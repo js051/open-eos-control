@@ -34,6 +34,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleCallback
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaDownloadResult
 import dev.openeos.control.data.CameraMediaItem
@@ -73,6 +76,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -345,6 +349,13 @@ class SavedJpegReceiverInstrumentedTest {
     }
 
     @Test fun realActivityRecreationRetainsTheLeaseAndDeliversExactlyOneExternalResult() {
+        val savedStateKey = "saved-jpeg-recreation-probe"
+        val savedStateToken = UUID.randomUUID().toString()
+        compose.activityRule.scenario.onActivity { activity ->
+            activity.savedStateRegistry.registerSavedStateProvider(savedStateKey) {
+                Bundle().apply { putString("token", savedStateToken) }
+            }
+        }
         publishDefaultOriginals()
         beginSendThroughSavedList(SavedJpegReceiverActivity.HOLD_RESULT)
         compose.waitUntil(TIMEOUT) {
@@ -359,35 +370,85 @@ class SavedJpegReceiverInstrumentedTest {
         assertEquals(0, heldReport.getInt("receiver_results"))
         // Recreation legitimately runs startup expiry again; keep the unrelated sentinel fresh.
         check(unrelatedSession.setLastModified(System.currentTimeMillis()))
-        var previousIdentity = 0
-        compose.activityRule.scenario.onActivity { previousIdentity = System.identityHashCode(it) }
-        compose.activityRule.scenario.recreate()
-        compose.activityRule.scenario.onActivity { recreated ->
-            assertNotEquals(previousIdentity, System.identityHashCode(recreated))
-            assertSame(viewModels, recreated.viewModelStore)
-            assertSame(model, recreated.viewModelStore["saved-jpeg-receiver"])
-            // ComponentActivity is a test host; reattach the identical production composition
-            // after real framework Bundle save/restore, with its ActivityResultRegistry intact.
-            recreated.setContent(content = appContent)
+        val lifecycle = ActivityLifecycleMonitorRegistry.getInstance()
+        lateinit var previous: ComponentActivity
+        val previousStopped = CountDownLatch(1)
+        val destroyedForRecreation = AtomicBoolean()
+        val recreatedHost = AtomicReference<ComponentActivity>()
+        val recreatedStopped = CountDownLatch(1)
+        val recreatedResumed = CountDownLatch(1)
+        val releasingReceiver = AtomicBoolean()
+        val resumedWhileHeld = AtomicBoolean()
+        val observer = ActivityLifecycleCallback { activity, stage ->
+            if (activity === previous) {
+                if (stage == Stage.STOPPED) previousStopped.countDown()
+                if (stage == Stage.DESTROYED) destroyedForRecreation.set(activity.isChangingConfigurations)
+            } else if (activity is ComponentActivity && activity.componentName == previous.componentName) {
+                if (stage == Stage.CREATED) recreatedHost.compareAndSet(null, activity)
+                if (activity === recreatedHost.get()) {
+                    if (stage == Stage.STOPPED) recreatedStopped.countDown()
+                    if (stage == Stage.RESUMED) {
+                        if (!releasingReceiver.get()) resumedWhileHeld.set(true)
+                        recreatedResumed.countDown()
+                    }
+                }
+            }
         }
-        compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
-        compose.waitForIdle()
-        assertTrue(model.viewModelScope.coroutineContext[Job]!!.isActive)
-        assertEquals(originals.mapTo(linkedSetOf()) { it.id }, model.savedJpegState.value.selectedIds)
-        assertEquals(lease.token, model.cameraImportHandoffState.value.active?.token)
-        assertEquals(CameraImportHandoffPhase.AWAITING_RESULT, model.cameraImportHandoffState.value.active?.phase)
-        assertTrue(directory.isDirectory)
-        val stillHeld = control(SavedJpegReceiverActivity.INSPECT)
-        assertEquals(1, stillHeld.getInt("receiver_launches"))
-        assertEquals(0, stillHeld.getInt("receiver_results"))
-        control(SavedJpegReceiverActivity.FINISH_HELD)
-        val completed = awaitHandoffResult()
-        assertEquals(lease.token, model.cameraImportHandoffState.value.lastResult?.token)
-        assertEquals(1, completed.getInt("receiver_launches"))
-        assertEquals(1, completed.getInt("receiver_results"))
-        assertReceiptReadByTarget(completed)
-        assertEquals(CameraImportReceiptSummary(1, 1, 0, 0), model.savedJpegState.value.outcome?.summary)
-        assertNoCameraReads()
+        compose.activityRule.scenario.onActivity { activity ->
+            previous = activity
+            lifecycle.addLifecycleCallback(observer)
+            if (lifecycle.getLifecycleStageOf(activity) == Stage.STOPPED) previousStopped.countDown()
+        }
+        try {
+            assertTrue("The real receiver must leave its caller stopped",
+                previousStopped.await(TIMEOUT, TimeUnit.MILLISECONDS))
+            compose.activityRule.scenario.onActivity { activity ->
+                assertSame(previous, activity)
+                assertEquals(Stage.STOPPED, lifecycle.getLifecycleStageOf(activity))
+                // ActivityScenario.recreate first demands RESUMED. Android's actual recreate
+                // preserves STOPPED on supported APIs without displacing the external receiver.
+                activity.recreate()
+            }
+            assertTrue("Android must recreate the caller and leave it stopped behind the receiver",
+                recreatedStopped.await(TIMEOUT, TimeUnit.MILLISECONDS))
+            assertTrue("The old host must really be destroyed for recreation", destroyedForRecreation.get())
+            compose.activityRule.scenario.onActivity { recreated ->
+                assertSame(recreatedHost.get(), recreated)
+                assertNotEquals(System.identityHashCode(previous), System.identityHashCode(recreated))
+                assertEquals(Stage.STOPPED, lifecycle.getLifecycleStageOf(recreated))
+                assertEquals(Lifecycle.State.CREATED, recreated.lifecycle.currentState)
+                assertEquals(savedStateToken,
+                    recreated.savedStateRegistry.consumeRestoredStateForKey(savedStateKey)?.getString("token"))
+                assertSame(viewModels, recreated.viewModelStore)
+                assertSame(model, recreated.viewModelStore["saved-jpeg-receiver"])
+                // Reattach the production composition to the actual recreated host. Its saved
+                // ActivityResultRegistry remains intact; wait for Compose only after receiver completion.
+                recreated.setContent(content = appContent)
+            }
+            assertFalse("The recreated caller must stay behind the held receiver", resumedWhileHeld.get())
+            assertTrue(model.viewModelScope.coroutineContext[Job]!!.isActive)
+            assertEquals(originals.mapTo(linkedSetOf()) { it.id }, model.savedJpegState.value.selectedIds)
+            assertEquals(lease.token, model.cameraImportHandoffState.value.active?.token)
+            assertEquals(CameraImportHandoffPhase.AWAITING_RESULT, model.cameraImportHandoffState.value.active?.phase)
+            assertTrue(directory.isDirectory)
+            val stillHeld = control(SavedJpegReceiverActivity.INSPECT)
+            assertEquals(1, stillHeld.getInt("receiver_launches"))
+            assertEquals(0, stillHeld.getInt("receiver_results"))
+            releasingReceiver.set(true)
+            control(SavedJpegReceiverActivity.FINISH_HELD)
+            assertTrue("Finishing the real receiver must naturally resume the recreated caller",
+                recreatedResumed.await(TIMEOUT, TimeUnit.MILLISECONDS))
+            assertFalse("The caller must not have resumed before receiver release", resumedWhileHeld.get())
+            val completed = awaitHandoffResult()
+            assertEquals(lease.token, model.cameraImportHandoffState.value.lastResult?.token)
+            assertEquals(1, completed.getInt("receiver_launches"))
+            assertEquals(1, completed.getInt("receiver_results"))
+            assertReceiptReadByTarget(completed)
+            assertEquals(CameraImportReceiptSummary(1, 1, 0, 0), model.savedJpegState.value.outcome?.summary)
+            assertNoCameraReads()
+        } finally {
+            instrumentation.runOnMainSync { lifecycle.removeLifecycleCallback(observer) }
+        }
     }
 
     @Test fun replacingTheCameraDuringReceiptIoPreservesTheLocalHandoffOutcome() {
