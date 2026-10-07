@@ -423,6 +423,18 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
             onFolderFilter = actions.setMediaFolderFilter,
         )
 
+        // Local originals are available independently of camera capabilities or connection work.
+        // Keep this entry beside the filter/header's download history without coupling the dialog
+        // to this screen's camera-session key.
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+            TextButton(
+                onClick = actions.openSavedJpegs,
+                modifier = Modifier.heightIn(min = 48.dp).testTag("saved-jpegs-open"),
+            ) {
+                Text(stringResource(R.string.saved_jpegs_title))
+            }
+        }
+
         if (state.mediaPreviewItem == null && state.mediaSaveFeedback.values.any { it is MediaSaveFeedback.IncompleteFile }) {
             Text(
                 stringResource(R.string.media_save_cleanup_unconfirmed), color = AppWarning,
