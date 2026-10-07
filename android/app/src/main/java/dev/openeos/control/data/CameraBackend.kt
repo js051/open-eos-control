@@ -391,6 +391,8 @@ class DesktopBridgeCameraBackend(
 
     override suspend fun captureStill(): CameraStatus = client.captureStill()
 
+    override suspend fun captureStill(autofocus: Boolean): CameraStatus = client.captureStill(autofocus)
+
     override suspend fun startBulbExposure(): CameraStatus = client.startBulbExposure()
 
     override suspend fun stopBulbExposure(): CameraStatus = client.stopBulbExposure()

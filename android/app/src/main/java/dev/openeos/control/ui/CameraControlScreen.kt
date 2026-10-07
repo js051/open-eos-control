@@ -45,6 +45,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -1335,6 +1336,14 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         Switch(checked = state.shutterAutofocus, onCheckedChange = null,
                             enabled = state.canChangeShutterAutofocus())
                     }
+                }
+                if (state.showShutterAutofocus()) {
+                    Text(
+                        stringResource(if (!state.shutterAutofocus && state.capabilities?.shutterAutofocusSupported != true)
+                            R.string.shutter_af_unavailable else if (state.shutterAutofocus)
+                            R.string.shutter_af_on_description else R.string.shutter_af_off_description),
+                        color = AppText, style = MaterialTheme.typography.bodySmall,
+                    )
                 }
                 if (state.supports(CameraFeature.CLICK_WHITE_BALANCE)) {
                     LiveViewTapActionControls(state, actions)

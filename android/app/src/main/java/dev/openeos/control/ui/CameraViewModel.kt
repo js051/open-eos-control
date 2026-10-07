@@ -1326,10 +1326,14 @@ class CameraViewModel(
     }
 
     fun setShutterAutofocus(enabled: Boolean) {
-        if (_uiState.value.canChangeShutterAutofocus()) _uiState.update { it.copy(shutterAutofocus = enabled) }
+        val state = _uiState.value
+        if (state.canChangeShutterAutofocus() && (enabled || state.capabilities?.shutterAutofocusSupported == true)) {
+            _uiState.update { it.copy(shutterAutofocus = enabled) }
+        }
     }
 
     fun captureStill() = runCamera(CameraOperation.CAPTURE) {
+        val autofocus = _uiState.value.shutterAutofocus
         if (_uiState.value.previewMode) {
             showCaptureSuccess()
             return@runCamera
@@ -1342,7 +1346,7 @@ class CameraViewModel(
         fun stillOwnsCapture() = generation == cameraSessionGeneration && _uiState.value.info === connection
         val revision = cameraStateRevision
         val result = try {
-            repository.captureStill(autofocus = _uiState.value.shutterAutofocus)
+            repository.captureStill(autofocus = autofocus)
         } catch (_: CaptureStatusReadbackException) {
             coroutineContext.ensureActive()
             if (!stillOwnsCapture()) return@runCamera

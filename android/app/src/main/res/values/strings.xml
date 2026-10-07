@@ -12,7 +12,7 @@
     <string name="media_saved_location">Saved to %1$s</string>
     <string name="media_save_to_folder">Save to another folder</string>
     <string name="shutter_autofocus">Shutter autofocus</string>
-    <string name="capture_without_autofocus">Capture photo without autofocus</string>
+    <string name="capture_without_autofocus">Capture photo without requesting autofocus</string>
     <string name="shutter_af_off">AF OFF</string>
     <string name="af_on_label">AF-ON</string>
     <string name="hold_af_on">Hold autofocus (up to 30 s); release to stop</string>
@@ -915,4 +915,8 @@
     <string name="saved_jpegs_recheck">Recheck saved original</string>
     <string name="saved_jpegs_rechecking">Rechecking saved original…</string>
     <string name="saved_jpegs_camera_result">Last camera handoff</string>
+    <string name="shutter_af_on_description">Shutter request asks for autofocus.</string>
+    <string name="shutter_af_off_description">Shutter request does not ask for autofocus. Camera or lens settings may still focus.</string>
+    <string name="shutter_af_unavailable">This session cannot request AF off. Enable shutter autofocus or reconnect.</string>
+    <string name="shutter_af_on">AF ON</string>
 </resources>

@@ -83,6 +83,27 @@ class CameraCapturePreviewListingTest {
         assertEquals(1, peer.captureWrites.get())
     }
 
+    @Test fun nativeShutterAFChoiceIsLocalUntilCaptureAndResetsAcrossSessions() = runBlocking {
+        viewModel.disconnect()
+        assertTrue(pumpUntil { !viewModel.uiState.value.connected && !viewModel.uiState.value.busy })
+        connect(native = true)
+        assertTrue(viewModel.uiState.value.canChangeShutterAutofocus())
+        val requests = peer.server.requestCount
+        viewModel.setShutterAutofocus(false)
+        assertFalse(viewModel.uiState.value.shutterAutofocus)
+        assertEquals(requests, peer.server.requestCount)
+        val capturedId = "${PreviewListingPeer.CONTENTS}/new.JPG"
+        capture(capturedId)
+        assertEquals(listOf(false), peer.captureAutofocus.toList())
+        viewModel.openCaptureReview()
+        assertTrue(pumpUntil { viewModel.uiState.value.mediaPreviewBytes != null && !viewModel.uiState.value.busy })
+        assertEquals(capturedId, viewModel.uiState.value.mediaPreviewItem?.id)
+        viewModel.disconnect()
+        assertTrue(pumpUntil { !viewModel.uiState.value.connected && !viewModel.uiState.value.busy })
+        connect(native = true)
+        assertTrue(viewModel.uiState.value.shutterAutofocus)
+    }
+
     @Test fun unsupportedAdjacentMediaKeepsTheCurrentPreviewInBothDirections() = runBlocking {
         peer.unsupportedSibling.set(true)
         capture()
@@ -298,6 +319,7 @@ private class PreviewListingPeer {
     lateinit var baseUrl: String
     val displayBytes = byteArrayOf(1, 2, 3, 4) // Preview state reads bytes; image decoding is instrumented separately.
     val captureWrites = AtomicInteger()
+    val captureAutofocus = CopyOnWriteArrayList<Boolean>()
     val omitCaptureFromList = AtomicBoolean(false)
     val unsupportedSibling = AtomicBoolean(false)
     val infoReads = AtomicInteger()
@@ -341,6 +363,7 @@ private class PreviewListingPeer {
                     path == "/ccapi/capabilities" -> json("""{"iso":["100"],"shutter":["1/125"],"aperture":["4.0"],"white_balance":["auto"]}""")
                     path == "/ccapi/events" -> json("""{"sequence":0,"keys":[]}""")
                     (path == "/ccapi/capture/still" || path.endsWith("/shutterbutton")) && request.method == "POST" -> {
+                        captureAutofocus += JSONObject(request.body.readUtf8()).getBoolean("af")
                         captureWrites.incrementAndGet()
                         json("{}")
                     }
