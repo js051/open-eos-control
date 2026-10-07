@@ -1067,6 +1067,17 @@ input:disabled {
   white-space: nowrap;
 }
 
+.latest-media-review {
+  display: grid;
+  gap: 8px;
+}
+
+.latest-media-review .supporting {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
 .quick-actions,
 .focus-actions {
   display: grid;

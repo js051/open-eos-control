@@ -72,6 +72,10 @@ def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> No
         "latest-media-button",
         "latest-media-thumbnail",
         "latest-media-label",
+        "latest-media-heading",
+        "latest-media-review",
+        "latest-media-review-status",
+        "latest-media-retry",
         "bulb-indicator",
         "shutter-disconnect-warning",
         "shutter-disconnect-confirm",
@@ -273,10 +277,12 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "function refreshMediaWhenCurrent()" in script
     assert "const LATEST_MEDIA_LIMIT = 8" in script
     assert "?limit=${LATEST_MEDIA_LIMIT}" in script
-    assert "function refreshLatestMedia({ previousId = null } = {})" in script
+    assert "function refreshLatestMedia()" in script
     assert "function cancelLatestMediaRefresh()" in script
     assert "function openLatestMedia()" in script
-    assert "void refreshLatestMedia({ previousId: previousLatestId })" in script
+    assert "knownIds: visibleMediaIds()" in script
+    assert "void refreshLatestMedia()" in script
+    assert 'ui.latestMediaRetry.addEventListener("click", retryLatestMedia)' in script
     assert 'mediaScope: "recent"' in script
     assert 'mediaHasMore: false' in script
     assert 'const limitQuery = mediaScope === "recent" ? "?limit=61" : ""' in script
@@ -293,6 +299,15 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
         "mediaNotLoadedCount",
         "mediaRecentCount",
         "mediaRecentMoreCount",
+        "previousMedia",
+        "previouslyVisibleMedia",
+        "openPreviousMedia",
+        "latestMediaSearching",
+        "latestMediaNotReady",
+        "latestMediaReadFailed",
+        "latestMediaFound",
+        "latestMediaReviewLimit",
+        "latestMediaRetry",
     }:
         declarations = re.findall(rf"^\s+{key}:\s+\"", script, flags=re.MULTILINE)
         assert len(declarations) == 2, f"{key} must be declared in both supported languages"
