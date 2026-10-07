@@ -218,7 +218,7 @@ public final class SavedJpegReceiverActivity extends Activity {
             require(INSPECT.equals(operation) || PROBE_HELD_GRANTS.equals(operation)
                     || FINISH_HELD.equals(operation) || RELEASE_RECEIPT.equals(operation)
                     || CLEAN.equals(operation), "unknown-control-operation");
-            ResultReceiver callback = data.readParcelable(ResultReceiver.class.getClassLoader());
+            ResultReceiver callback = ResultReceiver.CREATOR.createFromParcel(data);
             require(callback != null && data.dataAvail() == 0, "invalid-control-callback");
             // Serialize fixture Activity state on its own main thread. The Binder call itself
             // never waits for the main thread, the held Activity, or blocked receipt I/O.

@@ -469,16 +469,27 @@ class SavedJpegReceiverInstrumentedTest {
             val firstUris = listOf(first.manifestUri) + first.representationUris
             val secondUris = listOf(second.manifestUri) + second.representationUris
             val ready = CountDownLatch(1)
+            val readyCallback = object : ResultReceiver(null) {
+                override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                    if (resultCode == Activity.RESULT_OK) ready.countDown()
+                }
+            }
+            // Bundle writes the Parcelable's runtime class name. Send a framework receiver
+            // backed by the same callback Binder, never this instrumentation-only subclass.
+            val readyParcel = Parcel.obtain()
+            val frameworkReadyCallback = try {
+                readyCallback.writeToParcel(readyParcel, 0)
+                readyParcel.setDataPosition(0)
+                ResultReceiver.CREATOR.createFromParcel(readyParcel)
+            } finally {
+                readyParcel.recycle()
+            }
             val intent = controlIntent(SavedJpegReceiverActivity.HOLD_GRANTS).apply {
                 clipData = ClipData.newRawUri("Owned synthetic cache sessions", firstUris.first()).apply {
                     (firstUris.drop(1) + secondUris).forEach { addItem(ClipData.Item(it)) }
                 }
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                putExtra(SavedJpegReceiverActivity.READY_CALLBACK, object : ResultReceiver(null) {
-                    override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
-                        if (resultCode == Activity.RESULT_OK) ready.countDown()
-                    }
-                })
+                putExtra(SavedJpegReceiverActivity.READY_CALLBACK, frameworkReadyCallback)
             }
             pending = startForRealActivityResult(intent)
             assertTrue("The external Activity must hold both temporary grants before cleanup",
@@ -770,7 +781,8 @@ class SavedJpegReceiverInstrumentedTest {
         try {
             request.writeInterfaceToken(SavedJpegReceiverActivity.CONTROL_DESCRIPTOR)
             request.writeString(operation)
-            request.writeParcelable(callback, 0)
+            // Match the receiver's explicit CREATOR; omit the anonymous callback class name.
+            callback.writeToParcel(request, 0)
             assertTrue("The receiver must accept its diagnostic control transaction",
                 requireNotNull(receiverControl).transact(SavedJpegReceiverActivity.CONTROL_TRANSACTION,
                     request, acknowledgement, 0))
