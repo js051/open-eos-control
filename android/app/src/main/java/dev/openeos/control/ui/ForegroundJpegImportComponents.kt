@@ -160,6 +160,7 @@ internal fun ForegroundJpegImportDialog(
     val status = state.foregroundJpegImport
     val inactive = status.phase in setOf(ForegroundImportPhase.OFF, ForegroundImportPhase.STOPPED)
     val canEnable = state.canEnableForegroundJpegImport(platformSupported)
+    var technicalDetailsExpanded by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             modifier = modifier.testTag("foreground-import-dialog").padding(12.dp)
@@ -195,10 +196,6 @@ internal fun ForegroundJpegImportDialog(
                     status.activeName?.let {
                         Text(stringResource(R.string.foreground_import_active_file, it))
                     }
-                    Text(stringResource(R.string.foreground_import_counts,
-                        status.baselineCount, status.knownCount, status.pendingCount,
-                        status.completedCount, status.discardedCount),
-                        modifier = Modifier.testTag("foreground-import-counts"))
                     status.stopReason?.let {
                         Text(stringResource(foregroundImportStopResource(it)),
                             color = if (it in setOf(ForegroundImportStopReason.USER,
@@ -207,15 +204,40 @@ internal fun ForegroundJpegImportDialog(
                             modifier = Modifier.testTag("foreground-import-stop-reason"))
                     }
                 }
-                Text(stringResource(R.string.foreground_import_destination, cameraGalleryPath(state.info?.model)),
-                    modifier = Modifier.testTag("foreground-import-destination"))
                 Text(stringResource(R.string.foreground_import_disclosure),
                     modifier = Modifier.testTag("foreground-import-disclosure"))
-                Text(stringResource(R.string.foreground_import_baseline_disclosure))
-                Text(stringResource(R.string.foreground_import_limits,
-                    status.limits.baselineItems, status.limits.knownItems, status.limits.queuedItems),
-                    modifier = Modifier.testTag("foreground-import-limits"))
-                Text(stringResource(R.string.foreground_import_session_disclosure))
+                Text(stringResource(R.string.foreground_import_destination, cameraGalleryPath(state.info?.model)),
+                    modifier = Modifier.testTag("foreground-import-destination"))
+                Text(stringResource(R.string.foreground_import_session_disclosure),
+                    modifier = Modifier.testTag("foreground-import-session-disclosure"))
+                Text(stringResource(R.string.foreground_import_risk_disclosure),
+                    modifier = Modifier.testTag("foreground-import-risk-disclosure"))
+                TextButton(
+                    onClick = { technicalDetailsExpanded = !technicalDetailsExpanded },
+                    modifier = Modifier.testTag("foreground-import-details-toggle"),
+                ) {
+                    Text(stringResource(if (technicalDetailsExpanded) R.string.foreground_import_details_hide
+                        else R.string.foreground_import_details_show))
+                }
+                if (technicalDetailsExpanded) {
+                    Surface(color = AppSurfaceHigh, shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.testTag("foreground-import-details")) {
+                        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(stringResource(R.string.foreground_import_baseline_disclosure))
+                            Text(stringResource(R.string.foreground_import_stability_disclosure))
+                            Text(stringResource(R.string.foreground_import_limits,
+                                status.limits.baselineItems, status.limits.knownItems, status.limits.queuedItems),
+                                modifier = Modifier.testTag("foreground-import-limits"))
+                            Text(stringResource(R.string.foreground_import_stop_disclosure))
+                            if (status.phase != ForegroundImportPhase.OFF) {
+                                Text(stringResource(R.string.foreground_import_counts,
+                                    status.baselineCount, status.knownCount, status.pendingCount,
+                                    status.completedCount, status.discardedCount),
+                                    modifier = Modifier.testTag("foreground-import-counts"))
+                            }
+                        }
+                    }
+                }
                 if (inactive && !canEnable) {
                     val reason = when {
                         state.foregroundImportCleanupUnconfirmed -> R.string.foreground_import_requires_cleanup_ack

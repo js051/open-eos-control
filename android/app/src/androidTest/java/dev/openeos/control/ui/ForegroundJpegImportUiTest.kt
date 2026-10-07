@@ -65,15 +65,62 @@ class ForegroundJpegImportUiTest {
         compose.onNodeWithTag("foreground-import-destination").performScrollTo()
             .assertTextContains(cameraGalleryPath(state.value.info?.model), substring = true)
         compose.onNodeWithTag("foreground-import-disclosure").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("foreground-import-risk-disclosure").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("foreground-import-details").assertDoesNotExist()
+        compose.onNodeWithTag("foreground-import-details-toggle").performScrollTo().performClick()
         compose.onNodeWithTag("foreground-import-limits").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("foreground-import-dismiss").performScrollTo().performClick()
         compose.onNodeWithTag("foreground-import-dialog").assertDoesNotExist()
         compose.runOnIdle { assertEquals(0, starts) }
         compose.onNodeWithTag("foreground-import-entry").performClick()
+        compose.onNodeWithTag("foreground-import-details").assertDoesNotExist()
         compose.onNodeWithTag("foreground-import-start").performScrollTo().assertIsEnabled().performClick()
         compose.onNodeWithTag("foreground-import-dialog").assertDoesNotExist()
         compose.onNodeWithTag("foreground-import-stop").assertIsDisplayed().assertIsEnabled()
         compose.runOnIdle { assertEquals(1, starts) }
+    }
+
+    @Test fun detailsToggleNeverEnablesReadsOrChangesCleanupAndStopOwnership() {
+        val state = mutableStateOf(ready())
+        val calls = mutableListOf<String>()
+        val actions = connectionRecoveryTestActions().copy(
+            enableForegroundJpegImport = { calls += "enable" },
+            stopForegroundJpegImport = { calls += "stop" },
+            acknowledgeForegroundImportCleanupWarning = { calls += "acknowledge" },
+            refreshMedia = { calls += "refresh" },
+            loadMediaInfo = { calls += "info" },
+            saveMediaToPhone = { calls += "save" },
+            deleteMedia = { calls += "delete" },
+        )
+        compose.setContent { MaterialTheme { ForegroundJpegImportDialog(state.value, actions,
+            onDismiss = { calls += "dismiss" }) } }
+        for (activeWithWarning in listOf(false, true)) {
+            compose.runOnIdle {
+                state.value = ready().copy(
+                    foregroundImportCleanupUnconfirmed = activeWithWarning,
+                    foregroundImportOwnerActive = activeWithWarning,
+                    foregroundJpegImport = ForegroundJpegImportStatus(
+                        phase = if (activeWithWarning) ForegroundImportPhase.WATCHING else ForegroundImportPhase.OFF),
+                )
+            }
+            repeat(2) {
+                compose.onNodeWithTag("foreground-import-details").assertDoesNotExist()
+                compose.onNodeWithTag("foreground-import-details-toggle").performScrollTo().performTouchInput { click() }
+                compose.onNodeWithTag("foreground-import-limits").performScrollTo().assertIsDisplayed()
+                compose.onNodeWithTag("foreground-import-details-toggle").performScrollTo().performTouchInput { click() }
+                compose.onNodeWithTag("foreground-import-details").assertDoesNotExist()
+                compose.onNodeWithTag("foreground-import-risk-disclosure").performScrollTo().assertIsDisplayed()
+                if (activeWithWarning) {
+                    compose.onNodeWithTag("foreground-import-cleanup-warning").performScrollTo().assertIsDisplayed()
+                    compose.onNodeWithTag("foreground-import-cleanup-acknowledge").performScrollTo().assertIsNotEnabled()
+                    compose.onNodeWithTag("foreground-import-start").assertDoesNotExist()
+                    compose.onNodeWithTag("foreground-import-dialog-stop").performScrollTo().assertIsEnabled()
+                } else {
+                    compose.onNodeWithTag("foreground-import-start").performScrollTo().assertIsEnabled()
+                }
+                compose.runOnIdle { assertTrue("Details must not invoke camera or import actions: $calls", calls.isEmpty()) }
+            }
+        }
     }
 
     @Test fun eligibilityIsRecheckedWhileDisclosureIsOpen() {
@@ -286,6 +333,7 @@ class ForegroundJpegImportUiTest {
                         phase = ForegroundImportPhase.STOPPING, stopReason = ForegroundImportStopReason.USER))
                 }), onDismiss = {}) }
         }
+        compose.onNodeWithTag("foreground-import-details-toggle").performScrollTo().performClick()
         listOf(ForegroundImportPhase.BASELINING, ForegroundImportPhase.WATCHING,
             ForegroundImportPhase.WAITING, ForegroundImportPhase.SAVING).forEach { phase ->
             compose.runOnIdle { state.value = state.value.copy(foregroundJpegImport = ForegroundJpegImportStatus(
@@ -359,17 +407,17 @@ class ForegroundJpegImportUiTest {
     @Test fun englishLargeTextLandscapeStopIsFullyReachable() = verifyLargeTextAction("en", "foreground-import-dialog-stop")
     @Test fun traditionalChineseLargeTextLandscapeStopIsFullyReachable() = verifyLargeTextAction("zh-TW", "foreground-import-dialog-stop")
 
-    private fun assertCompleteActionText(tag: String) {
+    private fun assertCompleteText(tag: String) {
         val nodes = compose.onAllNodes(
             (hasTestTag(tag) or hasAnyAncestor(hasTestTag(tag))) and
                 SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult),
             useUnmergedTree = true,
         ).fetchSemanticsNodes()
-        assertTrue("The action must expose its text layout: $tag", nodes.isNotEmpty())
+        assertTrue("The content must expose its text layout: $tag", nodes.isNotEmpty())
         nodes.forEach { node ->
             val layouts = mutableListOf<TextLayoutResult>()
             compose.runOnIdle { node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts) }
-            assertTrue("The action must return its text layout: $tag", layouts.isNotEmpty())
+            assertTrue("The content must return its text layout: $tag", layouts.isNotEmpty())
             layouts.forEach { layout ->
                 // String semantics may report unused paragraph width. Use occupied line extents
                 // just as the existing connection layout canaries do, plus height and ellipsis.
@@ -378,9 +426,9 @@ class ForegroundJpegImportUiTest {
                 }
                 val noWrapClipped = !layout.layoutInput.softWrap &&
                     ceil(layout.multiParagraph.intrinsics.maxIntrinsicWidth.toDouble()).toInt() > layout.size.width
-                assertTrue("Horizontal action text clipping: $tag", !noWrapClipped && lineWidths.all { it <= layout.size.width })
-                assertTrue("Vertical action text clipping: $tag", !layout.didOverflowHeight)
-                assertTrue("Ellipsized action text: $tag", (0 until layout.lineCount).none(layout::isLineEllipsized))
+                assertTrue("Horizontal text clipping: $tag", !noWrapClipped && lineWidths.all { it <= layout.size.width })
+                assertTrue("Vertical text clipping: $tag", !layout.didOverflowHeight)
+                assertTrue("Ellipsized text: $tag", (0 until layout.lineCount).none(layout::isLineEllipsized))
             }
         }
     }
@@ -422,11 +470,41 @@ class ForegroundJpegImportUiTest {
             }
             compose.runOnIdle { assertLandscapeActivityWindow(compose.activity) }
             compose.onNodeWithTag("foreground-import-disclosure").performScrollTo().assertIsDisplayed()
-                .assertTextContains(if (locale == "zh-TW") "新檔案識別碼" else "new file identity", substring = true)
+                .assertTextContains(if (locale == "zh-TW") "本次連線拍攝" else "taken during this connection", substring = true)
+            for (disclosure in listOf("foreground-import-disclosure", "foreground-import-destination",
+                "foreground-import-session-disclosure", "foreground-import-risk-disclosure")) {
+                compose.onNodeWithTag(disclosure).performScrollTo().assertIsDisplayed()
+                assertCompleteText(disclosure)
+            }
+            // Expanding and collapsing must both be fully touchable at 2x, without starting work.
+            val toggleTag = "foreground-import-details-toggle"
+            val toggle = compose.onNodeWithTag(toggleTag).performScrollTo().assertIsDisplayed()
+            val toggleNode = toggle.fetchSemanticsNode()
+            compose.runOnIdle { assertFullyVisibleDialogAction(toggleNode) }
+            assertCompleteText(toggleTag)
+            toggle.performTouchInput { click() }
+            compose.onNodeWithTag("foreground-import-limits").performScrollTo().assertIsDisplayed()
+            assertCompleteText("foreground-import-limits")
+            val expandedAction = compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed().assertIsEnabled()
+            val expandedActionNode = expandedAction.fetchSemanticsNode()
+            compose.runOnIdle { assertFullyVisibleDialogAction(expandedActionNode) }
+            assertCompleteText(tag)
+            val collapse = compose.onNodeWithTag(toggleTag).performScrollTo().assertIsDisplayed()
+            val collapseNode = collapse.fetchSemanticsNode()
+            compose.runOnIdle { assertFullyVisibleDialogAction(collapseNode) }
+            assertCompleteText(toggleTag)
+            collapse.performTouchInput { click() }
+            compose.onNodeWithTag("foreground-import-details").assertDoesNotExist()
+            compose.runOnIdle {
+                assertEquals(0, starts)
+                assertEquals(0, stops)
+                assertEquals(0, dismisses)
+                assertEquals(0, acknowledgements)
+            }
             val action = compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed().assertIsEnabled()
             val node = action.fetchSemanticsNode()
             compose.runOnIdle { assertFullyVisibleDialogAction(node) }
-            assertCompleteActionText(tag)
+            assertCompleteText(tag)
             action.performTouchInput { click() }
             compose.runOnIdle {
                 assertEquals(if (tag == "foreground-import-start") 1 else 0, starts)

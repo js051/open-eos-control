@@ -6,8 +6,8 @@
 
 ## 可交付的使用流程
 
-1. Android 10 以上，以直接 CCAPI 連線且實際具有媒體瀏覽、下載能力。相簿及控制畫面有同一個匯入入口；只有開啟說明不會啟用。
-2. 使用者查看目的地、JPEG 原檔範圍、容量限制及前景／連線條件，再明確按啟用。離線預覽、USB、Desktop Bridge、缺少能力或尚有未確認清理警告時，不可啟用。
+1. Android 10 以上，以直接 CCAPI 連線且實際具有媒體瀏覽、下載能力。首次從相簿開啟匯入說明；控制畫面只在匯入啟用後、有停止結果或待處理清理警告時顯示狀態入口與對應操作。只有開啟說明不會啟用。
+2. 主層直接說明新 JPEG 原檔範圍、舊檔不補匯入、來源不能證明本次拍攝、相簿目的地、前景／連線條件、停止及清理風險；兩次清單、檔案大小與容量數字放在預設收合的「運作方式與限制」。展開或收合不會啟用、讀取相機或改變清理警告。查看說明後必須另按啟用；離線預覽、USB、Desktop Bridge、缺少能力或尚有未確認清理警告時，不可啟用。
 3. 系統取得兩次完整、有上限且 ID 集合一致的 baseline。啟用時已有的檔案全部排除，不補傳舊檔。
 4. 只考慮 baseline 之後新觀察到的 JPEG ID；RAW 同伴、影片、相同 ID 的重複回應不增加傳輸。相同檔名、不同 ID 仍是不同項目。
 5. 只對新候選讀新鮮 metadata；至少兩次正數大小一致且相隔一秒，才送入原檔保存。相簿顯示待處理、已完成、略過及停止原因。
@@ -48,7 +48,7 @@
 - `CameraForegroundImportJourneyTest` 的 7 個旅程走 production Compose → ViewModel → repository → MockWebServer → 真 MediaStore，使用唯一合成 folder／history，清理僅限測試建立的 row。
 - 覆蓋開啟／取消說明不啟用、舊檔不回灌、RAW/JPEG、重複觀察、一秒新大小、original 與 display bytes 不同、完成紀錄、下載後冷啟動仍關閉、真實 Activity ON_STOP/ON_START、明確重新 baseline。
 - 真 MediaStore wrapper 僅攔截當次建立的 URI，測試 pending-row 取消、錯誤長度／503 單次 GET、已 publication 後 Stop 競爭、delete failure 警告跨新 VM，以及 acknowledgement 零刪除／零啟用。
-- `ForegroundJpegImportUiTest` 的 19 個案例覆蓋能力、狀態與停止、清理警告／確認、新 session disclosure 隔離，Debug 正常 active／terminal 入口、清理未退役時不可確認，以及英繁中 2 倍字級的可捲動動作、完整文字與觸控邊界。
+- `ForegroundJpegImportUiTest` 的 20 個案例覆蓋能力、狀態與停止、清理警告／確認、新 session disclosure 隔離，Debug 正常 active／terminal 入口、清理未退役時不可確認、詳細說明切換零操作副作用，以及英繁中 2 倍字級下主層風險與展開／收合後的可捲動動作、完整文字和觸控邊界。
 - JVM fake output 可驗 operation ownership，不能代替上述 MediaStore instrumented runtime。編譯成功也不代表這些 OS 旅程已通過。
 
 ## 本地及遠端驗收狀態
@@ -61,7 +61,9 @@
 
 ## 2026-10-07 主線整合
 
-正常合入 accepted main `95d6def9cb0ad57b7a40c73cc601540f0a195707`；production 自動合併，產品矩陣的一處相鄰章節衝突保留双方公開紀錄，並分開標示歷史快照與本批候選。重新驗證本批完整 JVM、Camera Import contract、AndroidTest Kotlin／Java 編譯、fresh Lint 與精確 head API34／36，取得實際結果前維持待驗。先前兩次 compile／Lint unknown 原樣保留，不回頭重試該 tool action。
+正常合入 accepted main `95d6def9cb0ad57b7a40c73cc601540f0a195707`；production 自動合併，產品矩陣的一處相鄰章節衝突保留雙方公開紀錄，並分開標示歷史快照與本批候選。整合提交 `7198b697e66de3dda2a10f748af6e76d4a9696d6`（tree `1674f366b6f7262bf24e6eedf9859d85375c2498`）在 04:16:27 UTC 完成完整 app JVM 929/929、Camera Import contract 14/14、AndroidTest Kotlin／Java 編譯及 fresh Lint（0 error、63 warning、2 information），536 份 tracked source 在整輪前後一致。
+
+上述結果屬說明介面收斂前的主線整合來源。後續四檔 UI／文案／instrumented 測試收斂已保留原 19 案並增加 1 案，最終來源仍需本地 gate 與精確 head API34／36；不能把已通過整合來源直接當作修改後 runtime。先前兩次 compile／Lint unknown 原樣保留，不回頭重試該 tool action。
 
 ## Release Assessment
 
