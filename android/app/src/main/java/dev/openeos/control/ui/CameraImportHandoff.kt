@@ -1,9 +1,13 @@
 package dev.openeos.control.ui
 
 import android.content.ClipData
+import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
+import androidx.annotation.RequiresApi
 import androidx.core.content.FileProvider
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaDownloadResult
@@ -29,6 +33,9 @@ import dev.openeos.control.importing.CameraImportRepresentation
 import dev.openeos.control.importing.CameraImportSourceChecksumV1
 import dev.openeos.control.importing.OPEN_EOS_CAMERA_IMPORT_PROVIDER_ID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.BufferedOutputStream
 import java.io.File
@@ -87,9 +94,128 @@ internal object SereinImportIntents {
         .setDataAndType(dataUri, CameraImportAndroidIntentV1.MIME_TYPE)
 }
 
-internal class CameraImportHandoffStorage(private val context: Context) {
+internal class CameraImportHandoffStorage(
+    private val context: Context,
+    private val deleteSessionDirectory: (File) -> Boolean = { it.deleteRecursively() },
+) {
     private val root = File(context.cacheDir, ROOT_DIRECTORY)
     private val authority = "${context.packageName}.camera_import"
+
+    /** Reserve before starting a job so its owner can clean even a cancelled return value. */
+    fun reserveLocalSession(): CameraImportStagingReservation =
+        CameraImportStagingReservation("session-${UUID.randomUUID()}")
+
+    suspend fun preparePublishedJpegs(
+        selected: List<DeliveredJpeg>,
+        reservation: CameraImportStagingReservation,
+        providerVersion: String,
+        onItem: (index: Int, total: Int, name: String) -> Unit,
+        onProgress: (CameraMediaTransferProgress) -> Unit,
+    ): CameraImportHandoffSession {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) error("Saved Gallery JPEGs require Android 10 or newer.")
+        val originals = selected.toList()
+        require(originals.map { it.id }.toSet().size == originals.size) { "A saved JPEG was selected twice." }
+        val requiredBytes = savedJpegStagingBytes(originals.map { it.evidence })
+        val directory = stagingDirectory(reservation.sessionId)
+        var created = false
+        try {
+            return withContext(Dispatchers.IO) {
+                currentCoroutineContext().ensureActive()
+                requireSavedJpegStagingSpace(requiredBytes, context.cacheDir.usableSpace, context.cacheDir.canWrite())
+                check(directory.mkdirs()) { "Android could not create a Camera Import staging directory." }
+                created = true
+                var remainingBytes = requiredBytes
+                val staged = originals.mapIndexed { index, original ->
+                    currentCoroutineContext().ensureActive()
+                    requireSavedJpegStagingSpace(remainingBytes, context.cacheDir.usableSpace, context.cacheDir.canWrite())
+                    onItem(index, originals.size, original.row.filename)
+                    stagePublishedJpeg(directory, reservation.sessionId, original, providerVersion, onProgress)
+                        .also { remainingBytes -= original.evidence.byteLength }
+                }
+                val manifest = CameraImportAndroidHandoffManifestV1(
+                    handoffVersion = CAMERA_IMPORT_ANDROID_HANDOFF_VERSION,
+                    contractVersion = CAMERA_IMPORT_CONTRACT_VERSION,
+                    providerId = OPEN_EOS_CAMERA_IMPORT_PROVIDER_ID,
+                    providerVersion = providerVersion,
+                    sessionId = reservation.sessionId,
+                    items = staged.map(StagedItem::handoffItem),
+                )
+                val encoded = CameraImportJsonCodecV1.encodeAndroidHandoffManifest(manifest).toByteArray()
+                require(encoded.size <= SAVED_JPEG_MAX_MANIFEST_BYTES) { "The selected JPEG manifest is too large." }
+                currentCoroutineContext().ensureActive()
+                val manifestFile = File(directory, MANIFEST_FILENAME)
+                writeAtomically(manifestFile, encoded)
+                CameraImportHandoffSession(
+                    sessionId = reservation.sessionId,
+                    manifestUri = contentUri(manifestFile),
+                    representationUris = staged.map(StagedItem::contentUri),
+                    mediaIds = staged.mapTo(linkedSetOf()) { it.handoffItem.descriptor.mediaId },
+                    expectedOriginals = staged.associate {
+                        val descriptor = it.handoffItem.descriptor
+                        descriptor.mediaId to CameraImportOriginalEvidence(
+                            requireNotNull(descriptor.byteLength), requireNotNull(descriptor.sourceChecksum).value,
+                        )
+                    },
+                    itemCount = staged.size,
+                )
+            }
+        } catch (failure: Throwable) {
+            // Includes prompt cancellation after IO produced a complete session but before its
+            // return was delivered. The reservation remains with the caller if deletion fails.
+            if (created) withContext(NonCancellable + Dispatchers.IO) { cleanup(reservation) }
+            throw failure
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private suspend fun stagePublishedJpeg(
+        directory: File,
+        sessionId: String,
+        original: DeliveredJpeg,
+        providerVersion: String,
+        onProgress: (CameraMediaTransferProgress) -> Unit,
+    ): StagedItem {
+        val uri = original.uri
+        require(uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY && ContentUris.parseId(uri) > 0) {
+            "The saved JPEG has no valid Gallery handle."
+        }
+        // Query only the exact row this app published; never enumerate Gallery or trust a stale
+        // index size in place of the byte/hash checks on the streamed original.
+        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.IS_PENDING), null, null, null)?.use { cursor ->
+            val pending = cursor.getColumnIndex(MediaStore.MediaColumns.IS_PENDING)
+            check(cursor.count == 1 && cursor.moveToFirst() && pending >= 0 && cursor.getInt(pending) == 0) {
+                "The saved JPEG is no longer a published Gallery original."
+            }
+        } ?: error("Android could not confirm the saved Gallery original.")
+        val mediaId = "media-${original.id.value}"
+        val temporary = File(directory, "$mediaId.jpg.partial")
+        val destination = File(directory, "$mediaId.jpg")
+        currentCoroutineContext().ensureActive()
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(temporary).use { raw ->
+                val output = BufferedOutputStream(raw)
+                copyPublishedJpegOriginal(input, output, original.evidence, onProgress)
+                output.flush()
+                raw.fd.sync()
+            }
+        } ?: error("Android could not open the saved Gallery original.")
+        currentCoroutineContext().ensureActive()
+        check(temporary.renameTo(destination)) { "Android could not commit the staged JPEG." }
+        val identity = sourceIdentity(original.camera)
+        val descriptor = original.item.toImportDescriptor(
+            sessionId = sessionId, mediaId = mediaId, camera = original.camera,
+            opaqueCameraId = identity.cameraId, opaqueStorageId = identity.storageId,
+            providerVersion = providerVersion, byteLength = original.evidence.byteLength,
+            checksum = CameraImportSourceChecksumV1(CameraImportChecksumAlgorithm.SHA_256,
+                original.evidence.sha256, CameraImportChecksumScope.FULL_ORIGINAL),
+        )
+        require(descriptor.mediaKind == CameraImportMediaKind.JPEG && descriptor.mimeType == "image/jpeg") {
+            "Only published JPEG originals can use this handoff."
+        }
+        val stagedUri = contentUri(destination)
+        return StagedItem(CameraImportAndroidHandoffItemV1(descriptor,
+            listOf(CameraImportPlatformRepresentationV1(CameraImportRepresentation.ORIGINAL, stagedUri.toString()))), stagedUri)
+    }
 
     suspend fun prepare(
         items: List<CameraMediaItem>,
@@ -97,77 +223,96 @@ internal class CameraImportHandoffStorage(private val context: Context) {
         providerVersion: String,
         onItem: (index: Int, total: Int, name: String) -> Unit,
         onProgress: (CameraMediaTransferProgress) -> Unit,
+        reservation: CameraImportStagingReservation = reserveLocalSession(),
         download: suspend (
             item: CameraMediaItem,
             destination: OutputStream,
             onProgress: (CameraMediaTransferProgress) -> Unit,
         ) -> CameraMediaDownloadResult,
-    ): CameraImportHandoffSession = withContext(Dispatchers.IO) {
-        val selected = items.distinctBy(CameraMediaItem::id)
-        require(selected.isNotEmpty()) { "Camera Import requires at least one media item." }
-        require(selected.size <= CAMERA_IMPORT_MAX_BATCH_ITEMS) {
-            "Camera Import supports at most $CAMERA_IMPORT_MAX_BATCH_ITEMS items per handoff."
-        }
-        cleanupExpiredSessions()
-        val sessionId = "session-${UUID.randomUUID()}"
+    ): CameraImportHandoffSession {
+        val sessionId = reservation.sessionId
         val sessionDirectory = stagingDirectory(sessionId)
-        check(sessionDirectory.mkdirs()) { "Android could not create a Camera Import staging directory." }
-        val sourceIdentity = sourceIdentity(camera)
-
+        var created = false
         try {
-            val staged = selected.mapIndexed { index, item ->
-                onItem(index, selected.size, item.name)
-                stageItem(
-                    sessionDirectory = sessionDirectory,
-                    sessionId = sessionId,
-                    item = item,
-                    camera = camera,
-                    sourceIdentity = sourceIdentity,
+            return withContext(Dispatchers.IO) {
+                val selected = items.distinctBy(CameraMediaItem::id)
+                require(selected.isNotEmpty()) { "Camera Import requires at least one media item." }
+                require(selected.size <= CAMERA_IMPORT_MAX_BATCH_ITEMS) {
+                    "Camera Import supports at most $CAMERA_IMPORT_MAX_BATCH_ITEMS items per handoff."
+                }
+                currentCoroutineContext().ensureActive()
+                cleanupExpiredSessions(excludedSessionIds = setOf(sessionId))
+                check(sessionDirectory.mkdirs()) { "Android could not create a Camera Import staging directory." }
+                created = true
+                val sourceIdentity = sourceIdentity(camera)
+                val staged = selected.mapIndexed { index, item ->
+                    onItem(index, selected.size, item.name)
+                    stageItem(
+                        sessionDirectory = sessionDirectory,
+                        sessionId = sessionId,
+                        item = item,
+                        camera = camera,
+                        sourceIdentity = sourceIdentity,
+                        providerVersion = providerVersion,
+                        onProgress = onProgress,
+                        download = download,
+                    )
+                }
+                val manifest = CameraImportAndroidHandoffManifestV1(
+                    handoffVersion = CAMERA_IMPORT_ANDROID_HANDOFF_VERSION,
+                    contractVersion = CAMERA_IMPORT_CONTRACT_VERSION,
+                    providerId = OPEN_EOS_CAMERA_IMPORT_PROVIDER_ID,
                     providerVersion = providerVersion,
-                    onProgress = onProgress,
-                    download = download,
+                    sessionId = sessionId,
+                    items = staged.map(StagedItem::handoffItem),
+                )
+                val manifestFile = File(sessionDirectory, MANIFEST_FILENAME)
+                writeAtomically(manifestFile, CameraImportJsonCodecV1.encodeAndroidHandoffManifest(manifest).toByteArray())
+                CameraImportHandoffSession(
+                    sessionId = sessionId,
+                    manifestUri = contentUri(manifestFile),
+                    representationUris = staged.map(StagedItem::contentUri),
+                    mediaIds = staged.mapTo(linkedSetOf()) { it.handoffItem.descriptor.mediaId },
+                    expectedOriginals = staged.associate { stagedItem ->
+                        val descriptor = stagedItem.handoffItem.descriptor
+                        descriptor.mediaId to CameraImportOriginalEvidence(
+                            byteLength = requireNotNull(descriptor.byteLength),
+                            sha256 = requireNotNull(descriptor.sourceChecksum).value.lowercase(),
+                        )
+                    },
+                    itemCount = staged.size,
                 )
             }
-            val manifest = CameraImportAndroidHandoffManifestV1(
-                handoffVersion = CAMERA_IMPORT_ANDROID_HANDOFF_VERSION,
-                contractVersion = CAMERA_IMPORT_CONTRACT_VERSION,
-                providerId = OPEN_EOS_CAMERA_IMPORT_PROVIDER_ID,
-                providerVersion = providerVersion,
-                sessionId = sessionId,
-                items = staged.map(StagedItem::handoffItem),
-            )
-            val manifestFile = File(sessionDirectory, MANIFEST_FILENAME)
-            writeAtomically(manifestFile, CameraImportJsonCodecV1.encodeAndroidHandoffManifest(manifest).toByteArray())
-            CameraImportHandoffSession(
-                sessionId = sessionId,
-                manifestUri = contentUri(manifestFile),
-                representationUris = staged.map(StagedItem::contentUri),
-                mediaIds = staged.mapTo(linkedSetOf()) { it.handoffItem.descriptor.mediaId },
-                expectedOriginals = staged.associate { stagedItem ->
-                    val descriptor = stagedItem.handoffItem.descriptor
-                    descriptor.mediaId to CameraImportOriginalEvidence(
-                        byteLength = requireNotNull(descriptor.byteLength),
-                        sha256 = requireNotNull(descriptor.sourceChecksum).value.lowercase(),
-                    )
-                },
-                itemCount = staged.size,
-            )
-        } catch (error: Throwable) {
-            sessionDirectory.deleteRecursively()
-            throw error
+        } catch (failure: Throwable) {
+            // The caller owns this reservation before the job starts. Protect the IO return
+            // boundary too, and keep failed cleanup observable even under cancellation.
+            if (created) withContext(NonCancellable + Dispatchers.IO) { cleanup(reservation) }
+            throw failure
         }
     }
 
-    fun cleanup(sessionId: String) {
-        runCatching { stagingDirectory(sessionId) }
-            .getOrNull()
-            ?.deleteRecursively()
+    fun cleanup(sessionId: String): Boolean = runCatching {
+        val directory = stagingDirectory(sessionId)
+        // Revoke only this owned session and its children, including Activity/ClipData grants.
+        // Do this even after a partial deletion, and before removing the files. Never revoke
+        // the provider root or the unrelated Gallery originals.
+        context.revokeUriPermission(contentUri(directory),
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        !directory.exists() || deleteSessionDirectory(directory)
+    }.getOrDefault(false)
+
+    fun cleanup(reservation: CameraImportStagingReservation): Boolean = cleanup(reservation.sessionId).also {
+        reservation.cleanupUnconfirmed = !it
     }
 
-    fun cleanupExpiredSessions(nowMillis: Long = System.currentTimeMillis()) {
+    fun cleanupExpiredSessions(
+        nowMillis: Long = System.currentTimeMillis(),
+        excludedSessionIds: Set<String> = emptySet(),
+    ) {
         root.listFiles()?.filter { file ->
-            file.isDirectory && nowMillis - file.lastModified() >= SESSION_MAX_AGE_MILLIS
-        }?.forEach(File::deleteRecursively)
+            file.isDirectory && file.name !in excludedSessionIds &&
+                nowMillis - file.lastModified() >= SESSION_MAX_AGE_MILLIS
+        }?.forEach { cleanup(it.name) }
     }
 
     private suspend fun stageItem(
@@ -311,6 +456,7 @@ internal fun readCameraImportReceiptBatch(
         output.toByteArray()
     } ?: error("Android could not open the Serein receipt.")
     val batch: CameraImportReceiptBatchV1 = CameraImportJsonCodecV1.decodeReceiptBatch(bytes.toString(Charsets.UTF_8))
+    require(batch.providerId == OPEN_EOS_CAMERA_IMPORT_PROVIDER_ID) { "Serein returned an unexpected provider." }
     require(batch.sessionId == expectedSession.sessionId) { "Serein returned a receipt for another session." }
     require(batch.receipts.mapTo(hashSetOf()) { it.mediaId } == expectedSession.mediaIds) {
         "Serein receipt does not cover every selected item."
