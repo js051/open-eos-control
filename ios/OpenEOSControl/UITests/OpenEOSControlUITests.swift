@@ -783,8 +783,11 @@ final class OpenEOSControlUITests: XCTestCase {
                 XCTFail("The \(candidate.rawValue) button selection or cardinality did not match", file: file, line: line)
                 return false
             }
-            XCTAssertGreaterThanOrEqual(buttons.firstMatch.frame.width, 44, file: file, line: line)
-            XCTAssertGreaterThanOrEqual(buttons.firstMatch.frame.height, 44, file: file, line: line)
+            // AX CGRect subtraction can report 43.99999999999994 for a 44pt frame.
+            // A millionth of a point covers representation error, not layout slack.
+            let coordinateRoundingTolerance = 0.000_001
+            XCTAssertGreaterThanOrEqual(buttons.firstMatch.frame.width + coordinateRoundingTolerance, 44, file: file, line: line)
+            XCTAssertGreaterThanOrEqual(buttons.firstMatch.frame.height + coordinateRoundingTolerance, 44, file: file, line: line)
         }
         return true
     }
