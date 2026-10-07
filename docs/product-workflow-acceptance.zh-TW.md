@@ -42,7 +42,7 @@ SAF 保存接續P2原檔目的地旅程：已重現並修正一般resolver刪除
 
 ## P2 前景 JPEG 自動交付整合候選（2026-10-07 UTC）
 
-本批在已發布 v0.12.0 的 accepted main `95d6def9cb0ad57b7a40c73cc601540f0a195707` 上整合原三筆功能提交。原矩陣的「拍後自動交付」已有本地候選：Android 10+ 直接 CCAPI、每次連線明確啟用、兩次完整 baseline、新 ID／新鮮大小、單次 JPEG 原檔到 Gallery、背景／換 session 停止及清理警告。此處的「新」只表示 baseline 後新觀察到的 ID，不把快門 ACK、時間戳或檔名當拍攝因果。USB／Bridge、背景長駐及跨程序續傳不在本批。詳細容量／去重／安全停止與真 MediaStore 測試邊界見[本批契約與驗收](validation/android-foreground-jpeg-import-2026-10-06.zh-TW.md)。完整本地與 exact-head Android runtime gate 尚未閉合，不將原始矩陣缺口標成已接受完成。
+本批在已發布 v0.12.0 的 accepted main `95d6def9cb0ad57b7a40c73cc601540f0a195707` 上整合原三筆功能提交。原矩陣的「拍後自動交付」已有本地候選：Android 10+ 直接 CCAPI、每次連線明確啟用、兩次完整 baseline、新 ID／新鮮大小、單次 JPEG 原檔到 Gallery、背景／換 session 停止及清理警告。此處的「新」只表示 baseline 後新觀察到的 ID，不把快門 ACK、時間戳或檔名當拍攝因果。USB／Bridge、背景長駐及跨程序續傳不在本批。詳細容量／去重／安全停止與真 MediaStore 測試邊界見[本批契約與驗收](validation/android-foreground-jpeg-import-2026-10-06.zh-TW.md)。最終同來源完整本地 JVM／contract、AndroidTest 編譯與 Lint 已通過；exact-head Android runtime gate 仍待閉合，不將原始矩陣缺口標成已接受完成。
 
 ## 結論
 

@@ -2,7 +2,7 @@
 
 初始日期：2026-10-06 UTC；2026-10-07 整合已發布 v0.12.0 的 accepted main `95d6def9cb0ad57b7a40c73cc601540f0a195707`。原三筆功能提交以 `7e4e7cc869e745c3a6e47501f2990714112a8ac7` 為基底並完整保留。本批對應[原產品矩陣](../product-workflow-acceptance.zh-TW.md)的 P2「拍後自動交付」，是一個新的明確啟用、限本次連線的前景工作流。
 
-目前為本地候選，尚無本批 PR／精確 head CI。下列實作與測試來源不能提前當作 Android runtime 通過、main accepted 或物理相機驗證；最終本地測試結果另列於末節。本輪正常合入已發布的 SAF／USB／viewer 主線內容，未帶入未發布的 USB 驗收文件後續差異。舊來源的通過數不能代替新整合來源的 gate。
+本批本地最終來源已完成驗證；精確 head 的 Android runtime 結果須另由本批 PR 的 CI 提供。下列實作與測試來源不能提前當作 Android runtime 通過、main accepted 或物理相機驗證；最終本地測試結果另列於末節。本輪正常合入已發布的 SAF／USB／viewer 主線內容，未帶入未發布的 USB 驗收文件後續差異。舊來源的通過數不能代替新整合來源的 gate。
 
 ## 可交付的使用流程
 
@@ -63,11 +63,17 @@
 
 正常合入 accepted main `95d6def9cb0ad57b7a40c73cc601540f0a195707`；production 自動合併，產品矩陣的一處相鄰章節衝突保留雙方公開紀錄，並分開標示歷史快照與本批候選。整合提交 `7198b697e66de3dda2a10f748af6e76d4a9696d6`（tree `1674f366b6f7262bf24e6eedf9859d85375c2498`）在 04:16:27 UTC 完成完整 app JVM 929/929、Camera Import contract 14/14、AndroidTest Kotlin／Java 編譯及 fresh Lint（0 error、63 warning、2 information），536 份 tracked source 在整輪前後一致。
 
-上述結果屬說明介面收斂前的主線整合來源。後續四檔 UI／文案／instrumented 測試收斂已保留原 19 案並增加 1 案，最終來源仍需本地 gate 與精確 head API34／36；不能把已通過整合來源直接當作修改後 runtime。先前兩次 compile／Lint unknown 原樣保留，不回頭重試該 tool action。
+上述結果屬說明介面收斂前的主線整合來源。後續四檔 UI／文案／instrumented 測試收斂保留原 19 案並增加 1 案，另以新一輪最終來源 gate 驗證；不能把編譯當作 Android runtime。先前兩次 compile／Lint unknown 原樣保留，不回頭重試該 tool action。
+
+## 最終本地來源驗收
+
+最終來源 `56e60b65f2d495a14bd0f66bc4c5314d50712956`（tree `e83f290a4df9ab8f8160d465858b6d954ea4cba2`）於 `2026-10-07T04:35:37.354138+00:00` 完成完整 App JVM 929/929、Camera Import contract 14/14、AndroidTest Kotlin／Java 編譯及 fresh Lint（0 error、64 warning、2 information），536 份 tracked source 在整輪前後一致。
+
+本節後續只更新驗收文字，產品、測試與建置來源保持上述提交一致。正常 pre-commit／pre-push secret scan 保留；API34／36須使用本批實際 PR head，尚未取得結果前不稱 PR ready。
 
 ## Release Assessment
 
 - 最新發佈基準：`v0.12.0` Development Preview。
 - 建議 impact：`minor`，理由為新的使用者可見、明確啟用之自動交付能力。此文件不改版本、不建立 release 或授權 merge。
-- 未閉合項目：本批完整本地 gate、Android API34/36 exact-head CI、實體手機／相機的來源與容量／網路行為證據。
+- 未閉合項目：Android API34/36 exact-head CI、實體手機／相機的來源與容量／網路行為證據。
 - 物理裝置狀態：沒有新增。合成 HTTP／MediaStore 成功不代表 Canon 機身、USB、Bridge、外部 SAF、iOS 或 PC 同等可用。
