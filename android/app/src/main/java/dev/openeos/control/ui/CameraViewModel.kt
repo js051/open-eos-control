@@ -246,11 +246,18 @@ internal fun mediaThumbnailSampleSize(width: Int, height: Int, maximumEdge: Int 
 class CameraViewModel(
     private val repository: CameraRepository = CameraRepository(),
     private val downloadHistoryFactory: (Context) -> DownloadHistoryStore = DownloadHistoryProvider::get,
+    private val deliveredJpegStore: DeliveredJpegStore = DeliveredJpegStore(),
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
     private val _downloadHistoryState = MutableStateFlow(DownloadHistoryState())
     val downloadHistoryState: StateFlow<DownloadHistoryState> = _downloadHistoryState.asStateFlow()
+    private val handoffOwner by lazy { CameraImportHandoffOwner<CameraImportHandoffSession>(viewModelScope) }
+    private val savedJpegController by lazy { SavedJpegHandoffController(deliveredJpegStore, handoffOwner, viewModelScope) }
+    internal val savedJpegState: StateFlow<SavedJpegUiState> get() = savedJpegController.state
+    internal val cameraImportHandoffState: StateFlow<CameraImportHandoffState<CameraImportHandoffSession>> get() = handoffOwner.state
+    // Internal test-APK seam only; normal app flows always use the contract receiver package.
+    internal var cameraImportTargetPackage: String = dev.openeos.control.importing.CameraImportAndroidIntentV1.OPEN_NEGATIVE_PACKAGE
     private var downloadHistoryStore: DownloadHistoryStore? = null
     private var downloadHistoryInitialized = false
     private var liveViewJob: Job? = null
@@ -346,7 +353,9 @@ class CameraViewModel(
             networkRoutingConfigured = true
         }
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { CameraImportHandoffStorage(context.applicationContext).cleanupExpiredSessions() }
+            runCatching { CameraImportHandoffStorage(context.applicationContext).cleanupExpiredSessions(
+                excludedSessionIds = setOfNotNull(handoffOwner.state.value.active?.reservation?.sessionId),
+            ) }
         }
         if (preferencesLoaded) return
         preferencesLoaded = true
@@ -838,6 +847,7 @@ class CameraViewModel(
     }
 
     fun disconnect() {
+        handoffOwner.cancelUnlaunched(CameraImportHandoffOrigin.CAMERA)
         val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
         val previousState = _uiState.value
         val shutterWarning = previousState.shutterDisconnectWarning || previousState.shutterReleaseUnconfirmed ||
@@ -2139,13 +2149,14 @@ class CameraViewModel(
             return
         }
         val state = _uiState.value
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !state.canEnableForegroundJpegImport(true)) return
-        val connection = state.info ?: return
+        if (handoffOwner.state.value.busy || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !state.canEnableForegroundJpegImport(true)) return
+        val connection = state.info?.copy() ?: return
         val appContext = context.applicationContext
         val resolver = appContext.contentResolver
         initializeDownloadHistory(appContext)
         val history = downloadHistoryStore
-        val output = ForegroundJpegImportOutput { item, receipt, download ->
+        val output = ForegroundJpegImportOutput { originalItem, receipt, download ->
+            val item = originalItem.copy()
             withDownloadHistoryReceipt(history, history?.captureRequest(), item.name, DownloadHistoryDestination.GALLERY) { completed ->
                 CameraMediaGalleryStore(resolver).save(
                     connection.model, item,
@@ -2160,6 +2171,8 @@ class CameraViewModel(
                         // Only an acknowledgement bit persists; no path, URI or enablement does.
                         preferences.edit().putBoolean(KEY_FOREGROUND_IMPORT_CLEANUP_WARNING, true).apply()
                     },
+                    onPublished = { evidence -> recordPublishedJpeg(connection, item, evidence) },
+                    onPublicationObserverFailure = deliveredJpegStore::markRegistrationUnavailable,
                     download = download,
                 )
             }
@@ -2176,7 +2189,8 @@ class CameraViewModel(
         pollMillis: Long = 5_000L,
     ): Boolean {
         val state = _uiState.value
-        if (foregroundImportOwner != null || !appInForeground || !state.canEnableForegroundJpegImport(platformSupported)) return false
+        if (handoffOwner.state.value.busy || foregroundImportOwner != null || !appInForeground ||
+            !state.canEnableForegroundJpegImport(platformSupported)) return false
         val owner = ForegroundImportOwner(cameraSessionGeneration, requireNotNull(state.info), output, location)
         val io = object : ForegroundJpegImportIo {
             override suspend fun awaitAvailable() = awaitForegroundImportIdle(owner)
@@ -2396,7 +2410,7 @@ class CameraViewModel(
 
     fun downloadMediaBatch(context: Context, items: List<CameraMediaItem>, destinationTree: Uri? = null) {
         val state = _uiState.value
-        val selectedItems = items.distinctBy(CameraMediaItem::id)
+        val selectedItems = items.distinctBy(CameraMediaItem::id).map { it.copy() }
         if (
             selectedItems.isEmpty() || state.info == null ||
             state.previewMode ||
@@ -2405,6 +2419,7 @@ class CameraViewModel(
             (destinationTree == null && !selectedItems.all(::canSaveMediaToGallery)) ||
             mediaDownloadJob != null
         ) return
+        val camera = state.info.copy()
         val resolver = context.applicationContext.contentResolver
         initializeDownloadHistory(context)
         val history = downloadHistoryStore
@@ -2435,7 +2450,11 @@ class CameraViewModel(
                     try {
                         retryMediaRead {
                             if (destinationTree == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                CameraMediaGalleryStore(resolver).save(state.info.model, item, onFinalized) { output ->
+                                CameraMediaGalleryStore(resolver).save(
+                                    camera.model, item, onFinalized,
+                                    onPublished = { evidence -> recordPublishedJpeg(camera, item, evidence) },
+                                    onPublicationObserverFailure = deliveredJpegStore::markRegistrationUnavailable,
+                                ) { output ->
                                     repository.downloadMedia(item, output) { progress -> publishMediaSaveProgress(request, item, progress) }
                                 }
                             } else {
@@ -2475,144 +2494,164 @@ class CameraViewModel(
         trackMediaSaveJob(request, job)
     }
 
+    private fun recordPublishedJpeg(camera: CameraInfo, item: CameraMediaItem, evidence: PublishedGalleryOriginal) {
+        // A completed Gallery publication survives disconnect and observer/history failures.
+        try { deliveredJpegStore.recordPublished(camera, item, evidence) }
+        catch (_: Exception) { runCatching { deliveredJpegStore.markRegistrationUnavailable() } }
+    }
+
+    internal fun toggleSavedJpeg(id: DeliveredJpegId, selected: Boolean) = savedJpegController.toggle(id, selected)
+    internal fun clearSavedJpegs() = savedJpegController.clear()
+    internal fun cancelSavedJpegPreparation() = savedJpegController.cancel()
+    internal fun retryCameraImportCleanup() { handoffOwner.retryCleanup() }
+
+    internal fun sendSavedJpegs(context: Context, expectedSelection: Set<DeliveredJpegId>): Boolean =
+        savedJpegController.send(expectedSelection, savedJpegBackend(context),
+            automaticImportActive = foregroundImportOwner != null,
+            sereinAvailable = SereinImportIntents.isAvailable(context.applicationContext, cameraImportTargetPackage))
+
+    internal fun recheckSavedJpeg(context: Context, id: DeliveredJpegId): Boolean =
+        savedJpegController.recheck(id, savedJpegBackend(context), automaticImportActive = foregroundImportOwner != null)
+
+    private fun savedJpegBackend(context: Context): SavedJpegHandoffBackend<CameraImportHandoffSession> {
+        val appContext = context.applicationContext
+        val storage = CameraImportHandoffStorage(appContext)
+        return object : SavedJpegHandoffBackend<CameraImportHandoffSession> {
+            override fun reserve() = storage.reserveLocalSession()
+            override suspend fun prepare(selected: List<DeliveredJpeg>, reservation: CameraImportStagingReservation,
+                onItem: (Int, Int, String) -> Unit, onProgress: (CameraMediaTransferProgress) -> Unit,
+            ) = storage.preparePublishedJpegs(selected, reservation, appContext.installedVersionName(), onItem, onProgress)
+            override suspend fun cleanup(reservation: CameraImportStagingReservation): Boolean =
+                withContext(Dispatchers.IO) { storage.cleanup(reservation) }
+        }
+    }
+
     fun openInSerein(context: Context, items: List<CameraMediaItem>) {
         val state = _uiState.value
-        val selectedItems = items.distinctBy(CameraMediaItem::id)
-        if (
-            selectedItems.isEmpty() ||
-            state.previewMode ||
-            state.isBusy(CameraOperation.MEDIA) ||
-            !state.supports(CameraFeature.MEDIA_DOWNLOAD) ||
-            mediaDownloadJob != null
-        ) return
+        val selectedItems = items.distinctBy(CameraMediaItem::id).map { it.copy() }
+        if (selectedItems.isEmpty() || state.previewMode || state.isBusy(CameraOperation.MEDIA) ||
+            !state.supports(CameraFeature.MEDIA_DOWNLOAD) || mediaDownloadJob != null || foregroundImportOwner != null) return
         val appContext = context.applicationContext
-        if (!SereinImportIntents.isAvailable(appContext)) {
-            _uiState.update {
-                it.copy(
-                    error = appContext.getString(dev.openeos.control.R.string.serein_not_installed),
-                    errorOperation = CameraOperation.MEDIA,
-                )
-            }
+        if (handoffOwner.state.value.busy) {
+            _uiState.update { it.copy(error = appContext.getString(R.string.serein_handoff_busy), errorOperation = CameraOperation.MEDIA) }
             return
         }
-        val camera = state.info ?: return
-        val providerVersion = appContext.installedVersionName()
+        if (!SereinImportIntents.isAvailable(appContext, cameraImportTargetPackage)) {
+            _uiState.update { it.copy(error = appContext.getString(R.string.serein_not_installed), errorOperation = CameraOperation.MEDIA) }
+            return
+        }
+        val camera = state.info?.copy() ?: return
+        val generation = cameraSessionGeneration
         val storage = CameraImportHandoffStorage(appContext)
-        state.pendingCameraImportHandoff?.let { staleSession ->
-            viewModelScope.launch(Dispatchers.IO) { storage.cleanup(staleSession.sessionId) }
+        val reservation = storage.reserveLocalSession()
+        val lease = handoffOwner.acquire(CameraImportHandoffOrigin.CAMERA, reservation, generation,
+            cleanup = { withContext(Dispatchers.IO) { storage.cleanup(it) } }) ?: return
+        fun updateCamera(transform: (CameraUiState) -> CameraUiState) {
+            _uiState.update { current -> if (generation == cameraSessionGeneration) transform(current) else current }
         }
-        _uiState.update {
-            it.copy(
-                cameraImportPreparing = true,
-                pendingCameraImportHandoff = null,
-                lastCameraImportReceiptSummary = null,
-                lastMediaBatchResult = null,
-            )
-        }
-        val job = launchCameraOperation(CameraOperation.MEDIA) {
+        updateCamera { it.copy(cameraImportPreparing = true, pendingCameraImportHandoff = null,
+            lastCameraImportReceiptSummary = null, lastMediaBatchResult = null) }
+        val job = launchCameraOperation(CameraOperation.MEDIA,
+            onRegistered = { handoffOwner.attachPreparation(lease.token, it) },
+        ) {
             try {
                 val session = storage.prepare(
-                    items = selectedItems,
-                    camera = camera,
-                    providerVersion = providerVersion,
+                    items = selectedItems, camera = camera, providerVersion = appContext.installedVersionName(),
+                    reservation = reservation,
                     onItem = { index, total, name ->
-                        _uiState.update {
-                            it.copy(
-                                mediaBatchProgress = MediaBatchProgress(
-                                    operation = MediaBatchOperation.OPEN_NEGATIVE,
-                                    completedItems = index,
-                                    totalItems = total,
-                                    currentItemName = name,
-                                ),
+                        if (handoffOwner.owns(lease.token, CameraImportHandoffPhase.PREPARING)) updateCamera {
+                            it.copy(mediaBatchProgress = MediaBatchProgress(MediaBatchOperation.OPEN_NEGATIVE, index, total, name),
                                 activeMediaDownloadName = name,
-                                mediaDownloadProgress = CameraMediaTransferProgress(
-                                    bytesTransferred = 0L,
-                                    totalBytes = selectedItems[index].sizeBytes,
-                                ),
-                            )
+                                mediaDownloadProgress = CameraMediaTransferProgress(0L, selectedItems[index].sizeBytes))
                         }
                     },
                     onProgress = { progress ->
-                        _uiState.update { current -> current.copy(mediaDownloadProgress = progress) }
+                        if (handoffOwner.owns(lease.token, CameraImportHandoffPhase.PREPARING)) {
+                            updateCamera { it.copy(mediaDownloadProgress = progress) }
+                        }
                     },
-                ) { item, output, onProgress ->
-                    repository.downloadMedia(item, output, onProgress)
-                }
-                _uiState.update { it.copy(pendingCameraImportHandoff = session) }
+                ) { item, output, onProgress -> repository.downloadMedia(item, output, onProgress) }
+                if (handoffOwner.prepared(lease.token, session)) updateCamera { it.copy(pendingCameraImportHandoff = session) }
+            } catch (cancelled: CancellationException) {
+                handoffOwner.finish(lease.token, CameraImportHandoffOutcome(issue = CameraImportHandoffIssue.CANCELLED))
+                throw cancelled
+            } catch (_: Exception) {
+                handoffOwner.finish(lease.token, CameraImportHandoffOutcome(issue = CameraImportHandoffIssue.PREPARATION_FAILED))
+                updateCamera { it.copy(error = appContext.getString(R.string.serein_prepare_failed), errorOperation = CameraOperation.MEDIA) }
             } finally {
-                _uiState.update {
-                    it.copy(
-                        cameraImportPreparing = false,
-                        mediaBatchProgress = null,
-                        activeMediaDownloadName = null,
-                        mediaDownloadProgress = null,
-                    )
-                }
+                updateCamera { it.copy(cameraImportPreparing = false, mediaBatchProgress = null,
+                    activeMediaDownloadName = null, mediaDownloadProgress = null) }
             }
+        }
+        if (job == null) {
+            handoffOwner.finish(lease.token, CameraImportHandoffOutcome(issue = CameraImportHandoffIssue.CANCELLED))
+            updateCamera { it.copy(cameraImportPreparing = false) }
         }
         mediaDownloadJob = job
-        job?.invokeOnCompletion {
-            if (mediaDownloadJob === job) mediaDownloadJob = null
-        }
+        job?.invokeOnCompletion { if (mediaDownloadJob === job) mediaDownloadJob = null }
     }
 
-    fun handleSereinResult(context: Context, resultCode: Int, data: Intent?) {
-        val session = _uiState.value.pendingCameraImportHandoff ?: return
+    internal fun claimSereinLaunch(token: Long): CameraImportHandoffSession? = handoffOwner.claimLaunch(token)?.session
+
+    internal fun handleSereinResult(context: Context, token: Long, resultCode: Int, data: Intent?) {
+        val lease = handoffOwner.claimResult(token) ?: return
+        val session = requireNotNull(lease.session)
         val appContext = context.applicationContext
-        _uiState.update { it.copy(pendingCameraImportHandoff = null) }
-        if (resultCode != Activity.RESULT_OK) {
-            cleanupCameraImportSession(appContext, session.sessionId)
-            return
-        }
-        val receiptUri = data?.data
-        if (receiptUri == null) {
-            cleanupCameraImportSession(appContext, session.sessionId)
-            _uiState.update {
-                it.copy(
-                    error = appContext.getString(dev.openeos.control.R.string.serein_receipt_missing),
-                    errorOperation = CameraOperation.MEDIA,
-                )
-            }
-            return
-        }
-        runCamera(CameraOperation.MEDIA) {
+        // Receipt IO belongs to the retained transaction, even while a replacement camera is busy.
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            var outcome = CameraImportHandoffOutcome(issue = CameraImportHandoffIssue.RECEIPT_INVALID)
             try {
-                val resultType = data.type ?: appContext.contentResolver.getType(receiptUri)
-                require(resultType == dev.openeos.control.importing.CameraImportAndroidIntentV1.RECEIPT_MIME_TYPE) {
-                    "Serein returned an unsupported receipt type."
+                outcome = when {
+                    resultCode != Activity.RESULT_OK -> CameraImportHandoffOutcome(issue = CameraImportHandoffIssue.CANCELLED)
+                    data?.data == null -> CameraImportHandoffOutcome(issue = CameraImportHandoffIssue.RECEIPT_MISSING)
+                    else -> withContext(Dispatchers.IO) {
+                        val receiptUri = requireNotNull(data.data)
+                        val resultType = data.type ?: appContext.contentResolver.getType(receiptUri)
+                        require(resultType == dev.openeos.control.importing.CameraImportAndroidIntentV1.RECEIPT_MIME_TYPE)
+                        CameraImportHandoffOutcome(summary = readCameraImportReceiptBatch(appContext, receiptUri, session))
+                    }
                 }
-                val summary = withContext(Dispatchers.IO) {
-                    readCameraImportReceiptBatch(appContext, receiptUri, session)
-                }
-                _uiState.update { it.copy(lastCameraImportReceiptSummary = summary) }
+            } catch (cancelled: CancellationException) {
+                outcome = CameraImportHandoffOutcome(issue = CameraImportHandoffIssue.CANCELLED)
+                throw cancelled
+            } catch (_: Exception) {
+                // Provider errors can contain private URIs or arbitrary receipt contents.
+                outcome = CameraImportHandoffOutcome(issue = CameraImportHandoffIssue.RECEIPT_INVALID)
             } finally {
-                withContext(NonCancellable + Dispatchers.IO) {
-                    CameraImportHandoffStorage(appContext).cleanup(session.sessionId)
-                }
+                publishCameraHandoffOutcome(appContext, lease, outcome)
+                handoffOwner.finish(token, outcome)
             }
         }
     }
 
-    fun handleSereinLaunchFailure(context: Context, sessionId: String) {
-        val pending = _uiState.value.pendingCameraImportHandoff ?: return
-        if (pending.sessionId != sessionId) return
-        cleanupCameraImportSession(context.applicationContext, sessionId)
-        _uiState.update {
-            it.copy(
-                pendingCameraImportHandoff = null,
-                error = context.getString(dev.openeos.control.R.string.serein_launch_failed),
-                errorOperation = CameraOperation.MEDIA,
-            )
-        }
+    internal fun handleSereinLaunchFailure(context: Context, token: Long) {
+        val lease = handoffOwner.state.value.active?.takeIf {
+            it.token == token && it.phase == CameraImportHandoffPhase.AWAITING_RESULT
+        } ?: return
+        val outcome = CameraImportHandoffOutcome(issue = CameraImportHandoffIssue.LAUNCH_FAILED)
+        publishCameraHandoffOutcome(context.applicationContext, lease, outcome)
+        handoffOwner.finish(token, outcome)
     }
 
-    private fun cleanupCameraImportSession(context: Context, sessionId: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            CameraImportHandoffStorage(context.applicationContext).cleanup(sessionId)
+    private fun publishCameraHandoffOutcome(context: Context, lease: CameraImportHandoffLease<CameraImportHandoffSession>,
+        outcome: CameraImportHandoffOutcome,
+    ) {
+        if (lease.origin != CameraImportHandoffOrigin.CAMERA || lease.cameraGeneration != cameraSessionGeneration) return
+        val error = when (outcome.issue) {
+            CameraImportHandoffIssue.LAUNCH_FAILED -> context.getString(R.string.serein_launch_failed)
+            CameraImportHandoffIssue.RECEIPT_MISSING -> context.getString(R.string.serein_receipt_missing)
+            CameraImportHandoffIssue.RECEIPT_INVALID -> context.getString(R.string.serein_receipt_invalid)
+            else -> null
+        }
+        _uiState.update {
+            if (lease.cameraGeneration != cameraSessionGeneration) it else it.copy(
+                pendingCameraImportHandoff = null, lastCameraImportReceiptSummary = outcome.summary,
+                error = error, errorOperation = CameraOperation.MEDIA.takeIf { error != null })
         }
     }
 
     fun cancelMediaDownload() {
+        handoffOwner.cancelUnlaunched(CameraImportHandoffOrigin.CAMERA)
         if (foregroundImportOwner?.operation === mediaDownloadJob && mediaDownloadJob != null) {
             stopForegroundImport(ForegroundImportStopReason.USER)
         }
@@ -3062,6 +3101,7 @@ class CameraViewModel(
         } else emptyList()
         // A reconnect cannot inherit work whose item IDs or commands belong to the old backend.
         val previousJobs = if (operation == CameraOperation.CONNECT) {
+            handoffOwner.cancelUnlaunched(CameraImportHandoffOrigin.CAMERA)
             val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
             cameraSessionGeneration += 1
             (cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)).also { jobs ->
@@ -3571,6 +3611,7 @@ class CameraViewModel(
     }
 
     override fun onCleared() {
+        val handoffCleanup = handoffOwner.cancelUnlaunched()
         foregroundImportPreferences?.unregisterOnSharedPreferenceChangeListener(foregroundImportWarningListener)
         val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
         cameraSessionGeneration += 1
@@ -3597,6 +3638,7 @@ class CameraViewModel(
         uploadJob?.cancel()
         cancelMediaThumbnailLoads()
         viewModelScope.launch(NonCancellable + Dispatchers.IO) {
+            handoffCleanup?.join()
             teardown?.join()
             operationJobs.forEach { it.join() }
             uploadJob?.join()
