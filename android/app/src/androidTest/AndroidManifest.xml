@@ -1,6 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
+        <!-- Framework-only synthetic receiver in the test APK's UID. Receipts require a
+             temporary ActivityResult read grant; this provider is never exported. -->
+        <activity
+            android:name="dev.openeos.control.handoff.SavedJpegReceiverActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="dev.photo.workflow.action.IMPORT_CAMERA_MEDIA" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="application/vnd.openeos.camera-import.v1+json" />
+            </intent-filter>
+        </activity>
+        <provider
+            android:name="dev.openeos.control.handoff.SavedJpegReceiptProvider"
+            android:authorities="${applicationId}.saved_jpeg_receipts"
+            android:exported="false"
+            android:grantUriPermissions="true" />
         <!-- This is installed in the test APK, with a different UID from the target app.
              Only DocumentsUI or an actual picker URI grant may access these synthetic files. -->
         <provider
