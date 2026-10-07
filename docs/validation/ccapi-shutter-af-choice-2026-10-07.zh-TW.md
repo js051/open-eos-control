@@ -45,6 +45,18 @@
 - 該完整建置在 Lint 階段未取得整輪終態，沒有 Lint XML 或 APK 產物；原執行保留為 unknown，不能宣稱完整 gate 通過，也不重跑已證同來源的 983 項。Lint／APK／Android 裝置、PC browser、iOS Core／app／UI 與適用遠端 CI 仍須收齊。Linux 不提供 Xcode，JVM 證據不能代替其他平台或裝置執行結果。
 - 目前沒有實機相機證據。所有相機互動測試是明確標示的 synthetic protocol fixture；不得宣稱鏡頭不移動或任何 EOS 機型相容性已經實機驗證。
 
+## 第一輪遠端驗收與修正（2026-10-07 UTC）
+
+來源 `fd912a28ff74ecac88f993fa502ae7d2b6f2dcda` 的 [CI 37657345834](https://github.com/js051/open-eos-control/actions/runs/37657345834) 已完成：API 34／36 原始 XML 各 355/355、0 failure/error/skip；iOS Core 244/244、App 106/106 通過。Bridge Ruff、Node 22 腳本與真 PC browser、Windows bundle 及 Android JVM／APK／signer 通過。這些結果只屬該來源，整輪仍失敗，不能稱本 PR ready。
+
+- Bridge pytest 的新 unsupported 負例把既有 HTTP 409 契約誤寫為 501；修正期待值並確認 `UNSUPPORTED_FEATURE`、`STILL_CAPTURE`、`libgphoto2`，保留零相機呼叫與後續 legacy 拍摄斷言。
+- Simulator 47 項通過、1 項失敗，因原 exact state dict 漏掉新 `shutter_af_requests: []`。補入該欄位，保留完整 dictionary 相等判斷，未改成 subset。
+- iOS UI 為 19 項、4 項失敗。新 AF 測試查到 native Switch 的 AX frame 為 31pt；這不證明外層 44pt row 的實際 hit area。產品改用 label 明確持有至少 44pt 大小與 content shape 的 Button，保留本機切換、能力／忙碌 gate、selected 及英／繁中 On/Off value。測試仍要求至少 44pt，未降低尺寸。
+- 原 trace 顯示 AF case 已 teardown 後仍執行 UI；其 waiter 失敗被記到 Direct case，後續又污染 LiveView 與 Offline case。Apple 說明 `continueAfterFailure=false` 使用 Objective-C exception，穿過 Swift async frame 的行為未定義，見 [XCTest 遷移說明的失敗控制段落](https://developer.apple.com/documentation/testing/migratingfromxctest?language=objc)。五個 async case 改用可繼續記錄斷言的 XCTest 設定，再由 `XCTUnwrap` 的 Swift throw 立即結束失敗流程，並 defer 終止 App；同步 recovery case 保持原設定。
+- 19 個案例與原命令條件保留；#214 的單次 tap、5 秒期限、value／cardinality／44pt 條件保留，取消不再被 polling 吞掉。後三個 UI 失敗不是乾淨的獨立產品回歸證據，必須在生命週期修正後重跑整套驗收。
+
+上述修正尚待新的 exact-head CI。補缺的本機 Lint／APK 執行亦未取得終態，仍沒有 Lint report；原 983 項 JVM 證據保留，不因此重跑或冒稱 Lint 通過。
+
 ## Release Assessment
 
 - 截至 2026-10-07 16:17 UTC，公開版本仍為 v0.12.0 Development Preview；開發基底 v0.13.0 已在 `fb4f555` 完成 main acceptance 與不可變候選，尚待 tag／發布。本 feature batch 不調整版本，也不納入該凍結候選。

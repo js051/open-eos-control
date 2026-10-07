@@ -383,12 +383,28 @@ private struct CaptureBar: View {
 
             if camera.showShutterAutofocus {
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle(isOn: Binding(get: { camera.shutterAutofocus }, set: camera.setShutterAutofocus)) {
-                        Text("shutter_autofocus")
-                            .font(.caption.weight(.semibold))
+                    Button {
+                        camera.setShutterAutofocus(!camera.shutterAutofocus)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("shutter_autofocus")
+                            Spacer(minLength: 0)
+                            Text(LocalizedStringKey(camera.shutterAutofocus ? "shutter_af_on" : "shutter_af_off"))
+                            Image(systemName: camera.shutterAutofocus ? "checkmark.circle.fill" : "circle")
+                        }
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+                        .foregroundStyle(camera.shutterAutofocus ? Color.cameraBackground : Color.cameraText)
+                        .background(camera.shutterAutofocus ? Color.cameraText : Color.cameraSurfaceRaised)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .contentShape(Rectangle())
                     }
-                    .frame(minHeight: 44)
+                    .buttonStyle(.plain)
                     .disabled(!camera.canChangeShutterAutofocus)
+                    .accessibilityLabel(Text("shutter_autofocus"))
+                    .accessibilityValue(Text(LocalizedStringKey(camera.shutterAutofocus ? "shutter_af_on" : "shutter_af_off")))
+                    .accessibilityAddTraits(camera.shutterAutofocus ? .isSelected : [])
                     .accessibilityIdentifier("shutter-autofocus-toggle")
                     Text(LocalizedStringKey(!camera.shutterAutofocusAllowed ? "shutter_af_unavailable" :
                         camera.shutterAutofocus ? "shutter_af_on_description" : "shutter_af_off_description"))

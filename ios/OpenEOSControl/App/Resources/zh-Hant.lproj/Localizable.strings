@@ -471,6 +471,8 @@
 "previous_shutter_confirmation_help" = "請先確認上一台相機已停止曝光。此操作只清除警告，不會向任何相機傳送指令。";
 
 "shutter_autofocus" = "快門自動對焦";
+"shutter_af_on" = "開啟";
+"shutter_af_off" = "關閉";
 "shutter_af_on_description" = "拍攝請求會要求自動對焦。";
 "shutter_af_off_description" = "拍攝請求不要求自動對焦；相機或鏡頭設定仍可能使其對焦。";
 "shutter_af_unavailable" = "此連線不支援不要求自動對焦的拍攝。請開啟快門自動對焦或重新連線。";
