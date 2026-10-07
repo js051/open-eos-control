@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.SystemClock
@@ -274,6 +275,25 @@ class CameraViewModel(
     private var eventPollingJob: Job? = null
     private var eventPollingGeneration = 0L
     private var mediaDownloadJob: Job? = null
+    private class ForegroundImportOwner(
+        val generation: Long,
+        val connection: CameraInfo,
+        val output: ForegroundJpegImportOutput,
+        val location: String,
+    ) {
+        lateinit var runner: ForegroundJpegImportRunner
+        var job: Job? = null
+        var operation: Job? = null
+        var saveRequest: MediaSaveRequest? = null
+        var started = false
+    }
+    private var foregroundImportOwner: ForegroundImportOwner? = null
+    private var foregroundImportPreferences: SharedPreferences? = null
+    private val foregroundImportWarningListener = SharedPreferences.OnSharedPreferenceChangeListener { preferences, key ->
+        if (key == KEY_FOREGROUND_IMPORT_CLEANUP_WARNING) {
+            _uiState.update { it.copy(foregroundImportCleanupUnconfirmed = preferences.getBoolean(key, false)) }
+        }
+    }
     @Volatile private var mediaSaveRequest: MediaSaveRequest? = null
     private var mediaUploadJob: Job? = null
     private var mediaLibraryJob: Job? = null
@@ -331,8 +351,11 @@ class CameraViewModel(
         if (preferencesLoaded) return
         preferencesLoaded = true
         val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+        foregroundImportPreferences = preferences
+        preferences.registerOnSharedPreferenceChangeListener(foregroundImportWarningListener)
         _uiState.update {
             it.copy(
+                foregroundImportCleanupUnconfirmed = preferences.getBoolean(KEY_FOREGROUND_IMPORT_CLEANUP_WARNING, false),
                 connectionTarget = preferences.getString(KEY_CONNECTION_TARGET, null)
                     ?.let { value -> runCatching { ConnectionTarget.valueOf(value) }.getOrNull() }
                     ?: it.connectionTarget,
@@ -815,12 +838,13 @@ class CameraViewModel(
     }
 
     fun disconnect() {
+        val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
         val previousState = _uiState.value
         val shutterWarning = previousState.shutterDisconnectWarning || previousState.shutterReleaseUnconfirmed ||
             previousState.bulbExposureActive || CameraOperation.CAPTURE in previousState.pendingOperations ||
             CameraOperation.SHUTTER_RELEASE in previousState.pendingOperations
         cameraSessionGeneration += 1
-        val operationJobs = cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList()
+        val operationJobs = cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)
         cameraOperationJobs.clear()
         liveViewReconciliationJobs.clear()
         operationJobs.forEach(Job::cancel)
@@ -905,6 +929,7 @@ class CameraViewModel(
     }
 
     fun setAppForeground(foreground: Boolean) {
+        if (!foreground) stopForegroundImport(ForegroundImportStopReason.BACKGROUND)
         if (!foreground) stopHeldAutofocus()
         if (appInForeground == foreground) return
         appInForeground = foreground
@@ -1263,6 +1288,9 @@ class CameraViewModel(
     fun toggleRecording() {
         // Keep the user's command direction even if an event changes displayed state while it runs.
         val wasRecording = _uiState.value.status?.recording == true
+        if (wasRecording && foregroundImportOwner?.operation?.isActive == true) {
+            stopForegroundImport(ForegroundImportStopReason.USER)
+        }
         runCamera(CameraOperation.RECORDING) {
             val generation = cameraSessionGeneration
             val connection = _uiState.value.info
@@ -1338,50 +1366,57 @@ class CameraViewModel(
         if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
     }
 
-    fun toggleBulbExposure() = runCamera(CameraOperation.CAPTURE) {
-        val active = _uiState.value.bulbExposureActive
-        if (!active && (!_uiState.value.bulbMode || !_uiState.value.supports(CameraFeature.BULB_EXPOSURE))) {
-            return@runCamera
+    fun toggleBulbExposure() {
+        // A safety stop never waits for local Gallery cleanup before reaching the camera.
+        if (_uiState.value.bulbExposureActive && foregroundImportOwner?.operation?.isActive == true) {
+            stopForegroundImport(ForegroundImportStopReason.USER)
         }
-        if (_uiState.value.previewMode) {
-            val status = requireNotNull(_uiState.value.status).copy(bulbExposureActive = !active)
-            _uiState.update {
-                it.copy(
-                    status = status,
-                    bulbStartedAtMillis = if (active) null else SystemClock.elapsedRealtime(),
-                )
+        runCamera(CameraOperation.CAPTURE) {
+            val active = _uiState.value.bulbExposureActive
+            if (!active && (!_uiState.value.bulbMode || !_uiState.value.supports(CameraFeature.BULB_EXPOSURE))) {
+                return@runCamera
             }
-            if (active) showCaptureSuccess()
-            return@runCamera
+            if (_uiState.value.previewMode) {
+                val status = requireNotNull(_uiState.value.status).copy(bulbExposureActive = !active)
+                _uiState.update {
+                    it.copy(
+                        status = status,
+                        bulbStartedAtMillis = if (active) null else SystemClock.elapsedRealtime(),
+                    )
+                }
+                if (active) showCaptureSuccess()
+                return@runCamera
+            }
+            pauseLiveViewForBulb()
+            try {
+                val revision = cameraStateRevision
+                val response = if (active) repository.stopBulbExposure() else repository.startBulbExposure()
+                val status = latestCameraStatus(response, revision)
+                coroutineContext.ensureActive()
+                _uiState.update {
+                    it.copy(
+                        status = status,
+                        bulbStartedAtMillis = if (status.bulbExposureActive == true) {
+                            it.bulbStartedAtMillis ?: SystemClock.elapsedRealtime()
+                        } else {
+                            null
+                        },
+                    )
+                }
+                if (active && status.bulbExposureActive != true) {
+                    showCaptureSuccess()
+                    resumeLiveViewAfterBulb()
+                }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                coroutineContext.ensureActive()
+                if (exception is ShutterReleaseException) markShutterReleaseUnconfirmed()
+                else if (!active) resumeLiveViewAfterBulb()
+                throw exception
+            }
         }
-        pauseLiveViewForBulb()
-        try {
-            val revision = cameraStateRevision
-            val response = if (active) repository.stopBulbExposure() else repository.startBulbExposure()
-            val status = latestCameraStatus(response, revision)
-            coroutineContext.ensureActive()
-            _uiState.update {
-                it.copy(
-                    status = status,
-                    bulbStartedAtMillis = if (status.bulbExposureActive == true) {
-                        it.bulbStartedAtMillis ?: SystemClock.elapsedRealtime()
-                    } else {
-                        null
-                    },
-                )
-            }
-            if (active && status.bulbExposureActive != true) {
-                showCaptureSuccess()
-                resumeLiveViewAfterBulb()
-            }
-        } catch (exception: CancellationException) {
-            throw exception
-        } catch (exception: Exception) {
-            coroutineContext.ensureActive()
-            if (exception is ShutterReleaseException) markShutterReleaseUnconfirmed()
-            else if (!active) resumeLiveViewAfterBulb()
-            throw exception
-        }
+
     }
 
     fun retryShutterRelease() {
@@ -2097,6 +2132,232 @@ class CameraViewModel(
         }
     }
 
+    fun enableForegroundJpegImport(context: Context) {
+        val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+        if (preferences.getBoolean(KEY_FOREGROUND_IMPORT_CLEANUP_WARNING, false)) {
+            _uiState.update { it.copy(foregroundImportCleanupUnconfirmed = true) }
+            return
+        }
+        val state = _uiState.value
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !state.canEnableForegroundJpegImport(true)) return
+        val connection = state.info ?: return
+        val appContext = context.applicationContext
+        val resolver = appContext.contentResolver
+        initializeDownloadHistory(appContext)
+        val history = downloadHistoryStore
+        val output = ForegroundJpegImportOutput { item, receipt, download ->
+            withDownloadHistoryReceipt(history, history?.captureRequest(), item.name, DownloadHistoryDestination.GALLERY) { completed ->
+                CameraMediaGalleryStore(resolver).save(
+                    connection.model, item,
+                    onFinalized = {
+                        // Publication owns success before any receipt/observer can fail.
+                        receipt.markPublished()
+                        completed()
+                    },
+                    onCleanupFailure = {
+                        receipt.markCleanupUnconfirmed()
+                        _uiState.update { it.copy(foregroundImportCleanupUnconfirmed = true) }
+                        // Only an acknowledgement bit persists; no path, URI or enablement does.
+                        preferences.edit().putBoolean(KEY_FOREGROUND_IMPORT_CLEANUP_WARNING, true).apply()
+                    },
+                    download = download,
+                )
+            }
+        }
+        startForegroundJpegImport(output, cameraGalleryPath(connection.model))
+    }
+
+    internal fun startForegroundJpegImport(
+        output: ForegroundJpegImportOutput,
+        location: String = "Synthetic Gallery",
+        platformSupported: Boolean = true,
+        limits: ForegroundImportLimits = ForegroundImportLimits(),
+        elapsedMillis: () -> Long = SystemClock::elapsedRealtime,
+        pollMillis: Long = 5_000L,
+    ): Boolean {
+        val state = _uiState.value
+        if (foregroundImportOwner != null || !appInForeground || !state.canEnableForegroundJpegImport(platformSupported)) return false
+        val owner = ForegroundImportOwner(cameraSessionGeneration, requireNotNull(state.info), output, location)
+        val io = object : ForegroundJpegImportIo {
+            override suspend fun awaitAvailable() = awaitForegroundImportIdle(owner)
+            override suspend fun inventory(maximumItems: Int) = withForegroundImportOperation(owner) {
+                repository.listMediaIdentities(maximumItems)
+            }
+            override suspend fun freshInfo(item: CameraMediaItem) = withForegroundImportOperation(owner) {
+                repository.mediaInfo(item.copy(sizeBytes = null, contentType = null))
+            }
+            override suspend fun saveOriginal(item: CameraMediaItem, receipt: ForegroundImportReceipt) {
+                withForegroundImportOperation(owner, saving = true) {
+                    val request = beginMediaSave(_uiState.value, listOf(item))
+                    owner.saveRequest = request
+                    publishMediaSaveProgress(request, item, CameraMediaTransferProgress(0L, item.sizeBytes))
+                    var failure: Throwable? = null
+                    try {
+                        owner.output.save(item, receipt) { destination ->
+                            ensureForegroundImportOwner(owner)
+                            repository.downloadMediaSingleAttempt(item, destination) { progress ->
+                                publishMediaSaveProgress(request, item, progress)
+                            }
+                        }
+                    } catch (cause: Throwable) {
+                        failure = cause
+                        throw cause
+                    } finally {
+                        if (!receipt.cleanupConfirmed) {
+                            _uiState.update { it.copy(foregroundImportCleanupUnconfirmed = true) }
+                        }
+                        val feedback = when {
+                            receipt.published -> MediaSaveFeedback.Saved(owner.location)
+                            failure is CancellationException -> MediaSaveFeedback.Cancelled
+                            else -> MediaSaveFeedback.Failed("Automatic JPEG import did not publish this original.")
+                        }
+                        publishMediaSave(request, item, feedback)
+                        if (receipt.published) updateMediaSave(request) {
+                            it.copy(lastDownloadedMediaName = item.name, lastDownloadLocation = owner.location)
+                        }
+                    }
+                }
+            }
+        }
+        owner.runner = ForegroundJpegImportRunner(io, elapsedMillis, { status ->
+            if (ownsForegroundImport(owner)) _uiState.update { it.copy(foregroundJpegImport = status) }
+        }, limits, idlePollMillis = pollMillis)
+        foregroundImportOwner = owner
+        _uiState.update { it.copy(foregroundImportOwnerActive = true) }
+        owner.job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            owner.started = true
+            try {
+                owner.runner.run()
+            } finally {
+                withContext(NonCancellable) {
+                    owner.operation?.cancelAndJoin()
+                    if (foregroundImportOwner === owner) {
+                        foregroundImportOwner = null
+                        _uiState.update { it.copy(foregroundImportOwnerActive = false) }
+                        if (owner.generation == cameraSessionGeneration && _uiState.value.info === owner.connection) {
+                            _uiState.update { it.copy(foregroundJpegImport = owner.runner.status) }
+                        }
+                    }
+                }
+            }
+        }
+        owner.job?.invokeOnCompletion {
+            if (!owner.started) {
+                owner.runner.finishBeforeStart()
+                if (foregroundImportOwner === owner) {
+                    foregroundImportOwner = null
+                    _uiState.update { it.copy(foregroundImportOwnerActive = false) }
+                }
+            }
+        }
+        owner.job?.start()
+        return true
+    }
+
+    fun stopForegroundJpegImport() { stopForegroundImport(ForegroundImportStopReason.USER) }
+
+    fun acknowledgeForegroundImportCleanupWarning(context: Context) {
+        if (foregroundImportOwner != null) return
+        context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_FOREGROUND_IMPORT_CLEANUP_WARNING, false).apply()
+        _uiState.update { it.copy(foregroundImportCleanupUnconfirmed = false) }
+    }
+
+    private fun stopForegroundImport(reason: ForegroundImportStopReason): Job? {
+        val owner = foregroundImportOwner ?: return null
+        owner.runner.requestStop(reason)
+        owner.operation?.cancel()
+        owner.job?.cancel()
+        return owner.job
+    }
+
+    private fun ownsForegroundImport(owner: ForegroundImportOwner): Boolean =
+        foregroundImportOwner === owner && owner.generation == cameraSessionGeneration &&
+            _uiState.value.info === owner.connection
+
+    private suspend fun ensureForegroundImportOwner(owner: ForegroundImportOwner) {
+        coroutineContext.ensureActive()
+        if (!ownsForegroundImport(owner)) throw CancellationException("Foreground import connection changed.")
+        if (owner.runner.status.stopReason != null) throw CancellationException("Foreground import is stopping.")
+        if (!appInForeground) {
+            owner.runner.requestStop(ForegroundImportStopReason.BACKGROUND)
+            throw CancellationException("Foreground import left the foreground.")
+        }
+        val state = _uiState.value
+        if (!state.connected || state.previewMode || state.transport != CameraTransport.CCAPI_NETWORK ||
+            !state.supports(CameraFeature.MEDIA_BROWSER) || !state.supports(CameraFeature.MEDIA_DOWNLOAD)) {
+            owner.runner.requestStop(ForegroundImportStopReason.UNSUPPORTED)
+            throw CancellationException("Foreground import is no longer available.")
+        }
+    }
+
+    private suspend fun awaitForegroundImportIdle(owner: ForegroundImportOwner) {
+        while (true) {
+            ensureForegroundImportOwner(owner)
+            if (_uiState.value.foregroundImportCameraIdle() && mediaDownloadJob == null && mediaUploadJob == null &&
+                mediaLibraryJob?.isActive != true && eventMediaJob?.isActive != true && captureReviewJob?.isActive != true) return
+            delay(50L)
+        }
+    }
+
+    /** Participates in CONNECT/disconnect joins without clearing unrelated user-facing errors. */
+    private suspend fun <T> withForegroundImportOperation(
+        owner: ForegroundImportOwner,
+        saving: Boolean = false,
+        block: suspend () -> T,
+    ): T {
+        awaitForegroundImportIdle(owner)
+        ensureForegroundImportOwner(owner)
+        cameraStateRevision += 1
+        _uiState.update { it.copy(pendingOperations = it.pendingOperations + CameraOperation.MEDIA) }
+        val result = CompletableDeferred<Result<T>>()
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                ensureForegroundImportOwner(owner)
+                val value = block()
+                ensureForegroundImportOwner(owner)
+                refreshCapabilityEvidence()
+                result.complete(Result.success(value))
+            } catch (cancelled: CancellationException) {
+                result.complete(Result.failure(cancelled))
+                throw cancelled
+            } catch (failure: Throwable) {
+                result.complete(Result.failure(failure))
+            } finally {
+                if (ownsForegroundImport(owner)) {
+                    cameraStateRevision += 1
+                    _uiState.update { it.copy(pendingOperations = it.pendingOperations - CameraOperation.MEDIA) }
+                }
+            }
+        }
+        owner.operation = job
+        cameraOperationJobs[CameraOperation.MEDIA] = job
+        if (saving) mediaDownloadJob = job
+        job.start()
+        try {
+            job.join()
+            coroutineContext.ensureActive()
+            if (!result.isCompleted) throw CancellationException("Foreground import operation did not start.")
+            return result.await().getOrThrow()
+        } finally {
+            withContext(NonCancellable) {
+                if (!job.isCompleted) job.cancelAndJoin()
+                // A cancelled LAZY operation may never enter its own finally block.
+                if (ownsForegroundImport(owner) && owner.operation === job) {
+                    _uiState.update { it.copy(pendingOperations = it.pendingOperations - CameraOperation.MEDIA) }
+                }
+                if (owner.operation === job) owner.operation = null
+                if (cameraOperationJobs[CameraOperation.MEDIA] === job) cameraOperationJobs.remove(CameraOperation.MEDIA)
+                if (mediaDownloadJob === job) mediaDownloadJob = null
+                owner.saveRequest?.let { request ->
+                    updateMediaSave(request) { it.copy(activeMediaDownloadName = null, mediaDownloadProgress = null) }
+                    if (mediaSaveRequest === request) mediaSaveRequest = null
+                    owner.saveRequest = null
+                }
+            }
+        }
+    }
+
     fun downloadMedia(context: Context, item: CameraMediaItem, destination: Uri) {
         val state = _uiState.value
         if (state.info == null || state.previewMode || state.isBusy(CameraOperation.MEDIA) || mediaDownloadJob != null) return
@@ -2352,6 +2613,9 @@ class CameraViewModel(
     }
 
     fun cancelMediaDownload() {
+        if (foregroundImportOwner?.operation === mediaDownloadJob && mediaDownloadJob != null) {
+            stopForegroundImport(ForegroundImportStopReason.USER)
+        }
         mediaDownloadJob?.cancel()
     }
 
@@ -2798,12 +3062,13 @@ class CameraViewModel(
         } else emptyList()
         // A reconnect cannot inherit work whose item IDs or commands belong to the old backend.
         val previousJobs = if (operation == CameraOperation.CONNECT) {
+            val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
             cameraSessionGeneration += 1
-            (cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList()).also { jobs ->
+            (cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)).also { jobs ->
                 cameraOperationJobs.clear()
                 liveViewReconciliationJobs.clear()
                 jobs.forEach(Job::cancel)
-                _uiState.update { it.copy(pendingOperations = emptySet()) }
+                _uiState.update { it.copy(pendingOperations = emptySet(), foregroundJpegImport = ForegroundJpegImportStatus()) }
             }
         } else emptyList()
         val generation = cameraSessionGeneration
@@ -3306,8 +3571,10 @@ class CameraViewModel(
     }
 
     override fun onCleared() {
+        foregroundImportPreferences?.unregisterOnSharedPreferenceChangeListener(foregroundImportWarningListener)
+        val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
         cameraSessionGeneration += 1
-        val operationJobs = cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList()
+        val operationJobs = cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)
         cameraOperationJobs.clear()
         liveViewReconciliationJobs.clear()
         operationJobs.forEach(Job::cancel)
@@ -3372,6 +3639,7 @@ class CameraViewModel(
         captureReviewThumbnail = null,
         captureReviewLoading = false,
         mediaSaveFeedback = emptyMap(),
+        foregroundJpegImport = ForegroundJpegImportStatus(),
         captureReviewStatus = CaptureReviewStatus.IDLE,
         captureStatusReadbackFailed = false,
         activeMediaDownloadName = null,
@@ -3754,6 +4022,7 @@ class CameraViewModel(
         const val KEY_USERNAME = "username"
         const val KEY_BRIDGE_BASE_URL = "bridge_base_url"
         const val KEY_CONNECTION_TARGET = "connection_target"
+        const val KEY_FOREGROUND_IMPORT_CLEANUP_WARNING = "foreground_import_cleanup_unconfirmed"
         const val CAPTURE_FLASH_MILLIS = 120L
         const val FOCUS_FEEDBACK_MILLIS = 1_200L
         const val FPS_WINDOW_SIZE = 30

@@ -4,6 +4,8 @@ All notable release-level changes to Open EOS Control are documented here.
 
 ## [Unreleased]
 
+- Android direct CCAPI (Android 10+): add explicit per-session foreground JPEG original delivery to Gallery, with two complete bounded baseline inventories, fresh stable metadata, a bounded queue, visible progress and stop/cleanup feedback. Newly observed IDs do not prove capture causality; existing files are not backfilled, and background import, cross-session deduplication and camera-command replay are not added. See the [foreground import validation notes](docs/validation/android-foreground-jpeg-import-2026-10-06.zh-TW.md) for acceptance and device boundaries.
+
 ## [0.12.0] - 2026-10-06
 
 - Android: combine inclusive media-date, rating, type and observed-folder filters over loaded items, with rating sorting, explicit unknown metadata and preserved hidden selections. Partial listings are not a whole-card inventory, and media dates are not always original capture times.

@@ -401,6 +401,8 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
             }
         }
 
+        ForegroundJpegImportEntry(state, actions)
+
         MediaLibraryScopeBar(
             selected = state.mediaLibraryScope,
             enabled = !state.isBusy(CameraOperation.MEDIA),

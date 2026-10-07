@@ -51,13 +51,19 @@ internal class CameraMediaGalleryStore(private val resolver: ContentResolver) {
         cameraModel: String?,
         item: CameraMediaItem,
         onFinalized: () -> Unit = {},
+        onCleanupFailure: () -> Unit = {},
         download: suspend (OutputStream) -> CameraMediaDownloadResult,
     ): Uri {
         var created: Uri? = null
         return withMediaOutputFinalization(
             cleanupIncomplete = {
                 created?.let { destination ->
-                    check(resolver.delete(destination, null, null) == 1) { "Android could not remove the incomplete download." }
+                    try {
+                        check(resolver.delete(destination, null, null) == 1) { "Android could not remove the incomplete download." }
+                    } catch (failure: Exception) {
+                        onCleanupFailure()
+                        throw failure
+                    }
                 }
             },
             onFinalized = onFinalized,

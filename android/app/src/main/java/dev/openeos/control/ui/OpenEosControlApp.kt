@@ -180,6 +180,9 @@ fun OpenEosControlApp(
         downloadMedia = mediaPickers.downloadDocument,
         downloadMediaBatch = mediaPickers.downloadFolder,
         saveMediaToPhone = { items -> viewModel.downloadMediaBatch(context, items) },
+        enableForegroundJpegImport = { viewModel.enableForegroundJpegImport(context) },
+        stopForegroundJpegImport = viewModel::stopForegroundJpegImport,
+        acknowledgeForegroundImportCleanupWarning = { viewModel.acknowledgeForegroundImportCleanupWarning(context) },
         cancelMediaThumbnail = viewModel::cancelMediaThumbnail,
         openInSerein = { items -> viewModel.openInSerein(context, items) },
         uploadMedia = mediaPickers.upload,
@@ -208,29 +211,36 @@ fun OpenEosControlApp(
     ) {
         MaterialTheme(colorScheme = OpenEosColorScheme) {
             SystemBarsEffect(immersive = state.connected && state.uiMode == UiMode.CONTROL)
-            Box(Modifier.fillMaxSize().background(AppBackground)) {
-                if (!state.connected) {
-                    ConnectionScreen(state, actions)
-                } else if (state.uiMode == UiMode.MEDIA) {
-                    MediaScreen(state, actions)
-                } else if (state.uiMode == UiMode.DEBUG) {
-                    DebugScreen(
-                        state = state,
-                        actions = actions,
-                        systemAutoRotationEnabled = systemAutoRotationEnabled,
-                        controlRotationDegrees = controlRotationDegrees,
-                    )
-                } else {
-                    CameraControlScreen(
-                        state = state,
-                        actions = actions,
-                    )
-                }
-                Box(
-                    Modifier.align(if (state.shutterReleaseUnconfirmed) Alignment.TopCenter else Alignment.BottomCenter)
-                        .padding(top = if (state.shutterReleaseUnconfirmed) CAMERA_OVERLAY_HEADER_HEIGHT else 0.dp),
-                ) {
-                    CameraErrorPresentation(state, actions.clearError)
+            ForegroundImportCleanupWarningHost(state, actions) {
+                Box(Modifier.fillMaxSize().background(AppBackground)) {
+                    if (!state.connected) {
+                        ConnectionScreen(state, actions)
+                    } else if (state.uiMode == UiMode.MEDIA) {
+                        MediaScreen(state, actions)
+                    } else if (state.uiMode == UiMode.DEBUG) {
+                        DebugScreen(
+                            state = state,
+                            actions = actions,
+                            systemAutoRotationEnabled = systemAutoRotationEnabled,
+                            controlRotationDegrees = controlRotationDegrees,
+                        )
+                    } else {
+                        CameraControlScreen(
+                            state = state,
+                            actions = actions,
+                        )
+                    }
+                    Box(
+                        Modifier.align(if (state.shutterReleaseUnconfirmed) Alignment.TopCenter else Alignment.BottomCenter)
+                            .padding(
+                                top = if (state.shutterReleaseUnconfirmed) CAMERA_OVERLAY_HEADER_HEIGHT else 0.dp,
+                                bottom = if (!state.shutterReleaseUnconfirmed && state.connected &&
+                                    state.uiMode == UiMode.CONTROL && state.showForegroundJpegImportStatus
+                                ) FOREGROUND_IMPORT_BAR_HEIGHT else 0.dp,
+                            ),
+                    ) {
+                        CameraErrorPresentation(state, actions.clearError)
+                    }
                 }
             }
             LanguageSettingsSheet(state, actions)
@@ -380,6 +390,9 @@ data class CameraActions(
     val downloadMedia: (CameraMediaItem) -> Unit,
     val downloadMediaBatch: (List<CameraMediaItem>) -> Unit = {},
     val saveMediaToPhone: (List<CameraMediaItem>) -> Unit = {},
+    val enableForegroundJpegImport: () -> Unit = {},
+    val stopForegroundJpegImport: () -> Unit = {},
+    val acknowledgeForegroundImportCleanupWarning: () -> Unit = {},
     val cancelMediaThumbnail: (CameraMediaItem) -> Unit = {},
     val openInSerein: (List<CameraMediaItem>) -> Unit = {},
     val uploadMedia: () -> Unit = {},

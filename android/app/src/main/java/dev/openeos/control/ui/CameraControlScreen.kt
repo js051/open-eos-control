@@ -110,29 +110,40 @@ fun CameraControlScreen(
     state: CameraUiState,
     actions: CameraActions,
 ) {
-    Box(
-        Modifier
-            .fillMaxSize()
-            .testTag("camera-control-root")
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .pointerInput(state.hudVisible) {
-                var dragDistance = 0f
-                detectVerticalDragGestures(
-                    onVerticalDrag = { change, dragAmount ->
-                        change.consume()
-                        dragDistance += dragAmount
-                    },
-                    onDragEnd = {
-                        if (abs(dragDistance) >= 48.dp.toPx()) {
-                            actions.setHudVisible(!state.hudVisible)
-                        }
-                        dragDistance = 0f
-                    },
-                    onDragCancel = { dragDistance = 0f },
-                )
-            },
-    ) {
-        StableCameraControls(state, actions)
+    val showImportStatus = state.showForegroundJpegImportStatus
+    // The original control surface handles its own cutout/system-bar insets. Reserve safe
+    // space at this outer boundary only when the additional import status row is present.
+    val containerModifier = Modifier.fillMaxSize().then(
+        if (showImportStatus) Modifier.windowInsetsPadding(WindowInsets.safeDrawing) else Modifier,
+    )
+    Column(containerModifier) {
+        Box(
+            Modifier
+                .fillMaxWidth().weight(1f)
+                .testTag("camera-control-root")
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .pointerInput(state.hudVisible) {
+                    var dragDistance = 0f
+                    detectVerticalDragGestures(
+                        onVerticalDrag = { change, dragAmount ->
+                            change.consume()
+                            dragDistance += dragAmount
+                        },
+                        onDragEnd = {
+                            if (abs(dragDistance) >= 48.dp.toPx()) {
+                                actions.setHudVisible(!state.hudVisible)
+                            }
+                            dragDistance = 0f
+                        },
+                        onDragCancel = { dragDistance = 0f },
+                    )
+                },
+        ) {
+            StableCameraControls(state, actions)
+        }
+        if (showImportStatus) {
+            ForegroundJpegImportEntry(state, actions)
+        }
     }
     SettingSheets(state, actions)
 }

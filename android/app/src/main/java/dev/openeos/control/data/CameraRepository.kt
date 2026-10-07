@@ -278,6 +278,9 @@ class CameraRepository(
         onProgress: (List<CameraMediaItem>) -> Unit = {},
     ): List<CameraMediaItem> = backend.listMedia(maximumItems, onProgress)
 
+    suspend fun listMediaIdentities(maximumItems: Int): CameraMediaInventory =
+        backend.listMediaIdentities(maximumItems)
+
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = backend.mediaThumbnail(item)
 
     suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview = backend.mediaPreview(item)
@@ -289,6 +292,12 @@ class CameraRepository(
         destination: OutputStream,
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaDownloadResult = backend.downloadMedia(item, destination, onProgress)
+
+    suspend fun downloadMediaSingleAttempt(
+        item: CameraMediaItem,
+        destination: OutputStream,
+        onProgress: (CameraMediaTransferProgress) -> Unit = {},
+    ): CameraMediaDownloadResult = backend.downloadMediaSingleAttempt(item, destination, onProgress)
 
     suspend fun uploadMedia(
         name: String,
