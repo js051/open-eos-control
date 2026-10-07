@@ -217,10 +217,15 @@
               <span class="icon" data-icon="images"></span>
             </span>
             <span class="latest-media-copy">
-              <span class="supporting" data-i18n="latestMedia">Latest media</span>
+              <span id="latest-media-heading" class="supporting" data-i18n="latestMedia">Latest media</span>
               <strong id="latest-media-label" data-i18n="latestMediaEmpty">No recent media</strong>
             </span>
           </button>
+          <div id="latest-media-review" class="latest-media-review" hidden>
+            <span id="latest-media-review-status" class="supporting" role="status" aria-live="polite"></span>
+            <span class="supporting" data-i18n="latestMediaReviewLimit">Checks up to 8 items returned by the camera. A newly visible item may still be an older file.</span>
+            <button id="latest-media-retry" class="button secondary" type="button" data-i18n="latestMediaRetry" hidden>Check again</button>
+          </div>
 
           <div class="quick-actions">
             <button id="autofocus-button" class="button secondary" type="button">

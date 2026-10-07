@@ -109,6 +109,14 @@
       latestMediaEmpty: "No recent media",
       latestMediaLoading: "Updating latest media",
       openLatestMedia: "Open latest media",
+      previousMedia: "Previously visible media",
+      openPreviousMedia: "Open previously visible media",
+      latestMediaSearching: "Looking for newly visible media…",
+      latestMediaNotReady: "New media is not visible yet. Check again without taking another photo.",
+      latestMediaReadFailed: "The camera's media list could not be read. Check again without taking another photo.",
+      latestMediaFound: "Newly visible media found. Open the preview to confirm it.",
+      latestMediaReviewLimit: "Checks up to 8 items returned by the camera. A newly visible item may still be an older file.",
+      latestMediaRetry: "Check again",
       record: "Record",
       stopRecording: "Stop recording",
       ready: "Ready",
@@ -538,6 +546,14 @@
       latestMediaEmpty: "尚無最近媒體",
       latestMediaLoading: "正在更新最新媒體",
       openLatestMedia: "開啟最新媒體",
+      previousMedia: "先前可見素材",
+      openPreviousMedia: "開啟先前可見素材",
+      latestMediaSearching: "正在尋找新可見素材…",
+      latestMediaNotReady: "尚未找到新可見素材。可重新查找，不會再次拍攝。",
+      latestMediaReadFailed: "暫時無法讀取相機的素材清單。可重新查找，不會再次拍攝。",
+      latestMediaFound: "已找到新可見素材，請開啟預覽確認。",
+      latestMediaReviewLimit: "每次只查找相機回傳的最多 8 筆素材；新出現的素材也可能是先前未顯示的舊檔。",
+      latestMediaRetry: "重新查找",
       record: "開始錄影",
       stopRecording: "停止錄影",
       ready: "就緒",
@@ -1138,6 +1154,10 @@
     latestMediaGeneration: 0,
     latestMediaRefreshPromise: null,
     latestMediaController: null,
+    latestMediaCandidates: null,
+    latestMediaReviewAttempt: null,
+    latestMediaReviewStatus: "IDLE",
+    latestMediaReviewReadFailed: false,
     busy: false,
     refreshGeneration: 0,
     lastError: null,
@@ -1214,6 +1234,10 @@
     latestMediaButton: byId("latest-media-button"),
     latestMediaThumbnail: byId("latest-media-thumbnail"),
     latestMediaLabel: byId("latest-media-label"),
+    latestMediaHeading: byId("latest-media-heading"),
+    latestMediaReview: byId("latest-media-review"),
+    latestMediaReviewStatus: byId("latest-media-review-status"),
+    latestMediaRetry: byId("latest-media-retry"),
     operationState: byId("operation-state"),
     autofocusButton: byId("autofocus-button"),
     halfPressButton: byId("half-press-button"),
@@ -1757,6 +1781,10 @@
     releaseObjectUrl(state.latestMediaThumbnailUrl);
     state.latestMediaThumbnailUrl = null;
     state.latestMediaThumbnailLoading = false;
+    state.latestMediaCandidates = null;
+    state.latestMediaReviewAttempt = null;
+    state.latestMediaReviewStatus = "IDLE";
+    state.latestMediaReviewReadFailed = false;
     state.captureMode = "photo";
     state.previewInput = "CAMERA";
     state.liveSource = "AUTO";
@@ -2790,7 +2818,12 @@
         setOperationState(result);
         showToast(result);
       } else if (isPhoto) {
-        const previousLatestId = state.latestMediaItem?.id || null;
+        const reviewAttempt = { sessionId, knownIds: visibleMediaIds() };
+        // A new shutter supersedes an old review before the command waits for ACK.
+        cancelLatestMediaRefresh();
+        state.latestMediaReviewAttempt = null;
+        state.latestMediaReviewStatus = "IDLE";
+        state.latestMediaReviewReadFailed = false;
         const captured = await api(`/v1/session/${encodeURIComponent(sessionId)}/capture/still`, {
           method: "POST", json: { af: autofocus },
         });
@@ -2799,7 +2832,8 @@
         flashCapture();
         setOperationState(t("captureComplete"));
         showToast(t("captureComplete"));
-        void refreshLatestMedia({ previousId: previousLatestId });
+        state.latestMediaReviewAttempt = reviewAttempt;
+        void refreshLatestMedia();
       } else {
         const wasRecording = Boolean(state.status?.recording);
         state.status = await api(
@@ -2912,9 +2946,20 @@
     renderLatestMedia();
   }
 
-  function latestMediaFrom(items) {
+  function visibleMediaIds() {
+    const ids = new Set(state.media.map((item) => item.id));
+    if (state.latestMediaItem) ids.add(state.latestMediaItem.id);
+    if (state.latestMediaCandidates?.sessionId === state.session?.id) {
+      state.latestMediaCandidates.ids.forEach((id) => ids.add(id));
+    }
+    return ids;
+  }
+
+  function latestMediaFrom(items, knownIds = new Set(), photosOnly = false) {
     return mediaLibrary.itemsForDisplay(
-      Array.isArray(items) ? items : [],
+      (Array.isArray(items) ? items : []).filter((item) =>
+        !knownIds.has(item.id) && (!photosOnly || !mediaIsVideo(item)),
+      ),
       "all",
       // The bounded camera response is already ordered by the camera. Keep that
       // order because fresh captures may not have a timestamp yet.
@@ -2923,48 +2968,74 @@
     )[0] || null;
   }
 
-  function refreshLatestMedia({ previousId = null } = {}) {
+  function retryLatestMedia() {
+    const attempt = state.latestMediaReviewAttempt;
+    if (
+      !attempt || attempt.sessionId !== state.session?.id || cameraInteractionBusy() ||
+      state.latestMediaRefreshPromise || state.latestMediaReviewStatus !== "NOT_READY"
+    ) return state.latestMediaRefreshPromise || Promise.resolve(false);
+    return refreshLatestMedia();
+  }
+
+  function refreshLatestMedia() {
     if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER)) return Promise.resolve(false);
+    const reviewAttempt = state.latestMediaReviewAttempt?.sessionId === state.session.id
+      ? state.latestMediaReviewAttempt : null;
+    state.latestMediaReviewAttempt = reviewAttempt;
     cancelLatestMediaRefresh();
     const rawSessionId = state.session.id;
     const generation = state.latestMediaGeneration;
     const controller = new AbortController();
     state.latestMediaController = controller;
+    const stillOwnsReview = () => generation === state.latestMediaGeneration &&
+      state.session?.id === rawSessionId && !controller.signal.aborted &&
+      state.latestMediaReviewAttempt === reviewAttempt;
     const promise = (async () => {
       state.latestMediaThumbnailLoading = true;
+      state.latestMediaReviewStatus = reviewAttempt ? "SEARCHING" : "IDLE";
+      state.latestMediaReviewReadFailed = false;
       renderLatestMedia();
       try {
         let latest = null;
         for (let attempt = 0; attempt <= LATEST_MEDIA_RETRY_DELAYS_MILLIS.length; attempt += 1) {
-          if (
-            generation !== state.latestMediaGeneration ||
-            state.session?.id !== rawSessionId ||
-            controller.signal.aborted
-          ) return false;
-          const response = await api(
-            `/v1/session/${encodeURIComponent(rawSessionId)}/media?limit=${LATEST_MEDIA_LIMIT}`,
-            { signal: controller.signal },
-          );
-          latest = latestMediaFrom(response.items);
-          if (!previousId || (latest && latest.id !== previousId)) break;
+          if (!stillOwnsReview()) return false;
+          try {
+            const response = await api(
+              `/v1/session/${encodeURIComponent(rawSessionId)}/media?limit=${LATEST_MEDIA_LIMIT}`,
+              { signal: controller.signal },
+            );
+            if (!stillOwnsReview()) return false;
+            const candidates = (Array.isArray(response.items) ? response.items : []).slice(0, LATEST_MEDIA_LIMIT);
+            state.latestMediaCandidates = { sessionId: rawSessionId, ids: new Set(candidates.map((item) => item.id)) };
+            state.latestMediaReviewReadFailed = false;
+            latest = latestMediaFrom(candidates, reviewAttempt?.knownIds, Boolean(reviewAttempt));
+          } catch (error) {
+            if (!stillOwnsReview() || mediaTransfer.isAbortError(error)) return false;
+            if (!reviewAttempt) throw error;
+            state.latestMediaReviewReadFailed = true;
+          }
+          if (!reviewAttempt || latest) break;
           if (attempt === LATEST_MEDIA_RETRY_DELAYS_MILLIS.length) {
             state.latestMediaThumbnailLoading = false;
+            state.latestMediaReviewStatus = "NOT_READY";
             renderLatestMedia();
             return false;
           }
           await sleep(LATEST_MEDIA_RETRY_DELAYS_MILLIS[attempt]);
         }
-        if (
-          generation !== state.latestMediaGeneration ||
-          state.session?.id !== rawSessionId ||
-          controller.signal.aborted
-        ) return false;
+        if (!stillOwnsReview()) return false;
+        if (reviewAttempt) {
+          state.latestMediaReviewAttempt = null;
+          state.latestMediaReviewStatus = "READY";
+        }
         await publishLatestMedia(latest, generation, rawSessionId, controller.signal);
         return true;
       } catch (error) {
-        if (!mediaTransfer.isAbortError(error) && generation === state.latestMediaGeneration) {
+        if (!mediaTransfer.isAbortError(error) && stillOwnsReview()) {
           // Latest-media enrichment is best effort and must not rewrite capture success.
           state.latestMediaThumbnailLoading = false;
+          state.latestMediaReviewStatus = reviewAttempt ? "NOT_READY" : "IDLE";
+          state.latestMediaReviewReadFailed = Boolean(reviewAttempt);
           renderLatestMedia();
         }
         return false;
@@ -2972,6 +3043,7 @@
         if (state.latestMediaController === controller) {
           state.latestMediaController = null;
           state.latestMediaRefreshPromise = null;
+          renderLatestMedia();
         }
       }
     })();
@@ -3026,10 +3098,21 @@
     const button = ui.latestMediaButton;
     if (!button) return;
     const supported = Boolean(state.session) && featureSupported(FEATURES.MEDIA_BROWSER);
+    const reviewStatus = state.latestMediaReviewStatus;
+    const pending = reviewStatus === "SEARCHING" || reviewStatus === "NOT_READY";
     button.hidden = !supported;
     button.disabled = !state.latestMediaItem;
-    button.setAttribute("aria-label", state.latestMediaItem ? t("openLatestMedia") : t("latestMediaEmpty"));
-    ui.latestMediaLabel.textContent = state.latestMediaThumbnailLoading
+    button.setAttribute("aria-label", state.latestMediaItem
+      ? t(pending ? "openPreviousMedia" : "openLatestMedia") : t("latestMediaEmpty"));
+    ui.latestMediaHeading.textContent = t(pending ? "previousMedia" : "latestMedia");
+    ui.latestMediaReview.hidden = !supported || reviewStatus === "IDLE";
+    ui.latestMediaReviewStatus.textContent = t(reviewStatus === "SEARCHING" ? "latestMediaSearching" :
+      reviewStatus === "NOT_READY" ? (state.latestMediaReviewReadFailed ? "latestMediaReadFailed" : "latestMediaNotReady") :
+        "latestMediaFound");
+    ui.latestMediaRetry.hidden = !pending;
+    ui.latestMediaRetry.disabled = reviewStatus !== "NOT_READY" || cameraInteractionBusy() ||
+      Boolean(state.latestMediaRefreshPromise);
+    ui.latestMediaLabel.textContent = state.latestMediaThumbnailLoading && !pending
       ? t("latestMediaLoading")
       : state.latestMediaItem?.name || t("latestMediaEmpty");
     ui.latestMediaThumbnail.replaceChildren();
@@ -5779,6 +5862,7 @@
     });
     ui.shutterButton.addEventListener("click", operateShutter);
     ui.latestMediaButton.addEventListener("click", openLatestMedia);
+    ui.latestMediaRetry.addEventListener("click", retryLatestMedia);
     ui.autofocusButton.addEventListener("click", autofocus);
     ui.halfPressButton.addEventListener("click", halfPressShutter);
     ui.liveToggleButton.addEventListener("click", toggleLiveView);
