@@ -466,14 +466,14 @@ struct MediaView: View {
     @ViewBuilder
     private func downloadAction(_ item: CameraMediaItem) -> some View {
         Group {
-            if camera.downloadedFileName == item.name, let url = camera.downloadedFileURL {
+            if let url = camera.downloadedFile(for: item) {
                 ShareLink(item: url) {
                     Image(systemName: "square.and.arrow.up")
                         .frame(width: 48, height: 48)
                         .accessibilityLabel(Text("save_media"))
                 }
                 .foregroundStyle(Color.cameraStatus)
-            } else if camera.downloadedFileName == item.name, camera.isPreview {
+            } else if camera.isMediaDownloaded(item), camera.isPreview {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(Color.cameraStatus)
                     .frame(width: 48, height: 48)
@@ -848,9 +848,21 @@ private struct MediaPreviewView: View {
             } else if camera.mediaPreviewLoading {
                 ProgressView().tint(Color.cameraAccent).controlSize(.large)
             } else {
-                Text("media_preview_unavailable")
-                    .foregroundStyle(Color.cameraSecondaryText)
-                    .padding(24)
+                VStack(spacing: 12) {
+                    Text("media_preview_unavailable")
+                        .foregroundStyle(Color.cameraSecondaryText)
+                    if let item = camera.mediaPreviewItem, !mediaIsVideo(item), item.previewAvailable {
+                        Button {
+                            Task { await camera.retryMediaPreview() }
+                        } label: {
+                            Label("retry_media_preview", systemImage: "arrow.clockwise")
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .disabled(!camera.canRetryMediaPreview)
+                        .accessibilityIdentifier("retry-media-preview")
+                    }
+                }
+                .padding(24)
             }
 
             VStack(spacing: 0) {
@@ -915,6 +927,17 @@ private struct MediaPreviewView: View {
                 Spacer()
             }
         }
+        .alert(
+            Text("operation_failed"),
+            isPresented: Binding(
+                get: { camera.lastError != nil && camera.mediaPreviewItem != nil && !camera.shutterReleaseRequired },
+                set: { if !$0 { camera.clearError() } }
+            )
+        ) {
+            Button("dismiss", role: .cancel) { camera.clearError() }
+        } message: {
+            Text(camera.lastError ?? "")
+        }
     }
 
     @ViewBuilder
@@ -934,6 +957,7 @@ private struct MediaPreviewView: View {
         .foregroundStyle(.white)
         .disabled(destination == nil)
         .opacity(destination == nil ? 0 : 1)
+        .accessibilityIdentifier(offset < 0 ? "media-preview-previous" : "media-preview-next")
     }
 
     private func adjacentItem(offset: Int) -> CameraMediaItem? {
@@ -951,8 +975,11 @@ private struct MediaPreviewView: View {
     }
 
     private func positionText(for item: CameraMediaItem) -> String {
-        let position = items.firstIndex { $0.id == item.id }.map { $0 + 1 } ?? 0
-        return language.format("media_viewer_position_format", position, items.count)
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else {
+            // A bounded or filtered listing is not proof that the selected file was deleted.
+            return language.string("media_viewer_outside_list")
+        }
+        return language.format("media_viewer_position_format", index + 1, items.count)
     }
 
     private func metadataText(for item: CameraMediaItem) -> String {
@@ -966,7 +993,7 @@ private struct MediaPreviewView: View {
 
     @ViewBuilder
     private func previewDownloadAction(_ item: CameraMediaItem) -> some View {
-        if camera.downloadedFileName == item.name, let url = camera.downloadedFileURL {
+        if let url = camera.downloadedFile(for: item) {
             ShareLink(item: url) {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "square.and.arrow.up")
@@ -975,7 +1002,7 @@ private struct MediaPreviewView: View {
                 }
             }
             .accessibilityIdentifier("media-preview-share-\(item.id)")
-        } else if camera.downloadedFileName == item.name, camera.isPreview {
+        } else if camera.isMediaDownloaded(item), camera.isPreview {
             RotatingControl(degrees: controlRotation) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(Color.cameraStatus)

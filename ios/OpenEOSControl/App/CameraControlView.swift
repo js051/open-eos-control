@@ -417,6 +417,37 @@ private struct CaptureBar: View {
                 .padding(.bottom, 6)
             }
 
+            if camera.captureReviewState != .idle {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LocalizedStringKey(camera.captureReviewState.localizationKey))
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("capture-review-status")
+                    if camera.captureReviewState != .capturing {
+                        Text("capture_review_limited_list")
+                            .font(.caption2)
+                            .foregroundStyle(Color.cameraSecondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if camera.captureReviewState == .notReady || camera.captureReviewState == .readFailed {
+                        Button {
+                            camera.retryCaptureMediaReview()
+                        } label: {
+                            Label("capture_review_retry", systemImage: "arrow.clockwise")
+                                .font(.caption.weight(.semibold))
+                                .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.cameraAccent)
+                        .disabled(!camera.canRetryCaptureMediaReview)
+                        .accessibilityIdentifier("capture-review-retry")
+                    }
+                }
+                .padding(.horizontal, compact ? 8 : 18)
+                .padding(.bottom, 6)
+            }
+
             if !captureSupported {
                 Text(LocalizedStringKey(camera.bulbMode ? "bulb_not_supported" : camera.captureMode == .photo ? "capture_not_supported" : "recording_not_supported"))
                     .font(.caption)
@@ -459,6 +490,16 @@ private struct CaptureBar: View {
                         RoundedRectangle(cornerRadius: 5)
                             .stroke(Color.cameraText.opacity(0.25), lineWidth: 1)
                     }
+                    .overlay(alignment: .bottom) {
+                        if camera.latestMediaIsPrevious {
+                            Text("capture_review_previous_badge")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .background(.black.opacity(0.8))
+                                .accessibilityHidden(true)
+                        }
+                    }
                     .accessibilityLabel(Text(latestMediaAccessibilityLabel))
                 }
             }
@@ -476,7 +517,9 @@ private struct CaptureBar: View {
         guard let item = camera.latestMediaItem else {
             return language.string("open_latest_media")
         }
-        return language.format("open_latest_media_named", item.name)
+        let key = camera.latestMediaIsPrevious ? "open_previous_media_named"
+            : camera.captureReviewState == .available ? "open_visible_media_named" : "open_latest_media_named"
+        return language.format(key, item.name)
     }
 
     private var captureSupported: Bool {

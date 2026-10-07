@@ -477,3 +477,17 @@
 "shutter_af_off_description" = "Shutter request does not ask for autofocus. Camera or lens settings may still focus.";
 "shutter_af_unavailable" = "This session cannot request AF off. Enable shutter autofocus or reconnect.";
 "capture_without_autofocus" = "Capture photo without requesting autofocus";
+
+// Bounded still-capture review and read-only recovery.
+"capture_review_capturing" = "Waiting for the shutter response…";
+"capture_review_searching" = "Shot accepted. Looking for a newly visible photo…";
+"capture_review_notReady" = "Shot accepted. No newly visible photo found yet.";
+"capture_review_available" = "A newly visible photo is ready to review.";
+"capture_review_limited_list" = "Only 8 recent items are checked. A newly visible photo may be an older file.";
+"capture_review_retry" = "Check again · no new shot";
+"capture_review_previous_badge" = "Earlier";
+"open_previous_media_named" = "Open previous photo %@";
+"open_visible_media_named" = "Open newly visible photo %@";
+"retry_media_preview" = "Load preview again";
+"media_viewer_outside_list" = "Not in the current list";
+"capture_review_readFailed" = "Shot accepted, but the photo list could not be read. Check again when the camera is ready.";

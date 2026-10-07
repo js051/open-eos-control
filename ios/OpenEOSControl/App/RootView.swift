@@ -41,7 +41,7 @@ struct RootView: View {
         .alert(
             Text("operation_failed"),
             isPresented: Binding(
-                get: { camera.lastError != nil && !camera.shutterReleaseRequired },
+                get: { camera.lastError != nil && camera.mediaPreviewItem == nil && !camera.shutterReleaseRequired },
                 set: { if !$0 { camera.clearError() } }
             )
         ) {
