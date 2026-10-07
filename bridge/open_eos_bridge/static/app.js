@@ -109,7 +109,7 @@
       latestMediaEmpty: "No recent media",
       latestMediaLoading: "Updating latest media",
       openLatestMedia: "Open latest media",
-      previousMedia: "Previously visible media",
+      previouslyVisibleMedia: "Previously visible media",
       openPreviousMedia: "Open previously visible media",
       latestMediaSearching: "Looking for newly visible media…",
       latestMediaNotReady: "New media is not visible yet. Check again without taking another photo.",
@@ -546,7 +546,7 @@
       latestMediaEmpty: "尚無最近媒體",
       latestMediaLoading: "正在更新最新媒體",
       openLatestMedia: "開啟最新媒體",
-      previousMedia: "先前可見素材",
+      previouslyVisibleMedia: "先前可見素材",
       openPreviousMedia: "開啟先前可見素材",
       latestMediaSearching: "正在尋找新可見素材…",
       latestMediaNotReady: "尚未找到新可見素材。可重新查找，不會再次拍攝。",
@@ -3106,7 +3106,7 @@
     button.disabled = !state.latestMediaItem;
     button.setAttribute("aria-label", state.latestMediaItem
       ? t(pending ? "openPreviousMedia" : "openLatestMedia") : t("latestMediaEmpty"));
-    ui.latestMediaHeading.textContent = t(pending ? "previousMedia" : "latestMedia");
+    ui.latestMediaHeading.textContent = t(pending ? "previouslyVisibleMedia" : "latestMedia");
     ui.latestMediaReview.hidden = !supported || reviewStatus === "IDLE";
     ui.latestMediaReviewStatus.textContent = t(reviewStatus === "SEARCHING" ? "latestMediaSearching" :
       reviewStatus === "NOT_READY" ? (state.latestMediaReviewReadFailed ? "latestMediaReadFailed" : "latestMediaNotReady") :

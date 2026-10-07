@@ -54,6 +54,8 @@ Fixture 的 `kind=info.filesize` 另修為與其自定原始 JPEG 的實際長�
 
 ## 範圍與發行判定
 
+修訂 `9a3c0c40` 的 [CI 37691518482](https://github.com/js051/open-eos-control/actions/runs/37691518482) 已實際通過全部七個 PC browser 場景，包含原 picker 歸屬反例及 390×844 英／繁中恢復。其後的 pytest 發現新標題與既有預覽導覽重用 `previousMedia` 字串 key，兩語各重複一次；這也會讓新標題被舊導覽文案覆蓋。後續窄修只將新標題改用 `previouslyVisibleMedia`，保留原導覽 key 與各 key 在兩語恰好宣告一次的檢查。該窄修仍需新 head 正常 CI，不把前一版的七場景通過沿用為最新文字來源的完整驗收。
+
 不包含 REC／Bulb 擴充、自動傳圖、跨程序續傳、手機 Bridge CCAPI 入口或新 Serein 協定。沒有新增相機／手機／Windows 實體裝置證據。
 
 Release Assessment：比較來源為上述 accepted main（宣告版本 0.13.0）；2026-10-07 20:48 UTC 核對 GitHub，最新公開版本仍為 [v0.12.0 Development Preview](https://github.com/js051/open-eos-control/releases/tag/v0.12.0)。v0.13.0 尚未發布，其固定候選 `fb4f555` 不納入本批。此批修復既有 PC 拍後查找與失敗恢復，建議 impact 為 `patch`，不修改版本或發行通道。保存歸屬已有修復及本地控制，但完整 browser／窄版旅程與 exact-head CI 仍未閉合，不能據 module 綠燈發布或標成 PR ready。

@@ -300,6 +300,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
         "mediaRecentCount",
         "mediaRecentMoreCount",
         "previousMedia",
+        "previouslyVisibleMedia",
         "openPreviousMedia",
         "latestMediaSearching",
         "latestMediaNotReady",
