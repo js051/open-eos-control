@@ -114,6 +114,14 @@ async function run() {
     const page = await context.newPage();
     const pageErrors = [];
     const boundedMediaRequests = [];
+    const shutterRequests = [];
+    let withdrawShutterAF = false;
+    await page.route(/\/capabilities$/, async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      if (withdrawShutterAF) delete json.shutterAutofocusSupported;
+      await route.fulfill({ response, json });
+    });
     let retryLatestMedia = false;
     let retryLatestMediaRequests = 0;
     page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -124,6 +132,9 @@ async function run() {
       const url = new URL(request.url());
       if (request.method() === "GET" && url.pathname.endsWith("/media")) {
         boundedMediaRequests.push(url.searchParams.get("limit"));
+      }
+      if (request.method() === "POST" && url.pathname.endsWith("/capture/still")) {
+        shutterRequests.push(request.postDataJSON());
       }
     });
     await page.route(/\/media\?limit=8$/, async (route) => {
@@ -246,7 +257,39 @@ async function run() {
       "balanced Canon half-press and release",
     );
 
+    await page.waitForSelector("#shutter-af-control:not([hidden])");
+    assert.equal(await page.isChecked("#shutter-af-toggle"), true);
+    const beforeAFChoice = await readSimulatorState(simulatorOrigin);
+    await page.uncheck("#shutter-af-toggle");
+    const afterAFChoice = await readSimulatorState(simulatorOrigin);
+    assert.equal(afterAFChoice.capture_count, beforeAFChoice.capture_count, "AF choice must not trigger a shutter");
+    assert.equal(afterAFChoice.canonical.af_start_count, beforeAFChoice.canonical.af_start_count);
+    assert.match(await page.locator("#shutter-af-description").innerText(), /does not ask.*autofocus/i);
+    await page.locator("#control-view .language-select").selectOption("zh-TW");
+    assert.match(await page.locator("#shutter-af-description").innerText(), /不要求自動對焦/);
+    assert.equal(await page.isChecked("#shutter-af-toggle"), false);
+    await page.locator("#control-view .language-select").selectOption("en");
+    withdrawShutterAF = true;
+    await page.click("#refresh-button");
+    await page.waitForFunction(() => document.querySelector("#operation-state")?.textContent === "Ready");
+    assert.equal(await page.isChecked("#shutter-af-toggle"), false, "Lost capability cannot silently change intent to AF on");
+    assert.equal(await page.isDisabled("#shutter-button"), true);
+    withdrawShutterAF = false;
+    await page.click("#refresh-button");
+    await page.waitForFunction(() => !document.querySelector("#shutter-button")?.disabled);
+    let releaseCapture;
+    const captureGate = new Promise((resolve) => { releaseCapture = resolve; });
+    await page.route(/\/capture\/still$/, async (route) => { await captureGate; await route.continue(); });
     await page.click("#shutter-button");
+    assert.equal(await page.isDisabled("#shutter-af-toggle"), true);
+    await page.evaluate(() => {
+      const toggle = document.querySelector("#shutter-af-toggle");
+      toggle.checked = true;
+      toggle.dispatchEvent(new Event("change", { bubbles: true }));
+      document.querySelector("#shutter-button").click();
+    });
+    assert.equal(await page.isChecked("#shutter-af-toggle"), false);
+    releaseCapture();
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.capture_count === 1 && state.media_ids.includes("SIM_0003.JPG"),
@@ -256,10 +299,17 @@ async function run() {
       const button = document.querySelector("#latest-media-button");
       return button?.querySelector("#latest-media-label")?.textContent === "SIM_0003.JPG" && !button.disabled;
     });
+    assert.deepEqual((await readSimulatorState(simulatorOrigin)).canonical.shutter_af_requests, [false]);
+    assert.deepEqual(shutterRequests, [{ af: false }]);
+    await page.unroute(/\/capture\/still$/);
     await page.click("#latest-media-button");
     await page.waitForFunction(() => {
       const dialog = document.querySelector("#media-preview-dialog");
       return dialog?.open && document.querySelector("#media-preview-title")?.textContent === "SIM_0003.JPG";
+    });
+    await page.waitForFunction(() => {
+      const image = document.querySelector("#media-preview-image");
+      return image && !image.hidden && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0;
     });
     await page.click("#media-preview-close");
 
@@ -269,6 +319,7 @@ async function run() {
       contentType: "text/plain",
       body: "not-an-image",
     }));
+    await page.check("#shutter-af-toggle");
     await page.click("#shutter-button");
     await waitForSimulatorState(
       simulatorOrigin,
@@ -279,6 +330,7 @@ async function run() {
       const button = document.querySelector("#latest-media-button");
       return button?.querySelector("#latest-media-label")?.textContent === "SIM_0004.JPG" && !button.disabled;
     });
+    assert.deepEqual((await readSimulatorState(simulatorOrigin)).canonical.shutter_af_requests, [false, true]);
     assert.ok(retryLatestMediaRequests >= 2, "capture review should retry until the camera reports a new item");
     assert.equal(await page.locator("#operation-state").innerText(), "Photo captured");
     await page.unroute(/\/thumbnail$/);

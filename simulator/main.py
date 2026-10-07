@@ -162,6 +162,7 @@ def initial_state() -> dict[str, object]:
         "sensor_cleaning_auto_power_off": False,
         "temperature_status": "normal",
         "capture_count": 0,
+        "canonical_shutter_af_requests": [],
         "clock_sync_count": 0,
         "camera_datetime": None,
         "mode": "movie",
@@ -485,6 +486,7 @@ async def get_test_state() -> dict[str, object]:
         "media_ids": [item["id"] for item in state["media"]],
         "media_metadata_update_count": state["media_metadata_update_count"],
         "canonical": {
+            "shutter_af_requests": list(state["canonical_shutter_af_requests"]),
             "af_start_count": state["canonical_af_start_count"],
             "af_stop_count": state["canonical_af_stop_count"],
             "focus_position": state["canonical_focus_position"],
@@ -2254,8 +2256,9 @@ async def canon_set_file_naming(category: str, name: str, payload: dict[str, obj
 @app.post("/ccapi/ver100/shooting/control/shutterbutton", status_code=204)
 async def canon_capture_still(payload: dict[str, object]) -> Response:
     require_temperature_allows("release")
-    if payload != {"af": True}:
+    if set(payload) != {"af"} or type(payload["af"]) is not bool:
         raise HTTPException(status_code=422, detail="Unsupported shutter payload")
+    state["canonical_shutter_af_requests"].append(payload["af"])
     state["capture_count"] += 1
     name = f"SIM_{state['capture_count'] + 2:04d}.JPG"
     state["media"].insert(

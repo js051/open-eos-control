@@ -18,6 +18,18 @@ from main import (
 client = TestClient(app)
 
 
+def test_canonical_shutter_accepts_only_strict_af_booleans_and_records_each_request():
+    endpoint = "/ccapi/ver100/shooting/control/shutterbutton"
+    for af in [False, True]:
+        assert client.post(endpoint, json={"af": af}).status_code == 204
+    for invalid in [0, 1, "false", "true", None, [], {}]:
+        assert client.post(endpoint, json={"af": invalid}).status_code == 422
+    assert client.post(endpoint, json={}).status_code == 422
+    result = client.get("/ccapi/test/state").json()
+    assert result["capture_count"] == 2
+    assert result["canonical"]["shutter_af_requests"] == [False, True]
+
+
 def setup_function() -> None:
     state.clear()
     state.update(initial_state())

@@ -4,7 +4,7 @@ import re
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from .media_folders import MAX_FOLDER_ID_LENGTH, MAX_FOLDER_LABEL_LENGTH, optional_folder_value
 
@@ -402,6 +402,11 @@ class CameraCapabilities(ApiModel):
     settings: list[CameraSetting] = Field(default_factory=list)
     file_naming: FileNamingState | None = None
     evidence: CapabilityEvidence = Field(default_factory=CapabilityEvidence)
+    shutter_autofocus_supported: bool = False
+
+
+class StillCaptureRequest(ApiModel):
+    af: StrictBool = True
 
 
 class SettingUpdate(ApiModel):

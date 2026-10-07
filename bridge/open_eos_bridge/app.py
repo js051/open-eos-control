@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from . import __version__
-from .ccapi import CcapiEngine
+from .ccapi import CcapiEngine, CcapiSession
 from .edsdk import EdsdkEngine
 from .engine import CameraEngine, NetworkCameraEngine
 from .engine_registry import LocalEngineRegistry
@@ -68,6 +68,7 @@ from .models import (
     SessionCreated,
     SessionCreateRequest,
     SettingUpdate,
+    StillCaptureRequest,
     TapFocusRequest,
 )
 from .sessions import SessionManager
@@ -550,8 +551,17 @@ def create_app(
         return Response(status_code=204)
 
     @router.post("/session/{session_id}/capture/still", response_model=CameraStatus)
-    def capture_still(session_id: str) -> CameraStatus:
-        return manager.get(session_id).capture_still()
+    def capture_still(session_id: str, payload: StillCaptureRequest | None = None) -> CameraStatus:
+        session = manager.get(session_id)
+        if payload is None or payload.af:
+            # Preserve the existing provider call contract, including external EDSDK providers.
+            return session.capture_still()
+        if not isinstance(session, CcapiSession):
+            raise unsupported(
+                CameraFeature.STILL_CAPTURE.value, session.engine_name,
+                "This engine does not support a shutter request without autofocus.",
+            )
+        return session.capture_still(autofocus=False)
 
     @router.post("/session/{session_id}/bulb/start", response_model=CameraStatus)
     def start_bulb_exposure(session_id: str) -> CameraStatus:

@@ -114,6 +114,10 @@
       ready: "Ready",
       busy: "Working",
       autofocus: "AF-ON",
+      shutterAF: "Shutter AF",
+      shutterAFOn: "Shutter request asks for autofocus.",
+      shutterAFOff: "Shutter request does not ask for autofocus. Camera or lens settings may still focus.",
+      shutterAFUnavailable: "This session cannot request AF off. Enable shutter AF or reconnect.",
       halfPress: "Half-press",
       liveView: "Live View",
       manualFocus: "Manual focus",
@@ -539,6 +543,10 @@
       ready: "就緒",
       busy: "處理中",
       autofocus: "AF-ON",
+      shutterAF: "快門自動對焦",
+      shutterAFOn: "拍攝請求會要求自動對焦。",
+      shutterAFOff: "拍攝請求不要求自動對焦；相機或鏡頭設定仍可能使其對焦。",
+      shutterAFUnavailable: "此連線不支援不要求自動對焦的拍攝。請開啟快門自動對焦或重新連線。",
       halfPress: "半按快門",
       liveView: "即時預覽",
       manualFocus: "手動對焦",
@@ -1024,6 +1032,7 @@
     info: null,
     status: null,
     capabilities: null,
+    shutterAutofocus: true,
     fileNamingDrafts: {},
     settingDrafts: {},
     operatorConfirmedFeatures: new Set(),
@@ -1199,6 +1208,9 @@
     videoModeButton: byId("video-mode-button"),
     shutterButton: byId("shutter-button"),
     shutterLabel: byId("shutter-label"),
+    shutterAFControl: byId("shutter-af-control"),
+    shutterAFToggle: byId("shutter-af-toggle"),
+    shutterAFDescription: byId("shutter-af-description"),
     latestMediaButton: byId("latest-media-button"),
     latestMediaThumbnail: byId("latest-media-thumbnail"),
     latestMediaLabel: byId("latest-media-label"),
@@ -1594,6 +1606,7 @@
         method: "POST",
         json: sessionPayload,
       });
+      state.shutterAutofocus = true;
       const sessionId = encodeURIComponent(state.session.id);
       [state.info, state.status, state.capabilities] = await Promise.all([
         api(`/v1/session/${sessionId}/info`),
@@ -1726,6 +1739,7 @@
     state.info = null;
     state.status = null;
     state.capabilities = null;
+    state.shutterAutofocus = true;
     state.fileNamingDrafts = {};
     state.settingDrafts = {};
     state.operatorConfirmedFeatures.clear();
@@ -2725,6 +2739,16 @@
     renderAvailability();
   }
 
+  function shutterAFSupported() {
+    return state.capabilities?.shutterAutofocusSupported === true && featureSupported(FEATURES.STILL_CAPTURE);
+  }
+
+  function canChangeShutterAF() {
+    return Boolean(state.session) && state.captureMode === "photo" && !isBulbMode() &&
+      !cameraInteractionBusy() && !bulbControlLocked() && !state.status?.recording &&
+      (shutterAFSupported() || !state.shutterAutofocus);
+  }
+
   async function operateShutter() {
     if (!state.session || cameraInteractionBusy()) return;
     const sessionId = state.session.id;
@@ -2738,6 +2762,11 @@
       : isPhoto ? featureSupported(FEATURES.STILL_CAPTURE)
       : featureSupported(FEATURES.VIDEO_RECORDING));
     if (!supported) return;
+    const autofocus = state.shutterAutofocus;
+    if (isPhoto && !bulb && !autofocus && !shutterAFSupported()) {
+      setOperationState(t("shutterAFUnavailable"), true);
+      return;
+    }
     beginCameraInteraction();
     state.lastError = null;
     setOperationState(t("busy"));
@@ -2762,9 +2791,11 @@
         showToast(result);
       } else if (isPhoto) {
         const previousLatestId = state.latestMediaItem?.id || null;
-        state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/capture/still`, {
-          method: "POST",
+        const captured = await api(`/v1/session/${encodeURIComponent(sessionId)}/capture/still`, {
+          method: "POST", json: { af: autofocus },
         });
+        if (state.session?.id !== sessionId) return;
+        state.status = captured;
         flashCapture();
         setOperationState(t("captureComplete"));
         showToast(t("captureComplete"));
@@ -4315,7 +4346,15 @@
     const temperatureAllowed = bulbActiveStop || recording || (
       state.captureMode === "photo" ? temperatureAllows("release") : temperatureAllows("movie")
     );
-    ui.shutterButton.disabled = interactionBusy || !shutterSupported || !temperatureAllowed;
+    const shutterAFAllowed = bulbActiveStop || state.captureMode !== "photo" || isBulbMode() ||
+      state.shutterAutofocus || shutterAFSupported();
+    ui.shutterButton.disabled = interactionBusy || !shutterSupported || !temperatureAllowed || !shutterAFAllowed;
+    ui.shutterAFControl.hidden = !connected || state.captureMode !== "photo" || isBulbMode() || bulbActive ||
+      (!shutterAFSupported() && state.shutterAutofocus);
+    ui.shutterAFToggle.checked = state.shutterAutofocus;
+    ui.shutterAFToggle.disabled = !canChangeShutterAF();
+    ui.shutterAFDescription.textContent = t(!shutterAFAllowed ? "shutterAFUnavailable" :
+      state.shutterAutofocus ? "shutterAFOn" : "shutterAFOff");
     ui.shutterButton.title = shutterSupported && temperatureAllowed ? ui.shutterLabel.textContent : t("unsupported");
     const autofocusSupported = featureSupported(FEATURES.AUTOFOCUS);
     ui.autofocusButton.hidden = !autofocusSupported;
@@ -5732,6 +5771,12 @@
     });
     ui.photoModeButton.addEventListener("click", () => selectCaptureMode("photo"));
     ui.videoModeButton.addEventListener("click", () => selectCaptureMode("video"));
+    ui.shutterAFToggle.addEventListener("change", () => {
+      if (canChangeShutterAF() && (ui.shutterAFToggle.checked || shutterAFSupported())) {
+        state.shutterAutofocus = ui.shutterAFToggle.checked;
+      }
+      renderAvailability();
+    });
     ui.shutterButton.addEventListener("click", operateShutter);
     ui.latestMediaButton.addEventListener("click", openLatestMedia);
     ui.autofocusButton.addEventListener("click", autofocus);
