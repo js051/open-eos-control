@@ -110,11 +110,18 @@ fun CameraControlScreen(
     state: CameraUiState,
     actions: CameraActions,
 ) {
-    Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+    val showImportStatus = state.showForegroundJpegImportStatus
+    // The original control surface handles its own cutout/system-bar insets. Reserve safe
+    // space at this outer boundary only when the additional import status row is present.
+    val containerModifier = Modifier.fillMaxSize().then(
+        if (showImportStatus) Modifier.windowInsetsPadding(WindowInsets.safeDrawing) else Modifier,
+    )
+    Column(containerModifier) {
         Box(
             Modifier
                 .fillMaxWidth().weight(1f)
                 .testTag("camera-control-root")
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .pointerInput(state.hudVisible) {
                     var dragDistance = 0f
                     detectVerticalDragGestures(
@@ -134,7 +141,7 @@ fun CameraControlScreen(
         ) {
             StableCameraControls(state, actions)
         }
-        if (state.showForegroundJpegImportStatus) {
+        if (showImportStatus) {
             ForegroundJpegImportEntry(state, actions)
         }
     }
