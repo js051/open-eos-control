@@ -43,6 +43,7 @@ final class CCAPIShutterRecoveryTests: XCTestCase {
         let before = await transport.requests()
 
         await expectFailure { try await client.captureStill() }
+        await expectFailure { try await client.captureStill(autofocus: false) }
         await expectFailure { try await client.setSetting(key: "iso", value: "800") }
         await expectFailure { try await client.startLiveView() }
         await expectFailure { try await client.startBulbExposure() }

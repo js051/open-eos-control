@@ -572,6 +572,68 @@ final class OpenEOSControlUITests: XCTestCase {
     }
 
     @MainActor
+    func testCanonicalShutterAFChoiceReachesCameraAndNewJpegPreviewInBothLanguages() async throws {
+        guard await waitForSimulatorHealth() else {
+            #if OEC_REQUIRE_SIMULATOR_E2E
+            XCTFail("The required synthetic camera is not reachable")
+            return
+            #else
+            throw XCTSkip("Start the synthetic camera for the shutter AF UI journey")
+            #endif
+        }
+        for (language, apple, locale, explanation) in [
+            ("english", "en", "en_US", "does not ask for autofocus"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "不要求自動對焦"),
+        ] {
+            _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
+            _ = try await simulatorRequest(path: "/ccapi/ver100/shooting/settings/shootingmode", method: "PUT",
+                                           jsonBody: ["value": "Manual"])
+            let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
+                             environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString])
+            app.buttons["preset-http-button"].tap()
+            XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
+            app.buttons["connect-button"].tap()
+            let toggle = app.switches["shutter-autofocus-toggle"]
+            XCTAssertTrue(waitForInteraction(toggle, timeout: 30))
+            let coordinateRoundingTolerance = 0.000_001
+            XCTAssertGreaterThanOrEqual(toggle.frame.height + coordinateRoundingTolerance, 44)
+            XCTAssertEqual(toggle.value as? String, "1")
+            toggle.tap()
+            XCTAssertEqual(toggle.value as? String, "0")
+            XCTAssertTrue(app.staticTexts["shutter-autofocus-description"].label.contains(explanation))
+            let unchanged = try await simulatorRequest(path: "/ccapi/test/state")
+            XCTAssertEqual((unchanged["capture_count"] as? NSNumber)?.intValue, 0)
+            XCTAssertEqual((unchanged["canonical"] as? [String: Any])?["shutter_af_requests"] as? [Bool], [])
+            let shutter = app.buttons["shutter-button"]
+            XCTAssertTrue(waitForInteraction(shutter, timeout: 8))
+            shutter.tap()
+            try await waitForSimulatorState { state in
+                (state["canonical"] as? [String: Any])?["shutter_af_requests"] as? [Bool] == [false]
+            }
+            let latest = app.buttons["latest-media-button"]
+            XCTAssertTrue(waitForLabel(latest, containing: "SIM_0003.JPG", timeout: 20))
+            XCTAssertTrue(waitForInteraction(latest, timeout: 8))
+            latest.tap()
+            XCTAssertTrue(app.buttons["close-media-preview"].waitForExistence(timeout: 15))
+            XCTAssertTrue(app.images["media-preview-image"].waitForExistence(timeout: 15))
+            addScreenshot(name: "shutter-af-new-jpeg-\(language)")
+            app.buttons["close-media-preview"].tap()
+            app.buttons["media-back-button"].tap()
+            openMoreActions(in: app)
+            guard tapCameraAction(app.buttons["disconnect-menu-button"], in: app) else { return }
+            XCTAssertTrue(waitForConnectionScreen(in: app, timeout: 15))
+            XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
+            app.buttons["connect-button"].tap()
+            XCTAssertTrue(waitForInteraction(toggle, timeout: 30))
+            XCTAssertEqual(toggle.value as? String, "1")
+            openMoreActions(in: app)
+            guard tapCameraAction(app.buttons["disconnect-menu-button"], in: app) else { return }
+            XCTAssertTrue(waitForConnectionScreen(in: app, timeout: 15))
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testCanonicalCCAPIEventsRefreshTheProductionUI() async throws {
         let available = await waitForSimulatorHealth()
         guard available else {

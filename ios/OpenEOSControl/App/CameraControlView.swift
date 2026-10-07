@@ -381,6 +381,26 @@ private struct CaptureBar: View {
             .frame(minHeight: compact ? 72 : 84)
             .padding(.horizontal, compact ? 0 : 18)
 
+            if camera.showShutterAutofocus {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle(isOn: Binding(get: { camera.shutterAutofocus }, set: camera.setShutterAutofocus)) {
+                        Text("shutter_autofocus")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .frame(minHeight: 44)
+                    .disabled(!camera.canChangeShutterAutofocus)
+                    .accessibilityIdentifier("shutter-autofocus-toggle")
+                    Text(LocalizedStringKey(!camera.shutterAutofocusAllowed ? "shutter_af_unavailable" :
+                        camera.shutterAutofocus ? "shutter_af_on_description" : "shutter_af_off_description"))
+                        .font(.caption2)
+                        .foregroundStyle(Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("shutter-autofocus-description")
+                }
+                .padding(.horizontal, compact ? 8 : 18)
+                .padding(.bottom, 6)
+            }
+
             if !captureSupported {
                 Text(LocalizedStringKey(camera.bulbMode ? "bulb_not_supported" : camera.captureMode == .photo ? "capture_not_supported" : "recording_not_supported"))
                     .font(.caption)
@@ -446,6 +466,7 @@ private struct CaptureBar: View {
     private var captureSupported: Bool {
         if camera.shutterReleaseRequired { return true }
         if camera.captureMode == .video && camera.recording { return true }
+        if camera.captureMode == .photo && !camera.bulbMode && !camera.shutterAutofocusAllowed { return false }
         return camera.supports(
             camera.bulbMode ? .bulbExposure : camera.captureMode == .photo ? .stillCapture : .videoRecording
         )
@@ -510,7 +531,9 @@ private struct CaptureBar: View {
                                 ? camera.shutterReleaseUnconfirmed ? "release_shutter_now" : "stop_bulb_exposure"
                                 : camera.bulbMode
                                 ? "start_bulb_exposure"
-                                : camera.captureMode == .photo ? "capture_photo" : camera.recording ? "stop_recording" : "start_recording"
+                                : camera.captureMode == .photo
+                                    ? camera.shutterAutofocus ? "capture_photo" : "capture_without_autofocus"
+                                    : camera.recording ? "stop_recording" : "start_recording"
                         )
                     )
                 )

@@ -77,6 +77,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var frameContentType: String?
     @Published private(set) var frameSourceURL: URL?
     @Published private(set) var lastFrameAt: Date?
+    @Published private(set) var shutterAutofocus = true
     @Published private(set) var shutterFlash = false
     @Published private(set) var bulbStartedAt: Date?
     @Published private(set) var shutterReleaseState = CameraShutterReleaseState.idle
@@ -149,6 +150,20 @@ final class CameraAppState: ObservableObject {
         return item.previewAvailable && supports(.mediaPreview)
     }
     var recording: Bool { snapshot?.status.recording == true }
+    var shutterAutofocusAllowed: Bool { shutterAutofocus || capabilities?.shutterAutofocusSupported == true }
+    var showShutterAutofocus: Bool {
+        connected && !isPreview && captureMode == .photo && !bulbMode && supports(.stillCapture)
+            && (capabilities?.shutterAutofocusSupported == true || !shutterAutofocus)
+    }
+    var canChangeShutterAutofocus: Bool {
+        showShutterAutofocus && busyOperations.isEmpty && !recording && !shutterReleaseRequired
+    }
+
+    func setShutterAutofocus(_ enabled: Bool) {
+        guard canChangeShutterAutofocus, enabled || capabilities?.shutterAutofocusSupported == true else { return }
+        shutterAutofocus = enabled
+    }
+
     var bulbExposureActive: Bool { shutterReleaseState.bulbExposureActive == true }
     var shutterReleaseRequired: Bool { shutterReleaseState.releaseRequired }
     var shutterReleaseUnconfirmed: Bool { shutterReleaseState.releaseUnconfirmed }
@@ -317,6 +332,7 @@ final class CameraAppState: ObservableObject {
         await disconnectTask?.value
         guard generation == sessionGeneration, !Task.isCancelled else { return }
         cancelLiveViewFPSUpdate()
+        shutterAutofocus = true
         operatorConfirmedFeatures.removeAll()
         do {
             let newSession: CameraSession
@@ -517,6 +533,7 @@ final class CameraAppState: ObservableObject {
         rtpController.setAudioEnabled(false)
         focusMarker = nil
         bulbStartedAt = nil
+        shutterAutofocus = true
         shutterFlash = false
         lastClockSyncAt = nil
         lastCreatedDirectoryName = nil
@@ -695,8 +712,16 @@ final class CameraAppState: ObservableObject {
     }
 
     func captureStill() async {
-        guard supports(.stillCapture), stillCaptureTemperatureAllowed, begin(.capture) else { return }
-        defer { end(.capture) }
+        guard captureMode == .photo, !bulbMode, !recording,
+              supports(.stillCapture), stillCaptureTemperatureAllowed else { return }
+        guard shutterAutofocusAllowed else {
+            lastError = NSLocalizedString("shutter_af_unavailable", comment: "")
+            return
+        }
+        guard begin(.capture) else { return }
+        let generation = sessionGeneration
+        let autofocus = shutterAutofocus
+        defer { end(.capture, generation: generation) }
         if isPreview {
             showShutterFlash()
             return
@@ -704,11 +729,14 @@ final class CameraAppState: ObservableObject {
         guard let session else { return }
         let previousLatestID = latestMediaItem?.id ?? selectLatestMediaItem(mediaItems)?.id
         do {
-            updateStatus(try await session.captureStill())
+            let captured = try await session.captureStill(autofocus: autofocus)
+            guard generation == sessionGeneration else { return }
+            updateStatus(captured)
             showShutterFlash()
             lastError = nil
             startLatestMediaRefresh(session: session, previousID: previousLatestID, waitForNewID: true)
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
         }
     }
