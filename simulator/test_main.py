@@ -438,6 +438,7 @@ def test_canonical_ccapi_discovery_settings_and_live_view_contract() -> None:
     assert b"\xff\xd8" in detailed.content and b"\xff\xd9" in detailed.content
     assert stopped.status_code == 204
     assert test_state["canonical"] == {
+        "shutter_af_requests": [],
         "af_start_count": 0,
         "af_stop_count": 0,
         "focus_position": None,

@@ -83,7 +83,10 @@ def test_false_is_rejected_for_gphoto_without_camera_calls_and_legacy_default_re
         assert client.get(f"/v1/session/{session}/capabilities").json().get("shutterAutofocusSupported", False) is False
         before = list(runner.commands)
         response = client.post(f"/v1/session/{session}/capture/still", json={"af": False})
-        assert response.status_code == 501
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "UNSUPPORTED_FEATURE"
+        assert response.json()["error"]["feature"] == "STILL_CAPTURE"
+        assert response.json()["error"]["engine"] == "libgphoto2"
         assert runner.commands == before
         assert client.post(f"/v1/session/{session}/capture/still").status_code == 200
 
