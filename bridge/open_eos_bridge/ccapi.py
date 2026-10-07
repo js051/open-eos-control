@@ -1227,6 +1227,7 @@ class CcapiSession:
             model = self.info().model
             live_view_available = CameraFeature.LIVE_VIEW in supported or live_view_magnification is not None
             return CameraCapabilities(
+                shutter_autofocus_supported=self.shutter_autofocus_supported,
                 profile=camera_profile(model),
                 supported=sorted(supported, key=str),
                 planned=sorted(candidates - supported, key=str),
@@ -1691,9 +1692,22 @@ class CcapiSession:
             self._observed.add(CameraFeature.CAMERA_CLOCK_SYNC)
             return self.status()
 
-    def capture_still(self) -> CameraStatus:
+    @property
+    def shutter_autofocus_supported(self) -> bool:
+        return bool(
+            self._operation("POST", "/shooting/control/shutterbutton")
+            or self._operation("PUT", "/shooting/control/shutterbutton/manual")
+            or self._operation("POST", "/shooting/control/shutterbutton/manual")
+        )
+
+    def capture_still(self, autofocus: bool = True) -> CameraStatus:
         with self._lock:
             self._require_shutter_release_confirmed()
+            if type(autofocus) is not bool or (not autofocus and not self.shutter_autofocus_supported):
+                raise unsupported(
+                    CameraFeature.STILL_CAPTURE.value, self.engine_name,
+                    "The camera did not advertise a shutter operation that accepts an autofocus choice.",
+                )
             self._refresh_temperature_status()
             self._require_temperature_allows_still_capture()
             direct = self._operation("POST", "/shooting/control/shutterbutton")
@@ -1701,11 +1715,11 @@ class CcapiSession:
                 "POST", "/shooting/control/shutterbutton/manual"
             )
             if direct:
-                self._command_ok(direct, {"af": True})
+                self._command_ok(direct, {"af": autofocus})
             elif manual:
                 self._guaranteed_release(
                     manual,
-                    {"af": True, "action": "full_press"},
+                    {"af": autofocus, "action": "full_press"},
                     {"af": False, "action": "release"},
                 )
             else:

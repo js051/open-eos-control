@@ -565,6 +565,7 @@ public struct CameraCapabilityEvidence: Equatable, Sendable {
 }
 
 public struct CameraCapabilities: Equatable, Sendable {
+    public let shutterAutofocusSupported: Bool
     public let settings: [CameraSetting]
     public let fileNaming: CameraFileNaming?
     public let matrix: CapabilityMatrix
@@ -578,7 +579,8 @@ public struct CameraCapabilities: Equatable, Sendable {
         matrix: CapabilityMatrix,
         liveView: LiveViewCapabilities,
         profile: CameraProfile,
-        evidence: CameraCapabilityEvidence = CameraCapabilityEvidence()
+        evidence: CameraCapabilityEvidence = CameraCapabilityEvidence(),
+        shutterAutofocusSupported: Bool = false
     ) {
         self.settings = settings
         self.fileNaming = fileNaming
@@ -586,6 +588,7 @@ public struct CameraCapabilities: Equatable, Sendable {
         self.liveView = liveView
         self.profile = profile
         self.evidence = evidence
+        self.shutterAutofocusSupported = shutterAutofocusSupported
     }
 
     public func setting(_ key: String) -> CameraSetting? {
@@ -609,7 +612,8 @@ public struct CameraCapabilities: Equatable, Sendable {
                 observedFeatures: observed,
                 discoveryTrace: evidence.discoveryTrace,
                 truncated: evidence.truncated
-            )
+            ),
+            shutterAutofocusSupported: shutterAutofocusSupported
         )
     }
 }

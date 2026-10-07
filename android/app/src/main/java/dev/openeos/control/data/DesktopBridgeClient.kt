@@ -94,6 +94,7 @@ class DesktopBridgeClient(
     @Volatile private var shutterSession: BridgeShutterReleaseSession? = null
     private var sessionCameraModel: String? = null
     private var eventPollingSupported = false
+    private var shutterAutofocusSupported = false
     private var liveViewMagnifications: List<LiveViewMagnification> = emptyList()
     private val observedFeatures = mutableSetOf(CameraFeature.DESKTOP_BRIDGE)
 
@@ -109,6 +110,7 @@ class DesktopBridgeClient(
         observedFeatures.clear()
         observedFeatures.add(CameraFeature.DESKTOP_BRIDGE)
         eventPollingSupported = false
+        shutterAutofocusSupported = false
         liveViewMagnifications = emptyList()
         sessionCameraModel = null
         validateService()
@@ -138,6 +140,7 @@ class DesktopBridgeClient(
                     sessionId = null
                     sessionCameraModel = null
                     eventPollingSupported = false
+                    shutterAutofocusSupported = false
                     liveViewMagnifications = emptyList()
                 }
             }
@@ -196,7 +199,9 @@ class DesktopBridgeClient(
     }
 
     suspend fun capabilities(): CameraCapabilities {
+        val session = requireShutterSession()
         val body = getJson(sessionEndpoint("capabilities"))
+        requireCurrentSession(session)
         val settings = body.optJSONArray("settings").objects().mapNotNull { setting ->
             val key = setting.optString("key").trim()
             val values = setting.optJSONArray("values").strings()
@@ -258,6 +263,8 @@ class DesktopBridgeClient(
             advertisedSupported - CameraFeature.LIVE_VIEW_MAGNIFICATION
         }
         eventPollingSupported = CameraFeature.EVENT_POLLING in supported
+        shutterAutofocusSupported = (body.opt("shutterAutofocusSupported") as? Boolean) == true &&
+            CameraFeature.STILL_CAPTURE in supported
         val planned = (body.optJSONArray("planned").cameraFeatures() - supported) +
             if (CameraFeature.LIVE_VIEW_MAGNIFICATION in advertisedSupported && !validMagnificationCapability) {
                 setOf(CameraFeature.LIVE_VIEW_MAGNIFICATION)
@@ -323,6 +330,7 @@ class DesktopBridgeClient(
             }
         observedFeatures.addAll(evidenceObservedFeatures)
         return CameraCapabilities(
+            shutterAutofocusSupported = shutterAutofocusSupported,
             iso = settingsByKey["iso"]?.values.orEmpty(),
             shutter = settingsByKey["shutter"]?.values.orEmpty(),
             aperture = settingsByKey["aperture"]?.values.orEmpty(),
@@ -460,9 +468,14 @@ class DesktopBridgeClient(
         observedFeatures.add(CameraFeature.CAMERA_SLEEP)
     }
 
-    suspend fun captureStill(): CameraStatus = parseStatus(
-        postJson(sessionEndpoint("capture", "still"), JSONObject())
-    ).also { observedFeatures.add(CameraFeature.STILL_CAPTURE) }
+    suspend fun captureStill(autofocus: Boolean = true): CameraStatus {
+        check(autofocus || shutterAutofocusSupported) {
+            "This bridge session does not advertise capture without autofocus."
+        }
+        return parseStatus(
+            postJson(sessionEndpoint("capture", "still"), JSONObject().put("af", autofocus))
+        ).also { observedFeatures.add(CameraFeature.STILL_CAPTURE) }
+    }
 
     suspend fun startBulbExposure(): CameraStatus {
         val session = requireShutterSession()

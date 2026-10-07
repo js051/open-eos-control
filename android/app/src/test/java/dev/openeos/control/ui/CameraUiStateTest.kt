@@ -41,6 +41,11 @@ class CameraUiStateTest {
             assertFalse(ready.copy(autofocusHoldState = hold).canChangeShutterAutofocus())
         }
         assertTrue(ready.copy(shutterAutofocus = false).withOfflinePreview().shutterAutofocus)
+        val withdrawn = ready.copy(shutterAutofocus = false,
+            capabilities = ready.capabilities.copy(shutterAutofocusSupported = false))
+        assertFalse(withdrawn.shutterAutofocus)
+        assertTrue(withdrawn.showShutterAutofocus())
+        assertTrue(withdrawn.canChangeShutterAutofocus())
     }
 
     @Test

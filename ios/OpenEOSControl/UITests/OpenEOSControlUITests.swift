@@ -406,7 +406,9 @@ final class OpenEOSControlUITests: XCTestCase {
 
     @MainActor
     func testDirectCCAPIControlsReachTheRunningCameraSimulator() async throws {
-        let available = await waitForSimulatorHealth()
+        // Swift errors unwind this async test before XCTest begins the next case.
+        continueAfterFailure = true
+        let available = try await waitForSimulatorHealth()
         guard available else {
             #if OEC_REQUIRE_SIMULATOR_E2E
             XCTFail("The required fake camera is not reachable at \(simulatorURL.absoluteString)")
@@ -418,86 +420,87 @@ final class OpenEOSControlUITests: XCTestCase {
         _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
 
         let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
+        defer { app.terminate() }
         let simulatorPreset = app.buttons["preset-simulator-button"]
-        XCTAssertTrue(simulatorPreset.waitForExistence(timeout: 8))
-        simulatorPreset.tap()
-        app.buttons["connect-button"].tap()
+        _ = try XCTUnwrap((simulatorPreset.waitForExistence(timeout: 8)) ? true : nil)
+        try tapForAsyncTest(simulatorPreset)
+        try tapForAsyncTest(app.buttons["connect-button"])
 
-        XCTAssertTrue(app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30))
+        _ = try XCTUnwrap((app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30)) ? true : nil)
         let liveView = app.images["live-view-decoded-frame"]
-        XCTAssertTrue(liveView.waitForExistence(timeout: 30))
+        _ = try XCTUnwrap((liveView.waitForExistence(timeout: 30)) ? true : nil)
         let liveViewInteraction = app.descendants(matching: .any)["live-view-interaction-surface"]
-        XCTAssertTrue(liveViewInteraction.waitForExistence(timeout: 8))
+        _ = try XCTUnwrap((liveViewInteraction.waitForExistence(timeout: 8)) ? true : nil)
 
-        app.buttons["exposure-iso"].tap()
+        try tapForAsyncTest(app.buttons["exposure-iso"])
         let iso1600 = app.buttons["setting-value-1600"]
-        XCTAssertTrue(iso1600.waitForExistence(timeout: 8))
-        iso1600.tap()
+        _ = try XCTUnwrap((iso1600.waitForExistence(timeout: 8)) ? true : nil)
+        try tapForAsyncTest(iso1600)
         try await waitForSimulatorState { state in
             (state["exposure"] as? [String: Any])?["iso"] as? String == "1600"
         }
-        app.buttons["Done"].tap()
+        try tapForAsyncTest(app.buttons["Done"])
 
-        app.buttons["shutter-button"].tap()
+        try tapForAsyncTest(app.buttons["shutter-button"])
         try await waitForSimulatorState { state in
             (state["capture_count"] as? NSNumber)?.intValue == 1
         }
 
         let autofocus = app.buttons["autofocus-button"]
-        XCTAssertTrue(waitForInteraction(autofocus, timeout: 8))
-        autofocus.tap()
+        _ = try XCTUnwrap((waitForInteraction(autofocus, timeout: 8)) ? true : nil)
+        try tapForAsyncTest(autofocus)
         try await waitForSimulatorState { state in
             (state["half_press_count"] as? NSNumber)?.intValue == 1 &&
                 (state["shutter_release_count"] as? NSNumber)?.intValue == 1
         }
 
-        openMoreActions(in: app)
+        try openMoreActionsForAsyncTest(in: app)
         let halfPress = app.buttons["half-press-button"]
-        XCTAssertTrue(halfPress.waitForExistence(timeout: 8))
-        halfPress.tap()
+        _ = try XCTUnwrap((halfPress.waitForExistence(timeout: 8)) ? true : nil)
+        try tapForAsyncTest(halfPress)
         try await waitForSimulatorState { state in
             (state["half_press_count"] as? NSNumber)?.intValue == 2 &&
                 (state["shutter_release_count"] as? NSNumber)?.intValue == 2 &&
                 state["half_pressed"] as? Bool == false
         }
 
-        XCTAssertTrue(waitForInteraction(liveViewInteraction, timeout: 8))
-        liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.35)).tap()
+        _ = try XCTUnwrap((waitForInteraction(liveViewInteraction, timeout: 8)) ? true : nil)
+        try tapForAsyncTest(liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.35)))
         try await waitForSimulatorState { state in
             (state["focus"] as? [String: Any])?["count"] as? Int == 1
         }
 
-        openMoreActions(in: app)
+        try openMoreActionsForAsyncTest(in: app)
         let moreSettings = app.buttons["more-settings-menu-button"]
-        XCTAssertTrue(waitForInteraction(moreSettings, timeout: 8))
-        moreSettings.tap()
+        _ = try XCTUnwrap((waitForInteraction(moreSettings, timeout: 8)) ? true : nil)
+        try tapForAsyncTest(moreSettings)
         let tapAction = app.otherElements["live-view-tap-action-control"]
-        XCTAssertTrue(tapAction.waitForExistence(timeout: 5))
-        guard selectLiveViewTapAction(.whiteBalance, in: app, phase: "direct-ccapi") else { return }
-        app.buttons["Done"].tap()
-        XCTAssertTrue(waitForInteraction(liveViewInteraction, timeout: 8))
-        liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)).tap()
+        _ = try XCTUnwrap((tapAction.waitForExistence(timeout: 5)) ? true : nil)
+        guard try selectLiveViewTapAction(.whiteBalance, in: app, phase: "direct-ccapi") else { return }
+        try tapForAsyncTest(app.buttons["Done"])
+        _ = try XCTUnwrap((waitForInteraction(liveViewInteraction, timeout: 8)) ? true : nil)
+        try tapForAsyncTest(liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)))
         try await waitForSimulatorState { state in
             (state["click_white_balance"] as? [String: Any])?["count"] as? Int == 1 &&
                 (state["exposure"] as? [String: Any])?["white_balance"] as? String == "click"
         }
 
-        openMoreActions(in: app)
+        try openMoreActionsForAsyncTest(in: app)
         let focusDrive = app.buttons["focus-drive-menu-button"]
-        guard tapCameraAction(focusDrive, in: app) else { return }
+        guard try tapCameraActionForAsyncTest(focusDrive, in: app) else { return }
         let driveNearLarge = app.buttons["focus-drive-near-large"]
         guard waitForInteraction(driveNearLarge, timeout: 5) else {
             XCTFail("The focus-drive sheet did not become interactive")
             return
         }
-        driveNearLarge.tap()
+        try tapForAsyncTest(driveNearLarge)
         try await waitForSimulatorState { state in
             guard let focus = state["focus_drive"] as? [String: Any] else { return false }
             return (focus["count"] as? NSNumber)?.intValue == 1 &&
                 focus["direction"] as? String == "near" &&
                 focus["step"] as? String == "large"
         }
-        app.buttons["Done"].tap()
+        try tapForAsyncTest(app.buttons["Done"])
 
         _ = try await simulatorRequest(
             path: "/ccapi/test/mode",
@@ -505,75 +508,145 @@ final class OpenEOSControlUITests: XCTestCase {
             queryItems: [URLQueryItem(name: "mode", value: "Bulb")]
         )
         try await waitForSimulatorState { state in state["mode"] as? String == "Bulb" }
-        XCTAssertTrue(waitForLabel(app.buttons["shutter-button"], containing: "Start Bulb exposure", timeout: 15))
-        app.buttons["shutter-button"].tap()
+        _ = try XCTUnwrap((waitForLabel(app.buttons["shutter-button"], containing: "Start Bulb exposure", timeout: 15)) ? true : nil)
+        try tapForAsyncTest(app.buttons["shutter-button"])
         try await waitForSimulatorState { state in
             state["bulb_exposure_active"] as? Bool == true &&
                 (state["bulb_start_count"] as? NSNumber)?.intValue == 1
         }
-        XCTAssertTrue(waitForLabel(app.buttons["shutter-button"], containing: "Stop Bulb exposure", timeout: 8))
-        app.buttons["shutter-button"].tap()
+        _ = try XCTUnwrap((waitForLabel(app.buttons["shutter-button"], containing: "Stop Bulb exposure", timeout: 8)) ? true : nil)
+        try tapForAsyncTest(app.buttons["shutter-button"])
         try await waitForSimulatorState { state in
             state["bulb_exposure_active"] as? Bool == false &&
                 (state["bulb_stop_count"] as? NSNumber)?.intValue == 1
         }
 
         let captureMode = app.segmentedControls["capture-mode-picker"]
-        XCTAssertTrue(captureMode.waitForExistence(timeout: 8))
-        captureMode.buttons["Video"].tap()
+        _ = try XCTUnwrap((captureMode.waitForExistence(timeout: 8)) ? true : nil)
+        try tapForAsyncTest(captureMode.buttons["Video"])
         try await waitForSimulatorState { state in
             state["movie_mode"] as? String == "on" &&
                 (state["movie_mode_update_count"] as? NSNumber)?.intValue == 1
         }
         let record = app.buttons["record-button"]
-        XCTAssertTrue(waitForInteraction(record, timeout: 8))
-        record.tap()
+        _ = try XCTUnwrap((waitForInteraction(record, timeout: 8)) ? true : nil)
+        try tapForAsyncTest(record)
         try await waitForSimulatorState { state in state["recording"] as? Bool == true }
-        XCTAssertTrue(waitForLabel(record, containing: "Stop recording", timeout: 15))
-        record.tap()
+        _ = try XCTUnwrap((waitForLabel(record, containing: "Stop recording", timeout: 15)) ? true : nil)
+        try tapForAsyncTest(record)
         try await waitForSimulatorState { state in state["recording"] as? Bool == false }
-        captureMode.buttons["Photo"].tap()
+        try tapForAsyncTest(captureMode.buttons["Photo"])
         try await waitForSimulatorState { state in
             state["movie_mode"] as? String == "off" &&
                 (state["movie_mode_update_count"] as? NSNumber)?.intValue == 2
         }
 
-        openMoreActions(in: app)
-        guard tapCameraAction(app.buttons["camera-media-menu-button"], in: app) else { return }
-        XCTAssertTrue(app.staticTexts["SIM_0003.PNG"].waitForExistence(timeout: 20))
+        try openMoreActionsForAsyncTest(in: app)
+        guard try tapCameraActionForAsyncTest(app.buttons["camera-media-menu-button"], in: app) else { return }
+        _ = try XCTUnwrap((app.staticTexts["SIM_0003.PNG"].waitForExistence(timeout: 20)) ? true : nil)
 
         let previewMedia = app.buttons["preview-media-SIM_0003.PNG"]
-        XCTAssertTrue(waitForInteraction(previewMedia, timeout: 8))
-        previewMedia.tap()
-        XCTAssertTrue(app.buttons["close-media-preview"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["media-preview-position"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["media-preview-download-SIM_0003.PNG"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["media-preview-actions-SIM_0003.PNG"].waitForExistence(timeout: 3))
-        app.buttons["close-media-preview"].tap()
+        _ = try XCTUnwrap((waitForInteraction(previewMedia, timeout: 8)) ? true : nil)
+        try tapForAsyncTest(previewMedia)
+        _ = try XCTUnwrap((app.buttons["close-media-preview"].waitForExistence(timeout: 8)) ? true : nil)
+        _ = try XCTUnwrap((app.staticTexts["media-preview-position"].waitForExistence(timeout: 3)) ? true : nil)
+        _ = try XCTUnwrap((app.buttons["media-preview-download-SIM_0003.PNG"].waitForExistence(timeout: 3)) ? true : nil)
+        _ = try XCTUnwrap((app.buttons["media-preview-actions-SIM_0003.PNG"].waitForExistence(timeout: 3)) ? true : nil)
+        try tapForAsyncTest(app.buttons["close-media-preview"])
 
         let mediaActions = app.buttons["media-actions-SIM_0003.PNG"]
-        XCTAssertTrue(waitForInteraction(mediaActions, timeout: 8))
-        mediaActions.tap()
+        _ = try XCTUnwrap((waitForInteraction(mediaActions, timeout: 8)) ? true : nil)
+        try tapForAsyncTest(mediaActions)
         let deleteMedia = app.buttons["delete-media-SIM_0003.PNG"]
-        XCTAssertTrue(scrollToInteraction(deleteMedia, in: app, timeout: 8))
-        deleteMedia.tap()
+        _ = try XCTUnwrap((scrollToInteraction(deleteMedia, in: app, timeout: 8)) ? true : nil)
+        try tapForAsyncTest(deleteMedia)
         let deleteAlert = app.alerts["Delete from camera?"]
-        XCTAssertTrue(deleteAlert.waitForExistence(timeout: 5))
-        deleteAlert.buttons["Delete"].tap()
+        _ = try XCTUnwrap((deleteAlert.waitForExistence(timeout: 5)) ? true : nil)
+        try tapForAsyncTest(deleteAlert.buttons["Delete"])
         try await waitForSimulatorState { state in
             !(state["media_ids"] as? [String] ?? []).contains("SIM_0003.PNG")
         }
-        XCTAssertTrue(app.staticTexts["SIM_0003.PNG"].waitForNonExistence(timeout: 8))
+        _ = try XCTUnwrap((app.staticTexts["SIM_0003.PNG"].waitForNonExistence(timeout: 8)) ? true : nil)
 
-        app.buttons["media-back-button"].tap()
-        openMoreActions(in: app)
-        guard tapCameraAction(app.buttons["disconnect-menu-button"], in: app) else { return }
+        try tapForAsyncTest(app.buttons["media-back-button"])
+        try openMoreActionsForAsyncTest(in: app)
+        guard try tapCameraActionForAsyncTest(app.buttons["disconnect-menu-button"], in: app) else { return }
         guard waitForConnectionScreen(in: app, timeout: 15) else { return }
     }
 
     @MainActor
+    func testCanonicalShutterAFChoiceReachesCameraAndNewJpegPreviewInBothLanguages() async throws {
+        // Swift errors unwind this async test before XCTest begins the next case.
+        continueAfterFailure = true
+        guard try await waitForSimulatorHealth() else {
+            #if OEC_REQUIRE_SIMULATOR_E2E
+            XCTFail("The required synthetic camera is not reachable")
+            return
+            #else
+            throw XCTSkip("Start the synthetic camera for the shutter AF UI journey")
+            #endif
+        }
+        for (language, apple, locale, onValue, offValue, explanation) in [
+            ("english", "en", "en_US", "On", "Off", "does not ask for autofocus"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "開啟", "關閉", "不要求自動對焦"),
+        ] {
+            _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
+            _ = try await simulatorRequest(path: "/ccapi/ver100/shooting/settings/shootingmode", method: "PUT",
+                                           jsonBody: ["value": "Manual"])
+            let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
+                             environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString])
+            defer { app.terminate() }
+            try tapForAsyncTest(app.buttons["preset-http-button"])
+            _ = try XCTUnwrap((scrollConnectionButtonIntoView(in: app, timeout: 8)) ? true : nil)
+            try tapForAsyncTest(app.buttons["connect-button"])
+            let toggle = app.buttons["shutter-autofocus-toggle"]
+            _ = try XCTUnwrap((waitForInteraction(toggle, timeout: 30)) ? true : nil)
+            let coordinateRoundingTolerance = 0.000_001
+            _ = try XCTUnwrap(((toggle.frame.width + coordinateRoundingTolerance) >= (44)) ? true : nil)
+            _ = try XCTUnwrap(((toggle.frame.height + coordinateRoundingTolerance) >= (44)) ? true : nil)
+            _ = try XCTUnwrap((toggle.isSelected) ? true : nil)
+            _ = try XCTUnwrap(((toggle.value as? String) == (onValue)) ? true : nil)
+            try tapForAsyncTest(toggle)
+            _ = try XCTUnwrap((!(toggle.isSelected)) ? true : nil)
+            _ = try XCTUnwrap(((toggle.value as? String) == (offValue)) ? true : nil)
+            _ = try XCTUnwrap((app.staticTexts["shutter-autofocus-description"].label.contains(explanation)) ? true : nil)
+            let unchanged = try await simulatorRequest(path: "/ccapi/test/state")
+            _ = try XCTUnwrap((((unchanged["capture_count"] as? NSNumber)?.intValue) == (0)) ? true : nil)
+            _ = try XCTUnwrap((((unchanged["canonical"] as? [String: Any])?["shutter_af_requests"] as? [Bool]) == ([])) ? true : nil)
+            let shutter = app.buttons["shutter-button"]
+            _ = try XCTUnwrap((waitForInteraction(shutter, timeout: 8)) ? true : nil)
+            try tapForAsyncTest(shutter)
+            try await waitForSimulatorState { state in
+                (state["canonical"] as? [String: Any])?["shutter_af_requests"] as? [Bool] == [false]
+            }
+            let latest = app.buttons["latest-media-button"]
+            _ = try XCTUnwrap((waitForLabel(latest, containing: "SIM_0003.JPG", timeout: 20)) ? true : nil)
+            _ = try XCTUnwrap((waitForInteraction(latest, timeout: 8)) ? true : nil)
+            try tapForAsyncTest(latest)
+            _ = try XCTUnwrap((app.buttons["close-media-preview"].waitForExistence(timeout: 15)) ? true : nil)
+            _ = try XCTUnwrap((app.images["media-preview-image"].waitForExistence(timeout: 15)) ? true : nil)
+            addScreenshot(name: "shutter-af-new-jpeg-\(language)")
+            try tapForAsyncTest(app.buttons["close-media-preview"])
+            try tapForAsyncTest(app.buttons["media-back-button"])
+            try openMoreActionsForAsyncTest(in: app)
+            guard try tapCameraActionForAsyncTest(app.buttons["disconnect-menu-button"], in: app) else { return }
+            _ = try XCTUnwrap((waitForConnectionScreen(in: app, timeout: 15)) ? true : nil)
+            _ = try XCTUnwrap((scrollConnectionButtonIntoView(in: app, timeout: 8)) ? true : nil)
+            try tapForAsyncTest(app.buttons["connect-button"])
+            _ = try XCTUnwrap((waitForInteraction(toggle, timeout: 30)) ? true : nil)
+            _ = try XCTUnwrap((toggle.isSelected) ? true : nil)
+            _ = try XCTUnwrap(((toggle.value as? String) == (onValue)) ? true : nil)
+            try openMoreActionsForAsyncTest(in: app)
+            guard try tapCameraActionForAsyncTest(app.buttons["disconnect-menu-button"], in: app) else { return }
+            _ = try XCTUnwrap((waitForConnectionScreen(in: app, timeout: 15)) ? true : nil)
+        }
+    }
+
+    @MainActor
     func testCanonicalCCAPIEventsRefreshTheProductionUI() async throws {
-        let available = await waitForSimulatorHealth()
+        // Swift errors unwind this async test before XCTest begins the next case.
+        continueAfterFailure = true
+        let available = try await waitForSimulatorHealth()
         guard available else {
             #if OEC_REQUIRE_SIMULATOR_E2E
             XCTFail("The required fake camera is not reachable at \(simulatorURL.absoluteString)")
@@ -595,19 +668,20 @@ final class OpenEOSControlUITests: XCTestCase {
             locale: "en_US",
             environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString]
         )
+        defer { app.terminate() }
         let httpPreset = app.buttons["preset-http-button"]
-        XCTAssertTrue(httpPreset.waitForExistence(timeout: 8))
-        httpPreset.tap()
+        _ = try XCTUnwrap((httpPreset.waitForExistence(timeout: 8)) ? true : nil)
+        try tapForAsyncTest(httpPreset)
 
         let urlField = app.textFields["camera-url-field"]
-        XCTAssertTrue(urlField.waitForExistence(timeout: 3))
-        XCTAssertEqual(urlField.value as? String, simulatorURL.absoluteString)
+        _ = try XCTUnwrap((urlField.waitForExistence(timeout: 3)) ? true : nil)
+        _ = try XCTUnwrap(((urlField.value as? String) == (simulatorURL.absoluteString)) ? true : nil)
         let connect = app.buttons["connect-button"]
-        XCTAssertTrue(waitForInteraction(connect, timeout: 8))
-        connect.tap()
+        _ = try XCTUnwrap((waitForInteraction(connect, timeout: 8)) ? true : nil)
+        try tapForAsyncTest(connect)
 
-        XCTAssertTrue(app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30))
-        XCTAssertTrue(app.images["live-view-decoded-frame"].waitForExistence(timeout: 30))
+        _ = try XCTUnwrap((app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30)) ? true : nil)
+        _ = try XCTUnwrap((app.images["live-view-decoded-frame"].waitForExistence(timeout: 30)) ? true : nil)
         try await waitForSimulatorState { state in
             guard let canonical = state["canonical"] as? [String: Any] else { return false }
             return ((canonical["event_poll_count"] as? NSNumber)?.intValue ?? 0) >= 1 &&
@@ -620,26 +694,26 @@ final class OpenEOSControlUITests: XCTestCase {
             method: "PATCH",
             jsonBody: ["iso": "3200"]
         )
-        XCTAssertTrue(waitForLabel(app.buttons["exposure-iso"], containing: "3200", timeout: 20))
+        _ = try XCTUnwrap((waitForLabel(app.buttons["exposure-iso"], containing: "3200", timeout: 20)) ? true : nil)
 
-        openMoreActions(in: app)
-        guard tapCameraAction(app.buttons["camera-media-menu-button"], in: app) else { return }
-        XCTAssertTrue(app.staticTexts["SIM_0002.PNG"].waitForExistence(timeout: 20))
+        try openMoreActionsForAsyncTest(in: app)
+        guard try tapCameraActionForAsyncTest(app.buttons["camera-media-menu-button"], in: app) else { return }
+        _ = try XCTUnwrap((app.staticTexts["SIM_0002.PNG"].waitForExistence(timeout: 20)) ? true : nil)
 
         _ = try await simulatorRequest(
             path: "/ccapi/ver100/shooting/control/shutterbutton",
             method: "POST",
             jsonBody: ["af": true]
         )
-        XCTAssertTrue(app.staticTexts["SIM_0003.JPG"].waitForExistence(timeout: 20))
+        _ = try XCTUnwrap((app.staticTexts["SIM_0003.JPG"].waitForExistence(timeout: 20)) ? true : nil)
         try await waitForSimulatorState { state in
             guard let canonical = state["canonical"] as? [String: Any] else { return false }
             return ((canonical["event_cursor"] as? NSNumber)?.intValue ?? 0) >= 3
         }
 
-        app.buttons["media-back-button"].tap()
-        openMoreActions(in: app)
-        guard tapCameraAction(app.buttons["disconnect-menu-button"], in: app) else { return }
+        try tapForAsyncTest(app.buttons["media-back-button"])
+        try openMoreActionsForAsyncTest(in: app)
+        guard try tapCameraActionForAsyncTest(app.buttons["disconnect-menu-button"], in: app) else { return }
         guard waitForConnectionScreen(in: app, timeout: 15) else { return }
         try await waitForSimulatorState { state in
             guard let canonical = state["canonical"] as? [String: Any] else { return false }
@@ -651,7 +725,9 @@ final class OpenEOSControlUITests: XCTestCase {
 
     @MainActor
     func testCanonicalCCAPIMediaPagesAppearProgressivelyAndCanBeCancelled() async throws {
-        let available = await waitForSimulatorHealth()
+        // Swift errors unwind this async test before XCTest begins the next case.
+        continueAfterFailure = true
+        let available = try await waitForSimulatorHealth()
         guard available else {
             #if OEC_REQUIRE_SIMULATOR_E2E
             XCTFail("The required fake camera is not reachable at \(simulatorURL.absoluteString)")
@@ -673,39 +749,42 @@ final class OpenEOSControlUITests: XCTestCase {
             locale: "en_US",
             environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString]
         )
+        defer { app.terminate() }
         let httpPreset = app.buttons["preset-http-button"]
-        XCTAssertTrue(httpPreset.waitForExistence(timeout: 8))
-        httpPreset.tap()
+        _ = try XCTUnwrap((httpPreset.waitForExistence(timeout: 8)) ? true : nil)
+        try tapForAsyncTest(httpPreset)
         let connect = app.buttons["connect-button"]
-        XCTAssertTrue(waitForInteraction(connect, timeout: 8))
-        connect.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30))
+        _ = try XCTUnwrap((waitForInteraction(connect, timeout: 8)) ? true : nil)
+        try tapForAsyncTest(connect)
+        _ = try XCTUnwrap((app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30)) ? true : nil)
 
-        openMoreActions(in: app)
-        guard tapCameraAction(app.buttons["camera-media-menu-button"], in: app) else { return }
-        XCTAssertTrue(app.staticTexts["SIM_0002.PNG"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.descendants(matching: .any)["media-library-loading-progressive"].waitForExistence(timeout: 3))
+        try openMoreActionsForAsyncTest(in: app)
+        guard try tapCameraActionForAsyncTest(app.buttons["camera-media-menu-button"], in: app) else { return }
+        _ = try XCTUnwrap((app.staticTexts["SIM_0002.PNG"].waitForExistence(timeout: 8)) ? true : nil)
+        _ = try XCTUnwrap((app.descendants(matching: .any)["media-library-loading-progressive"].waitForExistence(timeout: 3)) ? true : nil)
         let loadingSummary = app.staticTexts["media-library-summary-loading"]
-        XCTAssertTrue(waitForLabel(loadingSummary, containing: "Loading", timeout: 3))
+        _ = try XCTUnwrap((waitForLabel(loadingSummary, containing: "Loading", timeout: 3)) ? true : nil)
         let cancel = app.buttons["cancel-media-library-load"]
-        XCTAssertTrue(waitForInteraction(cancel, timeout: 3))
-        cancel.tap()
+        _ = try XCTUnwrap((waitForInteraction(cancel, timeout: 3)) ? true : nil)
+        try tapForAsyncTest(cancel)
 
         let cancelledSummary = app.staticTexts["media-library-summary-cancelled"]
-        XCTAssertTrue(waitForLabel(cancelledSummary, containing: "incomplete", timeout: 8))
-        XCTAssertTrue(app.staticTexts["SIM_0002.PNG"].exists)
-        XCTAssertTrue(app.staticTexts["SIM_0001.PNG"].waitForNonExistence(timeout: 6))
-        XCTAssertTrue(app.buttons["refresh-media"].waitForExistence(timeout: 3))
+        _ = try XCTUnwrap((waitForLabel(cancelledSummary, containing: "incomplete", timeout: 8)) ? true : nil)
+        _ = try XCTUnwrap((app.staticTexts["SIM_0002.PNG"].exists) ? true : nil)
+        _ = try XCTUnwrap((app.staticTexts["SIM_0001.PNG"].waitForNonExistence(timeout: 6)) ? true : nil)
+        _ = try XCTUnwrap((app.buttons["refresh-media"].waitForExistence(timeout: 3)) ? true : nil)
 
-        app.buttons["media-back-button"].tap()
-        openMoreActions(in: app)
-        guard tapCameraAction(app.buttons["disconnect-menu-button"], in: app) else { return }
+        try tapForAsyncTest(app.buttons["media-back-button"])
+        try openMoreActionsForAsyncTest(in: app)
+        guard try tapCameraActionForAsyncTest(app.buttons["disconnect-menu-button"], in: app) else { return }
         guard waitForConnectionScreen(in: app, timeout: 15) else { return }
     }
 
     @MainActor
     func testLiveViewTapActionSelectionRetainsStateWithoutSendingLiveViewCommands() async throws {
-        let available = await waitForSimulatorHealth()
+        // Swift errors unwind this async test before XCTest begins the next case.
+        continueAfterFailure = true
+        let available = try await waitForSimulatorHealth()
         guard available else {
             #if OEC_REQUIRE_SIMULATOR_E2E
             XCTFail("The required fake camera is not reachable at \(simulatorURL.absoluteString)")
@@ -716,34 +795,35 @@ final class OpenEOSControlUITests: XCTestCase {
         }
         _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
         let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
+        defer { app.terminate() }
         let simulatorPreset = app.buttons["preset-simulator-button"]
-        XCTAssertTrue(simulatorPreset.waitForExistence(timeout: 8))
-        simulatorPreset.tap()
-        app.buttons["connect-button"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30))
-        XCTAssertTrue(app.images["live-view-decoded-frame"].waitForExistence(timeout: 30))
+        _ = try XCTUnwrap((simulatorPreset.waitForExistence(timeout: 8)) ? true : nil)
+        try tapForAsyncTest(simulatorPreset)
+        try tapForAsyncTest(app.buttons["connect-button"])
+        _ = try XCTUnwrap((app.descendants(matching: .any)["camera-model-status"].waitForExistence(timeout: 30)) ? true : nil)
+        _ = try XCTUnwrap((app.images["live-view-decoded-frame"].waitForExistence(timeout: 30)) ? true : nil)
 
-        openMoreSettingsForTapSelection(in: app)
+        try openMoreSettingsForTapSelection(in: app)
         let control = app.otherElements["live-view-tap-action-control"]
-        XCTAssertTrue(control.waitForExistence(timeout: 5))
-        XCTAssertTrue(control.buttons[LiveViewTapSelection.focus.buttonIdentifier].isSelected)
-        XCTAssertFalse(control.buttons[LiveViewTapSelection.whiteBalance.buttonIdentifier].isSelected)
-        XCTAssertEqual(control.value as? String, LiveViewTapSelection.focus.rawValue)
+        _ = try XCTUnwrap((control.waitForExistence(timeout: 5)) ? true : nil)
+        _ = try XCTUnwrap((control.buttons[LiveViewTapSelection.focus.buttonIdentifier].isSelected) ? true : nil)
+        _ = try XCTUnwrap((!(control.buttons[LiveViewTapSelection.whiteBalance.buttonIdentifier].isSelected)) ? true : nil)
+        _ = try XCTUnwrap(((control.value as? String) == (LiveViewTapSelection.focus.rawValue)) ? true : nil)
         try await assertNoSimulatorLiveViewCommands()
 
         // Each change is a single real UI tap. Reopening must retain the
         // production choice, and choosing a mode must not operate the camera.
         for choice in [LiveViewTapSelection.whiteBalance, .focus] {
-            guard selectLiveViewTapAction(choice, in: app, phase: "selection-only-\(choice.rawValue)") else { return }
+            guard try selectLiveViewTapAction(choice, in: app, phase: "selection-only-\(choice.rawValue)") else { return }
             try await assertNoSimulatorLiveViewCommands()
-            app.buttons["Done"].tap()
-            XCTAssertTrue(control.waitForNonExistence(timeout: 5))
-            openMoreSettingsForTapSelection(in: app)
-            XCTAssertTrue(control.waitForExistence(timeout: 5))
+            try tapForAsyncTest(app.buttons["Done"])
+            _ = try XCTUnwrap((control.waitForNonExistence(timeout: 5)) ? true : nil)
+            try openMoreSettingsForTapSelection(in: app)
+            _ = try XCTUnwrap((control.waitForExistence(timeout: 5)) ? true : nil)
             for candidate in LiveViewTapSelection.allCases {
-                XCTAssertEqual(control.buttons[candidate.buttonIdentifier].isSelected, candidate == choice)
+                _ = try XCTUnwrap(((control.buttons[candidate.buttonIdentifier].isSelected) == (candidate == choice)) ? true : nil)
             }
-            XCTAssertEqual(control.value as? String, choice.rawValue)
+            _ = try XCTUnwrap(((control.value as? String) == (choice.rawValue)) ? true : nil)
             try await assertNoSimulatorLiveViewCommands()
         }
     }
@@ -788,18 +868,18 @@ final class OpenEOSControlUITests: XCTestCase {
         var buttonIdentifier: String { "live-view-tap-action-\(rawValue)" }
     }
 
-    private func openMoreSettingsForTapSelection(in app: XCUIApplication) {
-        openMoreActions(in: app)
+    private func openMoreSettingsForTapSelection(in app: XCUIApplication) throws {
+        try openMoreActionsForAsyncTest(in: app)
         let moreSettings = app.buttons["more-settings-menu-button"]
-        XCTAssertTrue(waitForInteraction(moreSettings, timeout: 8))
-        moreSettings.tap()
+        _ = try XCTUnwrap((waitForInteraction(moreSettings, timeout: 8)) ? true : nil)
+        try tapForAsyncTest(moreSettings)
     }
 
     @MainActor
     private func selectLiveViewTapAction(
         _ choice: LiveViewTapSelection, in app: XCUIApplication, phase: String,
         file: StaticString = #filePath, line: UInt = #line
-    ) -> Bool {
+    ) throws -> Bool {
         let control = app.otherElements["live-view-tap-action-control"]
         let button = control.buttons[choice.buttonIdentifier]
         guard waitForInteraction(button, timeout: 5) else {
@@ -807,8 +887,10 @@ final class OpenEOSControlUITests: XCTestCase {
             return false
         }
         // Use one real button tap, with no warmup, retry, or intervening AX reads.
+        try requireNoRecordedUIFailure(file: file, line: line)
         button.tap()
         let deadline = ProcessInfo.processInfo.systemUptime + 5
+        try requireNoRecordedUIFailure(file: file, line: line)
         let selected = XCTNSPredicateExpectation(
             predicate: NSPredicate { candidate, _ in
                 (candidate as? XCUIElement)?.isSelected == true
@@ -837,8 +919,8 @@ final class OpenEOSControlUITests: XCTestCase {
             // AX CGRect subtraction can report 43.99999999999994 for a 44pt frame.
             // A millionth of a point covers representation error, not layout slack.
             let coordinateRoundingTolerance = 0.000_001
-            XCTAssertGreaterThanOrEqual(buttons.firstMatch.frame.width + coordinateRoundingTolerance, 44, file: file, line: line)
-            XCTAssertGreaterThanOrEqual(buttons.firstMatch.frame.height + coordinateRoundingTolerance, 44, file: file, line: line)
+            _ = try XCTUnwrap(((buttons.firstMatch.frame.width + coordinateRoundingTolerance) >= (44)) ? true : nil, file: file, line: line)
+            _ = try XCTUnwrap(((buttons.firstMatch.frame.height + coordinateRoundingTolerance) >= (44)) ? true : nil, file: file, line: line)
         }
         return true
     }
@@ -847,8 +929,8 @@ final class OpenEOSControlUITests: XCTestCase {
         file: StaticString = #filePath, line: UInt = #line
     ) async throws {
         let state = try await simulatorRequest(path: "/ccapi/test/state")
-        XCTAssertEqual((state["focus"] as? [String: Any])?["count"] as? Int, 0, file: file, line: line)
-        XCTAssertEqual((state["click_white_balance"] as? [String: Any])?["count"] as? Int, 0, file: file, line: line)
+        _ = try XCTUnwrap((((state["focus"] as? [String: Any])?["count"] as? Int) == (0)) ? true : nil, file: file, line: line)
+        _ = try XCTUnwrap((((state["click_white_balance"] as? [String: Any])?["count"] as? Int) == (0)) ? true : nil, file: file, line: line)
     }
 
     private func scrollToInteraction(
@@ -932,6 +1014,47 @@ final class OpenEOSControlUITests: XCTestCase {
             "Connect \(frame) must be a full 44pt target inside scroll/window viewport \(scroll.intersection(window))",
             file: file, line: line
         )
+    }
+
+    private func requireNoRecordedUIFailure(
+        file: StaticString = #filePath, line: UInt = #line
+    ) throws {
+        let run = try XCTUnwrap(testRun, "The UI test must have an active run", file: file, line: line)
+        _ = try XCTUnwrap(
+            run.totalFailureCount == 0 ? true : nil,
+            "Stop this async journey after the already-recorded UI failure", file: file, line: line
+        )
+    }
+
+    private func tapForAsyncTest(
+        _ element: XCUIElement, file: StaticString = #filePath, line: UInt = #line
+    ) throws {
+        try requireNoRecordedUIFailure(file: file, line: line)
+        element.tap()
+        try requireNoRecordedUIFailure(file: file, line: line)
+    }
+
+    private func tapForAsyncTest(
+        _ coordinate: XCUICoordinate, file: StaticString = #filePath, line: UInt = #line
+    ) throws {
+        try requireNoRecordedUIFailure(file: file, line: line)
+        coordinate.tap()
+        try requireNoRecordedUIFailure(file: file, line: line)
+    }
+
+    private func openMoreActionsForAsyncTest(in app: XCUIApplication) throws {
+        let moreActions = app.buttons["more-actions-button"]
+        _ = try XCTUnwrap(waitForInteraction(moreActions, timeout: 8) ? true : nil)
+        try tapForAsyncTest(moreActions)
+    }
+
+    private func tapCameraActionForAsyncTest(_ element: XCUIElement, in app: XCUIApplication) throws -> Bool {
+        guard scrollToInteraction(element, in: app, timeout: 8) else {
+            XCTFail("The requested camera action did not become interactive")
+            return false
+        }
+        try tapForAsyncTest(element)
+        return true
     }
 
     private func openMoreActions(in app: XCUIApplication) {
@@ -1096,9 +1219,19 @@ final class OpenEOSControlUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         var lastState: [String: Any]?
         repeat {
-            if let state = try? await simulatorRequest(path: "/ccapi/test/state") {
+            try Task.checkCancellation()
+            do {
+                let state = try await simulatorRequest(path: "/ccapi/test/state")
                 lastState = state
                 if predicate(state) { return }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as URLError {
+                if error.code == .cancelled { throw error }
+                try Task.checkCancellation()
+                // A transient fixture request failure still uses the original deadline.
+            } catch SimulatorTestError.invalidResponse {
+                try Task.checkCancellation()
             }
             try await Task.sleep(nanoseconds: 250_000_000)
         } while Date() < deadline
@@ -1107,14 +1240,23 @@ final class OpenEOSControlUITests: XCTestCase {
         throw SimulatorTestError.timeout
     }
 
-    private func waitForSimulatorHealth(timeout: TimeInterval = 10) async -> Bool {
+    private func waitForSimulatorHealth(timeout: TimeInterval = 10) async throws -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if let health = try? await simulatorRequest(path: "/health", timeoutInterval: 1),
-               health["ok"] as? Bool == true {
-                return true
+            try Task.checkCancellation()
+            do {
+                let health = try await simulatorRequest(path: "/health", timeoutInterval: 1)
+                if health["ok"] as? Bool == true { return true }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as URLError {
+                if error.code == .cancelled { throw error }
+                try Task.checkCancellation()
+                // Startup/readiness failures may retry only until the original deadline.
+            } catch SimulatorTestError.invalidResponse {
+                try Task.checkCancellation()
             }
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            try await Task.sleep(nanoseconds: 250_000_000)
         } while Date() < deadline
         return false
     }
@@ -1126,6 +1268,7 @@ final class OpenEOSControlUITests: XCTestCase {
         jsonBody: [String: Any]? = nil,
         timeoutInterval: TimeInterval = 5
     ) async throws -> [String: Any] {
+        try Task.checkCancellation()
         let normalizedPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let pathURL = simulatorURL.appendingPathComponent(normalizedPath)
         var components = try XCTUnwrap(URLComponents(url: pathURL, resolvingAgainstBaseURL: false))
@@ -1143,6 +1286,7 @@ final class OpenEOSControlUITests: XCTestCase {
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
         let (data, response) = try await session.data(for: request)
+        try Task.checkCancellation()
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
             throw SimulatorTestError.invalidResponse
         }

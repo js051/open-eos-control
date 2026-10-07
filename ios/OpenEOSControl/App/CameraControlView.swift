@@ -381,6 +381,42 @@ private struct CaptureBar: View {
             .frame(minHeight: compact ? 72 : 84)
             .padding(.horizontal, compact ? 0 : 18)
 
+            if camera.showShutterAutofocus {
+                VStack(alignment: .leading, spacing: 4) {
+                    Button {
+                        camera.setShutterAutofocus(!camera.shutterAutofocus)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("shutter_autofocus")
+                            Spacer(minLength: 0)
+                            Text(LocalizedStringKey(camera.shutterAutofocus ? "shutter_af_on" : "shutter_af_off"))
+                            Image(systemName: camera.shutterAutofocus ? "checkmark.circle.fill" : "circle")
+                        }
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+                        .foregroundStyle(camera.shutterAutofocus ? Color.cameraBackground : Color.cameraText)
+                        .background(camera.shutterAutofocus ? Color.cameraText : Color.cameraSurfaceRaised)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!camera.canChangeShutterAutofocus)
+                    .accessibilityLabel(Text("shutter_autofocus"))
+                    .accessibilityValue(Text(LocalizedStringKey(camera.shutterAutofocus ? "shutter_af_on" : "shutter_af_off")))
+                    .accessibilityAddTraits(camera.shutterAutofocus ? .isSelected : [])
+                    .accessibilityIdentifier("shutter-autofocus-toggle")
+                    Text(LocalizedStringKey(!camera.shutterAutofocusAllowed ? "shutter_af_unavailable" :
+                        camera.shutterAutofocus ? "shutter_af_on_description" : "shutter_af_off_description"))
+                        .font(.caption2)
+                        .foregroundStyle(Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("shutter-autofocus-description")
+                }
+                .padding(.horizontal, compact ? 8 : 18)
+                .padding(.bottom, 6)
+            }
+
             if !captureSupported {
                 Text(LocalizedStringKey(camera.bulbMode ? "bulb_not_supported" : camera.captureMode == .photo ? "capture_not_supported" : "recording_not_supported"))
                     .font(.caption)
@@ -446,6 +482,7 @@ private struct CaptureBar: View {
     private var captureSupported: Bool {
         if camera.shutterReleaseRequired { return true }
         if camera.captureMode == .video && camera.recording { return true }
+        if camera.captureMode == .photo && !camera.bulbMode && !camera.shutterAutofocusAllowed { return false }
         return camera.supports(
             camera.bulbMode ? .bulbExposure : camera.captureMode == .photo ? .stillCapture : .videoRecording
         )
@@ -510,7 +547,9 @@ private struct CaptureBar: View {
                                 ? camera.shutterReleaseUnconfirmed ? "release_shutter_now" : "stop_bulb_exposure"
                                 : camera.bulbMode
                                 ? "start_bulb_exposure"
-                                : camera.captureMode == .photo ? "capture_photo" : camera.recording ? "stop_recording" : "start_recording"
+                                : camera.captureMode == .photo
+                                    ? camera.shutterAutofocus ? "capture_photo" : "capture_without_autofocus"
+                                    : camera.recording ? "stop_recording" : "start_recording"
                         )
                     )
                 )

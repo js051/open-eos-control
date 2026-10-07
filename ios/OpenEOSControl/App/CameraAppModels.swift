@@ -148,7 +148,8 @@ extension CameraCapabilities {
             matrix: matrix,
             liveView: liveView,
             profile: profile,
-            evidence: evidence
+            evidence: evidence,
+            shutterAutofocusSupported: shutterAutofocusSupported
         )
     }
 }

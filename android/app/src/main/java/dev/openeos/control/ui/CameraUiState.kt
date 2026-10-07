@@ -251,7 +251,8 @@ internal val HELD_AF_INTERLOCK_OPERATIONS = setOf(
 )
 
 internal fun CameraUiState.showShutterAutofocus(): Boolean = connected && captureMode == CaptureMode.PHOTO &&
-    !bulbMode && supports(CameraFeature.STILL_CAPTURE) && capabilities?.shutterAutofocusSupported == true
+    !bulbMode && supports(CameraFeature.STILL_CAPTURE) &&
+    (capabilities?.shutterAutofocusSupported == true || !shutterAutofocus)
 
 internal fun CameraUiState.canChangeShutterAutofocus(): Boolean = showShutterAutofocus() &&
     !busy && !isBusy(CameraOperation.CAPTURE) && status?.recording != true

@@ -1822,6 +1822,8 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
             else -> CameraFeature.VIDEO_RECORDING
         },
     )
+    val shutterAFAllowed = releaseOnly || bulbActive || bulb || !photo ||
+        state.shutterAutofocus || state.capabilities?.shutterAutofocusSupported == true
     val description = when {
         releaseOnly -> stringResource(R.string.retry_shutter_release)
         bulbActive -> stringResource(R.string.stop_bulb_exposure)
@@ -1851,7 +1853,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
         Modifier.size(76.dp)
             .testTag("capture-button")
             .background(AppBackground, CircleShape)
-            .clickable(enabled = supported && temperatureAllowed && !processing) {
+            .clickable(enabled = supported && temperatureAllowed && shutterAFAllowed && !processing) {
                 when {
                     releaseOnly -> actions.retryShutterRelease()
                     bulbActive || bulb -> actions.toggleBulbExposure()
@@ -1878,12 +1880,13 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
                             fontWeight = FontWeight.SemiBold, maxFontSize = 11.sp, minFontSize = 8.sp,
                             maxLines = 2, softWrap = true)
                     }
-                } else if (photo && !bulb && !bulbActive && !state.shutterAutofocus) {
+                } else if (photo && !bulb && !bulbActive &&
+                    (state.capabilities?.shutterAutofocusSupported == true || !state.shutterAutofocus)) {
                     CameraRotatingSquareSlot(size = 50.dp) {
-                        CameraHudText(value = stringResource(R.string.shutter_af_off), color = AppBackground,
+                        CameraHudText(value = stringResource(if (state.shutterAutofocus) R.string.shutter_af_on else R.string.shutter_af_off), color = AppBackground,
                             fontWeight = FontWeight.SemiBold, maxFontSize = 11.sp, minFontSize = 8.sp,
                             maxLines = 2, softWrap = true,
-                            modifier = Modifier.testTag("shutter-af-off-indicator"))
+                            modifier = Modifier.testTag(if (state.shutterAutofocus) "shutter-af-on-indicator" else "shutter-af-off-indicator"))
                     }
                 }
             }

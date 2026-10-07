@@ -862,7 +862,8 @@ public actor CCAPIClient {
                 maximumFPS: 30
             ),
             profile: CameraProfile.from(modelName: cachedModel),
-            evidence: capabilityEvidence()
+            evidence: capabilityEvidence(),
+            shutterAutofocusSupported: directShutterOperation() != nil || manualShutterOperation() != nil
         )
     }
 
@@ -1218,14 +1219,17 @@ public actor CCAPIClient {
         observedFeatures.insert(.sensorCleaning)
     }
 
-    public func captureStill() async throws -> CameraStatus {
+    public func captureStill(autofocus: Bool = true) async throws -> CameraStatus {
+        guard autofocus || (resolvedMode == .camera && (directShutterOperation() != nil || manualShutterOperation() != nil)) else {
+            throw CCAPIError.invalidResponse("This camera session does not support a shutter request without autofocus.")
+        }
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
         try await refreshTemperatureStatusForRestrictedCommand()
         try requireTemperatureAllowsStillCapture()
         if resolvedMode == .simulator {
-            _ = try await requestJSON(path: "/ccapi/capture/still", method: .post, json: ["af": true])
+            _ = try await requestJSON(path: "/ccapi/capture/still", method: .post, json: ["af": autofocus])
             observedFeatures.insert(.stillCapture)
             return try await status()
         }
@@ -1234,10 +1238,10 @@ public actor CCAPIClient {
         let manual = manualShutterOperation()
         guard direct != nil || manual != nil else { throw CCAPIError.unsupported(.stillCapture) }
         if let direct {
-            try await commandOK(operation: direct, json: ["af": true])
+            try await commandOK(operation: direct, json: ["af": autofocus])
         } else if let manual {
             try await performGuaranteedRelease(
-                press: { try await self.commandOK(operation: manual, json: ["af": true, "action": "full_press"]) },
+                press: { try await self.commandOK(operation: manual, json: ["af": autofocus, "action": "full_press"]) },
                 release: { try await self.commandOK(operation: manual, json: ["af": false, "action": "release"]) }
             )
         }

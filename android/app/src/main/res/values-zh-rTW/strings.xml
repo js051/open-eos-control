@@ -20,7 +20,7 @@
     <string name="camera_value_one_push_compact">單次</string>
     <string name="camera_value_kelvin_compact">色溫</string>
     <string name="shutter_autofocus">快門自動對焦</string>
-    <string name="capture_without_autofocus">拍照，不啟動自動對焦</string>
+    <string name="capture_without_autofocus">拍照，不要求自動對焦</string>
     <string name="shutter_af_off">AF 關</string>
     <string name="af_on_label">AF-ON</string>
     <string name="hold_af_on">按住自動對焦（最多 30 秒），放開停止</string>
@@ -678,4 +678,8 @@
     <string name="saved_jpegs_recheck">重新檢查已儲存原始檔</string>
     <string name="saved_jpegs_rechecking">正在重新檢查原始檔…</string>
     <string name="saved_jpegs_camera_result">上次相機交接結果</string>
+    <string name="shutter_af_on_description">拍攝請求會要求自動對焦。</string>
+    <string name="shutter_af_off_description">拍攝請求不要求自動對焦；相機或鏡頭設定仍可能使其對焦。</string>
+    <string name="shutter_af_unavailable">此連線不支援不要求自動對焦的拍攝。請開啟快門自動對焦或重新連線。</string>
+    <string name="shutter_af_on">AF 開</string>
 </resources>

@@ -18,6 +18,16 @@ Camera media downloads are consumed as cancellable Fetch streams with visible by
 
 Direct CCAPI media details expose Canon file protection, archive state, rating from 0 through 5, and display rotation at 0, 90, 180, or 270 degrees only when discovery advertises contents `PUT`. The engine sends Canon's exact action/value body, then requires `kind=info` readback to match before reporting success or observed evidence. The browser reads metadata only when its single media-actions dialog opens. libgphoto2 sessions keep these controls unavailable because no separately verified mutation contract is claimed.
 
+## Shutter autofocus choice
+
+The browser shows a per-session Shutter AF switch next to the shutter when the CCAPI camera advertises ordinary shutter POST or manual shutter POST/PUT. It defaults to on. Changing the switch sends no camera command. An ordinary photograph sends the selected JSON boolean once; a manual release always sends `af:false`. The choice does not change lens AF/MF or disable continuous/Servo AF, and it does not apply to Bulb, video, half-press, or AF-ON.
+
+`GET /v1/session/{id}/capabilities` adds the optional `shutterAutofocusSupported` boolean. `POST /v1/session/{id}/capture/still` accepts an optional `{ "af": false }` or `{ "af": true }` body; an empty body or `{}` retains the old AF-on default. An `af` value must be a JSON boolean, and unknown fields are rejected. Only the capable CCAPI engine advertises selection. Other engines reject AF-off before calling the camera. Clients must reject AF-off locally when the capability is absent or invalid because older servers ignore the request body.
+
+If capability is withdrawn during a session, a selected AF-off choice remains visible and capture is blocked until the user explicitly enables AF or support returns. Reconnecting resets to AF-on. Camera errors never trigger an AF-on fallback or an automatic repeated shutter.
+
+The new reachable paths are iOS Direct CCAPI and the PC browser through Bridge CCAPI. Android Direct retains its existing choice. Mobile Bridge clients understand the optional capability and fail closed, but their current connection screens only configure local USB engines; this change does not add mobile Bridge CCAPI connection setup.
+
 ## CCAPI Bulb release recovery
 
 If a Bulb start or stop cannot confirm shutter release, the Bridge preserves the exact release operation in that session. Camera mutations are blocked until an explicit Stop succeeds; status and capability reads, recording/Live View/event stops, and disconnect remain available. The PC control page shows a persistent **Retry Stop Bulb** action even if the camera mode changes or a status refresh fails. Recovery confirms release without claiming that an unacknowledged exposure completed.

@@ -124,10 +124,10 @@ enum CameraSession: Sendable {
         }
     }
 
-    func captureStill() async throws -> CameraStatus {
+    func captureStill(autofocus: Bool = true) async throws -> CameraStatus {
         switch self {
-        case let .ccapi(client): return try await client.captureStill()
-        case let .desktopBridge(client): return try await client.captureStill()
+        case let .ccapi(client): return try await client.captureStill(autofocus: autofocus)
+        case let .desktopBridge(client): return try await client.captureStill(autofocus: autofocus)
         }
     }
 

@@ -469,3 +469,11 @@
 "confirm_previous_shutter_released" = "I checked the previous camera";
 "previous_shutter_physically_verified" = "Confirm shutter is released";
 "previous_shutter_confirmation_help" = "Confirm only after checking that the previous camera is no longer exposing. This clears the warning only; it sends no command to either camera.";
+
+"shutter_autofocus" = "Shutter autofocus";
+"shutter_af_on" = "On";
+"shutter_af_off" = "Off";
+"shutter_af_on_description" = "Shutter request asks for autofocus.";
+"shutter_af_off_description" = "Shutter request does not ask for autofocus. Camera or lens settings may still focus.";
+"shutter_af_unavailable" = "This session cannot request AF off. Enable shutter autofocus or reconnect.";
+"capture_without_autofocus" = "Capture photo without requesting autofocus";

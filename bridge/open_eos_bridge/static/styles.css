@@ -2032,3 +2032,8 @@ button.media-thumbnail:focus-visible {
     animation-iteration-count: 1 !important;
   }
 }
+
+.shutter-af-control { width: 100%; text-align: start; }
+.shutter-af-control label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; font-weight: 600; }
+.shutter-af-control input { width: 22px; height: 22px; flex: 0 0 auto; }
+.shutter-af-control .supporting { display: block; line-height: 1.4; }

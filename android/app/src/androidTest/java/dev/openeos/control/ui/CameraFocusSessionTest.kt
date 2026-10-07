@@ -81,6 +81,24 @@ class CameraFocusSessionTest {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.requestUrl!!.encodedPath
                 requestTrace += "${SystemClock.elapsedRealtime()} ${request.method} $path"
+                if (path == "/health") return json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                if (path == "/v1/session" && request.method == "POST") {
+                    return json("""{"id":"synthetic-af-bridge","engine":"libgphoto2"}""")
+                }
+                if (path.startsWith("/v1/session/synthetic-af-bridge")) {
+                    val status = """{"connected":true,"recording":false,"mode":"Manual","battery":{},"media":{},"exposure":{}}"""
+                    return when {
+                        path.endsWith("/info") -> json("""{"connected":true,"model":"Synthetic legacy Bridge","serial":"TEST-BRIDGE-AF","api":"desktop-bridge/v1"}""")
+                        path.endsWith("/capabilities") -> json("""{"supported":["STILL_CAPTURE"]}""")
+                        path.endsWith("/status") -> json(status)
+                        path.endsWith("/capture/still") && request.method == "POST" -> {
+                            captureAf += JSONObject(request.body.readUtf8()).getBoolean("af")
+                            json(status)
+                        }
+                        request.method == "DELETE" -> MockResponse().setResponseCode(204)
+                        else -> MockResponse().setResponseCode(404)
+                    }
+                }
                 if (request.method == "POST" && path.endsWith("/shooting/control/shutterbutton/manual")) {
                     val body = JSONObject(request.body.readUtf8())
                     val action = body.getString("action")
@@ -254,6 +272,30 @@ class CameraFocusSessionTest {
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.capture_photo)).performClick()
         compose.waitUntil(8_000) { captureAf.size == 2 && !viewModel.uiState.value.busy }
         assertEquals(listOf(false, true), captureAf.toList())
+    }
+
+    @Test
+    fun legacyBridgeProductionUiKeepsDefaultAndCannotOfferUnsupportedAFChoice() {
+        compose.runOnIdle { viewModel.disconnect() }
+        awaitStopped()
+        compose.runOnIdle {
+            viewModel.setBridgeBaseUrl(server.url("/").toString())
+            viewModel.setLiveViewAutoRefresh(false)
+            viewModel.connectBridge()
+        }
+        compose.waitUntil(8_000) { viewModel.uiState.value.connected && !viewModel.uiState.value.busy }
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) { OpenEosControlApp(viewModel) } }
+        compose.onNodeWithTag("camera-action-menu-button").performClick()
+        compose.onNodeWithTag("camera-action-settings").performClick()
+        compose.onNodeWithTag("shutter-autofocus-setting").assertDoesNotExist()
+        compose.runOnIdle { viewModel.setShutterAutofocus(false) }
+        assertTrue(viewModel.uiState.value.shutterAutofocus)
+        assertTrue(captureAf.isEmpty())
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.dismiss)).performClick()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.capture_photo)).performClick()
+        compose.waitUntil(8_000) { captureAf.size == 1 && !viewModel.uiState.value.busy }
+        assertEquals(listOf(true), captureAf.toList())
+        assertNull(viewModel.uiState.value.error)
     }
 
     /** Diagnostic counterpart: only the screen composition is absent during the same reconnect. */

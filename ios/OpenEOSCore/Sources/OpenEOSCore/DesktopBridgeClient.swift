@@ -119,6 +119,7 @@ public actor DesktopBridgeClient {
     private var shutterRelease: ShutterReleaseObligation?
     private var ownsShutterStatus = false
     private var releaseRevision = UUID()
+    private var shutterAutofocusSupported = false
     private var sessionID: String?
     private var sessionEngine: String?
     private var bridgeVersion: String?
@@ -196,6 +197,7 @@ public actor DesktopBridgeClient {
         defer {
             if initializationToken == token { initializationToken = nil }
         }
+        shutterAutofocusSupported = false
         liveViewMagnifications = []
         try await validateService()
         guard initializationToken == token, !initializationCancelled, !isClosing else { throw DesktopBridgeError.sessionChanged }
@@ -275,6 +277,7 @@ public actor DesktopBridgeClient {
         shutterRelease = nil
         ownsShutterStatus = false
         eventPollingSupported = false
+        shutterAutofocusSupported = false
         liveViewMagnifications = []
         completedCloseState = result
         isClosing = false
@@ -340,11 +343,15 @@ public actor DesktopBridgeClient {
     }
 
     public func capabilities() async throws -> CameraCapabilities {
+        let generation = sessionGeneration
         let body = try await getJSON(sessionEndpoint(["capabilities"]))
+        guard generation == sessionGeneration, !isClosing else { throw DesktopBridgeError.sessionChanged }
         let settings = body.array("settings").compactMap(Self.parseSetting)
         let fileNaming = Self.parseFileNaming(body.dictionary("fileNaming"))
         var supported = Set(body.stringArray("supported").compactMap(CameraFeature.init(rawValue:)))
         eventPollingSupported = supported.contains(.eventPolling)
+        shutterAutofocusSupported = Self.strictBool(body["shutterAutofocusSupported"]) == true
+            && supported.contains(.stillCapture)
         let reasons = body.dictionary("reasons").reduce(into: [CameraFeature: String]()) { result, entry in
             guard let feature = CameraFeature(rawValue: entry.key), let reason = entry.value as? String else { return }
             result[feature] = reason
@@ -460,7 +467,8 @@ public actor DesktopBridgeClient {
                 maximumFPS: maximumFPS
             ),
             profile: profile,
-            evidence: evidence
+            evidence: evidence,
+            shutterAutofocusSupported: shutterAutofocusSupported
         )
     }
 
@@ -523,8 +531,11 @@ public actor DesktopBridgeClient {
         try await requestOK(sessionEndpoint(["power", "sleep"]), method: "POST")
     }
 
-    public func captureStill() async throws -> CameraStatus {
-        let body = try await postJSON(sessionEndpoint(["capture", "still"]), payload: [:])
+    public func captureStill(autofocus: Bool = true) async throws -> CameraStatus {
+        guard autofocus || shutterAutofocusSupported else {
+            throw DesktopBridgeError.invalidResponse("This bridge session does not advertise capture without autofocus.")
+        }
+        let body = try await postJSON(sessionEndpoint(["capture", "still"]), payload: ["af": autofocus])
         return parseStatus(body)
     }
 

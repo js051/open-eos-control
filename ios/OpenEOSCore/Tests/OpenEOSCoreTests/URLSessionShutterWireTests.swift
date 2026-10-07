@@ -7,6 +7,29 @@ import XCTest
 /// This fixture accepts real loopback TCP connections. In particular, URLProtocol is not
 /// involved: request counts include any retries performed below CameraHTTPTransport.
 final class URLSessionShutterWireTests: XCTestCase {
+    func testOrdinaryStillFalseUsesExactManualMethodAndNeverReplaysLostPressOnWire() async throws {
+        for endpoint in ShutterRecoveryEndpoint.variants {
+            for fault in LoopbackShutterPeer.PressFault.allCases {
+                let peer = try LoopbackShutterPeer(endpoint: endpoint, pressFault: fault,
+                    failedReleases: 0, manualOnly: true)
+                defer { XCTAssertTrue(peer.stop()) }
+                let client = try CCAPIClient(baseURL: peer.baseURL, mode: .camera)
+                try await client.initialize()
+                do {
+                    _ = try await client.captureStill(autofocus: false)
+                    XCTFail("A lost ordinary press response must not report a captured photo")
+                } catch {}
+                let writes = peer.requests().filter(\.isMutation)
+                XCTAssertEqual(writes.shutterActions, ["full_press", "release"])
+                XCTAssertEqual(writes.map(\.autofocus), [false, false])
+                XCTAssertTrue(writes.allSatisfy { $0.method == endpoint.method && $0.path == endpoint.manualPath })
+                XCTAssertTrue(peer.errors().isEmpty)
+                await client.close()
+                XCTAssertEqual(peer.requests().filter(\.isMutation), writes)
+            }
+        }
+    }
+
     func testLostPressResponsePreservesReleaseWithoutReplayingTheFullPressOnTheWire() async throws {
         for endpoint in ShutterRecoveryEndpoint.variants {
             for fault in LoopbackShutterPeer.PressFault.allCases {
@@ -245,6 +268,7 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
     private let failedReleases: Int
     private let connectionMode: ConnectionMode
     private let controlResponse: Data?
+    private let manualOnly: Bool
     private let lock = NSLock()
     private let finished = DispatchGroup()
     private var stopped = false
@@ -260,13 +284,15 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
         pressFault: PressFault,
         failedReleases: Int,
         connectionMode: ConnectionMode = .fresh,
-        controlResponse: Data? = nil
+        controlResponse: Data? = nil,
+        manualOnly: Bool = false
     ) throws {
         self.endpoint = endpoint
         self.pressFault = pressFault
         self.failedReleases = failedReleases
         self.connectionMode = connectionMode
         self.controlResponse = controlResponse
+        self.manualOnly = manualOnly
         let socket = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard socket >= 0 else { throw LoopbackShutterPeerError.systemCall("socket", errno) }
         var initialized = false
@@ -446,7 +472,16 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
                 return false
             }
             let keepAlive = connectionMode == .pooled
-            try sendHTTP(status: 200, body: response.body, on: socket, keepAlive: keepAlive)
+            let body: Data
+            if manualOnly && ["/ccapi", "/ccapi/"].contains(request.path) {
+                let discovery = [endpoint.version: [
+                    ["path": "/shooting/control/shutterbutton/manual", endpoint.method.lowercased(): true] as [String: Any],
+                ]]
+                body = try JSONSerialization.data(withJSONObject: discovery)
+            } else {
+                body = response.body
+            }
+            try sendHTTP(status: 200, body: body, on: socket, keepAlive: keepAlive)
             return keepAlive
         }
         guard request.path == endpoint.manualPath, request.method == endpoint.method,
