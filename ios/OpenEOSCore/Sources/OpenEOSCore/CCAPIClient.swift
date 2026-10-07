@@ -570,8 +570,16 @@ public actor CCAPIClient {
     }
 
     private func finishClose() async -> CameraShutterReleaseState {
-        // A press suspended in transport must finish before its final release.
-        if let bulbStartTask { _ = await bulbStartTask.result }
+        // Cancel the owned pending request, then settle it before final release.
+        // A transport that ignores cancellation must still finish first.
+        if let bulbStartTask {
+            bulbStartTask.cancel()
+            _ = await bulbStartTask.result
+        }
+        // Preserve Close's bounded final cleanup: if Start's compensation failed,
+        // Close makes one last original-endpoint release attempt before retiring.
+        // Concurrent/repeated Close calls share closeTask; this is separate from
+        // one Stop action, which surfaces its failed compensation without retrying.
         try? await releasePendingBulb()
         await stopEventPolling()
         await stopLiveView()
@@ -1378,7 +1386,16 @@ public actor CCAPIClient {
     /// Stop-only; its successful return confirms release independently of status refresh.
     public func retryShutterRelease() async throws {
         guard !closing else { throw CCAPIError.invalidResponse("This camera connection is closing.") }
-        if let bulbStartTask { _ = await bulbStartTask.result }
+        if let bulbStartTask {
+            bulbStartTask.cancel()
+            let result = await bulbStartTask.result
+            guard !closing else { throw CCAPIError.invalidResponse("This camera connection is closing.") }
+            // A cancelled dispatched Start owns its one compensation attempt.
+            // Do not silently repeat a failed release in this same Stop action.
+            if case let .failure(error) = result, pendingBulbRelease != nil {
+                throw error
+            }
+        }
         guard !closing else { throw CCAPIError.invalidResponse("This camera connection is closing.") }
         try await releasePendingBulb()
     }
