@@ -1,6 +1,6 @@
 # iOS 單次拍攝至 JPEG 原檔交付：來源候選與待驗契約
 
-日期：2026-10-07 UTC。基底已同步 accepted main `fd3e9837cf1ce2c783acd5a191d252634c1cc6c1`（#218）；本記錄是開發分支 source 候選，不是 PR ready、main accepted 或發版證據。PC 批次已獨立完成；本 iOS 完整批次仍須對最後同一 head 完成全部適用 CI。
+日期：2026-10-07 UTC。基底已同步 accepted main `fd3e9837cf1ce2c783acd5a191d252634c1cc6c1`（#218）；本記錄屬 #219 開發分支，不是 PR ready、main accepted 或發版證據。PC 批次已獨立完成；本 iOS 完整批次仍須對最後同一 head 完成全部適用 CI。
 
 ## 有限產品範圍
 
@@ -12,7 +12,7 @@
 
 ## 從 source 確認的問題與修正
 
-下列是程式可達性分析及新寫的反例，尚未以 Swift／App runtime 重現紅例：
+下列原先由程式可達性分析及新寫反例建立；首輪正常 CI 已通過全部 App／Core 測試，兩個 UI 方法仍有下述待修紀錄。沒有宣稱所有產品問題都曾以未修正 App runtime 重現紅例：
 
 - 原選擇器先比較全清單最大日期，再排除一個先前 ID；未來日期的舊 A 可遮住較舊日期的新 N，已知 B 換序也可能被當成候選。現在先排除所有已知項目及影片，再沿既有日期／相機順序選靜態候選。
 - 原最近媒體工作在新快門 ACK 後才退休。現在新快門進入時就失效舊工作；ACK 未回前放行的舊 listing／thumbnail 不能發布。
@@ -25,7 +25,7 @@
 
 ## 已準備的因果測試
 
-以下是新增／延伸的 source 測試清單，數量不是通過數，不能與過去 CI 相加：
+以下是新增／延伸的測試清單；執行結果另列於下節，不能將方法數與不同 head 的 CI 通過數相加：
 
 - `MediaLibraryTests`：新增 2 個選擇反例，涵蓋 known {A,B}、A 未來日期／N 舊日期、只回 B、未知日期、RAW/JPEG 相機順序及影片排除；既有單 ID 測試更新為集合契約。
 - `CaptureMediaJourneyTests`：17 個 App 測試方法，使用真正 `CameraAppState → CameraSession → DesktopBridgeClient` 與 synthetic transport。包括四輪舊檔／503 後 NOT_READY、四輪全失敗的 readFailed、失敗後成功空清單清除提示、GET-only 重查且 shutter/AF 計數不增、已載入相簿集合、快門 ACK 前舊 listing／thumbnail、MEDIA busy 零請求、縮圖／display 失敗與原檔 bytes、同 ID 關閉重開／新 session 的成功與失敗、同名不同 ID 分享、原檔失敗／取消／重試、內容事件保護 review／選中但未列出的項目、舊原檔工作釋放時新 session 的 busy/share/error，以及明確刪除對照。
@@ -46,12 +46,22 @@ ShareLink 可見只證明 App 有原檔可交給使用者，不能宣稱外部 F
 - `simulator/main.py` 與新增 fixture 測試的 Python AST 可解析。
 - `git diff --check` 通過；獨立 source review 未找出已確認的 Swift 語法／owner 路徑 blocker，指出的反例缺口已補入。這不是 compiler 結果。
 
-尚未執行：Python fixture runtime、Swift Core tests、App 編譯／unit tests、iPhone Simulator UI、必要聚合／安全 gate。此環境沒有 Swift/Xcode；未安裝新工具。本地正常 CC／安全 hooks 已執行，但不構成 runtime 證據；draft PR 及同源 CI 的實際狀態以該 PR 記錄為準。後續正常 macOS CI 必須證明真正編譯、影像解碼、alert 呈現、雙語幾何與完整互動。若 runtime 失敗，保留 exact-head 紅例後修正，不能用 source 檢查替代。
+此環境沒有 Swift/Xcode；未安裝新工具。本地正常 CC／安全 hooks 已執行，但不構成 App runtime 證據；draft PR 及同源 CI 的實際狀態以該 PR 記錄為準。正常 macOS CI 必須證明真正編譯、影像解碼、alert 呈現、雙語幾何與完整互動；修正版不可沿用首輪綠燈。
+
+### 首輪 CI 與窄修
+
+原 head `09544229ced3c1e45ef23c6ce447a30de38989e5` 的 [CI 37699137960](https://github.com/js051/open-eos-control/actions/runs/37699137960) 已證明 App build、App 125/125（含新增 17 方法）、Swift Core 245/245、simulator 56 例與 Ruff、Desktop Bridge、Windows、Android JVM／APK 成功。iOS UI 20 個方法中 18 個通過、2 個失敗（3 個 assertion failures）；Android API34／36 裝置矩陣其後亦成功；原 run 的聚合結果仍因兩個 UI 方法失敗而不通過。這不是全批通過，也不拿部分結果替代最終 head 驗收。
+
+- 新 recovery journey 的英文流程已到原檔分享、部分清單未列出提示、同照片與分享保留，失敗在用 `isHittable == false` 驗停用導航。Apple 的 [isHittable](https://developer.apple.com/documentation/xcuiautomation/xcuielement/ishittable) 描述命中點，而 [isEnabled](https://developer.apple.com/documentation/xcuiautomation/xcuielementattributes/isenabled) 才是互動啟用狀態。修正版以最多 5 秒確認兩個導航均未提供或 disabled，保留照片／分享／位置、一次快門、AF 與原檔計數保障。沒有改 App 產品 source 或宣稱 UIKit 內部根因已定位。
+- 隨後原事件 UI 測試觀測到 poll count=1、delivery count=1、active requests=0，等候 active=1 超時。原 simulator 的待決 poll 在 `/ccapi/test/reset` 後仍直接使用全域 cursor 與 counter。新增原標準 `unittest.IsolatedAsyncioTestCase` 三案：舊 handler 消耗新事件、舊 finally 把新 active 1 減成 0，兩案在原 source 真紅；當前 owner 的事件交付正向對照通過。
+- 只在 simulator 加 reset generation 的 request 歸屬檢查，舊 poll 不讀取新事件，也不在 finally 扣新 counter。相同三案於 23:28:01 UTC 全過；兩輪來源 hash 無漂移，各約 0.1 秒測試時間。保留原 long-poll 時限與當前 owner 清理。此修復符合 UI 原觀測，但完整 macOS UI 仍須由新 head 正常 CI 驗證。
+
+沒有刪除失敗案例、放寬一次拍攝／原檔 ownership 契約、改必要 checks 或重啟先前停止的安裝。UI 修正版及 simulator 完整 pytest／其餘受影響矩陣尚待新 head 執行。
 
 ## Release Assessment
 
 - 最新真正公開 release：`v0.12.0 Development Preview`。repo README／App metadata 已是 `0.13.0`，固定的 0.13.0 候選尚未發布；檔案中的版本不等於已公開發版基準。
 - 建議 impact：`patch`，修復既有一次拍照至預覽／原檔交付及恢復流程；沒有新協定或新的平台能力聲明。
 - 本批沒有改版號、合併或發版。
-- 未解 blocker：全部 runtime／exact-head CI 尚待執行；已同步接受的 PC #218 main。這份 source 候選不能宣稱 PR ready。
+- 未解 blocker：兩個 UI 紅燈的修正版尚待最終 exact-head CI；已同步接受的 PC #218 main。部分 runtime 通過不構成 PR ready。
 - 物理裝置：沒有新增相機、實體 iPhone、Wi-Fi 弱網或外部儲存接收驗證。

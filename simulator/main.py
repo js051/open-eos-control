@@ -305,6 +305,7 @@ def initial_state() -> dict[str, object]:
 
 
 state = initial_state()
+_event_poll_reset_generation = 0
 uploaded_media_payloads: dict[str, tuple[bytes, str]] = {}
 media_upload_lock = asyncio.Lock()
 
@@ -374,6 +375,8 @@ async def health() -> dict[str, bool | str]:
 
 @app.post("/ccapi/test/reset")
 async def reset_test_state() -> dict[str, bool]:
+    global _event_poll_reset_generation
+    _event_poll_reset_generation += 1
     state.clear()
     state.update(initial_state())
     uploaded_media_payloads.clear()
@@ -1675,12 +1678,17 @@ async def canon_poll_event(
 ) -> dict[str, object]:
     if continue_mode is not None:
         raise HTTPException(status_code=422, detail="continue is only valid for CCAPI 1.0")
+    reset_generation = _event_poll_reset_generation
     state["canonical_event_poll_count"] += 1
     state["canonical_event_active_requests"] += 1
     cancel_generation = state["canonical_event_cancel_generation"]
     attempts = {"immediately": 1, "short": 20, "long": 600}[timeout]
     try:
         for _ in range(attempts):
+            # A previous app may leave a long poll alive across a synthetic reset.
+            # It owns neither the new event cursor nor the new active-request count.
+            if reset_generation != _event_poll_reset_generation:
+                return {}
             matching = [
                 event
                 for event in state["event_history"]
@@ -1696,7 +1704,8 @@ async def canon_poll_event(
             await asyncio.sleep(0.05)
         return {}
     finally:
-        state["canonical_event_active_requests"] -= 1
+        if reset_generation == _event_poll_reset_generation:
+            state["canonical_event_active_requests"] -= 1
 
 
 @app.delete("/ccapi/ver110/event/polling", status_code=204)

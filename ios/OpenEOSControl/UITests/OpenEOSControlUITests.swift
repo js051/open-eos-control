@@ -769,7 +769,20 @@ final class OpenEOSControlUITests: XCTestCase {
             _ = try XCTUnwrap(waitForLabel(app.staticTexts["media-preview-position"], containing: outsideList, timeout: 15) ? true : nil)
             _ = try XCTUnwrap(app.images["media-preview-image"].exists ? true : nil)
             _ = try XCTUnwrap(waitForInteraction(share, timeout: 5) ? true : nil)
-            _ = try XCTUnwrap(!app.buttons["media-preview-previous"].isHittable && !app.buttons["media-preview-next"].isHittable ? true : nil)
+            // isHittable describes a computed hit point, not the disabled interaction contract.
+            // SwiftUI may omit a transparent disabled control from the accessibility tree.
+            let navigationUnavailable = XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in
+                    let previous = app.buttons["media-preview-previous"]
+                    let next = app.buttons["media-preview-next"]
+                    return (!previous.exists || !previous.isEnabled) && (!next.exists || !next.isEnabled)
+                },
+                object: nil
+            )
+            _ = try XCTUnwrap(
+                XCTWaiter.wait(for: [navigationUnavailable], timeout: 5) == .completed ? true : nil,
+                "Navigation must be unavailable while the selected JPEG is outside the current listing"
+            )
             addScreenshot(name: "capture-review-recovered-original-share-\(language)")
         }
     }
