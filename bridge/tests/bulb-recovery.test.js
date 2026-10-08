@@ -60,6 +60,21 @@ function context(status = {}) {
 }
 
 async function run() {
+  const chineseStart = source.indexOf('    "zh-TW": {');
+  const languageSources = [source.slice(source.indexOf("    en: {"), chineseStart),
+    source.slice(chineseStart, source.indexOf("\n  };", chineseStart))];
+  for (const key of ["retryBulbStop", "bulbReleaseConfirmed", "bulbReleaseUnconfirmed",
+    "bulbDisconnectWarning", "previousShutterWarning"]) {
+    const translations = languageSources.map((language) => {
+      const definitions = [...language.matchAll(new RegExp(`^\\s+${key}: "([^"]*)",$`, "gm"))];
+      assert.equal(definitions.length, 1, `${key} must be unique in each language`);
+      return definitions[0][1];
+    });
+    assert.equal(translations.some((text) => /Bulb|長曝光/.test(text)), false,
+      "Shared recovery text must cover shutter and autofocus without claiming a Bulb exposure");
+  }
+  assert.match(source, /stopBulb: "Stop Bulb exposure"/);
+  assert.match(source, /stopBulb: "停止 Bulb 長曝光"/);
   {
     const test = context({ bulbExposureActive: true, mode: "Manual" });
     test.featureSupported = () => false;
