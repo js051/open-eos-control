@@ -211,26 +211,37 @@ private fun selectReviewCandidate(
     it.id !in previousIds && (!videosOnly || it.isVideo)
 })
 
+internal sealed interface CaptureReviewResult {
+    data class Found(val item: CameraMediaItem) : CaptureReviewResult
+    data object NotReady : CaptureReviewResult
+    data object ReadFailed : CaptureReviewResult
+}
+
 internal suspend fun awaitCaptureReviewItem(
     previousIds: Set<String>,
     retryDelaysMillis: LongArray,
     videosOnly: Boolean = false,
     loadRecentMedia: suspend () -> List<CameraMediaItem>,
-): CameraMediaItem? {
+): CaptureReviewResult {
+    var readSucceeded = false
     for (attempt in 0..retryDelaysMillis.size) {
         val candidate = try {
-            selectReviewCandidate(loadRecentMedia(), previousIds, videosOnly)
+            val items = loadRecentMedia()
+            readSucceeded = true
+            selectReviewCandidate(items, previousIds, videosOnly)
         } catch (exception: CancellationException) {
             throw exception
         } catch (_: Exception) {
             null
         }
         if (candidate != null) {
-            return candidate
+            return CaptureReviewResult.Found(candidate)
         }
         if (attempt < retryDelaysMillis.size) delay(retryDelaysMillis[attempt])
     }
-    return null
+    // A failed final round does not erase a successful listing earlier in this check.
+    // Keep exceptions out of UI state; no successful read means availability is unknown.
+    return if (readSucceeded) CaptureReviewResult.NotReady else CaptureReviewResult.ReadFailed
 }
 
 internal fun mediaThumbnailSampleSize(width: Int, height: Int, maximumEdge: Int = MEDIA_THUMBNAIL_MAX_EDGE): Int {
@@ -3805,7 +3816,7 @@ class CameraViewModel(
         val state = _uiState.value
         val attempt = pendingCaptureReview ?: return
         if (!state.connected || state.previewMode || state.isBusy(CameraOperation.CAPTURE) || state.isBusy(CameraOperation.MEDIA) ||
-            state.captureReviewLoading || state.captureReviewStatus != CaptureReviewStatus.NOT_READY ||
+            state.captureReviewLoading || !state.captureReviewStatus.canRetry ||
             attempt.sessionGeneration != cameraSessionGeneration) return
         refreshCaptureReview()
     }
@@ -3820,7 +3831,7 @@ class CameraViewModel(
         fun stillOwnsReview() = generation == captureReviewGeneration &&
             sessionGeneration == cameraSessionGeneration && _uiState.value.info === connection
         captureReviewJob = viewModelScope.launch {
-            val selected = awaitCaptureReviewItem(
+            val result = awaitCaptureReviewItem(
                 previousIds = attempt?.previousIds.orEmpty(),
                 retryDelaysMillis = CAPTURE_REVIEW_RETRY_DELAYS_MILLIS,
                 videosOnly = attempt?.videosOnly == true,
@@ -3841,14 +3852,17 @@ class CameraViewModel(
                 }
             }
             if (!stillOwnsReview()) return@launch
-            if (selected == null) {
-                _uiState.update { it.copy(
+            when (result) {
+                is CaptureReviewResult.Found -> publishCaptureReview(result.item, generation)
+                CaptureReviewResult.NotReady, CaptureReviewResult.ReadFailed -> _uiState.update { it.copy(
                     captureReviewLoading = false,
-                    captureReviewStatus = if (attempt != null) CaptureReviewStatus.NOT_READY else CaptureReviewStatus.IDLE,
+                    captureReviewStatus = when {
+                        attempt == null -> CaptureReviewStatus.IDLE
+                        result == CaptureReviewResult.ReadFailed -> CaptureReviewStatus.READ_FAILED
+                        else -> CaptureReviewStatus.NOT_READY
+                    },
                 ) }
-                return@launch
             }
-            publishCaptureReview(selected, generation)
         }.also { job ->
             job.invokeOnCompletion {
                 if (captureReviewJob === job) captureReviewJob = null
@@ -3861,7 +3875,11 @@ class CameraViewModel(
         val attempt = pendingCaptureReview
         val selected = selectReviewCandidate(items, attempt?.previousIds.orEmpty(), attempt?.videosOnly == true)
         // Event/gallery refreshes must not turn the old image into this attempt's result.
-        if (attempt != null && selected == null) return
+        if (attempt != null && selected == null) {
+            // A successful event/gallery listing resolves read failure, not the pending capture.
+            _uiState.update { it.copy(captureReviewStatus = CaptureReviewStatus.NOT_READY) }
+            return
+        }
         if (selected == null) {
             cancelCaptureReview()
             _uiState.update {

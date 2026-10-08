@@ -205,6 +205,7 @@ fun CaptureReviewButton(
     val description = when {
         state.captureReviewStatus == CaptureReviewStatus.SEARCHING -> stringResource(R.string.capture_review_searching)
         state.captureReviewStatus == CaptureReviewStatus.NOT_READY -> stringResource(R.string.capture_review_not_ready)
+        state.captureReviewStatus == CaptureReviewStatus.READ_FAILED -> stringResource(R.string.capture_review_read_failed)
         state.captureStatusReadbackFailed -> stringResource(R.string.capture_status_readback_failed)
         item != null -> stringResource(R.string.open_latest_media_named, item.name)
         else -> stringResource(R.string.open_latest_media)
@@ -244,6 +245,7 @@ fun CaptureReviewButton(
                     } else {
                         Icon(
                             painterResource(when {
+                                state.captureReviewStatus == CaptureReviewStatus.READ_FAILED -> LucideR.drawable.lucide_ic_triangle_alert
                                 waitingForNewMedia -> LucideR.drawable.lucide_ic_clock
                                 state.captureStatusReadbackFailed -> LucideR.drawable.lucide_ic_triangle_alert
                                 else -> LucideR.drawable.lucide_ic_images

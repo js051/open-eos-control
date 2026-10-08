@@ -511,6 +511,7 @@
     <string name="capture_status_readback_failed">快門指令已確認，但隨後的相機狀態讀取失敗。</string>
     <string name="capture_review_searching">正在尋找新出現的素材…</string>
     <string name="capture_review_not_ready">尚未找到新出現的素材。</string>
+    <string name="capture_review_read_failed">無法讀取最近素材，目前無法確認是否有新素材。</string>
     <string name="capture_review_latest_visible">目前可開啟最新可見素材。</string>
     <string name="capture_review_explanation">只會查詢相機的最近素材，不會再次發送相機控制指令。新出現的素材無法確定與這次拍攝或錄影相對應。</string>
     <string name="capture_review_retry">重新查詢最近素材</string>

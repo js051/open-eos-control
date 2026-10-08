@@ -52,8 +52,54 @@ class MediaLibraryTest {
             if (calls < 3) listOf(old) else listOf(new, old)
         }
 
-        assertEquals("new", selected?.id)
+        assertEquals(CaptureReviewResult.Found(new), selected)
         assertEquals(3, calls)
+    }
+
+    @Test
+    fun captureReviewDistinguishesFailedReadsFromSuccessfulEmptyOrKnownOnlyListings() = runTest {
+        val old = media("old", "OLD.JPG")
+        for (successfulRound in -1..3) {
+            for (items in listOf(emptyList(), listOf(old))) {
+                var calls = 0
+                val result = awaitCaptureReviewItem(setOf("old"), longArrayOf(0, 0, 0)) {
+                    if (calls++ != successfulRound) throw IOException("Synthetic private detail")
+                    items
+                }
+                assertEquals(if (successfulRound < 0) CaptureReviewResult.ReadFailed else CaptureReviewResult.NotReady, result)
+                assertEquals(4, calls)
+            }
+        }
+    }
+
+    @Test
+    fun captureReviewFindsVideoAfterFailedAndIneligibleSuccessfulRounds() = runTest {
+        val photo = media("new-photo", "NEW.JPG")
+        val video = media("new-video", "NEW.MP4", kind = "video")
+        var calls = 0
+        val result = awaitCaptureReviewItem(emptySet(), longArrayOf(0, 0, 0), videosOnly = true) {
+            when (calls++) {
+                0 -> throw IOException("Synthetic failure")
+                1 -> listOf(photo)
+                else -> listOf(photo, video)
+            }
+        }
+        assertEquals(CaptureReviewResult.Found(video), result)
+        assertEquals(3, calls)
+    }
+
+    @Test
+    fun captureReviewCancellationAfterAReadFailureStopsRatherThanReturningAnOutcome() = runTest {
+        var calls = 0
+        try {
+            awaitCaptureReviewItem(emptySet(), longArrayOf(0, 0, 0)) {
+                if (calls++ == 0) throw IOException("Synthetic failure")
+                throw CancellationException("stop")
+            }
+            org.junit.Assert.fail("Cancellation must propagate")
+        } catch (_: CancellationException) {
+            assertEquals(2, calls)
+        }
     }
 
     @Test
