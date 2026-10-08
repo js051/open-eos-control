@@ -28,3 +28,25 @@ PR #219 的 iOS 拍後 JPEG 修正仍受先前 Android API 36 崩潰調查影響
 ## Release Assessment
 
 本補證 impact 為 `none`，沒有產品可散布行為變更。PR #219 整體既有 patch 評估不因本文件改變。最新公開版基線仍為 v0.12.0 Development Preview；此批不改版本、合併 main 或發版。實體 EOS、Android/iPhone 與弱網相機驗證仍待。
+
+
+## 同源 CI 的獨立 iOS fixture 失敗與修正
+
+`46e90049606ce74986839257b92825bffcf52c99` 的 [CI 37750631884](https://github.com/js051/open-eos-control/actions/runs/37750631884) 中，iOS Core job `113222809739` 於 08:35:15 UTC 以 245 tests / 1 failure 結束。`testLostPressResponsePreservesReleaseWithoutReplayingTheFullPressOnTheWire` 的 POST / truncatedResponse / pooled 變體，在原 line 99 的 peer-errors 斷言報 `incompleteRequest`。先前單次 full_press、release 重試、idle、close 不新增請求等斷言沒有報失敗。此為獨立 required-gate failure，不是 Android Compose 崩潰的根因。
+
+Fixture 原 `recv <= 0` 一律拋 `incompleteRequest`，無法區分沒有任何新 request bytes 時的正常 idle EOF、半截 header/body，或真正 recv 錯誤。依 [Apple recv(2)](https://developer-mdn.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/recv.2.html)，有序關閉會回傳 0；fixture 現在只對這種零累積 bytes EOF 回傳 no-request。半截 request 仍失敗並記錄 byte count / header-complete / expected-body-length；負值僅重試 EINTR，其餘保留 recv errno；錯誤附合成 connection number，不印私密 request。
+
+新增四個 XCTest 方法：完整 GET 後的 idle EOF、沒有 request bytes 的 EOF、半截 header/body EOF 仍失敗、invalid socket 的 EBADF 仍失敗。socketpair 控制在讀前 shutdown writer write-half，兩端 receive/send timeout 皆檢查設定為 3 秒。沒有修改 production HTTP transport、TCP reuse、原 no-replay / release assertions 或 required gate。
+
+此修正經獨立來源審查；本地沒有 Swift/Xcode，未宣稱 XCTest 編譯／執行通過。原失敗缺 byte/errno 診斷，不能回溯宣稱它必然是 idle EOF；新 fixture 若再失敗，需按新增 framing evidence 繼續調查。修正尚待下一個 exact-head macOS CI；原矩陣已自然完成，沒有取消或重跑原 head。
+
+
+### 46e9004 原矩陣終態
+
+CI `37750631884` 已自然結束 `failure`，唯一失敗平台為前述 iOS Core，`ci-complete` 正確失敗。iOS App/UI、Android JVM/APK 及其他適用 gate 成功。
+
+- API34 artifact `11538943564`，SHA-256 `4637150341d6984322ebad76d4b391d437c5cde3c981cd4626403fe4c447661d`：原始 XML 356 tests / 0 failure / 0 error / 0 skip。
+- API36 artifact `11539867617`，SHA-256 `30b42c5230cb3cc076b93d428313c7029674ce8024b72f87d8bd246447a07cde`：原始 XML 同為 356 / 0 / 0 / 0。
+- 兩 API 的原 overlap 與新 control 皆走到原檔 bytes、frame/idle 及最終斷言。control 首次 IME observation 已是 false，皆只觀察一次，API34 為 0ms、API36 為 12ms。因此本輪沒有建立 visible→hidden 時序對照，更不能說已重現／修復早先 Compose 崩潰。
+
+保留原 e3f84fde 崩潰、884aaa8c 診斷綠燈及本輪結果為不同證據。下一 head 只修正嚴格的 iOS fixture EOF 分類，仍需完整 CI；不能將這份 Android 通過跨 head 當作未來 run 已成功。

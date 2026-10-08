@@ -7,6 +7,88 @@ import XCTest
 /// This fixture accepts real loopback TCP connections. In particular, URLProtocol is not
 /// involved: request counts include any retries performed below CameraHTTPTransport.
 final class URLSessionShutterWireTests: XCTestCase {
+    func testIdlePooledConnectionEOFIsNotAnIncompleteRequest() throws {
+        try withSocketPair { reader, writer in
+            let request = Data("GET /ccapi HTTP/1.1\r\nHost: localhost\r\n\r\n".utf8)
+            try writeFixtureBytes(request, to: writer)
+            XCTAssertEqual(Darwin.shutdown(writer, SHUT_WR), 0)
+            let parsed = try XCTUnwrap(LoopbackShutterPeer.readRequest(reader))
+            XCTAssertEqual(parsed.method, "GET")
+            XCTAssertEqual(parsed.path, "/ccapi")
+            XCTAssertEqual(parsed.body, Data())
+            XCTAssertNil(try LoopbackShutterPeer.readRequest(reader),
+                         "Orderly EOF between complete requests must not invent an incomplete request")
+        }
+    }
+
+    func testUnwrittenConnectionEOFDoesNotInventARequest() throws {
+        try withSocketPair { reader, writer in
+            XCTAssertEqual(Darwin.shutdown(writer, SHUT_WR), 0)
+            XCTAssertNil(try LoopbackShutterPeer.readRequest(reader))
+        }
+    }
+
+    func testReceiveErrorIsNotTreatedAsIdleEOF() throws {
+        do {
+            _ = try LoopbackShutterPeer.readRequest(-1)
+            XCTFail("An invalid socket must remain a receive error")
+        } catch LoopbackShutterPeerError.systemCall(let operation, let code) {
+            XCTAssertEqual(operation, "recv")
+            XCTAssertEqual(code, EBADF)
+        }
+    }
+
+    func testPartialRequestEOFStillFailsWithFramingEvidence() throws {
+        let cases: [(wire: String, headerComplete: Bool, expectedBodyBytes: Int?)] = [
+            ("POST /ccapi HTTP/1.1\r\nContent-Length: 9\r\n", false, nil),
+            ("POST /ccapi HTTP/1.1\r\nContent-Length: 9\r\n\r\n{", true, 9),
+        ]
+        for item in cases {
+            try withSocketPair { reader, writer in
+                let bytes = Data(item.wire.utf8)
+                try writeFixtureBytes(bytes, to: writer)
+                XCTAssertEqual(Darwin.shutdown(writer, SHUT_WR), 0)
+                do {
+                    _ = try LoopbackShutterPeer.readRequest(reader)
+                    XCTFail("EOF after partial request bytes must remain a failure")
+                } catch LoopbackShutterPeerError.incompleteRequest(let received, let headerComplete, let expectedBodyBytes) {
+                    XCTAssertEqual(received, bytes.count)
+                    XCTAssertEqual(headerComplete, item.headerComplete)
+                    XCTAssertEqual(expectedBodyBytes, item.expectedBodyBytes)
+                }
+            }
+        }
+    }
+
+    private func withSocketPair(_ body: (Int32, Int32) throws -> Void) throws {
+        var sockets = [Int32](repeating: -1, count: 2)
+        guard Darwin.socketpair(AF_UNIX, SOCK_STREAM, 0, &sockets) == 0 else {
+            throw LoopbackShutterPeerError.systemCall("socketpair", errno)
+        }
+        defer { Darwin.close(sockets[0]); Darwin.close(sockets[1]) }
+        var timeout = timeval(tv_sec: 3, tv_usec: 0)
+        for socket in sockets {
+            for option in [SO_RCVTIMEO, SO_SNDTIMEO] {
+                guard setsockopt(socket, SOL_SOCKET, option, &timeout, socklen_t(MemoryLayout<timeval>.size)) == 0 else {
+                    throw LoopbackShutterPeerError.systemCall("setsockopt", errno)
+                }
+            }
+        }
+        try body(sockets[0], sockets[1])
+    }
+
+    private func writeFixtureBytes(_ bytes: Data, to socket: Int32) throws {
+        try bytes.withUnsafeBytes { buffer in
+            var offset = 0
+            while offset < buffer.count {
+                let count = Darwin.send(socket, buffer.baseAddress!.advanced(by: offset), buffer.count - offset, 0)
+                if count < 0, errno == EINTR { continue }
+                guard count > 0 else { throw LoopbackShutterPeerError.systemCall("send", errno) }
+                offset += count
+            }
+        }
+    }
+
     func testOrdinaryStillFalseUsesExactManualMethodAndNeverReplaysLostPressOnWire() async throws {
         for endpoint in ShutterRecoveryEndpoint.variants {
             for fault in LoopbackShutterPeer.PressFault.allCases {
@@ -247,7 +329,7 @@ private enum LoopbackShutterPeerError: Error {
     case systemCall(String, Int32)
     case malformedRequest
     case requestTooLarge
-    case incompleteRequest
+    case incompleteRequest(receivedBytes: Int, headerComplete: Bool, expectedBodyBytes: Int?)
 }
 
 private final class LoopbackShutterPeer: @unchecked Sendable {
@@ -391,7 +473,7 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
             _ = setsockopt(connection, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
             do {
                 while !isStopped {
-                    let request = try readRequest(connection)
+                    guard let request = try Self.readRequest(connection) else { break }
                     lock.lock()
                     recorded.append(request)
                     recordedConnectionIDs.append(connectionNumber)
@@ -400,7 +482,7 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
                     if !keepAlive { break }
                 }
             } catch {
-                if !isStopped { recordFailure("Loopback peer failed: \(error)") }
+                if !isStopped { recordFailure("Loopback peer connection=\(connectionNumber) failed: \(error)") }
             }
             lock.lock()
             activeConnection = nil
@@ -410,7 +492,7 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
         }
     }
 
-    private func readRequest(_ socket: Int32) throws -> ShutterRecoveryRequest {
+    fileprivate static func readRequest(_ socket: Int32) throws -> ShutterRecoveryRequest? {
         var bytes = Data()
         let delimiter = Data("\r\n\r\n".utf8)
         var headerEnd: Int?
@@ -429,7 +511,17 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
             let count = buffer.withUnsafeMutableBytes { raw in
                 Darwin.recv(socket, raw.baseAddress!, raw.count, 0)
             }
-            guard count > 0 else { throw LoopbackShutterPeerError.incompleteRequest }
+            if count < 0, errno == EINTR { continue }
+            guard count >= 0 else { throw LoopbackShutterPeerError.systemCall("recv", errno) }
+            if count == 0 {
+                // HTTP keep-alive does not require the client to send another request. Only
+                // orderly EOF before any new bytes is idle closure; partial requests still fail.
+                if bytes.isEmpty { return nil }
+                throw LoopbackShutterPeerError.incompleteRequest(
+                    receivedBytes: bytes.count, headerComplete: headerEnd != nil,
+                    expectedBodyBytes: headerEnd == nil ? nil : bodyLength
+                )
+            }
             bytes.append(contentsOf: buffer.prefix(count))
             guard bytes.count <= 64 * 1024 else { throw LoopbackShutterPeerError.requestTooLarge }
             if headerEnd == nil, let range = bytes.range(of: delimiter) {
