@@ -692,3 +692,116 @@ jobs:
           require_job "${{ needs.secret-scan.outputs.ios_core }}" "${{ needs.ios-core.result }}" ios-core
           require_job "${{ needs.secret-scan.outputs.ios_app }}" "${{ needs.ios-app.result }}" ios-app
           echo "PR CI complete for $GITHUB_SHA"
+
+# REVIEW CANDIDATE ONLY. Insert this one job under existing jobs after review.
+# Promote launcher.py to scripts/validation/android_normal_app_job.py first.
+# Do not add this optional job to ci-complete.needs or modify any existing gate.
+  android-normal-app-api36:
+    needs: secret-scan
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.repository == 'js051/open-eos-control' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'test/android-normal-app-media-acceptance'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      EOS_AVD_NAME: eos_normal_${{ github.run_id }}_${{ github.run_attempt }}
+      EOS_HARNESS_SHA: ${{ github.sha }}
+      EOS_HEAD_REF: ${{ github.head_ref }}
+      EOS_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+      EOS_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+    steps:
+      - name: Read-only KVM and fresh-output preflight
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          EOS_ACCEPTANCE_DIR="$(mktemp -d "$RUNNER_TEMP/eos-normal-app-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-XXXXXX")"
+          printf 'EOS_ACCEPTANCE_DIR=%s\n' "$EOS_ACCEPTANCE_DIR" >> "$GITHUB_ENV"
+          printf 'evidence_directory=%s\n' "$EOS_ACCEPTANCE_DIR" >> "$GITHUB_OUTPUT"
+          printf '%s\n' '{"outcome":"BLOCKED","reason":"Preparation has not completed","final_acceptance":false,"release_hold":true,"original_root_cause":"UNKNOWN","visual_review":{"status":"PENDING"}}' > "$EOS_ACCEPTANCE_DIR/job-result.json"
+          if [[ ! -c /dev/kvm || ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+            printf '%s\n' '{"outcome":"BLOCKED","reason":"/dev/kvm lacks existing read/write access; no permissions change or CPU fallback is authorized","final_acceptance":false,"release_hold":true,"original_root_cause":"UNKNOWN","visual_review":{"status":"PENDING"}}' > "$EOS_ACCEPTANCE_DIR/job-result.json"
+            exit 2
+          fi
+          stat -c 'device=%n mode=%a uid=%u gid=%g' /dev/kvm > "$EOS_ACCEPTANCE_DIR/kvm-preflight.txt"
+          test ! -e "$HOME/.android/avd/$EOS_AVD_NAME.avd"
+          test ! -e "$HOME/.android/avd/$EOS_AVD_NAME.ini"
+
+      - name: Checkout actual PR merge fixture and driver
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+
+      - name: Checkout fixed accepted app source separately
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 65fbabf00c78924228ec7cbfe22d733ef806094f
+          path: accepted-app
+          persist-credentials: false
+
+      - name: Set up JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-read-only: true
+
+      - name: Prepare exact fixture and build ordinary isolated APK
+        id: prepare
+        timeout-minutes: 14
+        run: python harness/scripts/validation/android_normal_app_job.py prepare
+
+      - name: Run one normal-app journey on fresh API 36
+        id: scenario
+        timeout-minutes: 27
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.34.0
+        with:
+          api-level: 36
+          target: default
+          arch: x86_64
+          profile: pixel_5
+          avd-name: ${{ env.EOS_AVD_NAME }}
+          force-avd-creation: true
+          emulator-port: 5554
+          emulator-boot-timeout: 900
+          disable-linux-hw-accel: false
+          disable-animations: false
+          disable-spellchecker: false
+          enable-hw-keyboard: false
+          emulator-options: -accel on -wipe-data -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          pre-emulator-launch-script: python harness/scripts/validation/android_normal_app_job.py configure-avd
+          script: python harness/scripts/validation/android_normal_app_job.py run
+
+      - name: Verify owned-process cleanup and preserve outcome
+        if: always() && steps.prepare.outcome == 'success'
+        timeout-minutes: 1
+        env:
+          EOS_ACTION_OUTCOME: ${{ steps.scenario.outcome }}
+        run: python harness/scripts/validation/android_normal_app_job.py finalize
+
+      - name: Upload normal-app evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: normal-app-api36-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.preflight.outputs.evidence_directory }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: false
