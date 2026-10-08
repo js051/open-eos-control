@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -76,9 +78,9 @@ def test_manual_press_uses_choice_and_exact_advertised_method_then_releases_with
     ]
 
 
-def test_false_is_rejected_for_gphoto_without_camera_calls_and_legacy_default_remains_usable():
+def test_false_is_rejected_for_gphoto_without_camera_calls_and_legacy_default_remains_usable(tmp_path: Path):
     runner = FakeRunner()
-    with TestClient(create_app(engine=GPhoto2Engine(runner))) as client:
+    with TestClient(create_app(engine=GPhoto2Engine(runner, capture_directory=tmp_path))) as client:
         session = client.post("/v1/session", json={}).json()["id"]
         assert client.get(f"/v1/session/{session}/capabilities").json().get("shutterAutofocusSupported", False) is False
         before = list(runner.commands)
@@ -88,7 +90,8 @@ def test_false_is_rejected_for_gphoto_without_camera_calls_and_legacy_default_re
         assert response.json()["error"]["feature"] == "STILL_CAPTURE"
         assert response.json()["error"]["engine"] == "libgphoto2"
         assert runner.commands == before
-        assert client.post(f"/v1/session/{session}/capture/still").status_code == 200
+        legacy_capture = client.post(f"/v1/session/{session}/capture/still")
+        assert legacy_capture.status_code == 200, legacy_capture.text
 
 
 def test_get_only_shutter_does_not_advertise_choice_or_dispatch_false():

@@ -313,9 +313,29 @@ Errors must name the feature and engine so the UI can disable controls and show 
 Pydantic request validation also uses this envelope with code `INVALID_REQUEST`, so clients do not need a second parser for malformed input responses.
 
 
-## CCAPI Bulb release responsibility
+## CCAPI control stop responsibility
 
-`CameraStatus` adds optional/default-false `shutterReleaseUnconfirmed`. For the CCAPI engine, a lost start or stop response can leave an exact same-session release pending. While the flag is true, `bulbExposureActive` is `null`; it is not proof that exposure is active or stopped. A known successful start still reports `bulbExposureActive: true`. Other engines retain the default false field and do not acquire an unverified equivalent cleanup contract.
+The same stop-only recovery also covers short manual still capture, half-press, and autofocus
+start/stop operations. Before sending the start, the Bridge stores the exact operation, HTTP
+method, stop payload, and originating feature in that session. A missing stop acknowledgement
+returns `SHUTTER_RELEASE_UNCONFIRMED`, makes that responsibility visible in status, and blocks
+conflicting camera writes. The existing `/bulb/stop` recovery endpoint sends only the stored
+stop (including a dedicated AF `stop`); it does not discover a replacement or send a new start.
+This compatibility route does not advertise or observe Bulb support for a short control.
+Close makes one final stop attempt and reports failure if it cannot confirm it. A late PC
+close response may preserve a separate previous-camera warning, but must not reset a newer
+session or overwrite its status, current operation, or diagnostics. The closed
+session's responsibility never transfers to a newly opened session; check the camera itself
+before reconnecting after an unresolved close.
+
+For `POST /capture/still`, HTTP 502 with `CAPTURE_STATUS_READBACK_FAILED` has a narrow meaning:
+the camera acknowledged the shutter and, for manual capture, its release, but the separate
+status read failed. Bridge consumers must retain the warning and may use their
+existing read-only recent-media lookup. They never repeat the shutter automatically. An
+ordinary 502, a lost/rejected shutter acknowledgement, or unconfirmed cleanup does not carry
+this meaning. Finding a JPEG is a media observation, not physical validation of a new exposure.
+
+`CameraStatus` adds optional/default-false `shutterReleaseUnconfirmed`. For the CCAPI engine, a lost start or stop response can leave an exact same-session release pending. For a pending Bulb release, `bulbExposureActive` is `null`; it is not proof that exposure is active or stopped. A known successful Bulb start still reports `bulbExposureActive: true`. A short control does not claim a Bulb exposure. Other engines retain the default false field and do not acquire an unverified equivalent cleanup contract.
 
 `POST /v1/session/{id}/bulb/start` records the camera-advertised manual release method/path before sending `full_press`. A failed compensating release returns `SHUTTER_RELEASE_UNCONFIRMED` in the existing error envelope. A repeated start or other implemented camera mutation is rejected with HTTP 409 until release is confirmed. Status/capability reads, `POST .../bulb/stop`, recording stop, Live View/event stop and disconnect remain available. Unsupported CCAPI upload stays unsupported.
 
@@ -323,4 +343,4 @@ Pydantic request validation also uses this envelope with code `INVALID_REQUEST`,
 
 `DELETE /v1/session/{id}` keeps the camera registration reserved while final cleanup runs, then removes the session even on cleanup failure. An unresolved release returns HTTP 502 with a camera-side recovery warning rather than false-success 204. That removed session cannot be retried; the old release is never sent in a replacement session. Client UI must distinguish an old-connection warning from a current-session stop obligation. Closing a browser or process cannot guarantee a physical camera was stopped.
 
-The PC UI implements stop-only recovery and a separately acknowledged previous-connection warning. Android Bridge now retains a session-bound responsibility before start, exposes persistent Stop-only recovery, and accepts only literal Boolean proof from the same Stop or its fresh status readback. A normal acknowledged start/stop remains compatible with an older Bridge; an ambiguous operation cannot be cleared by missing legacy fields. iOS recovery is a separate follow-up. This is deterministic protocol coverage, not physical-camera validation.
+The PC UI implements stop-only recovery and a separately acknowledged previous-connection warning. Before a Bulb start, Android Bridge retains a session-bound responsibility, exposes persistent Stop-only recovery, and accepts only literal Boolean proof from the same Stop or its fresh status readback. For short autofocus, half-press, and manual still controls, the Bridge server retains the exact stop before dispatch; Android adopts that same-session responsibility from error or status evidence. A normal acknowledged start/stop remains compatible with an older Bridge; an ambiguous operation cannot be cleared by missing legacy fields. Android maps only the acknowledged-capture readback code into its existing read-only capture review. Shared stop warnings cover shutter or autofocus uncertainty without claiming a Bulb exposure. The iOS acknowledged-capture readback mapping and shared short-control wording remain a separate integration step. This is deterministic protocol coverage, not physical-camera validation.

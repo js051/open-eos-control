@@ -463,7 +463,8 @@ def test_bulb_recovery_has_distinct_accessible_current_and_previous_session_warn
     reset = script.split('function resetSession()', 1)[1].split('function featureSupported', 1)[0]
     assert 'state.shutterReleaseUnconfirmed = false;' in reset
     assert 'state.shutterDisconnectWarning = false;' not in reset
-    for key in ('retryBulbStop', 'bulbReleaseUnconfirmed', 'previousShutterWarning', 'confirmCameraChecked'):
+    for key in ('retryBulbStop', 'bulbReleaseConfirmed', 'bulbReleaseUnconfirmed', 'bulbDisconnectWarning',
+                'previousShutterWarning', 'confirmCameraChecked'):
         assert len(re.findall(rf'^\s+{key}: "', script, flags=re.MULTILINE)) == 2
 
 
