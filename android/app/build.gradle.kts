@@ -1,8 +1,16 @@
+import com.android.build.api.instrumentation.FramesComputationMode
+import com.android.build.api.instrumentation.InstrumentationScope
+import dev.openeos.probe.MeasureWriterVisitorFactory
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// LOCAL DIAGNOSTIC EXPERIMENT. Never merge or publish this probe with a product/release.
+val measureWriterProbe = providers.gradleProperty("eosMeasureWriterProbe").orNull == "true"
+val measureWriterInvocation = providers.gradleProperty("eosMeasureWriterInvocation").orNull
 
 val developmentSigningEnvironment = mapOf(
     "storeFile" to providers.environmentVariable("OEC_ANDROID_SIGNING_STORE_FILE").orNull,
@@ -15,6 +23,16 @@ if (!developmentSigningEnabled && developmentSigningEnvironment.values.any { !it
     throw GradleException("Android development signing requires all OEC_ANDROID_SIGNING_* values.")
 }
 
+// Development Preview publication uses a signed DEBUG APK. Release-variant exclusion alone
+// cannot protect that path: a diagnostic APK must never use the publication signing config.
+if (measureWriterProbe && developmentSigningEnabled) {
+    throw GradleException("The local measure-writer probe cannot use development publication signing.")
+}
+
+if (measureWriterProbe && !Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}").matches(measureWriterInvocation ?: "")) {
+    throw GradleException("The local measure-writer probe requires a fresh eosMeasureWriterInvocation nonce.")
+}
+
 android {
     namespace = "dev.openeos.control"
     compileSdk = 35
@@ -25,7 +43,12 @@ android {
         targetSdk = 35
         versionCode = 29
         versionName = "0.13.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = if (measureWriterProbe) {
+            "dev.openeos.control.diagnostics.MeasureWriterProbeRunner"
+        } else "androidx.test.runner.AndroidJUnitRunner"
+        if (measureWriterProbe) {
+            testInstrumentationRunnerArguments["eosMeasureWriterInvocation"] = measureWriterInvocation!!
+        }
     }
 
     val developmentSigningConfig = if (developmentSigningEnabled) {
@@ -53,6 +76,11 @@ android {
                 "proguard-rules.pro",
             )
         }
+    }
+
+    if (measureWriterProbe) {
+        sourceSets.getByName("debug").java.srcDir("../measureWriterProbe/java")
+        sourceSets.getByName("androidTest").java.srcDir("../measureWriterProbeAndroidTest/java")
     }
 
     compileOptions {
@@ -127,4 +155,17 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
             }
         }
     })
+}
+
+// ALL is essential: MeasureAndLayoutDelegate belongs to an external Compose dependency.
+// Release variants never register a transform or include the diagnostic runtime sources.
+if (measureWriterProbe) {
+    androidComponents.onVariants(androidComponents.selector().withBuildType("debug")) { variant ->
+        variant.instrumentation.transformClassesWith(
+            MeasureWriterVisitorFactory::class.java, InstrumentationScope.ALL,
+        ) {}
+        variant.instrumentation.setAsmFramesComputationMode(
+            FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS,
+        )
+    }
 }

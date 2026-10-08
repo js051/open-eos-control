@@ -608,6 +608,35 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requests.map(\.path), ["/ccapi", "\(path)?kind=display"])
     }
 
+    func testDistinctThumbnailDisplayAndOriginalBytesReachTheOriginalDestination() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi", body: discovery)
+        let path = "/ccapi/ver100/contents/card1/100CANON/IMG_DELIVERY.JPG"
+        let thumbnail = Data([0xFF, 0xD8, 1, 0xFF, 0xD9])
+        let display = Data([0xFF, 0xD8, 2, 0xFF, 0xD9])
+        let original = Data([0xFF, 0xD8, 3, 4, 5, 0xFF, 0xD9])
+        await transport.enqueue(path: "\(path)?kind=thumbnail", headers: ["content-type": "image/jpeg"], body: thumbnail)
+        await transport.enqueue(path: "\(path)?kind=display", headers: ["content-type": "image/jpeg"], body: display)
+        await transport.enqueueDownload(path: path, headers: ["content-type": "image/jpeg"], body: original)
+        let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+        let item = CameraMediaItem(id: path, name: "IMG_DELIVERY.JPG", kind: "image", previewAvailable: true)
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: destination) }
+
+        let loadedThumbnail = try await client.mediaThumbnail(item)
+        let loadedPreview = try await client.mediaPreview(item)
+        let downloaded = try await client.downloadMedia(item, to: destination)
+
+        XCTAssertEqual(loadedThumbnail.data, thumbnail)
+        XCTAssertEqual(loadedPreview.data, display)
+        XCTAssertEqual(try Data(contentsOf: downloaded.fileURL), original)
+        XCTAssertNotEqual(try Data(contentsOf: destination), loadedThumbnail.data)
+        XCTAssertNotEqual(try Data(contentsOf: destination), loadedPreview.data)
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.path), ["/ccapi", "\(path)?kind=thumbnail", "\(path)?kind=display", path])
+        XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+    }
+
     func testDirectCCAPIPreviewRejectsOversizedResponse() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)

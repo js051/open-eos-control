@@ -477,3 +477,17 @@
 "shutter_af_off_description" = "拍攝請求不要求自動對焦；相機或鏡頭設定仍可能使其對焦。";
 "shutter_af_unavailable" = "此連線不支援不要求自動對焦的拍攝。請開啟快門自動對焦或重新連線。";
 "capture_without_autofocus" = "拍照，不要求自動對焦";
+
+// Bounded still-capture review and read-only recovery.
+"capture_review_capturing" = "等待快門回應…";
+"capture_review_searching" = "快門已接受。正在尋找新出現的照片…";
+"capture_review_notReady" = "快門已接受。尚未找到新出現的照片。";
+"capture_review_available" = "找到新出現的照片，可開啟檢視。";
+"capture_review_limited_list" = "僅檢查最近 8 個項目，新出現的照片仍可能是舊檔。";
+"capture_review_retry" = "重新查找 · 不會重拍";
+"capture_review_previous_badge" = "舊圖";
+"open_previous_media_named" = "開啟先前照片 %@";
+"open_visible_media_named" = "開啟新出現的照片 %@";
+"retry_media_preview" = "重新載入預覽";
+"media_viewer_outside_list" = "目前清單未列出";
+"capture_review_readFailed" = "快門已接受，但無法讀取照片清單。請在相機就緒後重新查找。";

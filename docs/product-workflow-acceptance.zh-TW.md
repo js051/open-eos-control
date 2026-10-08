@@ -44,6 +44,10 @@ SAF 保存接續P2原檔目的地旅程：已重現並修正一般resolver刪除
 
 本批在已發布 v0.12.0 的 accepted main `95d6def9cb0ad57b7a40c73cc601540f0a195707` 上整合原三筆功能提交。原矩陣的「拍後自動交付」已有本地候選：Android 10+ 直接 CCAPI、每次連線明確啟用、兩次完整 baseline、新 ID／新鮮大小、單次 JPEG 原檔到 Gallery、背景／換 session 停止及清理警告。此處的「新」只表示 baseline 後新觀察到的 ID，不把快門 ACK、時間戳或檔名當拍攝因果。USB／Bridge、背景長駐及跨程序續傳不在本批。詳細容量／去重／安全停止與真 MediaStore 測試邊界見[本批契約與驗收](validation/android-foreground-jpeg-import-2026-10-06.zh-TW.md)。最終同來源完整本地 JVM／contract、AndroidTest 編譯與 Lint 已通過；exact-head Android runtime gate 仍待閉合，不將原始矩陣缺口標成已接受完成。
 
+## iOS 單次拍攝至原檔交付來源候選（2026-10-07 UTC）
+
+accepted main `1137bee3a35db89bc8fdb1d45f6529e7cafa0e7e` 上已準備獨立 iOS source 批次：沿用 8 候選／4 輪搜尋，先排除同連線已見素材，再讓新出現的靜態候選進入既有全螢幕預覽／原檔 ShareLink；耗盡可只讀重查，清楚區分清單讀取失敗與成功讀取但尚無新項目；舊圖標示清楚，縮圖故障不阻斷交付。預覽與原檔分享 owner、延遲內容事件及部分清單未列出所選素材的反例亦在同批。這是 source 可達性與已寫測試，沒有 Swift／App runtime 紅綠結果；未提交、未建立 PR，須在 PC #218 接受並同步後完成全部適用 exact-head gate。完整範圍與證據界線見[iOS 來源候選與待驗契約](validation/ios-capture-jpeg-delivery-2026-10-07.zh-TW.md)。不把新出現 ID 當曝光因果，也不把 ShareLink 入口當外部 Files／Photos 已保存。
+
 ## 結論
 
 專案已有可執行的拍攝、監看、相簿與傳輸基礎，不能再用「有沒有某個按鈕」評估完成度。接下來應依「可靠控制 → 完整拍攝流程 → 相簿與傳輸 → 易用性與相容性」交付，逐條驗證使用者在錯誤、取消、背景與換相機後仍能完成工作。

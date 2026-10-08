@@ -591,6 +591,8 @@ final class OpenEOSControlUITests: XCTestCase {
             ("traditionalChinese", "zh-Hant", "zh_TW", "開啟", "關閉", "不要求自動對焦"),
         ] {
             _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
+            _ = try await simulatorRequest(path: "/ccapi/test/capture-delivery", method: "POST",
+                                           jsonBody: ["enabled": true, "hidden_listing_reads": 1, "thumbnail_failures": 1])
             _ = try await simulatorRequest(path: "/ccapi/ver100/shooting/settings/shootingmode", method: "PUT",
                                            jsonBody: ["value": "Manual"])
             let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
@@ -613,6 +615,7 @@ final class OpenEOSControlUITests: XCTestCase {
             let unchanged = try await simulatorRequest(path: "/ccapi/test/state")
             _ = try XCTUnwrap((((unchanged["capture_count"] as? NSNumber)?.intValue) == (0)) ? true : nil)
             _ = try XCTUnwrap((((unchanged["canonical"] as? [String: Any])?["shutter_af_requests"] as? [Bool]) == ([])) ? true : nil)
+            _ = try XCTUnwrap(waitForLabel(app.buttons["latest-media-button"], containing: "SIM_0002.PNG", timeout: 10) ? true : nil)
             let shutter = app.buttons["shutter-button"]
             _ = try XCTUnwrap((waitForInteraction(shutter, timeout: 8)) ? true : nil)
             try tapForAsyncTest(shutter)
@@ -625,7 +628,22 @@ final class OpenEOSControlUITests: XCTestCase {
             try tapForAsyncTest(latest)
             _ = try XCTUnwrap((app.buttons["close-media-preview"].waitForExistence(timeout: 15)) ? true : nil)
             _ = try XCTUnwrap((app.images["media-preview-image"].waitForExistence(timeout: 15)) ? true : nil)
-            addScreenshot(name: "shutter-af-new-jpeg-\(language)")
+            let mediaID = "/ccapi/ver100/contents/card1/100CANON/SIM_0003.JPG"
+            let download = app.buttons["media-preview-download-\(mediaID)"]
+            _ = try XCTUnwrap(waitForInteraction(download, timeout: 5) ? true : nil)
+            try tapForAsyncTest(download)
+            let share = app.buttons["media-preview-share-\(mediaID)"]
+            _ = try XCTUnwrap(waitForInteraction(share, timeout: 10) ? true : nil)
+            let delivered = try await simulatorRequest(path: "/ccapi/test/state")
+            _ = try XCTUnwrap((delivered["capture_count"] as? NSNumber)?.intValue == 1 ? true : nil)
+            let fixture = try XCTUnwrap(delivered["capture_delivery"] as? [String: Any])
+            let gets = try XCTUnwrap(fixture["representation_get_counts"] as? [String: NSNumber])
+            _ = try XCTUnwrap(gets["original"]?.intValue == 1 ? true : nil)
+            _ = try XCTUnwrap(gets["display"]?.intValue == 1 ? true : nil)
+            let failures = try XCTUnwrap(fixture["representation_failure_counts"] as? [String: NSNumber])
+            _ = try XCTUnwrap(failures["thumbnail"]?.intValue == 1 ? true : nil)
+            // This proves the production app can hand off its original, not external Files/Photos saving.
+            addScreenshot(name: "shutter-af-new-jpeg-original-share-\(language)")
             try tapForAsyncTest(app.buttons["close-media-preview"])
             try tapForAsyncTest(app.buttons["media-back-button"])
             try openMoreActionsForAsyncTest(in: app)
@@ -639,6 +657,133 @@ final class OpenEOSControlUITests: XCTestCase {
             try openMoreActionsForAsyncTest(in: app)
             guard try tapCameraActionForAsyncTest(app.buttons["disconnect-menu-button"], in: app) else { return }
             _ = try XCTUnwrap((waitForConnectionScreen(in: app, timeout: 15)) ? true : nil)
+        }
+    }
+
+    @MainActor
+    func testCanonicalCaptureReviewRetriesReadsAndFailedPreviewOriginalWithoutReshooting() async throws {
+        continueAfterFailure = true
+        guard try await waitForSimulatorHealth() else {
+            #if OEC_REQUIRE_SIMULATOR_E2E
+            XCTFail("The required synthetic camera is not reachable")
+            return
+            #else
+            throw XCTSkip("Start the synthetic camera for the JPEG delivery recovery journey")
+            #endif
+        }
+        for (language, apple, locale, notReady, readFailed, previous, outsideList) in [
+            ("english", "en", "en_US", "No newly visible photo", "photo list could not be read", "previous photo", "Not in the current list"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "尚未找到新出現", "無法讀取照片清單", "先前照片", "目前清單未列出"),
+        ] {
+            _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
+            _ = try await simulatorRequest(path: "/ccapi/test/capture-delivery", method: "POST", jsonBody: [
+                "enabled": true, "listing_failures": 1, "hidden_listing_reads": 20,
+                "thumbnail_failures": 1, "display_failures": 1, "original_failures": 3,
+            ])
+            _ = try await simulatorRequest(path: "/ccapi/ver100/shooting/settings/shootingmode", method: "PUT",
+                                           jsonBody: ["value": "Manual"])
+            let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
+                             environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString])
+            defer { app.terminate() }
+            try tapForAsyncTest(app.buttons["preset-http-button"])
+            _ = try XCTUnwrap(scrollConnectionButtonIntoView(in: app, timeout: 8) ? true : nil)
+            try tapForAsyncTest(app.buttons["connect-button"])
+            let toggle = app.buttons["shutter-autofocus-toggle"]
+            _ = try XCTUnwrap(waitForInteraction(toggle, timeout: 30) ? true : nil)
+            try tapForAsyncTest(toggle)
+            let latest = app.buttons["latest-media-button"]
+            _ = try XCTUnwrap(waitForLabel(latest, containing: "SIM_0002.PNG", timeout: 10) ? true : nil)
+            try tapForAsyncTest(app.buttons["shutter-button"])
+            let status = app.staticTexts["capture-review-status"]
+            _ = try XCTUnwrap(waitForLabel(status, containing: notReady, timeout: 15) ? true : nil)
+            _ = try XCTUnwrap(latest.label.contains(previous) ? true : nil)
+            let retry = app.buttons["capture-review-retry"]
+            _ = try XCTUnwrap(waitForInteraction(retry, timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(retry.frame.height + 0.000_001 >= 44 && retry.frame.width + 0.000_001 >= 44 ? true : nil)
+            addScreenshot(name: "capture-review-not-ready-\(language)")
+            // Cover every GET in the four bounded rounds, including Canon query fallbacks.
+            // Wait for the terminal status rather than assuming a transient UI state.
+            let forcedFailures = try await simulatorRequest(path: "/ccapi/test/capture-delivery", method: "POST",
+                                                           jsonBody: ["listing_failures": 20])
+            let failuresBefore = try XCTUnwrap((forcedFailures["listing_failure_count"] as? NSNumber)?.intValue)
+            try tapForAsyncTest(retry)
+            _ = try XCTUnwrap(waitForLabel(status, containing: readFailed, timeout: 15) ? true : nil)
+            _ = try XCTUnwrap(waitForInteraction(retry, timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(retry.frame.height + 0.000_001 >= 44 && retry.frame.width + 0.000_001 >= 44 ? true : nil)
+            _ = try XCTUnwrap(latest.label.contains(previous) ? true : nil)
+            let failedReview = try await simulatorRequest(path: "/ccapi/test/state")
+            _ = try XCTUnwrap((failedReview["capture_count"] as? NSNumber)?.intValue == 1 ? true : nil)
+            _ = try XCTUnwrap((failedReview["canonical"] as? [String: Any])?["shutter_af_requests"] as? [Bool] == [false] ? true : nil)
+            let failedFixture = try XCTUnwrap(failedReview["capture_delivery"] as? [String: Any])
+            let failuresAfter = try XCTUnwrap((failedFixture["listing_failure_count"] as? NSNumber)?.intValue)
+            _ = try XCTUnwrap(failuresAfter - failuresBefore >= 4 ? true : nil)
+            addScreenshot(name: "capture-review-read-failed-\(language)")
+            _ = try await simulatorRequest(path: "/ccapi/test/capture-delivery", method: "POST",
+                                           jsonBody: ["hidden_listing_reads": 0, "listing_failures": 0])
+            try tapForAsyncTest(retry)
+            _ = try XCTUnwrap(waitForLabel(latest, containing: "SIM_0003.JPG", timeout: 10) ? true : nil)
+            _ = try XCTUnwrap(waitForInteraction(latest, timeout: 5) ? true : nil)
+            try tapForAsyncTest(latest)
+            _ = try XCTUnwrap(app.alerts.firstMatch.waitForExistence(timeout: 10) ? true : nil)
+            try tapForAsyncTest(app.alerts.buttons.firstMatch)
+            let previewRetry = app.buttons["retry-media-preview"]
+            _ = try XCTUnwrap(waitForInteraction(previewRetry, timeout: 5) ? true : nil)
+            try tapForAsyncTest(previewRetry)
+            _ = try XCTUnwrap(app.images["media-preview-image"].waitForExistence(timeout: 10) ? true : nil)
+            let mediaID = "/ccapi/ver100/contents/card1/100CANON/SIM_0003.JPG"
+            let download = app.buttons["media-preview-download-\(mediaID)"]
+            let share = app.buttons["media-preview-share-\(mediaID)"]
+            let cancel = app.buttons["media-preview-cancel-download-\(mediaID)"]
+            _ = try XCTUnwrap(waitForInteraction(download, timeout: 5) ? true : nil)
+            try tapForAsyncTest(download)
+            _ = try XCTUnwrap(app.alerts.firstMatch.waitForExistence(timeout: 10) ? true : nil)
+            try tapForAsyncTest(app.alerts.buttons.firstMatch)
+            _ = try XCTUnwrap(!share.exists ? true : nil)
+            _ = try await simulatorRequest(path: "/ccapi/test/capture-delivery", method: "POST",
+                                           jsonBody: ["original_failures": 0, "original_delay_ms": 60_000])
+            _ = try XCTUnwrap(waitForInteraction(download, timeout: 5) ? true : nil)
+            try tapForAsyncTest(download)
+            try await waitForSimulatorState { observed in
+                let fixture = observed["capture_delivery"] as? [String: Any]
+                return (fixture?["representation_get_counts"] as? [String: NSNumber])?["original"]?.intValue == 4
+            }
+            _ = try XCTUnwrap(waitForInteraction(cancel, timeout: 5) ? true : nil)
+            try tapForAsyncTest(cancel)
+            _ = try XCTUnwrap(waitForInteraction(download, timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(!share.exists ? true : nil)
+            _ = try await simulatorRequest(path: "/ccapi/test/capture-delivery", method: "POST",
+                                           jsonBody: ["original_delay_ms": 0])
+            try tapForAsyncTest(download)
+            _ = try XCTUnwrap(waitForInteraction(share, timeout: 10) ? true : nil)
+            let delivered = try await simulatorRequest(path: "/ccapi/test/state")
+            _ = try XCTUnwrap((delivered["capture_count"] as? NSNumber)?.intValue == 1 ? true : nil)
+            _ = try XCTUnwrap((delivered["canonical"] as? [String: Any])?["shutter_af_requests"] as? [Bool] == [false] ? true : nil)
+            let fixture = try XCTUnwrap(delivered["capture_delivery"] as? [String: Any])
+            let gets = try XCTUnwrap(fixture["representation_get_counts"] as? [String: NSNumber])
+            _ = try XCTUnwrap(gets["display"]?.intValue == 2 && gets["original"]?.intValue == 5 ? true : nil)
+            // Hide the selected JPEG from a later partial listing without deleting it.
+            // Deleting a different synthetic old item emits a real contents notification.
+            _ = try await simulatorRequest(path: "/ccapi/test/capture-delivery", method: "POST",
+                                           jsonBody: ["hidden_listing_reads": 20])
+            _ = try await simulatorRequest(path: "/ccapi/ver100/contents/card1/100CANON/SIM_0001.PNG", method: "DELETE")
+            _ = try XCTUnwrap(waitForLabel(app.staticTexts["media-preview-position"], containing: outsideList, timeout: 15) ? true : nil)
+            _ = try XCTUnwrap(app.images["media-preview-image"].exists ? true : nil)
+            _ = try XCTUnwrap(waitForInteraction(share, timeout: 5) ? true : nil)
+            // isHittable describes a computed hit point, not the disabled interaction contract.
+            // SwiftUI may omit a transparent disabled control from the accessibility tree.
+            let navigationUnavailable = XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in
+                    let previous = app.buttons["media-preview-previous"]
+                    let next = app.buttons["media-preview-next"]
+                    return (!previous.exists || !previous.isEnabled) && (!next.exists || !next.isEnabled)
+                },
+                object: nil
+            )
+            _ = try XCTUnwrap(
+                XCTWaiter.wait(for: [navigationUnavailable], timeout: 5) == .completed ? true : nil,
+                "Navigation must be unavailable while the selected JPEG is outside the current listing"
+            )
+            addScreenshot(name: "capture-review-recovered-original-share-\(language)")
         }
     }
 
