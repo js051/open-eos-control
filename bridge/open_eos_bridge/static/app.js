@@ -1710,9 +1710,13 @@
   }
 
   async function refreshCapabilityEvidence() {
-    if (!state.session) return;
+    const session = state.session;
+    if (!session) return;
     try {
-      state.capabilities = await api(`/v1/session/${encodeURIComponent(state.session.id)}/capabilities`);
+      const capabilities = await api(`/v1/session/${encodeURIComponent(session.id)}/capabilities`);
+      // The connection object owns this response, even if a later connection reuses its ID.
+      if (state.session !== session) return;
+      state.capabilities = capabilities;
     } catch (_) {
       // Evidence refresh must not turn an already successful camera operation into a failure.
     }

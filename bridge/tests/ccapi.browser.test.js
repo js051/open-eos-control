@@ -87,6 +87,104 @@ function processEnv() {
   return { ...globalThis.process.env };
 }
 
+async function verifyCapabilityResponseOwnership(browser, origin) {
+  for (const reconnect of [false, true]) {
+    const context = await browser.newContext({ locale: "en-US" });
+    const page = await context.newPage();
+    const pageErrors = [];
+    const writes = [];
+    const sessionReads = new Map();
+    let releaseResponse;
+    const responseGate = new Promise((resolve) => { releaseResponse = resolve; });
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    page.on("request", (request) => {
+      if (request.method() !== "GET") {
+        writes.push({ method: request.method(), path: new URL(request.url()).pathname });
+      }
+    });
+    // Use the existing real Bridge and fake USB backend. Only capability contents
+    // and delivery order are controlled, as in this suite's other route fixtures.
+    await page.route(/\/capabilities$/, async (route) => {
+      const response = await route.fetch();
+      assert.equal(response.ok(), true);
+      const capabilities = await response.json();
+      const sessionId = new URL(route.request().url()).pathname.split("/")[3];
+      const reads = (sessionReads.get(sessionId) || 0) + 1;
+      sessionReads.set(sessionId, reads);
+      const firstConnection = sessionId === sessionReads.keys().next().value;
+      capabilities.profile = firstConnection ? "synthetic-owner-A" : "synthetic-owner-B";
+      capabilities.supported = firstConnection ? ["STILL_CAPTURE"] : [];
+      capabilities.settings = [];
+      if (firstConnection && reads === 2) {
+        await page.evaluate(() => { window.__capabilityResponsePending = true; });
+        await responseGate;
+      }
+      await route.fulfill({ response, json: capabilities });
+    });
+    try {
+      await page.goto(origin, { waitUntil: "networkidle" });
+      await page.waitForSelector("#connect-button:not([disabled])");
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      assert.equal(await page.locator("#shutter-button").isEnabled(), true);
+      await page.evaluate(() => {
+        window.__capabilityDiagnosticRenders = 0;
+        new MutationObserver(() => { window.__capabilityDiagnosticRenders += 1; })
+          .observe(document.querySelector("#diagnostics-output"), { childList: true });
+      });
+      await page.click('.tab[data-view="diagnostics"]');
+      await page.waitForFunction(() => window.__capabilityResponsePending === true);
+      assert.equal(await page.locator("#disconnect-button").isEnabled(), true);
+      await page.click("#disconnect-button");
+      await page.waitForSelector("#connection-view:not([hidden])");
+      if (reconnect) {
+        assert.equal(await page.locator("#connect-button").isEnabled(), true);
+        await page.click("#connect-button");
+        await page.waitForSelector("#control-view:not([hidden])");
+        await page.waitForFunction(() => (
+          JSON.parse(document.querySelector("#diagnostics-output").textContent)
+            .capabilities?.profile === "synthetic-owner-B"
+        ));
+        assert.equal(sessionReads.size, 2, "Normal reconnect creates a replacement connection");
+        assert.equal(await page.locator("#shutter-button").isDisabled(), true);
+      }
+      const rendersBeforeResponse = await page.evaluate(() => window.__capabilityDiagnosticRenders);
+      const writesBeforeResponse = writes.slice();
+      releaseResponse();
+      // Require the late callback to render before checking unchanged state. A
+      // pre-response assertion of B would otherwise pass on the broken product.
+      await page.waitForFunction((previous) => window.__capabilityDiagnosticRenders > previous,
+        rendersBeforeResponse);
+      const report = JSON.parse(await page.locator("#diagnostics-output").textContent());
+      assert.equal(report.capabilities?.profile || null, reconnect ? "synthetic-owner-B" : null);
+      if (reconnect) {
+        await page.click('.tab[data-view="live"]');
+        await page.click("#photo-mode-button");
+        assert.equal(await page.locator("#shutter-button").isDisabled(), true,
+          "A-only capture remains disabled when current availability is rendered");
+      } else {
+        assert.equal(report.camera, null);
+        assert.equal(await page.locator("#connection-view").isVisible(), true);
+      }
+      assert.deepEqual(writes, writesBeforeResponse, "Late capability delivery sends no camera writes");
+      assert.equal(writes.filter(({ method }) => method === "POST").length, reconnect ? 2 : 1);
+      assert.equal(writes.every(({ method, path }) => (
+        (method === "POST" && path === "/v1/session") ||
+        (method === "DELETE" && /^\/v1\/session\/[^/]+$/.test(path))
+      )), true, "Only explicit connection lifecycle requests are permitted");
+      assert.deepEqual(pageErrors, []);
+      if (reconnect) {
+        await page.click("#disconnect-button");
+        await page.waitForSelector("#connection-view:not([hidden])");
+      }
+      console.log(`Capability response ownership: ${reconnect ? "reconnect" : "disconnect"} passed`);
+    } finally {
+      releaseResponse();
+      await context.close();
+    }
+  }
+}
+
 async function run() {
   const [simulatorPort, bridgePort] = await Promise.all([freePort(), freePort()]);
   const simulatorOrigin = `http://127.0.0.1:${simulatorPort}`;
@@ -881,6 +979,7 @@ async function run() {
     assert.deepEqual(await page.evaluate(() => window.__objectUrlRevocationViolations), []);
     assert.deepEqual(pageErrors, []);
     await context.close();
+    await verifyCapabilityResponseOwnership(browser, bridgeOrigin);
   } finally {
     if (browser) await browser.close();
     await stopProcess(bridge?.process);
