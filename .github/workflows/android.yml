@@ -273,7 +273,7 @@ jobs:
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           working-directory: android
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true
+          script: bash ../scripts/ci/run-android-ui-tests.sh
 
       - name: Upload Android UI test results
         if: always()
@@ -351,7 +351,7 @@ jobs:
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           working-directory: android
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.requireSimulator=true
+          script: bash ../scripts/ci/run-android-ui-tests.sh
 
       - name: Upload Android 16 UI test results
         if: always()

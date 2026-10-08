@@ -12,7 +12,7 @@
 
 ## 從 source 確認的問題與修正
 
-下列原先由程式可達性分析及新寫反例建立；首輪正常 CI 已通過全部 App／Core 測試，兩個 UI 方法仍有下述待修紀錄。沒有宣稱所有產品問題都曾以未修正 App runtime 重現紅例：
+下列原先由程式可達性分析及新寫反例建立；首輪正常 CI 通過全部 App／Core 測試，兩個 UI 方法的失敗與後續修復保留於下文。沒有宣稱所有產品問題都曾以未修正 App runtime 重現紅例：
 
 - 原選擇器先比較全清單最大日期，再排除一個先前 ID；未來日期的舊 A 可遮住較舊日期的新 N，已知 B 換序也可能被當成候選。現在先排除所有已知項目及影片，再沿既有日期／相機順序選靜態候選。
 - 原最近媒體工作在新快門 ACK 後才退休。現在新快門進入時就失效舊工作；ACK 未回前放行的舊 listing／thumbnail 不能發布。
@@ -58,10 +58,31 @@ ShareLink 可見只證明 App 有原檔可交給使用者，不能宣稱外部 F
 
 沒有刪除失敗案例、放寬一次拍攝／原檔 ownership 契約、改必要 checks 或重啟先前停止的安裝。UI 修正版及 simulator 完整 pytest／其餘受影響矩陣尚待新 head 執行。
 
+### 修正版 CI 終態與 Android 補證
+
+修正版 head `e3f84fdeb4508f440ff75a6c1aeea11674da9aa6`、tree `af1c28bc71123d6ec94ff226aec7d42cd5f3883f` 的 [CI 37703284681](https://github.com/js051/open-eos-control/actions/runs/37703284681) 於 2026-10-08 00:15:27 UTC 正常結束 failure：
+
+- iOS App 125/125、UI 20/20 通過；新增英／繁完整恢復旅程及原事件案例皆成功。Core 245、simulator 59／Ruff、Desktop Bridge、Windows、Android JVM／APK 亦通過。
+- API34 於 00:15:14 UTC 完成全部 355 案、BUILD SUCCESSFUL。
+- API36 在原有 `CameraMediaDateFilterJourneyTest.filteringAnActiveDownloadDoesNotChangeItsOwnerOrOriginalBytes` 發生 `IllegalArgumentException: performMeasureAndLayout called during measure layout`。100/355 時 process crashed，後續 255 案未執行；`ci-complete` 失敗，不能 ready 或合併。沒有重跑此 run。
+- 該 Android 產品與測試在此輪未改，首輪兩個 API 各 355 案成功。這些歷史事實不取消本輪失敗，也不能證明環境偶發。既有 job log 有主執行緒 fatal stack；原 artifact 的本地取回得到 HTTP403，完整 XML／per-test logcat 尚不可讀，沒有改用另一身份或路線。
+
+來源診斷確認 fatal 的 `AndroidComposeView:1558`／`dispatchDraw:1898` 與 [UI 1.9.3 官方 sources](https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-android/1.9.3/ui-android-1.9.3-sources.jar) 相符。`icons-lucide-android:2.2.1` 的 [POM](https://repo.maven.apache.org/maven2/com/composables/icons-lucide-android/2.2.1/icons-lucide-android-2.2.1.pom) 要求 foundation 1.9.3，UI module 亦有 test 套件的 atomic-group 約束；不能只看宣告 BOM 就推定 App／test 混版。guard 在 finally 復原，正常 test clock 操作切回 UI thread；現有 stack 未指出另一次量測的 caller，尚無根因或產品修復可證。
+
+下一個 test-only 補證只作用於原失敗 method：外層 RuleChain 涵蓋 setup、原操作、teardown 與 Compose cleanup，記錄固定 phase；一般 failure 原樣拋出，fatal 在 finally 委派原 handler。只在失敗時採樣最多 6 個相關執行緒的前 16 frames；cause／suppressed 關聯先列，最多 16 節點／32 關聯，截斷明示。每種 failure 最多一次、每次 16,000 字元，不列 thread 名稱／ID、locals 或任意訊息；原 Throwable 與其完整關聯物件不被修改。所有原操作、assert、HTTP 計數、bytes、timeout 與 API34／36 的 355 案保留，沒有額外 UI query、sleep、retry、產品或依賴變更。
+
+既有 Gradle job log 只保證提供最後 fatal crash，不保證包含新診斷 tag。因此原 API34／36 emulator script 同批接一個窄 wrapper：先且只先執行原完整 Gradle 命令；失敗後在仍運行的 emulator 讀 `EOSDateFilterDiag` 單一合成測試 tag，10 秒有界，其他 tag 靜默，最後回傳原 Gradle exit。診斷缺失、空 tag 或 adb 本身失敗都不能把原失敗變成功或改成另一個結果。四個標準 unittest 實際以合成命令驗證成功不查 log、原失敗輸出指定 tag、空 tag及診斷失敗保留原 exit，於 2026-10-08 00:48:03 UTC 4/4 通過；此為 shell 邊界測試，不是 emulator runtime。
+
+live delivery 設定仍為 active Protect main `19766111`、strict `ci-complete`／app15368、只允 squash、review thread 必解、無 bypass。原 classic protection 403 保持停止；Actions allowlist 的查詢 endpoint 由目前 connector 回 400 不支援，完整清單未知。現行 e3 job 成功執行相同 emulator/upload pins，只證這些既有 pins 可執行。此批沒有變更 action pin、permissions、required check 或安全設定。
+
+本地單次 300 秒 stage 於 00:48:04 UTC 啟動、00:49:31 真正 exit0，耗時 87.33 秒。288 個凍結輸入前後一致，Kotlin／Java instrumentation 編譯成功；沒有重跑 JVM 測試、Lint、APK 或 emulator。相同宣告配置的 `debugRuntimeClasspath` 與 `debugAndroidTestRuntimeClasspath` 均實際解析 UI 1.9.3；`ui-test`／`ui-test-junit4`／`ui-test-manifest` 亦為 1.9.3，沒有本地解析的 1.9.3／1.7.6 混版證據。這是本地 resolved graph，不冒充原失敗 CI 的 APK 內部 metadata。
+
+這些診斷沒有修正已確認的 Compose 根因；下一輪正常 CI 即使全綠，也只表示該輪未重現，須保留此次未解歷史。
+
 ## Release Assessment
 
 - 最新真正公開 release：`v0.12.0 Development Preview`。repo README／App metadata 已是 `0.13.0`，固定的 0.13.0 候選尚未發布；檔案中的版本不等於已公開發版基準。
 - 建議 impact：`patch`，修復既有一次拍照至預覽／原檔交付及恢復流程；沒有新協定或新的平台能力聲明。
 - 本批沒有改版號、合併或發版。
-- 未解 blocker：兩個 UI 紅燈的修正版尚待最終 exact-head CI；已同步接受的 PC #218 main。部分 runtime 通過不構成 PR ready。
+- 未解 blocker：iOS 兩個 UI 方法已在修正版同源 CI 通過；API36 的 Compose crash、完整 355 案與最終 exact-head `ci-complete` 尚未閉合。已同步接受的 PC #218 main，部分 runtime 通過不構成 PR ready。
 - 物理裝置：沒有新增相機、實體 iPhone、Wi-Fi 弱網或外部儲存接收驗證。
