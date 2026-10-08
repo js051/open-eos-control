@@ -22,6 +22,8 @@ import androidx.compose.ui.test.performScrollToKey
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.R
@@ -196,6 +198,15 @@ class CameraMediaDateFilterJourneyTest {
     }
 
     @Test fun filteringAnActiveDownloadDoesNotChangeItsOwnerOrOriginalBytes() {
+        verifyFilteredDownload(waitForDismissal = false)
+    }
+
+    /** Diagnostic control only: retain the original overlap case above without this extra wait. */
+    @Test fun filteredDownloadAfterObservedDialogAndImeDismissalKeepsOwnerAndOriginalBytes() {
+        verifyFilteredDownload(waitForDismissal = true)
+    }
+
+    private fun verifyFilteredDownload(waitForDismissal: Boolean) {
         diagnostics.phase("download:prepare-destination")
         val item = model.uiState.value.mediaItems.single { it.id == "older" }
         val file = File(directory, item.name).apply { check(createNewFile()) }
@@ -209,6 +220,9 @@ class CameraMediaDateFilterJourneyTest {
                 camera.imageResponse()
             } else original(request)
         }
+        // This control shares the original gate's 15-second bound, starting conservatively
+        // before the request. It cannot add another full gate-length wait after date entry.
+        val controlDeadline = if (waitForDismissal) SystemClock.uptimeMillis() + SESSION_TEST_TIMEOUT_MILLIS else 0L
         diagnostics.phase("download:start")
         compose.runOnIdle { model.downloadMedia(compose.activity, item, uri) }
         diagnostics.phase("download:await-gate")
@@ -218,6 +232,29 @@ class CameraMediaDateFilterJourneyTest {
         assertEquals(item.name, model.uiState.value.activeMediaDownloadName)
         compose.onNodeWithContentDescription(text(R.string.cancel_media_download)).assertIsDisplayed()
         assertEquals(listOf("/ccapi/media/older"), camera.originalReads.toList())
+        val appliedRange = requireNotNull(model.uiState.value.mediaDateRange)
+        if (waitForDismissal) {
+            diagnostics.phase("download:await-dialog-and-ime-dismissal")
+            compose.onNode(isDialog()).assertDoesNotExist()
+            // Observe platform state on the UI thread. Do not hide the IME, sleep, or disable
+            // automatic clock advancement to turn this control into a replacement workaround.
+            val remainingMillis = controlDeadline - SystemClock.uptimeMillis()
+            check(remainingMillis > 0) { "No synthetic response-gate budget remains for the dismissal control." }
+            val observationStartedAt = SystemClock.uptimeMillis()
+            var observationCount = 0
+            var firstImeVisible: Boolean? = null
+            compose.waitUntil(remainingMillis) {
+                val visible = compose.runOnUiThread {
+                    ViewCompat.getRootWindowInsets(compose.activity.window.decorView)
+                        ?.isVisible(WindowInsetsCompat.Type.ime())
+                }
+                if (observationCount++ == 0) firstImeVisible = visible
+                visible == false
+            }
+            diagnostics.phase("download:ime-hidden first=$firstImeVisible observations=$observationCount elapsed=${SystemClock.uptimeMillis() - observationStartedAt}ms")
+            compose.waitForIdle()
+            check(SystemClock.uptimeMillis() < controlDeadline) { "Dismissal control exhausted the response-gate budget." }
+        }
         diagnostics.phase("download:release-gate")
         gate.release()
         diagnostics.phase("download:await-completion")
@@ -226,6 +263,13 @@ class CameraMediaDateFilterJourneyTest {
         }
         diagnostics.phase("download:assert-bytes-and-request")
         assertArrayEquals(camera.imageBytes, file.readBytes())
+        assertEquals(listOf("/ccapi/media/older"), camera.originalReads.toList())
+        diagnostics.phase("download:next-frame-and-idle")
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        assertEquals(appliedRange, model.uiState.value.mediaDateRange)
+        assertArrayEquals(camera.imageBytes, file.readBytes())
+        assertEquals(item.name, model.uiState.value.lastDownloadedMediaName)
         assertEquals(listOf("/ccapi/media/older"), camera.originalReads.toList())
         diagnostics.phase("download:verified")
     }
@@ -303,7 +347,10 @@ private class DateFilterFailureDiagnostics : TestRule {
     private lateinit var testThread: Thread
 
     override fun apply(base: Statement, description: Description): Statement {
-        if (description.methodName != "filteringAnActiveDownloadDoesNotChangeItsOwnerOrOriginalBytes") return base
+        if (description.methodName !in setOf(
+                "filteringAnActiveDownloadDoesNotChangeItsOwnerOrOriginalBytes",
+                "filteredDownloadAfterObservedDialogAndImeDismissalKeepsOwnerAndOriginalBytes",
+            )) return base
         return object : Statement() {
             override fun evaluate() {
                 testThread = Thread.currentThread()
