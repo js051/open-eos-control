@@ -9,6 +9,32 @@ import org.w3c.dom.Element
 
 class StringResourcesTest {
     @Test
+    fun sharedStopRecoveryCoversAutofocusWhileKnownBulbControlsKeepTheirMeaning() {
+        for ((directory, autofocus) in listOf("values" to "autofocus", "values-zh-rTW" to "自動對焦")) {
+            val strings = readResources(resourceFile("$directory/strings.xml"))
+            for (key in listOf(
+                "shutter_disconnect_warning", "shutter_release_unconfirmed", "bridge_shutter_release_unconfirmed",
+            )) {
+                assertTrue(
+                    "$directory/$key must also explain autofocus uncertainty",
+                    strings.getValue(key).single().contains(autofocus),
+                )
+            }
+            for (key in listOf(
+                "retry_shutter_release", "shutter_release_unconfirmed", "bridge_shutter_release_unconfirmed",
+            )) {
+                val value = strings.getValue(key).single()
+                assertTrue(
+                    "$directory/$key must not call a short control a Bulb exposure",
+                    !value.contains("Bulb") && !value.contains("曝光"),
+                )
+            }
+            assertTrue(strings.getValue("start_bulb_exposure").single().contains("Bulb"))
+            assertTrue(strings.getValue("stop_bulb_exposure").single().contains("Bulb"))
+        }
+    }
+
+    @Test
     fun traditionalChineseContainsEveryEnglishResourceWithMatchingFormats() {
         val english = readResources(resourceFile("values/strings.xml"))
         val traditionalChinese = readResources(resourceFile("values-zh-rTW/strings.xml"))

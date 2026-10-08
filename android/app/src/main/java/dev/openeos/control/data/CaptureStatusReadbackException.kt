@@ -1,6 +1,6 @@
 package dev.openeos.control.data
 
-/** The CCAPI shutter command was acknowledged; its separate status read failed.
+/** The shutter command was acknowledged; its separate status read failed.
  * This does not establish an exposure or a newly visible media item.
  */
 internal class CaptureStatusReadbackException(cause: Exception) : Exception(
