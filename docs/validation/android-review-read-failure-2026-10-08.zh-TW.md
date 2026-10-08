@@ -63,3 +63,30 @@ manifest 與各階段原始 log／XML 分開保存；失敗紀錄未以後續成
 最新公開發布基準為 `v0.12.0` Development Preview；repository 宣告的 `0.13.0` 與其 frozen candidate 是另外的狀態，不代表已公開發布。本批為修正既有錯誤／恢復流程的 `patch`，不在此改版本、合併或發版。不是新的連線時錯誤介面，不改後端對部分／可選 listing 讀取的既有容錯規則，不做全卡查找，不解決素材與物理快門／REC 的因果認定。still 的候選種類繼續為既有 ALL；本批沒有新增 image-only still 規則。
 
 本批交付狀態為 **implemented**；所有上述本地 gate 已有終態證據。尚待精確 head 的 CI／API 34、36 裝置執行；本機環境沒有 `/dev/kvm`，因此只編譯 instrumented tests，不冒稱執行通過。實體 R6 Mark III／手機／USB 驗證仍未執行。交付狀態不得只因本機成功升為 PR ready／main accepted／preview released。
+
+## PR #220 裝置 CI 與 Dialog 測試配置修正
+
+PR head `1063e732f2f130055d47277fedd7b248b70c649e`、run `37760192669` 的 API 34／36 各執行 357 tests，皆為 **356 pass／1 failure／0 skip**。唯一失敗都是 `CameraCaptureReviewUiTest.missingAndFailedReviewsHaveDistinctReachableReadOnlyActionsInBothLanguages`：英文兩個狀態之後，繁中 parent button 的 `contentDescription` 斷言與開啟動作已通過，但 Dialog 的 `performScrollTo` 找不到「尚未找到新出現的素材。」。這是找不到語意節點，不是已證實的文字截斷。兩個平台的完整失敗原件均保留，不重跑或替換掉這筆紀錄。
+
+- API 34 artifact `11544270713`，ZIP SHA-256 `eac8d206de1e47c43e8e0779442141ff3b61252b1d88ab45c569cb5e9244395f`
+- API 36 artifact `11544006349`，ZIP SHA-256 `b941890cdaf8a397f1b8a0eef8ab66c039881c044cff86339c0f951ad66a3390`
+- 原始 XML／logcat 沒有本例的 Dialog 語意樹或失敗截圖，因此不能冒稱已直接看到原始 Dialog 的英文文字或實際 fontScale。
+- 同一 run 的完整 `failedReviewRetryFindsTheNewPhotoAndSavesItsOriginalWithoutAnotherCameraCommand` 在兩個 API 都通過；這證明該 head 的真 App → VM → HTTP → MediaStore 失敗恢復旅程已執行，但不能抵銷本例配置檢查失敗。
+
+來源診斷：現有 `DialogUiTestSupport.kt` 已明示獨立 Dialog 使用 `LocalView.current.context`，其新的 AndroidComposeView 會安裝自己的 density。單純 composition 的 Locale／FontScale override 不能證明 Dialog window 也採用該配置。現有 `DialogFontScaleOverride` 透過實際 ComposeView 傳遞覆寫後 Android context；同一 CI 內 `mediaSelectionActionsRemainReachableInTraditionalChineseAtLargeText` 已用它明確驗證 Dialog root 的 zh-TW resources 與 fontScale，API 34／36 均通過。這與本次「parent 已繁中，但 Dialog 找不到繁中文字」的失敗位置一致，足以支持修復 fixture，而不是改翻譯或放寬預期文字。
+
+本輪修正僅限測試與此證據文件：
+
+- 沿用既有 `DialogFontScaleOverride(2f)`，並在 locale／viewport 改變時以 `key` 重建 AndroidView，避免沿用 factory 第一次建立的 context。
+- 保留英文／繁中、320×480／480×320 的 forced-viewport matrix、兩個狀態的 exact text、重查停用、舊素材入口、4 次 retry／open 以及零快門斷言。
+- 新增實際 Dialog Android root 的 locale、resource text、resource fontScale 與 Compose density 200% 斷言；重查及舊素材按鈕另驗證完整 touch target 位於實際可見視窗內。forced viewport 不等同於真實裝置視窗旋轉，沒有以它宣稱實體 landscape 證據。
+- 若再失敗，嘗試保存該測試的 unmerged semantics，並只在明確 synthetic emulator CI 中擷取失敗畫面；診斷無法取得時另記原因，再原樣傳出原始失敗；不更改 production 或原檔保存旅程。
+
+修正後的本機終態（2 CPU／單一 worker／單一 test fork，前後 repair source manifest 一致）：
+
+- 11:02 UTC Kotlin／Java instrumented compilation：exit 0、38s；Kotlin 實際重編，Java up-to-date，420s 上限。
+- 11:03 UTC `lintDebug`：exit 0、1m1s，600s 上限；0 errors、66 warnings、2 informational findings，沒有移除必要檢查。
+- 11:04 UTC debug／AndroidTest APK／contract JAR gates：exit 0、13s，600s 上限；AndroidTest APK 實際重新 dex／封裝，未改的 debug APK／contract JAR up-to-date。
+- 未重跑 JVM aggregate。已逐檔比對原997-pass source manifest 中的 production／JVM／resource 及完整 original-save journey，全部 byte-identical；另確認 production、JVM 與 contract source scopes 相對 published head `1063e732` 沒有差異。這是沿用相同來源的既有證據，不稱作新的997次執行。
+
+修正仍需新 exact-head API 34／36 runtime 驗證；上述舊 head 的 pass／failure 狀態不因此改寫。
