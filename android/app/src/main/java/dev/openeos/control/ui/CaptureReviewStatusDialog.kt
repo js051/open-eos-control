@@ -42,6 +42,7 @@ internal fun CaptureReviewStatusDialog(state: CameraUiState, actions: CameraActi
                         Text(stringResource(when (state.captureReviewStatus) {
                             CaptureReviewStatus.SEARCHING -> R.string.capture_review_searching
                             CaptureReviewStatus.NOT_READY -> R.string.capture_review_not_ready
+                            CaptureReviewStatus.READ_FAILED -> R.string.capture_review_read_failed
                             CaptureReviewStatus.IDLE -> if (state.captureReviewItem != null)
                                 R.string.capture_review_latest_visible else R.string.capture_review_not_ready
                         }), color = AppText)
@@ -50,7 +51,7 @@ internal fun CaptureReviewStatusDialog(state: CameraUiState, actions: CameraActi
                             TextButton(
                                 onClick = actions.retryCaptureReview,
                                 enabled = state.connected && !state.previewMode && !state.captureReviewLoading &&
-                                    state.captureReviewStatus == CaptureReviewStatus.NOT_READY && !state.isBusy(CameraOperation.CAPTURE) &&
+                                    state.captureReviewStatus.canRetry && !state.isBusy(CameraOperation.CAPTURE) &&
                                     !state.isBusy(CameraOperation.MEDIA),
                                 modifier = Modifier.fillMaxWidth().testTag("capture-review-retry"),
                             ) { Text(stringResource(R.string.capture_review_retry)) }

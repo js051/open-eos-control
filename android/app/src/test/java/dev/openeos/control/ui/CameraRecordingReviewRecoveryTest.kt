@@ -223,6 +223,36 @@ class CameraRecordingReviewRecoveryTest {
         assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
     }
 
+    @Test fun failedStopReviewCanRetryReadsWithoutReplayingStopOrAcceptingANewPhoto() = runBlocking {
+        connect()
+        startRecording()
+        val reads = peer.listingReads.get()
+        peer.failListing.set(true)
+        model.toggleRecording()
+        assertTrue(pumpUntil(advanceTime = true) { model.uiState.value.captureReviewStatus == CaptureReviewStatus.READ_FAILED })
+        assertEquals(reads + 4, peer.listingReads.get())
+        assertEquals("OLD.JPG", model.uiState.value.captureReviewItem?.name)
+        assertFalse(model.uiState.value.captureReviewLoading)
+        assertNull(model.uiState.value.error)
+        val writes = peer.writes.toList()
+        peer.failListing.set(false)
+        peer.publishNewJpeg.set(true)
+        model.retryCaptureReview()
+        model.retryCaptureReview()
+        awaitNotReady()
+        assertEquals(reads + 8, peer.listingReads.get())
+        assertEquals("OLD.JPG", model.uiState.value.captureReviewItem?.name)
+        peer.publishAfterStopRead.set(0)
+        model.retryCaptureReview()
+        assertTrue(pumpUntil(advanceTime = true) { model.uiState.value.captureReviewItem?.name == "NEW.MP4" })
+        assertEquals(reads + 9, peer.listingReads.get())
+        assertEquals(CaptureReviewStatus.IDLE, model.uiState.value.captureReviewStatus)
+        assertEquals(writes, peer.writes.toList())
+        assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
+        assertEquals(0, peer.captureWrites.get())
+        assertTrue(peer.pages.isNotEmpty() && peer.pages.all { it == 1 })
+    }
+
     @Test fun twoKnownOldIdsReorderedDuringStopAndEarlyContentsEventDoNotResolveReview() = runBlocking {
         connect()
         model.refreshMedia()
@@ -488,6 +518,7 @@ private class RecordingReviewPeer {
     val captureWrites = AtomicInteger()
     val historicalTimestamps = AtomicBoolean(false)
     val failStatus = AtomicBoolean(false)
+    val failListing = AtomicBoolean(false)
     val listingReads = AtomicInteger()
     val stopReviewReads = AtomicInteger()
     val publishAfterStopRead = AtomicInteger(Int.MAX_VALUE)
@@ -568,6 +599,7 @@ private class RecordingReviewPeer {
                         pages += requireNotNull(url.queryParameter("page")).toInt()
                         val names = visibleItems()
                         hold(nextListing)
+                        if (failListing.get()) return MockResponse().setResponseCode(503)
                         json(JSONObject().put("path", JSONArray(names.map { "/ccapi/ver110/contents/$it" })).toString())
                     }
                     path.endsWith("/contents") -> json("{}")

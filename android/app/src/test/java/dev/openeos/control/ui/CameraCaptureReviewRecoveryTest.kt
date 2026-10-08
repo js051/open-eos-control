@@ -27,6 +27,7 @@ import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.CountDownLatch
@@ -54,6 +55,7 @@ class CameraCaptureReviewRecoveryTest {
     }
 
     @After fun tearDown() = runBlocking {
+        peer.releaseGates()
         try {
             viewModel.disconnect()
             http.dispatcher.cancelAll()
@@ -149,6 +151,429 @@ class CameraCaptureReviewRecoveryTest {
         assertEquals(reads + 9, peer.reviewReads.get())
         assertEquals("Read-only retry must not send any camera write", writesAfterCapture, peer.writes.toList())
         assertTrue(peer.pages.isNotEmpty() && peer.pages.all { it == 1 })
+    }
+
+    @Test fun failedReviewReadsAreNotReportedAsMissingMediaAndRetryIsReadOnly() = runBlocking {
+        connect()
+        peer.failListing.set(true)
+        val reads = peer.reviewReads.get()
+        viewModel.captureStill()
+        assertTrue(pumpUntil(advanceTime = true) {
+            peer.reviewReads.get() >= reads + 4 && !viewModel.uiState.value.captureReviewLoading
+        })
+        assertEquals("READ_FAILED", viewModel.uiState.value.captureReviewStatus.name)
+        assertEquals(reads + 4, peer.reviewReads.get())
+        assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertNull(viewModel.uiState.value.error)
+        assertFalse(viewModel.uiState.value.captureStatusReadbackFailed)
+        val writes = peer.writes.toList()
+        peer.failListing.set(false)
+        viewModel.retryCaptureReview()
+        viewModel.retryCaptureReview()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewItem?.name == "NEW.JPG" })
+        assertEquals(CaptureReviewStatus.IDLE, viewModel.uiState.value.captureReviewStatus)
+        assertEquals(reads + 5, peer.reviewReads.get())
+        assertEquals(writes, peer.writes.toList())
+        assertEquals(1, peer.captureWrites.get())
+    }
+
+    @Test fun failedNativeReviewRetriesRemainBoundedThenSuccessfulOldListingBecomesNotReady() = runBlocking {
+        connect(native = true)
+        peer.failListing.set(true)
+        val reads = peer.reviewReads.get()
+        viewModel.captureStill()
+        awaitReadFailed()
+        assertEquals(reads + 4, peer.reviewReads.get())
+        val writes = peer.writes.toList()
+        viewModel.retryCaptureReview()
+        viewModel.retryCaptureReview()
+        assertEquals(CaptureReviewStatus.SEARCHING, viewModel.uiState.value.captureReviewStatus)
+        awaitReadFailed()
+        assertEquals(reads + 8, peer.reviewReads.get())
+        peer.failListing.set(false)
+        peer.publishNew.set(false)
+        viewModel.retryCaptureReview()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewStatus == CaptureReviewStatus.NOT_READY })
+        assertEquals(reads + 12, peer.reviewReads.get())
+        assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        peer.publishNew.set(true)
+        viewModel.retryCaptureReview()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewItem?.name == "NEW.JPG" })
+        assertEquals(reads + 13, peer.reviewReads.get())
+        assertEquals(CaptureReviewStatus.IDLE, viewModel.uiState.value.captureReviewStatus)
+        assertEquals(writes, peer.writes.toList())
+        assertEquals(1, peer.captureWrites.get())
+        assertTrue(peer.pages.isNotEmpty() && peer.pages.all { it == 1 })
+    }
+
+    @Test fun aSuccessfulNativeRoundAnywhereInTheCheckMakesNoCandidateNotReady() = runBlocking {
+        connect(native = true)
+        peer.publishNew.set(false)
+        for (successfulRound in 0..3) {
+            peer.listingFailures.addAll((0..3).map { it != successfulRound })
+            val reads = peer.reviewReads.get()
+            viewModel.captureStill()
+            assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewStatus == CaptureReviewStatus.NOT_READY })
+            assertEquals(reads + 4, peer.reviewReads.get())
+            assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+            assertNull(viewModel.uiState.value.error)
+        }
+        assertEquals(4, peer.captureWrites.get())
+    }
+
+    @Test fun aNewNativeCandidateAfterFailedRoundsStillResolvesTheSameCapture() = runBlocking {
+        connect(native = true)
+        peer.listingFailures.addAll(listOf(true, true, false))
+        val reads = peer.reviewReads.get()
+        viewModel.captureStill()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewItem?.name == "NEW.JPG" })
+        assertEquals(reads + 3, peer.reviewReads.get())
+        assertEquals(CaptureReviewStatus.IDLE, viewModel.uiState.value.captureReviewStatus)
+        assertEquals(1, peer.captureWrites.get())
+        assertNull(viewModel.uiState.value.error)
+    }
+
+    @Test fun statusAndListingFailuresAreIndependentAndMediaRetryDoesNotClearStatusWarning() = runBlocking {
+        connect()
+        peer.failStatus.set(true)
+        peer.failListing.set(true)
+        viewModel.captureStill()
+        awaitReadFailed()
+        assertTrue(viewModel.uiState.value.captureStatusReadbackFailed)
+        assertNull(viewModel.uiState.value.error)
+        val writes = peer.writes.toList()
+        peer.failListing.set(false)
+        viewModel.retryCaptureReview()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewItem?.name == "NEW.JPG" })
+        assertTrue(viewModel.uiState.value.captureStatusReadbackFailed)
+        assertEquals(writes, peer.writes.toList())
+    }
+
+    @Test fun completeManualGalleryReadOfOldMediaResolvesReadFailureAndPreservesTheCaptureBoundary() = runBlocking {
+        connect()
+        peer.failStatus.set(true)
+        peer.failListing.set(true)
+        peer.publishNew.set(false)
+        viewModel.captureStill()
+        awaitReadFailed()
+        val reads = peer.reviewReads.get()
+        val writes = peer.writes.toList()
+        peer.failListing.set(false)
+        viewModel.refreshMedia()
+        assertTrue(pumpUntil { !viewModel.uiState.value.mediaLibraryLoading &&
+            viewModel.uiState.value.mediaLibraryLoadStatus == MediaLibraryLoadStatus.COMPLETE })
+        assertEquals(reads + 1, peer.reviewReads.get())
+        assertEquals(CaptureReviewStatus.NOT_READY, viewModel.uiState.value.captureReviewStatus)
+        assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertTrue(viewModel.uiState.value.captureStatusReadbackFailed)
+        assertEquals(writes, peer.writes.toList())
+
+        peer.publishNew.set(true)
+        viewModel.retryCaptureReview()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewItem?.name == "NEW.JPG" })
+        assertEquals(CaptureReviewStatus.IDLE, viewModel.uiState.value.captureReviewStatus)
+        assertTrue(viewModel.uiState.value.captureStatusReadbackFailed)
+        assertEquals(reads + 2, peer.reviewReads.get())
+        assertEquals(writes, peer.writes.toList())
+        assertEquals(1, peer.captureWrites.get())
+    }
+
+    @Test fun completeManualGalleryReadCanFindNewMediaWithoutAnotherReviewListingOrCapture() = runBlocking {
+        connect()
+        peer.failListing.set(true)
+        viewModel.captureStill()
+        awaitReadFailed()
+        val reads = peer.reviewReads.get()
+        val writes = peer.writes.toList()
+        peer.failListing.set(false)
+        viewModel.refreshMedia()
+        assertTrue(pumpUntil { !viewModel.uiState.value.mediaLibraryLoading &&
+            viewModel.uiState.value.mediaLibraryLoadStatus == MediaLibraryLoadStatus.COMPLETE })
+        assertEquals(CaptureReviewStatus.IDLE, viewModel.uiState.value.captureReviewStatus)
+        assertEquals("NEW.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertEquals(reads + 1, peer.reviewReads.get())
+        assertEquals(writes, peer.writes.toList())
+        assertEquals(1, peer.captureWrites.get())
+    }
+
+    @Test fun failedManualGalleryReadKeepsReadFailureAndPriorMedia() = runBlocking {
+        connect()
+        peer.failListing.set(true)
+        viewModel.captureStill()
+        awaitReadFailed()
+        val writes = peer.writes.toList()
+        viewModel.refreshMedia()
+        assertTrue(pumpUntil { !viewModel.uiState.value.mediaLibraryLoading &&
+            viewModel.uiState.value.mediaLibraryLoadStatus == MediaLibraryLoadStatus.FAILED })
+        assertEquals(CaptureReviewStatus.READ_FAILED, viewModel.uiState.value.captureReviewStatus)
+        assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertEquals(writes, peer.writes.toList())
+    }
+
+    @Test fun partialManualGalleryCannotResolveReviewUntilTheEntireRequestedListingSucceeds() = runBlocking {
+        val gate = startGatedFullGallery()
+        val writes = peer.writes.toList()
+        try {
+            assertTrue(pumpUntil { gate.entered.count == 0L && viewModel.uiState.value.mediaItems.any { it.name == "NEW.JPG" } })
+            assertTrue(viewModel.uiState.value.mediaLibraryLoading)
+            assertEquals(CaptureReviewStatus.READ_FAILED, viewModel.uiState.value.captureReviewStatus)
+            assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        } finally { gate.release.countDown() }
+        assertTrue(pumpUntil { !viewModel.uiState.value.mediaLibraryLoading &&
+            viewModel.uiState.value.mediaLibraryLoadStatus == MediaLibraryLoadStatus.COMPLETE })
+        assertEquals(CaptureReviewStatus.IDLE, viewModel.uiState.value.captureReviewStatus)
+        assertEquals("NEW.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertEquals(writes, peer.writes.toList())
+        assertEquals(1, peer.captureWrites.get())
+    }
+
+    @Test fun failedLaterGalleryPageCannotUseAPartialNewCandidateToClearReadFailure() = runBlocking {
+        val gate = startGatedFullGallery(failSecondPage = true)
+        val writes = peer.writes.toList()
+        try {
+            assertTrue(pumpUntil { gate.entered.count == 0L && viewModel.uiState.value.mediaItems.any { it.name == "NEW.JPG" } })
+            assertEquals(CaptureReviewStatus.READ_FAILED, viewModel.uiState.value.captureReviewStatus)
+        } finally { gate.release.countDown() }
+        assertTrue(pumpUntil { !viewModel.uiState.value.mediaLibraryLoading &&
+            viewModel.uiState.value.mediaLibraryLoadStatus == MediaLibraryLoadStatus.FAILED })
+        assertEquals(CaptureReviewStatus.READ_FAILED, viewModel.uiState.value.captureReviewStatus)
+        assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertEquals(writes, peer.writes.toList())
+    }
+
+    @Test fun cancelledPartialGalleryCannotUseItsNewCandidateToClearReadFailure() = runBlocking {
+        val gate = startGatedFullGallery()
+        val writes = peer.writes.toList()
+        try {
+            assertTrue(pumpUntil { gate.entered.count == 0L && viewModel.uiState.value.mediaItems.any { it.name == "NEW.JPG" } })
+            viewModel.cancelMediaLibraryLoad()
+            assertEquals(MediaLibraryLoadStatus.CANCELLED, viewModel.uiState.value.mediaLibraryLoadStatus)
+        } finally { gate.release.countDown() }
+        settle()
+        assertEquals(CaptureReviewStatus.READ_FAILED, viewModel.uiState.value.captureReviewStatus)
+        assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertFalse(viewModel.uiState.value.mediaLibraryLoading)
+        assertEquals(writes, peer.writes.toList())
+    }
+
+    @Test fun galleryStartedBeforeCaptureCannotDemoteTheNewCaptureReadFailure() = runBlocking {
+        connect()
+        val gate = peer.gateNextListing()
+        try {
+            viewModel.refreshMedia()
+            assertTrue(pumpUntil { gate.entered.count == 0L })
+            peer.failListing.set(true)
+            viewModel.captureStill()
+            awaitReadFailed()
+        } finally { gate.release.countDown() }
+        assertTrue(pumpUntil { !viewModel.uiState.value.mediaLibraryLoading &&
+            viewModel.uiState.value.mediaLibraryLoadStatus == MediaLibraryLoadStatus.COMPLETE })
+        assertEquals(CaptureReviewStatus.READ_FAILED, viewModel.uiState.value.captureReviewStatus)
+        assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertEquals(1, peer.captureWrites.get())
+    }
+
+    @Test fun galleryFromAnOlderCaptureCannotResolveANewerCaptureAttempt() = runBlocking {
+        connect()
+        peer.failListing.set(true)
+        viewModel.captureStill()
+        awaitReadFailed()
+        peer.failListing.set(false)
+        val gate = peer.gateNextListing()
+        try {
+            viewModel.refreshMedia()
+            assertTrue(pumpUntil { gate.entered.count == 0L }) // This response snapshots NEW.JPG.
+            peer.failListing.set(true)
+            viewModel.captureStill()
+            awaitReadFailed()
+        } finally { gate.release.countDown() }
+        assertTrue(pumpUntil { !viewModel.uiState.value.mediaLibraryLoading &&
+            viewModel.uiState.value.mediaLibraryLoadStatus == MediaLibraryLoadStatus.COMPLETE })
+        assertTrue(viewModel.uiState.value.mediaItems.any { it.name == "NEW.JPG" })
+        assertEquals(CaptureReviewStatus.READ_FAILED, viewModel.uiState.value.captureReviewStatus)
+        assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertEquals(2, peer.captureWrites.get())
+    }
+
+    @Test fun galleryStartedBeforeReadOnlyRetryCannotResolveItsNewerReviewGeneration() = runBlocking {
+        connect()
+        peer.failListing.set(true)
+        viewModel.captureStill()
+        awaitReadFailed()
+        peer.failListing.set(false)
+        val gate = peer.gateNextListing()
+        val writes = peer.writes.toList()
+        try {
+            viewModel.refreshMedia()
+            assertTrue(pumpUntil { gate.entered.count == 0L })
+            peer.failListing.set(true)
+            viewModel.retryCaptureReview() // Same capture attempt, a newer bounded review generation.
+            assertEquals(CaptureReviewStatus.SEARCHING, viewModel.uiState.value.captureReviewStatus)
+            awaitReadFailed()
+        } finally { gate.release.countDown() }
+        assertTrue(pumpUntil { !viewModel.uiState.value.mediaLibraryLoading &&
+            viewModel.uiState.value.mediaLibraryLoadStatus == MediaLibraryLoadStatus.COMPLETE })
+        assertEquals(CaptureReviewStatus.READ_FAILED, viewModel.uiState.value.captureReviewStatus)
+        assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertEquals(writes, peer.writes.toList())
+    }
+
+    @Test fun cancelledOldSessionGalleryCannotChangeTheReplacementSessionReview() = runBlocking {
+        connect()
+        peer.failListing.set(true)
+        viewModel.captureStill()
+        awaitReadFailed()
+        peer.failListing.set(false)
+        val gate = peer.gateNextListing()
+        try {
+            viewModel.refreshMedia()
+            assertTrue(pumpUntil { gate.entered.count == 0L })
+            viewModel.disconnect()
+            assertTrue(pumpUntil { !viewModel.uiState.value.connected && !viewModel.uiState.value.busy })
+            peer.publishNew.set(false)
+            connect()
+            peer.failListing.set(true)
+            viewModel.captureStill()
+            awaitReadFailed()
+        } finally { gate.release.countDown() }
+        settle()
+        assertEquals(CaptureReviewStatus.READ_FAILED, viewModel.uiState.value.captureReviewStatus)
+        assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertEquals(2, peer.captureWrites.get())
+    }
+
+    private suspend fun startGatedFullGallery(failSecondPage: Boolean = false): CaptureReviewPeer.ListingGate {
+        connect(native = true)
+        peer.failListing.set(true)
+        viewModel.captureStill()
+        awaitReadFailed()
+        peer.failListing.set(false)
+        peer.pageCount.set(2)
+        peer.failSecondPage.set(failSecondPage)
+        val gate = peer.gateSecondNativePage()
+        viewModel.setMediaLibraryScope(MediaLibraryScope.ALL)
+        return gate
+    }
+
+    @Test fun successfulOldMediaEventResolvesReadFailureButKeepsOriginalCaptureBoundary() = runBlocking {
+        connect()
+        peer.failListing.set(true)
+        peer.publishNew.set(false)
+        viewModel.captureStill()
+        awaitReadFailed()
+        val writes = peer.writes.toList()
+        peer.failListing.set(false)
+        peer.enqueueMediaEvent()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewStatus == CaptureReviewStatus.NOT_READY })
+        assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        peer.publishNew.set(true)
+        viewModel.retryCaptureReview()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewItem?.name == "NEW.JPG" })
+        assertEquals(writes, peer.writes.toList())
+    }
+
+    @Test fun lateFailedRetryCannotOverwriteANewerCaptureReview() = runBlocking {
+        connect(native = true)
+        peer.failListing.set(true)
+        viewModel.captureStill()
+        awaitReadFailed()
+        val gate = peer.gateNextListing()
+        try {
+            viewModel.retryCaptureReview()
+            assertTrue(pumpUntil { gate.entered.count == 0L })
+            peer.failListing.set(false)
+            viewModel.captureStill()
+            assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewItem?.name == "NEW.JPG" })
+        } finally { gate.release.countDown() }
+        settle()
+        assertEquals(CaptureReviewStatus.IDLE, viewModel.uiState.value.captureReviewStatus)
+        assertEquals("NEW.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertEquals(2, peer.captureWrites.get())
+        assertNull(viewModel.uiState.value.error)
+    }
+
+    @Test fun disconnectCancelsFailedRetryAndReplacementSessionHasNoPendingAttempt() = runBlocking {
+        connect(native = true)
+        peer.failListing.set(true)
+        viewModel.captureStill()
+        awaitReadFailed()
+        val gate = peer.gateNextListing()
+        try {
+            viewModel.retryCaptureReview()
+            assertTrue(pumpUntil { gate.entered.count == 0L })
+            viewModel.disconnect()
+        } finally { gate.release.countDown() }
+        assertTrue(pumpUntil { !viewModel.uiState.value.connected && !viewModel.uiState.value.busy })
+        assertEquals(CaptureReviewStatus.IDLE, viewModel.uiState.value.captureReviewStatus)
+        peer.failListing.set(false)
+        peer.publishNew.set(false)
+        connect(native = true)
+        val reads = peer.reviewReads.get()
+        viewModel.retryCaptureReview()
+        main.scheduler.advanceTimeBy(5_000)
+        settle()
+        assertEquals(reads, peer.reviewReads.get())
+        assertEquals(CaptureReviewStatus.IDLE, viewModel.uiState.value.captureReviewStatus)
+        assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
+        assertEquals(1, peer.captureWrites.get())
+    }
+
+    @Test fun failedInitialListingDoesNotClaimCaptureButLaterCaptureCanRetryWithoutPreviousMedia() = runBlocking {
+        peer.failListing.set(true)
+        viewModel.useDevSimulatorPreset()
+        viewModel.setBaseUrl(peer.baseUrl)
+        viewModel.setLiveViewAutoRefresh(false)
+        viewModel.connect()
+        assertTrue(pumpUntil(advanceTime = true) {
+            viewModel.uiState.value.connected && !viewModel.uiState.value.busy &&
+                peer.reviewReads.get() == 4 && !viewModel.uiState.value.captureReviewLoading
+        })
+        assertEquals(CaptureReviewStatus.IDLE, viewModel.uiState.value.captureReviewStatus)
+        assertNull(viewModel.uiState.value.captureReviewItem)
+        assertEquals(0, peer.captureWrites.get())
+        viewModel.captureStill()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewStatus == CaptureReviewStatus.READ_FAILED })
+        assertEquals(8, peer.reviewReads.get())
+        assertNull(viewModel.uiState.value.captureReviewItem)
+        assertNull(viewModel.uiState.value.error)
+        val writes = peer.writes.toList()
+        peer.failListing.set(false)
+        viewModel.retryCaptureReview()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewItem?.name == "NEW.JPG" })
+        assertEquals(9, peer.reviewReads.get())
+        assertEquals(writes, peer.writes.toList())
+    }
+
+    @Test fun failedReviewRetryDoesNotCompeteWithCurrentMediaOperation() = runBlocking {
+        connect(native = true)
+        peer.failListing.set(true)
+        viewModel.captureStill()
+        awaitReadFailed()
+        val gate = peer.gateNextMediaInfo()
+        val reads = peer.reviewReads.get()
+        val writes = peer.writes.toList()
+        try {
+            viewModel.loadMediaInfo(requireNotNull(viewModel.uiState.value.captureReviewItem))
+            assertTrue(pumpUntil { gate.entered.count == 0L })
+            viewModel.retryCaptureReview()
+            main.scheduler.advanceTimeBy(5_000)
+            settle()
+            assertEquals(reads, peer.reviewReads.get())
+            assertEquals(CaptureReviewStatus.READ_FAILED, viewModel.uiState.value.captureReviewStatus)
+            assertFalse(viewModel.uiState.value.captureReviewLoading)
+        } finally { gate.release.countDown() }
+        assertTrue(pumpUntil { CameraOperation.MEDIA !in viewModel.uiState.value.pendingOperations })
+        peer.failListing.set(false)
+        viewModel.retryCaptureReview()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewItem?.name == "NEW.JPG" })
+        assertEquals(reads + 1, peer.reviewReads.get())
+        assertEquals(writes, peer.writes.toList())
+    }
+
+    private suspend fun awaitReadFailed() {
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewStatus == CaptureReviewStatus.READ_FAILED })
+        assertFalse(viewModel.uiState.value.captureReviewLoading)
+        assertEquals("OLD.JPG", viewModel.uiState.value.captureReviewItem?.name)
     }
 
     @Test fun oldRetryCannotPublishOrClearANewerCaptureAttempt() = runBlocking {
@@ -349,6 +774,9 @@ private class CaptureReviewPeer {
     lateinit var baseUrl: String
     val native = AtomicBoolean(false)
     val failStatus = AtomicBoolean(false)
+    val failListing = AtomicBoolean(false)
+    val listingFailures = ConcurrentLinkedQueue<Boolean>()
+    private val nativeListingFailed = AtomicBoolean(false)
     val rejectCapture = AtomicBoolean(false)
     val publishNew = AtomicBoolean(true)
     val captureWrites = AtomicInteger()
@@ -356,13 +784,19 @@ private class CaptureReviewPeer {
     val failedStatusReads = AtomicInteger()
     val reviewReads = AtomicInteger()
     val pages = CopyOnWriteArrayList<Int>()
+    val pageCount = AtomicInteger(1000)
+    val failSecondPage = AtomicBoolean(false)
     class ListingGate(val entered: CountDownLatch = CountDownLatch(1), val release: CountDownLatch = CountDownLatch(1))
+    private val gates = CopyOnWriteArrayList<ListingGate>()
     private val nextListingGate = AtomicReference<ListingGate?>()
-    fun gateNextListing() = ListingGate().also(nextListingGate::set)
+    fun gateNextListing() = ListingGate().also { gates += it; nextListingGate.set(it) }
+    private val secondNativePageGate = AtomicReference<ListingGate?>()
+    fun gateSecondNativePage() = ListingGate().also { gates += it; secondNativePageGate.set(it) }
+    fun releaseGates() { gates.forEach { it.release.countDown() } }
     private val nextStatusGate = AtomicReference<ListingGate?>()
-    fun gateNextStatus() = ListingGate().also(nextStatusGate::set)
+    fun gateNextStatus() = ListingGate().also { gates += it; nextStatusGate.set(it) }
     private val nextMediaInfoGate = AtomicReference<ListingGate?>()
-    fun gateNextMediaInfo() = ListingGate().also(nextMediaInfoGate::set)
+    fun gateNextMediaInfo() = ListingGate().also { gates += it; nextMediaInfoGate.set(it) }
     private val eventPending = AtomicBoolean(false)
     private val eventSequence = AtomicInteger()
     fun enqueueMediaEvent() { eventPending.set(true) }
@@ -404,20 +838,34 @@ private class CaptureReviewPeer {
                     }
                     path == "/ccapi/media" -> {
                         reviewReads.incrementAndGet()
+                        val failed = listingFailures.poll() ?: failListing.get()
+                        nextListingGate.getAndSet(null)?.let { gate ->
+                            gate.entered.countDown()
+                            check(gate.release.await(5, TimeUnit.SECONDS)) { "Simulator listing gate was not released" }
+                        }
+                        if (failed) return MockResponse().setResponseCode(503).setBody("Synthetic private failure detail")
                         json(JSONObject().put("items", JSONArray().put(JSONObject().put("id", latest)
                             .put("name", latest).put("kind", "jpeg"))).toString())
                     }
                     path.endsWith("/contents") && url.queryParameter("kind") == "number" -> {
                         reviewReads.incrementAndGet()
-                        json("""{"pagenumber":1000}""")
+                        nativeListingFailed.set(listingFailures.poll() ?: failListing.get())
+                        json("""{"pagenumber":${pageCount.get()}}""")
                     }
                     path.endsWith("/contents") && url.queryParameter("page") != null -> {
                         pages += url.queryParameter("page")!!.toInt()
                         val paths = listOf(latest) + (1..7).map { "OLDER$it.JPG" }
+                        val failed = nativeListingFailed.get() ||
+                            (url.queryParameter("page") == "2" && failSecondPage.get())
+                        if (url.queryParameter("page") == "2") secondNativePageGate.getAndSet(null)?.let { gate ->
+                            gate.entered.countDown()
+                            check(gate.release.await(5, TimeUnit.SECONDS)) { "Second native page was not released" }
+                        }
                         nextListingGate.getAndSet(null)?.let { gate ->
                             gate.entered.countDown()
                             check(gate.release.await(5, TimeUnit.SECONDS)) { "Listing gate was not released" }
                         }
+                        if (failed) return MockResponse().setResponseCode(503).setBody("Synthetic private failure detail")
                         json(JSONObject().put("path", JSONArray(paths.map { "/ccapi/ver110/contents/$it" })).toString())
                     }
                     path.endsWith("/contents") -> json("{}")

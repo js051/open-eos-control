@@ -69,7 +69,11 @@ data class LiveViewDiagnostics(
     val lastFrameAtMillis: Long? = null,
 )
 
-enum class CaptureReviewStatus { IDLE, SEARCHING, NOT_READY }
+enum class CaptureReviewStatus {
+    IDLE, SEARCHING, NOT_READY, READ_FAILED;
+
+    val canRetry: Boolean get() = this == NOT_READY || this == READ_FAILED
+}
 
 enum class CaptureFeedback { SUCCESS }
 

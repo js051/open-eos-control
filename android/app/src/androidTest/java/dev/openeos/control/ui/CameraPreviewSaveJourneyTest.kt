@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -17,6 +18,7 @@ import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
@@ -36,6 +38,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -60,6 +63,7 @@ class CameraPreviewSaveJourneyTest {
     private val store = ViewModelStore()
     private lateinit var viewModel: CameraViewModel
     private val captured = AtomicBoolean(false)
+    private val failListing = AtomicBoolean(false)
     private val shutterRequests = AtomicInteger()
     private val originalMode = AtomicReference(OriginalMode.COMPLETE)
     private val capturedId = "${camera.label}-captured"
@@ -82,7 +86,9 @@ class CameraPreviewSaveJourneyTest {
                     captured.set(true)
                     camera.json("{}")
                 }
-                request.method == "GET" && url.encodedPath == "/ccapi/media" -> camera.json(mediaJson())
+                request.method == "GET" && url.encodedPath == "/ccapi/media" ->
+                    if (failListing.get()) MockResponse().setResponseCode(503).setBody("Synthetic private listing detail")
+                    else camera.json(mediaJson())
                 request.method == "GET" && url.encodedPath.startsWith("/ccapi/media/") &&
                     url.queryParameter("kind") == "info" -> {
                     val id = url.pathSegments.last()
@@ -148,6 +154,76 @@ class CameraPreviewSaveJourneyTest {
         assertEquals(listOf("/ccapi/media/$capturedId"), camera.originalReads.toList())
         assertEquals(1, shutterRequests.get())
         assertEquals(capturedId, viewModel.uiState.value.mediaPreviewItem?.id)
+    }
+
+    @Test
+    fun failedReviewRetryFindsTheNewPhotoAndSavesItsOriginalWithoutAnotherCameraCommand() {
+        assertEquals(previousId, viewModel.uiState.value.captureReviewItem?.id)
+        val oldThumbnail = viewModel.uiState.value.captureReviewThumbnail
+        val reads = camera.mediaReads.get()
+        failListing.set(true)
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.capture_photo))
+            .assertIsDisplayed().assertIsEnabled().performClick()
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            val state = viewModel.uiState.value
+            !state.busy && !state.captureReviewLoading && state.captureReviewStatus == CaptureReviewStatus.READ_FAILED
+        }
+        assertEquals(reads + 4, camera.mediaReads.get())
+        assertEquals(previousId, viewModel.uiState.value.captureReviewItem?.id)
+        assertSame(oldThumbnail, viewModel.uiState.value.captureReviewThumbnail)
+        assertNull(viewModel.uiState.value.error)
+        assertEquals(1, shutterRequests.get())
+        val writes = camera.mutations.toList()
+        assertEquals(listOf("POST /ccapi/capture/still"), writes)
+        val failedMessage = compose.activity.getString(R.string.capture_review_read_failed)
+        compose.onNodeWithTag("capture-review-button").assertContentDescriptionEquals(failedMessage)
+            .assertIsDisplayed().assertIsEnabled().performClick()
+        dialogText(failedMessage).performScrollTo().assertIsDisplayed()
+        dialogText(compose.activity.getString(R.string.capture_command_acknowledged)).performScrollTo().assertIsDisplayed()
+        dialogText(compose.activity.getString(R.string.capture_review_not_ready)).assertDoesNotExist()
+        dialogText("Synthetic private listing detail").assertDoesNotExist()
+        compose.onNodeWithTag("capture-review-open-existing").performScrollTo().assertIsDisplayed()
+
+        val retry = camera.gate()
+        val ordinaryResponse = camera.intercept
+        camera.intercept = { request ->
+            if (request.method == "GET" && request.requestUrl?.encodedPath == "/ccapi/media") retry.blockResponse()
+            ordinaryResponse(request)
+        }
+        try {
+            failListing.set(false)
+            compose.onNodeWithTag("capture-review-retry").performScrollTo().assertIsEnabled().performClick()
+            compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { retry.entered.count == 0L }
+            assertEquals(CaptureReviewStatus.SEARCHING, viewModel.uiState.value.captureReviewStatus)
+            compose.onNodeWithTag("capture-review-retry").performScrollTo().assertIsNotEnabled()
+                .performTouchInput { click() }
+            assertEquals(reads + 5, camera.mediaReads.get())
+            assertEquals(writes, camera.mutations.toList())
+        } finally {
+            retry.release()
+            camera.intercept = ordinaryResponse
+        }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            val state = viewModel.uiState.value
+            !state.busy && !state.captureReviewLoading && state.captureReviewItem?.id == capturedId &&
+                state.captureReviewStatus == CaptureReviewStatus.IDLE
+        }
+        compose.onNodeWithTag("capture-review-status-dialog").assertDoesNotExist()
+        assertEquals(reads + 5, camera.mediaReads.get())
+        compose.onNodeWithTag("capture-review-button").assertIsDisplayed().performClick()
+        awaitPreview(capturedId)
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { !viewModel.uiState.value.mediaLibraryLoading }
+        val item = requireNotNull(viewModel.uiState.value.mediaPreviewItem)
+        assertArrayEquals(camera.imageBytes, viewModel.uiState.value.mediaPreviewBytes)
+        assertTrue(camera.previewReads.contains("/ccapi/media/$capturedId"))
+        assertTrue(camera.originalReads.isEmpty())
+        downloadButton(item).assertIsDisplayed().assertIsEnabled().performClick()
+        awaitSaved(item)
+        dialogText(savedMessage()).assertIsDisplayed()
+        assertPublishedOriginal()
+        assertEquals(listOf("/ccapi/media/$capturedId"), camera.originalReads.toList())
+        assertEquals(1, shutterRequests.get())
+        assertEquals("Retry, preview and save must not send shutter, AF or any other camera control", writes, camera.mutations.toList())
     }
 
     @Test
