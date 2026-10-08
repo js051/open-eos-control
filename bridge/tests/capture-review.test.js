@@ -124,6 +124,79 @@ function writes(subject) {
   return subject.requests.filter((request) => request.method !== "GET");
 }
 
+function installLatestMediaRenderer(subject) {
+  const element = () => ({
+    hidden: false, disabled: false, textContent: "", dataset: {},
+    setAttribute() {}, replaceChildren() {}, append() {},
+  });
+  subject.ui = Object.fromEntries([
+    "latestMediaButton", "latestMediaHeading", "latestMediaReview", "latestMediaReviewStatus",
+    "latestMediaRetry", "latestMediaLabel", "latestMediaThumbnail",
+  ].map((name) => [name, element()]));
+  subject.document = { createElement: element };
+  vm.runInContext(productionFunction("renderLatestMedia"), subject);
+  subject.renderSession = () => subject.renderLatestMedia();
+}
+
+for (const readyDuringSearch of [true, false]) {
+  test(`acknowledged readback recovery renders ${readyDuringSearch ? "disabled retry before automatic discovery" :
+    "enabled retry only after bounded exhaustion"}`, async () => {
+    const subject = context();
+    installLatestMediaRenderer(subject);
+    const originalApi = subject.api;
+    subject.api = async (url, options = {}) => {
+      if (url.endsWith("/capture/still")) {
+        subject.requests.push({ url, method: "POST", json: options.json });
+        throw { code: "CAPTURE_STATUS_READBACK_FAILED", status: 502, message: "Synthetic readback warning" };
+      }
+      return originalApi(url, options);
+    };
+    const gates = [];
+    subject.sleep = (delay) => {
+      subject.delays.push(delay);
+      const gate = deferred();
+      gates.push(gate);
+      return gate.promise;
+    };
+    await subject.operateShutter();
+    const automaticReview = subject.state.latestMediaRefreshPromise;
+    const originalWrites = writes(subject).slice();
+    const readsBeforeReady = readyDuringSearch ? 1 : 4;
+    for (let index = 0; index < Math.min(readsBeforeReady, 3); index += 1) {
+      await eventually(() => gates.length === index + 1, `automatic review delay ${index + 1}`);
+      assert.equal(listingRequests(subject).length, index + 1);
+      assert.equal(subject.state.latestMediaReviewStatus, "SEARCHING");
+      assert.equal(subject.ui.latestMediaRetry.hidden, false, "Visibility alone does not permit a manual retry");
+      assert.equal(subject.ui.latestMediaRetry.disabled, true);
+      assert.equal(subject.ui.latestMediaLabel.textContent, OLD_A.name);
+      assert.equal(subject.retryLatestMedia(), automaticReview, "An early retry must retain the automatic owner");
+      if (readyDuringSearch) subject.listing = [NEW_C, OLD_A, OLD_B];
+      gates[index].resolve();
+    }
+    await automaticReview;
+    if (!readyDuringSearch) {
+      assert.equal(listingRequests(subject).length, 4);
+      assert.deepEqual(subject.delays, [250, 750, 1500]);
+      assert.equal(subject.state.latestMediaReviewStatus, "NOT_READY");
+      assert.equal(subject.state.latestMediaRefreshPromise, null);
+      assert.equal(subject.ui.latestMediaRetry.hidden, false);
+      assert.equal(subject.ui.latestMediaRetry.disabled, false, "Exhaustion makes the manual retry actionable");
+      assert.equal(subject.ui.latestMediaLabel.textContent, OLD_A.name);
+      subject.listing = [NEW_C, OLD_A, OLD_B];
+      await subject.retryLatestMedia();
+    }
+    assert.equal(listingRequests(subject).length, readsBeforeReady + 1);
+    assert.equal(subject.state.latestMediaReviewStatus, "READY");
+    assert.equal(subject.ui.latestMediaRetry.hidden, true, "Discovery hides the retry, even without a manual click");
+    assert.equal(subject.ui.latestMediaLabel.textContent, NEW_C.name);
+    assert.equal(originalWrites.length, 1);
+    assert.equal(originalWrites[0].json.af, false);
+    assert.deepEqual(writes(subject), originalWrites, "Automatic and manual review never resend the shutter");
+    assert.equal(subject.feedback.includes("Synthetic readback warning"), true);
+    assert.equal(subject.feedback.includes("captureComplete"), false, "Media discovery cannot erase the readback warning");
+  });
+}
+
 test("only the acknowledged capture readback code permits read-only media recovery", async () => {
   for (const code of ["CAPTURE_STATUS_READBACK_FAILED", "CCAPI_UNREACHABLE", "HTTP_ERROR"]) {
     const subject = context();

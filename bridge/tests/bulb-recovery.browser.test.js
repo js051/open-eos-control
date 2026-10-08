@@ -292,16 +292,29 @@ async function run() {
     await page.uncheck("#shutter-af-toggle");
     await configure({ status_failure_after_release: true, media_ready: false });
     const beforeCapture = (await cameraState()).commands.length;
+    const reviewRequests = [];
+    page.on("request", (request) => {
+      if (/\/media\?limit=8$/.test(request.url())) reviewRequests.push(request.url());
+    });
     const capturedResponse = page.waitForResponse((response) => response.url().endsWith("/capture/still"));
     await page.click("#shutter-button");
     const captured = await capturedResponse;
     assert.equal(captured.status(), 502);
     assert.equal((await captured.json()).error.code, "CAPTURE_STATUS_READBACK_FAILED");
     await page.getByRole("button", { name: /check again/i }).waitFor({ state: "visible" });
+    // The retry is already visible but disabled during the automatic bounded search.
+    // Keep the peer unready until that search ends, so only this manual click finds NEW.
+    await page.waitForFunction(() => {
+      const button = document.querySelector("#latest-media-retry");
+      return button && !button.hidden && !button.disabled;
+    });
+    await assertActionable(page, "#latest-media-retry");
+    assert.equal(reviewRequests.length, 4, "The automatic search exhausts its four bounded reads");
     assert.equal(await page.locator("#latest-media-label").innerText(), "SYNTHETIC_OLD.JPG");
     await configure({ media_ready: true });
     await page.getByRole("button", { name: /check again/i }).click();
     await page.waitForFunction(() => document.querySelector("#latest-media-label")?.textContent === "SYNTHETIC_NEW.JPG");
+    assert.equal(reviewRequests.length, 5, "The enabled manual retry performs one new read");
     await page.click("#latest-media-button");
     await page.waitForFunction(() => {
       const image = document.querySelector("#media-preview-image");

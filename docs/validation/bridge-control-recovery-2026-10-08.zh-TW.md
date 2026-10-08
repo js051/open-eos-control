@@ -191,6 +191,34 @@ Security tests 使用真正 hook entry points、官方 Gitleaks8.30.1 archive �
 
 Stop ACK 是協定回應，不保證實體相機已停止。close／程序退出也不能保證實體停止。發現 JPEG 只表示媒體可見，不是新的曝光證明。
 
+## 第一輪 exact-head CI 與後續 fixture 修正候選
+
+[CI 37815838415](https://github.com/js051/open-eos-control/actions/runs/37815838415) 在 head `aa7073e9fdbc1e0b0b55fc803a46f4f24d3646b2` 完整終態為 failure；actual checkout 為 `4ab3701dbf0ce078a5913aedc4a141f7ce78b2b9`，將該 head 合入 accepted base `f9e938b`。沒有取消仍在進行的 gates 或盲目重跑。
+
+- Core **253/253**、App **135/135**（CaptureMediaJourney27）及 UI **20/20** 實際通過。新增 typed-error、owner／generation、只讀 retry 與 pure wire fixture 均在此來源執行；不能繼承為之後新 head 的 pass。
+- Android JVM／debug build、Windows standalone、simulator、security／workflow helpers通過。未修改的 affected-surface classification 將 Camera Import contract job/schema step列為 **skipped**，不是新 CI pass；本地 contract JVM14分開保留。
+- API36 raw XML **357/357**，0 failure/error/skip；artifact11568938012 SHA256 `e98794b160c7ea4937d4bd09bf70f3ae1e05206b529caf8f9b20a60a88f3eb7b`。
+- API34 raw XML **356/357**，1 failure、0 error/skip；artifact11568408260 SHA256 `9d026f0a88ec9c4342636bc22ad8f547b4a4b689b1fc24890cf74e4aa369e303`。失敗是 `CameraSafOsJourneyTest.treePickerSavesExactBatchBytesAndCompletedReceipts` 的 root drawer 未關閉，不是本批產品驗收成功。
+- Desktop browser在第三個 `bulb-recovery.browser.test.js:303` 失敗；第四條capture-review browser journey和後續Bridge Python CI gate未執行。`ci-complete`因此失敗，PR尚未ready。
+
+### PC manual-retry fixture
+
+失敗log顯示Check again先是visible／disabled，再變hidden。Production-function/render deterministic harness確認：若自動bounded search還在SEARCHING時便把peer切成media-ready，自動下一次read會找到NEW並隱藏retry；visibility不等於manual retry已可操作。
+
+候選只改兩個test files：先等retry真正enabled／reachable，確認原四次自動read耗盡，再切peer ready並保留原manual click、JPEG decode與exact full_press/release assertions；新增manual第五次read計數。沒有產品code、timeout或retry-budget變更。
+
+候選的九個Node module suites全過，capture-review **35/35**；三個Python readback cases與獨立TCP trace通過。後者保留四次OLD listing、第五次NEW、32×24 JPEG decode和exact兩個camera writes。本地browser仍因既有環境限制未重跑；真正DOM結果待新head正常CI。
+
+### API34 DocumentsUI root-selection fixture
+
+原PNG／hierarchy顯示drawer仍開啟且選中舊internal storage。Log中17:38:09.840的單次label touch，與09.838–09.851的root refresh/rebind重疊；沒有synthetic root load。這符合adapter更新干擾touch的機制，但沒有證明具體Android取消分支，也不能歸因於產品或將failure忽略。
+
+候選只調整既有driver：在roots_list內選取包含精確title的enabled clickable row；500ms accessibility-event quiet仍受原15秒pre-tap deadline約束；idle後重新查詢bounds／foreground，僅送一次touch。以整個roots_list消失確認drawer關閉，不將row rebinding時的暫時缺席當成完成。沒有重試Save／Create／Allow，也沒有增加timeout。
+
+四個artifact-backed檢查通過，包含toolbar同名反例與target row暫時消失時drawer仍應開啟。六個journey方法本體、bytes／receipt／grant／cleanup assertions及failure capture與aa7073e逐byte一致。這些是source／evidence檢查，不是picker runtime。2026-10-08 18:18:51–18:21:01 UTC另執行候選 `:app:assembleDebugAndroidTest`，exit0、129.55秒，10 tasks executed／38 up-to-date；source及tool hashes前後一致。新test APK SHA256 `415cd907e305e9fe910d7e7439b3892bec4408a711e7c4a63f979ea20e7af802`。此階段只有compile／assembly；API34／36 runtime仍須新head正常CI。
+
+兩個fixture候選均保留原red證據。下個head必須完成正常完整必要CI；不移除gate、不把舊head綠燈或本地source checks當成新head驗收。PR219的原Compose原因UNKNOWN及frozen release HOLD不因此改變。
+
 ## Release Assessment
 
 - 最新真正公開 baseline：[v0.12.0 Development Preview](https://github.com/js051/open-eos-control/releases/tag/v0.12.0)，2026-10-07T02:38:04Z 發布，draft=false／prerelease=true；2026-10-08 17:06 UTC 由 owner fresh read 確認。repo metadata 的 0.13.0 與 frozen unpublished candidate 分開列示，不能拿本地版號冒充已發布版本。

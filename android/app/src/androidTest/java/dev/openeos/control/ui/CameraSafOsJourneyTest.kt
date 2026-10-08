@@ -495,6 +495,7 @@ private class DocumentsUiDriver(private val evidenceId: String) {
     private val device = UiDevice.getInstance(instrumentation)
     private val pickerPackage = Pattern.compile(".*documentsui.*")
     private val drawerDescription = Pattern.compile("Show roots|Open navigation drawer")
+    private val rootsList = By.res(Pattern.compile(".*:id/roots_list")).pkg(pickerPackage)
     private var evidenceSequence = 0
 
     fun awaitPicker() {
@@ -556,32 +557,36 @@ private class DocumentsUiDriver(private val evidenceId: String) {
 
     private fun chooseRoot(title: String) {
         awaitPicker()
-        // The toolbar may repeat the current root title. Require a real actionable row
-        // ancestor in the opened drawer, then tap the label's freshly queried visible bounds.
-        if (device.hasObject(By.desc(drawerDescription))) {
+        // The toolbar may repeat the current root title. Target the clickable row inside
+        // the roots list, not its non-clickable label or the obscured toolbar.
+        if (!device.hasObject(rootsList)) {
             click("Open DocumentsUI roots", By.desc(drawerDescription))
         }
-        val rootRow = By.text(title).pkg(pickerPackage).hasAncestor(By.clickable(true)).enabled(true)
-        click("Synthetic provider root '$title'", rootRow)
-        awaitRootDrawerClosed(rootRow)
+        val rootRow = By.clickable(true).enabled(true).pkg(pickerPackage)
+            .hasAncestor(rootsList).hasDescendant(By.text(title))
+        click("Synthetic provider root '$title'", rootRow, requireIdle = true)
+        awaitRootDrawerClosed()
         awaitObject("Synthetic root contents", By.text(SyntheticDocumentsProvider.SENTINEL).pkg(pickerPackage))
     }
 
-    private fun awaitRootDrawerClosed(rootRow: BySelector) = withEvidence("Root drawer closes after selection") {
+    private fun awaitRootDrawerClosed() = withEvidence("Root drawer closes after selection") {
         val deadline = SystemClock.uptimeMillis() + SESSION_TEST_TIMEOUT_MILLIS
         do {
-            if (isPickerForeground() && !device.hasObject(rootRow)) return@withEvidence
+            if (isPickerForeground() && !device.hasObject(rootsList)) return@withEvidence
             SystemClock.sleep(100)
         } while (SystemClock.uptimeMillis() < deadline)
         error("DocumentsUI did not close the selected root drawer")
     }
 
-    private fun click(description: String, selector: BySelector) = withEvidence(description) {
+    private fun click(description: String, selector: BySelector, requireIdle: Boolean = false) = withEvidence(description) {
         // Roots load asynchronously and can reorder after the drawer appears. Observe the
         // same target geometry across consecutive fresh queries before sending one touch.
         // This never retries a Save/Create/Allow or treats a failed action as successful.
-        val node = awaitObject(description, selector, requireStableBounds = true)
+        val deadline = SystemClock.uptimeMillis() + SESSION_TEST_TIMEOUT_MILLIS
+        val node = awaitObject(description, selector, requireStableBounds = true,
+            requireIdle = requireIdle, deadline = deadline)
         check(isPickerForeground()) { "DocumentsUI lost the foreground before $description" }
+        check(SystemClock.uptimeMillis() < deadline) { "DocumentsUI readiness expired before $description" }
         node.click()
     }
 
@@ -596,20 +601,13 @@ private class DocumentsUiDriver(private val evidenceId: String) {
         description: String,
         selector: BySelector,
         requireStableBounds: Boolean = false,
+        requireIdle: Boolean = false,
+        deadline: Long = SystemClock.uptimeMillis() + SESSION_TEST_TIMEOUT_MILLIS,
     ): UiObject2 = withEvidence(description) {
-        val deadline = SystemClock.uptimeMillis() + SESSION_TEST_TIMEOUT_MILLIS
         var previousBounds: Rect? = null
         var unchangedSince = 0L
         do {
-            // A stale read means this snapshot disappeared before any action was sent.
-            val candidate = try {
-                (if (isPickerForeground()) device.findObject(selector) else null)?.let { node ->
-                    val bounds = node.visibleBounds
-                    if (bounds.isEmpty) null else node to bounds
-                }
-            } catch (_: StaleObjectException) {
-                null
-            }
+            val candidate = findVisibleObject(selector)
             if (candidate != null) {
                 val (node, bounds) = candidate
                 if (!requireStableBounds) return@withEvidence node
@@ -618,7 +616,21 @@ private class DocumentsUiDriver(private val evidenceId: String) {
                     previousBounds = Rect(bounds)
                     unchangedSince = now
                 } else if (now - unchangedSince >= 200L) {
-                    return@withEvidence node
+                    if (!requireIdle) return@withEvidence node
+                    // A roots-loader refresh can replace ListView rows without changing
+                    // their bounds and cancel an in-flight tap. Use UI Automator's 500 ms
+                    // accessibility-event quiet interval, bounded by this same deadline.
+                    // Unlike UiDevice.waitForIdle, a timeout here fails before any touch.
+                    val remaining = deadline - now
+                    if (remaining <= 0L) break
+                    automation.waitForIdle(500L, remaining)
+                    val settled = findVisibleObject(selector)
+                    if (settled != null && settled.second == bounds && SystemClock.uptimeMillis() < deadline) {
+                        return@withEvidence settled.first
+                    }
+                    // Only readiness is retried; no input has been sent.
+                    previousBounds = null
+                    unchangedSince = 0L
                 }
             } else {
                 previousBounds = null
@@ -627,6 +639,16 @@ private class DocumentsUiDriver(private val evidenceId: String) {
             SystemClock.sleep(100)
         } while (SystemClock.uptimeMillis() < deadline)
         error("Timed out waiting for $description. Platform picker nodes: ${describeWindow()}")
+    }
+
+    private fun findVisibleObject(selector: BySelector): Pair<UiObject2, Rect>? = try {
+        // A stale read means this snapshot disappeared before any action was sent.
+        (if (isPickerForeground()) device.findObject(selector) else null)?.let { node ->
+            val bounds = node.visibleBounds
+            if (bounds.isEmpty) null else node to bounds
+        }
+    } catch (_: StaleObjectException) {
+        null
     }
 
     private inline fun <T> withEvidence(description: String, block: () -> T): T = try {
