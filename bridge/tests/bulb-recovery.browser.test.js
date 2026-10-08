@@ -117,7 +117,7 @@ async function run() {
 
     // The camera receives full_press; both the reply and compensating release fail.
     await page.click("#shutter-button");
-    await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Retry Stop Bulb");
+    await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Retry camera stop");
     assert.equal(await page.isDisabled("#shutter-button"), false);
     assert.equal(await page.isDisabled("#photo-mode-button"), true);
     assert.equal(await page.isDisabled("#video-mode-button"), true);
@@ -125,21 +125,21 @@ async function run() {
     assert.equal(await page.isDisabled("#live-toggle-button"), true);
     assert.equal(await page.isDisabled("#rail-live-button"), true);
     assert.equal(await page.isVisible("#toast"), false);
-    assert.match(await page.textContent("#bulb-indicator"), /release unconfirmed/i);
+    assert.match(await page.textContent("#bulb-indicator"), /stop unconfirmed/i);
     assert.equal((await cameraState()).commands.length, 2);
 
     // Neither a changed mode nor a failed status refresh may turn Stop into Start.
     await configure({ mode: "Manual", drop_status: true });
     await page.click("#refresh-button");
     await page.waitForFunction(() => document.querySelector("#operation-state")?.classList.contains("error-text"));
-    assert.equal(await page.getAttribute("#shutter-button", "aria-label"), "Retry Stop Bulb");
+    assert.equal(await page.getAttribute("#shutter-button", "aria-label"), "Retry camera stop");
     await configure({ drop_status: false });
     await refreshMode();
-    assert.equal(await page.getAttribute("#shutter-button", "aria-label"), "Retry Stop Bulb");
+    assert.equal(await page.getAttribute("#shutter-button", "aria-label"), "Retry camera stop");
 
     await page.click("#shutter-button");
     await page.waitForFunction(() => !document.querySelector("#shutter-button").disabled);
-    assert.equal(await page.getAttribute("#shutter-button", "aria-label"), "Retry Stop Bulb");
+    assert.equal(await page.getAttribute("#shutter-button", "aria-label"), "Retry camera stop");
     assert.equal((await cameraState()).commands.length, 3);
     const results = path.join(root, "test-results");
     fs.mkdirSync(results, { recursive: true });
@@ -161,7 +161,7 @@ async function run() {
     await page.click("#shutter-button");
     await page.waitForFunction(() => {
       const toast = document.querySelector("#toast");
-      return toast && !toast.hidden && toast.textContent === "Shutter release confirmed";
+      return toast && !toast.hidden && toast.textContent === "Camera stop confirmed";
     });
     assert.equal(await page.isVisible("#bulb-indicator"), false);
     assert.equal(await page.isDisabled("#photo-mode-button"), false);
@@ -196,7 +196,7 @@ async function run() {
     assert.equal((await stopResponse).status(), 502);
     await page.waitForFunction(() => {
       const toast = document.querySelector("#toast");
-      return toast && !toast.hidden && toast.textContent === "Shutter release confirmed";
+      return toast && !toast.hidden && toast.textContent === "Camera stop confirmed";
     });
     assert.equal(await page.isVisible("#bulb-indicator"), false);
     assert.equal(await page.isDisabled("#photo-mode-button"), false);
@@ -210,7 +210,7 @@ async function run() {
     await refreshMode();
     await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Start Bulb exposure");
     await page.click("#shutter-button");
-    await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Retry Stop Bulb");
+    await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Retry camera stop");
     await page.click("#disconnect-button");
     await page.waitForSelector("#connection-view:not([hidden])");
     assert.match(await page.textContent("#connection-error"), /stop the exposure on the camera before reconnecting/);
@@ -247,8 +247,89 @@ async function run() {
     await page.click("#disconnect-button");
     await page.waitForSelector("#connection-view:not([hidden])");
     assert.equal((await cameraState()).commands.length, beforeReconnect + 2);
+
+    // Short controls own the same reachable stop-only recovery even outside Bulb mode.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await configure({ mode: "Manual", drop_press: false, reject_release: true,
+      direct_shutter: false, dedicated_af: true, media_enabled: true, media_ready: false, capture_count: 0 });
+    await page.click("#connect-button");
+    await page.waitForSelector("#control-view:not([hidden])");
+    await page.waitForFunction(() => document.querySelector("#latest-media-label")?.textContent === "SYNTHETIC_OLD.JPG");
+    for (const [selector, startAction, stopAction] of [
+      ["#shutter-button", "full_press", "release"],
+      ["#half-press-button", "half_press", "release"],
+      ["#autofocus-button", "start", "stop"],
+    ]) {
+      await configure({ reject_release: true });
+      const before = (await cameraState()).commands.length;
+      await page.click(selector);
+      await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Retry camera stop");
+      assert.match(await page.textContent("#bulb-indicator"), /shutter or autofocus may still be active/i);
+      assert.doesNotMatch(await page.textContent("#bulb-indicator"), /Bulb/);
+      assert.equal(await page.isDisabled("#half-press-button"), true);
+      assert.equal(await page.isDisabled("#autofocus-button"), true);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await assertActionable(page, "#shutter-button");
+      if (startAction === "start") {
+        await page.locator("#control-view .language-select").selectOption("zh-TW");
+        assert.equal(await page.getAttribute("#shutter-button", "aria-label"), "重試停止相機操作");
+        assert.match(await page.textContent("#bulb-indicator"), /快門或自動對焦可能仍在作用/);
+        assert.doesNotMatch(await page.textContent("#bulb-indicator"), /Bulb|長曝光/);
+        await assertActionable(page, "#shutter-button");
+        await page.screenshot({ path: path.join(results, "bridge-short-control-stop-zh-TW.png"), fullPage: true });
+        await page.locator("#control-view .language-select").selectOption("en");
+      }
+      await configure({ reject_release: false });
+      await page.click("#shutter-button");
+      await page.waitForFunction(() => !document.querySelector("#bulb-indicator") || document.querySelector("#bulb-indicator").hidden);
+      assert.deepEqual((await cameraState()).commands.slice(before).map(([, , body]) => body.action),
+        [startAction, stopAction, stopAction], "Retry sends only the original control's stop");
+      await page.setViewportSize({ width: 1280, height: 900 });
+    }
+
+    // The real shutter and release ACK, then the TCP status read is lost. The page
+    // preserves the warning while its existing read-only JPEG journey stays usable.
+    await page.uncheck("#shutter-af-toggle");
+    await configure({ status_failure_after_release: true, media_ready: false });
+    const beforeCapture = (await cameraState()).commands.length;
+    const reviewRequests = [];
+    page.on("request", (request) => {
+      if (/\/media\?limit=8$/.test(request.url())) reviewRequests.push(request.url());
+    });
+    const capturedResponse = page.waitForResponse((response) => response.url().endsWith("/capture/still"));
+    await page.click("#shutter-button");
+    const captured = await capturedResponse;
+    assert.equal(captured.status(), 502);
+    assert.equal((await captured.json()).error.code, "CAPTURE_STATUS_READBACK_FAILED");
+    await page.getByRole("button", { name: /check again/i }).waitFor({ state: "visible" });
+    // The retry is already visible but disabled during the automatic bounded search.
+    // Keep the peer unready until that search ends, so only this manual click finds NEW.
+    await page.waitForFunction(() => {
+      const button = document.querySelector("#latest-media-retry");
+      return button && !button.hidden && !button.disabled;
+    });
+    await assertActionable(page, "#latest-media-retry");
+    assert.equal(reviewRequests.length, 4, "The automatic search exhausts its four bounded reads");
+    assert.equal(await page.locator("#latest-media-label").innerText(), "SYNTHETIC_OLD.JPG");
+    await configure({ media_ready: true });
+    await page.getByRole("button", { name: /check again/i }).click();
+    await page.waitForFunction(() => document.querySelector("#latest-media-label")?.textContent === "SYNTHETIC_NEW.JPG");
+    assert.equal(reviewRequests.length, 5, "The enabled manual retry performs one new read");
+    await page.click("#latest-media-button");
+    await page.waitForFunction(() => {
+      const image = document.querySelector("#media-preview-image");
+      return document.querySelector("#media-preview-dialog")?.open && image?.complete && image.naturalWidth === 32;
+    });
+    assert.deepEqual((await cameraState()).commands.slice(beforeCapture), [
+      ["PUT", "/ccapi/ver100/shooting/control/shutterbutton/manual", { af: false, action: "full_press" }],
+      ["PUT", "/ccapi/ver100/shooting/control/shutterbutton/manual", { af: false, action: "release" }],
+    ], "Read-only review retry and JPEG preview never resend the shutter");
+    await page.screenshot({ path: path.join(results, "bridge-capture-readback-jpeg-recovery.png"), fullPage: true });
+    await page.click("#media-preview-close");
+    await page.click("#disconnect-button");
+    await page.waitForSelector("#connection-view:not([hidden])");
     assert.deepEqual(pageErrors, []);
-    console.log("PASS: real Bridge HTTP peer + browser stop-only recovery, status failure, mode change, retry, teardown and fresh-session isolation");
+    console.log("PASS: real Bridge HTTP peer + browser Bulb/short-control stop-only recovery and acknowledged capture JPEG recovery");
   } finally {
     await browser?.close();
     server.kill();

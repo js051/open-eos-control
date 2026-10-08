@@ -45,7 +45,7 @@ internal class BridgeShutterReleaseSession(val id: String) {
 
     suspend fun start(read: suspend () -> CameraStatus, press: suspend () -> CameraStatus): CameraStatus = mutex.withLock {
         check(!closed) { "Desktop Bridge session is closed." }
-        if (unconfirmed) throw ShutterReleaseException(IllegalStateException("Retry Stop Bulb in this Bridge session."))
+        if (unconfirmed) throw ShutterReleaseException(IllegalStateException("Retry stopping the camera control in this Bridge session."))
         if (confirmedStart) return@withLock read()
         // Record responsibility before bytes can reach Bridge. No failed start is replayable.
         markUnconfirmed()

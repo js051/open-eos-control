@@ -232,12 +232,12 @@
       stopBulb: "Stop Bulb exposure",
       bulbStarted: "Bulb exposure started",
       bulbStopped: "Bulb exposure stopped",
-      previousShutterWarning: "Shutter release in the previous connection was not confirmed. Check the camera and stop any exposure before shooting again.",
+      previousShutterWarning: "The shutter or autofocus may still be active after the previous connection. Check the camera and stop any active control before using it again.",
       confirmCameraChecked: "I've checked the camera",
-      retryBulbStop: "Retry Stop Bulb",
-      bulbReleaseConfirmed: "Shutter release confirmed",
-      bulbReleaseUnconfirmed: "Shutter release unconfirmed. Retry Stop Bulb or check the camera.",
-      bulbDisconnectWarning: "Connection closed locally; shutter release is unconfirmed. Check the camera before reconnecting.",
+      retryBulbStop: "Retry camera stop",
+      bulbReleaseConfirmed: "Camera stop confirmed",
+      bulbReleaseUnconfirmed: "Camera stop unconfirmed. The shutter or autofocus may still be active. Retry stop or check the camera.",
+      bulbDisconnectWarning: "Connection closed locally; the camera stop is unconfirmed. Check the camera before reconnecting.",
       autofocusComplete: "Autofocus complete",
       halfPressComplete: "Shutter half-press complete",
       recordingStarted: "Recording started",
@@ -651,12 +651,12 @@
       stopBulb: "停止 Bulb 長曝光",
       bulbStarted: "Bulb 長曝光已開始",
       bulbStopped: "Bulb 長曝光已停止",
-      previousShutterWarning: "上一連線尚未確認快門釋放。再次拍攝前，請先檢查相機並停止可能仍在進行的曝光。",
+      previousShutterWarning: "上一連線的快門或自動對焦可能仍在作用。再次操作前，請先檢查相機並停止仍在進行的操作。",
       confirmCameraChecked: "我已檢查相機",
-      retryBulbStop: "重試停止 Bulb",
-      bulbReleaseConfirmed: "已確認快門釋放",
-      bulbReleaseUnconfirmed: "尚未確認快門釋放。請重試停止 Bulb，或檢查相機。",
-      bulbDisconnectWarning: "本機連線已關閉，但尚未確認快門釋放。重新連線前請先檢查相機。",
+      retryBulbStop: "重試停止相機操作",
+      bulbReleaseConfirmed: "已確認相機操作停止",
+      bulbReleaseUnconfirmed: "尚未確認相機操作停止；快門或自動對焦可能仍在作用。請重試停止，或檢查相機。",
+      bulbDisconnectWarning: "本機連線已關閉，但尚未確認相機操作停止。重新連線前請先檢查相機。",
       autofocusComplete: "自動對焦完成",
       halfPressComplete: "快門半按完成",
       recordingStarted: "已開始錄影",
@@ -1732,10 +1732,17 @@
     try {
       await api(`/v1/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
     } catch (error) {
-      disconnectError = captureError(error);
       state.shutterDisconnectWarning ||= hadBulbResponsibility ||
-        disconnectError.code === "SHUTTER_RELEASE_UNCONFIRMED";
+        error?.code === "SHUTTER_RELEASE_UNCONFIRMED";
+      if (state.session?.id !== sessionId) {
+        // An old close can leave a previous-camera warning, never reset the
+        // replacement session or publish an old error as its current operation.
+        renderAvailability();
+        return;
+      }
+      disconnectError = captureError(error);
     }
+    if (state.session?.id !== sessionId) return;
     resetSession();
     if (disconnectError) {
       const message = hadBulbResponsibility && disconnectError.code !== "SHUTTER_RELEASE_UNCONFIRMED"
@@ -1868,7 +1875,7 @@
     try {
       await api(`/v1/session/${encodeURIComponent(sessionId)}/events`, { method: "DELETE" });
     } catch (error) {
-      captureError(error);
+      if (state.session?.id === sessionId) captureError(error);
     }
   }
 
@@ -2793,6 +2800,7 @@
       : featureSupported(FEATURES.VIDEO_RECORDING));
     if (!supported) return;
     const autofocus = state.shutterAutofocus;
+    let reviewAttempt = null;
     if (isPhoto && !bulb && !autofocus && !shutterAFSupported()) {
       setOperationState(t("shutterAFUnavailable"), true);
       return;
@@ -2820,7 +2828,7 @@
         setOperationState(result);
         showToast(result);
       } else if (isPhoto) {
-        const reviewAttempt = { sessionId, knownIds: visibleMediaIds() };
+        reviewAttempt = { sessionId, knownIds: visibleMediaIds() };
         // A new shutter supersedes an old review before the command waits for ACK.
         cancelLatestMediaRefresh();
         state.latestMediaReviewAttempt = null;
@@ -2838,10 +2846,12 @@
         void refreshLatestMedia();
       } else {
         const wasRecording = Boolean(state.status?.recording);
-        state.status = await api(
-          `/v1/session/${encodeURIComponent(state.session.id)}/recording/${wasRecording ? "stop" : "start"}`,
+        const status = await api(
+          `/v1/session/${encodeURIComponent(sessionId)}/recording/${wasRecording ? "stop" : "start"}`,
           { method: "POST" },
         );
+        if (state.session?.id !== sessionId) return;
+        state.status = status;
         const result = wasRecording ? t("recordingStopped") : t("recordingStarted");
         setOperationState(result);
         showToast(result);
@@ -2849,6 +2859,14 @@
     } catch (error) {
       if (state.session?.id !== sessionId) return;
       const normalized = captureError(error);
+      if (normalized.code === "CAPTURE_STATUS_READBACK_FAILED" && reviewAttempt) {
+        state.latestMediaReviewAttempt = reviewAttempt;
+        void refreshLatestMedia();
+      }
+      if (normalized.code === "SHUTTER_RELEASE_UNCONFIRMED") {
+        state.shutterReleaseUnconfirmed = true;
+        pauseLivePolling();
+      }
       if (bulb) {
         // Keep stop responsibility even if the API response or a later read is lost.
         const uncertain = bulbWasActive || [
@@ -2893,43 +2911,63 @@
 
   async function autofocus() {
     if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.AUTOFOCUS)) return;
+    const sessionId = state.session.id;
     beginCameraInteraction();
     setOperationState(t("busy"));
     renderAvailability();
     try {
-      state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/focus/auto`, {
+      const status = await api(`/v1/session/${encodeURIComponent(sessionId)}/focus/auto`, {
         method: "POST",
       });
+      if (state.session?.id !== sessionId) return;
+      state.status = status;
       setOperationState(t("autofocusComplete"));
       showToast(t("autofocusComplete"));
     } catch (error) {
+      if (state.session?.id !== sessionId) return;
       const normalized = captureError(error);
+      if (normalized.code === "SHUTTER_RELEASE_UNCONFIRMED") {
+        state.shutterReleaseUnconfirmed = true;
+        pauseLivePolling();
+      }
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
     } finally {
-      state.busy = false;
-      renderSession();
+      if (state.session?.id === sessionId) {
+        state.busy = false;
+        renderSession();
+      }
     }
   }
 
   async function halfPressShutter() {
     if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.SHUTTER_HALF_PRESS)) return;
+    const sessionId = state.session.id;
     beginCameraInteraction();
     setOperationState(t("busy"));
     renderAvailability();
     try {
-      state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/shutter/half-press`, {
+      const status = await api(`/v1/session/${encodeURIComponent(sessionId)}/shutter/half-press`, {
         method: "POST",
       });
+      if (state.session?.id !== sessionId) return;
+      state.status = status;
       setOperationState(t("halfPressComplete"));
       showToast(t("halfPressComplete"));
     } catch (error) {
+      if (state.session?.id !== sessionId) return;
       const normalized = captureError(error);
+      if (normalized.code === "SHUTTER_RELEASE_UNCONFIRMED") {
+        state.shutterReleaseUnconfirmed = true;
+        pauseLivePolling();
+      }
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
     } finally {
-      state.busy = false;
-      renderSession();
+      if (state.session?.id === sessionId) {
+        state.busy = false;
+        renderSession();
+      }
     }
   }
 

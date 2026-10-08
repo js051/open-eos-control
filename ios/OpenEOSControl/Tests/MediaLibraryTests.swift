@@ -31,14 +31,31 @@ final class MediaLibraryTests: XCTestCase {
     func testCaptureReviewSelectionRequiresAChangedID() {
         let items = [media("old", "IMG_1.JPG", "2026-08-15T10:00:00Z")]
 
-        XCTAssertNil(selectLatestMediaItem(afterCaptureFrom: items, previousID: "old"))
+        XCTAssertNil(selectLatestMediaItem(afterCaptureFrom: items, previousIDs: ["old"]))
         XCTAssertEqual(
             selectLatestMediaItem(afterCaptureFrom: [
                 media("old", "IMG_1.JPG", "2026-08-15T10:00:00Z"),
                 media("new", "IMG_2.JPG", "2026-08-15T10:01:00Z"),
-            ], previousID: "old")?.id,
+            ], previousIDs: ["old"])?.id,
             "new"
         )
+    }
+
+    func testCaptureReviewExcludesEveryKnownItemBeforeComparingDates() {
+        let a = media("A", "A.JPG", "2030-01-01T00:00:00Z")
+        let b = media("B", "B.JPG", "2029-01-01T00:00:00Z")
+        let new = media("N", "N.JPG", "2020-01-01T00:00:00Z")
+        XCTAssertEqual(selectLatestMediaItem(afterCaptureFrom: [a, new, b], previousIDs: ["A", "B"])?.id, "N")
+        XCTAssertNil(selectLatestMediaItem(afterCaptureFrom: [b], previousIDs: ["A", "B"]))
+    }
+
+    func testCaptureReviewRetainsUnknownDateAndRawPairCameraOrderWithoutClaimingCaptureTime() {
+        let raw = media("raw", "PAIR.CR3", nil)
+        let jpeg = media("jpeg", "PAIR.JPG", nil)
+        XCTAssertEqual(selectLatestMediaItem(afterCaptureFrom: [raw, jpeg], previousIDs: [])?.id, "raw")
+        XCTAssertEqual(selectLatestMediaItem(afterCaptureFrom: [jpeg, raw], previousIDs: [])?.id, "jpeg")
+        let video = CameraMediaItem(id: "video", name: "OLD.MP4", kind: "video", captureTime: "2030-01-01T00:00:00Z")
+        XCTAssertEqual(selectLatestMediaItem(afterCaptureFrom: [video, jpeg], previousIDs: [])?.id, "jpeg")
     }
 
     func testRecentMediaBatchKeepsSixtyItemsAndReportsMore() {

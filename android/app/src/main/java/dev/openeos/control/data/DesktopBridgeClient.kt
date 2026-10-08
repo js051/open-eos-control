@@ -472,9 +472,13 @@ class DesktopBridgeClient(
         check(autofocus || shutterAutofocusSupported) {
             "This bridge session does not advertise capture without autofocus."
         }
-        return parseStatus(
-            postJson(sessionEndpoint("capture", "still"), JSONObject().put("af", autofocus))
-        ).also { observedFeatures.add(CameraFeature.STILL_CAPTURE) }
+        return try {
+            parseStatus(postJson(sessionEndpoint("capture", "still"), JSONObject().put("af", autofocus)))
+                .also { observedFeatures.add(CameraFeature.STILL_CAPTURE) }
+        } catch (exception: DesktopBridgeException) {
+            if (exception.code != "CAPTURE_STATUS_READBACK_FAILED") throw exception
+            throw CaptureStatusReadbackException(exception)
+        }
     }
 
     suspend fun startBulbExposure(): CameraStatus {
@@ -1267,7 +1271,7 @@ class DesktopBridgeClient(
             val root = endpoint("v1", "session", session.id).encodedPath
             val stopOnly = (request.method == "POST" && path in setOf("$root/bulb/stop", "$root/liveview/stop", "$root/recording/stop")) ||
                 (request.method == "DELETE" && path in setOf(root, "$root/events"))
-            if (!stopOnly) throw ShutterReleaseException(IllegalStateException("Retry Stop Bulb before another Bridge operation."))
+            if (!stopOnly) throw ShutterReleaseException(IllegalStateException("Retry stopping the camera control before another Bridge operation."))
         }
         val oneShot = request.body?.let { body ->
             object : RequestBody() {

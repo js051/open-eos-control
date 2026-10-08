@@ -31,9 +31,16 @@ func selectLatestMediaItem(_ items: [CameraMediaItem]) -> CameraMediaItem? {
     }
 }
 
-func selectLatestMediaItem(afterCaptureFrom items: [CameraMediaItem], previousID: String?) -> CameraMediaItem? {
-    guard let item = selectLatestMediaItem(items), item.id != previousID else { return nil }
-    return item
+enum CaptureReviewState: String {
+    case idle, capturing, searching, notReady, readFailed, available
+
+    var localizationKey: String { "capture_review_\(rawValue)" }
+}
+
+func selectLatestMediaItem(afterCaptureFrom items: [CameraMediaItem], previousIDs: Set<String>) -> CameraMediaItem? {
+    // Visibility is not exposure provenance. Keep the existing date/camera order,
+    // but exclude everything already observed before choosing a still candidate.
+    selectLatestMediaItem(items.filter { !previousIDs.contains($0.id) && !mediaIsVideo($0) })
 }
 
 enum MediaFilter: String, CaseIterable, Identifiable {

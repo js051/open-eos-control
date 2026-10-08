@@ -3,11 +3,11 @@
     <string name="media_picker_transfer_unavailable">This transfer is not available right now. Please select the file or folder again when the camera is ready.</string>
     <string name="media_picker_open_failed">Android could not open the file picker. Please try again.</string>
     <string name="live_view_release_unconfirmed">Live View stop unconfirmed. Turn Live View off, then retry.</string>
-    <string name="shutter_disconnect_warning">Check the previous camera: its shutter release was not confirmed.</string>
-    <string name="retry_shutter_release">Retry releasing shutter; stop only</string>
+    <string name="shutter_disconnect_warning">Check the previous camera: its shutter or autofocus stop was not confirmed.</string>
+    <string name="retry_shutter_release">Retry stopping the camera control; stop only</string>
     <string name="shutter_release_retry_short">RETRY STOP</string>
-    <string name="shutter_release_unconfirmed">Exposure may still be active. Tap RETRY STOP.</string>
-    <string name="bridge_shutter_release_unconfirmed">Exposure may still be active. RETRY STOP; if it fails, stop on camera and update Bridge.</string>
+    <string name="shutter_release_unconfirmed">The shutter or autofocus may still be active. Tap RETRY STOP.</string>
+    <string name="bridge_shutter_release_unconfirmed">The shutter or autofocus may still be active. RETRY STOP; if it fails, stop the control on camera and update Bridge.</string>
 
     <string name="media_saved_location">Saved to %1$s</string>
     <string name="media_save_to_folder">Save to another folder</string>

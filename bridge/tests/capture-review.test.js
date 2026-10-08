@@ -66,6 +66,7 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
       BULB_EXPOSURE: "BULB_EXPOSURE", VIDEO_RECORDING: "VIDEO_RECORDING",
       STILL_CAPTURE: "STILL_CAPTURE", MEDIA_BROWSER: "MEDIA_BROWSER",
       MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL", MEDIA_DOWNLOAD: "MEDIA_DOWNLOAD",
+      AUTOFOCUS: "AUTOFOCUS", SHUTTER_HALF_PRESS: "SHUTTER_HALF_PRESS",
     },
     LATEST_MEDIA_LIMIT: 8,
     LATEST_MEDIA_RETRY_DELAYS_MILLIS: [250, 750, 1500],
@@ -80,6 +81,8 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
     renderMedia() {}, renderMediaTransfer() {}, renderMediaPreviewNavigation() {},
     scheduleMediaTransferRender() {}, clearScheduledMediaTransferRender() {},
     releaseObjectUrl() {}, flashCapture() {},
+    pauseLivePolling: () => feedback.push("pause"),
+    resumeLivePolling: () => feedback.push("resume"),
     setOperationState: (message) => feedback.push(message),
     showToast: (message) => feedback.push(message),
     captureError: (error) => ({ code: error.code, message: error.message }),
@@ -95,7 +98,7 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
   });
   const functionNames = [
     "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
-    "shutterReleaseUnconfirmed", "bulbControlLocked", "operateShutter",
+    "shutterReleaseUnconfirmed", "bulbControlLocked", "operateShutter", "autofocus", "halfPressShutter",
     "cancelLatestMediaRefresh", "latestMediaFrom", "refreshLatestMedia",
     "publishLatestMedia", "loadLatestMediaThumbnail", "chooseMediaWritable", "downloadMedia", "cancelMediaDownload",
   ];
@@ -120,6 +123,249 @@ function listingRequests(subject) {
 function writes(subject) {
   return subject.requests.filter((request) => request.method !== "GET");
 }
+
+function installLatestMediaRenderer(subject) {
+  const element = () => ({
+    hidden: false, disabled: false, textContent: "", dataset: {},
+    setAttribute() {}, replaceChildren() {}, append() {},
+  });
+  subject.ui = Object.fromEntries([
+    "latestMediaButton", "latestMediaHeading", "latestMediaReview", "latestMediaReviewStatus",
+    "latestMediaRetry", "latestMediaLabel", "latestMediaThumbnail",
+  ].map((name) => [name, element()]));
+  subject.document = { createElement: element };
+  vm.runInContext(productionFunction("renderLatestMedia"), subject);
+  subject.renderSession = () => subject.renderLatestMedia();
+}
+
+for (const readyDuringSearch of [true, false]) {
+  test(`acknowledged readback recovery renders ${readyDuringSearch ? "disabled retry before automatic discovery" :
+    "enabled retry only after bounded exhaustion"}`, async () => {
+    const subject = context();
+    installLatestMediaRenderer(subject);
+    const originalApi = subject.api;
+    subject.api = async (url, options = {}) => {
+      if (url.endsWith("/capture/still")) {
+        subject.requests.push({ url, method: "POST", json: options.json });
+        throw { code: "CAPTURE_STATUS_READBACK_FAILED", status: 502, message: "Synthetic readback warning" };
+      }
+      return originalApi(url, options);
+    };
+    const gates = [];
+    subject.sleep = (delay) => {
+      subject.delays.push(delay);
+      const gate = deferred();
+      gates.push(gate);
+      return gate.promise;
+    };
+    await subject.operateShutter();
+    const automaticReview = subject.state.latestMediaRefreshPromise;
+    const originalWrites = writes(subject).slice();
+    const readsBeforeReady = readyDuringSearch ? 1 : 4;
+    for (let index = 0; index < Math.min(readsBeforeReady, 3); index += 1) {
+      await eventually(() => gates.length === index + 1, `automatic review delay ${index + 1}`);
+      assert.equal(listingRequests(subject).length, index + 1);
+      assert.equal(subject.state.latestMediaReviewStatus, "SEARCHING");
+      assert.equal(subject.ui.latestMediaRetry.hidden, false, "Visibility alone does not permit a manual retry");
+      assert.equal(subject.ui.latestMediaRetry.disabled, true);
+      assert.equal(subject.ui.latestMediaLabel.textContent, OLD_A.name);
+      assert.equal(subject.retryLatestMedia(), automaticReview, "An early retry must retain the automatic owner");
+      if (readyDuringSearch) subject.listing = [NEW_C, OLD_A, OLD_B];
+      gates[index].resolve();
+    }
+    await automaticReview;
+    if (!readyDuringSearch) {
+      assert.equal(listingRequests(subject).length, 4);
+      assert.deepEqual(subject.delays, [250, 750, 1500]);
+      assert.equal(subject.state.latestMediaReviewStatus, "NOT_READY");
+      assert.equal(subject.state.latestMediaRefreshPromise, null);
+      assert.equal(subject.ui.latestMediaRetry.hidden, false);
+      assert.equal(subject.ui.latestMediaRetry.disabled, false, "Exhaustion makes the manual retry actionable");
+      assert.equal(subject.ui.latestMediaLabel.textContent, OLD_A.name);
+      subject.listing = [NEW_C, OLD_A, OLD_B];
+      await subject.retryLatestMedia();
+    }
+    assert.equal(listingRequests(subject).length, readsBeforeReady + 1);
+    assert.equal(subject.state.latestMediaReviewStatus, "READY");
+    assert.equal(subject.ui.latestMediaRetry.hidden, true, "Discovery hides the retry, even without a manual click");
+    assert.equal(subject.ui.latestMediaLabel.textContent, NEW_C.name);
+    assert.equal(originalWrites.length, 1);
+    assert.equal(originalWrites[0].json.af, false);
+    assert.deepEqual(writes(subject), originalWrites, "Automatic and manual review never resend the shutter");
+    assert.equal(subject.feedback.includes("Synthetic readback warning"), true);
+    assert.equal(subject.feedback.includes("captureComplete"), false, "Media discovery cannot erase the readback warning");
+  });
+}
+
+test("only the acknowledged capture readback code permits read-only media recovery", async () => {
+  for (const code of ["CAPTURE_STATUS_READBACK_FAILED", "CCAPI_UNREACHABLE", "HTTP_ERROR"]) {
+    const subject = context();
+    const api = subject.api;
+    subject.listing = [NEW_C, OLD_A, OLD_B];
+    subject.api = async (url, options = {}) => {
+      if (url.endsWith("/capture/still")) {
+        subject.requests.push({ url, method: "POST", json: options.json });
+        throw { code, status: 502, message: "Synthetic capture response" };
+      }
+      return api(url, options);
+    };
+    await captureAndReview(subject);
+    assert.equal(writes(subject).length, 1, "Recovery must never resend the shutter");
+    assert.equal(writes(subject)[0].json.af, false);
+    assert.equal(listingRequests(subject).length, code === "CAPTURE_STATUS_READBACK_FAILED" ? 1 : 0);
+    assert.equal(subject.state.latestMediaItem.id, code === "CAPTURE_STATUS_READBACK_FAILED" ? NEW_C.id : OLD_A.id);
+    assert.equal(subject.feedback.includes("captureComplete"), false, "Readback failure must remain visible");
+  }
+});
+
+test("short-control failure exposes a stop-only button and never repeats the original command", async () => {
+  for (const [method, route] of [["operateShutter", "/capture/still"], ["autofocus", "/focus/auto"],
+    ["halfPressShutter", "/shutter/half-press"]]) {
+    const subject = context();
+    subject.api = async (url, options = {}) => {
+      subject.requests.push({ url, method: options.method || "GET" });
+      if (url.endsWith(route)) throw { code: "SHUTTER_RELEASE_UNCONFIRMED", message: "Stop not confirmed" };
+      if (url.endsWith("/bulb/stop")) return { bulbExposureActive: false, shutterReleaseUnconfirmed: false };
+      throw new Error(`Unexpected request: ${url}`);
+    };
+    await subject[method]();
+    assert.equal(subject.state.shutterReleaseUnconfirmed, true);
+    assert.equal(subject.feedback.includes("pause"), true);
+    await subject.operateShutter();
+    assert.equal(subject.state.shutterReleaseUnconfirmed, false);
+    assert.deepEqual(subject.requests.map(({ url }) => url.split("/synthetic-session-a")[1]), [route, "/bulb/stop"]);
+  }
+});
+
+test("late short-control failures cannot transfer stop responsibility to a replacement session", async () => {
+  for (const method of ["autofocus", "halfPressShutter"]) {
+    const subject = context();
+    const response = deferred();
+    subject.api = () => response.promise;
+    const pending = subject[method]();
+    subject.state.session = { id: "replacement-session" };
+    subject.state.busy = true;
+    response.reject({ code: "SHUTTER_RELEASE_UNCONFIRMED", message: "Old-session stop failed" });
+    await pending;
+    assert.notEqual(subject.state.shutterReleaseUnconfirmed, true);
+    assert.equal(subject.state.busy, true, "An old finally block cannot release the new session's owner");
+  }
+});
+
+test("late short-control acknowledgements cannot replace a newer session's status or owner", async () => {
+  for (const method of ["autofocus", "halfPressShutter"]) {
+    const subject = context();
+    const response = deferred();
+    subject.api = () => response.promise;
+    const pending = subject[method]();
+    const status = { mode: "Manual", recording: true };
+    subject.state.session = { id: "replacement-session" };
+    subject.state.status = status;
+    subject.state.busy = true;
+    const feedback = [...subject.feedback];
+    response.resolve({ mode: "Old camera", recording: false });
+    await pending;
+    assert.equal(subject.state.status, status);
+    assert.equal(subject.state.busy, true);
+    assert.deepEqual(subject.feedback, feedback);
+  }
+});
+
+for (const action of ["start", "stop"]) {
+  for (const outcome of ["acknowledged", "failed"]) {
+    test(`late recording ${action} ${outcome} cannot overwrite a replacement session`, async () => {
+      const subject = context();
+      subject.state.captureMode = "video";
+      subject.state.status.recording = action === "stop";
+      const response = deferred();
+      subject.api = (url, options) => {
+        subject.requests.push({ url, method: options.method });
+        return response.promise;
+      };
+      const pending = subject.operateShutter();
+      const replacement = { id: "replacement-recording-session" };
+      const status = { mode: "Manual", recording: action === "stop" };
+      const error = { message: "Replacement operation warning" };
+      subject.state.session = replacement;
+      subject.state.status = status;
+      subject.state.lastError = error;
+      subject.state.busy = true;
+      subject.state.shutterReleaseUnconfirmed = false;
+      const feedback = [...subject.feedback];
+      if (outcome === "acknowledged") response.resolve({ mode: "Old camera", recording: action === "start" });
+      else response.reject({ code: "SHUTTER_RELEASE_UNCONFIRMED", message: "Old recording response failed" });
+      await pending;
+      assert.deepEqual(subject.requests, [{ url: `/v1/session/synthetic-session-a/recording/${action}`, method: "POST" }]);
+      assert.equal(subject.state.session, replacement);
+      assert.equal(subject.state.status, status, "A recording response belongs only to the captured session");
+      assert.equal(subject.state.lastError, error);
+      assert.equal(subject.state.busy, true, "Old finally must not release the replacement operation");
+      assert.equal(subject.state.shutterReleaseUnconfirmed, false);
+      assert.deepEqual(subject.feedback, feedback, "Late recording feedback must remain silent");
+    });
+  }
+}
+
+for (const outcome of ["acknowledged", "unconfirmed", "lost-response"]) {
+  test(`late ${outcome} disconnect cleans only its original session and preserves newer ownership`, async () => {
+    const subject = context();
+    const eventStop = deferred();
+    const close = deferred();
+    subject.state.shutterReleaseUnconfirmed = true;
+    subject.ui = { connectionError: {} };
+    subject.stopLiveLoop = () => {};
+    subject.stopLocalVideo = () => {};
+    subject.stopEventLoop = (id) => {
+      assert.equal(id, "synthetic-session-a");
+      return eventStop.promise;
+    };
+    let resets = 0;
+    subject.resetSession = () => { resets += 1; subject.state.session = null; subject.state.busy = false; };
+    subject.api = (url, options) => {
+      subject.requests.push({ url, method: options.method });
+      return close.promise;
+    };
+    vm.runInContext(productionFunction("disconnectCamera"), subject);
+    const pending = subject.disconnectCamera();
+    const replacement = { id: "replacement-session" };
+    const status = { mode: "Manual", recording: true };
+    subject.state.session = replacement;
+    subject.state.status = status;
+    subject.state.busy = true;
+    subject.state.shutterReleaseUnconfirmed = false;
+    const feedback = [...subject.feedback];
+    eventStop.resolve();
+    await eventually(() => subject.requests.length === 1, "original close after event stop");
+    if (outcome === "acknowledged") close.resolve(null);
+    else close.reject({ code: outcome === "unconfirmed" ? "SHUTTER_RELEASE_UNCONFIRMED" : "NETWORK_ERROR",
+      message: "Old camera stop could not be confirmed" });
+    await pending;
+    assert.deepEqual(subject.requests, [{ url: "/v1/session/synthetic-session-a", method: "DELETE" }]);
+    assert.equal(resets, 0, "Original close must not reset the replacement session");
+    assert.equal(subject.state.session, replacement);
+    assert.equal(subject.state.status, status);
+    assert.equal(subject.state.busy, true);
+    assert.equal(subject.state.shutterReleaseUnconfirmed, false);
+    assert.equal(Boolean(subject.state.shutterDisconnectWarning), outcome !== "acknowledged",
+      "A failed old close retains a separate previous-camera warning");
+    assert.deepEqual(subject.feedback, feedback);
+  });
+}
+
+test("late event-stop failure does not publish diagnostics into a replacement session", async () => {
+  const subject = context();
+  const response = deferred();
+  subject.cancelEventLoop = () => {};
+  subject.api = () => response.promise;
+  const errors = [];
+  subject.captureError = (error) => errors.push(error);
+  vm.runInContext(productionFunction("stopEventLoop"), subject);
+  const pending = subject.stopEventLoop("synthetic-session-a");
+  subject.state.session = { id: "replacement-session" };
+  response.reject({ code: "NETWORK_ERROR", message: "Old event stop failed" });
+  await pending;
+  assert.deepEqual(errors, []);
+});
 
 test("known loaded A/B changing order must not turn old B into newly visible media", async () => {
   const subject = context();

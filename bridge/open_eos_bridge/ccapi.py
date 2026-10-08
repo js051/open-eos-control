@@ -837,6 +837,7 @@ class CcapiSession:
         self._bulb_exposure_active: bool | None = False
         self._bulb_release_operation: CcapiOperation | None = None
         self._bulb_start_confirmed = False
+        self._short_control_release: tuple[CcapiOperation, dict[str, object], CameraFeature] | None = None
         self._shutter_release_unconfirmed = False
         self._temperature_status: CameraTemperatureStatus | None = None
         self._live_view_active = False
@@ -984,6 +985,12 @@ class CcapiSession:
             except BridgeError as error:
                 self._last_error = error.message
             release_error = None
+            if self._short_control_release is not None:
+                try:
+                    self._release_short_control_locked()
+                except BridgeError:
+                    release_error = self._shutter_release_error(disconnected=True)
+                    self._last_error = release_error.message
             if self._bulb_release_operation is not None:
                 try:
                     self._release_bulb_locked()
@@ -1721,11 +1728,24 @@ class CcapiSession:
                     manual,
                     {"af": autofocus, "action": "full_press"},
                     {"af": False, "action": "release"},
+                    feature=CameraFeature.STILL_CAPTURE,
                 )
             else:
                 raise unsupported(CameraFeature.STILL_CAPTURE.value, self.engine_name)
             self._observed.add(CameraFeature.STILL_CAPTURE)
-            return self.status()
+            try:
+                return self.status()
+            except BridgeError as error:
+                # Both the shutter command and any required release are acknowledged.
+                # This code permits only read-only review, never another shutter request.
+                raise BridgeError(
+                    "CAPTURE_STATUS_READBACK_FAILED",
+                    "The shutter command was acknowledged, but camera status could not be read. "
+                    "Check recent media without taking another photo.",
+                    status_code=502,
+                    feature=CameraFeature.STILL_CAPTURE.value,
+                    engine=self.engine_name,
+                ) from error
 
     def half_press_shutter(self) -> CameraStatus:
         with self._lock:
@@ -1739,6 +1759,7 @@ class CcapiSession:
                 manual,
                 {"af": True, "action": "half_press"},
                 {"af": False, "action": "release"},
+                feature=CameraFeature.SHUTTER_HALF_PRESS,
                 hold=HALF_PRESS_SECONDS,
             )
             self._observed.add(CameraFeature.SHUTTER_HALF_PRESS)
@@ -1777,6 +1798,9 @@ class CcapiSession:
     def stop_bulb_exposure(self) -> CameraStatus:
         with self._lock:
             self._require_open()
+            # Keep the existing recovery route usable by older Bridge consumers. A
+            # short control retries its saved stop, never a newly discovered Bulb release.
+            self._release_short_control_locked()
             if self._bulb_release_operation is not None and self._release_bulb_locked():
                 self._observed.add(CameraFeature.BULB_EXPOSURE)
             return self.status()
@@ -1803,12 +1827,27 @@ class CcapiSession:
         return confirmed_start
 
     def _shutter_release_error(self, *, disconnected: bool = False, blocked: bool = False) -> BridgeError:
+        short_control = self._short_control_release
+        if short_control is not None:
+            return BridgeError(
+                "SHUTTER_RELEASE_UNCONFIRMED",
+                (
+                    "The Bridge session was closed, but the camera control stop was not confirmed. "
+                    "Check and stop the camera control on the camera before reconnecting."
+                    if disconnected else
+                    "The shutter or autofocus may still be active because its stop was not confirmed. "
+                    "Retry stopping the camera control in this session, or check the camera before disconnecting."
+                ),
+                status_code=409 if blocked else 502,
+                feature=short_control[2].value,
+                engine=self.engine_name,
+            )
         message = (
             "The Bridge session was closed, but shutter release was not confirmed. "
             "Check the camera and stop the exposure on the camera before reconnecting."
             if disconnected else
             "Shutter release was not confirmed; the camera may still be exposing. "
-            "Retry Stop Bulb in this session, or stop the exposure on the camera before disconnecting."
+            "Retry stopping the exposure in this session, or stop it on the camera before disconnecting."
         )
         return BridgeError(
             "SHUTTER_RELEASE_UNCONFIRMED",
@@ -1835,6 +1874,7 @@ class CcapiSession:
                     operation,
                     {"action": "start"},
                     {"action": "stop"},
+                    feature=CameraFeature.AUTOFOCUS,
                     hold=HALF_PRESS_SECONDS,
                 )
             elif manual is not None:
@@ -1842,6 +1882,7 @@ class CcapiSession:
                     manual,
                     {"af": True, "action": "half_press"},
                     {"af": False, "action": "release"},
+                    feature=CameraFeature.AUTOFOCUS,
                     hold=HALF_PRESS_SECONDS,
                 )
             else:
@@ -2825,8 +2866,13 @@ class CcapiSession:
         press: dict[str, object],
         release: dict[str, object],
         *,
+        feature: CameraFeature,
         hold: float = 0.0,
     ) -> None:
+        # Responsibility belongs to this session and exact operation even if the
+        # press reply is lost, discovery changes, or the compensating stop fails.
+        self._short_control_release = (operation, dict(release), feature)
+        self._shutter_release_unconfirmed = True
         primary: Exception | None = None
         try:
             self._command_ok(operation, press)
@@ -2835,13 +2881,30 @@ class CcapiSession:
         except Exception as error:
             primary = error
         try:
-            self._command_ok(operation, release)
+            self._release_short_control_locked()
         except Exception as release_error:
-            if primary is None:
-                raise
-            self._last_error = f"{primary}; release command also failed: {release_error}"
+            if primary is not None:
+                raise release_error from primary
+            raise
         if primary is not None:
             raise primary
+
+    def _release_short_control_locked(self) -> None:
+        pending = self._short_control_release
+        if pending is None:
+            return
+        operation, release, _ = pending
+        try:
+            self._command_ok(operation, release)
+        except Exception as error:
+            self._shutter_release_unconfirmed = True
+            failure = self._shutter_release_error()
+            self._last_error = failure.message
+            raise failure from error
+        # Status readback is independent of a received stop ACK.
+        self._short_control_release = None
+        self._shutter_release_unconfirmed = False
+        self._last_error = None
 
     def _command_ok(self, operation: CcapiOperation, payload: dict[str, object]) -> None:
         if operation.method not in COMMAND_METHODS:

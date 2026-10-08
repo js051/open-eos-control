@@ -11,7 +11,226 @@ from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.models import CameraDescriptor, CameraStatus
 from open_eos_bridge.sessions import SessionManager
 
-from .ccapi_bulb_peer import MANUAL_PATH, BulbPeer
+from .ccapi_bulb_peer import AF_PATH, DIRECT_PATH, MANUAL_PATH, BulbPeer
+
+
+class ShortControlRecoveryTests(unittest.TestCase):
+    """Production ASGI routes and urllib transport, with an independent TCP camera peer."""
+
+    def setUp(self) -> None:
+        self.peer = BulbPeer()
+        self.peer.mode = "Manual"
+        self.peer.direct_shutter = False
+        self.peer.dedicated_af = True
+        self.peer.drop_press = False
+        self.client = TestClient(create_app(ccapi_engine=CcapiEngine(sleeper=lambda _: None)))
+        self.client.__enter__()
+        self.connect()
+
+    def connect(self) -> None:
+        created = self.client.post("/v1/session", json={"engine": "ccapi", "ccapiUrl": self.peer.origin})
+        self.assertEqual(created.status_code, 201, created.text)
+        self.session_path = f"/v1/session/{created.json()['id']}"
+
+    def tearDown(self) -> None:
+        self.peer.reject_release = False
+        self.peer.drop_release = False
+        self.peer.drop_status = False
+        self.client.__exit__(None, None, None)
+        self.peer.close()
+
+    def test_failed_short_control_release_blocks_writes_and_retries_only_original_stop(self) -> None:
+        for route, operation, press, release, feature in (
+            ("/capture/still", MANUAL_PATH, {"af": False, "action": "full_press"},
+             {"af": False, "action": "release"}, "STILL_CAPTURE"),
+            ("/shutter/half-press", MANUAL_PATH, {"af": True, "action": "half_press"},
+             {"af": False, "action": "release"}, "SHUTTER_HALF_PRESS"),
+            ("/focus/auto", AF_PATH, {"action": "start"}, {"action": "stop"}, "AUTOFOCUS"),
+        ):
+            with self.subTest(route=route):
+                self.peer.reject_release = True
+                start = len(self.peer.commands)
+                response = self.client.post(f"{self.session_path}{route}", json={"af": False})
+                self.assertEqual(response.status_code, 502, response.text)
+                self.assertEqual(response.json()["error"]["code"], "SHUTTER_RELEASE_UNCONFIRMED")
+                self.assertEqual(response.json()["error"]["feature"], feature)
+                self.assertTrue(self.client.get(f"{self.session_path}/status").json()["shutterReleaseUnconfirmed"])
+                self.assertEqual(self.client.post(f"{self.session_path}/capture/still").status_code, 409)
+                self.assertEqual(len(self.peer.commands), start + 2)
+                self.peer.reject_release = False
+                stopped = self.client.post(f"{self.session_path}/bulb/stop")
+                self.assertEqual(stopped.status_code, 200, stopped.text)
+                self.assertFalse(stopped.json()["shutterReleaseUnconfirmed"])
+                method = "POST" if operation == AF_PATH else "PUT"
+                self.assertEqual(self.peer.commands[start:], [
+                    (method, operation, press), (method, operation, release), (method, operation, release),
+                ])
+                self.assertFalse(self.peer.active)
+                observed = self.client.get(f"{self.session_path}/capabilities").json()["evidence"]["observedFeatures"]
+                self.assertNotIn("BULB_EXPOSURE", observed)
+
+    def test_post_only_advertised_manual_short_control_uses_post_for_every_release(self) -> None:
+        self.client.delete(self.session_path)
+        self.peer.manual_method = "POST"
+        self.connect()
+        failed = self.client.post(f"{self.session_path}/shutter/half-press")
+        self.assertEqual(failed.json()["error"]["feature"], "SHUTTER_HALF_PRESS")
+        self.peer.reject_release = False
+        self.assertEqual(self.client.post(f"{self.session_path}/bulb/stop").status_code, 200)
+        self.assertEqual(self.peer.commands, [
+            ("POST", MANUAL_PATH, {"af": True, "action": "half_press"}),
+            ("POST", MANUAL_PATH, {"af": False, "action": "release"}),
+            ("POST", MANUAL_PATH, {"af": False, "action": "release"}),
+        ])
+
+    def test_dedicated_af_recovery_does_not_require_or_observe_bulb_capability(self) -> None:
+        self.client.delete(self.session_path)
+        self.peer.manual_method = None
+        self.connect()
+        response = self.client.post(f"{self.session_path}/focus/auto")
+        self.assertEqual(response.json()["error"]["feature"], "AUTOFOCUS")
+        self.peer.reject_release = False
+        self.assertEqual(self.client.post(f"{self.session_path}/bulb/stop").status_code, 200)
+        capabilities = self.client.get(f"{self.session_path}/capabilities").json()
+        self.assertNotIn("BULB_EXPOSURE", capabilities["supported"])
+        self.assertNotIn("BULB_EXPOSURE", capabilities["evidence"]["observedFeatures"])
+        self.assertEqual(self.peer.commands, [
+            ("POST", AF_PATH, {"action": "start"}),
+            ("POST", AF_PATH, {"action": "stop"}),
+            ("POST", AF_PATH, {"action": "stop"}),
+        ])
+
+    def test_pending_short_stop_blocks_conflicting_writes_but_allows_diagnosis_and_safe_stops(self) -> None:
+        self.client.post(f"{self.session_path}/focus/auto")
+        before = list(self.peer.commands)
+        for route, payload in (
+            ("/bulb/start", None), ("/capture/still", None), ("/shutter/half-press", None),
+            ("/focus/auto", None), ("/recording/start", None), ("/liveview/start", {}),
+            ("/settings/shootingmode", {"value": "Bulb"}),
+        ):
+            with self.subTest(route=route):
+                response = self.client.post(f"{self.session_path}{route}", json=payload)
+                self.assertEqual(response.status_code, 409, response.text)
+                self.assertEqual(response.json()["error"]["feature"], "AUTOFOCUS")
+        self.assertEqual(self.peer.commands, before)
+        for route in ("/info", "/status", "/capabilities"):
+            self.assertEqual(self.client.get(f"{self.session_path}{route}").status_code, 200)
+        self.assertEqual(self.client.post(f"{self.session_path}/recording/stop").status_code, 200)
+        self.assertEqual(self.client.post(f"{self.session_path}/liveview/stop").status_code, 200)
+        self.assertEqual(self.client.delete(f"{self.session_path}/events").status_code, 204)
+        self.assertTrue(self.client.get(f"{self.session_path}/status").json()["shutterReleaseUnconfirmed"])
+        self.assertEqual(self.peer.commands[-1][2], {"action": "stop"})
+
+    def test_short_control_disconnect_reports_failed_stop_and_does_not_transfer_it(self) -> None:
+        self.client.post(f"{self.session_path}/focus/auto")
+        response = self.client.delete(self.session_path)
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertEqual(response.json()["error"]["code"], "SHUTTER_RELEASE_UNCONFIRMED")
+        self.assertIn("camera", response.json()["error"]["message"].lower())
+        commands = list(self.peer.commands)
+        self.connect()
+        self.assertEqual(self.client.post(f"{self.session_path}/bulb/stop").status_code, 200)
+        self.assertEqual(self.peer.commands, commands)
+
+    def test_lost_press_and_lost_release_keep_the_original_short_control_stop(self) -> None:
+        self.peer.drop_press = True
+        self.peer.reject_release = False
+        self.peer.drop_release = True
+        response = self.client.post(f"{self.session_path}/focus/auto")
+        self.assertEqual(response.json()["error"]["code"], "SHUTTER_RELEASE_UNCONFIRMED")
+        self.assertFalse(self.peer.active, "Applied stop without its ACK remains an uncertain client result")
+        for _ in range(2):
+            response = self.client.post(f"{self.session_path}/bulb/stop")
+            self.assertEqual(response.json()["error"]["code"], "SHUTTER_RELEASE_UNCONFIRMED")
+            self.assertEqual(self.client.post(f"{self.session_path}/focus/auto").status_code, 409)
+        self.peer.drop_release = False
+        self.assertEqual(self.client.post(f"{self.session_path}/bulb/stop").status_code, 200)
+        count = len(self.peer.commands)
+        self.assertEqual(self.client.post(f"{self.session_path}/bulb/stop").status_code, 200)
+        self.assertEqual(len(self.peer.commands), count)
+        self.assertEqual([body["action"] for _, _, body in self.peer.commands], ["start"] + ["stop"] * 4)
+
+    def test_short_control_retry_ack_is_not_lost_when_its_status_read_fails(self) -> None:
+        self.client.post(f"{self.session_path}/shutter/half-press")
+        self.peer.reject_release = False
+        self.peer.status_failure_after_release = True
+        self.assertEqual(self.client.post(f"{self.session_path}/bulb/stop").status_code, 502)
+        count = len(self.peer.commands)
+        status = self.client.get(f"{self.session_path}/status").json()
+        self.assertFalse(status["shutterReleaseUnconfirmed"])
+        self.assertFalse(status["bulbExposureActive"])
+        self.assertEqual(self.client.post(f"{self.session_path}/bulb/stop").status_code, 200)
+        self.assertEqual(len(self.peer.commands), count)
+
+    def test_short_control_close_retries_saved_stop_once_without_a_new_start(self) -> None:
+        self.client.post(f"{self.session_path}/focus/auto")
+        self.peer.reject_release = False
+        self.assertEqual(self.client.delete(self.session_path).status_code, 204)
+        self.assertEqual(self.peer.commands, [
+            ("POST", AF_PATH, {"action": "start"}),
+            ("POST", AF_PATH, {"action": "stop"}),
+            ("POST", AF_PATH, {"action": "stop"}),
+        ])
+
+    def test_short_control_stop_preserves_original_method_path_and_payload_after_discovery_changes(self) -> None:
+        session = CcapiEngine(sleeper=lambda _: None).open_connection(self.peer.origin)
+        session._operations.discard(CcapiOperation("PUT", MANUAL_PATH))
+        session._operations.add(CcapiOperation("POST", MANUAL_PATH))
+        with self.assertRaises(BridgeError):
+            session.half_press_shutter()
+        session._operations = {CcapiOperation("PUT", "/ccapi/ver110/shooting/control/shutterbutton/manual")}
+        self.peer.reject_release = False
+        session.stop_bulb_exposure()
+        session.close()
+        self.assertEqual(self.peer.commands, [
+            ("POST", MANUAL_PATH, {"af": True, "action": "half_press"}),
+            ("POST", MANUAL_PATH, {"af": False, "action": "release"}),
+            ("POST", MANUAL_PATH, {"af": False, "action": "release"}),
+        ])
+
+    def test_autofocus_manual_fallback_retains_release_instead_of_sending_af_stop(self) -> None:
+        self.client.delete(self.session_path)
+        self.peer.dedicated_af = False
+        self.connect()
+        response = self.client.post(f"{self.session_path}/focus/auto")
+        self.assertEqual(response.json()["error"]["code"], "SHUTTER_RELEASE_UNCONFIRMED")
+        self.assertEqual(response.json()["error"]["feature"], "AUTOFOCUS")
+        self.peer.reject_release = False
+        self.assertEqual(self.client.post(f"{self.session_path}/bulb/stop").status_code, 200)
+        self.assertEqual(self.peer.commands, [
+            ("PUT", MANUAL_PATH, {"af": True, "action": "half_press"}),
+            ("PUT", MANUAL_PATH, {"af": False, "action": "release"}),
+            ("PUT", MANUAL_PATH, {"af": False, "action": "release"}),
+        ])
+
+    def test_acknowledged_manual_capture_readback_failure_has_specific_recoverable_code(self) -> None:
+        self.peer.reject_release = False
+        self.peer.status_failure_after_release = True
+        response = self.client.post(f"{self.session_path}/capture/still", json={"af": False})
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertEqual(response.json()["error"]["code"], "CAPTURE_STATUS_READBACK_FAILED")
+        self.assertFalse(self.peer.active)
+        self.assertEqual([body["action"] for _, _, body in self.peer.commands], ["full_press", "release"])
+
+    def test_unacknowledged_manual_capture_never_claims_readback_only_failure(self) -> None:
+        self.peer.reject_release = False
+        self.peer.drop_press = True
+        response = self.client.post(f"{self.session_path}/capture/still", json={"af": False})
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertEqual(response.json()["error"]["code"], "CCAPI_UNREACHABLE")
+        self.assertFalse(self.peer.active)
+
+    def test_direct_capture_readback_code_requires_command_acknowledgement(self) -> None:
+        self.client.delete(self.session_path)
+        self.peer.direct_shutter = True
+        self.connect()
+        self.peer.status_failure_after_release = True
+        response = self.client.post(f"{self.session_path}/capture/still", json={"af": False})
+        self.assertEqual(response.json()["error"]["code"], "CAPTURE_STATUS_READBACK_FAILED")
+        self.peer.drop_press = True
+        response = self.client.post(f"{self.session_path}/capture/still", json={"af": False})
+        self.assertEqual(response.json()["error"]["code"], "CCAPI_UNREACHABLE")
+        self.assertEqual(self.peer.commands, [("POST", DIRECT_PATH, {"af": False})] * 2)
 
 
 class BulbRecoveryTests(unittest.TestCase):

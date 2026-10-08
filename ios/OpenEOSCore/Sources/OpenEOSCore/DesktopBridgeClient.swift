@@ -23,6 +23,7 @@ public enum DesktopBridgeError: Error, Equatable, Sendable {
     case notInitialized
     case sessionChanged
     case shutterReleaseUnconfirmed
+    case captureStatusReadbackFailed
     case invalidResponse(String)
     case http(
         statusCode: Int,
@@ -46,7 +47,9 @@ extension DesktopBridgeError: LocalizedError {
         case .sessionChanged:
             "The Desktop Bridge session changed or is closing. Connect again before using the camera."
         case .shutterReleaseUnconfirmed:
-            "Camera shutter release is not confirmed. Retry Stop Bulb before starting another camera operation."
+            "Camera shutter or autofocus stop is not confirmed. Retry Stop before starting another camera operation."
+        case .captureStatusReadbackFailed:
+            "The shutter command was acknowledged, but camera status could not be read. Check recent media without taking another photo."
         case let .invalidResponse(message):
             message
         case let .http(statusCode, method, url, code, message, feature, engine):
@@ -535,7 +538,15 @@ public actor DesktopBridgeClient {
         guard autofocus || shutterAutofocusSupported else {
             throw DesktopBridgeError.invalidResponse("This bridge session does not advertise capture without autofocus.")
         }
-        let body = try await postJSON(sessionEndpoint(["capture", "still"]), payload: ["af": autofocus])
+        let body: BridgeJSON
+        do {
+            body = try await postJSON(sessionEndpoint(["capture", "still"]), payload: ["af": autofocus])
+        } catch let error as DesktopBridgeError {
+            if case .http(_, _, _, "CAPTURE_STATUS_READBACK_FAILED", _, _, _) = error {
+                throw DesktopBridgeError.captureStatusReadbackFailed
+            }
+            throw error
+        }
         return parseStatus(body)
     }
 

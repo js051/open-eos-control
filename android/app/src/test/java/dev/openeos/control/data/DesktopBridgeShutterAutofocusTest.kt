@@ -18,6 +18,7 @@ class DesktopBridgeShutterAutofocusTest {
     private val server = MockWebServer()
     private var capability: Any? = true
     private var failCapture = false
+    private var captureErrorCode = "CAPTURE_FAILED"
     private val captures = CopyOnWriteArrayList<RecordedRequest>()
 
     @Before fun setUp() {
@@ -32,7 +33,7 @@ class DesktopBridgeShutterAutofocusTest {
                         .apply { capability?.let { put("shutterAutofocusSupported", it) } }.toString())
                     path.endsWith("/capture/still") -> {
                         captures += request
-                        if (failCapture) json("""{"error":{"code":"CAPTURE_FAILED","message":"Rejected"}}""")
+                        if (failCapture) json("""{"error":{"code":"$captureErrorCode","message":"Rejected"}}""")
                             .setResponseCode(503) else json("{}")
                     }
                     else -> json("{}")
@@ -94,6 +95,21 @@ class DesktopBridgeShutterAutofocusTest {
         assertTrue(runCatching { client.captureStill(false) }.isFailure)
         assertEquals(1, captures.size)
         assertEquals(false, JSONObject(captures.single().body.readUtf8()).get("af"))
+    }
+
+    @Test fun onlyAcknowledgedReadbackCodeBecomesTypedCaptureRecoveryWithoutResending() = runTest {
+        val client = DesktopBridgeClient(server.url("/").toString())
+        client.initialize()
+        client.capabilities()
+        failCapture = true
+        for (code in listOf("CAPTURE_STATUS_READBACK_FAILED", "CCAPI_UNREACHABLE", "CAPTURE_FAILED")) {
+            captureErrorCode = code
+            val before = captures.size
+            val failure = runCatching { client.captureStill(false) }.exceptionOrNull()
+            assertEquals(code == "CAPTURE_STATUS_READBACK_FAILED", failure is CaptureStatusReadbackException)
+            assertEquals(before + 1, captures.size)
+            assertEquals(false, JSONObject(captures.last().body.readUtf8()).get("af"))
+        }
     }
 
     private fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
