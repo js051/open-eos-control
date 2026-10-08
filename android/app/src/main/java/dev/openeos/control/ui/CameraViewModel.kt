@@ -1661,6 +1661,11 @@ class CameraViewModel(
             initialState.isBusy(CameraOperation.MEDIA)
         ) return
         val scope = initialState.mediaLibraryScope
+        // A completed gallery read may recover only the review that owned it at admission.
+        val reviewAttempt = pendingCaptureReview
+        val reviewGeneration = captureReviewGeneration
+        val sessionGeneration = cameraSessionGeneration
+        val connection = initialState.info
         val generation = ++mediaLibraryGeneration
         cancelMediaThumbnailLoads()
         _uiState.value.mediaStreamSource?.close()
@@ -1683,9 +1688,11 @@ class CameraViewModel(
                         applyMediaItems(batch.items, batch.hasMore)
                     }
                 }
+                coroutineContext.ensureActive()
                 if (generation != mediaLibraryGeneration) return@launch
                 val batch = items.toMediaLibraryBatch(scope)
                 val capabilities = runCatching { repository.refreshCapabilities() }.getOrNull()
+                coroutineContext.ensureActive()
                 if (generation != mediaLibraryGeneration) return@launch
                 _uiState.update {
                     it.copy(
@@ -1701,6 +1708,13 @@ class CameraViewModel(
                     )
                 }
                 refreshCapabilityEvidence()
+                // Partial pages are gallery progress only. Do not let an older successful
+                // read resolve a newer capture, read-only retry, or replacement connection.
+                if (reviewAttempt != null && pendingCaptureReview === reviewAttempt &&
+                    reviewGeneration == captureReviewGeneration && sessionGeneration == cameraSessionGeneration &&
+                    _uiState.value.info === connection) {
+                    refreshCaptureReview(batch.items)
+                }
             } catch (exception: CancellationException) {
                 if (generation == mediaLibraryGeneration) {
                     _uiState.update {
