@@ -7,6 +7,308 @@ import XCTest
 /// Gates ignore cancellation deliberately: late network completions must not own newer UI state.
 @MainActor
 final class CaptureMediaJourneyTests: XCTestCase {
+    func testOnlyAcknowledgedBridgeReadbackErrorStartsReviewWithoutInventingCaptureSuccess() async throws {
+        for code in ["CAPTURE_STATUS_READBACK_FAILED", "CCAPI_UNREACHABLE", "CAPTURE_FAILED", "SHUTTER_RELEASE_UNCONFIRMED"] {
+            let peer = CaptureMediaPeer()
+            let state = makeState(peer)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            await state.connect()
+            try await waitUntil { state.latestMediaItem?.id == "A" && !state.latestMediaThumbnailLoading }
+            state.setShutterAutofocus(false)
+            await peer.setCaptureError(code)
+            await peer.queueListings([.items([.a, .b, .new])])
+            let before = await peer.listCount()
+            let previousMode = state.status?.mode
+            await state.captureStill()
+            await state.latestMediaTask?.value
+            let after = await peer.listCount()
+            let acknowledged = code == "CAPTURE_STATUS_READBACK_FAILED"
+            XCTAssertEqual(after - before, acknowledged ? 1 : 0)
+            XCTAssertEqual(state.captureReviewState, acknowledged ? .available : .idle)
+            XCTAssertEqual(state.latestMediaItem?.id, acknowledged ? "N" : "A")
+            XCTAssertEqual(state.status?.mode, previousMode)
+            XCTAssertFalse(state.shutterFlash, "A readback error must not flash a successful exposure")
+            XCTAssertNotNil(state.lastError)
+            let choices = await peer.captureChoices()
+            XCTAssertEqual(choices, [false], "An error must not replay the shutter or change its AF choice")
+        }
+    }
+
+    func testAcknowledgedReadbackRecoveryKeepsAllKnownIDsAndOneReadOnlyRetryOwner() async throws {
+        let peer = CaptureMediaPeer()
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        try await waitUntil { state.latestMediaItem?.id == "A" && !state.latestMediaThumbnailLoading }
+        await peer.queueListings([.items([.a, .b, .libraryOnly])])
+        state.startMediaLibraryLoad()
+        try await waitUntil { state.mediaLibraryLoadStatus == .complete }
+        state.setShutterAutofocus(false)
+        await peer.setCaptureError("CAPTURE_STATUS_READBACK_FAILED")
+        await peer.queueListings([.items([.b, .a]), .items([.libraryOnly]), .items([.b]), .items([.a, .b])])
+        let before = await peer.listCount()
+        await state.captureStill()
+        try await waitUntil { state.captureReviewState == .notReady }
+        let after = await peer.listCount()
+        XCTAssertEqual(after - before, 4, "Use the existing bounded lookup, without a pre-capture scan")
+        XCTAssertEqual(state.latestMediaItem?.id, "A")
+        XCTAssertTrue(state.latestMediaIsPrevious)
+        let warning = try XCTUnwrap(state.lastError)
+        await peer.queueListings([.items([.a, .b, .libraryOnly, .new])])
+        await peer.holdNext("listing", gate: "readback-retry")
+        state.retryCaptureMediaReview()
+        let owner = try XCTUnwrap(state.latestMediaTask)
+        try await waitForGate(peer, "readback-retry")
+        let heldCount = await peer.listCount()
+        state.retryCaptureMediaReview()
+        let repeatedCount = await peer.listCount()
+        XCTAssertEqual(repeatedCount, heldCount, "A repeated retry cannot create another listing owner")
+        await peer.release("readback-retry")
+        await owner.value
+        XCTAssertEqual(state.captureReviewState, .available)
+        XCTAssertEqual(state.latestMediaItem?.id, "N", "Known future-dated IDs cannot hide the older-dated new item")
+        XCTAssertEqual(state.lastError, warning)
+        XCTAssertFalse(state.shutterFlash)
+        let choices = await peer.captureChoices()
+        let requests = await peer.requestsSinceCapture()
+        XCTAssertEqual(choices, [false])
+        XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") })
+    }
+
+    func testReadbackRecoveryDistinguishesUnreadListsAndEmptyListsIncludingAnEmptyBaseline() async throws {
+        for emptyBaseline in [false, true] {
+            let peer = CaptureMediaPeer()
+            if emptyBaseline { await peer.queueListings([.items([])]) }
+            let state = makeState(peer)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            await state.connect()
+            try await waitUntil { state.latestMediaTask == nil && !state.latestMediaThumbnailLoading }
+            state.setShutterAutofocus(false)
+            await peer.setCaptureError("CAPTURE_STATUS_READBACK_FAILED")
+            await peer.queueListings([.failure, .failure, .failure, .failure])
+            let before = await peer.listCount()
+            await state.captureStill()
+            await state.latestMediaTask?.value
+            XCTAssertEqual(state.captureReviewState, .readFailed)
+            XCTAssertTrue(state.canRetryCaptureMediaReview)
+            let warning = try XCTUnwrap(state.lastError)
+            await peer.queueListings([.items([]), .items([]), .items([]), .items([])])
+            state.retryCaptureMediaReview()
+            await state.latestMediaTask?.value
+            let after = await peer.listCount()
+            XCTAssertEqual(after - before, 8, "An empty known-ID set still owns two complete four-read attempts")
+            XCTAssertEqual(state.captureReviewState, .notReady)
+            XCTAssertTrue(state.canRetryCaptureMediaReview)
+            let expectedPrevious: String? = emptyBaseline ? nil : "A"
+            XCTAssertEqual(state.latestMediaItem?.id, expectedPrevious)
+            XCTAssertEqual(state.lastError, warning)
+            await peer.queueListings([.items([.new])])
+            state.retryCaptureMediaReview()
+            await state.latestMediaTask?.value
+            XCTAssertEqual(state.captureReviewState, .available)
+            XCTAssertEqual(state.latestMediaItem?.id, "N")
+            XCTAssertEqual(state.lastError, warning)
+            let choices = await peer.captureChoices()
+            let requests = await peer.requestsSinceCapture()
+            XCTAssertEqual(choices, [false])
+            XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") })
+        }
+    }
+
+    func testContentEventCannotStealAcknowledgedReadbackRecovery() async throws {
+        let peer = CaptureMediaPeer(eventPolling: true)
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        try await waitUntil { state.latestMediaItem?.id == "A" && !state.latestMediaThumbnailLoading }
+        try await waitForGate(peer, "event")
+        state.setShutterAutofocus(false)
+        await peer.setCaptureError("CAPTURE_STATUS_READBACK_FAILED")
+        await state.captureStill()
+        try await waitUntil { state.captureReviewState == .notReady }
+        let warning = try XCTUnwrap(state.lastError)
+        let before = await peer.listCount()
+        await peer.queueListings([.items([.new])])
+        await peer.release("event")
+        try await waitForEventPoll(peer, count: 2)
+        let after = await peer.listCount()
+        XCTAssertEqual(after, before)
+        XCTAssertEqual(state.captureReviewState, .notReady)
+        XCTAssertEqual(state.latestMediaItem?.id, "A")
+        XCTAssertEqual(state.lastError, warning)
+        state.retryCaptureMediaReview()
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.latestMediaItem?.id, "N")
+        XCTAssertEqual(state.lastError, warning)
+        let choices = await peer.captureChoices()
+        let requests = await peer.requestsSinceCapture()
+        XCTAssertEqual(choices, [false])
+        XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") })
+    }
+
+    func testOldListingAndThumbnailCannotOwnNewCaptureReadbackRecovery() async throws {
+        for operation in ["listing", "thumbnail"] {
+            let peer = CaptureMediaPeer()
+            await peer.holdNext(operation)
+            let state = makeState(peer)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            await state.connect()
+            try await waitForGate(peer, operation)
+            let retiredReview = try XCTUnwrap(state.latestMediaTask)
+            state.setShutterAutofocus(false)
+            await peer.setCaptureError("CAPTURE_STATUS_READBACK_FAILED")
+            await peer.holdNext("capture")
+            let capture = Task { await state.captureStill() }
+            try await waitForGate(peer, "capture")
+            await peer.release(operation)
+            await retiredReview.value
+            XCTAssertEqual(state.captureReviewState, .capturing)
+            XCTAssertNil(state.latestMediaThumbnail)
+            XCTAssertTrue(state.isBusy(.capture))
+            await peer.queueListings([.items([.new])])
+            await peer.release("capture")
+            await capture.value
+            await state.latestMediaTask?.value
+            XCTAssertEqual(state.captureReviewState, .available)
+            XCTAssertEqual(state.latestMediaItem?.id, "N")
+            XCTAssertNotNil(state.lastError)
+            XCTAssertFalse(state.shutterFlash)
+            let choices = await peer.captureChoices()
+            XCTAssertEqual(choices, [false])
+        }
+    }
+
+    func testOldCaptureReadbackFailureCannotChangeAReplacementSessionOrItsNewCapture() async throws {
+        let peer = CaptureMediaPeer()
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        try await waitUntil { state.latestMediaItem?.id == "A" && !state.latestMediaThumbnailLoading }
+        state.setShutterAutofocus(false)
+        await peer.setCaptureError("CAPTURE_STATUS_READBACK_FAILED")
+        await peer.holdNext("capture", gate: "old-capture")
+        let old = Task { await state.captureStill() }
+        try await waitForGate(peer, "old-capture")
+        await state.disconnect()
+        await state.connect()
+        try await waitUntil { state.latestMediaItem?.id == "A" && !state.latestMediaThumbnailLoading }
+        state.setShutterAutofocus(false)
+        await peer.setCaptureError(nil)
+        await peer.holdNext("capture", gate: "new-capture")
+        let new = Task { await state.captureStill() }
+        try await waitForGate(peer, "new-capture")
+        let replacementMode = state.status?.mode
+        await peer.release("old-capture")
+        await old.value
+        XCTAssertEqual(state.status?.mode, replacementMode)
+        XCTAssertTrue(state.isBusy(.capture))
+        XCTAssertEqual(state.captureReviewState, .capturing)
+        XCTAssertNil(state.lastError)
+        XCTAssertFalse(state.shutterFlash)
+        await peer.queueListings([.items([.a, .b, .new])])
+        await peer.release("new-capture")
+        await new.value
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.latestMediaItem?.id, "N")
+        let choices = await peer.captureChoices()
+        XCTAssertEqual(choices, [false, false], "Each explicitly requested capture stays bound to its own session")
+    }
+
+    func testReadbackWarningWithoutMediaCapabilityDoesNotInventAReviewOrAnotherCapture() async throws {
+        let peer = CaptureMediaPeer(mediaSupported: false)
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        state.setShutterAutofocus(false)
+        await peer.setCaptureError("CAPTURE_STATUS_READBACK_FAILED")
+        await state.captureStill()
+        XCTAssertEqual(state.captureReviewState, .idle)
+        XCTAssertNil(state.latestMediaTask)
+        XCTAssertFalse(state.canRetryCaptureMediaReview)
+        XCTAssertFalse(state.shutterFlash)
+        XCTAssertNotNil(state.lastError)
+        let listings = await peer.listCount()
+        let choices = await peer.captureChoices()
+        XCTAssertEqual(listings, 0)
+        XCTAssertEqual(choices, [false])
+    }
+
+    func testAcknowledgedReadbackRetryWhileMediaBusySendsZeroRequests() async throws {
+        let peer = CaptureMediaPeer()
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        try await waitUntil { state.latestMediaItem?.id == "A" && !state.latestMediaThumbnailLoading }
+        state.setShutterAutofocus(false)
+        await peer.setCaptureError("CAPTURE_STATUS_READBACK_FAILED")
+        await state.captureStill()
+        try await waitUntil { state.captureReviewState == .notReady }
+        await peer.holdNext("preview")
+        let preview = Task { await state.openLatestMedia() }
+        try await waitForGate(peer, "preview")
+        let before = await peer.requestCount()
+        XCTAssertFalse(state.canRetryCaptureMediaReview)
+        state.retryCaptureMediaReview()
+        let after = await peer.requestCount()
+        XCTAssertEqual(after, before)
+        XCTAssertEqual(state.captureReviewState, .notReady)
+        let choices = await peer.captureChoices()
+        XCTAssertEqual(choices, [false])
+        await peer.release("preview")
+        await preview.value
+    }
+
+    func testNewReadbackCaptureRetiresAnEarlierCaptureReviewBeforeItsAcknowledgement() async throws {
+        let peer = CaptureMediaPeer()
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        try await waitUntil { state.latestMediaItem?.id == "A" && !state.latestMediaThumbnailLoading }
+        state.setShutterAutofocus(false)
+        await peer.setCaptureError("CAPTURE_STATUS_READBACK_FAILED")
+        await peer.holdNext("listing", gate: "old-review")
+        await state.captureStill()
+        try await waitForGate(peer, "old-review")
+        let oldReview = try XCTUnwrap(state.latestMediaTask)
+        await peer.holdNext("capture", gate: "new-capture")
+        let capture = Task { await state.captureStill() }
+        try await waitForGate(peer, "new-capture")
+        await peer.release("old-review")
+        await oldReview.value
+        XCTAssertEqual(state.captureReviewState, .capturing)
+        XCTAssertTrue(state.isBusy(.capture))
+        XCTAssertEqual(state.latestMediaItem?.id, "A")
+        await peer.queueListings([.items([.a, .b, .new])])
+        await peer.release("new-capture")
+        await capture.value
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.captureReviewState, .available)
+        XCTAssertEqual(state.latestMediaItem?.id, "N")
+        XCTAssertNotNil(state.lastError)
+        XCTAssertFalse(state.shutterFlash)
+        let choices = await peer.captureChoices()
+        XCTAssertEqual(choices, [false, false])
+    }
+
+    func testSharedStopRecoveryResourcesCoverAutofocusWhileKnownBulbLabelsRemain() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        for (language, autofocus) in [("en", "autofocus"), ("zh-Hant", "自動對焦")] {
+            let source = try String(contentsOf: root.appendingPathComponent("App/Resources/\(language).lproj/Localizable.strings"), encoding: .utf8)
+            func line(_ key: String) throws -> String {
+                let matches = source.split(separator: "\n").filter { $0.hasPrefix("\"\(key)\" = ") }
+                XCTAssertEqual(matches.count, 1, "Each localization key must be unique")
+                return String(try XCTUnwrap(matches.first))
+            }
+            for key in ["shutter_release_recovery_help", "previous_shutter_release_warning", "previous_shutter_confirmation_help"] {
+                XCTAssertTrue(try line(key).contains(autofocus))
+            }
+            XCTAssertFalse(try line("shutter_release_recovery_help").contains("Bulb"))
+            XCTAssertTrue(try line("start_bulb_exposure").contains("Bulb"))
+            XCTAssertTrue(try line("stop_bulb_exposure").contains("Bulb"))
+            _ = try line("capture_status_readback_failed")
+        }
+    }
+
     func testFourOldOrFailedReadsBecomeNotReadyAndRetryOnlyReadsWithoutAutofocus() async throws {
         let peer = CaptureMediaPeer()
         let state = makeState(peer)
@@ -541,7 +843,13 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
     private var failures = Set<String>()
     private var captureRequestEnd = 0
     private let eventPolling: Bool
-    init(eventPolling: Bool = false) { self.eventPolling = eventPolling }
+    private let mediaSupported: Bool
+    private var captureErrorCode: String?
+    init(eventPolling: Bool = false, mediaSupported: Bool = true) {
+        self.eventPolling = eventPolling
+        self.mediaSupported = mediaSupported
+    }
+    func setCaptureError(_ code: String?) { captureErrorCode = code }
     func listCount() -> Int { counts["listing", default: 0] }
     func requestCount() -> Int { requests.count }
     func count(_ operation: String) -> Int { counts[operation, default: 0] }
@@ -582,7 +890,8 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
         } else if path.hasSuffix("/info") {
             object = ["connected": true, "model": "Synthetic capture review", "serial": "TEST-CAPTURE-REVIEW", "api": "desktop-bridge/v1"]
         } else if path.hasSuffix("/capabilities") {
-            let supported = ["STILL_CAPTURE", "MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_PREVIEW", "MEDIA_DOWNLOAD", "MEDIA_DELETE"]
+            let supported = ["STILL_CAPTURE"]
+                + (mediaSupported ? ["MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_PREVIEW", "MEDIA_DOWNLOAD", "MEDIA_DELETE"] : [])
                 + (eventPolling ? ["EVENT_POLLING"] : [])
             object = ["supported": supported, "shutterAutofocusSupported": true]
         } else if path.hasSuffix("/events") {
@@ -598,7 +907,13 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
             let payload = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
             choices.append(payload["af"] as! Bool)
             captureRequestEnd = requests.count
+            let errorCode = captureErrorCode
             await waitIfHeld("capture")
+            if let errorCode {
+                let error = ["error": ["code": errorCode, "message": "Synthetic capture response failure",
+                                       "feature": "STILL_CAPTURE", "engine": "ccapi"]]
+                return CameraHTTPResponse(statusCode: 502, body: try JSONSerialization.data(withJSONObject: error))
+            }
             object = ["connected": true, "recording": false, "mode": "Manual"]
         } else if path.hasSuffix("/media") {
             counts["listing", default: 0] += 1

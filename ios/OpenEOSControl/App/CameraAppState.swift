@@ -765,6 +765,14 @@ final class CameraAppState: ObservableObject {
             if let previousIDs = pendingCaptureReviewIDs {
                 startLatestMediaRefresh(session: session, previousIDs: previousIDs)
             }
+        } catch DesktopBridgeError.captureStatusReadbackFailed {
+            guard generation == sessionGeneration else { return }
+            // The command was acknowledged; keep this capture's existing read-only owner.
+            // A status-read failure does not establish an exposure or justify replaying the shutter command.
+            lastError = NSLocalizedString("capture_status_readback_failed", comment: "")
+            if let previousIDs = pendingCaptureReviewIDs {
+                startLatestMediaRefresh(session: session, previousIDs: previousIDs)
+            }
         } catch {
             guard generation == sessionGeneration else { return }
             pendingCaptureReviewIDs = nil

@@ -36,8 +36,8 @@ final class OpenEOSControlUITests: XCTestCase {
 
     func testShutterRecoveryStopRemainsReachableAcrossLanguagesFontsAndRotation() throws {
         let languages = [
-            ("english", "en", "en_US", "Stop · Release shutter", "Shutter release is unconfirmed"),
-            ("traditionalChinese", "zh-Hant", "zh_TW", "停止・釋放快門", "尚未確認快門已釋放"),
+            ("english", "en", "en_US", "Stop camera control", "Camera stop is unconfirmed"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "停止相機操作", "尚未確認相機操作已停止"),
         ]
         for (language, appleLanguage, locale, stopLabel, warningLabel) in languages {
             for font in ["UICTContentSizeCategoryXS", "UICTContentSizeCategoryAccessibilityXXXL"] {
@@ -162,7 +162,7 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(stop.isHittable)
         addScreenshot(name: "previous-warning-and-current-stop")
         confirm.tap()
-        app.buttons["Confirm shutter is released"].tap()
+        app.buttons["Confirm camera control stopped"].tap()
         XCTAssertTrue(previous.waitForNonExistence(timeout: 5))
         XCTAssertTrue(waitForInteraction(stop, timeout: 5), "Acknowledging the old camera must leave the new Stop available")
         stop.tap()

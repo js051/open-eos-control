@@ -461,14 +461,14 @@
 "apply" = "Apply";
 
 // Shutter release recovery
-"shutter_release_unconfirmed" = "Shutter release is unconfirmed";
+"shutter_release_unconfirmed" = "Camera stop is unconfirmed";
 "bulb_exposure_running" = "Bulb exposure is running";
-"shutter_release_recovery_help" = "The camera may still be exposing. Stop retries shutter release only. Other camera controls stay locked until release is confirmed.";
-"release_shutter_now" = "Stop · Release shutter";
-"previous_shutter_release_warning" = "The previous connection did not confirm shutter release. Check that camera directly. Connecting again does not clear this warning.";
+"shutter_release_recovery_help" = "The shutter or autofocus may still be active. Stop sends only the saved stop command. Other camera controls stay locked until stopping is confirmed.";
+"release_shutter_now" = "Stop camera control";
+"previous_shutter_release_warning" = "The previous connection did not confirm the shutter or autofocus stop. Check that camera directly. Connecting again does not clear this warning.";
 "confirm_previous_shutter_released" = "I checked the previous camera";
-"previous_shutter_physically_verified" = "Confirm shutter is released";
-"previous_shutter_confirmation_help" = "Confirm only after checking that the previous camera is no longer exposing. This clears the warning only; it sends no command to either camera.";
+"previous_shutter_physically_verified" = "Confirm camera control stopped";
+"previous_shutter_confirmation_help" = "Confirm only after checking that the previous camera shutter or autofocus has stopped. This clears the warning only; it sends no command to either camera.";
 
 "shutter_autofocus" = "Shutter autofocus";
 "shutter_af_on" = "On";
@@ -491,3 +491,4 @@
 "retry_media_preview" = "Load preview again";
 "media_viewer_outside_list" = "Not in the current list";
 "capture_review_readFailed" = "Shot accepted, but the photo list could not be read. Check again when the camera is ready.";
+"capture_status_readback_failed" = "The shutter command was acknowledged, but camera status could not be read. Check recent media without taking another photo.";
