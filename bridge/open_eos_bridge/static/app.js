@@ -5568,14 +5568,17 @@
   }
 
   async function deleteMedia(item, button) {
-    if (!state.session || !featureSupported(FEATURES.MEDIA_DELETE) || cameraInteractionBusy()) return;
+    const session = state.session;
+    if (!session || !featureSupported(FEATURES.MEDIA_DELETE) || cameraInteractionBusy()) return;
     if (!window.confirm(t("deleteConfirm", { name: item.name }))) return;
     button.disabled = true;
     try {
       await api(
-        `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}`,
+        `/v1/session/${encodeURIComponent(session.id)}/media/${encodeURIComponent(item.id)}`,
         { method: "DELETE" },
       );
+      // A replacement connection can reuse both the session ID and the media ID.
+      if (state.session !== session) return;
       state.media = state.media.filter((candidate) => candidate.id !== item.id);
       const thumbnailUrl = state.mediaThumbnailUrls.get(item.id);
       state.mediaThumbnailUrls.delete(item.id);
@@ -5587,6 +5590,7 @@
       releaseObjectUrl(thumbnailUrl);
       showToast(t("deleted", { name: item.name }));
     } catch (error) {
+      if (state.session !== session) return;
       const normalized = captureError(error);
       showToast(normalized.message, true);
       button.disabled = false;

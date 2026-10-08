@@ -185,6 +185,101 @@ async function verifyCapabilityResponseOwnership(browser, origin) {
   }
 }
 
+async function verifyMediaDeleteResponseOwnership(browser, origin) {
+  for (const rejected of [false, true]) {
+    const context = await browser.newContext({ locale: "en-US" });
+    const page = await context.newPage();
+    const writes = [], pageErrors = [];
+    let releaseResponse;
+    const gate = new Promise(resolve => { releaseResponse = resolve; });
+    const item = { id: "SYNTHETIC_SHARED.JPG", name: "SYNTHETIC_SHARED.JPG", kind: "image",
+      sizeBytes: 1024, captureTime: null, previewAvailable: false };
+    // Observe consumption of the synthetic response, then a new browser task.
+    // The production api/delete continuation microtasks finish before this marker.
+    await context.addInitScript(() => {
+      const fetchOriginal = window.fetch;
+      window.fetch = async (...args) => {
+        const response = await fetchOriginal(...args);
+        if (args[1]?.method === "DELETE" && String(args[0]).includes("/media/")) {
+          const json = response.json.bind(response);
+          response.json = async () => {
+            const value = await json();
+            const channel = new MessageChannel();
+            channel.port1.onmessage = () => {
+              window.__deleteResponseConsumed = true;
+              channel.port1.close(); channel.port2.close();
+            };
+            channel.port2.postMessage(null);
+            return value;
+          };
+        }
+        return response;
+      };
+    });
+    page.on("pageerror", error => pageErrors.push(error.message));
+    page.on("request", request => {
+      if (request.method() !== "GET") writes.push({ method: request.method(), path: new URL(request.url()).pathname });
+    });
+    await page.route(/\/capabilities$/, async route => {
+      const response = await route.fetch();
+      const capabilities = await response.json();
+      capabilities.supported = ["MEDIA_BROWSER", "MEDIA_DELETE"];
+      capabilities.settings = [];
+      await route.fulfill({ response, json: capabilities });
+    });
+    await page.route(/\/v1\/session\/[^/]+\/media(?:\?.*)?$/, route => route.fulfill({ json: { items: [item] } }));
+    await page.route(/\/v1\/session\/[^/]+\/media\/SYNTHETIC_SHARED.JPG$/, async route => {
+      assert.equal(route.request().method(), "DELETE");
+      // This synthetic delete never reaches the fake backend or a physical camera.
+      await page.evaluate(() => { window.__deleteResponsePending = true; });
+      await gate;
+      await route.fulfill({ status: rejected ? 500 : 200,
+        json: rejected ? { error: { code: "SYNTHETIC_DELETE_FAILURE", message: "Old A deletion failed" } } : {} });
+    });
+    try {
+      await page.goto(origin, { waitUntil: "networkidle" });
+      await page.waitForSelector("#connect-button:not([disabled])");
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      await page.click('.tab[data-view="media"]');
+      await page.locator(".media-card .media-actions button").click();
+      await page.waitForSelector("#media-details-dialog[open]");
+      page.once("dialog", dialog => dialog.accept());
+      await page.click("#media-details-delete");
+      await page.waitForFunction(() => window.__deleteResponsePending === true);
+      await page.keyboard.press("Escape");
+      await page.waitForSelector("#media-details-dialog:not([open])", { state: "attached" });
+      assert.equal(await page.locator("#disconnect-button").isEnabled(), true);
+      await page.click("#disconnect-button");
+      await page.waitForSelector("#connection-view:not([hidden])");
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      await page.click('.tab[data-view="media"]');
+      await page.locator(".media-card .media-actions button").click();
+      await page.waitForSelector("#media-details-dialog[open]");
+      assert.equal(await page.locator("#media-details-delete").isEnabled(), true);
+      const requestsBefore = writes.slice();
+      const errorBefore = JSON.parse(await page.locator("#diagnostics-output").textContent()).lastError;
+      releaseResponse();
+      await page.waitForFunction(() => window.__deleteResponseConsumed === true);
+      assert.equal(await page.locator(".media-card").count(), 1, "B's same-ID media survives A's response");
+      assert.equal(await page.locator("#media-details-dialog").evaluate(dialog => dialog.open), true);
+      assert.equal(await page.locator("#media-details-delete").isEnabled(), true);
+      assert.deepEqual(JSON.parse(await page.locator("#diagnostics-output").textContent()).lastError, errorBefore);
+      assert.deepEqual(writes, requestsBefore, "Late response never retries or deletes from B");
+      assert.equal(writes.filter(x => x.method === "DELETE" && x.path.includes("/media/")).length, 1);
+      assert.deepEqual(pageErrors, []);
+      await page.keyboard.press("Escape");
+      await page.click("#disconnect-button");
+      await page.waitForSelector("#connection-view:not([hidden])");
+      console.log(`Media delete response ownership: stale ${rejected ? "rejection" : "success"} passed`);
+    } finally {
+      releaseResponse();
+      await context.close();
+    }
+  }
+}
+
 async function run() {
   const [simulatorPort, bridgePort] = await Promise.all([freePort(), freePort()]);
   const simulatorOrigin = `http://127.0.0.1:${simulatorPort}`;
@@ -980,6 +1075,7 @@ async function run() {
     assert.deepEqual(pageErrors, []);
     await context.close();
     await verifyCapabilityResponseOwnership(browser, bridgeOrigin);
+    await verifyMediaDeleteResponseOwnership(browser, bridgeOrigin);
   } finally {
     if (browser) await browser.close();
     await stopProcess(bridge?.process);
