@@ -3815,16 +3815,24 @@
   }
 
   async function refreshRtpAudioStatus() {
-    if (!state.session || !state.liveActive || state.activeLiveSource !== "CCAPI_RTP") {
+    const session = state.session;
+    if (!session || !state.liveActive || state.activeLiveSource !== "CCAPI_RTP" || localPreviewSelected()) {
       renderRtpAudio();
       return;
     }
+    const liveGeneration = state.liveGeneration;
+    const refreshGeneration = state.refreshGeneration;
+    const ownsRefresh = () => state.session === session && state.liveGeneration === liveGeneration &&
+      state.refreshGeneration === refreshGeneration && state.liveActive &&
+      state.activeLiveSource === "CCAPI_RTP" && !localPreviewSelected();
     try {
-      state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/status`);
+      const status = await api(`/v1/session/${encodeURIComponent(session.id)}/status`);
+      if (!ownsRefresh()) return;
+      state.status = status;
     } catch (_) {
       // Video remains usable even when this optional status refresh fails.
     }
-    renderRtpAudio();
+    if (ownsRefresh()) renderRtpAudio();
   }
 
   function renderRtpAudio() {
@@ -3846,8 +3854,11 @@
       stopRtpAudio({ announce: true });
       return;
     }
+    if (state.rtpAudioBusy) return;
+    const session = state.session;
     const status = currentRtpAudioStatus();
-    if (!state.session || !state.liveActive || state.activeLiveSource !== "CCAPI_RTP" || !status?.available) {
+    if (!session || !state.liveActive || state.activeLiveSource !== "CCAPI_RTP" ||
+      localPreviewSelected() || !status?.available) {
       showToast(status?.reason || t("cameraAudioUnavailable"), true);
       return;
     }
@@ -3856,27 +3867,40 @@
       showToast(t("cameraAudioUnavailable"), true);
       return;
     }
+    const liveGeneration = state.liveGeneration;
+    const generation = ++state.rtpAudioLoopGeneration;
+    const ownsStart = () => state.rtpAudioLoopGeneration === generation && state.session === session &&
+      state.liveGeneration === liveGeneration && state.liveActive &&
+      state.activeLiveSource === "CCAPI_RTP" && !localPreviewSelected();
     state.rtpAudioBusy = true;
     state.rtpAudioError = null;
     renderRtpAudio();
     let context = null;
     try {
       context = new AudioContextClass({ latencyHint: "interactive", sampleRate: 48_000 });
-      await context.resume();
+      // Stop owns cleanup even while resume is pending (and may never settle).
       state.rtpAudioContext = context;
+      await context.resume();
+      if (!ownsStart()) return;
       state.rtpAudioEnabled = true;
       state.rtpAudioAfterGeneration = 0;
       state.rtpAudioNextStart = Number.NaN;
-      state.rtpAudioLoopGeneration += 1;
-      void pollRtpAudio(state.rtpAudioLoopGeneration);
+      void pollRtpAudio(generation);
       showToast(t("cameraAudioStarted"));
     } catch (error) {
+      if (!ownsStart()) return;
       state.rtpAudioError = error instanceof Error ? error.message : String(error);
-      if (context) void context.close();
       showToast(state.rtpAudioError, true);
     } finally {
-      state.rtpAudioBusy = false;
-      renderRtpAudio();
+      // A stopped attempt must not clear a newer start's busy state or context.
+      if (state.rtpAudioLoopGeneration === generation) {
+        if (!state.rtpAudioEnabled && state.rtpAudioContext === context) {
+          state.rtpAudioContext = null;
+          if (context) void context.close().catch(() => {});
+        }
+        state.rtpAudioBusy = false;
+        renderRtpAudio();
+      }
     }
   }
 
