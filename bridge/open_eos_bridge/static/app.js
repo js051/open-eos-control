@@ -4715,7 +4715,7 @@
       copy.append(name, time);
       const size = document.createElement("span");
       size.className = "media-size";
-      size.textContent = [formatMediaDimensions(item), formatBytes(item.sizeBytes)].filter(Boolean).join(" · ");
+      size.textContent = [formatMediaDimensions(item), formatMediaSize(item)].filter(Boolean).join(" · ");
       const actions = document.createElement("div");
       actions.className = "media-actions";
       const actionSupported = featureSupported(FEATURES.MEDIA_BROWSER) || mediaMetadataSupported() ||
@@ -5061,7 +5061,7 @@
     ui.mediaDetailsSummary.textContent = [
       formatDate(item.captureTime),
       formatMediaDimensions(item),
-      formatBytes(item.sizeBytes),
+      formatMediaSize(item),
       formatMediaContentType(item.contentType),
     ]
       .filter(Boolean).join(" · ");
@@ -5267,7 +5267,7 @@
     const summary = [
       t("mediaPreviewPosition", { position: Math.max(0, index + 1), total: items.length }),
       formatMediaDimensions(item),
-      formatBytes(item.sizeBytes),
+      formatMediaSize(item),
     ].filter((value) => value && value !== "-");
     ui.mediaPreviewMeta.textContent = summary.join(" · ");
     ui.mediaPreviewDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
@@ -5856,6 +5856,13 @@
     window.OpenEosIcons?.render(button);
     const rendered = button.querySelector("svg.icon");
     if (rendered) rendered.dataset.renderedIcon = iconName;
+  }
+
+  function formatMediaSize(item) {
+    // Media metadata uses zero for unavailable size as well as empty files.
+    // Only positive numeric evidence can support a size label here.
+    const bytes = item?.sizeBytes;
+    return typeof bytes === "number" && Number.isFinite(bytes) && bytes > 0 ? formatBytes(bytes) : "";
   }
 
   function formatBytes(value) {

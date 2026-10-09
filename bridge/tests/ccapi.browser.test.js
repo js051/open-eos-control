@@ -878,18 +878,23 @@ async function run() {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.unroute(mediaListRoute);
     await page.unroute(bulkThumbnailRoute);
-    await page.click("#media-refresh-button");
     const selectedMediaInfoRoute = /\/v1\/session\/[^/]+\/media\/[^/]+\/info(?:\?.*)?$/;
+    let selectedMediaSize = 4096;
+    let selectedMediaInfoReads = 0;
     await page.route(selectedMediaInfoRoute, async (route) => {
+      selectedMediaInfoReads += 1;
       const response = await route.fetch();
       const item = await response.json();
       await route.fulfill({
         response,
-        json: { ...item, contentType: "image/jpeg", widthPixels: 6000, heightPixels: 4000 },
+        json: { ...item, sizeBytes: selectedMediaSize, contentType: "image/jpeg", widthPixels: 6000, heightPixels: 4000 },
       });
     });
+    await page.click("#media-refresh-button");
     const capturedMedia = page.locator(".media-card").filter({ hasText: "SIM_0003.JPG" });
     await capturedMedia.waitFor({ state: "visible" });
+    assert.equal(await capturedMedia.locator(".media-size").innerText(), "");
+    assert.equal(selectedMediaInfoReads, 0, "listing must not fetch size metadata automatically");
     assert.equal(await page.locator("#media-filter-control button.active").innerText(), "All");
     await page.click('#media-filter-control button[data-media-filter="video"]');
     assert.equal(await capturedMedia.isVisible(), false);
@@ -904,6 +909,8 @@ async function run() {
     await page.screenshot({ path: path.join(RESULTS_DIR, "narrow-media-viewer.png") });
     await page.setViewportSize({ width: 1440, height: 900 });
     assert.match(await page.locator("#media-preview-meta").innerText(), /\d+ of \d+/);
+    assert.doesNotMatch(await page.locator("#media-preview-meta").innerText(), /(?:^| · )0 B(?:$| · )/);
+    assert.equal(selectedMediaInfoReads, 0, "opening preview must not fetch size metadata");
     assert.equal(await page.locator("#media-preview-download").isVisible(), true);
     assert.equal(await page.locator("#media-preview-details").isVisible(), true);
     await page.locator("#media-preview-image").dblclick();
@@ -916,6 +923,31 @@ async function run() {
     assert.equal(await page.locator("#media-details-name").innerText(), "SIM_0003.JPG");
     await page.waitForFunction(() => document.querySelector("#media-details-summary")?.textContent?.includes("6000 x 4000"));
     assert.match(await page.locator("#media-details-summary").innerText(), /image\/jpeg/);
+    await page.waitForSelector("#media-details-loading[hidden]", { state: "attached" });
+    assert.match(await page.locator("#media-details-summary").innerText(), /4\.0 KB/);
+    assert.equal(await capturedMedia.locator(".media-size").innerText(), "6000 x 4000 · 4.0 KB");
+    assert.equal(selectedMediaInfoReads, 1);
+    await page.click("#media-details-close");
+    await capturedMedia.locator("button.media-thumbnail").click();
+    await page.waitForSelector("#media-preview-dialog[open] #media-preview-image:not([hidden])");
+    assert.match(await page.locator("#media-preview-meta").innerText(), /4\.0 KB/);
+    selectedMediaSize = 0;
+    await page.click("#media-preview-details");
+    await page.waitForSelector("#media-details-dialog[open] #media-details-loading[hidden]", { state: "attached" });
+    assert.equal(selectedMediaInfoReads, 2);
+    assert.doesNotMatch(await page.locator("#media-details-summary").innerText(), /(?:0 B|4\.0 KB)/);
+    assert.equal(await capturedMedia.locator(".media-size").innerText(), "6000 x 4000");
+    await page.screenshot({ path: path.join(RESULTS_DIR, "desktop-unknown-media-size-details.png") });
+    await page.click("#media-details-close");
+    await capturedMedia.locator("button.media-thumbnail").click();
+    await page.waitForSelector("#media-preview-dialog[open] #media-preview-image:not([hidden])");
+    assert.doesNotMatch(await page.locator("#media-preview-meta").innerText(), /(?:0 B|4\.0 KB)/);
+    assert.match(await page.locator("#media-preview-meta").innerText(), /6000 x 4000/);
+    await page.screenshot({ path: path.join(RESULTS_DIR, "desktop-unknown-media-size-preview.png") });
+    await page.click("#media-preview-details");
+    await page.waitForSelector("#media-details-dialog[open] #media-details-loading[hidden]", { state: "attached" });
+    assert.equal(selectedMediaInfoReads, 3, "only explicit details requests may fetch metadata");
+    console.log("CCAPI unknown media size -> known metadata -> unknown metadata render journey passed");
     await page.unroute(selectedMediaInfoRoute);
     page.once("dialog", (dialog) => dialog.accept());
     await page.click("#media-details-delete");
