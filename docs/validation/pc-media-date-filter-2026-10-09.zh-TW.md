@@ -28,6 +28,16 @@
 
 本地 Node 24.19.0，正式 CI 仍沿用原 Node 22；未更換依賴。輕量檢查限制單 CPU、60 秒與觀測 aggregate RSS 640 MiB 停止線。完整 module 輪次 1.62 秒、peak 約 111 MiB；17 個 UI 狀態案例約 0.20 秒。後續最終來源與結果另補，舊結果不自動驗證新修改。
 
+### 首輪正常 CI 與鍵盤測試修正
+
+Head `34b71e21bcb2799547295ed2ca89051248c4de4b` 的 [CI 37962105591](https://github.com/js051/open-eos-control/actions/runs/37962105591) 必要 gate 失敗。JVM／debug packaging、Windows standalone、secret／workflow 通過；原 classifier 判定未變動的平台 skipped，沒有修改 gate。Desktop browser 在日期旅程的第一組大字級鍵盤巡覽中，於 2026-10-09 16:59:25 UTC 失敗：`dialog.contains(document.activeElement)` 為 false。後续旅程與該輪 desktop backend／packaging 尚未完成，不能記為通過。
+
+原 artifact `11632871402` 為 762,486 bytes，SHA-256 `ce3993d4dfeb16834cab232bbc41216680bc8514243588ebd5e7c7898fc228de`。其中只有前置案例的 11 張圖，沒有失敗當下的日期對話框畫面或 focus trace，故無法從此輪確認焦點究竟去了哪裡。
+
+[HTML sequential focus navigation](https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation) 允許在文件邊界轉移至瀏覽器控制；原本要求每個樣本必須位於 dialog 內，超出原生 modal 的保證。獨立 review 後只修正測試：仍要求每步為 open／`:modal`；若焦點不在 dialog，僅允許文件失焦且 activeElement 恰為 body／documentElement 的根節點，任何背景 App 控制仍失敗。這只辨識「文件失焦且回報根節點」，不把它當作已確認的瀏覽器 chrome 原因。
+
+保留 28 次原生 Tab 並檢查最後一次的結果，六個必要控制必須在文件有焦點時實際走訪；幾何、可操作性、Escape、回到原開啟按鈕與 12 秒 timeout 不變。每步先保存有界 JSON trace，開始巡覽前保存畫面；沒有新增 App focus-trap、關閉安全檢查或延長 timeout。修正後的 browser runtime 仍待新 exact-head CI。
+
 ## Release Assessment
 
 - Latest release baseline：v0.12.0 Development Preview；目前來源 metadata 0.13.0 不代表已發布。

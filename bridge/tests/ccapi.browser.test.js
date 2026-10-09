@@ -220,18 +220,36 @@ async function verifyDateDialogLayout(page, language) {
     // Enlarge text through the public document styling, never the app's state.
     await page.locator("html").evaluate((element) => { element.style.fontSize = "32px"; });
     await page.locator("#media-date-button").focus();
+    assert.equal(await page.locator("#media-date-button").evaluate((element) => document.activeElement === element), true);
     await page.keyboard.press("Enter");
     await page.waitForSelector("#media-date-dialog[open]");
     assert.equal(await page.locator("#media-date-from").evaluate((element) => document.activeElement === element), true);
     const visited = new Set();
-    for (let index = 0; index < 28; index += 1) {
-      const focus = await page.evaluate(() => ({
-        id: document.activeElement.id,
-        inside: document.querySelector("#media-date-dialog").contains(document.activeElement),
-      }));
-      assert.equal(focus.inside, true, "Keyboard focus stays inside the modal");
-      visited.add(focus.id);
-      await page.keyboard.press("Tab");
+    const focusTrace = [];
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    const evidenceName = `desktop-media-date-${language}-${viewport.width}x${viewport.height}-text200`;
+    await page.screenshot({ path: path.join(RESULTS_DIR, `${evidenceName}-focus-start.png`) });
+    for (let index = 0; index <= 28; index += 1) {
+      const focus = await page.evaluate(() => {
+        const active = document.activeElement;
+        const dialog = document.querySelector("#media-date-dialog");
+        return {
+          id: active?.id || "", tag: active?.tagName || null,
+          inside: dialog.contains(active), documentHasFocus: document.hasFocus(),
+          documentRoot: active === document.body || active === document.documentElement,
+          open: dialog.open, modal: dialog.matches(":modal"),
+        };
+      });
+      focusTrace.push({ index, ...focus });
+      fs.writeFileSync(path.join(RESULTS_DIR, `${evidenceName}-focus.json`), JSON.stringify(focusTrace, null, 2));
+      assert.equal(focus.open && focus.modal, true, "Keyboard traversal retains the native modal");
+      // HTML sequential navigation permits the browser's own controls at the
+      // document boundary. Only its unfocused root sentinel is acceptable here;
+      // a background app control must fail regardless of document focus.
+      assert.equal(focus.inside || (!focus.documentHasFocus && focus.documentRoot), true,
+        `Keyboard focus must not enter the background app: ${JSON.stringify(focus)}`);
+      if (focus.inside && focus.documentHasFocus) visited.add(focus.id);
+      if (index < 28) await page.keyboard.press("Tab");
     }
     for (const id of ["media-date-from", "media-date-to", "media-date-close", "media-date-dialog-clear", "media-date-cancel", "media-date-apply"]) {
       assert.ok(visited.has(id), `${language}: ${id} is keyboard reachable`);
