@@ -38,6 +38,14 @@ Head `34b71e21bcb2799547295ed2ca89051248c4de4b` 的 [CI 37962105591](https://git
 
 保留 28 次原生 Tab 並檢查最後一次的結果，六個必要控制必須在文件有焦點時實際走訪；幾何、可操作性、Escape、回到原開啟按鈕與 12 秒 timeout 不變。每步先保存有界 JSON trace，開始巡覽前保存畫面；沒有新增 App focus-trap、關閉安全檢查或延長 timeout。修正後的 browser runtime 仍待新 exact-head CI。
 
+### 第二輪：窄視窗的大字級溢出
+
+Head `b9e4e75debc8b90a49310a73975adc9ff041460c` 的 [CI 37963745744](https://github.com/js051/open-eos-control/actions/runs/37963745744) desktop job 在 2026-10-09 17:06:35 UTC 於下一個幾何斷言失敗：英語 390×844、200% 文字時 dialog 有橫向溢出。仍不是 browser 全套通過。
+
+Artifact `11632003149` 為 834,887 bytes，SHA-256 `5a7d387e161868423b6e1ee54f960c7a9fd49cf5842c92f2b8ce26fd80b0d772`。已實際檢視開始畫面：長時區名稱與日期輸入欄右側裁切。来源顯示日期欄位的 implicit auto grid track 可被時區字串的 min-content width 撐寬；修正為 `minmax(0, 1fr)` 並讓說明／時區文字可換行，沒有縮小字級或以 hidden overflow 隱藏問題。原幾何斷言保留，新增將測量值保存至 artifact。
+
+此輪 focus JSON 有 29 個樣本；第 11、25 步為 BODY、documentHasFocus=false，其餘在 modal 中，六個必要控制皆在文件有焦點時走訪。這是第二輪觀察，不回推首輪未記錄的實際焦點原因。布局修正仍需自己的 exact-head browser 及畫面驗證。
+
 ## Release Assessment
 
 - Latest release baseline：v0.12.0 Development Preview；目前來源 metadata 0.13.0 不代表已發布。

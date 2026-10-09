@@ -2056,7 +2056,8 @@ button.media-thumbnail:focus-visible {
 .media-date-dialog { overflow-y: auto; overscroll-behavior: contain; }
 .media-date-dialog .dialog-heading { display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 12px; }
 .media-date-dialog h2 { overflow-wrap: anywhere; }
-.media-date-fields { display: grid; gap: 16px; padding: 0 24px 20px; }
+.media-date-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 0 24px 20px; }
+.media-date-fields .supporting { min-width: 0; overflow-wrap: anywhere; }
 .media-date-fields label { display: grid; gap: 8px; min-width: 0; }
 .media-date-fields input { width: 100%; min-width: 0; box-sizing: border-box; }
 .media-date-error { color: var(--danger); overflow-wrap: anywhere; }

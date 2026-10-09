@@ -267,6 +267,7 @@ async function verifyDateDialogLayout(page, language) {
         .filter((element) => element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1)
         .map((element) => element.id || element.tagName),
     }));
+    fs.writeFileSync(path.join(RESULTS_DIR, `${evidenceName}-geometry.json`), JSON.stringify(geometry, null, 2));
     assert.ok(geometry.scrollWidth <= geometry.width + 1, `${language}: dialog has no horizontal overflow`);
     assert.deepEqual(geometry.clipped, [], `${language}: enlarged labels and actions are not clipped`);
     fs.mkdirSync(RESULTS_DIR, { recursive: true });
