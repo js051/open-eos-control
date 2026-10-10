@@ -21,6 +21,8 @@
 
 - 新增 14 個受控 App 測試方法，走 production CCAPI／Bridge client：精確 Unicode 身分及 metadata／評分／保護／刪除回覆對兩個等價拼寫 ID 的隔離、RAW/JPEG 分別選取、部分清單與 60/61 邊界、同 session 依序成功與失敗、取消各階段、不合作回覆、reconnect 同 wire ID、晚進度、同名檔、原子目錄碰撞與既有位元組保護、分享 lease 經 reset／新批次存活、busy 與離線控制。
 - 新增兩個正常 UI 測試來源：英／繁中大字體離線選取不冒充下載，以及 synthetic Canon 兩原檔備妥／分享入口可達／沒有拍攝。
-- 此雲端沒有 Swift／Xcode，編譯、單元與 UI runtime **NOT_RUN**；来源審查與 git diff --check 不代替執行。交付後以 exact-head 正常 CI 記錄結果，不沿用前版測試。
+- 初版交付時此雲端沒有 Swift／Xcode，本地編譯、單元與 UI runtime **NOT_RUN**；來源審查與 git diff --check 不代替執行。
+- 初版 exact head `4538b988` 正常 CI `38092470290` 終態失敗。iOS build／Core／JVM／secret 成功，App 248/248 通過，UI 25 中 23 通過、2 失敗。新 synthetic Canon 批次備妥旅程通過；離線批次旅程在初始 `offline-preview-button` 等待失敗，既有日期／評分／資料夾旅程在套用已知資料夾後無法於原 8 秒到達 `media-actions-preview-001`。失敗 artifact `11684659715` 為 205762516 bytes，SHA-256 `5e70911a376a0c19fc382c00268a9ebdcf5f00c47223a3214166241d3119c3da`。
+- 後續測試修正保留所有既有 assertions 與 timeout：離線入口使用既有 connection scroll／可見 hit-frame 驗證；共用 scroll helper 使用有重疊的有界 drag、已知 frame 的短距離修正及釋放前停留，避免以整頁慣性 swipe 搜尋 lazy cells。新增純幾何控制，UI 方法總數 25→26。第二項失敗的 trace 只證明三次 swipe 與 settling 耗盡 deadline、target 最後才存在，未取得 final frame，故仍是待 exact-head CI 驗證的導覽修正候選，不能聲稱已證明產品無誤。此次候選本地 Swift／XCTest 仍 **NOT_RUN**，不盲重跑舊 head。
 - 新 UI 旅程只驗分享入口可用，尚未執行 UIKit share sheet 的呈現／關閉／再次開啟（包括 iPad）；不選外部分享目的地，不宣稱已保存；完整 App 人工、真相機與 Files／Photos provider 驗收依使用者指示開發後集中。
 - 不含跨程序續傳、背景 transfer、Range resume、持久化隊列、批次刪除／評分／相機寫入。原 required CI、安全檢查與 release HOLD 保留，不將本批稱為整個 P2 或完整產品驗收完成。

@@ -17,6 +17,30 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertFalse(Self.targetIsAboveScrollViewport(.zero, viewport: viewport))
     }
 
+    func testScrollHelperBoundsSearchAndCorrectsClippedTargets() throws {
+        let viewport = CGRect(x: 0, y: 80, width: 390, height: 700)
+        let search = try XCTUnwrap(Self.scrollDragOffset(target: .null, viewport: viewport))
+        XCTAssertGreaterThan(search, 0)
+        XCTAssertLessThan(search, viewport.height, "Keep overlap while materializing lazy cells")
+        for target in [
+            CGRect(x: 12, y: 60, width: 100, height: 44),
+            CGRect(x: 12, y: 760, width: 100, height: 44),
+        ] {
+            let offset = try XCTUnwrap(Self.scrollDragOffset(target: target, viewport: viewport))
+            XCTAssertTrue(viewport.contains(target.offsetBy(dx: 0, dy: -offset)))
+            XCTAssertLessThan(abs(offset), search, "A clipped button only needs a short correction")
+        }
+        for y in [CGFloat(-2_000), CGFloat(2_000)] {
+            let target = CGRect(x: 12, y: y, width: 100, height: 44)
+            let offset = try XCTUnwrap(Self.scrollDragOffset(target: target, viewport: viewport))
+            XCTAssertLessThanOrEqual(abs(offset), search)
+            XCTAssertLessThan(abs(target.midY - offset - viewport.midY), abs(target.midY - viewport.midY))
+        }
+        XCTAssertNil(Self.scrollDragOffset(target: CGRect(x: 12, y: 100, width: 100, height: 44), viewport: viewport))
+        XCTAssertNil(Self.scrollDragOffset(target: .null, viewport: .zero))
+        XCTAssertNil(Self.scrollDragOffset(target: .null, viewport: .infinite))
+    }
+
     func testOfflineBatchSelectionRemainsSeparateFromPreviewAndCannotFakeDownloads() throws {
         for (language, apple, locale, selected, notSelected) in [
             ("english", "en", "en_US", "Selected", "Not selected"),
@@ -25,7 +49,9 @@ final class OpenEOSControlUITests: XCTestCase {
             let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
                              contentSizeCategory: "UICTContentSizeCategoryAccessibilityXXXL")
             defer { app.terminate() }
-            XCTAssertTrue(waitForInteraction(app.buttons["offline-preview-button"], timeout: 8))
+            XCTAssertTrue(scrollConnectionButtonIntoView(
+                in: app, buttonIdentifier: "offline-preview-button", timeout: 8
+            ))
             app.buttons["offline-preview-button"].tap()
             openMoreActions(in: app)
             XCTAssertTrue(tapCameraAction(app.buttons["camera-media-menu-button"], in: app))
@@ -1311,22 +1337,50 @@ final class OpenEOSControlUITests: XCTestCase {
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if element.exists, element.isEnabled, element.isHittable { return true }
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            let exists = element.exists
+            if exists, element.isEnabled, element.isHittable { return true }
             let scrollSurface = app.scrollViews.allElementsBoundByIndex.last {
                 $0.exists && $0.isHittable
             }
             let surface = scrollSurface ?? app
-            let targetFrame = element.exists ? element.frame : .null
-            let viewport = surface.frame.intersection(app.frame)
-            if Self.targetIsAboveScrollViewport(targetFrame, viewport: viewport) {
-                surface.swipeDown()
-            } else {
-                surface.swipeUp()
+            let surfaceFrame = surface.frame
+            let viewport = surfaceFrame.intersection(app.frame)
+            let targetFrame = exists ? element.frame : .null
+            guard let offset = Self.scrollDragOffset(target: targetFrame, viewport: viewport) else {
+                // Visible but disabled/covered controls need state to settle;
+                // scrolling them away cannot make them interactive.
+                Thread.sleep(forTimeInterval: min(0.05, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
+                continue
             }
+            guard ProcessInfo.processInfo.systemUptime < deadline else { break }
+            let startY = offset > 0 ? viewport.maxY - viewport.height * 0.1 : viewport.minY + viewport.height * 0.1
+            let origin = surface.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: viewport.midX - surfaceFrame.minX, dy: startY - surfaceFrame.minY))
+            let end = origin.withOffset(CGVector(dx: viewport.midX - surfaceFrame.minX, dy: startY - surfaceFrame.minY - offset))
+            // Release only after stopping. Whole-view swipes coast, consuming
+            // the deadline and potentially passing a newly materialized cell.
+            start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .default, thenHoldForDuration: 0.1)
         }
         return element.exists && element.isEnabled && element.isHittable
+    }
+
+    private static func scrollDragOffset(target: CGRect, viewport: CGRect) -> CGFloat? {
+        guard !viewport.isNull, !viewport.isInfinite, !viewport.isEmpty,
+              [viewport.minX, viewport.minY, viewport.maxX, viewport.maxY].allSatisfy({ $0.isFinite })
+        else { return nil }
+        let maximum = viewport.height * 0.8
+        guard !target.isNull, !target.isInfinite, !target.isEmpty,
+              [target.minX, target.minY, target.maxX, target.maxY].allSatisfy({ $0.isFinite })
+        else { return maximum } // Search downward until a lazy cell has a frame.
+        if targetIsAboveScrollViewport(target, viewport: viewport) {
+            return -min(maximum, max(44, viewport.minY - target.minY + 12))
+        }
+        if target.maxY > viewport.maxY {
+            return min(maximum, max(44, target.maxY - viewport.maxY + 12))
+        }
+        return nil
     }
 
     private static func targetIsAboveScrollViewport(_ target: CGRect, viewport: CGRect) -> Bool {
@@ -1348,8 +1402,10 @@ final class OpenEOSControlUITests: XCTestCase {
         return !viewport.isEmpty && viewport.contains(button) && viewport.contains(center)
     }
 
-    private func scrollConnectionButtonIntoView(in app: XCUIApplication, timeout: TimeInterval) -> Bool {
-        let connect = app.buttons["connect-button"]
+    private func scrollConnectionButtonIntoView(
+        in app: XCUIApplication, buttonIdentifier: String = "connect-button", timeout: TimeInterval
+    ) -> Bool {
+        let connect = app.buttons[buttonIdentifier]
         let scroll = app.scrollViews["connection-scroll-view"]
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
         var swipes = 0
