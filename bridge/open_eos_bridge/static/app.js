@@ -1896,7 +1896,7 @@
               refreshed && contentsChanged && state.mediaLoaded &&
               generation === state.eventGeneration
             ) {
-              await refreshMedia();
+              await refreshMedia({ preservePreview: true });
             }
           }
         } catch (error) {
@@ -4665,9 +4665,13 @@
     }
   }
 
-  function refreshMedia() {
-    if (state.mediaRefreshPromise) return state.mediaRefreshPromise;
-    const promise = refreshMediaWhenCurrent();
+  function refreshMedia({ preservePreview = false } = {}) {
+    if (state.mediaRefreshPromise) {
+      // An explicit refresh still dismisses review when joining a background read.
+      if (!preservePreview) closeMediaPreview();
+      return state.mediaRefreshPromise;
+    }
+    const promise = refreshMediaWhenCurrent({ preservePreview });
     state.mediaRefreshPromise = promise;
     return promise.finally(() => {
       if (state.mediaRefreshPromise === promise) state.mediaRefreshPromise = null;
@@ -4675,7 +4679,7 @@
     });
   }
 
-  async function refreshMediaWhenCurrent() {
+  async function refreshMediaWhenCurrent({ preservePreview = false } = {}) {
     while (state.session && featureSupported(FEATURES.MEDIA_BROWSER)) {
       while (cameraInteractionBusy() && state.session) await sleep(25);
       if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER)) return false;
@@ -4685,7 +4689,8 @@
       ui.mediaRefreshButton.disabled = true;
       state.mediaLoadStatus = "LOADING";
       renderMediaSummary();
-      closeMediaPreview();
+      // A contents event owns the listing, not the independently opened review.
+      if (!preservePreview) closeMediaPreview();
       try {
         const limitQuery = mediaScope === "recent" ? "?limit=61" : "";
         const response = await api(
@@ -4703,6 +4708,7 @@
         state.mediaLoaded = true;
         state.mediaLoadStatus = "COMPLETE";
         renderMedia();
+        if (preservePreview && ui.mediaPreviewDialog.open) renderMediaPreviewNavigation();
         return true;
       } catch (error) {
         if (state.session?.id !== rawSessionId) return false;

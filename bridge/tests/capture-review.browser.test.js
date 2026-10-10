@@ -182,6 +182,28 @@ async function installDatedListing(page, dateForName) {
   });
 }
 
+async function holdNextResponse(page, pattern, routeCleanups) {
+  let release;
+  const released = new Promise((resolve) => { release = resolve; });
+  let pending;
+  const handler = (route) => {
+    pending = (async () => {
+      // Keep the real Bridge response; only its delivery order is controlled.
+      const response = await route.fetch({ timeout: 12_000 });
+      await released;
+      await route.fulfill({ response });
+    })();
+    return pending;
+  };
+  routeCleanups.push(async () => {
+    release();
+    await page.unroute(pattern, handler);
+    await pending;
+  });
+  await page.route(pattern, handler, { times: 1 });
+  return { release };
+}
+
 async function assertOneCapture(origin) {
   const state = await peerState(origin);
   assert.equal(state.capture_count, 1);
@@ -221,7 +243,7 @@ async function assertNarrowRecoveryLayout(page, language) {
 const cases = [
   ...["en", "zh-TW"].map((language) => ({
     name: `${language} out-of-range capture review stays isolated`,
-    run: async ({ page, simulatorOrigin, listingRequests, cameraWrites, infoRequests }) => {
+    run: async ({ page, simulatorOrigin, listingRequests, cameraWrites, infoRequests, routeCleanups }) => {
       await page.locator("#control-view .language-select").selectOption(language);
       await installDatedListing(page, (name) => name.startsWith("SYNTHETIC_OLD_") ? "2026-10-07" : "2026-10-09");
       await page.click('.tab[data-view="media"]');
@@ -232,9 +254,61 @@ const cases = [
       assert.deepEqual({ listing: listingRequests.length, info: infoRequests.length, writes: cameraWrites.length }, reads);
       await page.click('.tab[data-view="live"]');
       await configure(simulatorOrigin, { mode: "new-first" });
-      await capture(page, simulatorOrigin);
+      const capabilitiesPattern = /\/v1\/session\/[^/]+\/capabilities$/;
+      const capabilities = await holdNextResponse(page, capabilitiesPattern, routeCleanups);
+      // The capture's contents event refreshes capabilities before reloading the
+      // already-opened library. Hold that real response until review owns the UI.
+      const [contentsEvent] = await Promise.all([
+        page.waitForResponse(async (response) => {
+          if (response.request().method() !== "GET" ||
+            !/\/v1\/session\/[^/]+\/events$/.test(response.url())) return false;
+          return (await response.json()).changedKeys?.some((key) => String(key).toLowerCase().includes("content"));
+        }),
+        page.waitForRequest(capabilitiesPattern),
+        capture(page, simulatorOrigin),
+      ]);
+      assert.ok((await contentsEvent.json()).changedKeys?.some((key) => String(key).toLowerCase().includes("content")),
+        "The held capabilities refresh follows the capture's real contents event");
       await waitForNew(page);
-      await openPreview(page);
+      let preview;
+      let readySource;
+      if (language === "en") {
+        await openPreview(page);
+        readySource = await page.locator("#media-preview-image").getAttribute("src");
+      } else {
+        const previewPattern = /\/v1\/session\/[^/]+\/media\/[^/]+\/preview$/;
+        preview = await holdNextResponse(page, previewPattern, routeCleanups);
+        await Promise.all([
+          page.waitForRequest(previewPattern),
+          page.click("#latest-media-button"),
+        ]);
+        await page.waitForSelector("#media-preview-dialog[open]");
+      }
+      const reloaded = page.waitForResponse((response) => response.request().method() === "GET" &&
+        /\/v1\/session\/[^/]+\/media\?limit=61$/.test(response.url()));
+      capabilities.release();
+      await reloaded;
+      // COMPLETE alone could still describe the old two-item listing. Require
+      // the rendered three-item total to prove the new response was consumed.
+      await page.waitForFunction((expectedCount) =>
+        document.querySelector("#media-summary")?.dataset.loadStatus === "COMPLETE" &&
+        document.querySelector("#media-date-summary")?.textContent.includes(expectedCount),
+      language === "en" ? "2 of 3 loaded items match" : "已載入 3 項中符合 2 項");
+      assert.equal(await page.locator("#media-preview-dialog").evaluate((dialog) => dialog.open), true,
+        "A delayed contents refresh must preserve the independently opened capture review");
+      if (preview) {
+        assert.equal(await page.locator("#media-preview-image").getAttribute("src"), null,
+          "The preview response is still held while the contents refresh completes");
+        preview.release();
+      } else {
+        assert.equal(await page.locator("#media-preview-image").getAttribute("src"), readySource,
+          "A contents refresh must preserve the already-decoded preview object URL");
+      }
+      await page.waitForFunction(() => {
+        const image = document.querySelector("#media-preview-image");
+        return document.querySelector("#media-preview-dialog")?.open && image && !image.hidden &&
+          image.complete && image.naturalWidth === 160 && image.naturalHeight === 120;
+      });
       assert.equal(await page.locator("#media-preview-title").innerText(), "SIM_0003.JPG");
       assert.match(await page.locator("#media-preview-meta").innerText(), language === "en" ? /1 of 1/ : /第 1 個，共 1 個/);
       assert.equal(await page.isDisabled("#media-preview-previous"), true);
@@ -506,6 +580,7 @@ async function run() {
       const originalRequests = [];
       const infoRequests = [];
       const pageErrors = [];
+      const routeCleanups = [];
       page.on("pageerror", (error) => pageErrors.push(error.message));
       page.on("request", (request) => {
         const url = new URL(request.url());
@@ -521,13 +596,43 @@ async function run() {
       try {
         await page.goto(bridgeOrigin, { waitUntil: "networkidle" });
         await connect(page, simulatorOrigin);
-        await scenario.run({ page, simulatorOrigin, listingRequests, cameraWrites, originalRequests, infoRequests });
+        await scenario.run({ page, simulatorOrigin, listingRequests, cameraWrites, originalRequests, infoRequests, routeCleanups });
         assert.deepEqual(pageErrors, []);
         console.log(`PASS: synthetic PC capture review: ${scenario.name}`);
       } catch (error) {
         failures.push(scenario.name);
         console.error(`FAIL: synthetic PC capture review: ${scenario.name}`, error);
+        // Capture the failed UI before cleanup can close the dialog or reset it.
+        // Evidence failure never replaces the original scenario failure.
+        try {
+          fs.mkdirSync(RESULTS_DIR, { recursive: true });
+          const label = scenario.name.replace(/[^a-zA-Z0-9-]+/g, "-");
+          const preview = await page.evaluate(() => {
+            const image = document.querySelector("#media-preview-image");
+            return {
+              dialogOpen: document.querySelector("#media-preview-dialog")?.open,
+              title: document.querySelector("#media-preview-title")?.textContent,
+              latest: document.querySelector("#latest-media-label")?.textContent,
+              loadingHidden: document.querySelector("#media-preview-loading")?.hidden,
+              unavailableHidden: document.querySelector("#media-preview-unavailable")?.hidden,
+              image: image && { hidden: image.hidden, complete: image.complete,
+                width: image.naturalWidth, height: image.naturalHeight, hasSource: Boolean(image.getAttribute("src")) },
+            };
+          });
+          fs.writeFileSync(path.join(RESULTS_DIR, `capture-review-failure-${label}.json`),
+            JSON.stringify({ scenario: scenario.name, error: String(error), preview, pageErrors,
+              listingRequests, infoRequests, cameraWrites, originalRequests }, null, 2));
+          await page.screenshot({ path: path.join(RESULTS_DIR, `capture-review-failure-${label}.png`) });
+        } catch (evidenceError) {
+          console.error(`Failure evidence also failed: ${scenario.name}`, evidenceError);
+        }
       } finally {
+        const routeResults = await Promise.allSettled(routeCleanups.map((cleanup) => cleanup()));
+        for (const result of routeResults) {
+          if (result.status === "fulfilled") continue;
+          failures.push(`${scenario.name} (route cleanup)`);
+          console.error(`Capture review route cleanup failed: ${scenario.name}`, result.reason);
+        }
         try {
           if (await page.locator("#media-date-dialog[open]").count()) await page.keyboard.press("Escape");
           if (await page.locator("#media-preview-dialog[open]").count()) await page.click("#media-preview-close");
