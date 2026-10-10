@@ -15,6 +15,9 @@ struct MediaView: View {
     @State private var isFileImporterPresented = false
     @State private var mediaFilter = MediaFilter.all
     @State private var mediaSort = MediaSort.newest
+    @State private var isRatingFilterPresented = false
+    @State private var ratingFilterOwner: UUID?
+    @State private var ratingFilterDraft = MediaRatingFilter.all
     @State private var isDateFilterPresented = false
     @State private var dateFilterOwner: UUID?
     @State private var dateFilterStart = Date()
@@ -99,8 +102,11 @@ struct MediaView: View {
         .onChange(of: camera.mediaLibrarySessionID) { _, _ in
             isDateFilterPresented = false
             dateFilterOwner = nil
+            isRatingFilterPresented = false
+            ratingFilterOwner = nil
         }
         .sheet(isPresented: $isDateFilterPresented) { dateFilterSheet }
+        .sheet(isPresented: $isRatingFilterPresented) { ratingFilterSheet }
         .fullScreenCover(
             isPresented: Binding(
                 get: { camera.mediaPreviewItem != nil },
@@ -269,6 +275,34 @@ struct MediaView: View {
                 }
                 .foregroundStyle(Color.cameraText)
                 .accessibilityIdentifier("media-sort")
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    ratingFilterOwner = camera.mediaLibrarySessionID
+                    ratingFilterDraft = camera.mediaRatingFilter
+                    isRatingFilterPresented = true
+                } label: {
+                    Label(language.string("media_rating_filter"), systemImage: "star")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("media-rating-filter")
+                if camera.mediaRatingFilter != .all || mediaSort == .ratingHigh || mediaSort == .ratingLow {
+                    Text(language.string(camera.mediaRatingFilter.localizationKey))
+                        .font(.caption)
+                        .accessibilityIdentifier("media-rating-applied")
+                    Text(ratingFilterSummary)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("media-rating-summary")
+                }
+                if camera.mediaRatingFilter != .all {
+                    Button(language.string("media_rating_clear")) {
+                        camera.setMediaRatingFilter(.all, owner: camera.mediaLibrarySessionID)
+                    }
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("media-rating-clear")
+                }
             }
             VStack(alignment: .leading, spacing: 6) {
                 Button {
@@ -648,6 +682,57 @@ struct MediaView: View {
         }
     }
 
+    private var ratingFilterSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    ForEach(MediaRatingFilter.allCases) { filter in
+                        Button {
+                            ratingFilterDraft = filter
+                        } label: {
+                            HStack {
+                                Text(language.string(filter.localizationKey))
+                                Spacer()
+                                if ratingFilterDraft == filter { Image(systemName: "checkmark") }
+                            }
+                            .frame(minHeight: 44)
+                        }
+                        .accessibilityIdentifier("media-rating-choice-\(filter.rawValue)")
+                        .accessibilityAddTraits(ratingFilterDraft == filter ? [.isSelected] : [])
+                    }
+                }
+                Section {
+                    Text(language.string("media_rating_loaded_only"))
+                    Text(language.string("media_rating_unknown_help"))
+                }
+            }
+            .navigationTitle(language.string("media_rating_filter"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(language.string("cancel")) { isRatingFilterPresented = false }
+                        .accessibilityIdentifier("media-rating-cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(language.string("apply")) {
+                        guard let owner = ratingFilterOwner else { return }
+                        camera.setMediaRatingFilter(ratingFilterDraft, owner: owner)
+                        isRatingFilterPresented = false
+                    }
+                    .disabled(ratingFilterOwner != camera.mediaLibrarySessionID)
+                    .accessibilityIdentifier("media-rating-apply")
+                }
+            }
+        }
+    }
+
+    private var ratingFilterSummary: String {
+        let summary = mediaRatingFilterSummary(camera.mediaItems, filter: mediaFilter,
+            dateRange: camera.mediaDateRange, ratingFilter: camera.mediaRatingFilter)
+        return language.format("media_rating_summary", summary.matchedCount, summary.loadedCount,
+                               summary.unknownRatingCount) + " " + language.string("media_rating_loaded_only")
+    }
+
     private func dateRangeLabel(_ range: MediaDateRange) -> String {
         let formatter = DateFormatter()
         formatter.locale = language.locale
@@ -660,13 +745,15 @@ struct MediaView: View {
     }
 
     private var dateFilterSummary: String {
-        let summary = mediaDateFilterSummary(camera.mediaItems, filter: mediaFilter, dateRange: camera.mediaDateRange)
+        let summary = mediaDateFilterSummary(camera.mediaItems, filter: mediaFilter, dateRange: camera.mediaDateRange,
+            ratingFilter: camera.mediaRatingFilter)
         return language.format("media_date_summary", summary.matchedCount, summary.loadedCount,
                                summary.unknownDateCount) + " " + language.string("media_date_loaded_only")
     }
 
     private var displayedMedia: [CameraMediaItem] {
-        mediaItemsForDisplay(camera.mediaItems, filter: mediaFilter, sort: mediaSort, dateRange: camera.mediaDateRange)
+        mediaItemsForDisplay(camera.mediaItems, filter: mediaFilter, sort: mediaSort, dateRange: camera.mediaDateRange,
+            ratingFilter: camera.mediaRatingFilter)
     }
 
     private var mediaLibrarySummary: String {
@@ -694,7 +781,7 @@ struct MediaView: View {
     }
 
     private var mediaGroups: [MediaGroup] {
-        if mediaSort == .camera {
+        if mediaSort == .camera || mediaSort == .ratingHigh || mediaSort == .ratingLow {
             return displayedMedia.isEmpty
                 ? []
                 : [MediaGroup(id: "camera", title: nil, items: displayedMedia)]

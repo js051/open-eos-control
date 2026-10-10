@@ -408,6 +408,273 @@ final class MediaLibraryTests: XCTestCase {
         )
     }
 
+    func testRatingNormalizationKeepsOnlyNumericZeroThroughFive() {
+        let cases: [(Int?, Int?)] = [
+            (nil, nil), (Int.min, nil), (-1, nil),
+            (0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5),
+            (6, nil), (Int.max, nil),
+        ]
+        for (value, expected) in cases {
+            let item = media("rating", "FIVE_STARS.JPG", nil, rating: value)
+            XCTAssertEqual(mediaNormalizedRating(item), expected, "Raw rating: \(String(describing: value))")
+            XCTAssertEqual(item.rating, value, "Normalization must not rewrite camera metadata")
+        }
+    }
+
+    func testRatingFiltersDistinguishKnownUnratedThresholdsAndUnknownValues() {
+        let items = [
+            media("missing", "FIVE_STARS.JPG", nil),
+            media("negative", "NEGATIVE.JPG", nil, rating: -1),
+            media("zero", "ZERO.JPG", nil, rating: 0),
+            media("one", "ONE.JPG", nil, rating: 1),
+            media("two", "TWO.JPG", nil, rating: 2),
+            media("three", "THREE.JPG", nil, rating: 3),
+            media("four", "FOUR.JPG", nil, rating: 4),
+            media("five", "FIVE.JPG", nil, rating: 5),
+            media("too-high", "HIGH.JPG", nil, rating: 6),
+        ]
+        let cases: [(MediaRatingFilter, [String])] = [
+            (.all, items.map(\.id)),
+            (.unrated, ["zero"]),
+            (.atLeast1, ["one", "two", "three", "four", "five"]),
+            (.atLeast2, ["two", "three", "four", "five"]),
+            (.atLeast3, ["three", "four", "five"]),
+            (.atLeast4, ["four", "five"]),
+            (.five, ["five"]),
+            (.unknown, ["missing", "negative", "too-high"]),
+        ]
+        for (ratingFilter, expectedIDs) in cases {
+            XCTAssertEqual(
+                mediaItemsForDisplay(items, filter: .all, sort: .camera, ratingFilter: ratingFilter).map(\.id),
+                expectedIDs,
+                ratingFilter.rawValue
+            )
+        }
+        XCTAssertEqual(mediaItemsForDisplay(items, filter: .all, sort: .camera), items)
+    }
+
+    func testRatingSortsKeepUnknownLastAndRetainEqualRatingCameraOrder() {
+        let items = [
+            media("missing", "IMG_1.JPG", "2030-01-01T00:00:00Z"),
+            media("three-z", "Z.JPG", "2020-01-01T00:00:00Z", rating: 3),
+            media("too-high", "IMG_2.JPG", nil, rating: Int.max),
+            media("five", "FIVE.JPG", nil, rating: 5),
+            media("zero", "ZERO.JPG", nil, rating: 0),
+            media("three-a", "A.JPG", "2030-01-01T00:00:00Z", rating: 3),
+            media("negative", "IMG_0.JPG", nil, rating: Int.min),
+            media("one", "ONE.JPG", nil, rating: 1),
+        ]
+
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .ratingHigh).map(\.id),
+            ["five", "three-z", "three-a", "one", "zero", "missing", "too-high", "negative"]
+        )
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .ratingLow).map(\.id),
+            ["zero", "one", "three-z", "three-a", "five", "missing", "too-high", "negative"]
+        )
+    }
+
+    func testRatingSortPreservesExactItemsAndSeparateRawJpegIdentities() {
+        let raw = CameraMediaItem(
+            id: "PAIR", name: "PAIR.CR3", kind: "image", sizeBytes: 1_234,
+            captureTime: "2026-08-14T10:00:00Z", previewAvailable: true,
+            protected: true, rating: 4, rotationDegrees: 90, archived: false,
+            contentType: "image/x-canon-cr3", widthPixels: 6_000, heightPixels: 4_000
+        )
+        let jpeg = CameraMediaItem(
+            id: "pair", name: "PAIR.JPG", kind: "image", sizeBytes: 567,
+            captureTime: "2026-08-14T10:00:00Z", previewAvailable: true,
+            protected: false, rating: 4, rotationDegrees: 180, archived: true,
+            contentType: "image/jpeg", widthPixels: 3_000, heightPixels: 2_000
+        )
+        let invalid = media("invalid", "PAIR.JPG", nil, rating: 6)
+        let items = [invalid, raw, jpeg]
+
+        for sort in [MediaSort.ratingHigh, .ratingLow] {
+            XCTAssertEqual(mediaItemsForDisplay(items, filter: .all, sort: sort), [raw, jpeg, invalid])
+            XCTAssertEqual(
+                mediaItemsForDisplay(items, filter: .all, sort: sort, ratingFilter: .atLeast4),
+                [raw, jpeg]
+            )
+            XCTAssertEqual(
+                mediaItemsForDisplay([jpeg, raw], filter: .all, sort: sort),
+                [jpeg, raw]
+            )
+        }
+        XCTAssertEqual(items, [invalid, raw, jpeg])
+    }
+
+    func testRatingSortKeepsAllUnknownOrAllUnratedListsInLoadedOrder() {
+        let unknown = [
+            media("z", "Z.JPG", nil, rating: 6),
+            media("a", "A.JPG", nil),
+            media("b", "B.JPG", nil, rating: -1),
+        ]
+        let unrated = [
+            media("z", "Z.JPG", nil, rating: 0),
+            media("a", "A.JPG", nil, rating: 0),
+        ]
+        for sort in [MediaSort.ratingHigh, .ratingLow] {
+            XCTAssertEqual(mediaItemsForDisplay(unknown, filter: .all, sort: sort), unknown)
+            XCTAssertEqual(mediaItemsForDisplay(unrated, filter: .all, sort: sort), unrated)
+            XCTAssertTrue(mediaItemsForDisplay(unknown, filter: .all, sort: sort, ratingFilter: .unrated).isEmpty)
+            XCTAssertTrue(mediaItemsForDisplay(unrated, filter: .all, sort: sort, ratingFilter: .unknown).isEmpty)
+        }
+    }
+
+    func testRatingFilterIntersectsLoadedMediaTypeAndWholeDateRange() throws {
+        let day = try instant("2026-08-14T12:00:00Z")
+        let range = try XCTUnwrap(MediaDateRange(startDate: day, endDate: day, timeZone: zone("UTC")))
+        let items = [
+            media("outside", "OUTSIDE.JPG", "2026-08-13T23:59:59Z", rating: 5),
+            media("unknown-date", "UNKNOWN.JPG", nil, rating: 5),
+            media("raw", "PAIR.CR3", "2026-08-14T00:00:00Z", rating: 4),
+            media("video", "CLIP.MP4", "2026-08-14T12:00:00Z", rating: 5),
+            media("low", "LOW.JPG", "2026-08-14T12:00:00Z", rating: 3),
+            media("jpeg", "PAIR.JPG", "2026-08-14T23:59:59Z", rating: 4),
+            media("unknown-rating", "UNKNOWN.JPG", "2026-08-14T12:00:00Z"),
+            media("next-day", "NEXT.JPG", "2026-08-15T00:00:00Z", rating: 5),
+        ]
+
+        for sort in [MediaSort.camera, .ratingHigh, .ratingLow] {
+            XCTAssertEqual(
+                mediaItemsForDisplay(items, filter: .photos, sort: sort, dateRange: range, ratingFilter: .atLeast4),
+                [items[2], items[5]]
+            )
+            XCTAssertEqual(
+                mediaItemsForDisplay(items, filter: .videos, sort: sort, dateRange: range, ratingFilter: .five),
+                [items[3]]
+            )
+        }
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .ratingHigh, dateRange: range, ratingFilter: .atLeast4),
+            [items[3], items[2], items[5]]
+        )
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .ratingLow, dateRange: range, ratingFilter: .atLeast4),
+            [items[2], items[5], items[3]]
+        )
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .camera, dateRange: range, ratingFilter: .unknown),
+            [items[6]]
+        )
+    }
+
+    func testRatingSummaryCountsUnknownBeforeRatingFilterWithinTypeAndDate() throws {
+        let day = try instant("2026-08-14T12:00:00Z")
+        let range = try XCTUnwrap(MediaDateRange(startDate: day, endDate: day, timeZone: zone("UTC")))
+        let items = [
+            media("rated", "RATED.JPG", "2026-08-14T12:00:00Z", rating: 5),
+            media("zero", "ZERO.JPG", "2026-08-14T12:00:00Z", rating: 0),
+            media("missing", "MISSING.JPG", "2026-08-14T12:00:00Z"),
+            media("invalid", "INVALID.JPG", "2026-08-14T12:00:00Z", rating: 6),
+            media("unknown-date", "UNKNOWN.JPG", nil),
+            media("outside", "OUTSIDE.JPG", "2026-08-13T12:00:00Z"),
+            media("video", "CLIP.MOV", "2026-08-14T12:00:00Z"),
+        ]
+
+        XCTAssertEqual(
+            mediaRatingFilterSummary(items, filter: .photos, dateRange: range, ratingFilter: .five),
+            MediaRatingFilterSummary(loadedCount: 7, matchedCount: 1, unknownRatingCount: 2)
+        )
+        XCTAssertEqual(
+            mediaRatingFilterSummary(items, filter: .photos, dateRange: range, ratingFilter: .unknown),
+            MediaRatingFilterSummary(loadedCount: 7, matchedCount: 2, unknownRatingCount: 2)
+        )
+        XCTAssertEqual(
+            mediaRatingFilterSummary(items, filter: .photos, dateRange: range, ratingFilter: .unrated),
+            MediaRatingFilterSummary(loadedCount: 7, matchedCount: 1, unknownRatingCount: 2)
+        )
+        XCTAssertEqual(
+            mediaRatingFilterSummary(items, filter: .photos),
+            MediaRatingFilterSummary(loadedCount: 7, matchedCount: 6, unknownRatingCount: 4)
+        )
+        XCTAssertEqual(
+            mediaRatingFilterSummary(items, filter: .videos, dateRange: range),
+            MediaRatingFilterSummary(loadedCount: 7, matchedCount: 1, unknownRatingCount: 1)
+        )
+    }
+
+    func testDateSummaryIncludesRatingConditionAndScopesUnknownDatesToTypeAndRating() throws {
+        let day = try instant("2026-08-14T12:00:00Z")
+        let range = try XCTUnwrap(MediaDateRange(startDate: day, endDate: day, timeZone: zone("UTC")))
+        let items = [
+            media("in-range", "IN.JPG", "2026-08-14T12:00:00Z", rating: 5),
+            media("outside", "OUT.JPG", "2026-08-13T12:00:00Z", rating: 5),
+            media("unknown-five", "UNKNOWN.JPG", nil, rating: 5),
+            media("unknown-zero", "ZERO.JPG", "not-a-date", rating: 0),
+            media("unknown-both", "MISSING.JPG", nil),
+            media("video", "CLIP.MP4", nil, rating: 5),
+        ]
+
+        XCTAssertEqual(
+            mediaDateFilterSummary(items, filter: .photos, dateRange: range, ratingFilter: .five),
+            MediaDateFilterSummary(loadedCount: 6, matchedCount: 1, unknownDateCount: 1)
+        )
+        XCTAssertEqual(
+            mediaDateFilterSummary(items, filter: .photos, dateRange: nil, ratingFilter: .five),
+            MediaDateFilterSummary(loadedCount: 6, matchedCount: 3, unknownDateCount: 1)
+        )
+        XCTAssertEqual(
+            mediaDateFilterSummary(items, filter: .photos, dateRange: range, ratingFilter: .unknown),
+            MediaDateFilterSummary(loadedCount: 6, matchedCount: 0, unknownDateCount: 1)
+        )
+    }
+
+    func testRatingAndDateSummariesMatchEveryDisplayedFilterAndSortIntersection() throws {
+        let day = try instant("2026-08-14T12:00:00Z")
+        let range = try XCTUnwrap(MediaDateRange(startDate: day, endDate: day, timeZone: zone("UTC")))
+        let items = [
+            media("five", "FIVE.JPG", "2026-08-14T12:00:00Z", rating: 5),
+            media("zero", "ZERO.JPG", "2026-08-14T12:00:00Z", rating: 0),
+            media("missing", "MISSING.JPG", "2026-08-14T12:00:00Z"),
+            media("invalid", "INVALID.JPG", "2026-08-14T12:00:00Z", rating: -1),
+            media("outside", "OUTSIDE.JPG", "2026-08-13T12:00:00Z", rating: 3),
+            media("unknown-date", "UNKNOWN.JPG", nil, rating: 4),
+            media("video", "CLIP.MP4", "2026-08-14T12:00:00Z", rating: 2),
+            media("unknown-video", "UNKNOWN.MOV", nil),
+        ]
+
+        for dateRange in [nil, range] as [MediaDateRange?] {
+            for filter in MediaFilter.allCases {
+                for ratingFilter in MediaRatingFilter.allCases {
+                    let dateSummary = mediaDateFilterSummary(
+                        items, filter: filter, dateRange: dateRange, ratingFilter: ratingFilter
+                    )
+                    let ratingSummary = mediaRatingFilterSummary(
+                        items, filter: filter, dateRange: dateRange, ratingFilter: ratingFilter
+                    )
+                    XCTAssertEqual(dateSummary.loadedCount, items.count)
+                    XCTAssertEqual(ratingSummary.loadedCount, items.count)
+                    for sort in MediaSort.allCases {
+                        let displayed = mediaItemsForDisplay(
+                            items, filter: filter, sort: sort, dateRange: dateRange, ratingFilter: ratingFilter
+                        )
+                        XCTAssertEqual(dateSummary.matchedCount, displayed.count)
+                        XCTAssertEqual(ratingSummary.matchedCount, displayed.count)
+                    }
+                }
+            }
+        }
+    }
+
+    func testRatingFilterHandlesEmptyAndNoMatchLoadedLists() {
+        let items = [media("five", "FIVE.JPG", nil, rating: 5)]
+        for ratingFilter in MediaRatingFilter.allCases {
+            XCTAssertEqual(
+                mediaRatingFilterSummary([], filter: .all, ratingFilter: ratingFilter),
+                MediaRatingFilterSummary(loadedCount: 0, matchedCount: 0, unknownRatingCount: 0)
+            )
+            XCTAssertTrue(mediaItemsForDisplay([], filter: .all, sort: .ratingHigh, ratingFilter: ratingFilter).isEmpty)
+        }
+        XCTAssertTrue(mediaItemsForDisplay(items, filter: .all, sort: .ratingLow, ratingFilter: .unknown).isEmpty)
+        XCTAssertEqual(
+            mediaRatingFilterSummary(items, filter: .all, ratingFilter: .unknown),
+            MediaRatingFilterSummary(loadedCount: 1, matchedCount: 0, unknownRatingCount: 0)
+        )
+    }
+
     func testThumbnailCacheRemainsBoundedAndRefreshesExistingEntry() {
         var cache = MediaThumbnailCache(capacity: 3)
         cache.insert(Data([1]), for: "one")
@@ -429,8 +696,8 @@ final class MediaLibraryTests: XCTestCase {
         XCTAssertNil(cache.values["two"])
     }
 
-    private func media(_ id: String, _ name: String, _ captureTime: String?) -> CameraMediaItem {
-        CameraMediaItem(id: id, name: name, kind: "image", captureTime: captureTime)
+    private func media(_ id: String, _ name: String, _ captureTime: String?, rating: Int? = nil) -> CameraMediaItem {
+        CameraMediaItem(id: id, name: name, kind: "image", captureTime: captureTime, rating: rating)
     }
 
     private func instant(_ value: String) throws -> Date {

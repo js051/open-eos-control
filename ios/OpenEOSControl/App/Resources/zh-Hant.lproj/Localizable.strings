@@ -502,5 +502,21 @@
 "media_date_loaded_only" = "僅篩選已載入素材。最近素材或未完成的清單不代表已搜尋整張記憶卡。";
 "media_date_unknown_excluded" = "啟用日期區間時，拍攝日期未知的素材會被排除。";
 "media_date_range_applied" = "%@ 至 %@ · %@";
-"media_date_summary" = "已載入 %2$d 項中有 %1$d 項符合；此素材類型排除 %3$d 項未知日期。";
+"media_date_summary" = "已載入 %2$d 項中有 %1$d 項符合；此類型／評分範圍排除 %3$d 項未知日期。";
 "media_date_clear" = "清除日期區間";
+
+"media_rating_filter" = "素材評分篩選";
+"media_rating_filter_all" = "所有評分";
+"media_rating_filter_unrated" = "未評分（已知 0）";
+"media_rating_filter_at_least_1" = "至少 1 星";
+"media_rating_filter_at_least_2" = "至少 2 星";
+"media_rating_filter_at_least_3" = "至少 3 星";
+"media_rating_filter_at_least_4" = "至少 4 星";
+"media_rating_filter_five" = "5 星";
+"media_rating_filter_unknown" = "未知評分";
+"media_rating_clear" = "清除評分篩選";
+"media_rating_loaded_only" = "僅篩選已載入素材，不額外查詢中繼資料。";
+"media_rating_unknown_help" = "未知評分與已知 0 不同，排序時放在已知評分之後。";
+"media_rating_summary" = "已載入 %2$d 項中符合 %1$d 項；日期／類型範圍內有 %3$d 項未知評分。";
+"media_sort_rating_high" = "評分：高至低";
+"media_sort_rating_low" = "評分：低至高";

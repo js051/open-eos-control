@@ -52,6 +52,26 @@ enum MediaFilter: String, CaseIterable, Identifiable {
     var localizationKey: String { "media_filter_\(rawValue)" }
 }
 
+enum MediaRatingFilter: String, CaseIterable, Identifiable {
+    case all
+    case unrated
+    case atLeast1 = "at_least_1"
+    case atLeast2 = "at_least_2"
+    case atLeast3 = "at_least_3"
+    case atLeast4 = "at_least_4"
+    case five
+    case unknown
+
+    var id: String { rawValue }
+    var localizationKey: String { "media_rating_filter_\(rawValue)" }
+}
+
+func mediaNormalizedRating(_ item: CameraMediaItem) -> Int? {
+    // Zero is an explicit camera value; absent or invalid metadata is unknown.
+    guard let rating = item.rating, (0...5).contains(rating) else { return nil }
+    return rating
+}
+
 struct MediaDateRange: Equatable {
     let startDate: Date
     let endDate: Date
@@ -88,20 +108,23 @@ struct MediaDateRange: Equatable {
 struct MediaDateFilterSummary: Equatable {
     // The denominator is every loaded item, including other media types.
     let loadedCount: Int
-    // The visible type/date intersection; sorting does not change this count.
+    // The visible type/date/rating intersection; sorting does not change this count.
     let matchedCount: Int
-    // Missing/unparseable dates in the selected type, even without a range.
+    // Missing/unparseable dates in the selected type/rating, even without a range.
     let unknownDateCount: Int
 }
 
 func mediaDateFilterSummary(
     _ items: [CameraMediaItem],
     filter: MediaFilter,
-    dateRange: MediaDateRange?
+    dateRange: MediaDateRange?,
+    ratingFilter: MediaRatingFilter = .all
 ) -> MediaDateFilterSummary {
     var matchedCount = 0
     var unknownDateCount = 0
-    for item in items where mediaMatchesFilter(item, filter: filter) {
+    for item in items where mediaMatchesFilter(item, filter: filter)
+        && mediaMatchesRatingFilter(item, filter: ratingFilter)
+    {
         let captureDate = mediaCaptureDate(item)
         if captureDate == nil { unknownDateCount += 1 }
         if let dateRange {
@@ -114,6 +137,35 @@ func mediaDateFilterSummary(
         loadedCount: items.count,
         matchedCount: matchedCount,
         unknownDateCount: unknownDateCount
+    )
+}
+
+struct MediaRatingFilterSummary: Equatable {
+    // Keep the same loaded denominator and visible count as the date summary.
+    let loadedCount: Int
+    let matchedCount: Int
+    // Unknown ratings in the selected type/date, before applying a rating filter.
+    let unknownRatingCount: Int
+}
+
+func mediaRatingFilterSummary(
+    _ items: [CameraMediaItem],
+    filter: MediaFilter,
+    dateRange: MediaDateRange? = nil,
+    ratingFilter: MediaRatingFilter = .all
+) -> MediaRatingFilterSummary {
+    var matchedCount = 0
+    var unknownRatingCount = 0
+    for item in items where mediaMatchesFilter(item, filter: filter)
+        && mediaMatchesDateRange(item, dateRange: dateRange)
+    {
+        if mediaNormalizedRating(item) == nil { unknownRatingCount += 1 }
+        if mediaMatchesRatingFilter(item, filter: ratingFilter) { matchedCount += 1 }
+    }
+    return MediaRatingFilterSummary(
+        loadedCount: items.count,
+        matchedCount: matchedCount,
+        unknownRatingCount: unknownRatingCount
     )
 }
 
@@ -135,6 +187,8 @@ enum MediaSort: String, CaseIterable, Identifiable {
     case newest
     case oldest
     case name
+    case ratingHigh = "rating_high"
+    case ratingLow = "rating_low"
 
     var id: String { rawValue }
     var localizationKey: String { "media_sort_\(rawValue)" }
@@ -144,6 +198,8 @@ enum MediaSort: String, CaseIterable, Identifiable {
         case .newest: "calendar.badge.clock"
         case .oldest: "calendar"
         case .name: "textformat"
+        case .ratingHigh: "star.fill"
+        case .ratingLow: "star"
         }
     }
 }
@@ -158,14 +214,14 @@ func mediaItemsForDisplay(
     _ items: [CameraMediaItem],
     filter: MediaFilter,
     sort: MediaSort,
-    dateRange: MediaDateRange? = nil
+    dateRange: MediaDateRange? = nil,
+    ratingFilter: MediaRatingFilter = .all
 ) -> [CameraMediaItem] {
     let filtered = items
         .filter { item in
-            guard mediaMatchesFilter(item, filter: filter) else { return false }
-            guard let dateRange else { return true }
-            guard let captureDate = mediaCaptureDate(item) else { return false }
-            return dateRange.contains(captureDate: captureDate)
+            mediaMatchesFilter(item, filter: filter)
+                && mediaMatchesRatingFilter(item, filter: ratingFilter)
+                && mediaMatchesDateRange(item, dateRange: dateRange)
         }
     guard sort != .camera else { return filtered }
     return filtered.enumerated()
@@ -196,6 +252,26 @@ private func mediaMatchesFilter(_ item: CameraMediaItem, filter: MediaFilter) ->
     }
 }
 
+private func mediaMatchesRatingFilter(_ item: CameraMediaItem, filter: MediaRatingFilter) -> Bool {
+    let rating = mediaNormalizedRating(item)
+    switch filter {
+    case .all: return true
+    case .unrated: return rating == 0
+    case .atLeast1: return rating.map { $0 >= 1 } ?? false
+    case .atLeast2: return rating.map { $0 >= 2 } ?? false
+    case .atLeast3: return rating.map { $0 >= 3 } ?? false
+    case .atLeast4: return rating.map { $0 >= 4 } ?? false
+    case .five: return rating == 5
+    case .unknown: return rating == nil
+    }
+}
+
+private func mediaMatchesDateRange(_ item: CameraMediaItem, dateRange: MediaDateRange?) -> Bool {
+    guard let dateRange else { return true }
+    guard let captureDate = mediaCaptureDate(item) else { return false }
+    return dateRange.contains(captureDate: captureDate)
+}
+
 private func compareMediaItems(
     _ left: CameraMediaItem,
     _ right: CameraMediaItem,
@@ -207,6 +283,20 @@ private func compareMediaItems(
         return compared == .orderedSame
             ? left.id.compare(right.id, options: [.caseInsensitive, .numeric])
             : compared
+    }
+    if sort == .ratingHigh || sort == .ratingLow {
+        switch (mediaNormalizedRating(left), mediaNormalizedRating(right)) {
+        case let (.some(leftRating), .some(rightRating)) where leftRating != rightRating:
+            let ascending = leftRating < rightRating ? ComparisonResult.orderedAscending : .orderedDescending
+            return sort == .ratingHigh ? ascending.reversed : ascending
+        case (.some, .none):
+            return .orderedAscending
+        case (.none, .some):
+            return .orderedDescending
+        default:
+            // Both equal and unknown ratings retain the loaded camera order.
+            return .orderedSame
+        }
     }
 
     let leftDate = mediaCaptureDate(left)

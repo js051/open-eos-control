@@ -129,11 +129,13 @@ final class CameraAppState: ObservableObject {
     private let defaults: UserDefaults
     @Published private(set) var mediaLibrarySessionID = UUID()
     @Published private(set) var mediaDateRange: MediaDateRange?
+    @Published private(set) var mediaRatingFilter = MediaRatingFilter.all
     private var session: CameraSession? {
         didSet {
             exportGeneration = UUID()
             mediaLibrarySessionID = UUID()
             mediaDateRange = nil
+            mediaRatingFilter = .all
         }
     }
     private var exportGeneration = UUID()
@@ -503,6 +505,13 @@ final class CameraAppState: ObservableObject {
     func setMediaDateRange(_ range: MediaDateRange?, owner: UUID) -> Bool {
         guard owner == mediaLibrarySessionID else { return false }
         mediaDateRange = range
+        return true
+    }
+
+    @discardableResult
+    func setMediaRatingFilter(_ filter: MediaRatingFilter, owner: UUID) -> Bool {
+        guard owner == mediaLibrarySessionID else { return false }
+        mediaRatingFilter = filter
         return true
     }
 

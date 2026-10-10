@@ -356,6 +356,31 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-002"], in: app, timeout: 8))
             XCTAssertTrue(app.staticTexts["R6M3_0001.JPG"].exists)
             addScreenshot(name: "media-date-range-cleared-\(language)")
+            let rating = app.buttons["media-rating-filter"]
+            XCTAssertTrue(scrollToInteraction(rating, in: app, timeout: 8))
+            XCTAssertEqual(rating.label, language == "english" ? "Media rating filter" : "素材評分篩選")
+            rating.tap()
+            let five = app.buttons["media-rating-choice-five"]
+            XCTAssertTrue(scrollToInteraction(five, in: app, timeout: 8))
+            five.tap()
+            app.buttons["media-rating-cancel"].tap()
+            XCTAssertFalse(app.staticTexts["media-rating-applied"].exists)
+            XCTAssertTrue(scrollToInteraction(rating, in: app, timeout: 8))
+            rating.tap()
+            XCTAssertTrue(scrollToInteraction(five, in: app, timeout: 8))
+            five.tap()
+            app.buttons["media-rating-apply"].tap()
+            let ratingApplied = app.staticTexts["media-rating-applied"]
+            XCTAssertTrue(ratingApplied.waitForExistence(timeout: 5))
+            XCTAssertEqual(ratingApplied.label, language == "english" ? "5 stars" : "5 星")
+            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: 8))
+            XCTAssertFalse(app.buttons["media-actions-preview-002"].exists)
+            let ratingClear = app.buttons["media-rating-clear"]
+            XCTAssertTrue(scrollToInteraction(ratingClear, in: app, timeout: 8))
+            ratingClear.tap()
+            XCTAssertFalse(ratingApplied.exists)
+            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-002"], in: app, timeout: 8))
+            addScreenshot(name: "media-rating-cleared-\(language)")
             app.terminate()
         }
     }

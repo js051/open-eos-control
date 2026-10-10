@@ -37,3 +37,14 @@
 Latest released baseline：v0.12.0 Development Preview。這是新使用者可見的 iOS 日期挑片能力，屬 minor 類影響；
 不因此自行改版號或發布。來源0.13.0尚未發布，既有release HOLD保留。
 本批目前未編譯、未完成exact-head CI、未實機驗證，不能標記main accepted或完整產品完成。
+
+
+## 同批補齊評分挑片（待新版 CI）
+
+日期 head `d6bc46c05bf2412fdfd55c3c2aae132a2a375a33` 的 CI 38084521728 已成功：209 App／21 UI，包含雙語大字級日期套用／取消／清除，另有 JVM／APK 及 secret scan。這些結果只驗證該舊 head，不能沿用為下面新增評分來源的執行結果。
+
+同一 iOS 挑片批次新增評分條件：全部、已知 0 未評分、至少 1–4 星、5 星及未知。資料模型 Int? 中的 nil／範圍外數值視為未知；不以 0 取代。高至低／低至高均把未知排最後，同分維持載入順序，與日期／種類取交集。評分排序不顯示日期分组標題。
+
+評分 sheet 使用英文／繁中、可捲動選項、取消／套用／清除；草稿綁定 media library session 身分，斷線清除已套用條件並退休舊草稿。套用／清除不改載入項目或既有預覽資料，也不逐檔查詢 metadata。日期摘要 matched 反映評分交集，unknown 日期只計所選種類／評分；評分摘要 unknown 則計所選種類／日期範圍，避免先被 unknown 篩選自身消去。所有分母仍是已載入清單，並非全卡。
+
+新 helper 測試、session 正向／舊 owner 反例及 CCAPI／Bridge 真選取保留與請求計數測試已寫。既有雙語大字級 UI 旅程延伸評分取消、5 星套用、清除及原素材可達性。Swift 本機不可用，新版編譯／runtime NOT_RUN，待此完整批次正常 CI；來源檢查不代表視覺或實機通過。完整 App 驗收仍集中於開發之後，PR 不合併 main、不發版。

@@ -35,6 +35,40 @@ final class MediaDateFilterOwnershipTests: XCTestCase {
         }
     }
 
+    func testRatingFilterRetiresOnDisconnectAndRejectsOldApplyAndClear() throws {
+        try withState { state in
+            state.openOfflinePreview()
+            let oldOwner = state.mediaLibrarySessionID
+            XCTAssertTrue(state.setMediaRatingFilter(.five, owner: oldOwner))
+            state.requestDisconnect()
+            XCTAssertEqual(state.mediaRatingFilter, .all)
+            XCTAssertFalse(state.setMediaRatingFilter(.unrated, owner: oldOwner))
+            state.openOfflinePreview()
+            let newOwner = state.mediaLibrarySessionID
+            XCTAssertTrue(state.setMediaRatingFilter(.unknown, owner: newOwner))
+            XCTAssertFalse(state.setMediaRatingFilter(.five, owner: oldOwner))
+            XCTAssertFalse(state.setMediaRatingFilter(.all, owner: oldOwner))
+            XCTAssertEqual(state.mediaRatingFilter, .unknown)
+        }
+    }
+
+    func testCurrentRatingFilterPreservesDateAndLoadedMedia() throws {
+        try withState { state in
+            state.openOfflinePreview()
+            let owner = state.mediaLibrarySessionID
+            let range = try makeRange()
+            XCTAssertTrue(state.setMediaDateRange(range, owner: owner))
+            let items = state.mediaItems
+            XCTAssertFalse(items.isEmpty)
+            for filter in MediaRatingFilter.allCases {
+                XCTAssertTrue(state.setMediaRatingFilter(filter, owner: owner))
+                XCTAssertEqual(state.mediaRatingFilter, filter)
+                XCTAssertEqual(state.mediaDateRange, range)
+                XCTAssertEqual(state.mediaItems, items)
+            }
+        }
+    }
+
     private func makeRange(offset: TimeInterval = 0) throws -> MediaDateRange {
         let date = Date(timeIntervalSince1970: 1_786_752_000 + offset)
         return try XCTUnwrap(MediaDateRange(startDate: date, endDate: date, timeZone: TimeZone(secondsFromGMT: 0)!))

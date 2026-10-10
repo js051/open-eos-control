@@ -44,6 +44,46 @@ final class MediaResponseOwnershipTests: XCTestCase {
         }
     }
 
+    func testRatingFilterAndClearPreserveAnActuallySelectedPreviewWithoutRequests() async throws {
+        for bridge in [false, true] {
+            let peer = MediaOwnershipPeer()
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            let item = try XCTUnwrap(state.latestMediaItem)
+            await state.openMediaPreview(item)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewItem).id, item.id)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewData), MediaOwnershipPeer.imageBytes)
+            let items = state.mediaItems
+            let status = state.mediaLibraryLoadStatus
+            let owner = state.mediaLibrarySessionID
+            let listingCount = await peer.count(.listing)
+            let previewCount = await peer.count(.preview)
+            let infoCount = await peer.count(.info)
+            let mutations = await peer.mutationOperations()
+            // Choose a valid filter that excludes the selected item, regardless of fixture rating.
+            let excluded: MediaRatingFilter = item.rating == 5 ? .unrated : .five
+            XCTAssertTrue(state.setMediaRatingFilter(excluded, owner: owner))
+            XCTAssertFalse(mediaItemsForDisplay(items, filter: .all, sort: .ratingHigh,
+                ratingFilter: excluded).contains { $0.id == item.id })
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            XCTAssertEqual(state.mediaItems, items)
+            XCTAssertEqual(state.mediaLibraryLoadStatus, status)
+            XCTAssertTrue(state.setMediaRatingFilter(.all, owner: owner))
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            let afterListing = await peer.count(.listing)
+            let afterPreview = await peer.count(.preview)
+            XCTAssertEqual(afterListing, listingCount)
+            XCTAssertEqual(afterPreview, previewCount)
+            let afterInfo = await peer.count(.info)
+            let afterMutations = await peer.mutationOperations()
+            XCTAssertEqual(afterInfo, infoCount)
+            XCTAssertEqual(afterMutations, mutations)
+        }
+    }
+
     func testRetiredInfoAndEveryMetadataResponseCannotOwnReplacementSession() async throws {
         for bridge in [false, true] {
             for operation in OwnershipOperation.metadataAndInfo {
