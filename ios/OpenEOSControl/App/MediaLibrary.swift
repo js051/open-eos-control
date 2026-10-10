@@ -52,6 +52,71 @@ enum MediaFilter: String, CaseIterable, Identifiable {
     var localizationKey: String { "media_filter_\(rawValue)" }
 }
 
+struct MediaDateRange: Equatable {
+    let startDate: Date
+    let endDate: Date
+    let endExclusive: Date
+    let timeZone: TimeZone
+
+    init?(startDate: Date, endDate: Date, timeZone: TimeZone) {
+        guard startDate.timeIntervalSinceReferenceDate.isFinite,
+              endDate.timeIntervalSinceReferenceDate.isFinite,
+              let capturedTimeZone = TimeZone(identifier: timeZone.identifier)
+        else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = capturedTimeZone
+        guard let firstDay = calendar.dateInterval(of: .day, for: startDate),
+              let lastDay = calendar.dateInterval(of: .day, for: endDate),
+              firstDay.start <= lastDay.start,
+              firstDay.start.timeIntervalSinceReferenceDate.isFinite,
+              lastDay.start.timeIntervalSinceReferenceDate.isFinite,
+              lastDay.end.timeIntervalSinceReferenceDate.isFinite,
+              lastDay.end > lastDay.start
+        else { return nil }
+        self.startDate = firstDay.start
+        self.endDate = lastDay.start
+        // Calendar day intervals include the whole last day even across DST.
+        endExclusive = lastDay.end
+        self.timeZone = capturedTimeZone
+    }
+
+    func contains(captureDate: Date) -> Bool {
+        captureDate >= startDate && captureDate < endExclusive
+    }
+}
+
+struct MediaDateFilterSummary: Equatable {
+    // The denominator is every loaded item, including other media types.
+    let loadedCount: Int
+    // The visible type/date intersection; sorting does not change this count.
+    let matchedCount: Int
+    // Missing/unparseable dates in the selected type, even without a range.
+    let unknownDateCount: Int
+}
+
+func mediaDateFilterSummary(
+    _ items: [CameraMediaItem],
+    filter: MediaFilter,
+    dateRange: MediaDateRange?
+) -> MediaDateFilterSummary {
+    var matchedCount = 0
+    var unknownDateCount = 0
+    for item in items where mediaMatchesFilter(item, filter: filter) {
+        let captureDate = mediaCaptureDate(item)
+        if captureDate == nil { unknownDateCount += 1 }
+        if let dateRange {
+            if let captureDate, dateRange.contains(captureDate: captureDate) { matchedCount += 1 }
+        } else {
+            matchedCount += 1
+        }
+    }
+    return MediaDateFilterSummary(
+        loadedCount: items.count,
+        matchedCount: matchedCount,
+        unknownDateCount: unknownDateCount
+    )
+}
+
 func mediaLibraryBatch(
     _ items: [CameraMediaItem],
     scope: MediaLibraryScope,
@@ -92,15 +157,15 @@ func mediaIsVideo(_ item: CameraMediaItem) -> Bool {
 func mediaItemsForDisplay(
     _ items: [CameraMediaItem],
     filter: MediaFilter,
-    sort: MediaSort
+    sort: MediaSort,
+    dateRange: MediaDateRange? = nil
 ) -> [CameraMediaItem] {
     let filtered = items
         .filter { item in
-            switch filter {
-            case .all: true
-            case .photos: !mediaIsVideo(item)
-            case .videos: mediaIsVideo(item)
-            }
+            guard mediaMatchesFilter(item, filter: filter) else { return false }
+            guard let dateRange else { return true }
+            guard let captureDate = mediaCaptureDate(item) else { return false }
+            return dateRange.contains(captureDate: captureDate)
         }
     guard sort != .camera else { return filtered }
     return filtered.enumerated()
@@ -121,6 +186,14 @@ func mediaCaptureDate(_ item: CameraMediaItem) -> Date? {
         return parsed
     }
     return MediaDateParsers.local.firstNonNil { $0.date(from: value) }
+}
+
+private func mediaMatchesFilter(_ item: CameraMediaItem, filter: MediaFilter) -> Bool {
+    switch filter {
+    case .all: true
+    case .photos: !mediaIsVideo(item)
+    case .videos: mediaIsVideo(item)
+    }
 }
 
 private func compareMediaItems(

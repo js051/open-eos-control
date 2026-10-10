@@ -15,6 +15,11 @@ struct MediaView: View {
     @State private var isFileImporterPresented = false
     @State private var mediaFilter = MediaFilter.all
     @State private var mediaSort = MediaSort.newest
+    @State private var isDateFilterPresented = false
+    @State private var dateFilterOwner: UUID?
+    @State private var dateFilterStart = Date()
+    @State private var dateFilterEnd = Date()
+    @State private var dateFilterTimeZone = TimeZone.current
 
     private let mediaColumns = [
         GridItem(.adaptive(minimum: 156, maximum: 240), spacing: 10),
@@ -42,30 +47,32 @@ struct MediaView: View {
                 ContentUnavailableView("no_media", systemImage: "photo.on.rectangle.angled")
                     .frame(maxHeight: .infinity)
             } else {
-                mediaToolbar
-                if displayedMedia.isEmpty {
-                    ContentUnavailableView("no_media", systemImage: "line.3.horizontal.decrease.circle")
-                        .frame(maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 12) {
-                            ForEach(mediaGroups) { group in
-                                if let title = group.title {
-                                    Text(title)
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(Color.cameraSecondaryText)
-                                        .padding(.top, 4)
-                                }
-                                LazyVGrid(columns: mediaColumns, alignment: .leading, spacing: 10) {
-                                    ForEach(group.items) { item in
-                                        mediaCard(item)
-                                            .task(id: item.id) { await camera.loadMediaThumbnail(item) }
+                ScrollView {
+                    VStack(spacing: 0) {
+                        mediaToolbar
+                        if displayedMedia.isEmpty {
+                            ContentUnavailableView("no_media", systemImage: "line.3.horizontal.decrease.circle")
+                                .frame(minHeight: 180)
+                        } else {
+                            LazyVStack(alignment: .leading, spacing: 12) {
+                                ForEach(mediaGroups) { group in
+                                    if let title = group.title {
+                                        Text(title)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(Color.cameraSecondaryText)
+                                            .padding(.top, 4)
+                                    }
+                                    LazyVGrid(columns: mediaColumns, alignment: .leading, spacing: 10) {
+                                        ForEach(group.items) { item in
+                                            mediaCard(item)
+                                                .task(id: item.id) { await camera.loadMediaThumbnail(item) }
+                                        }
                                     }
                                 }
                             }
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 20)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 20)
                     }
                 }
             }
@@ -89,6 +96,11 @@ struct MediaView: View {
             }
         }
         .onDisappear { camera.closeMediaPreview() }
+        .onChange(of: camera.mediaLibrarySessionID) { _, _ in
+            isDateFilterPresented = false
+            dateFilterOwner = nil
+        }
+        .sheet(isPresented: $isDateFilterPresented) { dateFilterSheet }
         .fullScreenCover(
             isPresented: Binding(
                 get: { camera.mediaPreviewItem != nil },
@@ -257,6 +269,35 @@ struct MediaView: View {
                 }
                 .foregroundStyle(Color.cameraText)
                 .accessibilityIdentifier("media-sort")
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    dateFilterOwner = camera.mediaLibrarySessionID
+                    dateFilterTimeZone = camera.mediaDateRange?.timeZone ?? .current
+                    dateFilterStart = camera.mediaDateRange?.startDate ?? Date()
+                    dateFilterEnd = camera.mediaDateRange?.endDate ?? dateFilterStart
+                    isDateFilterPresented = true
+                } label: {
+                    Label(language.string("media_date_range"), systemImage: "calendar")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("media-date-range")
+                if let range = camera.mediaDateRange {
+                    Text(dateRangeLabel(range))
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("media-date-range-applied")
+                    Text(dateFilterSummary)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("media-date-range-summary")
+                    Button(language.string("media_date_clear")) {
+                        camera.setMediaDateRange(nil, owner: camera.mediaLibrarySessionID)
+                    }
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("media-date-range-clear")
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -554,8 +595,78 @@ struct MediaView: View {
         return item.previewAvailable && camera.supports(.mediaPreview)
     }
 
+    private var dateFilterCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = dateFilterTimeZone
+        return calendar
+    }
+
+    private var dateFilterDraft: MediaDateRange? {
+        MediaDateRange(startDate: dateFilterStart, endDate: dateFilterEnd, timeZone: dateFilterTimeZone)
+    }
+
+    private var dateFilterSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    DatePicker(language.string("media_date_start"), selection: $dateFilterStart, displayedComponents: .date)
+                        .accessibilityIdentifier("media-date-start")
+                    DatePicker(language.string("media_date_end"), selection: $dateFilterEnd, displayedComponents: .date)
+                        .accessibilityIdentifier("media-date-end")
+                    Text(language.format("media_date_timezone", dateFilterTimeZone.identifier))
+                    if dateFilterDraft == nil {
+                        Text(language.string("media_date_invalid"))
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("media-date-invalid")
+                    }
+                }
+                Section {
+                    Text(language.string("media_date_loaded_only"))
+                    Text(language.string("media_date_unknown_excluded"))
+                }
+            }
+            .environment(\.timeZone, dateFilterTimeZone)
+            .environment(\.calendar, dateFilterCalendar)
+            .environment(\.locale, language.locale)
+            .navigationTitle(language.string("media_date_range"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(language.string("cancel")) { isDateFilterPresented = false }
+                        .accessibilityIdentifier("media-date-cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(language.string("apply")) {
+                        guard let owner = dateFilterOwner, let range = dateFilterDraft else { return }
+                        camera.setMediaDateRange(range, owner: owner)
+                        isDateFilterPresented = false
+                    }
+                    .disabled(dateFilterDraft == nil || dateFilterOwner != camera.mediaLibrarySessionID)
+                    .accessibilityIdentifier("media-date-apply")
+                }
+            }
+        }
+    }
+
+    private func dateRangeLabel(_ range: MediaDateRange) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = language.locale
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = range.timeZone
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return language.format("media_date_range_applied", formatter.string(from: range.startDate),
+                               formatter.string(from: range.endDate), range.timeZone.identifier)
+    }
+
+    private var dateFilterSummary: String {
+        let summary = mediaDateFilterSummary(camera.mediaItems, filter: mediaFilter, dateRange: camera.mediaDateRange)
+        return language.format("media_date_summary", summary.matchedCount, summary.loadedCount,
+                               summary.unknownDateCount) + " " + language.string("media_date_loaded_only")
+    }
+
     private var displayedMedia: [CameraMediaItem] {
-        mediaItemsForDisplay(camera.mediaItems, filter: mediaFilter, sort: mediaSort)
+        mediaItemsForDisplay(camera.mediaItems, filter: mediaFilter, sort: mediaSort, dateRange: camera.mediaDateRange)
     }
 
     private var mediaLibrarySummary: String {

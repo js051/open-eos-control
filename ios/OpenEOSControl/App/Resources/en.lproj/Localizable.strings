@@ -492,3 +492,15 @@
 "media_viewer_outside_list" = "Not in the current list";
 "capture_review_readFailed" = "Shot accepted, but the photo list could not be read. Check again when the camera is ready.";
 "capture_status_readback_failed" = "The shutter command was acknowledged, but camera status could not be read. Check recent media without taking another photo.";
+
+// Loaded-media calendar-day filtering.
+"media_date_range" = "Media date range";
+"media_date_start" = "Start date";
+"media_date_end" = "End date";
+"media_date_timezone" = "Calendar days in %@";
+"media_date_invalid" = "Choose an end date on or after the start date.";
+"media_date_loaded_only" = "Only already loaded media is filtered. Recent or incomplete lists do not search the whole card.";
+"media_date_unknown_excluded" = "Media with an unknown capture date is excluded while a date range is active.";
+"media_date_range_applied" = "%@ to %@ · %@";
+"media_date_summary" = "%d matching of %d loaded; %d unknown dates excluded in this media type.";
+"media_date_clear" = "Clear date range";

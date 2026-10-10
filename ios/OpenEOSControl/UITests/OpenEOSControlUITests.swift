@@ -313,6 +313,53 @@ final class OpenEOSControlUITests: XCTestCase {
         guard waitForConnectionScreen(in: app, timeout: 8) else { return }
     }
 
+    func testOfflineMediaDateRangeApplyCancelAndClearInBothLanguages() throws {
+        for (language, appleLanguage, locale, label) in [
+            ("english", "en", "en_US", "Media date range"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "素材日期區間"),
+        ] {
+            let app = launch(appLanguage: language, appleLanguage: appleLanguage, locale: locale,
+                             contentSizeCategory: "UICTContentSizeCategoryAccessibilityXXXL")
+            XCTAssertTrue(app.buttons["offline-preview-button"].waitForExistence(timeout: 8))
+            app.buttons["offline-preview-button"].tap()
+            let moreActions = app.buttons["more-actions-button"]
+            XCTAssertTrue(moreActions.waitForExistence(timeout: 5))
+            moreActions.tap()
+            XCTAssertTrue(tapCameraAction(app.buttons["camera-media-menu-button"], in: app))
+            let range = app.buttons["media-date-range"]
+            XCTAssertTrue(scrollToInteraction(range, in: app, timeout: 8))
+            XCTAssertEqual(range.label, label)
+            range.tap()
+            XCTAssertTrue(app.datePickers["media-date-start"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.datePickers["media-date-end"].exists)
+            app.buttons["media-date-cancel"].tap()
+            XCTAssertFalse(app.staticTexts["media-date-range-applied"].exists)
+
+            XCTAssertTrue(scrollToInteraction(range, in: app, timeout: 8))
+            range.tap()
+            let apply = app.buttons["media-date-apply"]
+            XCTAssertTrue(waitForInteraction(apply, timeout: 5))
+            apply.tap()
+            let applied = app.staticTexts["media-date-range-applied"]
+            XCTAssertTrue(applied.waitForExistence(timeout: 5))
+            let savedLabel = applied.label
+            XCTAssertTrue(app.staticTexts["media-date-range-summary"].exists)
+            XCTAssertTrue(scrollToInteraction(range, in: app, timeout: 8))
+            range.tap()
+            XCTAssertTrue(app.buttons["media-date-cancel"].waitForExistence(timeout: 5))
+            app.buttons["media-date-cancel"].tap()
+            XCTAssertEqual(applied.label, savedLabel)
+            let clear = app.buttons["media-date-range-clear"]
+            XCTAssertTrue(scrollToInteraction(clear, in: app, timeout: 8))
+            clear.tap()
+            XCTAssertFalse(applied.exists)
+            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-002"], in: app, timeout: 8))
+            XCTAssertTrue(app.staticTexts["R6M3_0001.JPG"].exists)
+            addScreenshot(name: "media-date-range-cleared-\(language)")
+            app.terminate()
+        }
+    }
+
     func testOfflineMediaDeletionRequiresConfirmation() throws {
         let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
         let preview = app.buttons["offline-preview-button"]

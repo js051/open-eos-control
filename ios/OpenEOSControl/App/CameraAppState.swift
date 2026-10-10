@@ -127,8 +127,14 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var busyOperations = Set<CameraOperation>()
 
     private let defaults: UserDefaults
+    @Published private(set) var mediaLibrarySessionID = UUID()
+    @Published private(set) var mediaDateRange: MediaDateRange?
     private var session: CameraSession? {
-        didSet { exportGeneration = UUID() }
+        didSet {
+            exportGeneration = UUID()
+            mediaLibrarySessionID = UUID()
+            mediaDateRange = nil
+        }
     }
     private var exportGeneration = UUID()
     private let sessionFactory: (@MainActor () throws -> CameraSession)?
@@ -491,6 +497,13 @@ final class CameraAppState: ObservableObject {
             guard generation == sessionGeneration else { return }
             record(error)
         }
+    }
+
+    @discardableResult
+    func setMediaDateRange(_ range: MediaDateRange?, owner: UUID) -> Bool {
+        guard owner == mediaLibrarySessionID else { return false }
+        mediaDateRange = range
+        return true
     }
 
     func openOfflinePreview() {

@@ -185,6 +185,229 @@ final class MediaLibraryTests: XCTestCase {
         )
     }
 
+    func testMediaDateRangeIncludesBothWholeDaysAndExcludesNextMidnight() throws {
+        let range = try XCTUnwrap(MediaDateRange(
+            startDate: instant("2026-08-14T18:00:00Z"),
+            endDate: instant("2026-08-16T03:00:00Z"),
+            timeZone: zone("UTC")
+        ))
+
+        XCTAssertEqual(range.startDate, try instant("2026-08-14T00:00:00Z"))
+        XCTAssertEqual(range.endDate, try instant("2026-08-16T00:00:00Z"))
+        XCTAssertEqual(range.endExclusive, try instant("2026-08-17T00:00:00Z"))
+        XCTAssertFalse(range.contains(captureDate: range.startDate.addingTimeInterval(-0.001)))
+        XCTAssertTrue(range.contains(captureDate: range.startDate))
+        XCTAssertTrue(range.contains(captureDate: range.endDate))
+        XCTAssertTrue(range.contains(captureDate: range.endExclusive.addingTimeInterval(-0.001)))
+        XCTAssertFalse(range.contains(captureDate: range.endExclusive))
+    }
+
+    func testMediaDateRangeAllowsSameDayWithReversedTimeOfDay() throws {
+        let range = try XCTUnwrap(MediaDateRange(
+            startDate: instant("2028-02-29T22:00:00Z"),
+            endDate: instant("2028-02-29T01:00:00Z"),
+            timeZone: zone("UTC")
+        ))
+
+        XCTAssertEqual(range.startDate, range.endDate)
+        XCTAssertEqual(range.endExclusive, try instant("2028-03-01T00:00:00Z"))
+    }
+
+    func testMediaDateRangeRejectsReversedDaysAndNonFiniteDates() throws {
+        let first = try instant("2026-08-14T00:00:00Z")
+        let last = try instant("2026-08-15T00:00:00Z")
+        let timeZone = try zone("UTC")
+        XCTAssertNil(MediaDateRange(startDate: last, endDate: first, timeZone: timeZone))
+        for value in [Double.nan, Double.infinity, -Double.infinity] {
+            let invalid = Date(timeIntervalSinceReferenceDate: value)
+            XCTAssertNil(MediaDateRange(startDate: invalid, endDate: last, timeZone: timeZone))
+            XCTAssertNil(MediaDateRange(startDate: first, endDate: invalid, timeZone: timeZone))
+        }
+    }
+
+    func testMediaDateRangeSpringForwardUsesTwentyThreeHourDay() throws {
+        let day = try instant("2026-03-08T12:00:00Z")
+        let range = try XCTUnwrap(MediaDateRange(
+            startDate: day, endDate: day, timeZone: zone("America/Los_Angeles")
+        ))
+
+        XCTAssertEqual(range.startDate, try instant("2026-03-08T08:00:00Z"))
+        XCTAssertEqual(range.endExclusive, try instant("2026-03-09T07:00:00Z"))
+        XCTAssertEqual(range.endExclusive.timeIntervalSince(range.startDate), 23 * 60 * 60)
+        XCTAssertTrue(range.contains(captureDate: try instant("2026-03-09T06:59:59Z")))
+        XCTAssertFalse(range.contains(captureDate: try instant("2026-03-09T07:00:00Z")))
+    }
+
+    func testMediaDateRangeFallBackIncludesBothRepeatedHoursAndFullLastDay() throws {
+        let day = try instant("2026-11-01T12:00:00Z")
+        let range = try XCTUnwrap(MediaDateRange(
+            startDate: day, endDate: day, timeZone: zone("America/Los_Angeles")
+        ))
+
+        XCTAssertEqual(range.startDate, try instant("2026-11-01T07:00:00Z"))
+        XCTAssertEqual(range.endExclusive, try instant("2026-11-02T08:00:00Z"))
+        XCTAssertEqual(range.endExclusive.timeIntervalSince(range.startDate), 25 * 60 * 60)
+        XCTAssertTrue(range.contains(captureDate: try instant("2026-11-01T08:30:00Z")))
+        XCTAssertTrue(range.contains(captureDate: try instant("2026-11-01T09:30:00Z")))
+        XCTAssertTrue(range.contains(captureDate: try instant("2026-11-02T07:59:59Z")))
+        XCTAssertFalse(range.contains(captureDate: range.endExclusive))
+    }
+
+    func testDateFilterUsesCapturedTimeZoneForOffsetTimestamps() throws {
+        let items = [
+            media("east-morning", "EAST.JPG", "2026-08-14T00:30:00+08:00"),
+            media("west-evening", "WEST.JPG", "2026-08-13T23:30:00-07:00"),
+            media("midday", "MIDDAY.JPG", "2026-08-14T12:00:00Z"),
+            media("west-late", "LATE.JPG", "2026-08-14T23:30:00-07:00"),
+        ]
+        let day = try instant("2026-08-14T12:00:00Z")
+        let cases: [(String, [String])] = [
+            ("UTC", ["west-evening", "midday"]),
+            ("Asia/Taipei", ["east-morning", "west-evening", "midday"]),
+            ("America/Los_Angeles", ["midday", "west-late"]),
+        ]
+        for (identifier, expectedIDs) in cases {
+            let range = try XCTUnwrap(MediaDateRange(
+                startDate: day, endDate: day, timeZone: zone(identifier)
+            ))
+            XCTAssertEqual(range.timeZone, try zone(identifier))
+            XCTAssertEqual(
+                mediaItemsForDisplay(items, filter: .all, sort: .camera, dateRange: range).map(\.id),
+                expectedIDs,
+                identifier
+            )
+        }
+    }
+
+    func testDateFilterExcludesUnknownAndMalformedDatesOnlyWhileActive() throws {
+        let items = [
+            media("missing", "20260814.JPG", nil),
+            media("empty", "EMPTY.JPG", ""),
+            media("spaces", "SPACES.JPG", "  \n "),
+            media("malformed", "BROKEN.JPG", "not-a-date"),
+            media("raw", "PAIR.CR3", "2026-08-14T10:00:00Z"),
+            media("jpeg", "PAIR.JPG", "2026-08-14T10:00:00Z"),
+            media("outside", "OLD.JPG", "2026-08-13T10:00:00Z"),
+        ]
+        let day = try instant("2026-08-14T12:00:00Z")
+        let range = try XCTUnwrap(MediaDateRange(startDate: day, endDate: day, timeZone: zone("UTC")))
+
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .camera, dateRange: range),
+            [items[4], items[5]]
+        )
+        XCTAssertEqual(mediaItemsForDisplay(items, filter: .all, sort: .camera, dateRange: nil), items)
+        XCTAssertEqual(
+            mediaDateFilterSummary(items, filter: .all, dateRange: range),
+            MediaDateFilterSummary(loadedCount: 7, matchedCount: 2, unknownDateCount: 4)
+        )
+        XCTAssertEqual(
+            mediaDateFilterSummary(items, filter: .all, dateRange: nil),
+            MediaDateFilterSummary(loadedCount: 7, matchedCount: 7, unknownDateCount: 4)
+        )
+    }
+
+    func testDateFilterRetainsExistingTimezoneFreeCaptureDateFormats() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let day = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 8, day: 14, hour: 12)))
+        let range = try XCTUnwrap(MediaDateRange(startDate: day, endDate: day, timeZone: calendar.timeZone))
+        let items = [
+            media("compact", "PAIR.CR3", "20260814T120000"),
+            media("spaced", "PAIR.JPG", "2026-08-14 12:00:00"),
+            media("previous", "OLD.JPG", "20260813T120000"),
+        ]
+
+        XCTAssertEqual(mediaCaptureDate(items[0]), day)
+        XCTAssertEqual(mediaCaptureDate(items[1]), day)
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .camera, dateRange: range),
+            [items[0], items[1]]
+        )
+    }
+
+    func testDateFilterIntersectsMediaTypeAndPreservesAllSortOrders() throws {
+        let items = [
+            media("outside", "IMG_0.JPG", "2026-08-13T10:00:00Z"),
+            media("raw", "IMG_2.CR3", "2026-08-14T10:00:00Z"),
+            media("video", "IMG_1.MP4", "2026-08-14T12:00:00Z"),
+            media("jpeg", "IMG_2.JPG", "2026-08-14T10:00:00Z"),
+            media("early", "IMG_10.JPG", "2026-08-14T08:00:00Z"),
+            media("unknown", "IMG_3.JPG", nil),
+        ]
+        let day = try instant("2026-08-14T12:00:00Z")
+        let range = try XCTUnwrap(MediaDateRange(startDate: day, endDate: day, timeZone: zone("UTC")))
+        let cases: [(MediaSort, [String], [String])] = [
+            (.camera, ["raw", "video", "jpeg", "early"], ["raw", "jpeg", "early"]),
+            (.newest, ["video", "raw", "jpeg", "early"], ["raw", "jpeg", "early"]),
+            (.oldest, ["early", "raw", "jpeg", "video"], ["early", "raw", "jpeg"]),
+            (.name, ["video", "raw", "jpeg", "early"], ["raw", "jpeg", "early"]),
+        ]
+        for (sort, allIDs, photoIDs) in cases {
+            XCTAssertEqual(
+                mediaItemsForDisplay(items, filter: .all, sort: sort, dateRange: range).map(\.id), allIDs
+            )
+            XCTAssertEqual(
+                mediaItemsForDisplay(items, filter: .photos, sort: sort, dateRange: range).map(\.id), photoIDs
+            )
+            XCTAssertEqual(
+                mediaItemsForDisplay(items, filter: .videos, sort: sort, dateRange: range).map(\.id), ["video"]
+            )
+        }
+    }
+
+    func testDateFilterSummaryCountsAllLoadedItemsAndTypeScopedUnknownDates() throws {
+        let items = [
+            media("photo", "PHOTO.JPG", "2026-08-14T10:00:00Z"),
+            media("unknown-photo", "UNKNOWN.CR3", nil),
+            CameraMediaItem(id: "video", name: "CLIP.bin", kind: "video", captureTime: "2026-08-14T11:00:00Z"),
+            media("unknown-video", "UNKNOWN.MOV", "not-a-date"),
+            media("outside-video", "OLD.MP4", "2026-08-13T10:00:00Z"),
+        ]
+        let day = try instant("2026-08-14T12:00:00Z")
+        let range = try XCTUnwrap(MediaDateRange(startDate: day, endDate: day, timeZone: zone("UTC")))
+
+        XCTAssertEqual(
+            mediaDateFilterSummary(items, filter: .all, dateRange: range),
+            MediaDateFilterSummary(loadedCount: 5, matchedCount: 2, unknownDateCount: 2)
+        )
+        XCTAssertEqual(
+            mediaDateFilterSummary(items, filter: .photos, dateRange: range),
+            MediaDateFilterSummary(loadedCount: 5, matchedCount: 1, unknownDateCount: 1)
+        )
+        XCTAssertEqual(
+            mediaDateFilterSummary(items, filter: .videos, dateRange: range),
+            MediaDateFilterSummary(loadedCount: 5, matchedCount: 1, unknownDateCount: 1)
+        )
+        XCTAssertEqual(
+            mediaDateFilterSummary(items, filter: .videos, dateRange: nil),
+            MediaDateFilterSummary(loadedCount: 5, matchedCount: 3, unknownDateCount: 1)
+        )
+        for filter in MediaFilter.allCases {
+            for sort in MediaSort.allCases {
+                XCTAssertEqual(
+                    mediaDateFilterSummary(items, filter: filter, dateRange: range).matchedCount,
+                    mediaItemsForDisplay(items, filter: filter, sort: sort, dateRange: range).count
+                )
+            }
+        }
+    }
+
+    func testDateFilterHandlesEmptyAndZeroMatchLoadedLists() throws {
+        let day = try instant("2026-08-14T12:00:00Z")
+        let range = try XCTUnwrap(MediaDateRange(startDate: day, endDate: day, timeZone: zone("UTC")))
+        XCTAssertEqual(
+            mediaDateFilterSummary([], filter: .all, dateRange: range),
+            MediaDateFilterSummary(loadedCount: 0, matchedCount: 0, unknownDateCount: 0)
+        )
+        let items = [media("outside", "OLD.JPG", "2026-08-13T10:00:00Z")]
+        XCTAssertTrue(mediaItemsForDisplay(items, filter: .all, sort: .camera, dateRange: range).isEmpty)
+        XCTAssertEqual(
+            mediaDateFilterSummary(items, filter: .all, dateRange: range),
+            MediaDateFilterSummary(loadedCount: 1, matchedCount: 0, unknownDateCount: 0)
+        )
+    }
+
     func testThumbnailCacheRemainsBoundedAndRefreshesExistingEntry() {
         var cache = MediaThumbnailCache(capacity: 3)
         cache.insert(Data([1]), for: "one")
@@ -208,5 +431,13 @@ final class MediaLibraryTests: XCTestCase {
 
     private func media(_ id: String, _ name: String, _ captureTime: String?) -> CameraMediaItem {
         CameraMediaItem(id: id, name: name, kind: "image", captureTime: captureTime)
+    }
+
+    private func instant(_ value: String) throws -> Date {
+        try XCTUnwrap(ISO8601DateFormatter().date(from: value))
+    }
+
+    private func zone(_ identifier: String) throws -> TimeZone {
+        try XCTUnwrap(TimeZone(identifier: identifier))
     }
 }

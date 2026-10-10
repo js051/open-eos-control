@@ -492,3 +492,15 @@
 "media_viewer_outside_list" = "目前清單未列出";
 "capture_review_readFailed" = "快門已接受，但無法讀取照片清單。請在相機就緒後重新查找。";
 "capture_status_readback_failed" = "相機已確認收到快門指令，但未能讀取相機狀態。請只重新查找最近素材，不要再次拍攝。";
+
+// Loaded-media calendar-day filtering.
+"media_date_range" = "素材日期區間";
+"media_date_start" = "開始日期";
+"media_date_end" = "結束日期";
+"media_date_timezone" = "以 %@ 的日曆日期篩選";
+"media_date_invalid" = "結束日期必須等於或晚於開始日期。";
+"media_date_loaded_only" = "僅篩選已載入素材。最近素材或未完成的清單不代表已搜尋整張記憶卡。";
+"media_date_unknown_excluded" = "啟用日期區間時，拍攝日期未知的素材會被排除。";
+"media_date_range_applied" = "%@ 至 %@ · %@";
+"media_date_summary" = "已載入 %2$d 項中有 %1$d 項符合；此素材類型排除 %3$d 項未知日期。";
+"media_date_clear" = "清除日期區間";

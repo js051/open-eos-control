@@ -8,6 +8,42 @@ import XCTest
 /// exact owner task's completion, rather than treating a delay as evidence.
 @MainActor
 final class MediaResponseOwnershipTests: XCTestCase {
+    func testDateFilterAndClearPreserveAnActuallySelectedPreview() async throws {
+        for bridge in [false, true] {
+            let peer = MediaOwnershipPeer()
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            let item = try XCTUnwrap(state.latestMediaItem)
+            await state.openMediaPreview(item)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewItem).id, item.id)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewData), MediaOwnershipPeer.imageBytes)
+            let owner = state.mediaLibrarySessionID
+            let media = state.mediaItems
+            let loadStatus = state.mediaLibraryLoadStatus
+            let listingCount = await peer.count(.listing)
+            let previewCount = await peer.count(.preview)
+            let date = Date(timeIntervalSince1970: 1_786_752_000)
+            let range = try XCTUnwrap(MediaDateRange(startDate: date, endDate: date,
+                                                   timeZone: TimeZone(secondsFromGMT: 0)!))
+            XCTAssertTrue(state.setMediaDateRange(range, owner: owner))
+            // The selected fixture has an unknown capture date and is excluded from the list.
+            XCTAssertTrue(mediaItemsForDisplay(media, filter: .all, sort: .camera, dateRange: range).isEmpty)
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            XCTAssertEqual(state.mediaItems, media)
+            XCTAssertEqual(state.mediaLibraryLoadStatus, loadStatus)
+            XCTAssertTrue(state.setMediaDateRange(nil, owner: owner))
+            XCTAssertEqual(mediaItemsForDisplay(state.mediaItems, filter: .all, sort: .camera), media)
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            let afterListingCount = await peer.count(.listing)
+            let afterPreviewCount = await peer.count(.preview)
+            XCTAssertEqual(afterListingCount, listingCount)
+            XCTAssertEqual(afterPreviewCount, previewCount)
+        }
+    }
+
     func testRetiredInfoAndEveryMetadataResponseCannotOwnReplacementSession() async throws {
         for bridge in [false, true] {
             for operation in OwnershipOperation.metadataAndInfo {
