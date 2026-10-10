@@ -271,7 +271,8 @@ final class CameraAppState: ObservableObject {
         sessionFactory: (@MainActor () throws -> CameraSession)? = nil,
         bridgeCameraDiscovery: (@Sendable (String, String) async throws -> [DesktopBridgeCamera])? = nil,
         cubeLutLoader: (@Sendable (URL) async throws -> CubeLut)? = nil,
-        focusMarkerDelay: (@Sendable () async throws -> Void)? = nil
+        focusMarkerDelay: (@Sendable () async throws -> Void)? = nil,
+        rtpEventDispatcher: (@Sendable (@escaping @MainActor @Sendable () -> Void) -> Void)? = nil
     ) {
         self.defaults = defaults
         self.sessionFactory = sessionFactory
@@ -303,8 +304,14 @@ final class CameraAppState: ObservableObject {
         activeLiveViewSource = nil
         nativeLiveViewSize = nil
         rtpController = IOSCcapiRTPController()
-        rtpController.setEventHandler { [weak self] event in
-            Task { @MainActor [weak self] in self?.handleRTPEvent(event) }
+        let dispatchRTPEvent = rtpEventDispatcher ?? { action in
+            Task { @MainActor in action() }
+        }
+        rtpController.setEventHandler { [weak self] delivery in
+            dispatchRTPEvent { [weak self] in
+                guard let self, self.rtpController.accepts(delivery) else { return }
+                self.handleRTPEvent(delivery.event)
+            }
         }
     }
 
@@ -559,6 +566,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func prepareDisconnect() -> CameraSession? {
+        rtpController.retireDelivery()
         invalidateBridgeScan()
         retireFocusMarker()
         sessionGeneration = UUID()

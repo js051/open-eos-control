@@ -398,8 +398,8 @@ final class CameraAppTests: XCTestCase {
     func testClosingReplacedRTPSessionDoesNotClearCurrentAudioStatus() async throws {
         let recorder = RTPAudioStatusRecorder()
         let controller = IOSCcapiRTPController()
-        controller.setEventHandler { event in
-            if case let .audioStatus(status) = event { recorder.record(status) }
+        controller.setEventHandler { delivery in
+            if case let .audioStatus(status) = delivery.event { recorder.record(status) }
         }
         let description = try CCAPIRTPSessionDescriptionParser.parse(
             """
