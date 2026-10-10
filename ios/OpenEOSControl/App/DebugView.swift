@@ -153,8 +153,9 @@ struct DebugView: View {
 
                         Button {
                             Task {
-                                guard let record = try? await camera.physicalValidationRecord() else { return }
-                                UIPasteboard.general.string = record
+                                guard let record = try? await camera.physicalValidationRecord(),
+                                      camera.canPublishExport(record) else { return }
+                                UIPasteboard.general.string = record.text
                                 physicalValidationCopied = true
                                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                                 physicalValidationCopied = false
@@ -231,7 +232,9 @@ struct DebugView: View {
 
                     Button {
                         Task {
-                            UIPasteboard.general.string = await camera.diagnosticReport()
+                            guard let report = try? await camera.diagnosticReport(),
+                                  camera.canPublishExport(report) else { return }
+                            UIPasteboard.general.string = report.text
                             copied = true
                             try? await Task.sleep(nanoseconds: 1_500_000_000)
                             copied = false

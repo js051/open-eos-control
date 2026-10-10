@@ -676,7 +676,7 @@ final class CameraAppTests: XCTestCase {
         XCTAssertFalse(settings.safeAreaVisible)
     }
 
-    func testDiagnosticReportIncludesMonitoringAssistState() async {
+    func testDiagnosticReportIncludesMonitoringAssistState() async throws {
         let suite = "OpenEOSControlTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -692,7 +692,7 @@ final class CameraAppTests: XCTestCase {
             desqueeze: .x1_5
         )
 
-        let report = await state.diagnosticReport()
+        let report = try await state.diagnosticReport().text
 
         XCTAssertTrue(report.contains("monitorHistogram=true"))
         XCTAssertTrue(report.contains("monitorWaveform=true"))
@@ -704,14 +704,14 @@ final class CameraAppTests: XCTestCase {
         XCTAssertTrue(report.contains("monitorDesqueeze=x1_5"))
     }
 
-    func testOfflinePreviewReportsCompleteMediaTraversal() async {
+    func testOfflinePreviewReportsCompleteMediaTraversal() async throws {
         let suite = "OpenEOSControlTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let state = CameraAppState(defaults: defaults)
 
         state.openOfflinePreview()
-        let report = await state.diagnosticReport()
+        let report = try await state.diagnosticReport().text
 
         XCTAssertEqual(state.mediaLibraryLoadStatus, .complete)
         XCTAssertEqual(state.mediaLibraryScope, .recent)
