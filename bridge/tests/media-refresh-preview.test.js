@@ -2,6 +2,7 @@
 
 // Exercise the production event, listing and preview functions with deferred reads.
 // This is a deterministic client regression, not browser or physical-camera evidence.
+// Abort assertions cover the browser-to-Bridge request, not synchronous camera I/O.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -38,6 +39,7 @@ const item = (id, captureTime) => ({ id, name: id, captureTime, kind: "jpeg", pr
 const OLD = item("SYNTHETIC_OLD.JPG", "2026-10-01");
 const LATEST = item("SYNTHETIC_LATEST.JPG", "2026-10-02");
 const REPLACEMENT = item("SYNTHETIC_RECONNECTED.JPG", "2026-10-03");
+const VIDEO = { ...item("SYNTHETIC_VIDEO.MP4", "2026-10-02"), kind: "video" };
 const imageBlob = () => new Blob(["synthetic preview"], { type: "image/jpeg" });
 
 function fixture(t, { dated = false } = {}) {
@@ -48,7 +50,7 @@ function fixture(t, { dated = false } = {}) {
     mediaScope: "recent", mediaFilter: "all", mediaSort: "camera", mediaPage: 0,
     mediaDateRange: dated ? { start: "2026-10-01", end: "2026-10-01" } : null,
     mediaDateDialogSession: null, mediaPreviewGeneration: 0, mediaPreviewItem: null,
-    mediaPreviewUrl: null, mediaPreviewTicketUrl: null,
+    mediaPreviewUrl: null, mediaPreviewTicketUrl: null, mediaPreviewController: null,
     mediaDownloadPreparing: false, mediaDownload: null, mediaUpload: null,
     latestMediaItem: LATEST, latestMediaGeneration: 0, latestMediaRefreshPromise: null,
     latestMediaController: null, latestMediaThumbnailLoading: false,
@@ -68,6 +70,10 @@ function fixture(t, { dated = false } = {}) {
   const requests = [];
   const listings = [];
   const previews = [];
+  const playbacks = [];
+  const originals = [];
+  const ticketDeletes = [];
+  const savedBlobs = [];
   const events = [];
   const feedback = [];
   const renders = [];
@@ -78,7 +84,8 @@ function fixture(t, { dated = false } = {}) {
   let objectUrls = 0;
   ui.mediaPreviewImage.decode = () => { decodeCalls += 1; return decode.promise; };
   const s = vm.createContext({
-    state, ui, requests, listings, previews, events, feedback, renders, releasedUrls, delays,
+    state, ui, requests, listings, previews, playbacks, originals, ticketDeletes, savedBlobs,
+    events, feedback, renders, releasedUrls, delays,
     AbortController, Blob, Set, Map, Intl, Date, mediaLibrary, mediaTransfer,
     URL: { createObjectURL: () => `blob:synthetic-preview-${++objectUrls}` },
     FEATURES: Object.fromEntries(["EVENT_POLLING", "MEDIA_BROWSER", "MEDIA_PREVIEW", "MEDIA_DOWNLOAD",
@@ -96,8 +103,18 @@ function fixture(t, { dated = false } = {}) {
     sleep: async (delay) => { delays.push(delay); },
     clampFps: (value) => value,
     reviewResponse: () => ({ items: [LATEST, OLD] }),
+    chooseMediaWritable: async () => ({ writable: null, cancelled: false }),
+    saveMediaBlob: (blob, name) => savedBlobs.push({ blob, name }),
+    fetch: async (url, options) => {
+      assert.equal(options.method, "DELETE", "Only playback-ticket cleanup may use fetch");
+      ticketDeletes.push({ url, method: options.method, cache: options.cache, keepalive: options.keepalive });
+      return { ok: true };
+    },
     api: (url, options = {}) => {
       requests.push({ url, method: options.method || "GET" });
+      if (url.endsWith("/playback") && options.method === "POST") {
+        const gate = deferred(); playbacks.push({ ...gate, url, signal: options.signal }); return gate.promise;
+      }
       if (options.method && options.method !== "GET") throw new Error(`Unexpected write: ${url}`);
       if (url.endsWith("/events")) {
         const gate = deferred();
@@ -109,22 +126,29 @@ function fixture(t, { dated = false } = {}) {
         const gate = deferred(); listings.push({ ...gate, url }); return gate.promise;
       }
       if (url.endsWith("/preview")) {
-        const gate = deferred(); previews.push({ ...gate, url }); return gate.promise;
+        // Deliberately ignore abort until the test releases the read. This proves
+        // timely cancellation and guards stale completion even when transport races.
+        const gate = deferred(); previews.push({ ...gate, url, signal: options.signal }); return gate.promise;
       }
       if (url.endsWith("/media?limit=8")) return Promise.resolve().then(() => s.reviewResponse());
       if (/\/(?:info|status|capabilities)$/.test(url)) return Promise.resolve({});
+      if (/\/media\/[^/]+$/.test(url)) {
+        const gate = deferred(); originals.push({ ...gate, url, signal: options.signal }); return gate.promise;
+      }
       throw new Error(`Unexpected request: ${url}`);
     },
   });
   for (const name of ["renderAvailability", "renderLatestMedia", "renderSession", "setOperationState",
     "syncLiveMagnificationFromCapabilities", "clearMediaThumbnails", "stopLiveLoop", "stopLocalVideo",
-    "cancelMediaDownload", "cancelMediaUpload", "clearScheduledMediaTransferRender", "closeMediaDetails",
+    "renderMediaTransfer", "scheduleMediaTransferRender", "cancelMediaUpload",
+    "clearScheduledMediaTransferRender", "closeMediaDetails",
     "clearBulbTimer", "renderHealth"]) s[name] = () => {};
   const names = ["startEventLoop", "cancelEventLoop", "refreshSession", "refreshMedia", "refreshMediaWhenCurrent",
     "mediaTransferActive", "cameraInteractionBusy", "openMediaPreview", "closeMediaPreview", "clearMediaPreview",
     "resetMediaPreviewTransform", "renderMediaPreviewNavigation", "previewableMedia", "displayedMedia",
     "renderMediaSummary", "renderMediaDateFilter", "mediaDisplayTimeZone", "resetSession", "cancelLatestMediaRefresh",
-    "retryLatestMedia", "refreshLatestMedia", "latestMediaFrom", "publishLatestMedia"];
+    "retryLatestMedia", "refreshLatestMedia", "latestMediaFrom", "publishLatestMedia",
+    "downloadMedia", "cancelMediaDownload"];
   vm.runInContext(names.map(extract).join("\n"), s, { timeout: 1000 });
   s.renderMedia = () => {
     renders.push(Array.from(state.media, (entry) => entry.id));
@@ -163,6 +187,30 @@ function assertReadOnly(s) {
   assert.equal(s.requests.some(({ url }) => /\/(?:capture|shutter|recording)(?:\/|$)/.test(url)), false);
 }
 
+function previewSnapshot(s) {
+  return {
+    open: s.ui.mediaPreviewDialog.open, item: s.state.mediaPreviewItem,
+    generation: s.state.mediaPreviewGeneration, url: s.state.mediaPreviewUrl,
+    ticketUrl: s.state.mediaPreviewTicketUrl, imageSource: s.ui.mediaPreviewImage.src,
+    imageHidden: s.ui.mediaPreviewImage.hidden, videoSource: s.ui.mediaPreviewVideo.src,
+    videoHidden: s.ui.mediaPreviewVideo.hidden, loading: s.ui.mediaPreviewLoading.hidden,
+    unavailable: s.ui.mediaPreviewUnavailable.hidden, title: s.ui.mediaPreviewTitle.textContent,
+    feedback: Array.from(s.feedback), releasedUrls: Array.from(s.releasedUrls),
+  };
+}
+
+function retirePreview(s, action, replacement = OLD) {
+  if (action === "close") { s.closeMediaPreview(); return {}; }
+  if (action === "manual refresh") return { refresh: s.refreshMedia() };
+  if (action.includes("reconnect")) {
+    const sessionId = s.state.session.id;
+    s.resetSession();
+    s.state.session = { id: action.startsWith("reused") ? sessionId : "synthetic-session-b" };
+  }
+  const next = action.startsWith("reused") ? { ...LATEST } : replacement;
+  return { replacement: s.openMediaPreview(next) };
+}
+
 for (const dated of [false, true]) {
   for (const phase of ["request pending", "decode pending", "ready"]) {
     test(`content event preserves ${phase} explicit review${dated ? " outside the date range" : ""}`,
@@ -189,6 +237,8 @@ for (const dated of [false, true]) {
         assert.equal(s.state.mediaLoadStatus, "COMPLETE");
         assert.deepEqual(Array.from(s.state.media, (entry) => entry.id), [LATEST.id, OLD.id]);
         assert.equal(s.previews.length, 1, "Refreshing the library cannot issue another preview read");
+        assert.notEqual(s.previews[0].signal?.aborted, true,
+          "A background listing must not abort the independently opened image read");
         if (dated) {
           assert.deepEqual(Array.from(s.displayedMedia(), (entry) => entry.id), [OLD.id]);
           assert.deepEqual(Array.from(s.previewableMedia(), (entry) => entry.id), [LATEST.id]);
@@ -361,5 +411,201 @@ test("latest-review read failure and retry after a content event never resend a 
     assert.equal(s.state.latestMediaReviewStatus, "READY");
     assert.equal(s.state.latestMediaItem, REPLACEMENT);
     assert.equal(s.requests.filter(({ url }) => url.endsWith("/media?limit=8")).length, 5);
+    assertReadOnly(s);
+  });
+
+for (const action of ["close", "manual refresh", "replacement", "reused-item replacement",
+  "reset/reconnect", "reused-session-and-item reconnect"]) {
+  for (const outcome of ["resolve", "reject"]) {
+    test(`${action} aborts the image request before its late ${outcome} can settle`,
+      { timeout: 2000 }, async (t) => {
+        const s = fixture(t);
+        const pending = s.openMediaPreview(LATEST);
+        const retired = s.previews[0];
+        assert.ok(retired.signal, "Image preview GET must receive its own AbortSignal");
+        assert.equal(retired.signal.aborted, false);
+        const next = retirePreview(s, action);
+        // Check before releasing either deferred request, never after completion.
+        assert.equal(retired.signal.aborted, true, "Retirement must immediately abort the pending image read");
+        const current = s.previews[1];
+        if (next.replacement) {
+          assert.ok(current.signal);
+          assert.notEqual(current.signal, retired.signal, "Replacement owns a separate request signal");
+          assert.equal(current.signal.aborted, false);
+        }
+        const afterRetirement = previewSnapshot(s);
+        if (outcome === "resolve") retired.resolve(imageBlob());
+        else retired.reject(new Error("Synthetic retired preview transport failure"));
+        await pending;
+        assert.deepEqual(previewSnapshot(s), afterRetirement,
+          "A retired image must not publish a URL, failure, or loading-state change");
+        assert.equal(s.decodeCalls(), 0, "A retired image must not start decoding");
+        if (next.replacement) {
+          assert.equal(current.signal.aborted, false, "The old finalizer must not cancel the new request");
+          s.closeMediaPreview();
+          assert.equal(current.signal.aborted, true,
+            "The old finalizer must leave the replacement controller available to Close");
+          current.resolve(imageBlob());
+          await next.replacement;
+        }
+        if (next.refresh) {
+          s.listings[0].resolve({ items: [LATEST, OLD] });
+          assert.equal(await next.refresh, true);
+        }
+        assertReadOnly(s);
+      });
+  }
+}
+
+for (const action of ["close", "reused-item replacement", "reused-session-and-item reconnect"]) {
+  test(`retired non-AbortError after ${action} cannot overwrite preview feedback`,
+    { timeout: 2000 }, async (t) => {
+      const s = fixture(t);
+      const pending = s.openMediaPreview(LATEST);
+      const next = retirePreview(s, action);
+      const current = previewSnapshot(s);
+      s.previews[0].reject(new Error("Synthetic stale non-AbortError"));
+      await pending;
+      assert.deepEqual(previewSnapshot(s), current);
+      assert.deepEqual(s.feedback, []);
+      if (next.replacement) {
+        s.previews[1].resolve(imageBlob()); s.decode.resolve();
+        await next.replacement;
+        assert.equal(s.ui.mediaPreviewImage.hidden, false);
+        assert.equal(s.ui.mediaPreviewUnavailable.hidden, true);
+      }
+      assertReadOnly(s);
+    });
+}
+
+for (const action of ["close", "manual refresh", "replacement", "reset/reconnect"]) {
+  test(`delayed video ticket after ${action} remains readable for cleanup without stale playback`,
+    { timeout: 2000 }, async (t) => {
+      const s = fixture(t);
+      const pending = s.openMediaPreview(VIDEO);
+      assert.equal(s.playbacks.length, 1);
+      const allocation = s.playbacks[0];
+      assert.equal(allocation.signal, undefined,
+        "Aborting ticket allocation can lose the cleanup token; await and revoke stale tickets instead");
+      const next = retirePreview(s, action);
+      assert.equal(s.ticketDeletes.length, 0, "No cleanup token exists until allocation finishes");
+      const current = previewSnapshot(s);
+      const ticketUrl = "/v1/media-playback/synthetic-retired-ticket";
+      allocation.resolve({ url: ticketUrl });
+      await pending;
+      assert.deepEqual(s.ticketDeletes, [{ url: ticketUrl, method: "DELETE", cache: "no-store", keepalive: true }]);
+      assert.deepEqual(previewSnapshot(s), current, "A stale ticket cannot replace the active image or reopen playback");
+      if (next.replacement) {
+        const image = s.previews[0];
+        assert.ok(image.signal);
+        assert.equal(image.signal.aborted, false);
+        s.closeMediaPreview();
+        assert.equal(image.signal.aborted, true,
+          "The old video finalizer must leave the replacement image controller available to Close");
+        image.resolve(imageBlob());
+        await next.replacement;
+        assert.equal(s.ui.mediaPreviewImage.hidden, true);
+        assert.equal(s.ui.mediaPreviewVideo.hidden, true);
+      }
+      if (next.refresh) {
+        s.listings[0].resolve({ items: [LATEST, OLD] });
+        assert.equal(await next.refresh, true);
+      }
+      assert.equal(s.requests.filter(({ method }) => method === "POST").length, 1);
+      assert.equal(s.requests.some(({ url }) => /\/(?:capture|shutter|recording)(?:\/|$)/.test(url)), false);
+    });
+}
+
+test("a current video ticket publishes once and Close revokes its playback URL",
+  { timeout: 2000 }, async (t) => {
+    const s = fixture(t);
+    const pending = s.openMediaPreview(VIDEO);
+    const ticketUrl = "/v1/media-playback/synthetic-current-ticket";
+    s.playbacks[0].resolve({ url: ticketUrl }); await pending;
+    assert.equal(s.ui.mediaPreviewVideo.src, ticketUrl);
+    assert.equal(s.ui.mediaPreviewVideo.hidden, false);
+    assert.equal(s.state.mediaPreviewTicketUrl, ticketUrl);
+    assert.deepEqual(s.ticketDeletes, []);
+    s.closeMediaPreview();
+    assert.deepEqual(s.ticketDeletes, [{ url: ticketUrl, method: "DELETE", cache: "no-store", keepalive: true }]);
+    assert.equal(s.ui.mediaPreviewVideo.src, undefined);
+    assert.equal(s.state.mediaPreviewTicketUrl, null);
+  });
+
+test("closing an image preview leaves its independently requested original save running",
+  { timeout: 2000 }, async (t) => {
+    const s = fixture(t);
+    const preview = s.openMediaPreview(LATEST);
+    const download = s.downloadMedia(LATEST);
+    await eventually(() => s.originals.length === 1, "original download read");
+    const original = s.originals[0];
+    assert.ok(original.signal);
+    assert.notEqual(original.signal, s.previews[0].signal);
+    s.closeMediaPreview();
+    assert.equal(original.signal.aborted, false, "Closing review must not cancel a user-requested original save");
+    original.resolve(new Response("synthetic original", { headers: { "Content-Type": "image/jpeg" } }));
+    await download;
+    assert.equal(s.savedBlobs.length, 1);
+    assert.equal(s.savedBlobs[0].name, LATEST.name);
+    assert.equal(await s.savedBlobs[0].blob.text(), "synthetic original");
+    const current = previewSnapshot(s);
+    s.previews[0].reject(new Error("Synthetic retired preview failed after original save"));
+    await preview;
+    assert.deepEqual(previewSnapshot(s), current);
+    assert.equal(s.feedback.some((message) => message.startsWith("downloaded:")), true);
+    assertReadOnly(s);
+  });
+
+for (const outcome of ["resolve", "reject"]) {
+  test(`Close releases a decoding image once and ignores its late decode ${outcome}`,
+    { timeout: 2000 }, async (t) => {
+      const s = fixture(t);
+      const review = await openReview(s, "decode pending");
+      assert.ok(review.url);
+      s.closeMediaPreview();
+      assert.equal(s.previews[0].signal.aborted, true);
+      assert.deepEqual(s.releasedUrls, [review.url]);
+      const current = previewSnapshot(s);
+      if (outcome === "resolve") s.decode.resolve();
+      else s.decode.reject(new Error("Synthetic retired image decode failure"));
+      await review.pending;
+      assert.deepEqual(previewSnapshot(s), current);
+      assert.equal(s.state.mediaPreviewUrl, null);
+      assert.deepEqual(s.feedback, []);
+      assertReadOnly(s);
+    });
+}
+
+test("a current image transport failure still publishes the preview failure",
+  { timeout: 2000 }, async (t) => {
+    const s = fixture(t);
+    const pending = s.openMediaPreview(LATEST);
+    s.previews[0].reject(new Error("Synthetic current preview transport failure"));
+    await pending;
+    assert.equal(s.ui.mediaPreviewDialog.open, true);
+    assert.equal(s.ui.mediaPreviewUnavailable.hidden, false);
+    assert.equal(s.ui.mediaPreviewLoading.hidden, true);
+    assert.equal(s.ui.mediaPreviewImage.hidden, true);
+    assert.ok(s.feedback.includes("Synthetic current preview transport failure"));
+    assertReadOnly(s);
+  });
+
+test("cancelling an original save leaves its independently opened image preview running",
+  { timeout: 2000 }, async (t) => {
+    const s = fixture(t);
+    const preview = s.openMediaPreview(LATEST);
+    const download = s.downloadMedia(LATEST);
+    await eventually(() => s.originals.length === 1, "original download read");
+    s.cancelMediaDownload();
+    assert.equal(s.originals[0].signal.aborted, true);
+    assert.equal(s.previews[0].signal.aborted, false);
+    s.originals[0].reject(mediaTransfer.cancellationError());
+    await download;
+    assert.deepEqual(s.savedBlobs, []);
+    s.previews[0].resolve(imageBlob()); s.decode.resolve();
+    await preview;
+    assert.equal(s.ui.mediaPreviewDialog.open, true);
+    assert.equal(s.ui.mediaPreviewImage.hidden, false);
+    assert.equal(s.ui.mediaPreviewUnavailable.hidden, true);
     assertReadOnly(s);
   });

@@ -1167,6 +1167,7 @@
     mediaGeneration: 0,
     mediaPreviewUrl: null,
     mediaPreviewTicketUrl: null,
+    mediaPreviewController: null,
     mediaPreviewItem: null,
     mediaPreviewGeneration: 0,
     mediaPreviewScale: 1,
@@ -5118,6 +5119,9 @@
 
   function clearMediaPreview() {
     state.mediaPreviewGeneration += 1;
+    const controller = state.mediaPreviewController;
+    state.mediaPreviewController = null;
+    controller?.abort();
     state.mediaPreviewItem = null;
     ui.mediaPreviewVideo.pause();
     ui.mediaPreviewVideo.removeAttribute("src");
@@ -5339,6 +5343,9 @@
     ) return;
     clearMediaPreview();
     const generation = state.mediaPreviewGeneration;
+    // Playback allocation must return its ticket so stale responses can revoke it.
+    const controller = video ? null : new AbortController();
+    state.mediaPreviewController = controller;
     state.mediaPreviewItem = item;
     if (!ui.mediaPreviewDialog.open) ui.mediaPreviewDialog.showModal();
     renderMediaPreviewNavigation();
@@ -5361,7 +5368,7 @@
       }
       const blob = await api(
         `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}/preview`,
-        { responseType: "blob" },
+        { responseType: "blob", signal: controller.signal },
       );
       if (!blob.type.startsWith("image/") || blob.size <= 0 || blob.size > MAX_MEDIA_PREVIEW_BYTES) {
         throw new ApiError("Invalid media preview", { code: "INVALID_MEDIA_PREVIEW" });
@@ -5397,6 +5404,8 @@
       ui.mediaPreviewUnavailable.hidden = false;
       renderMediaPreviewNavigation();
       showToast(normalized.message, true);
+    } finally {
+      if (state.mediaPreviewController === controller) state.mediaPreviewController = null;
     }
   }
 

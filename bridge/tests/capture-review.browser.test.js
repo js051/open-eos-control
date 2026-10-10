@@ -201,7 +201,10 @@ async function holdNextResponse(page, pattern, routeCleanups) {
     await pending;
   });
   await page.route(pattern, handler, { times: 1 });
-  return { release };
+  return { release, settled: () => {
+    assert.ok(pending, "The held response must have reached its handler");
+    return pending;
+  } };
 }
 
 async function assertOneCapture(origin) {
@@ -241,6 +244,60 @@ async function assertNarrowRecoveryLayout(page, language) {
 }
 
 const cases = [
+  {
+    name: "closing pending image preview cancels native fetch and permits reopening",
+    run: async ({ page, simulatorOrigin, cameraWrites, routeCleanups }) => {
+      const writes = cameraWrites.slice();
+      const before = await page.evaluate(() => ({
+        toast: document.querySelector("#toast").textContent,
+        lastError: JSON.parse(document.querySelector("#diagnostics-output").textContent).lastError,
+      }));
+      await page.evaluate(() => {
+        const originalFetch = window.fetch;
+        window.__syntheticPreviewFetch = { observed: false, outcome: null };
+        window.fetch = function (...args) {
+          const result = originalFetch.apply(this, args);
+          const url = String(args[0]);
+          if (!window.__syntheticPreviewFetch.observed && /\/media\/[^/]+\/preview$/.test(url)) {
+            window.__syntheticPreviewFetch.observed = true;
+            // Observe native rejection without replacing the response or signal.
+            return result.then((response) => {
+              window.__syntheticPreviewFetch.outcome = "resolved";
+              return response;
+            }, (error) => {
+              window.__syntheticPreviewFetch.outcome = error.name;
+              throw error;
+            });
+          }
+          return result;
+        };
+        window.__restoreSyntheticPreviewFetch = () => { window.fetch = originalFetch; };
+      });
+      routeCleanups.push(() => page.evaluate(() => window.__restoreSyntheticPreviewFetch()));
+      const previewPattern = /\/v1\/session\/[^/]+\/media\/[^/]+\/preview$/;
+      const held = await holdNextResponse(page, previewPattern, routeCleanups);
+      await Promise.all([page.waitForRequest(previewPattern), page.click("#latest-media-button")]);
+      await page.waitForSelector("#media-preview-dialog[open]");
+      assert.equal(await page.locator("#media-preview-image").getAttribute("src"), null);
+      assert.equal(await page.locator("#media-preview-loading").isVisible(), true);
+      await page.click("#media-preview-close");
+      // The real fetch must reject before the held response or cleanup is released.
+      await page.waitForFunction(() => window.__syntheticPreviewFetch.outcome === "AbortError");
+      assert.equal(await page.locator("#media-preview-dialog").evaluate((dialog) => dialog.open), false);
+      held.release();
+      await held.settled();
+      assert.equal(await page.locator("#media-preview-image").getAttribute("src"), null);
+      assert.deepEqual(await page.evaluate(() => ({
+        toast: document.querySelector("#toast").textContent,
+        lastError: JSON.parse(document.querySelector("#diagnostics-output").textContent).lastError,
+      })), before);
+      await openPreview(page);
+      assert.equal(await page.locator("#media-preview-title").innerText(), "SYNTHETIC_OLD_A.JPG");
+      await page.click("#media-preview-close");
+      assert.deepEqual(cameraWrites, writes);
+      assert.equal((await peerState(simulatorOrigin)).capture_count, 0);
+    },
+  },
   ...["en", "zh-TW"].map((language) => ({
     name: `${language} out-of-range capture review stays isolated`,
     run: async ({ page, simulatorOrigin, listingRequests, cameraWrites, infoRequests, routeCleanups }) => {
