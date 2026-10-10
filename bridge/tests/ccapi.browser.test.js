@@ -620,7 +620,7 @@ async function verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin) {
       await page.waitForFunction(() => !document.querySelector("#media-date-dialog").open);
 
       // Viewer navigation enumerates exactly the filtered photo sequence.
-      await page.locator('.media-card [data-media-id="DATE_ONLY.JPG"]').click();
+      await page.locator('.media-card button.media-card-preview[data-media-id="DATE_ONLY.JPG"]').click();
       for (let index = 0; index < sameDayPhotos.length; index += 1) {
         await page.waitForFunction((name) => document.querySelector("#media-preview-title")?.textContent === name, sameDayPhotos[index]);
         assert.match(await page.locator("#media-preview-meta").innerText(), language === "en"
