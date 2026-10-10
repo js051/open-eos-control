@@ -271,10 +271,10 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "await refreshSession({ quiet: true })" in script
     assert 'String(key).toLowerCase().includes("content")' in script
     assert "contentsChanged && state.mediaLoaded" in script
-    assert "await refreshMedia()" in script
+    assert "await refreshMedia({ preservePreview: true })" in script
     assert "mediaRefreshPromise: null" in script
     assert 'mediaLoadStatus: "NOT_LOADED"' in script
-    assert "function refreshMediaWhenCurrent()" in script
+    assert "function refreshMediaWhenCurrent({ preservePreview = false } = {})" in script
     assert "const LATEST_MEDIA_LIMIT = 8" in script
     assert "?limit=${LATEST_MEDIA_LIMIT}" in script
     assert "function refreshLatestMedia()" in script

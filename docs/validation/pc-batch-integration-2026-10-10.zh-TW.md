@@ -30,7 +30,7 @@
 
 ## 邊界
 
-2026-10-10 使用者已明確批准四批完成整合檢查後正常合併 main 並驗證 main；原先 #224 ready 的拒絕歷史保留。新整合 commit 以 #227 為 first parent，保留 #224／#225／#226 原 heads 為其他 parents，使正常 merge commit 可保存四批完整 ancestry。必須先通過整合 CI、核對當前 heads/base，才進行後續合併。此授權不包含發版或 KVM 權限變更。#219 原始 Compose 根因 UNKNOWN、凍結 v0.13 HOLD 與真機驗收限制不因 PC 整合通過而解除。各獨立批次文件保留當時來源／證據，後續整合狀態以本文件及 exact-head PR CI 摘要為準。
+2026-10-10 使用者已明確批准四批完成整合檢查後正常合併 main 並驗證 main；原先 #224 ready 的拒絕歷史保留。新整合 commit 以 #227 為 first parent，保留 #224／#225／#226 原 heads 為其他 parents，使來源可逐批稽核。其後核實 repo 只允許 squash、不允許 merge commit；因此依既有政策 squash #227，驗證 main tree 與完整整合 head 逐字相同、原 provenance gate 通過後，再將已確實包含的 #224～#226 標明由 #227 取代並正常關閉，不稱為各自 merged，不刪分支或改 repo 設定。必須先通過整合 CI、核對當前 heads/base，才進行後續合併。此授權不包含發版或 KVM 權限變更。#219 原始 Compose 根因 UNKNOWN、凍結 v0.13 HOLD 與真機驗收限制不因 PC 整合通過而解除。各獨立批次文件保留當時來源／證據，後續整合狀態以本文件及 exact-head PR CI 摘要為準。
 
 ## 首次整合 CI 與修正
 
@@ -45,3 +45,6 @@ Artifact `11656896211`（2,285,856 bytes）已下载核驗，SHA256 `6835d8af359
 正常 browser 原英／中兩案例改用有界真 HTTP 回應 gate，分別控制已解碼與 pending preview 遭遇晚到的背景 listing；保留原 12 秒限制與所有篩選、1/1、導航、單次拍攝 assertion。失敗會在 cleanup 前保存 DOM/pageErrors/請求紀錄及畫面；gate 最後釋放並清理，不讓診斷失敗吞掉原失敗。修正後完整正常 CI 仍須重新通過，不能以本地 synthetic 測試代替。
 
 保留 preview 後另以第 18 案重現導航計數仍舊的問題（17 pass／1 fail），補上成功刷新後重算開啟 preview 的導航，但保留目標、URL 與 generation。最終 18 案全過，15 個完整模組腳本也全過（2.332 秒、122,512 KiB）。新 browser gate 限定 recent listing 的 `limit=61`，並等待畫面顯示新的三項總數，避免誤把舊 COMPLETE 或 latest-review 讀取當作背景刷新已完成。
+
+
+第二輪 `a95764d0` 的正常 CI `38017085225` 已通過全部真 browser journeys，包含兩個有控制重疊的英／中拍後 review；desktop 其後在 Python 靜態契約失敗，因仍要求舊無參數 refreshMediaWhenCurrent 字串。僅同步該函式新簽名及背景 event opt-in 契約，沒有刪除安全或功能 assertion。此輪失敗保留；最終候選仍需完整正常 CI。
