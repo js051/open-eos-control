@@ -1,6 +1,12 @@
 import Foundation
 import OpenEOSCore
 
+/// Prepared text retains its admitting connection through the final UI publish.
+struct CameraSessionExport {
+    let text: String
+    fileprivate let owner: UUID
+}
+
 @MainActor
 final class CameraAppState: ObservableObject {
     static let latestMediaRequestItemCount = 8
@@ -115,7 +121,10 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var busyOperations = Set<CameraOperation>()
 
     private let defaults: UserDefaults
-    private var session: CameraSession?
+    private var session: CameraSession? {
+        didSet { exportGeneration = UUID() }
+    }
+    private var exportGeneration = UUID()
     private let sessionFactory: (@MainActor () throws -> CameraSession)?
     private var sessionGeneration = UUID()
     private var disconnectTask: Task<Void, Never>?
@@ -350,6 +359,7 @@ final class CameraAppState: ObservableObject {
 
     func connect() async {
         guard session == nil, !isPreview, begin(.connect) else { return }
+        exportGeneration = UUID()
         let generation = sessionGeneration
         defer { end(.connect, generation: generation) }
         await disconnectTask?.value
@@ -1920,7 +1930,9 @@ final class CameraAppState: ObservableObject {
         }
     }
 
-    func diagnosticReport() async -> String {
+    func diagnosticReport() async throws -> CameraSessionExport {
+        try Task.checkCancellation()
+        let owner = exportGeneration
         let metrics = CCAPILiveViewMetrics(
             requestedFPS: requestedFPS,
             observedFPS: observedFPS,
@@ -1930,27 +1942,6 @@ final class CameraAppState: ObservableObject {
             sourceURL: frameSourceURL,
             lastFrameAt: lastFrameAt
         )
-        let report: String
-        if let session {
-            report = await session.diagnosticReport(snapshot: snapshot, liveView: metrics, lastError: lastError)
-        } else if connectionMode == .desktopBridge, let url = URL(string: bridgeURL) {
-            report = DesktopBridgeDiagnosticReport.make(
-                baseURL: url,
-                snapshot: snapshot,
-                liveView: metrics,
-                lastError: lastError
-            )
-        } else {
-            let url = URL(string: baseURL) ?? URL(string: Self.defaultCameraURL)!
-            report = CCAPIDiagnosticReport.make(
-                baseURL: url,
-                mode: isPreview ? .simulator : .automatic,
-                versions: isPreview ? ["offline-preview"] : [],
-                snapshot: snapshot,
-                liveView: metrics,
-                lastError: lastError
-            )
-        }
         let monitoring = [
             "mediaItemCount=\(mediaItems.count)",
             "mediaLoadStatus=\(mediaLibraryLoadStatus.rawValue)",
@@ -1988,7 +1979,36 @@ final class CameraAppState: ObservableObject {
             "rtpAudioReason=\(rtpAudioStatus.reason ?? "none")",
             "rtpAudioError=\(rtpAudioStatus.error ?? "none")",
         ].joined(separator: "\n")
-        return "\(report)\n\(monitoring)"
+        let report: String
+        if let session {
+            report = await session.diagnosticReport(snapshot: snapshot, liveView: metrics, lastError: lastError)
+        } else if connectionMode == .desktopBridge, let url = URL(string: bridgeURL) {
+            report = DesktopBridgeDiagnosticReport.make(
+                baseURL: url,
+                snapshot: snapshot,
+                liveView: metrics,
+                lastError: lastError
+            )
+        } else {
+            let url = URL(string: baseURL) ?? URL(string: Self.defaultCameraURL)!
+            report = CCAPIDiagnosticReport.make(
+                baseURL: url,
+                mode: isPreview ? .simulator : .automatic,
+                versions: isPreview ? ["offline-preview"] : [],
+                snapshot: snapshot,
+                liveView: metrics,
+                lastError: lastError
+            )
+        }
+        try Task.checkCancellation()
+        guard owner == exportGeneration else { throw CancellationError() }
+        return CameraSessionExport(text: "\(report)\n\(monitoring)", owner: owner)
+    }
+
+    /// Call on the main actor immediately before publishing, without an await
+    /// between this check and the clipboard write or copied-success UI update.
+    func canPublishExport(_ export: CameraSessionExport) -> Bool {
+        export.owner == exportGeneration && !Task.isCancelled
     }
 
     func setOperatorConfirmation(_ feature: CameraFeature, confirmed: Bool) {
@@ -2000,14 +2020,24 @@ final class CameraAppState: ObservableObject {
         }
     }
 
-    func physicalValidationRecord() async throws -> String {
-        let report = await diagnosticReport()
-        return try PhysicalValidationRecord.make(
-            summary: physicalValidation,
-            info: info,
-            transport: transportIdentifier,
-            diagnosticReport: report
+    func physicalValidationRecord() async throws -> CameraSessionExport {
+        try Task.checkCancellation()
+        let owner = exportGeneration
+        let summary = physicalValidation
+        let cameraInfo = info
+        let transport = transportIdentifier
+        guard summary.sessionStatus == .ready else {
+            throw PhysicalValidationRecord.ValidationError.physicalCameraRequired
+        }
+        let report = try await diagnosticReport()
+        guard owner == exportGeneration, canPublishExport(report) else { throw CancellationError() }
+        let text = try PhysicalValidationRecord.make(
+            summary: summary,
+            info: cameraInfo,
+            transport: transport,
+            diagnosticReport: report.text
         )
+        return CameraSessionExport(text: text, owner: owner)
     }
 
     func clearError() {
