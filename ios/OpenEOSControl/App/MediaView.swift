@@ -15,6 +15,9 @@ struct MediaView: View {
     @State private var isFileImporterPresented = false
     @State private var mediaFilter = MediaFilter.all
     @State private var mediaSort = MediaSort.newest
+    @State private var isFolderFilterPresented = false
+    @State private var folderFilterOwner: UUID?
+    @State private var folderFilterDraft = MediaFolderFilter.all
     @State private var isRatingFilterPresented = false
     @State private var ratingFilterOwner: UUID?
     @State private var ratingFilterDraft = MediaRatingFilter.all
@@ -35,47 +38,44 @@ struct MediaView: View {
             if camera.activeMediaUploadName != nil || camera.mediaUploadError != nil || camera.uploadedMediaName != nil {
                 uploadStatus
             }
-            if camera.mediaLibraryLoading, camera.mediaItems.isEmpty {
-                Spacer()
-                ProgressView("loading_media").tint(Color.cameraAccent)
-                    .accessibilityIdentifier("media-library-loading-empty")
-                Spacer()
-            } else if camera.mediaItems.isEmpty, camera.mediaLibraryLoadStatus == .cancelled {
-                ContentUnavailableView("media_load_cancelled", systemImage: "pause.circle")
-                    .frame(maxHeight: .infinity)
-            } else if camera.mediaItems.isEmpty, camera.mediaLibraryLoadStatus == .failed {
-                ContentUnavailableView("media_load_failed", systemImage: "exclamationmark.triangle")
-                    .frame(maxHeight: .infinity)
-            } else if camera.mediaItems.isEmpty {
-                ContentUnavailableView("no_media", systemImage: "photo.on.rectangle.angled")
-                    .frame(maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        mediaToolbar
-                        if displayedMedia.isEmpty {
-                            ContentUnavailableView("no_media", systemImage: "line.3.horizontal.decrease.circle")
-                                .frame(minHeight: 180)
-                        } else {
-                            LazyVStack(alignment: .leading, spacing: 12) {
-                                ForEach(mediaGroups) { group in
-                                    if let title = group.title {
-                                        Text(title)
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(Color.cameraSecondaryText)
-                                            .padding(.top, 4)
-                                    }
-                                    LazyVGrid(columns: mediaColumns, alignment: .leading, spacing: 10) {
-                                        ForEach(group.items) { item in
-                                            mediaCard(item)
-                                                .task(id: item.id) { await camera.loadMediaThumbnail(item) }
-                                        }
+            ScrollView {
+                VStack(spacing: 0) {
+                    mediaToolbar
+                    if camera.mediaLibraryLoading, camera.mediaItems.isEmpty {
+                        ProgressView("loading_media").tint(Color.cameraAccent)
+                            .accessibilityIdentifier("media-library-loading-empty")
+                            .frame(minHeight: 180)
+                    } else if camera.mediaItems.isEmpty, camera.mediaLibraryLoadStatus == .cancelled {
+                        ContentUnavailableView("media_load_cancelled", systemImage: "pause.circle")
+                            .frame(minHeight: 180)
+                    } else if camera.mediaItems.isEmpty, camera.mediaLibraryLoadStatus == .failed {
+                        ContentUnavailableView("media_load_failed", systemImage: "exclamationmark.triangle")
+                            .frame(minHeight: 180)
+                    } else if camera.mediaItems.isEmpty {
+                        ContentUnavailableView("no_media", systemImage: "photo.on.rectangle.angled")
+                            .frame(minHeight: 180)
+                    } else if displayedMedia.isEmpty {
+                        ContentUnavailableView("no_media", systemImage: "line.3.horizontal.decrease.circle")
+                            .frame(minHeight: 180)
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 12) {
+                            ForEach(mediaGroups) { group in
+                                if let title = group.title {
+                                    Text(title)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(Color.cameraSecondaryText)
+                                        .padding(.top, 4)
+                                }
+                                LazyVGrid(columns: mediaColumns, alignment: .leading, spacing: 10) {
+                                    ForEach(group.items) { item in
+                                        mediaCard(item)
+                                            .task(id: item.id) { await camera.loadMediaThumbnail(item) }
                                     }
                                 }
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.bottom, 20)
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 20)
                     }
                 }
             }
@@ -104,9 +104,12 @@ struct MediaView: View {
             dateFilterOwner = nil
             isRatingFilterPresented = false
             ratingFilterOwner = nil
+            isFolderFilterPresented = false
+            folderFilterOwner = nil
         }
         .sheet(isPresented: $isDateFilterPresented) { dateFilterSheet }
         .sheet(isPresented: $isRatingFilterPresented) { ratingFilterSheet }
+        .sheet(isPresented: $isFolderFilterPresented) { folderFilterSheet }
         .fullScreenCover(
             isPresented: Binding(
                 get: { camera.mediaPreviewItem != nil },
@@ -275,6 +278,33 @@ struct MediaView: View {
                 }
                 .foregroundStyle(Color.cameraText)
                 .accessibilityIdentifier("media-sort")
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    folderFilterOwner = camera.mediaLibrarySessionID
+                    folderFilterDraft = camera.mediaFolderFilter
+                    isFolderFilterPresented = true
+                } label: {
+                    Label(language.string("media_folder_filter"), systemImage: "folder")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("media-folder-filter")
+                if camera.mediaFolderFilter != .all {
+                    Text(folderFilterLabel(camera.mediaFolderFilter))
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("media-folder-applied")
+                    Text(folderFilterSummary)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("media-folder-summary")
+                    Button(language.string("media_folder_clear")) {
+                        camera.setMediaFolderFilter(.all, owner: camera.mediaLibrarySessionID)
+                    }
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("media-folder-clear")
+                }
             }
             VStack(alignment: .leading, spacing: 6) {
                 Button {
@@ -682,6 +712,96 @@ struct MediaView: View {
         }
     }
 
+    private var folderChoices: [CameraMediaFolder] {
+        var folders = mediaFolderOptions(camera.mediaItems).map(\.folder)
+        if case let .folder(selected) = camera.mediaFolderFilter,
+           !folders.contains(where: { mediaFolderIdentity($0) == mediaFolderIdentity(selected) }) {
+            folders.append(selected)
+        }
+        return folders
+    }
+
+    private func folderFilterLabel(_ filter: MediaFolderFilter) -> String {
+        switch filter {
+        case .all: return language.string("media_folder_all")
+        case .unknown: return language.string("media_folder_unknown")
+        case let .folder(folder):
+            if let current = mediaFolderOptions(camera.mediaItems).first(where: { $0.id == mediaFolderIdentity(folder) }) {
+                return folderChoiceLabel(current.folder)
+            }
+            return folder.label + " · " + language.string("media_folder_missing")
+        }
+    }
+
+    private func folderChoiceLabel(_ folder: CameraMediaFolder) -> String {
+        let duplicates = folderChoices.filter { $0.label == folder.label }
+        guard duplicates.count > 1, let index = duplicates.firstIndex(where: { mediaFolderIdentity($0) == mediaFolderIdentity(folder) }) else {
+            return folder.label
+        }
+        return language.format("media_folder_duplicate", folder.label, index + 1)
+    }
+
+    private func folderChoiceButton(_ filter: MediaFolderFilter, label: String, identifier: String) -> some View {
+        Button { folderFilterDraft = filter } label: {
+            HStack {
+                Text(label).lineLimit(3)
+                Spacer()
+                if folderFilterDraft == filter { Image(systemName: "checkmark") }
+            }
+            .frame(minHeight: 44)
+        }
+        .accessibilityLabel(Text(label))
+        .accessibilityIdentifier(identifier)
+        .accessibilityAddTraits(folderFilterDraft == filter ? [.isSelected] : [])
+    }
+
+    private var folderFilterSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    folderChoiceButton(.all, label: language.string("media_folder_all"), identifier: "media-folder-choice-all")
+                    folderChoiceButton(.unknown, label: language.string("media_folder_unknown"), identifier: "media-folder-choice-unknown")
+                    ForEach(folderChoices, id: \.folderViewIdentity) { folder in
+                        folderChoiceButton(.folder(folder), label: folderChoiceLabel(folder),
+                            identifier: "media-folder-choice-known-\(folder.id)")
+                    }
+                }
+                Section {
+                    Text(language.string("media_folder_loaded_only"))
+                    if case let .folder(selected) = camera.mediaFolderFilter,
+                       !mediaFolderOptions(camera.mediaItems).contains(where: { $0.id == mediaFolderIdentity(selected) }) {
+                        Text(language.string("media_folder_missing"))
+                    }
+                }
+            }
+            .navigationTitle(language.string("media_folder_filter"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(language.string("cancel")) { isFolderFilterPresented = false }
+                        .accessibilityIdentifier("media-folder-cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(language.string("apply")) {
+                        guard let owner = folderFilterOwner else { return }
+                        camera.setMediaFolderFilter(folderFilterDraft, owner: owner)
+                        isFolderFilterPresented = false
+                    }
+                    .disabled(folderFilterOwner != camera.mediaLibrarySessionID)
+                    .accessibilityIdentifier("media-folder-apply")
+                }
+            }
+        }
+    }
+
+    private var folderFilterSummary: String {
+        let summary = mediaFolderFilterSummary(camera.mediaItems, filter: mediaFilter,
+            dateRange: camera.mediaDateRange, ratingFilter: camera.mediaRatingFilter,
+            folderFilter: camera.mediaFolderFilter)
+        return language.format("media_folder_summary", summary.matchedCount, summary.loadedCount,
+            summary.unknownFolderCount) + " " + language.string("media_folder_loaded_only")
+    }
+
     private var ratingFilterSheet: some View {
         NavigationStack {
             Form {
@@ -728,7 +848,7 @@ struct MediaView: View {
 
     private var ratingFilterSummary: String {
         let summary = mediaRatingFilterSummary(camera.mediaItems, filter: mediaFilter,
-            dateRange: camera.mediaDateRange, ratingFilter: camera.mediaRatingFilter)
+            dateRange: camera.mediaDateRange, ratingFilter: camera.mediaRatingFilter, folderFilter: camera.mediaFolderFilter)
         return language.format("media_rating_summary", summary.matchedCount, summary.loadedCount,
                                summary.unknownRatingCount) + " " + language.string("media_rating_loaded_only")
     }
@@ -746,14 +866,14 @@ struct MediaView: View {
 
     private var dateFilterSummary: String {
         let summary = mediaDateFilterSummary(camera.mediaItems, filter: mediaFilter, dateRange: camera.mediaDateRange,
-            ratingFilter: camera.mediaRatingFilter)
+            ratingFilter: camera.mediaRatingFilter, folderFilter: camera.mediaFolderFilter)
         return language.format("media_date_summary", summary.matchedCount, summary.loadedCount,
                                summary.unknownDateCount) + " " + language.string("media_date_loaded_only")
     }
 
     private var displayedMedia: [CameraMediaItem] {
         mediaItemsForDisplay(camera.mediaItems, filter: mediaFilter, sort: mediaSort, dateRange: camera.mediaDateRange,
-            ratingFilter: camera.mediaRatingFilter)
+            ratingFilter: camera.mediaRatingFilter, folderFilter: camera.mediaFolderFilter)
     }
 
     private var mediaLibrarySummary: String {
@@ -1413,4 +1533,9 @@ private struct CameraVideoPreview: View {
             return "media_video_unavailable"
         }
     }
+}
+
+
+private extension CameraMediaFolder {
+    var folderViewIdentity: Data { mediaFolderIdentity(self) }
 }

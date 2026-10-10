@@ -84,6 +84,57 @@ final class MediaResponseOwnershipTests: XCTestCase {
         }
     }
 
+    func testFolderFilterAndClearPreserveSelectedPreviewAndDownloadWithoutRequests() async throws {
+        for bridge in [false, true] {
+            let peer = MediaOwnershipPeer()
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            let item = try XCTUnwrap(state.latestMediaItem)
+            await state.openMediaPreview(item)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewItem).id, item.id)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewData), MediaOwnershipPeer.imageBytes)
+            state.startMediaDownload(item)
+            let download = try XCTUnwrap(state.mediaDownloadTask)
+            await download.value
+            let downloadedFile = try XCTUnwrap(state.downloadedFile(for: item))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: downloadedFile.path))
+            XCTAssertEqual(try Data(contentsOf: downloadedFile), MediaOwnershipPeer.imageBytes)
+            let owner = state.mediaLibrarySessionID
+            let items = state.mediaItems
+            XCTAssertTrue(items.contains { $0.id == item.id })
+            let scope = state.mediaLibraryScope
+            let status = state.mediaLibraryLoadStatus
+            let hasMore = state.mediaLibraryHasMore
+            let requests = await peer.requestOperations()
+            let limits = await peer.listLimits()
+            let excluded = try XCTUnwrap(CameraMediaFolder(id: "synthetic:not-loaded", label: "Not loaded"))
+            XCTAssertFalse(items.contains { $0.folder.map { mediaFolderIdentity($0) } == mediaFolderIdentity(excluded) })
+            XCTAssertTrue(state.setMediaFolderFilter(.folder(excluded), owner: owner))
+            XCTAssertTrue(mediaItemsForDisplay(items, filter: .all, sort: .camera,
+                folderFilter: state.mediaFolderFilter).isEmpty)
+            XCTAssertEqual(state.mediaFolderFilter, .folder(excluded))
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            XCTAssertEqual(state.downloadedFile(for: item), downloadedFile)
+            XCTAssertTrue(state.setMediaFolderFilter(.all, owner: owner))
+            XCTAssertEqual(mediaItemsForDisplay(state.mediaItems, filter: .all, sort: .camera,
+                folderFilter: state.mediaFolderFilter), items)
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            XCTAssertEqual(state.downloadedFile(for: item), downloadedFile)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: downloadedFile.path))
+            XCTAssertEqual(state.mediaItems, items)
+            XCTAssertEqual(state.mediaLibraryScope, scope)
+            XCTAssertEqual(state.mediaLibraryLoadStatus, status)
+            XCTAssertEqual(state.mediaLibraryHasMore, hasMore)
+            let afterRequests = await peer.requestOperations()
+            let afterLimits = await peer.listLimits()
+            XCTAssertEqual(afterRequests, requests, "Folder selection cannot list, preview, download, or mutate media")
+            XCTAssertEqual(afterLimits, limits, "Folder selection cannot request full-card enumeration")
+        }
+    }
+
     func testRetiredInfoAndEveryMetadataResponseCannotOwnReplacementSession() async throws {
         for bridge in [false, true] {
             for operation in OwnershipOperation.metadataAndInfo {
@@ -479,6 +530,7 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
         plans[operation, default: []].append(Plan(gate: gate, error: error))
     }
     func currentItem() -> CameraMediaItem { item }
+    func requestOperations() -> [OwnershipOperation] { operations }
     func count(_ operation: OwnershipOperation) -> Int { operations.filter { $0 == operation }.count }
     func listLimits() -> [String?] { limits }
     func mutationOperations() -> [OwnershipOperation] {

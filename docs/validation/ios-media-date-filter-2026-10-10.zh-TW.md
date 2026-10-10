@@ -48,3 +48,16 @@ Latest released baseline：v0.12.0 Development Preview。這是新使用者可�
 評分 sheet 使用英文／繁中、可捲動選項、取消／套用／清除；草稿綁定 media library session 身分，斷線清除已套用條件並退休舊草稿。套用／清除不改載入項目或既有預覽資料，也不逐檔查詢 metadata。日期摘要 matched 反映評分交集，unknown 日期只計所選種類／評分；評分摘要 unknown 則計所選種類／日期範圍，避免先被 unknown 篩選自身消去。所有分母仍是已載入清單，並非全卡。
 
 新 helper 測試、session 正向／舊 owner 反例及 CCAPI／Bridge 真選取保留與請求計數測試已寫。既有雙語大字級 UI 旅程延伸評分取消、5 星套用、清除及原素材可達性。Swift 本機不可用，新版編譯／runtime NOT_RUN，待此完整批次正常 CI；來源檢查不代表視覺或實機通過。完整 App 驗收仍集中於開發之後，PR 不合併 main、不發版。
+
+## 同批資料夾契約與完整挑片範圍
+
+本批接續既有公開 EOS folderId/folderLabel 契約，Core 以成對可選 CameraMediaFolder 表示。Bridge 只消費回覆中的合法 pair；缺漏／非法保持 unknown。原生 CCAPI 只從已驗 listing 父路徑取來源，不從 caller ID、檔名、host 路徑推測；info/metadata readback 保留原生已知來源，不加任何逐檔查詢。此為公開 EOS 互操作資料，不包含私有消費端資訊。
+
+資料夾 sheet 與日期／評分／類型交集，按 exact opaque ID 選取。未知與全部明確分開，同名不同 ID 不合併；清除只清資料夾，舊 session 草稿不能套用。選中的 folder 暫未載入仍保持零匹配及可清除，不悄悄放寬範圍。摘要使用目前載入分母，保留最近／全部、取消／失敗／部分清單提示。長名稱可省略畫面行數但 accessible label 保留完整文字，選項可捲動。
+
+Core transport、helper 交集／長清單、session 及真選取保留測試來源需由整批新 CI 驗證。本機沒有 Swift，新增來源 runtime NOT_RUN。雙語大字級 UI 來源覆蓋日期、rating、known/unknown folder 的取消／套用／清除；40 個長名稱資料夾的 helper 測試不等同真 40 選項 UI touch，該視覺/操作驗收仍未執行。不新增 App fixture 框架或改 simulator/Android gates 來假稱覆蓋。
+
+本次完整功能群是已載入素材挑片與單項預覽的一致性。PC/iOS 多選與批次原檔交付尚無既有 state/UI，仍是原 P2 計畫後續流程；不能把這輪篩選稱為整個 P2 或完整產品完成。沒有 main 合併或發版，集中 App／實機驗收仍後置。
+
+
+整批獨立來源審查修正三個邊界：空載入清單仍保留日期／評分／資料夾 Clear 控制；Swift String 的 Unicode canonical equality 不可代表 opaque ID，因此 Core equality、Bridge response ID、App grouping/filter/SwiftUI row identity 全部採 UTF-8 exact 身分，並有組合／分解 Unicode 反例；UI 滾動 helper 會依目標在 viewport 上方或下方決定方向，不增加 timeout。另新增離線刪除最後素材後仍可清除條件的 UI 旅程與方向幾何控制。這些新增 source 尚待整批 runtime，不能稱已執行反例。

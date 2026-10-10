@@ -2080,9 +2080,22 @@ public actor CCAPIClient {
                 id: $0,
                 name: ($0 as NSString).lastPathComponent,
                 kind: Self.mediaKind($0),
-                previewAvailable: Self.isCCAPIDisplayPreviewPath($0)
+                previewAvailable: Self.isCCAPIDisplayPreviewPath($0),
+                folder: Self.listedMediaFolder($0)
             )
         }
+    }
+
+    /// Called only for normalized paths from a successful camera listing, never caller-supplied item IDs.
+    private static func listedMediaFolder(_ path: String) -> CameraMediaFolder? {
+        guard let separator = path.lastIndex(of: "/") else { return nil }
+        let parent = String(path[..<separator])
+        // Qualify the encoded path before decoding: other/contents and encoded endpoint names
+        // remain browsable media but do not establish folder provenance.
+        guard parent.range(of: #"^/ccapi/ver[0-9]+/contents(?:/.+)?$"#, options: .regularExpression) != nil,
+              let prefix = parent.range(of: #"^/ccapi/ver[0-9]+/contents"#, options: .regularExpression),
+              let label = String(parent[prefix.upperBound...]).removingPercentEncoding else { return nil }
+        return CameraMediaFolder(id: parent, label: label.isEmpty ? "/" : label)
     }
 
     public func downloadMedia(
@@ -2392,7 +2405,8 @@ public actor CCAPIClient {
             archived: archived,
             contentType: item.contentType,
             widthPixels: item.widthPixels,
-            heightPixels: item.heightPixels
+            heightPixels: item.heightPixels,
+            folder: item.folder
         )
     }
 

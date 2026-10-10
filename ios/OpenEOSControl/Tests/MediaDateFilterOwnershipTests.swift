@@ -1,4 +1,5 @@
 import Foundation
+import OpenEOSCore
 import XCTest
 @testable import OpenEOSControl
 
@@ -67,6 +68,100 @@ final class MediaDateFilterOwnershipTests: XCTestCase {
                 XCTAssertEqual(state.mediaItems, items)
             }
         }
+    }
+
+    func testFolderFilterRetiresOnDisconnectAndRejectsOldApplyAndClear() throws {
+        try withState { state in
+            state.openOfflinePreview()
+            let folder = try XCTUnwrap(state.mediaItems.first?.folder)
+            let oldOwner = state.mediaLibrarySessionID
+            XCTAssertTrue(state.setMediaFolderFilter(.folder(folder), owner: oldOwner))
+            state.requestDisconnect()
+            XCTAssertNotEqual(state.mediaLibrarySessionID, oldOwner)
+            XCTAssertEqual(state.mediaFolderFilter, .all)
+            XCTAssertFalse(state.setMediaFolderFilter(.folder(folder), owner: oldOwner))
+            XCTAssertFalse(state.setMediaFolderFilter(.all, owner: oldOwner))
+            state.openOfflinePreview()
+            let newOwner = state.mediaLibrarySessionID
+            XCTAssertTrue(state.setMediaFolderFilter(.unknown, owner: newOwner))
+            XCTAssertFalse(state.setMediaFolderFilter(.folder(folder), owner: oldOwner))
+            XCTAssertFalse(state.setMediaFolderFilter(.all, owner: oldOwner))
+            XCTAssertEqual(state.mediaFolderFilter, .unknown)
+            XCTAssertEqual(state.mediaLibrarySessionID, newOwner)
+        }
+    }
+
+    func testCurrentFolderFilterPreservesDateRatingAndLoadedLibraryWithoutImplicitLoadAll() throws {
+        try withState { state in
+            state.openOfflinePreview()
+            let owner = state.mediaLibrarySessionID
+            let range = try makeRange()
+            let loadedFolder = try XCTUnwrap(state.mediaItems.first?.folder)
+            let missingFolder = try XCTUnwrap(CameraMediaFolder(id: "synthetic:missing", label: loadedFolder.label))
+            XCTAssertTrue(state.setMediaDateRange(range, owner: owner))
+            XCTAssertTrue(state.setMediaRatingFilter(.atLeast3, owner: owner))
+            let items = state.mediaItems
+            let scope = state.mediaLibraryScope
+            let loadStatus = state.mediaLibraryLoadStatus
+            let hasMore = state.mediaLibraryHasMore
+            XCTAssertFalse(items.isEmpty)
+            for filter in [MediaFolderFilter.folder(loadedFolder), .unknown, .folder(missingFolder), .all] {
+                XCTAssertTrue(state.setMediaFolderFilter(filter, owner: owner))
+                XCTAssertEqual(state.mediaFolderFilter, filter)
+                XCTAssertEqual(state.mediaDateRange, range)
+                XCTAssertEqual(state.mediaRatingFilter, .atLeast3)
+                XCTAssertEqual(state.mediaItems, items)
+                XCTAssertEqual(state.mediaLibraryScope, scope)
+                XCTAssertEqual(state.mediaLibraryLoadStatus, loadStatus)
+                XCTAssertEqual(state.mediaLibraryHasMore, hasMore)
+                XCTAssertFalse(state.mediaLibraryLoading)
+            }
+            XCTAssertTrue(state.setMediaFolderFilter(.folder(missingFolder), owner: owner))
+            XCTAssertTrue(mediaItemsForDisplay(state.mediaItems, filter: .all, sort: .camera,
+                folderFilter: state.mediaFolderFilter).isEmpty)
+            XCTAssertEqual(state.mediaFolderFilter, .folder(missingFolder))
+        }
+    }
+
+    func testOfflineRawJpegFolderSurvivesAllMetadataCopiesAndVideoStaysUnknown() async throws {
+        let suite = "MediaFolderMetadataTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = CameraAppState(defaults: defaults)
+        defer { state.requestDisconnect() }
+        state.openOfflinePreview()
+        let raw = try XCTUnwrap(state.mediaItems.first { $0.name.hasSuffix(".CR3") })
+        let jpeg = try XCTUnwrap(state.mediaItems.first { $0.name.hasSuffix(".JPG") })
+        let video = try XCTUnwrap(state.mediaItems.first { mediaIsVideo($0) })
+        let folder = try XCTUnwrap(raw.folder)
+        XCTAssertEqual(folder.id, "synthetic:preview-folder")
+        XCTAssertEqual(folder.label, "card1/DCIM/100CANON")
+        XCTAssertEqual(jpeg.folder, folder)
+        XCTAssertNotEqual(raw.id, jpeg.id)
+        XCTAssertNil(video.folder)
+        XCTAssertTrue(state.setMediaFolderFilter(.folder(folder), owner: state.mediaLibrarySessionID))
+        for original in [raw, jpeg] {
+            await state.setMediaProtection(original, enabled: !(original.protected ?? false))
+            var updated = try XCTUnwrap(state.mediaItems.first { $0.id == original.id })
+            XCTAssertEqual(updated.folder, folder)
+            await state.setMediaRating(updated, rating: 4)
+            updated = try XCTUnwrap(state.mediaItems.first { $0.id == original.id })
+            XCTAssertEqual(updated.folder, folder)
+            await state.setMediaRotation(updated, degrees: 180)
+            updated = try XCTUnwrap(state.mediaItems.first { $0.id == original.id })
+            XCTAssertEqual(updated.folder, folder)
+            await state.setMediaArchive(updated, enabled: true)
+            updated = try XCTUnwrap(state.mediaItems.first { $0.id == original.id })
+            XCTAssertEqual(updated.folder, folder)
+            XCTAssertEqual(updated.protected, !(original.protected ?? false))
+            XCTAssertEqual(updated.rating, 4)
+            XCTAssertEqual(updated.rotationDegrees, 180)
+            XCTAssertEqual(updated.archived, true)
+        }
+        XCTAssertEqual(state.mediaFolderFilter, .folder(folder))
+        XCTAssertEqual(mediaItemsForDisplay(state.mediaItems, filter: .all, sort: .camera,
+            folderFilter: state.mediaFolderFilter).map(\.id), [raw.id, jpeg.id])
+        XCTAssertEqual(state.mediaItems.first { $0.id == video.id }, video)
     }
 
     private func makeRange(offset: TimeInterval = 0) throws -> MediaDateRange {

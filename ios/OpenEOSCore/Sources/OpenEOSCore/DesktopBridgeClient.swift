@@ -840,7 +840,7 @@ public actor DesktopBridgeClient {
 
     public func mediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {
         let body = try await getJSON(sessionEndpoint(["media", item.id, "info"]))
-        guard let updated = Self.parseMediaItem(body) else {
+        guard let updated = Self.parseMediaItem(body), updated.id.utf8.elementsEqual(item.id.utf8) else {
             throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid media information.")
         }
         return updated
@@ -878,7 +878,7 @@ public actor DesktopBridgeClient {
             method: "PUT",
             payload: payload
         )
-        guard let updated = Self.parseMediaItem(body) else {
+        guard let updated = Self.parseMediaItem(body), updated.id.utf8.elementsEqual(item.id.utf8) else {
             throw DesktopBridgeError.invalidResponse(
                 "Desktop Bridge returned invalid media information after updating \(item.name)."
             )
@@ -1575,6 +1575,12 @@ public actor DesktopBridgeClient {
         let rating = item.int("rating").flatMap { (0...5).contains($0) ? $0 : nil }
         let rotation = item.int("rotationDegrees").flatMap { mediaRotations.contains($0) ? $0 : nil }
         let archived = item.optionalBool("archived")
+        let folder: CameraMediaFolder?
+        if let id = item.string("folderId"), let label = item.string("folderLabel") {
+            folder = CameraMediaFolder(id: id, label: label)
+        } else {
+            folder = nil
+        }
         return CameraMediaItem(
             id: id,
             name: name,
@@ -1588,7 +1594,8 @@ public actor DesktopBridgeClient {
             archived: archived,
             contentType: item.nonEmptyString("contentType"),
             widthPixels: item.int("widthPixels").flatMap { $0 > 0 ? $0 : nil },
-            heightPixels: item.int("heightPixels").flatMap { $0 > 0 ? $0 : nil }
+            heightPixels: item.int("heightPixels").flatMap { $0 > 0 ? $0 : nil },
+            folder: folder
         )
     }
 

@@ -675,6 +675,240 @@ final class MediaLibraryTests: XCTestCase {
         )
     }
 
+    func testFolderOptionsGroupExactIDsAndResolveLabelConflictsDeterministically() throws {
+        let first = try folder("card1/100CANON", "100CANON")
+        let renamed = try folder("card1/100CANON", "Renamed")
+        let second = try folder("card2/100CANON", "100CANON")
+        let differentCase = try folder("CARD1/100CANON", "100CANON")
+        let items = [
+            media("raw", "PAIR.CR3", nil, folder: renamed),
+            media("jpeg", "PAIR.JPG", nil, folder: first),
+            media("second", "PAIR.JPG", nil, folder: second),
+            media("case", "PAIR.JPG", nil, folder: differentCase),
+            media("unknown", "card1/100CANON/IMAGE.JPG", nil),
+        ]
+        let expected = [
+            MediaFolderOption(folder: differentCase, itemCount: 1),
+            MediaFolderOption(folder: first, itemCount: 2),
+            MediaFolderOption(folder: second, itemCount: 1),
+        ]
+        XCTAssertEqual(mediaFolderOptions(items), expected)
+        XCTAssertEqual(mediaFolderOptions(Array(items.reversed())), expected)
+        XCTAssertEqual(MediaFolderFilter.folder(first), .folder(renamed))
+        XCTAssertNotEqual(MediaFolderFilter.folder(first), .folder(second))
+        XCTAssertNotEqual(MediaFolderFilter.folder(first), .folder(differentCase))
+        XCTAssertNotEqual(MediaFolderFilter.all, .unknown)
+        XCTAssertNotEqual(MediaFolderFilter.folder(first), .unknown)
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .camera, folderFilter: .folder(first)),
+            [items[0], items[1]],
+            "RAW and JPEG keep separate file identities in their exact folder"
+        )
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .camera, folderFilter: .folder(second)),
+            [items[2]],
+            "Identical display labels cannot merge different folders"
+        )
+    }
+
+    func testFolderUnknownDoesNotGuessFromFilenameIDOrKindAndAllKeepsLoadedOrder() throws {
+        let known = try folder("opaque-known", "Known")
+        let items = [
+            media("card1/DCIM/100CANON/IMAGE.JPG", "100CANON/IMAGE.JPG", nil),
+            media("ptp:storage/parent/file", "DIRECTORY.CR3", nil),
+            media("known", "CLIP.MP4", nil, folder: known),
+        ]
+        XCTAssertEqual(mediaItemsForDisplay(items, filter: .all, sort: .camera), items)
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .camera, folderFilter: .all), items
+        )
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .camera, folderFilter: .unknown),
+            Array(items.prefix(2))
+        )
+        XCTAssertEqual(mediaFolderOptions(items), [MediaFolderOption(folder: known, itemCount: 1)])
+        XCTAssertEqual(
+            mediaFolderFilterSummary(items, filter: .all, folderFilter: .folder(known)),
+            MediaFolderFilterSummary(loadedCount: 3, matchedCount: 1, unknownFolderCount: 2)
+        )
+    }
+
+    func testCanonicallyEquivalentFolderIDsKeepDistinctWireIdentities() throws {
+        let composed = try folder("caf\u{00E9}", "Shared label")
+        let decomposed = try folder("cafe\u{0301}", "Shared label")
+        XCTAssertEqual(composed.id, decomposed.id, "The fixture must exercise Swift canonical String equality")
+        XCTAssertNotEqual(mediaFolderIdentity(composed), mediaFolderIdentity(decomposed))
+        XCTAssertNotEqual(MediaFolderFilter.folder(composed), .folder(decomposed))
+        let items = [
+            media("composed-raw", "PAIR.CR3", nil, folder: composed),
+            media("decomposed", "PAIR.JPG", nil, folder: decomposed),
+            media("composed-jpeg", "PAIR.JPG", nil, folder: composed),
+        ]
+        let expected = [
+            MediaFolderOption(folder: decomposed, itemCount: 1),
+            MediaFolderOption(folder: composed, itemCount: 2),
+        ]
+        XCTAssertEqual(mediaFolderOptions(items), expected)
+        XCTAssertEqual(mediaFolderOptions(Array(items.reversed())), expected)
+        XCTAssertEqual(Set(mediaFolderOptions(items).map(\.id)).count, 2)
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .camera, folderFilter: .folder(composed)),
+            [items[0], items[2]]
+        )
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .all, sort: .camera, folderFilter: .folder(decomposed)),
+            [items[1]]
+        )
+    }
+
+    func testCanonicalLabelConflictsChooseStableBytesWithinOneFolderIdentity() throws {
+        let composedLabel = try folder("same-id", "caf\u{00E9}")
+        let decomposedLabel = try folder("same-id", "cafe\u{0301}")
+        let items = [
+            media("first", "FIRST.JPG", nil, folder: composedLabel),
+            media("second", "SECOND.JPG", nil, folder: decomposedLabel),
+        ]
+        for loaded in [items, Array(items.reversed())] {
+            let option = try XCTUnwrap(mediaFolderOptions(loaded).first)
+            XCTAssertEqual(option.itemCount, 2)
+            XCTAssertEqual(Data(option.folder.label.utf8), Data(decomposedLabel.label.utf8))
+        }
+    }
+
+    func testMissingSelectedFolderStaysZeroInsteadOfFallingBackToAll() throws {
+        let loaded = try folder("loaded", "Same label")
+        let missing = try folder("not-loaded", "Same label")
+        let items = [media("loaded", "FILE.JPG", nil, folder: loaded), media("unknown", "UNKNOWN.JPG", nil)]
+        for sort in MediaSort.allCases {
+            XCTAssertTrue(mediaItemsForDisplay(items, filter: .all, sort: sort, folderFilter: .folder(missing)).isEmpty)
+        }
+        XCTAssertEqual(
+            mediaFolderFilterSummary(items, filter: .all, folderFilter: .folder(missing)),
+            MediaFolderFilterSummary(loadedCount: 2, matchedCount: 0, unknownFolderCount: 1)
+        )
+        for folderFilter in [MediaFolderFilter.all, .unknown, .folder(missing)] {
+            XCTAssertEqual(
+                mediaFolderFilterSummary([], filter: .all, folderFilter: folderFilter),
+                MediaFolderFilterSummary(loadedCount: 0, matchedCount: 0, unknownFolderCount: 0)
+            )
+            XCTAssertTrue(mediaItemsForDisplay([], filter: .all, sort: .camera, folderFilter: folderFilter).isEmpty)
+        }
+        XCTAssertTrue(mediaFolderOptions([]).isEmpty)
+    }
+
+    func testFolderSummaryUnknownCountUsesTypeDateAndRatingBeforeFolderFilter() throws {
+        let known = try folder("known", "Known")
+        let day = try instant("2026-08-14T12:00:00Z")
+        let range = try XCTUnwrap(MediaDateRange(startDate: day, endDate: day, timeZone: zone("UTC")))
+        let items = [
+            media("known", "KNOWN.JPG", "2026-08-14T12:00:00Z", rating: 5, folder: known),
+            media("unknown-folder", "UNKNOWN.JPG", "2026-08-14T12:00:00Z", rating: 5),
+            media("unknown-folder-low", "LOW.JPG", "2026-08-14T12:00:00Z", rating: 3),
+            media("unknown-folder-date", "DATE.JPG", nil, rating: 5),
+            media("unknown-folder-old", "OLD.JPG", "2026-08-13T12:00:00Z", rating: 5),
+            media("unknown-folder-video", "CLIP.MP4", "2026-08-14T12:00:00Z", rating: 5),
+            media("known-unknown-date", "DATE.JPG", nil, rating: 5, folder: known),
+            media("known-unknown-rating", "RATING.JPG", "2026-08-14T12:00:00Z", folder: known),
+            media("known-invalid-rating", "RATING.JPG", "2026-08-14T12:00:00Z", rating: 9, folder: known),
+        ]
+        for (folderFilter, matched) in [(MediaFolderFilter.all, 2), (.folder(known), 1), (.unknown, 1)] {
+            XCTAssertEqual(
+                mediaFolderFilterSummary(items, filter: .photos, dateRange: range,
+                    ratingFilter: .five, folderFilter: folderFilter),
+                MediaFolderFilterSummary(loadedCount: 9, matchedCount: matched, unknownFolderCount: 1)
+            )
+        }
+        XCTAssertEqual(
+            mediaDateFilterSummary(items, filter: .photos, dateRange: range,
+                ratingFilter: .five, folderFilter: .folder(known)),
+            MediaDateFilterSummary(loadedCount: 9, matchedCount: 1, unknownDateCount: 1)
+        )
+        XCTAssertEqual(
+            mediaRatingFilterSummary(items, filter: .photos, dateRange: range,
+                ratingFilter: .five, folderFilter: .folder(known)),
+            MediaRatingFilterSummary(loadedCount: 9, matchedCount: 1, unknownRatingCount: 2)
+        )
+        XCTAssertEqual(
+            mediaItemsForDisplay(items, filter: .photos, sort: .camera, dateRange: range,
+                ratingFilter: .five, folderFilter: .folder(known)),
+            [items[0]]
+        )
+    }
+
+    func testFolderIntersectionsAgreeAcrossEveryFilterSortAndLoadedSummary() throws {
+        let first = try folder("card1", "Same")
+        let second = try folder("card2", "Same")
+        let missing = try folder("missing", "Same")
+        let day = try instant("2026-08-14T12:00:00Z")
+        let range = try XCTUnwrap(MediaDateRange(startDate: day, endDate: day, timeZone: zone("UTC")))
+        let items = [
+            media("raw", "PAIR.CR3", "2026-08-14T12:00:00Z", rating: 4, folder: first),
+            media("jpeg", "PAIR.JPG", "2026-08-14T12:00:00Z", rating: 4, folder: first),
+            media("rated", "FIVE.JPG", "2026-08-14T13:00:00Z", rating: 5, folder: second),
+            media("unrated", "ZERO.JPG", "2026-08-14T12:00:00Z", rating: 0),
+            media("missing-rating", "RATING.JPG", "2026-08-14T12:00:00Z", folder: first),
+            media("outside", "OLD.JPG", "2026-08-13T12:00:00Z", rating: 3, folder: second),
+            media("unknown-date", "DATE.JPG", nil, rating: 4, folder: first),
+            media("video", "CLIP.MP4", "2026-08-14T12:00:00Z", rating: 2, folder: first),
+            media("unknown-video", "UNKNOWN.MOV", nil),
+        ]
+        for dateRange in [nil, range] as [MediaDateRange?] {
+            for filter in MediaFilter.allCases {
+                for ratingFilter in MediaRatingFilter.allCases {
+                    for folderFilter in [MediaFolderFilter.all, .unknown, .folder(first), .folder(second), .folder(missing)] {
+                        let dateSummary = mediaDateFilterSummary(items, filter: filter, dateRange: dateRange,
+                            ratingFilter: ratingFilter, folderFilter: folderFilter)
+                        let ratingSummary = mediaRatingFilterSummary(items, filter: filter, dateRange: dateRange,
+                            ratingFilter: ratingFilter, folderFilter: folderFilter)
+                        let folderSummary = mediaFolderFilterSummary(items, filter: filter, dateRange: dateRange,
+                            ratingFilter: ratingFilter, folderFilter: folderFilter)
+                        XCTAssertEqual(dateSummary.loadedCount, items.count)
+                        XCTAssertEqual(ratingSummary.loadedCount, items.count)
+                        XCTAssertEqual(folderSummary.loadedCount, items.count)
+                        for sort in MediaSort.allCases {
+                            let displayed = mediaItemsForDisplay(items, filter: filter, sort: sort, dateRange: dateRange,
+                                ratingFilter: ratingFilter, folderFilter: folderFilter)
+                            XCTAssertEqual(dateSummary.matchedCount, displayed.count)
+                            XCTAssertEqual(ratingSummary.matchedCount, displayed.count)
+                            XCTAssertEqual(folderSummary.matchedCount, displayed.count)
+                        }
+                    }
+                }
+            }
+        }
+        // Equal-rating pairs preserve the camera's order after all four filters.
+        for sort in [MediaSort.camera, .ratingHigh, .ratingLow, .newest, .oldest] {
+            XCTAssertEqual(
+                mediaItemsForDisplay(items, filter: .photos, sort: sort, dateRange: range,
+                    ratingFilter: .atLeast4, folderFilter: .folder(first)),
+                [items[0], items[1]]
+            )
+        }
+    }
+
+    func testFortyLongUnicodeFolderLabelsRemainKnownAndKeepDistinctIDs() throws {
+        let sharedLabel = "card/DCIM/" + String(repeating: "資料夾📷e\u{301}", count: 32)
+        let folders = try (0..<40).map { try folder("synthetic-long-folder-\($0)", sharedLabel) }
+        let items = folders.enumerated().map { index, folder in
+            media("image-\(index)", "IMAGE.JPG", nil, folder: folder)
+        }
+        let options = mediaFolderOptions(items)
+        XCTAssertEqual(options.count, 40)
+        XCTAssertEqual(Set(options.map(\.id)), Set(folders.map { mediaFolderIdentity($0) }))
+        XCTAssertTrue(options.allSatisfy { $0.folder.label == sharedLabel && $0.itemCount == 1 })
+        XCTAssertEqual(mediaFolderOptions(Array(items.reversed())), options)
+        XCTAssertEqual(
+            mediaFolderFilterSummary(items, filter: .all),
+            MediaFolderFilterSummary(loadedCount: 40, matchedCount: 40, unknownFolderCount: 0)
+        )
+        for (index, folder) in folders.enumerated() {
+            XCTAssertEqual(
+                mediaItemsForDisplay(items, filter: .all, sort: .camera, folderFilter: .folder(folder)),
+                [items[index]]
+            )
+        }
+    }
+
     func testThumbnailCacheRemainsBoundedAndRefreshesExistingEntry() {
         var cache = MediaThumbnailCache(capacity: 3)
         cache.insert(Data([1]), for: "one")
@@ -696,8 +930,14 @@ final class MediaLibraryTests: XCTestCase {
         XCTAssertNil(cache.values["two"])
     }
 
-    private func media(_ id: String, _ name: String, _ captureTime: String?, rating: Int? = nil) -> CameraMediaItem {
-        CameraMediaItem(id: id, name: name, kind: "image", captureTime: captureTime, rating: rating)
+    private func media(
+        _ id: String, _ name: String, _ captureTime: String?, rating: Int? = nil, folder: CameraMediaFolder? = nil
+    ) -> CameraMediaItem {
+        CameraMediaItem(id: id, name: name, kind: "image", captureTime: captureTime, rating: rating, folder: folder)
+    }
+
+    private func folder(_ id: String, _ label: String) throws -> CameraMediaFolder {
+        try XCTUnwrap(CameraMediaFolder(id: id, label: label))
     }
 
     private func instant(_ value: String) throws -> Date {

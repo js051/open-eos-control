@@ -130,12 +130,14 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaLibrarySessionID = UUID()
     @Published private(set) var mediaDateRange: MediaDateRange?
     @Published private(set) var mediaRatingFilter = MediaRatingFilter.all
+    @Published private(set) var mediaFolderFilter = MediaFolderFilter.all
     private var session: CameraSession? {
         didSet {
             exportGeneration = UUID()
             mediaLibrarySessionID = UUID()
             mediaDateRange = nil
             mediaRatingFilter = .all
+            mediaFolderFilter = .all
         }
     }
     private var exportGeneration = UUID()
@@ -512,6 +514,13 @@ final class CameraAppState: ObservableObject {
     func setMediaRatingFilter(_ filter: MediaRatingFilter, owner: UUID) -> Bool {
         guard owner == mediaLibrarySessionID else { return false }
         mediaRatingFilter = filter
+        return true
+    }
+
+    @discardableResult
+    func setMediaFolderFilter(_ filter: MediaFolderFilter, owner: UUID) -> Bool {
+        guard owner == mediaLibrarySessionID else { return false }
+        mediaFolderFilter = filter
         return true
     }
 
@@ -1657,7 +1666,7 @@ final class CameraAppState: ObservableObject {
                 captureTime: item.captureTime, previewAvailable: item.previewAvailable,
                 protected: enabled, rating: item.rating, rotationDegrees: item.rotationDegrees,
                 archived: item.archived, contentType: item.contentType,
-                widthPixels: item.widthPixels, heightPixels: item.heightPixels
+                widthPixels: item.widthPixels, heightPixels: item.heightPixels, folder: item.folder
             )
         }
     }
@@ -1672,7 +1681,7 @@ final class CameraAppState: ObservableObject {
                 captureTime: item.captureTime, previewAvailable: item.previewAvailable,
                 protected: item.protected, rating: rating, rotationDegrees: item.rotationDegrees,
                 archived: item.archived, contentType: item.contentType,
-                widthPixels: item.widthPixels, heightPixels: item.heightPixels
+                widthPixels: item.widthPixels, heightPixels: item.heightPixels, folder: item.folder
             )
         }
     }
@@ -1687,7 +1696,7 @@ final class CameraAppState: ObservableObject {
                 captureTime: item.captureTime, previewAvailable: item.previewAvailable,
                 protected: item.protected, rating: item.rating, rotationDegrees: degrees,
                 archived: item.archived, contentType: item.contentType,
-                widthPixels: item.widthPixels, heightPixels: item.heightPixels
+                widthPixels: item.widthPixels, heightPixels: item.heightPixels, folder: item.folder
             )
         }
     }
@@ -1851,7 +1860,7 @@ final class CameraAppState: ObservableObject {
                 captureTime: item.captureTime, previewAvailable: item.previewAvailable,
                 protected: item.protected, rating: item.rating, rotationDegrees: item.rotationDegrees,
                 archived: enabled, contentType: item.contentType,
-                widthPixels: item.widthPixels, heightPixels: item.heightPixels
+                widthPixels: item.widthPixels, heightPixels: item.heightPixels, folder: item.folder
             )
         }
     }
@@ -2726,9 +2735,11 @@ final class CameraAppState: ObservableObject {
         )
     }
 
+    private static let previewMediaFolder = CameraMediaFolder(id: "synthetic:preview-folder", label: "card1/DCIM/100CANON")
+
     static let previewMedia = [
-        CameraMediaItem(id: "preview-001", name: "R6M3_0001.CR3", kind: "raw", sizeBytes: 31_457_280, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true, protected: true, rating: 5, rotationDegrees: 0, archived: false, contentType: "image/x-canon-raw", widthPixels: 6000, heightPixels: 4000),
-        CameraMediaItem(id: "preview-002", name: "R6M3_0001.JPG", kind: "image", sizeBytes: 8_912_384, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true, protected: false, rating: 3, rotationDegrees: 90, archived: true, contentType: "image/jpeg", widthPixels: 6000, heightPixels: 4000),
+        CameraMediaItem(id: "preview-001", name: "R6M3_0001.CR3", kind: "raw", sizeBytes: 31_457_280, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true, protected: true, rating: 5, rotationDegrees: 0, archived: false, contentType: "image/x-canon-raw", widthPixels: 6000, heightPixels: 4000, folder: previewMediaFolder),
+        CameraMediaItem(id: "preview-002", name: "R6M3_0001.JPG", kind: "image", sizeBytes: 8_912_384, captureTime: "2026-07-21T10:08:24+08:00", previewAvailable: true, protected: false, rating: 3, rotationDegrees: 90, archived: true, contentType: "image/jpeg", widthPixels: 6000, heightPixels: 4000, folder: previewMediaFolder),
         CameraMediaItem(id: "preview-003", name: "R6M3_0002.MP4", kind: "video", sizeBytes: 128_450_560, captureTime: "2026-07-21T10:10:02+08:00", protected: false, rating: 0, rotationDegrees: 0, archived: false, contentType: "video/mp4", widthPixels: 3840, heightPixels: 2160),
     ]
 }

@@ -502,7 +502,7 @@
 "media_date_loaded_only" = "Only already loaded media is filtered. Recent or incomplete lists do not search the whole card.";
 "media_date_unknown_excluded" = "Media with an unknown capture date is excluded while a date range is active.";
 "media_date_range_applied" = "%@ to %@ · %@";
-"media_date_summary" = "%d matching of %d loaded; %d unknown dates excluded in this type/rating scope.";
+"media_date_summary" = "%d matching of %d loaded; %d unknown dates excluded in this type/rating/folder scope.";
 "media_date_clear" = "Clear date range";
 
 "media_rating_filter" = "Media rating filter";
@@ -517,6 +517,15 @@
 "media_rating_clear" = "Clear rating filter";
 "media_rating_loaded_only" = "Filters only loaded media; no extra metadata requests.";
 "media_rating_unknown_help" = "Unknown ratings are different from known 0 and sort after known ratings.";
-"media_rating_summary" = "%d matching of %d loaded; %d unknown ratings in the date/type scope.";
+"media_rating_summary" = "%d matching of %d loaded; %d unknown ratings in the date/type/folder scope.";
 "media_sort_rating_high" = "Rating: high to low";
 "media_sort_rating_low" = "Rating: low to high";
+
+"media_folder_filter" = "Camera folder filter";
+"media_folder_all" = "All loaded folders";
+"media_folder_unknown" = "Unknown folder";
+"media_folder_clear" = "Clear folder filter";
+"media_folder_loaded_only" = "Uses only loaded folder information. No extra camera requests; labels do not establish physical card slots.";
+"media_folder_missing" = "The selected folder is not in the currently loaded list. Clear the filter to see other loaded media.";
+"media_folder_duplicate" = "%@ · distinct folder %d";
+"media_folder_summary" = "%d matching of %d loaded; %d unknown folders in the other filter conditions.";

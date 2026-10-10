@@ -502,7 +502,7 @@
 "media_date_loaded_only" = "僅篩選已載入素材。最近素材或未完成的清單不代表已搜尋整張記憶卡。";
 "media_date_unknown_excluded" = "啟用日期區間時，拍攝日期未知的素材會被排除。";
 "media_date_range_applied" = "%@ 至 %@ · %@";
-"media_date_summary" = "已載入 %2$d 項中有 %1$d 項符合；此類型／評分範圍排除 %3$d 項未知日期。";
+"media_date_summary" = "已載入 %2$d 項中有 %1$d 項符合；此類型／評分／資料夾範圍排除 %3$d 項未知日期。";
 "media_date_clear" = "清除日期區間";
 
 "media_rating_filter" = "素材評分篩選";
@@ -517,6 +517,15 @@
 "media_rating_clear" = "清除評分篩選";
 "media_rating_loaded_only" = "僅篩選已載入素材，不額外查詢中繼資料。";
 "media_rating_unknown_help" = "未知評分與已知 0 不同，排序時放在已知評分之後。";
-"media_rating_summary" = "已載入 %2$d 項中符合 %1$d 項；日期／類型範圍內有 %3$d 項未知評分。";
+"media_rating_summary" = "已載入 %2$d 項中符合 %1$d 項；日期／類型／資料夾範圍內有 %3$d 項未知評分。";
 "media_sort_rating_high" = "評分：高至低";
 "media_sort_rating_low" = "評分：低至高";
+
+"media_folder_filter" = "相機資料夾篩選";
+"media_folder_all" = "全部已載入資料夾";
+"media_folder_unknown" = "未知資料夾";
+"media_folder_clear" = "清除資料夾篩選";
+"media_folder_loaded_only" = "僅使用已載入的資料夾資訊，不額外查詢相機；名稱不代表已驗證的實體卡槽。";
+"media_folder_missing" = "目前載入清單沒有先前選取的資料夾；清除篩選可查看其他已載入素材。";
+"media_folder_duplicate" = "%1$@ · 不同資料夾 %2$d";
+"media_folder_summary" = "已載入 %2$d 項中符合 %1$d 項；其他篩選條件內有 %3$d 項未知資料夾。";

@@ -681,6 +681,30 @@ public struct LiveViewMagnificationResult: Equatable, Sendable {
     }
 }
 
+/// Folder provenance reported by a transport. The ID is opaque and is not a filesystem path.
+public struct CameraMediaFolder: Equatable, Sendable {
+    public let id: String
+    public let label: String
+
+    public init?(id: String, label: String) {
+        guard Self.isValid(id, maximumUTF16Count: 4_096),
+              Self.isValid(label, maximumUTF16Count: 1_024) else { return nil }
+        self.id = id
+        self.label = label
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        // Swift String equality normalizes Unicode; provenance retains the exact transport values.
+        lhs.id.utf8.elementsEqual(rhs.id.utf8) && lhs.label.utf8.elementsEqual(rhs.label.utf8)
+    }
+
+    private static func isValid(_ value: String, maximumUTF16Count: Int) -> Bool {
+        !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && value.utf16.count <= maximumUTF16Count
+            && !value.unicodeScalars.contains { $0.value <= 0x1F || (0x7F...0x9F).contains($0.value) }
+    }
+}
+
 public struct CameraMediaItem: Identifiable, Equatable, Sendable {
     public let id: String
     public let name: String
@@ -695,6 +719,7 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
     public let contentType: String?
     public let widthPixels: Int?
     public let heightPixels: Int?
+    public let folder: CameraMediaFolder?
 
     public init(
         id: String,
@@ -709,7 +734,8 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
         archived: Bool? = nil,
         contentType: String? = nil,
         widthPixels: Int? = nil,
-        heightPixels: Int? = nil
+        heightPixels: Int? = nil,
+        folder: CameraMediaFolder? = nil
     ) {
         self.id = id
         self.name = name
@@ -724,6 +750,7 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
         self.contentType = contentType
         self.widthPixels = widthPixels
         self.heightPixels = heightPixels
+        self.folder = folder
     }
 }
 

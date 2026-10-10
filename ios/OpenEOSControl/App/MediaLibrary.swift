@@ -66,6 +66,55 @@ enum MediaRatingFilter: String, CaseIterable, Identifiable {
     var localizationKey: String { "media_rating_filter_\(rawValue)" }
 }
 
+enum MediaFolderFilter: Equatable {
+    case all
+    case unknown
+    case folder(CameraMediaFolder)
+
+    static func == (left: Self, right: Self) -> Bool {
+        switch (left, right) {
+        case (.all, .all), (.unknown, .unknown): true
+        case let (.folder(left), .folder(right)): mediaFolderIdentity(left) == mediaFolderIdentity(right)
+        default: false
+        }
+    }
+}
+
+func mediaFolderIdentity(_ folder: CameraMediaFolder) -> Data {
+    // Swift String equality folds canonically equivalent Unicode spellings.
+    // Folder IDs are opaque wire identities, so preserve their exact UTF-8 bytes.
+    Data(folder.id.utf8)
+}
+
+struct MediaFolderOption: Equatable, Identifiable {
+    let folder: CameraMediaFolder
+    let itemCount: Int
+
+    var id: Data { mediaFolderIdentity(folder) }
+}
+
+func mediaFolderOptions(_ items: [CameraMediaItem]) -> [MediaFolderOption] {
+    var folders: [Data: MediaFolderOption] = [:]
+    for item in items {
+        guard let folder = item.folder else { continue }
+        let identity = mediaFolderIdentity(folder)
+        let existing = folders[identity]
+        // Labels can change between loaded pages. Pick one deterministically,
+        // without merging different opaque IDs that happen to share a label.
+        let preferred = existing.map { option in
+            if option.folder.label == folder.label {
+                return option.folder.label.utf8.lexicographicallyPrecedes(folder.label.utf8) ? option.folder : folder
+            }
+            return option.folder.label < folder.label ? option.folder : folder
+        } ?? folder
+        folders[identity] = MediaFolderOption(folder: preferred, itemCount: (existing?.itemCount ?? 0) + 1)
+    }
+    return folders.values.sorted { left, right in
+        if left.folder.label != right.folder.label { return left.folder.label < right.folder.label }
+        return left.id.lexicographicallyPrecedes(right.id)
+    }
+}
+
 func mediaNormalizedRating(_ item: CameraMediaItem) -> Int? {
     // Zero is an explicit camera value; absent or invalid metadata is unknown.
     guard let rating = item.rating, (0...5).contains(rating) else { return nil }
@@ -108,9 +157,9 @@ struct MediaDateRange: Equatable {
 struct MediaDateFilterSummary: Equatable {
     // The denominator is every loaded item, including other media types.
     let loadedCount: Int
-    // The visible type/date/rating intersection; sorting does not change this count.
+    // The visible type/date/rating/folder intersection; sorting does not change this count.
     let matchedCount: Int
-    // Missing/unparseable dates in the selected type/rating, even without a range.
+    // Missing/unparseable dates in the selected type/rating/folder, even without a range.
     let unknownDateCount: Int
 }
 
@@ -118,12 +167,14 @@ func mediaDateFilterSummary(
     _ items: [CameraMediaItem],
     filter: MediaFilter,
     dateRange: MediaDateRange?,
-    ratingFilter: MediaRatingFilter = .all
+    ratingFilter: MediaRatingFilter = .all,
+    folderFilter: MediaFolderFilter = .all
 ) -> MediaDateFilterSummary {
     var matchedCount = 0
     var unknownDateCount = 0
     for item in items where mediaMatchesFilter(item, filter: filter)
         && mediaMatchesRatingFilter(item, filter: ratingFilter)
+        && mediaMatchesFolderFilter(item, filter: folderFilter)
     {
         let captureDate = mediaCaptureDate(item)
         if captureDate == nil { unknownDateCount += 1 }
@@ -144,7 +195,7 @@ struct MediaRatingFilterSummary: Equatable {
     // Keep the same loaded denominator and visible count as the date summary.
     let loadedCount: Int
     let matchedCount: Int
-    // Unknown ratings in the selected type/date, before applying a rating filter.
+    // Unknown ratings in the selected type/date/folder, before applying a rating filter.
     let unknownRatingCount: Int
 }
 
@@ -152,12 +203,14 @@ func mediaRatingFilterSummary(
     _ items: [CameraMediaItem],
     filter: MediaFilter,
     dateRange: MediaDateRange? = nil,
-    ratingFilter: MediaRatingFilter = .all
+    ratingFilter: MediaRatingFilter = .all,
+    folderFilter: MediaFolderFilter = .all
 ) -> MediaRatingFilterSummary {
     var matchedCount = 0
     var unknownRatingCount = 0
     for item in items where mediaMatchesFilter(item, filter: filter)
         && mediaMatchesDateRange(item, dateRange: dateRange)
+        && mediaMatchesFolderFilter(item, filter: folderFilter)
     {
         if mediaNormalizedRating(item) == nil { unknownRatingCount += 1 }
         if mediaMatchesRatingFilter(item, filter: ratingFilter) { matchedCount += 1 }
@@ -166,6 +219,36 @@ func mediaRatingFilterSummary(
         loadedCount: items.count,
         matchedCount: matchedCount,
         unknownRatingCount: unknownRatingCount
+    )
+}
+
+struct MediaFolderFilterSummary: Equatable {
+    let loadedCount: Int
+    let matchedCount: Int
+    // Unknown folders in the selected type/date/rating, before the folder filter.
+    let unknownFolderCount: Int
+}
+
+func mediaFolderFilterSummary(
+    _ items: [CameraMediaItem],
+    filter: MediaFilter,
+    dateRange: MediaDateRange? = nil,
+    ratingFilter: MediaRatingFilter = .all,
+    folderFilter: MediaFolderFilter = .all
+) -> MediaFolderFilterSummary {
+    var matchedCount = 0
+    var unknownFolderCount = 0
+    for item in items where mediaMatchesFilter(item, filter: filter)
+        && mediaMatchesDateRange(item, dateRange: dateRange)
+        && mediaMatchesRatingFilter(item, filter: ratingFilter)
+    {
+        if item.folder == nil { unknownFolderCount += 1 }
+        if mediaMatchesFolderFilter(item, filter: folderFilter) { matchedCount += 1 }
+    }
+    return MediaFolderFilterSummary(
+        loadedCount: items.count,
+        matchedCount: matchedCount,
+        unknownFolderCount: unknownFolderCount
     )
 }
 
@@ -215,13 +298,15 @@ func mediaItemsForDisplay(
     filter: MediaFilter,
     sort: MediaSort,
     dateRange: MediaDateRange? = nil,
-    ratingFilter: MediaRatingFilter = .all
+    ratingFilter: MediaRatingFilter = .all,
+    folderFilter: MediaFolderFilter = .all
 ) -> [CameraMediaItem] {
     let filtered = items
         .filter { item in
             mediaMatchesFilter(item, filter: filter)
                 && mediaMatchesRatingFilter(item, filter: ratingFilter)
                 && mediaMatchesDateRange(item, dateRange: dateRange)
+                && mediaMatchesFolderFilter(item, filter: folderFilter)
         }
     guard sort != .camera else { return filtered }
     return filtered.enumerated()
@@ -270,6 +355,14 @@ private func mediaMatchesDateRange(_ item: CameraMediaItem, dateRange: MediaDate
     guard let dateRange else { return true }
     guard let captureDate = mediaCaptureDate(item) else { return false }
     return dateRange.contains(captureDate: captureDate)
+}
+
+private func mediaMatchesFolderFilter(_ item: CameraMediaItem, filter: MediaFolderFilter) -> Bool {
+    switch filter {
+    case .all: true
+    case .unknown: item.folder == nil
+    case let .folder(folder): item.folder.map { mediaFolderIdentity($0) } == mediaFolderIdentity(folder)
+    }
 }
 
 private func compareMediaItems(

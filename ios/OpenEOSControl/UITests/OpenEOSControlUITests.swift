@@ -7,6 +7,16 @@ final class OpenEOSControlUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testScrollHelperReturnsTowardControlsAboveTheViewport() {
+        let viewport = CGRect(x: 0, y: 80, width: 390, height: 700)
+        XCTAssertTrue(Self.targetIsAboveScrollViewport(CGRect(x: 12, y: -100, width: 100, height: 44), viewport: viewport))
+        XCTAssertTrue(Self.targetIsAboveScrollViewport(CGRect(x: 12, y: 60, width: 100, height: 44), viewport: viewport))
+        XCTAssertFalse(Self.targetIsAboveScrollViewport(CGRect(x: 12, y: 850, width: 100, height: 44), viewport: viewport))
+        XCTAssertFalse(Self.targetIsAboveScrollViewport(CGRect(x: 12, y: 100, width: 100, height: 44), viewport: viewport))
+        XCTAssertFalse(Self.targetIsAboveScrollViewport(.null, viewport: viewport))
+        XCTAssertFalse(Self.targetIsAboveScrollViewport(.zero, viewport: viewport))
+    }
+
     func testConnectionHitGeometryRejectsOffscreenOrClippedButtons() {
         let window = CGRect(x: 0, y: 0, width: 874, height: 402)
         let visible = CGRect(x: 157, y: 200, width: 560, height: 77.33333333333337)
@@ -375,6 +385,36 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertEqual(ratingApplied.label, language == "english" ? "5 stars" : "5 星")
             XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: 8))
             XCTAssertFalse(app.buttons["media-actions-preview-002"].exists)
+            let folder = app.buttons["media-folder-filter"]
+            XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: 8))
+            folder.tap()
+            let knownFolder = app.buttons["media-folder-choice-known-synthetic:preview-folder"]
+            XCTAssertTrue(scrollToInteraction(knownFolder, in: app, timeout: 8))
+            XCTAssertEqual(knownFolder.label, "card1/DCIM/100CANON")
+            knownFolder.tap()
+            app.buttons["media-folder-cancel"].tap()
+            XCTAssertFalse(app.staticTexts["media-folder-applied"].exists)
+            XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: 8))
+            folder.tap()
+            XCTAssertTrue(scrollToInteraction(knownFolder, in: app, timeout: 8))
+            knownFolder.tap()
+            app.buttons["media-folder-apply"].tap()
+            XCTAssertTrue(app.staticTexts["media-folder-applied"].waitForExistence(timeout: 5))
+            XCTAssertEqual(app.staticTexts["media-folder-applied"].label, "card1/DCIM/100CANON")
+            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: 8))
+            XCTAssertFalse(app.buttons["media-actions-preview-002"].exists)
+            XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: 8))
+            folder.tap()
+            let unknownFolder = app.buttons["media-folder-choice-unknown"]
+            XCTAssertTrue(scrollToInteraction(unknownFolder, in: app, timeout: 8))
+            unknownFolder.tap()
+            app.buttons["media-folder-apply"].tap()
+            XCTAssertFalse(app.buttons["media-actions-preview-001"].exists)
+            let folderClear = app.buttons["media-folder-clear"]
+            XCTAssertTrue(scrollToInteraction(folderClear, in: app, timeout: 8))
+            folderClear.tap()
+            XCTAssertTrue(ratingApplied.exists)
+            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: 8))
             let ratingClear = app.buttons["media-rating-clear"]
             XCTAssertTrue(scrollToInteraction(ratingClear, in: app, timeout: 8))
             ratingClear.tap()
@@ -383,6 +423,46 @@ final class OpenEOSControlUITests: XCTestCase {
             addScreenshot(name: "media-rating-cleared-\(language)")
             app.terminate()
         }
+    }
+
+    func testOfflineFolderCanClearAfterTheLoadedLibraryBecomesEmpty() throws {
+        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
+        XCTAssertTrue(app.buttons["offline-preview-button"].waitForExistence(timeout: 8))
+        app.buttons["offline-preview-button"].tap()
+        XCTAssertTrue(app.buttons["more-actions-button"].waitForExistence(timeout: 5))
+        app.buttons["more-actions-button"].tap()
+        XCTAssertTrue(tapCameraAction(app.buttons["camera-media-menu-button"], in: app))
+        func deleteOfflineItem(_ id: String) {
+            let actions = app.buttons["media-actions-\(id)"]
+            XCTAssertTrue(scrollToInteraction(actions, in: app, timeout: 8))
+            actions.tap()
+            let delete = app.buttons["delete-media-\(id)"]
+            XCTAssertTrue(scrollToInteraction(delete, in: app, timeout: 8))
+            delete.tap()
+            let alert = app.alerts["Delete from camera?"]
+            XCTAssertTrue(alert.waitForExistence(timeout: 5))
+            alert.buttons["Delete"].tap()
+            XCTAssertTrue(actions.waitForNonExistence(timeout: 5))
+        }
+        deleteOfflineItem("preview-003")
+        let folder = app.buttons["media-folder-filter"]
+        XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: 8))
+        folder.tap()
+        let known = app.buttons["media-folder-choice-known-synthetic:preview-folder"]
+        XCTAssertTrue(scrollToInteraction(known, in: app, timeout: 8))
+        known.tap()
+        app.buttons["media-folder-apply"].tap()
+        deleteOfflineItem("preview-001")
+        deleteOfflineItem("preview-002")
+        let clear = app.buttons["media-folder-clear"]
+        XCTAssertTrue(scrollToInteraction(clear, in: app, timeout: 8))
+        XCTAssertTrue(app.staticTexts["media-folder-applied"].exists)
+        clear.tap()
+        XCTAssertFalse(app.staticTexts["media-folder-applied"].exists)
+        XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: 8))
+        XCTAssertTrue(scrollToInteraction(app.buttons["media-rating-filter"], in: app, timeout: 8))
+        XCTAssertTrue(scrollToInteraction(app.buttons["media-date-range"], in: app, timeout: 8))
+        addScreenshot(name: "media-empty-library-filter-controls")
     }
 
     func testOfflineMediaDeletionRequiresConfirmation() throws {
@@ -1161,13 +1241,23 @@ final class OpenEOSControlUITests: XCTestCase {
             let scrollSurface = app.scrollViews.allElementsBoundByIndex.last {
                 $0.exists && $0.isHittable
             }
-            if let scrollSurface {
-                scrollSurface.swipeUp()
+            let surface = scrollSurface ?? app
+            let targetFrame = element.exists ? element.frame : .null
+            let viewport = surface.frame.intersection(app.frame)
+            if Self.targetIsAboveScrollViewport(targetFrame, viewport: viewport) {
+                surface.swipeDown()
             } else {
-                app.swipeUp()
+                surface.swipeUp()
             }
         }
         return element.exists && element.isEnabled && element.isHittable
+    }
+
+    private static func targetIsAboveScrollViewport(_ target: CGRect, viewport: CGRect) -> Bool {
+        guard !target.isNull, !target.isInfinite, !target.isEmpty,
+              !viewport.isNull, !viewport.isInfinite, !viewport.isEmpty,
+              target.minY.isFinite, viewport.minY.isFinite else { return false }
+        return target.minY < viewport.minY
     }
 
     private static func connectionButtonHasVisibleHitFrame(
