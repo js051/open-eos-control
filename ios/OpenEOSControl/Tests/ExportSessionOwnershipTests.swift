@@ -80,7 +80,13 @@ final class ExportSessionOwnershipTests: XCTestCase {
                 XCTAssertEqual(fixture.state.physicalValidation.sessionStatus, .offlinePreview)
                 let diagnostic = try await fixture.start(.diagnostic).value
                 XCTAssertTrue(fixture.state.canPublishExport(diagnostic))
-                if !bridge { XCTAssertTrue(diagnostic.text.contains("apiVersions=offline-preview")) }
+                // Offline preview deliberately reuses this marker as its serial.
+                // The existing sanitizer redacts every occurrence, including the
+                // API-version field; export ownership must preserve that privacy.
+                XCTAssertFalse(diagnostic.text.contains("offline-preview"))
+                if !bridge {
+                    XCTAssertTrue(diagnostic.text.contains("apiVersions=[redacted]"))
+                }
                 XCTAssertTrue(diagnostic.text.contains("mediaItemCount=3"))
             }
         }

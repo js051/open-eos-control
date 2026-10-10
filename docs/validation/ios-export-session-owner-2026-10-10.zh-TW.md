@@ -27,3 +27,9 @@ DebugView 的 Task 不因關閉頁面或重新連線自動結束；只有 prepar
 ## Release Assessment
 
 最新發布基準 v0.12.0 Development Preview。影響 patch：修正既有匯出資料的連線歸屬及驗證證據完整性。需完整本批 exact-head CI 與 main acceptance；release HOLD、PR #219 根因 UNKNOWN、#223 KVM 待批准及實體相機限制保留，不改版本、發版或安全設定。
+
+## 第一輪正常 CI 與預期修正
+
+原 head `e982a438` 的 CI `38031800771` 為 failure：App 170 tests 中 1 個失敗，UI 20/20 及 JVM/APK 通過。新 9 方法中 8 個通過；`testOfflinePreviewRetiresAnExportWaitingForCapabilities` 第 83 行錯把 `apiVersions=offline-preview` 當作匯出字串。既有 offline snapshot 的 serial 同為 `offline-preview`，`redactDiagnosticText` 會將所有該值替換為 `[redacted]`，因此原預期違反既有隱私契約。
+
+只修測試為 `apiVersions=[redacted]` 並斷言結果不含原 offline serial。production、隱私遮蔽、其他斷言及必要 gates 均未更改。保留第一輪失敗；修後尚需全新 exact-head 正常 CI，不能沿用舊 head 的成功部分作完整驗收。
