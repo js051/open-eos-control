@@ -355,6 +355,26 @@
         <p id="media-folder-summary" class="supporting media-date-summary" role="status" hidden></p>
         <p id="media-rating-summary" class="supporting media-date-summary" role="status" hidden></p>
         <p id="media-date-summary" class="supporting media-date-summary" role="status" hidden></p>
+        <section id="media-selection" class="media-selection" aria-describedby="media-selection-help">
+          <p id="media-selection-summary" class="supporting" role="status"></p>
+          <div class="media-selection-actions">
+            <button id="media-select-filtered" class="button secondary" type="button" data-i18n="mediaSelectFiltered">Select all loaded matches</button>
+            <button id="media-selection-clear" class="button secondary" type="button" data-i18n="mediaSelectionClear">Clear selection</button>
+            <button id="media-batch-start" class="button primary" type="button" data-i18n="mediaBatchStart">Save selected originals to folder…</button>
+          </div>
+          <p id="media-selection-help" class="supporting" data-i18n="mediaSelectionHelp">Selects loaded matches across pages, not unseen files on the card. Selection is kept when filters or scope change. Hidden and no-longer-loaded selections are included in the batch.</p>
+          <p id="media-batch-unavailable" class="supporting" data-i18n="mediaBatchUnavailable" hidden>Batch saving needs a browser with folder access. You can still download originals individually.</p>
+        </section>
+        <section id="media-batch-panel" class="media-batch-panel" aria-labelledby="media-batch-title" hidden>
+          <div class="media-batch-heading">
+            <h3 id="media-batch-title" data-i18n="mediaBatchTitle">Original file batch</h3>
+            <button id="media-batch-cancel" class="button secondary" type="button" data-i18n="mediaBatchCancel">Cancel remaining files</button>
+          </div>
+          <p id="media-batch-destination" class="supporting"></p>
+          <p id="media-batch-summary" role="status"></p>
+          <p id="media-batch-notice" class="supporting"></p>
+          <ol id="media-batch-list" class="media-batch-list"></ol>
+        </section>
         <section id="media-transfer" class="media-transfer" aria-live="polite" hidden>
           <span class="media-transfer-icon icon" data-icon="download" aria-hidden="true"></span>
           <div class="media-transfer-copy">
@@ -667,6 +687,8 @@
   <script src="/app/rtp-audio.js"></script>
   <script src="/app/media-transfer.js"></script>
   <script src="/app/media-library.js"></script>
+  <script src="/app/media-batch.js"></script>
+  <script src="/app/media-batch-destination.js"></script>
   <script src="/app/app.js"></script>
 </body>
 </html>

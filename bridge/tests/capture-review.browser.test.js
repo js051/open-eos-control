@@ -162,6 +162,62 @@ function filePlatform({ mode, delayWritable, pauseSecondWrite }) {
   };
 }
 
+// Only the browser's directory/writer surface is synthetic. Production DOM,
+// selection, queue, Bridge HTTP and Canon-shaped original bytes remain real.
+function batchFilePlatform({ pauseFirstWrite = false, unsupported = false }) {
+  if (unsupported) {
+    Object.defineProperty(window, "showDirectoryPicker", { configurable: true, value: undefined });
+    return;
+  }
+  window.__batchFiles = [];
+  window.__batchPickerCalls = 0;
+  const directories = new Map();
+  const missing = () => new DOMException("Synthetic entry absent", "NotFoundError");
+  window.showDirectoryPicker = async (options) => {
+    if (options?.mode !== "readwrite") throw new Error("Expected explicit readwrite directory picker");
+    window.__batchPickerCalls += 1;
+    return {
+      kind: "directory",
+      name: "Synthetic destination",
+      async getDirectoryHandle(name, { create = false } = {}) {
+        if (directories.has(name)) return directories.get(name);
+        if (!create) throw missing();
+        const files = new Map();
+        const directory = {
+          kind: "directory",
+          name,
+          async getFileHandle(filename, { create: createFile = false } = {}) {
+            if (files.has(filename)) return files.get(filename);
+            if (!createFile) throw missing();
+            const output = { name: filename, directory: name, bytes: [], closed: false, aborted: false };
+            window.__batchFiles.push(output);
+            const handle = { kind: "file", name: filename, async createWritable() {
+              return {
+                async write(chunk) {
+                  if (pauseFirstWrite && window.__batchFiles[0] === output && !output.writeStarted) {
+                    output.writeStarted = true;
+                    await new Promise((resolve, reject) => {
+                      const timer = setTimeout(() => reject(new Error("Batch synthetic write gate timed out")), 20_000);
+                      window.__releaseBatchWrite = () => { clearTimeout(timer); resolve(); };
+                    });
+                  }
+                  for (const byte of new Uint8Array(chunk)) output.bytes.push(byte);
+                },
+                async close() { output.closed = true; },
+                async abort() { output.aborted = true; },
+              };
+            } };
+            files.set(filename, handle);
+            return handle;
+          },
+        };
+        directories.set(name, directory);
+        return directory;
+      },
+    };
+  };
+}
+
 async function applyMediaDateRange(page, start, end) {
   await page.click("#media-date-button");
   await page.waitForSelector("#media-date-dialog[open]");
@@ -603,6 +659,83 @@ const cases = [
   },
 ];
 
+for (const language of ["en", "zh-TW"]) {
+  cases.push({
+    name: `batch originals preserve hidden selection and confirm closed bytes ${language}`,
+    batch: {},
+    run: async ({ page, simulatorOrigin, originalRequests, infoRequests, listingRequests, cameraWrites }) => {
+      await page.locator("#control-view .language-select").selectOption(language);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 2);
+      const before = { info: infoRequests.length, listing: listingRequests.length, writes: cameraWrites.length };
+      await page.click("#media-select-filtered");
+      await page.click('[data-media-filter="video"]');
+      assert.equal(await page.locator(".media-select-checkbox").count(), 0);
+      assert.equal(await page.isDisabled("#media-batch-start"), false, "Hidden selection remains transferable");
+      await page.click("#media-batch-start");
+      await page.waitForFunction(() => document.querySelectorAll('#media-batch-list [data-status="completed"]').length === 2);
+      const files = await page.evaluate(() => window.__batchFiles);
+      const expected = Buffer.from(await (await fetch(`${simulatorOrigin}/__test/representation/original`)).arrayBuffer());
+      assert.equal(files.length, 2);
+      for (const file of files) {
+        assert.equal(file.closed, true); assert.equal(file.aborted, false);
+        assert.deepEqual(Buffer.from(file.bytes), expected, "Saved bytes are the original representation");
+      }
+      assert.equal(new Set(files.map(file => file.directory)).size, 1);
+      assert.equal(new Set(files.map(file => file.name)).size, 2);
+      assert.deepEqual(files.map(file => file.name).sort(), ["SYNTHETIC_OLD_A.JPG", "SYNTHETIC_OLD_B.JPG"]);
+      assert.equal(originalRequests.length, 2);
+      const requestedIds = originalRequests.map(url => decodeURIComponent(new URL(url).pathname.split("/").at(-1)));
+      assert.equal(new Set(requestedIds).size, 2, "Each selected raw media ID is requested once");
+      assert.equal(await page.evaluate(() => window.__batchPickerCalls), 1);
+      assert.deepEqual({ info: infoRequests.length, listing: listingRequests.length, writes: cameraWrites.length }, before,
+        "Batch selection and delivery add no metadata, listing or camera mutation requests");
+      assert.equal((await peerState(simulatorOrigin)).capture_count, 0);
+      await page.locator("#media-batch-panel").scrollIntoViewIfNeeded();
+      const width = await page.evaluate(() => ({ viewport: innerWidth, page: document.documentElement.scrollWidth }));
+      assert.ok(width.page <= width.viewport + 1, "Batch summary fits narrow 200% layout");
+      fs.mkdirSync(RESULTS_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-batch-${language}.png`), fullPage: true });
+    },
+  });
+}
+cases.push({
+  name: "unsupported directory API keeps single-file controls without batch requests",
+  batch: { unsupported: true },
+  run: async ({ page, originalRequests }) => {
+    await page.click('.tab[data-view="media"]');
+    await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 2);
+    await page.click("#media-select-filtered");
+    assert.equal(await page.isVisible("#media-batch-unavailable"), true);
+    assert.equal(await page.isDisabled("#media-batch-start"), true);
+    assert.deepEqual(originalRequests, []);
+    await page.locator(".media-actions button").first().click();
+    await page.waitForSelector("#media-details-dialog[open]");
+    assert.equal(await page.isDisabled("#media-details-download"), false);
+    await page.keyboard.press("Escape");
+  },
+});
+cases.push({
+  name: "batch cancellation stops later originals and preserves uncertain current output",
+  batch: { pauseFirstWrite: true },
+  run: async ({ page, originalRequests }) => {
+    await page.click('.tab[data-view="media"]');
+    await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 2);
+    await page.click("#media-select-filtered");
+    await page.click("#media-batch-start");
+    await page.waitForFunction(() => typeof window.__releaseBatchWrite === "function");
+    await page.click("#media-batch-cancel");
+    await page.evaluate(() => window.__releaseBatchWrite());
+    await page.waitForFunction(() => window.__batchFiles[0]?.aborted);
+    await page.waitForFunction(() => document.querySelector('#media-batch-list [data-status="not-started"]'));
+    assert.equal(originalRequests.length, 1, "Cancellation prevents the second camera original request");
+    assert.equal(await page.evaluate(() => window.__batchFiles.some(file => file.closed)), false);
+    assert.equal(await page.locator('#media-batch-list [data-status="completed"]').count(), 0);
+  },
+});
+
 async function run() {
   const [simulatorPort, bridgePort] = await Promise.all([freePort(), freePort()]);
   const simulatorOrigin = `http://127.0.0.1:${simulatorPort}`;
@@ -630,6 +763,7 @@ async function run() {
         mode: scenario.mode || "blob", delayWritable: Boolean(scenario.delayWritable),
         pauseSecondWrite: Boolean(scenario.pauseSecondWrite),
       });
+      if (scenario.batch) await context.addInitScript(batchFilePlatform, scenario.batch);
       const page = await context.newPage();
       page.setDefaultTimeout(12_000);
       const listingRequests = [];
@@ -694,6 +828,7 @@ async function run() {
           if (await page.locator("#media-date-dialog[open]").count()) await page.keyboard.press("Escape");
           if (await page.locator("#media-preview-dialog[open]").count()) await page.click("#media-preview-close");
           await page.evaluate(() => window.__releaseSyntheticWrite?.());
+          await page.evaluate(() => window.__releaseBatchWrite?.());
           if (await page.locator("#control-view:not([hidden])").count()) {
             await page.click("#disconnect-button");
             await page.waitForSelector("#connection-view:not([hidden])");

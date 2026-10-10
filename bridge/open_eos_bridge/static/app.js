@@ -15,6 +15,10 @@
   if (!mediaTransfer) throw new Error("Open EOS media transfer module is unavailable.");
   const mediaLibrary = globalThis.OpenEOSMediaLibrary;
   if (!mediaLibrary) throw new Error("Open EOS media library module is unavailable.");
+  const mediaBatch = globalThis.OpenEOSMediaBatch;
+  if (!mediaBatch) throw new Error("Open EOS media batch module is unavailable.");
+  const mediaBatchDestination = globalThis.OpenEOSMediaBatchDestination;
+  if (!mediaBatchDestination) throw new Error("Open EOS media batch destination module is unavailable.");
 
   const FEATURES = {
     RECORDABLE_STATUS: "RECORDABLE_STATUS",
@@ -436,6 +440,30 @@
       mediaDateInvalid: "Enter valid calendar dates.",
       mediaDateReversed: "The end date must be on or after the start date.",
       mediaNoMatches: "No loaded media matches these filters. Clear the date, rating or folder filter, or change the media type.",
+      mediaSelect: "Select {name}",
+      mediaSelectFiltered: "Select all loaded matches",
+      mediaSelectionClear: "Clear selection",
+      mediaSelectionSummary: "{selected} selected · {hidden} hidden by filters · {notLoaded} not currently loaded",
+      mediaSelectionHelp: "Selects loaded matches across pages, not unseen files on the card. Selection is kept when filters or scope change. Hidden and no-longer-loaded selections are included in the batch.",
+      mediaBatchStart: "Save selected originals to folder…",
+      mediaBatchUnavailable: "Batch saving needs a browser with folder access. You can still download originals individually.",
+      mediaBatchTitle: "Original file batch",
+      mediaBatchChoosing: "Choose a folder. A new isolated batch folder will be created inside it.",
+      mediaBatchDestination: "Destination: {name}",
+      mediaBatchSummary: "{completed} saved · {failed} failed · {uncertain} uncertain · {notStarted} not started · {queued} queued · {running} running",
+      mediaBatchCancel: "Cancel remaining files",
+      mediaBatchCancelling: "Cancelling. The current camera read or file close may still finish; later files will not start.",
+      mediaBatchNotice: "Files are saved one at a time. Saved means the browser confirmed the file was closed. Cancellation may leave partial files in the batch folder; camera reads may continue in the Bridge.",
+      mediaBatchLeftovers: "{count} file(s) may be incomplete or have an uncertain result in the batch folder. Inspect them before using or removing them.",
+      mediaBatchDirectoryMayRemain: "An empty batch folder may remain at the chosen destination.",
+      mediaBatchQueued: "Queued",
+      mediaBatchRunning: "Saving",
+      mediaBatchCompleted: "Saved",
+      mediaBatchFailed: "Failed",
+      mediaBatchUncertain: "Save result uncertain; inspect the destination",
+      mediaBatchNotStarted: "Not started",
+      mediaBatchFinished: "Batch finished. Review the per-file results.",
+      mediaBatchStopped: "Batch stopped. Saved files are retained.",
 
       manageMedia: "Manage {name}",
       mediaDetails: "Media details",
@@ -885,6 +913,30 @@
       mediaDateInvalid: "請輸入有效的日曆日期。",
       mediaDateReversed: "結束日期不能早於開始日期。",
       mediaNoMatches: "已載入素材沒有符合篩選的項目。請清除日期、評分或資料夾篩選，或變更素材類型。",
+      mediaSelect: "選取 {name}",
+      mediaSelectFiltered: "選取全部已載入符合項目",
+      mediaSelectionClear: "清除選取",
+      mediaSelectionSummary: "已選 {selected} 項 · 篩選隱藏 {hidden} 項 · 目前未載入 {notLoaded} 項",
+      mediaSelectionHelp: "跨頁選取已載入且符合篩選的項目，不包含記憶卡上尚未載入的檔案。變更篩選或範圍會保留選取；已隱藏與目前未載入的選取項目也包含在批次中。",
+      mediaBatchStart: "將所選原檔儲存到資料夾…",
+      mediaBatchUnavailable: "批次儲存需要支援資料夾存取的瀏覽器。仍可逐一下載原檔。",
+      mediaBatchTitle: "原檔批次儲存",
+      mediaBatchChoosing: "請選擇資料夾，系統會在其中建立新的獨立批次資料夾。",
+      mediaBatchDestination: "目的地：{name}",
+      mediaBatchSummary: "已儲存 {completed} · 失敗 {failed} · 結果不確定 {uncertain} · 未開始 {notStarted} · 等待中 {queued} · 處理中 {running}",
+      mediaBatchCancel: "取消後續檔案",
+      mediaBatchCancelling: "正在取消。目前的相機讀取或檔案關閉仍可能完成；不會開始後續檔案。",
+      mediaBatchNotice: "逐一儲存原檔。「已儲存」表示瀏覽器已確認關閉檔案。取消後批次資料夾可能留有不完整檔案；Bridge 的相機讀取仍可能繼續。",
+      mediaBatchLeftovers: "批次資料夾中有 {count} 個檔案可能不完整或結果不確定，使用或刪除前請先檢查。",
+      mediaBatchDirectoryMayRemain: "選定的目的地可能留有空的批次資料夾。",
+      mediaBatchQueued: "等待中",
+      mediaBatchRunning: "正在儲存",
+      mediaBatchCompleted: "已儲存",
+      mediaBatchFailed: "失敗",
+      mediaBatchUncertain: "儲存結果不確定，請檢查目的地",
+      mediaBatchNotStarted: "未開始",
+      mediaBatchFinished: "批次已結束，請查看各檔案結果。",
+      mediaBatchStopped: "批次已停止，已儲存檔案會保留。",
 
       manageMedia: "管理 {name}",
       mediaDetails: "媒體詳細資料",
@@ -1195,6 +1247,9 @@
     focusStep: "MEDIUM",
     tapAction: "focus",
     media: [],
+    mediaSelection: mediaBatch.createSelection(),
+    mediaBatchOwner: null,
+    mediaBatch: null,
     mediaLoaded: false,
     mediaLoadStatus: "NOT_LOADED",
     mediaRefreshPromise: null,
@@ -1398,6 +1453,18 @@
     mediaTransferStatus: byId("media-transfer-status"),
     mediaTransferProgress: byId("media-transfer-progress"),
     mediaTransferCancel: byId("media-transfer-cancel"),
+    mediaSelection: byId("media-selection"),
+    mediaSelectFiltered: byId("media-select-filtered"),
+    mediaSelectionClear: byId("media-selection-clear"),
+    mediaSelectionSummary: byId("media-selection-summary"),
+    mediaBatchStart: byId("media-batch-start"),
+    mediaBatchUnavailable: byId("media-batch-unavailable"),
+    mediaBatchPanel: byId("media-batch-panel"),
+    mediaBatchDestination: byId("media-batch-destination"),
+    mediaBatchSummary: byId("media-batch-summary"),
+    mediaBatchList: byId("media-batch-list"),
+    mediaBatchCancel: byId("media-batch-cancel"),
+    mediaBatchNotice: byId("media-batch-notice"),
     mediaPreviewDialog: byId("media-preview-dialog"),
     mediaPreviewClose: byId("media-preview-close"),
     mediaPreviewTitle: byId("media-preview-title"),
@@ -1892,6 +1959,10 @@
     state.lastClockSyncAt = null;
     state.lastCreatedDirectoryName = null;
     state.media = [];
+    state.mediaSelection?.clear();
+    state.mediaSelection?.replaceLoaded([]);
+    state.mediaBatchOwner = null;
+    state.mediaBatch = null;
     state.mediaFolderFilter = { kind: "all" };
     state.mediaFolderDialogSession = null;
     state.mediaFolderDraftChoices = [];
@@ -2004,7 +2075,8 @@
   }
 
   function mediaTransferActive() {
-    return state.mediaDownloadPreparing || Boolean(state.mediaDownload) || Boolean(state.mediaUpload);
+    return state.mediaDownloadPreparing || Boolean(state.mediaDownload) || Boolean(state.mediaUpload) ||
+      Boolean(state.mediaBatchOwner);
   }
 
   function cameraInteractionBusy() {
@@ -4803,12 +4875,14 @@
 
   function renderMedia() {
     if (!ui.mediaList) return;
+    state.mediaSelection.replaceLoaded(state.media);
     mediaThumbnailObserver?.disconnect();
     const visibleItems = displayedMedia();
     const mediaPage = mediaLibrary.page(visibleItems, state.mediaPage, MEDIA_PAGE_SIZE);
     state.mediaPage = mediaPage.pageIndex;
     mediaPage.items.forEach((item) => mediaLibrary.touch(state.mediaThumbnailUrls, item.id));
     renderMediaSummary(visibleItems);
+    renderMediaSelection(visibleItems);
     ui.mediaSortSelect.value = state.mediaSort;
     ui.mediaScopeControl.querySelectorAll("[data-media-scope]").forEach((button) => {
       const active = button.dataset.mediaScope === state.mediaScope;
@@ -4844,6 +4918,25 @@
       }
       const card = document.createElement("article");
       card.className = "media-card";
+      const selection = document.createElement("label");
+      selection.className = "media-select";
+      selection.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "media-select-checkbox";
+      checkbox.dataset.mediaId = item.id;
+      checkbox.checked = state.mediaSelection.has(item.id);
+      checkbox.disabled = cameraInteractionBusy();
+      const selectionLabel = t("mediaSelect").replaceAll("{name}", () => String(item.name));
+      checkbox.setAttribute("aria-label", selectionLabel);
+      checkbox.addEventListener("change", () => {
+        if (cameraInteractionBusy()) return;
+        state.mediaSelection.setSelected(item.id, checkbox.checked);
+        renderMediaSelection();
+      });
+      const selectionText = document.createElement("span");
+      selectionText.textContent = selectionLabel;
+      selection.append(checkbox, selectionText);
       const previewSupported = mediaIsVideo(item)
         ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
         : item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW);
@@ -4852,6 +4945,7 @@
       thumbnail.dataset.mediaId = item.id;
       if (previewSupported) {
         thumbnail.type = "button";
+        thumbnail.disabled = Boolean(state.mediaBatchOwner);
         thumbnail.setAttribute("aria-label", t("previewMedia", { name: item.name }));
         thumbnail.addEventListener("click", () => openMediaPreview(item));
       }
@@ -4885,7 +4979,7 @@
         manage.addEventListener("click", () => openMediaDetails(item));
         actions.append(manage);
       }
-      card.append(thumbnail, copy, size, actions);
+      card.append(selection, thumbnail, copy, size, actions);
       ui.mediaList.append(card);
       if (
         featureSupported(FEATURES.MEDIA_THUMBNAIL) &&
@@ -4900,6 +4994,239 @@
 
   function mediaIsVideo(item) {
     return mediaLibrary.isVideo(item);
+  }
+
+  function renderMediaSelection(visibleItems = displayedMedia()) {
+    if (!ui.mediaSelection || !state.mediaSelection) return;
+    const selection = state.mediaSelection.snapshot(visibleItems.map((item) => item.id));
+    const supported = featureSupported(FEATURES.MEDIA_DOWNLOAD);
+    const folderAvailable = typeof window.showDirectoryPicker === "function";
+    const busy = cameraInteractionBusy();
+    ui.mediaSelection.hidden = !supported;
+    ui.mediaSelectionSummary.textContent = t("mediaSelectionSummary", {
+      selected: selection.length,
+      hidden: selection.filter((entry) => entry.loaded && entry.hidden).length,
+      notLoaded: selection.filter((entry) => !entry.loaded).length,
+    });
+    ui.mediaSelectFiltered.disabled = !state.session || busy || !visibleItems.length;
+    ui.mediaSelectionClear.disabled = busy || !selection.length;
+    ui.mediaBatchStart.disabled = !state.session || !supported || busy || !selection.length || !folderAvailable;
+    ui.mediaBatchUnavailable.hidden = folderAvailable;
+    ui.mediaList.querySelectorAll(".media-select-checkbox").forEach((checkbox) => {
+      checkbox.disabled = busy;
+    });
+  }
+
+  function renderMediaBatch() {
+    if (!ui.mediaBatchPanel) return;
+    const batch = state.mediaBatch;
+    ui.mediaBatchPanel.hidden = !batch;
+    if (!batch) return;
+    const owner = state.mediaBatchOwner;
+    const counts = { completed: 0, failed: 0, uncertain: 0, notStarted: 0, queued: 0, running: 0 };
+    const statusKeys = {
+      pending: ["queued", "mediaBatchQueued"],
+      running: ["running", "mediaBatchRunning"],
+      completed: ["completed", "mediaBatchCompleted"],
+      failed: ["failed", "mediaBatchFailed"],
+      "cancelled-or-unknown": ["uncertain", "mediaBatchUncertain"],
+      "not-started": ["notStarted", "mediaBatchNotStarted"],
+    };
+    ui.mediaBatchList.replaceChildren();
+    batch.queue.results.forEach((result, index) => {
+      const [countKey, labelKey] = statusKeys[result.status];
+      counts[countKey] += 1;
+      const row = document.createElement("li");
+      row.dataset.mediaId = result.id;
+      row.dataset.status = result.status;
+      const name = document.createElement("strong");
+      name.textContent = result.receipt?.name || batch.destination?.files?.find((file) => file.index === index)?.name || result.item.name;
+      const status = document.createElement("span");
+      status.textContent = t(labelKey);
+      if (batch.progress?.index === index && result.status === "running") {
+        status.textContent += ` · ${t("downloadProgressUnknown", { transferred: formatBytes(batch.progress.bytesTransferred) })}`;
+      }
+      row.append(name, status);
+      if (result.error?.message) {
+        const error = document.createElement("span");
+        error.className = "supporting";
+        error.textContent = result.error.message;
+        row.append(error);
+      }
+      ui.mediaBatchList.append(row);
+    });
+    ui.mediaBatchDestination.textContent = batch.destinationName
+      ? t("mediaBatchDestination").replaceAll("{name}", () => batch.destinationName) : t("mediaBatchChoosing");
+    ui.mediaBatchSummary.textContent = t("mediaBatchSummary", counts);
+    const notices = [t(owner?.cancelled ? "mediaBatchCancelling" : "mediaBatchNotice")];
+    if (batch.errorMessage) notices.push(batch.errorMessage);
+    if (batch.destination?.leftoverCount) {
+      notices.push(t("mediaBatchLeftovers", { count: batch.destination.leftoverCount }));
+    } else if (batch.destination?.directoryMayRemain && !counts.completed && !owner) {
+      notices.push(t("mediaBatchDirectoryMayRemain"));
+    }
+    ui.mediaBatchNotice.textContent = notices.join(" ");
+    ui.mediaBatchCancel.hidden = !owner;
+    ui.mediaBatchCancel.disabled = !owner || owner.cancelled;
+  }
+
+  function ownsMediaBatch(owner) {
+    return state.mediaBatchOwner === owner && state.session === owner.session;
+  }
+
+  function assertMediaBatchCurrent(owner) {
+    if (!ownsMediaBatch(owner) || owner.cancelled || owner.controller.signal.aborted) {
+      throw mediaTransfer.cancellationError();
+    }
+  }
+
+  async function transferMediaBatchItem(item, { owner, destination, index }) {
+    let writable = null;
+    let closed = false;
+    try {
+      assertMediaBatchCurrent(owner);
+      const file = await destination.open(item, index);
+      writable = file.writable;
+      // A directory/file prompt may finish after disconnect or cancellation.
+      // Always abort its late writable before requesting any camera bytes.
+      assertMediaBatchCurrent(owner);
+      const response = await api(
+        `/v1/session/${encodeURIComponent(owner.session.id)}/media/${encodeURIComponent(item.id)}`,
+        { responseType: "response", signal: owner.controller.signal },
+      );
+      assertMediaBatchCurrent(owner);
+      const result = await mediaTransfer.readResponse(response, {
+        signal: owner.controller.signal,
+        expectedBytes: item.sizeBytes,
+        writeChunk: async (chunk) => {
+          assertMediaBatchCurrent(owner);
+          await writable.write(chunk);
+          assertMediaBatchCurrent(owner);
+        },
+        onProgress: (progress) => {
+          if (!ownsMediaBatch(owner) || owner.cancelled) return;
+          state.mediaBatch.progress = { ...progress, index };
+          scheduleMediaTransferRender();
+        },
+      });
+      assertMediaBatchCurrent(owner);
+      await writable.close();
+      closed = true;
+      // Close completion is a receipt even if cancellation arrived during it.
+      // The queue retains the receipt while the owner guards prevent stale UI.
+      return { completed: true, bytesTransferred: result.bytesTransferred, name: file.name };
+    } catch (error) {
+      let cleanupError = null;
+      if (writable && !closed) {
+        try {
+          await writable.abort(error);
+        } catch (abortError) {
+          cleanupError = abortError;
+        }
+      }
+      if (cleanupError || destination.snapshot().files.some((file) => file.index === index && file.outcomeUnknown)) {
+        // Preserve the primary failure while making uncertain cleanup visible
+        // to the queue, including errors which are primitive or frozen.
+        const failure = new Error(error?.message || String(error));
+        failure.name = error?.name || "Error";
+        failure.cause = error;
+        failure.outcomeUnknown = true;
+        if (cleanupError) failure.abortError = cleanupError;
+        throw failure;
+      }
+      throw error;
+    } finally {
+      if (ownsMediaBatch(owner)) state.mediaBatch.destination = destination.snapshot();
+    }
+  }
+
+  async function downloadSelectedMedia() {
+    if (!state.session || !featureSupported(FEATURES.MEDIA_DOWNLOAD) || cameraInteractionBusy()) return;
+    if (typeof window.showDirectoryPicker !== "function") {
+      showToast(t("mediaBatchUnavailable"), true);
+      return;
+    }
+    state.mediaSelection.replaceLoaded(state.media);
+    const items = state.mediaSelection.snapshot().map((entry) => entry.item);
+    if (!items.length) return;
+    const owner = { session: state.session, controller: new AbortController(), cancelled: false, silent: false };
+    state.mediaBatchOwner = owner;
+    state.refreshGeneration += 1;
+    const batch = {
+      queue: { status: "pending", results: items.map((item) => ({ id: item.id, item, status: "pending" })) },
+      destinationName: "", destination: null, progress: null, errorMessage: null,
+    };
+    state.mediaBatch = batch;
+    renderMedia();
+    renderAvailability();
+    renderMediaPreviewNavigation();
+    setOperationState(t("mediaBatchChoosing"));
+    let destination = null;
+    try {
+      // Invoke directly in the user's click task; never restore/persist a handle
+      // or fall back to automatic anchor downloads when folder access fails.
+      const directoryHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+      assertMediaBatchCurrent(owner);
+      destination = mediaBatchDestination.createDirectoryBatchDestination({
+        directoryHandle,
+        nonce: globalThis.crypto.randomUUID(),
+        safeDownloadName: mediaTransfer.safeDownloadName,
+        signal: owner.controller.signal,
+        isCurrent: () => ownsMediaBatch(owner),
+      });
+      batch.destination = destination.snapshot();
+      batch.destinationName = `${directoryHandle.name} / ${batch.destination.batchName}`;
+      setOperationState(t("mediaBatchRunning"));
+      const result = await mediaBatch.runSequentialBatch(items, {
+        signal: owner.controller.signal,
+        isCurrent: () => ownsMediaBatch(owner),
+        transfer: (item, { index }) => transferMediaBatchItem(item, { owner, destination, index }),
+        onUpdate: (queue) => {
+          if (!ownsMediaBatch(owner)) return;
+          batch.queue = queue;
+          batch.destination = destination.snapshot();
+          renderMediaBatch();
+        },
+      });
+      if (!ownsMediaBatch(owner)) return;
+      batch.queue = result;
+      batch.destination = destination.snapshot();
+      if (!owner.silent) {
+        setOperationState(t(batch.queue.status === "completed" ? "mediaBatchFinished" : "mediaBatchStopped"));
+      }
+    } catch (error) {
+      if (!ownsMediaBatch(owner)) return;
+      batch.queue = { status: "stopped", results: batch.queue.results.map((result) =>
+        result.status === "pending" ? { ...result, status: "not-started" } : result) };
+      const cancelled = owner.cancelled || mediaTransfer.isAbortError(error);
+      if (!cancelled) batch.errorMessage = captureError(error).message;
+      if (!owner.silent) {
+        setOperationState(cancelled ? t("mediaBatchStopped") : batch.errorMessage, !cancelled);
+        if (!cancelled) showToast(batch.errorMessage, true);
+      }
+    } finally {
+      if (ownsMediaBatch(owner)) {
+        if (destination) batch.destination = destination.snapshot();
+        clearScheduledMediaTransferRender();
+        state.mediaBatchOwner = null;
+        renderMedia();
+        renderAvailability();
+        renderMediaPreviewNavigation();
+      }
+    }
+  }
+
+  function cancelMediaBatch({ silent = false } = {}) {
+    const owner = state.mediaBatchOwner;
+    if (!owner || !ownsMediaBatch(owner)) return;
+    owner.cancelled = true;
+    owner.silent = silent;
+    if (state.mediaBatch.queue.status === "pending") {
+      state.mediaBatch.queue = { status: "stopping", results: state.mediaBatch.queue.results.map((result) =>
+        result.status === "pending" ? { ...result, status: "not-started" } : result) };
+    }
+    owner.controller.abort();
+    renderMediaBatch();
   }
 
   function mediaTime(item) {
@@ -5201,6 +5528,7 @@
   async function loadMediaThumbnail(item) {
     if (
       !state.session ||
+      Boolean(state.mediaBatchOwner) ||
       !featureSupported(FEATURES.MEDIA_THUMBNAIL) ||
       state.mediaThumbnailUrls.has(item.id) ||
       state.mediaThumbnailLoads.has(item.id) ||
@@ -5542,6 +5870,7 @@
     const video = mediaIsVideo(item);
     if (
       !state.session ||
+      Boolean(state.mediaBatchOwner) ||
       (video && !featureSupported(FEATURES.MEDIA_DOWNLOAD)) ||
       (!video && (item.previewAvailable !== true || !featureSupported(FEATURES.MEDIA_PREVIEW)))
     ) return;
@@ -5616,8 +5945,10 @@
   function renderMediaPreviewNavigation() {
     const items = previewableMedia();
     const index = items.findIndex((item) => item.id === state.mediaPreviewItem?.id);
-    ui.mediaPreviewPrevious.disabled = index <= 0;
-    ui.mediaPreviewNext.disabled = index < 0 || index >= items.length - 1;
+    ui.mediaPreviewPrevious.disabled = Boolean(state.mediaBatchOwner) || index <= 0;
+    ui.mediaPreviewNext.disabled = Boolean(state.mediaBatchOwner) || index < 0 || index >= items.length - 1;
+    ui.mediaPreviewRetry.disabled = Boolean(state.mediaBatchOwner);
+    ui.mediaPreviewFailureDownload.disabled = cameraInteractionBusy();
     const item = state.mediaPreviewItem;
     if (!item) return;
     ui.mediaPreviewTitle.textContent = item.name;
@@ -5656,6 +5987,8 @@
   }
 
   function renderMediaTransfer() {
+    renderMediaSelection();
+    renderMediaBatch();
     const transfer = state.mediaUpload || state.mediaDownload;
     const uploading = Boolean(state.mediaUpload);
     ui.mediaTransfer.hidden = !transfer;
@@ -5814,6 +6147,7 @@
   }
 
   function cancelMediaDownload({ silent = false } = {}) {
+    cancelMediaBatch({ silent });
     if (state.mediaDownloadOwner) {
       state.mediaDownloadOwner.cancelled = true;
       state.mediaDownloadOwner.silent = silent;
@@ -5938,6 +6272,7 @@
       // A replacement connection can reuse both the session ID and the media ID.
       if (state.session !== session) return;
       state.media = state.media.filter((candidate) => candidate.id !== item.id);
+      state.mediaSelection?.remove(item.id);
       const thumbnailUrl = state.mediaThumbnailUrls.get(item.id);
       state.mediaThumbnailUrls.delete(item.id);
       state.mediaThumbnailLoads.delete(item.id);
@@ -6397,6 +6732,19 @@
       applyMediaDateFilter();
     });
     ui.mediaRefreshButton.addEventListener("click", refreshMedia);
+    ui.mediaSelectFiltered.addEventListener("click", () => {
+      if (cameraInteractionBusy()) return;
+      state.mediaSelection.replaceLoaded(state.media);
+      state.mediaSelection.setMany(displayedMedia().map((item) => item.id), true);
+      renderMedia();
+    });
+    ui.mediaSelectionClear.addEventListener("click", () => {
+      if (cameraInteractionBusy()) return;
+      state.mediaSelection.clear();
+      renderMedia();
+    });
+    ui.mediaBatchStart.addEventListener("click", downloadSelectedMedia);
+    ui.mediaBatchCancel.addEventListener("click", () => cancelMediaBatch());
     ui.mediaScopeControl.addEventListener("click", (event) => {
       const button = event.target.closest?.("[data-media-scope]");
       if (!button || button.dataset.mediaScope === state.mediaScope) return;

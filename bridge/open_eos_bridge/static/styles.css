@@ -1356,6 +1356,7 @@ input:disabled {
   aspect-ratio: 1;
   overflow: hidden;
   grid-column: 1 / -1;
+  grid-row: 2;
   place-items: center;
   border: 1px solid var(--line);
   border-radius: 5px;
@@ -1393,17 +1394,18 @@ button.media-thumbnail:focus-visible {
 .media-card .media-copy {
   padding: 7px 5px 4px;
   grid-column: 1 / -1;
+  grid-row: 3;
 }
 
 .media-card .media-size {
   padding: 0 5px 7px;
   grid-column: 1;
-  grid-row: 3;
+  grid-row: 4;
 }
 
 .media-card .media-actions {
   grid-column: 2;
-  grid-row: 3;
+  grid-row: 4;
   justify-self: end;
 }
 
@@ -2063,3 +2065,20 @@ button.media-thumbnail:focus-visible {
 .media-date-error { color: var(--danger); overflow-wrap: anywhere; }
 .media-date-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; padding: 0 24px 24px; }
 .media-date-actions .button { white-space: normal; min-height: 44px; }
+
+/* Batch controls and outcomes remain readable at narrow widths and 200% zoom. */
+.media-selection, .media-batch-panel { min-width: 0; margin: 0 0 16px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; }
+.media-selection[hidden], .media-batch-panel[hidden] { display: none; }
+.media-selection p, .media-batch-panel p { margin: 0 0 10px; overflow-wrap: anywhere; }
+.media-selection-actions, .media-batch-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+.media-batch-heading { justify-content: space-between; }
+.media-batch-heading h3 { margin: 0; }
+.media-selection-actions .button, .media-batch-heading .button { max-width: 100%; min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
+.media-select { display: flex; grid-column: 1 / -1; grid-row: 1; min-height: 44px; min-width: 0; align-items: center; gap: 8px; padding: 4px; cursor: pointer; }
+.media-select input { flex: 0 0 auto; width: 22px; height: 22px; accent-color: var(--accent); }
+.media-select input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.media-select span { min-width: 0; font-size: 0.78rem; overflow-wrap: anywhere; }
+.media-batch-list { display: grid; gap: 8px; max-height: 22rem; overflow-y: auto; padding: 0; margin: 0; list-style-position: inside; }
+.media-batch-list li { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 10px; border: 1px solid var(--line); border-radius: 4px; overflow-wrap: anywhere; }
+.media-batch-list li[data-status="completed"] { border-color: var(--accent); }
+.media-batch-list li[data-status="failed"], .media-batch-list li[data-status="cancelled-or-unknown"] { border-color: var(--danger); }

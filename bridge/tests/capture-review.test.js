@@ -100,7 +100,7 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
     "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
     "shutterReleaseUnconfirmed", "bulbControlLocked", "operateShutter", "autofocus", "halfPressShutter",
     "cancelLatestMediaRefresh", "latestMediaFrom", "refreshLatestMedia",
-    "publishLatestMedia", "loadLatestMediaThumbnail", "chooseMediaWritable", "downloadMedia", "cancelMediaDownload",
+    "publishLatestMedia", "loadLatestMediaThumbnail", "chooseMediaWritable", "downloadMedia", "cancelMediaDownload", "cancelMediaBatch",
   ];
   // Load a future recovery entry point only when present. Assertions first prove the
   // observable missing NOT_READY result on the unchanged baseline, not an import error.

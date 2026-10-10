@@ -146,9 +146,9 @@ function fixture(t, { dated = false } = {}) {
   const names = ["startEventLoop", "cancelEventLoop", "refreshSession", "refreshMedia", "refreshMediaWhenCurrent",
     "mediaTransferActive", "cameraInteractionBusy", "openMediaPreview", "closeMediaPreview", "clearMediaPreview",
     "resetMediaPreviewTransform", "renderMediaPreviewNavigation", "previewableMedia", "displayedMedia",
-    "renderMediaSummary", "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel", "mediaDisplayTimeZone", "resetSession", "cancelLatestMediaRefresh",
+    "renderMediaSummary", "renderMediaSelection", "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel", "mediaDisplayTimeZone", "resetSession", "cancelLatestMediaRefresh",
     "retryLatestMedia", "refreshLatestMedia", "latestMediaFrom", "publishLatestMedia",
-    "downloadMedia", "cancelMediaDownload"];
+    "downloadMedia", "cancelMediaDownload", "cancelMediaBatch"];
   vm.runInContext(names.map(extract).join("\n"), s, { timeout: 1000 });
   s.renderMedia = () => {
     renders.push(Array.from(state.media, (entry) => entry.id));

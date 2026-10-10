@@ -80,6 +80,7 @@ function harness() {
     shutterAFSupported: () => true, canChangeShutterAF: () => true,
     effectiveTapAction: () => null, validCcapiUrl: () => true,
     liveCapabilities: () => sandbox.state.capabilities?.liveView || {},
+    mediaBatch: require("../open_eos_bridge/static/media-batch.js"),
     rtpAudio: {readPcmResponse: () => {throw new Error("Audio fixture must stay pending");}},
     renderLiveState: () => sandbox.renderRtpAudio(),
     fetch: async (url, options) => {

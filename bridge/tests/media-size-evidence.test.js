@@ -10,6 +10,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const mediaBatch = require("../open_eos_bridge/static/media-batch.js");
 const mediaLibrary = require("../open_eos_bridge/static/media-library.js");
 const source = fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static/app.js"), "utf8");
 
@@ -62,7 +63,7 @@ function context(item = media(), { metadata } = {}) {
     mediaThumbnailUrls: new Map(), mediaThumbnailLoads: new Set(),
     mediaDetailsItem: item, mediaDetailsBusy: false, mediaDetailsGeneration: 0, mediaPreviewItem: item,
     latestMediaItem: null, mediaDownloadPreparing: false, mediaDownloadOwner: null,
-    mediaDownload: null, mediaUpload: null,
+    mediaDownload: null, mediaUpload: null, mediaSelection: mediaBatch.createSelection(),
   };
   const effects = [];
   const requests = [];
@@ -113,7 +114,7 @@ function context(item = media(), { metadata } = {}) {
     "mediaTransferActive", "cameraInteractionBusy", "replaceMediaItem",
     "openMediaDetails", "clearMediaDetails",
     "renderMedia", "renderMediaSummary", "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel", "mediaDisplayTimeZone", "renderMediaDetails", "renderMediaPreviewNavigation",
-    "renderMediaTransfer", "renderSession",
+    "renderMediaTransfer", "renderMediaSelection", "renderMediaBatch", "renderSession",
   ];
   // The unchanged baseline must fail on its rendered claims, not a missing import.
   // Once present, load the production helper without supplying a test substitute.
