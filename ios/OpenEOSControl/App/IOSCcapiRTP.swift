@@ -13,6 +13,11 @@ enum IOSCcapiRTPEvent: Sendable {
     case failed(String)
 }
 
+struct IOSCcapiRTPDelivery: Sendable {
+    let owner: UUID
+    let event: IOSCcapiRTPEvent
+}
+
 struct IOSCcapiRTPAudioStatus: Equatable, Sendable {
     var advertised = false
     var available = false
@@ -94,7 +99,7 @@ enum CameraRTPNetworkAddress {
 
 final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
     private let handlerLock = NSLock()
-    private var eventHandler: (@Sendable (IOSCcapiRTPEvent) -> Void)?
+    private var eventHandler: (@Sendable (IOSCcapiRTPDelivery) -> Void)?
     private let audioStateLock = NSLock()
     private let audioQueue = DispatchQueue(label: "dev.openeos.control.ccapi-rtp-audio", qos: .userInitiated)
     private var audioStatus = IOSCcapiRTPAudioStatus.inactive
@@ -104,6 +109,8 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
     private var queuedAudioAccessUnits = 0
     private var lastAudioStatusPublishedAt = Date.distantPast
     private var activeAudioSessionID: UUID?
+    private var deliveryOwner = UUID()
+    private let videoConsumer: (@MainActor @Sendable (CCAPIH264AccessUnit) -> Void)?
     private let audioPipeline = IOSCcapiRTPAudioPipeline()
 
     @MainActor private weak var displayLayer: AVSampleBufferDisplayLayer?
@@ -112,6 +119,33 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
     @MainActor private var formatDescription: CMVideoFormatDescription?
     @MainActor private var needsKeyFrame = true
     @MainActor private var renderingEnabled = true
+    @MainActor private var renderedSessionID: UUID?
+
+    init(videoConsumer: (@MainActor @Sendable (CCAPIH264AccessUnit) -> Void)? = nil) {
+        self.videoConsumer = videoConsumer
+    }
+
+    func accepts(_ delivery: IOSCcapiRTPDelivery) -> Bool {
+        audioStateLock.synchronized { deliveryOwner == delivery.owner }
+    }
+
+    @MainActor
+    func retireDelivery() {
+        let owner = audioStateLock.synchronized { () -> UUID in
+            activeAudioSessionID = nil
+            deliveryOwner = UUID()
+            audioRequested = false
+            queuedAudioAccessUnits = 0
+            audioStatus = .inactive
+            return deliveryOwner
+        }
+        audioQueue.async { [weak self] in
+            guard let self, self.audioStateLock.synchronized({ self.deliveryOwner == owner }) else { return }
+            self.audioPipeline.stop()
+        }
+        clearRendererSession()
+        emit(.audioStatus(.inactive), owner: owner)
+    }
 
     func makeSession(
         description: CCAPIRTPSessionDescription,
@@ -131,7 +165,7 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
         )
     }
 
-    func setEventHandler(_ handler: @escaping @Sendable (IOSCcapiRTPEvent) -> Void) {
+    func setEventHandler(_ handler: @escaping @Sendable (IOSCcapiRTPDelivery) -> Void) {
         handlerLock.synchronized { eventHandler = handler }
     }
 
@@ -249,26 +283,38 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
     }
 
     fileprivate func endAudioSession(sessionID: UUID) {
-        let ended = audioStateLock.synchronized { () -> Bool in
-            guard activeAudioSessionID == sessionID else { return false }
+        let owner = audioStateLock.synchronized { () -> UUID? in
+            guard activeAudioSessionID == sessionID else { return nil }
             activeAudioSessionID = nil
+            deliveryOwner = UUID()
             audioRequested = false
             queuedAudioAccessUnits = 0
             audioStatus = .inactive
-            return true
+            return deliveryOwner
         }
-        guard ended else { return }
+        guard let owner else { return }
         stopAudioPipeline(unlessSessionReplaced: sessionID)
-        emit(.audioStatus(.inactive))
+        emit(.audioStatus(.inactive), owner: owner)
     }
 
     @MainActor
-    fileprivate func enqueue(
+    func enqueue(
         _ accessUnit: CCAPIH264AccessUnit,
         sequenceParameterSet: Data?,
-        pictureParameterSet: Data?
+        pictureParameterSet: Data?,
+        sessionID: UUID
     ) {
-        guard renderingEnabled, let displayLayer else { return }
+        guard audioStateLock.synchronized({ activeAudioSessionID == sessionID && deliveryOwner == sessionID }),
+              renderingEnabled else { return }
+        if renderedSessionID != sessionID {
+            clearRendererSession()
+            renderedSessionID = sessionID
+        }
+        if let videoConsumer {
+            videoConsumer(accessUnit)
+            return
+        }
+        guard let displayLayer else { return }
         let parameterSetsChanged = sequenceParameterSet != nil && pictureParameterSet != nil &&
             (sequenceParameterSet != latestSPS || pictureParameterSet != latestPPS)
         if parameterSetsChanged {
@@ -283,11 +329,11 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
                 if let formatDescription {
                     let dimensions = CMVideoFormatDescriptionGetDimensions(formatDescription)
                     if dimensions.width > 0, dimensions.height > 0 {
-                        emit(.videoSize(width: dimensions.width, height: dimensions.height))
+                        emit(.videoSize(width: dimensions.width, height: dimensions.height), owner: sessionID)
                     }
                 }
             } catch {
-                emit(.failed("Canon H.264 format setup failed: \(error.localizedDescription)"))
+                emit(.failed("Canon H.264 format setup failed: \(error.localizedDescription)"), owner: sessionID)
                 return
             }
         }
@@ -305,16 +351,18 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
             )
             renderer.enqueue(sampleBuffer)
             needsKeyFrame = false
-            emit(.frame(encodedBytes: accessUnit.encodedByteCount, at: Date()))
+            emit(.frame(encodedBytes: accessUnit.encodedByteCount, at: Date()), owner: sessionID)
         } catch {
             resetRenderer(removingImage: false)
-            emit(.failed("Canon H.264 sample creation failed: \(error.localizedDescription)"))
+            emit(.failed("Canon H.264 sample creation failed: \(error.localizedDescription)"), owner: sessionID)
         }
     }
 
-    fileprivate func emit(_ event: IOSCcapiRTPEvent) {
+    fileprivate func emit(_ event: IOSCcapiRTPEvent, owner: UUID) {
+        let delivery = IOSCcapiRTPDelivery(owner: owner, event: event)
+        guard accepts(delivery) else { return }
         let handler = handlerLock.synchronized { eventHandler }
-        handler?(event)
+        handler?(delivery)
     }
 
     private func configureAudio(
@@ -324,6 +372,7 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
     ) {
         audioStateLock.synchronized {
             activeAudioSessionID = sessionID
+            deliveryOwner = sessionID
             audioRequested = false
             queuedAudioAccessUnits = 0
             lastAudioStatusPublishedAt = .distantPast
@@ -340,7 +389,7 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
             )
         }
         audioQueue.async { [audioPipeline] in audioPipeline.stop() }
-        emit(.audioStatus(audioStateLock.synchronized { audioStatus }))
+        publishAudioStatus(force: true, sessionID: sessionID)
     }
 
     private func updateAudioActivation() {
@@ -374,16 +423,16 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
     }
 
     private func publishAudioStatus(force: Bool = false, sessionID: UUID? = nil) {
-        let status = audioStateLock.synchronized { () -> IOSCcapiRTPAudioStatus? in
+        let delivery = audioStateLock.synchronized { () -> IOSCcapiRTPDelivery? in
             if let sessionID, activeAudioSessionID != sessionID { return nil }
             let now = Date()
             guard force || now.timeIntervalSince(lastAudioStatusPublishedAt) >= audioStatusInterval else {
                 return nil
             }
             lastAudioStatusPublishedAt = now
-            return audioStatus
+            return IOSCcapiRTPDelivery(owner: deliveryOwner, event: .audioStatus(audioStatus))
         }
-        if let status { emit(.audioStatus(status)) }
+        if let delivery { emit(delivery.event, owner: delivery.owner) }
     }
 
     private func publishAudioStatusIfNeeded(sessionID: UUID) {
@@ -402,6 +451,15 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
             }
             if shouldStop { self.audioPipeline.stop() }
         }
+    }
+
+    @MainActor
+    private func clearRendererSession() {
+        renderedSessionID = nil
+        latestSPS = nil
+        latestPPS = nil
+        formatDescription = nil
+        resetRenderer(removingImage: true)
     }
 
     @MainActor
@@ -563,7 +621,8 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
                 video,
                 kind: "video",
                 onFailure: { [weak self] error in
-                    self?.sink.emit(.failed("Canon RTP video listener failed: \(error.localizedDescription)"))
+                    guard let self else { return }
+                    self.sink.emit(.failed("Canon RTP video listener failed: \(error.localizedDescription)"), owner: self.sessionID)
                 },
                 onConnection: { [weak self] connection in self?.acceptVideo(connection) }
             )
@@ -692,7 +751,7 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
                 self.receiveVideo(on: connection)
             case let .failed(error):
                 if !self.stateLock.synchronized({ self.closed }) {
-                    self.sink.emit(.failed("Canon RTP receive failed: \(error.localizedDescription)"))
+                    self.sink.emit(.failed("Canon RTP receive failed: \(error.localizedDescription)"), owner: self.sessionID)
                 }
             default:
                 break
@@ -715,17 +774,19 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
                     let latestSPS = self.latestSPS
                     let latestPPS = self.latestPPS
                     Task { @MainActor [weak self] in
-                        self?.sink.enqueue(
+                        guard let self else { return }
+                        self.sink.enqueue(
                             accessUnit,
                             sequenceParameterSet: latestSPS,
-                            pictureParameterSet: latestPPS
+                            pictureParameterSet: latestPPS,
+                            sessionID: self.sessionID
                         )
                     }
                 }
             }
             if let error {
                 if !self.stateLock.synchronized({ self.closed }) {
-                    self.sink.emit(.failed("Canon RTP receive failed: \(error.localizedDescription)"))
+                    self.sink.emit(.failed("Canon RTP receive failed: \(error.localizedDescription)"), owner: self.sessionID)
                 }
                 return
             }
