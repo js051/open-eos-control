@@ -39,13 +39,19 @@ final class CameraAppState: ObservableObject {
         static let liveViewSource = "live-view-source"
     }
 
-    @Published var connectionMode: AppConnectionMode
+    @Published var connectionMode: AppConnectionMode {
+        didSet { if connectionMode != oldValue { invalidateBridgeScan() } }
+    }
     @Published var baseURL: String
     @Published private(set) var ccapiConnectionMode = CCAPIConnectionMode.automatic
     @Published var username: String
     @Published var password = ""
-    @Published var bridgeURL: String
-    @Published var bridgeToken = ""
+    @Published var bridgeURL: String {
+        didSet { if bridgeURL != oldValue { invalidateBridgeScan() } }
+    }
+    @Published var bridgeToken = "" {
+        didSet { if bridgeToken != oldValue { invalidateBridgeScan() } }
+    }
     @Published private(set) var bridgeCameras: [DesktopBridgeCamera] = []
     @Published var selectedBridgeCameraID: String?
     @Published private(set) var snapshot: CameraSnapshot? {
@@ -126,6 +132,13 @@ final class CameraAppState: ObservableObject {
     }
     private var exportGeneration = UUID()
     private let sessionFactory: (@MainActor () throws -> CameraSession)?
+    private let bridgeCameraDiscovery: (@Sendable (String, String) async throws -> [DesktopBridgeCamera])?
+    private let cubeLutLoader: (@Sendable (URL) async throws -> CubeLut)?
+    private let focusMarkerDelay: (@Sendable () async throws -> Void)?
+    private var bridgeScanOwner = UUID()
+    private var cubeLutOwner = UUID()
+    private var focusMarkerOwner = UUID()
+    private(set) var focusMarkerExpiryTask: Task<Void, Never>?
     private var sessionGeneration = UUID()
     private var disconnectTask: Task<Void, Never>?
     private var pendingBulbStartID: UUID?
@@ -255,10 +268,16 @@ final class CameraAppState: ObservableObject {
 
     init(
         defaults: UserDefaults = .standard,
-        sessionFactory: (@MainActor () throws -> CameraSession)? = nil
+        sessionFactory: (@MainActor () throws -> CameraSession)? = nil,
+        bridgeCameraDiscovery: (@Sendable (String, String) async throws -> [DesktopBridgeCamera])? = nil,
+        cubeLutLoader: (@Sendable (URL) async throws -> CubeLut)? = nil,
+        focusMarkerDelay: (@Sendable () async throws -> Void)? = nil
     ) {
         self.defaults = defaults
         self.sessionFactory = sessionFactory
+        self.bridgeCameraDiscovery = bridgeCameraDiscovery
+        self.cubeLutLoader = cubeLutLoader
+        self.focusMarkerDelay = focusMarkerDelay
         if CommandLine.arguments.contains("-resetState") {
             [
                 DefaultsKey.baseURL,
@@ -309,10 +328,6 @@ final class CameraAppState: ObservableObject {
     }
 
     func setBridgeURL(_ value: String) {
-        if bridgeURL != value {
-            bridgeCameras = []
-            selectedBridgeCameraID = nil
-        }
         bridgeURL = value
         defaults.set(value, forKey: DefaultsKey.bridgeURL)
     }
@@ -337,12 +352,27 @@ final class CameraAppState: ObservableObject {
         setBaseURL(Self.simulatorURL)
     }
 
+    private func invalidateBridgeScan() {
+        bridgeScanOwner = UUID()
+        end(.scan)
+        bridgeCameras = []
+        selectedBridgeCameraID = nil
+    }
+
     func scanBridgeCameras() async {
-        guard begin(.scan) else { return }
-        defer { end(.scan) }
+        guard !Task.isCancelled, begin(.scan) else { return }
+        let owner = UUID()
+        bridgeScanOwner = owner
+        defer { if bridgeScanOwner == owner { end(.scan) } }
         do {
-            let probe = try DesktopBridgeClient(baseURL: bridgeURL, token: bridgeToken)
-            let cameras = try await probe.discoverCameras()
+            let cameras: [DesktopBridgeCamera]
+            if let bridgeCameraDiscovery {
+                cameras = try await bridgeCameraDiscovery(bridgeURL, bridgeToken)
+            } else {
+                let probe = try DesktopBridgeClient(baseURL: bridgeURL, token: bridgeToken)
+                cameras = try await probe.discoverCameras()
+            }
+            guard bridgeScanOwner == owner, !Task.isCancelled else { return }
             bridgeCameras = cameras
             if let selectedBridgeCameraID, cameras.contains(where: { $0.id == selectedBridgeCameraID }) {
                 self.selectedBridgeCameraID = selectedBridgeCameraID
@@ -351,6 +381,7 @@ final class CameraAppState: ObservableObject {
             }
             lastError = nil
         } catch {
+            guard bridgeScanOwner == owner, !Task.isCancelled else { return }
             bridgeCameras = []
             selectedBridgeCameraID = nil
             record(error)
@@ -528,6 +559,8 @@ final class CameraAppState: ObservableObject {
     }
 
     private func prepareDisconnect() -> CameraSession? {
+        invalidateBridgeScan()
+        retireFocusMarker()
         sessionGeneration = UUID()
         pendingBulbStartTask?.cancel()
         pendingBulbStartTask = nil
@@ -2045,7 +2078,12 @@ final class CameraAppState: ObservableObject {
     }
 
     func importCubeLut(from url: URL) async {
-        let task = Task.detached(priority: .userInitiated) { () throws -> CubeLut in
+        guard !Task.isCancelled else { return }
+        let owner = UUID()
+        cubeLutOwner = owner
+        let loader = cubeLutLoader
+        let task = Task.detached(priority: .userInitiated) { () async throws -> CubeLut in
+            if let loader { return try await loader(url) }
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
@@ -2062,9 +2100,12 @@ final class CameraAppState: ObservableObject {
             return try parseCubeLut(text, fallbackName: url.lastPathComponent)
         }
         do {
-            monitorSettings.cubeLut = try await task.value
+            let lut = try await task.value
+            guard cubeLutOwner == owner, !Task.isCancelled else { return }
+            monitorSettings.cubeLut = lut
             lastError = nil
         } catch {
+            guard cubeLutOwner == owner, !Task.isCancelled else { return }
             lastError = String(
                 format: NSLocalizedString("lut_import_failed", comment: ""),
                 error.localizedDescription
@@ -2073,10 +2114,12 @@ final class CameraAppState: ObservableObject {
     }
 
     func clearCubeLut() {
+        cubeLutOwner = UUID()
         monitorSettings.cubeLut = nil
     }
 
     func reportCubeLutImportError(_ error: Error) {
+        cubeLutOwner = UUID()
         lastError = String(
             format: NSLocalizedString("lut_import_failed", comment: ""),
             error.localizedDescription
@@ -2395,13 +2438,26 @@ final class CameraAppState: ObservableObject {
         }
     }
 
+    private func retireFocusMarker() {
+        focusMarkerOwner = UUID()
+        focusMarkerExpiryTask?.cancel()
+        focusMarkerExpiryTask = nil
+        focusMarker = nil
+    }
+
     private func showFocusMarker(x: Double, y: Double, accepted: Bool) {
+        retireFocusMarker()
+        let owner = focusMarkerOwner
+        let delay = focusMarkerDelay
         focusMarker = FocusMarker(x: x, y: y, accepted: accepted)
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            if self?.focusMarker == FocusMarker(x: x, y: y, accepted: accepted) {
-                self?.focusMarker = nil
-            }
+        focusMarkerExpiryTask = Task { [weak self] in
+            do {
+                if let delay { try await delay() }
+                else { try await Task.sleep(nanoseconds: 1_200_000_000) }
+            } catch { return }
+            guard !Task.isCancelled, self?.focusMarkerOwner == owner else { return }
+            self?.focusMarker = nil
+            self?.focusMarkerExpiryTask = nil
         }
     }
 
