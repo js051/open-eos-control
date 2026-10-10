@@ -401,6 +401,20 @@
       nextMediaPage: "Next media page",
       mediaPageStatus: "{start}-{end} of {total}",
       mediaUnknownDate: "Unknown date",
+      mediaDateRange: "Media date range",
+      mediaDateFrom: "From",
+      mediaDateTo: "To",
+      mediaDateApply: "Apply",
+      mediaDateCancel: "Cancel",
+      mediaDateClear: "Clear date range",
+      mediaDateHelp: "Filters loaded media only, without reading more dates from the camera. Some connections do not report dates. Dates may be file modification dates, not capture dates.",
+      mediaDateZone: "Display time zone: {zone}. Date-only values keep their reported day.",
+      mediaDateActive: "{start} to {end}: {matched} of {total} loaded items match. {unknown} loaded items have unknown dates and are excluded.",
+      mediaDateRequired: "Enter both dates.",
+      mediaDateInvalid: "Enter valid calendar dates.",
+      mediaDateReversed: "The end date must be on or after the start date.",
+      mediaNoMatches: "No loaded media matches these filters. Clear the date range or change the media type.",
+
       manageMedia: "Manage {name}",
       mediaDetails: "Media details",
       closeMediaDetails: "Close media details",
@@ -814,6 +828,20 @@
       nextMediaPage: "下一頁媒體",
       mediaPageStatus: "第 {start}-{end} 個，共 {total} 個",
       mediaUnknownDate: "日期不明",
+      mediaDateRange: "素材日期區間",
+      mediaDateFrom: "開始日期",
+      mediaDateTo: "結束日期",
+      mediaDateApply: "套用",
+      mediaDateCancel: "取消",
+      mediaDateClear: "清除日期區間",
+      mediaDateHelp: "僅篩選已載入素材，不向相機補查日期。部分連線不提供日期；素材日期可能是檔案修改日期，不一定是拍攝日期。",
+      mediaDateZone: "顯示時區：{zone}。僅有日期的值保留原本日期。",
+      mediaDateActive: "{start} 至 {end}：已載入 {total} 項中符合 {matched} 項。已載入項目有 {unknown} 項日期不明，已排除。",
+      mediaDateRequired: "請輸入開始與結束日期。",
+      mediaDateInvalid: "請輸入有效的日曆日期。",
+      mediaDateReversed: "結束日期不能早於開始日期。",
+      mediaNoMatches: "已載入素材沒有符合篩選的項目。請清除日期區間或變更素材類型。",
+
       manageMedia: "管理 {name}",
       mediaDetails: "媒體詳細資料",
       closeMediaDetails: "關閉媒體詳細資料",
@@ -1129,6 +1157,8 @@
     mediaScope: "recent",
     mediaHasMore: false,
     mediaFilter: "all",
+    mediaDateRange: null,
+    mediaDateDialogSession: null,
     mediaSort: "newest",
     mediaPage: 0,
     mediaThumbnailUrls: new Map(),
@@ -1275,6 +1305,18 @@
     mediaUploadButton: byId("media-upload-button"),
     mediaUploadInput: byId("media-upload-input"),
     mediaSummary: byId("media-summary"),
+    mediaDateButton: byId("media-date-button"),
+    mediaDateClear: byId("media-date-clear"),
+    mediaDateSummary: byId("media-date-summary"),
+    mediaDateDialog: byId("media-date-dialog"),
+    mediaDateForm: byId("media-date-form"),
+    mediaDateFrom: byId("media-date-from"),
+    mediaDateTo: byId("media-date-to"),
+    mediaDateError: byId("media-date-error"),
+    mediaDateZone: byId("media-date-zone"),
+    mediaDateClose: byId("media-date-close"),
+    mediaDateCancel: byId("media-date-cancel"),
+    mediaDateDialogClear: byId("media-date-dialog-clear"),
     mediaList: byId("media-list"),
     mediaScopeControl: byId("media-scope-control"),
     mediaFilterControl: byId("media-filter-control"),
@@ -1782,6 +1824,9 @@
     state.lastClockSyncAt = null;
     state.lastCreatedDirectoryName = null;
     state.media = [];
+    state.mediaDateRange = null;
+    state.mediaDateDialogSession = null;
+    if (ui.mediaDateDialog?.open) ui.mediaDateDialog.close();
     state.mediaHasMore = false;
     state.mediaPage = 0;
     state.mediaLoaded = false;
@@ -1851,7 +1896,7 @@
               refreshed && contentsChanged && state.mediaLoaded &&
               generation === state.eventGeneration
             ) {
-              await refreshMedia();
+              await refreshMedia({ preservePreview: true });
             }
           }
         } catch (error) {
@@ -3815,16 +3860,24 @@
   }
 
   async function refreshRtpAudioStatus() {
-    if (!state.session || !state.liveActive || state.activeLiveSource !== "CCAPI_RTP") {
+    const session = state.session;
+    if (!session || !state.liveActive || state.activeLiveSource !== "CCAPI_RTP" || localPreviewSelected()) {
       renderRtpAudio();
       return;
     }
+    const liveGeneration = state.liveGeneration;
+    const refreshGeneration = state.refreshGeneration;
+    const ownsRefresh = () => state.session === session && state.liveGeneration === liveGeneration &&
+      state.refreshGeneration === refreshGeneration && state.liveActive &&
+      state.activeLiveSource === "CCAPI_RTP" && !localPreviewSelected();
     try {
-      state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/status`);
+      const status = await api(`/v1/session/${encodeURIComponent(session.id)}/status`);
+      if (!ownsRefresh()) return;
+      state.status = status;
     } catch (_) {
       // Video remains usable even when this optional status refresh fails.
     }
-    renderRtpAudio();
+    if (ownsRefresh()) renderRtpAudio();
   }
 
   function renderRtpAudio() {
@@ -3846,8 +3899,11 @@
       stopRtpAudio({ announce: true });
       return;
     }
+    if (state.rtpAudioBusy) return;
+    const session = state.session;
     const status = currentRtpAudioStatus();
-    if (!state.session || !state.liveActive || state.activeLiveSource !== "CCAPI_RTP" || !status?.available) {
+    if (!session || !state.liveActive || state.activeLiveSource !== "CCAPI_RTP" ||
+      localPreviewSelected() || !status?.available) {
       showToast(status?.reason || t("cameraAudioUnavailable"), true);
       return;
     }
@@ -3856,27 +3912,40 @@
       showToast(t("cameraAudioUnavailable"), true);
       return;
     }
+    const liveGeneration = state.liveGeneration;
+    const generation = ++state.rtpAudioLoopGeneration;
+    const ownsStart = () => state.rtpAudioLoopGeneration === generation && state.session === session &&
+      state.liveGeneration === liveGeneration && state.liveActive &&
+      state.activeLiveSource === "CCAPI_RTP" && !localPreviewSelected();
     state.rtpAudioBusy = true;
     state.rtpAudioError = null;
     renderRtpAudio();
     let context = null;
     try {
       context = new AudioContextClass({ latencyHint: "interactive", sampleRate: 48_000 });
-      await context.resume();
+      // Stop owns cleanup even while resume is pending (and may never settle).
       state.rtpAudioContext = context;
+      await context.resume();
+      if (!ownsStart()) return;
       state.rtpAudioEnabled = true;
       state.rtpAudioAfterGeneration = 0;
       state.rtpAudioNextStart = Number.NaN;
-      state.rtpAudioLoopGeneration += 1;
-      void pollRtpAudio(state.rtpAudioLoopGeneration);
+      void pollRtpAudio(generation);
       showToast(t("cameraAudioStarted"));
     } catch (error) {
+      if (!ownsStart()) return;
       state.rtpAudioError = error instanceof Error ? error.message : String(error);
-      if (context) void context.close();
       showToast(state.rtpAudioError, true);
     } finally {
-      state.rtpAudioBusy = false;
-      renderRtpAudio();
+      // A stopped attempt must not clear a newer start's busy state or context.
+      if (state.rtpAudioLoopGeneration === generation) {
+        if (!state.rtpAudioEnabled && state.rtpAudioContext === context) {
+          state.rtpAudioContext = null;
+          if (context) void context.close().catch(() => {});
+        }
+        state.rtpAudioBusy = false;
+        renderRtpAudio();
+      }
     }
   }
 
@@ -4596,9 +4665,13 @@
     }
   }
 
-  function refreshMedia() {
-    if (state.mediaRefreshPromise) return state.mediaRefreshPromise;
-    const promise = refreshMediaWhenCurrent();
+  function refreshMedia({ preservePreview = false } = {}) {
+    if (state.mediaRefreshPromise) {
+      // An explicit refresh still dismisses review when joining a background read.
+      if (!preservePreview) closeMediaPreview();
+      return state.mediaRefreshPromise;
+    }
+    const promise = refreshMediaWhenCurrent({ preservePreview });
     state.mediaRefreshPromise = promise;
     return promise.finally(() => {
       if (state.mediaRefreshPromise === promise) state.mediaRefreshPromise = null;
@@ -4606,7 +4679,7 @@
     });
   }
 
-  async function refreshMediaWhenCurrent() {
+  async function refreshMediaWhenCurrent({ preservePreview = false } = {}) {
     while (state.session && featureSupported(FEATURES.MEDIA_BROWSER)) {
       while (cameraInteractionBusy() && state.session) await sleep(25);
       if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER)) return false;
@@ -4616,7 +4689,8 @@
       ui.mediaRefreshButton.disabled = true;
       state.mediaLoadStatus = "LOADING";
       renderMediaSummary();
-      closeMediaPreview();
+      // A contents event owns the listing, not the independently opened review.
+      if (!preservePreview) closeMediaPreview();
       try {
         const limitQuery = mediaScope === "recent" ? "?limit=61" : "";
         const response = await api(
@@ -4634,6 +4708,7 @@
         state.mediaLoaded = true;
         state.mediaLoadStatus = "COMPLETE";
         renderMedia();
+        if (preservePreview && ui.mediaPreviewDialog.open) renderMediaPreviewNavigation();
         return true;
       } catch (error) {
         if (state.session?.id !== rawSessionId) return false;
@@ -4678,7 +4753,7 @@
     if (!visibleItems.length) {
       const empty = document.createElement("div");
       empty.className = "empty-state";
-      empty.textContent = t("mediaEmpty");
+      empty.textContent = t(state.media.length ? "mediaNoMatches" : "mediaEmpty");
       ui.mediaList.append(empty);
       return;
     }
@@ -4715,7 +4790,7 @@
       copy.append(name, time);
       const size = document.createElement("span");
       size.className = "media-size";
-      size.textContent = [formatMediaDimensions(item), formatBytes(item.sizeBytes)].filter(Boolean).join(" · ");
+      size.textContent = [formatMediaDimensions(item), formatMediaSize(item)].filter(Boolean).join(" · ");
       const actions = document.createElement("div");
       actions.className = "media-actions";
       const actionSupported = featureSupported(FEATURES.MEDIA_BROWSER) || mediaMetadataSupported() ||
@@ -4766,10 +4841,12 @@
       state.mediaFilter,
       state.mediaSort,
       resolvedLanguage(),
+      state.mediaDateRange,
     );
   }
 
   function renderMediaSummary(visibleItems = displayedMedia()) {
+    renderMediaDateFilter(visibleItems);
     if (!ui.mediaSummary) return;
     ui.mediaSummary.dataset.loadStatus = state.mediaLoadStatus;
     if (state.mediaLoadStatus === "LOADING") {
@@ -4796,9 +4873,71 @@
       : t("mediaFilteredCount", { visible: visibleItems.length, total: state.media.length });
   }
 
+  function mediaDisplayTimeZone() {
+    return new Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  }
+
+  function renderMediaDateFilter(visibleItems = displayedMedia()) {
+    if (!ui.mediaDateButton) return;
+    const range = state.mediaDateRange;
+    ui.mediaDateButton.disabled = !state.session || !featureSupported(FEATURES.MEDIA_BROWSER);
+    ui.mediaDateButton.setAttribute("aria-pressed", String(Boolean(range)));
+    ui.mediaDateClear.hidden = !range;
+    ui.mediaDateSummary.hidden = !range;
+    ui.mediaDateZone.textContent = t("mediaDateZone", { zone: mediaDisplayTimeZone() });
+    if (range) {
+      ui.mediaDateSummary.textContent = t("mediaDateActive", {
+        start: range.start, end: range.end, matched: visibleItems.length,
+        total: state.media.length, unknown: mediaLibrary.countUnknownDates(state.media),
+      }) + " " + t("mediaDateZone", { zone: mediaDisplayTimeZone() });
+    }
+  }
+
+  function openMediaDateFilter() {
+    if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER) || ui.mediaDateDialog.open) return;
+    state.mediaDateDialogSession = state.session;
+    ui.mediaDateFrom.value = state.mediaDateRange?.start || "";
+    ui.mediaDateTo.value = state.mediaDateRange?.end || "";
+    ui.mediaDateFrom.removeAttribute("aria-invalid");
+    ui.mediaDateTo.removeAttribute("aria-invalid");
+    ui.mediaDateError.textContent = "";
+    ui.mediaDateError.hidden = true;
+    renderMediaDateFilter();
+    ui.mediaDateDialog.showModal();
+  }
+
+  function applyMediaDateFilter() {
+    if (!ui.mediaDateDialog.open || !state.session || state.mediaDateDialogSession !== state.session) return;
+    const result = mediaLibrary.validateDateRange({ start: ui.mediaDateFrom.value, end: ui.mediaDateTo.value });
+    if (!result.valid) {
+      const key = result.error === "required" ? "mediaDateRequired"
+        : result.error === "reversed" ? "mediaDateReversed" : "mediaDateInvalid";
+      ui.mediaDateError.textContent = t(key);
+      ui.mediaDateError.hidden = false;
+      ui.mediaDateFrom.setAttribute("aria-invalid", "true");
+      ui.mediaDateTo.setAttribute("aria-invalid", "true");
+      ui.mediaDateFrom.focus();
+      return;
+    }
+    state.mediaDateRange = result.range;
+    state.mediaPage = 0;
+    ui.mediaDateDialog.close();
+    closeMediaPreview();
+    renderMedia();
+  }
+
+  function clearMediaDateFilter() {
+    if (!state.session || (ui.mediaDateDialog.open && state.mediaDateDialogSession !== state.session)) return;
+    state.mediaDateRange = null;
+    state.mediaPage = 0;
+    if (ui.mediaDateDialog.open) ui.mediaDateDialog.close();
+    closeMediaPreview();
+    renderMedia();
+  }
+
   function previewableMedia() {
     const source = state.mediaLoaded || state.media.length ? state.media : [];
-    const items = mediaLibrary.itemsForDisplay(source, state.mediaFilter, state.mediaSort, resolvedLanguage())
+    const items = mediaLibrary.itemsForDisplay(source, state.mediaFilter, state.mediaSort, resolvedLanguage(), state.mediaDateRange)
       .filter((item) => mediaIsVideo(item)
         ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
         : item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
@@ -4806,7 +4945,11 @@
     const latestPreviewable = latest && (mediaIsVideo(latest)
       ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
       : latest.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
-    if (latestPreviewable && !items.some((item) => item.id === latest.id)) items.unshift(latest);
+    if (state.mediaDateRange) {
+      // Capture review may explicitly open a file outside the current library filter.
+      const opened = state.mediaPreviewItem;
+      if (opened && !items.some((item) => item.id === opened.id)) return [opened];
+    } else if (latestPreviewable && !items.some((item) => item.id === latest.id)) items.unshift(latest);
     return items;
   }
 
@@ -4814,15 +4957,17 @@
     if (state.mediaSort === "name") {
       return String(item.name || "#").trim().charAt(0).toLocaleUpperCase(resolvedLanguage()) || "#";
     }
-    const value = mediaTime(item);
-    if (value === null) return t("mediaUnknownDate");
-    return new Intl.DateTimeFormat(resolvedLanguage(), { dateStyle: "long" }).format(new Date(value));
+    const parsed = mediaLibrary.mediaDateForItem(item);
+    if (!parsed) return t("mediaUnknownDate");
+    return new Intl.DateTimeFormat(resolvedLanguage(), {
+      dateStyle: "long", ...(!parsed.hasTime ? { timeZone: "UTC" } : {}),
+    }).format(parsed.date);
   }
 
   function formatMediaTime(value) {
-    const time = Date.parse(value || "");
-    if (!Number.isFinite(time)) return "";
-    return new Intl.DateTimeFormat(resolvedLanguage(), { timeStyle: "short" }).format(new Date(time));
+    const parsed = mediaLibrary.parseMediaDate(value);
+    if (!parsed?.hasTime) return "";
+    return new Intl.DateTimeFormat(resolvedLanguage(), { timeStyle: "short" }).format(parsed.date);
   }
 
   function renderMediaThumbnail(container, item, url = null) {
@@ -5061,7 +5206,7 @@
     ui.mediaDetailsSummary.textContent = [
       formatDate(item.captureTime),
       formatMediaDimensions(item),
-      formatBytes(item.sizeBytes),
+      formatMediaSize(item),
       formatMediaContentType(item.contentType),
     ]
       .filter(Boolean).join(" · ");
@@ -5267,7 +5412,7 @@
     const summary = [
       t("mediaPreviewPosition", { position: Math.max(0, index + 1), total: items.length }),
       formatMediaDimensions(item),
-      formatBytes(item.sizeBytes),
+      formatMediaSize(item),
     ].filter((value) => value && value !== "-");
     ui.mediaPreviewMeta.textContent = summary.join(" · ");
     ui.mediaPreviewDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
@@ -5568,14 +5713,17 @@
   }
 
   async function deleteMedia(item, button) {
-    if (!state.session || !featureSupported(FEATURES.MEDIA_DELETE) || cameraInteractionBusy()) return;
+    const session = state.session;
+    if (!session || !featureSupported(FEATURES.MEDIA_DELETE) || cameraInteractionBusy()) return;
     if (!window.confirm(t("deleteConfirm", { name: item.name }))) return;
     button.disabled = true;
     try {
       await api(
-        `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}`,
+        `/v1/session/${encodeURIComponent(session.id)}/media/${encodeURIComponent(item.id)}`,
         { method: "DELETE" },
       );
+      // A replacement connection can reuse both the session ID and the media ID.
+      if (state.session !== session) return;
       state.media = state.media.filter((candidate) => candidate.id !== item.id);
       const thumbnailUrl = state.mediaThumbnailUrls.get(item.id);
       state.mediaThumbnailUrls.delete(item.id);
@@ -5587,6 +5735,7 @@
       releaseObjectUrl(thumbnailUrl);
       showToast(t("deleted", { name: item.name }));
     } catch (error) {
+      if (state.session !== session) return;
       const normalized = captureError(error);
       showToast(normalized.message, true);
       button.disabled = false;
@@ -5858,6 +6007,13 @@
     if (rendered) rendered.dataset.renderedIcon = iconName;
   }
 
+  function formatMediaSize(item) {
+    // Media metadata uses zero for unavailable size as well as empty files.
+    // Only positive numeric evidence can support a size label here.
+    const bytes = item?.sizeBytes;
+    return typeof bytes === "number" && Number.isFinite(bytes) && bytes > 0 ? formatBytes(bytes) : "";
+  }
+
   function formatBytes(value) {
     const bytes = Number(value);
     if (!Number.isFinite(bytes) || bytes <= 0) return bytes === 0 ? "0 B" : "-";
@@ -5868,10 +6024,11 @@
   }
 
   function formatDate(value) {
-    if (!value) return "";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return new Intl.DateTimeFormat(resolvedLanguage(), { dateStyle: "medium", timeStyle: "short" }).format(date);
+    const parsed = mediaLibrary.parseMediaDate(value);
+    if (!parsed) return "";
+    return new Intl.DateTimeFormat(resolvedLanguage(), {
+      dateStyle: "medium", ...(parsed.hasTime ? { timeStyle: "short" } : { timeZone: "UTC" }),
+    }).format(parsed.date);
   }
 
   function sleep(milliseconds) {
@@ -5993,6 +6150,16 @@
           candidate.setAttribute("aria-pressed", String(candidate === button));
         });
       });
+    });
+    ui.mediaDateButton.addEventListener("click", openMediaDateFilter);
+    ui.mediaDateClear.addEventListener("click", clearMediaDateFilter);
+    ui.mediaDateDialogClear.addEventListener("click", clearMediaDateFilter);
+    ui.mediaDateClose.addEventListener("click", () => ui.mediaDateDialog.close());
+    ui.mediaDateCancel.addEventListener("click", () => ui.mediaDateDialog.close());
+    ui.mediaDateDialog.addEventListener("close", () => { state.mediaDateDialogSession = null; });
+    ui.mediaDateForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      applyMediaDateFilter();
     });
     ui.mediaRefreshButton.addEventListener("click", refreshMedia);
     ui.mediaScopeControl.addEventListener("click", (event) => {

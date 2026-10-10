@@ -107,13 +107,32 @@ async function openPreview(page) {
   });
 }
 
-function filePlatform({ mode, delayWritable }) {
+function filePlatform({ mode, delayWritable, pauseSecondWrite }) {
   if (mode === "blob") {
     Object.defineProperty(window, "showSaveFilePicker", { configurable: true, value: undefined });
     return;
   }
   window.__syntheticFiles = [];
   window.__syntheticPickerCalls = 0;
+  if (pauseSecondWrite) {
+    const fetchOriginal = window.fetch.bind(window);
+    window.fetch = async (input, options) => {
+      const response = await fetchOriginal(input, options);
+      const url = new URL(typeof input === "string" ? input : input.url, location.href);
+      if (!/^\/v1\/session\/[^/]+\/media\/[^/]+$/.test(url.pathname) || !response.body) return response;
+      // Preserve the real Bridge request and bytes, but make the synthetic network
+      // chunk size deterministic. Chromium may otherwise coalesce the whole route
+      // response into one chunk, so a second OS write would never be reached.
+      const framed = response.body.pipeThrough(new TransformStream({
+        transform(chunk, controller) {
+          for (let offset = 0; offset < chunk.byteLength; offset += 64 * 1024) {
+            controller.enqueue(chunk.subarray(offset, offset + 64 * 1024));
+          }
+        },
+      }));
+      return new Response(framed, { status: response.status, statusText: response.statusText, headers: response.headers });
+    };
+  }
   window.showSaveFilePicker = async () => {
     window.__syntheticPickerCalls += 1;
     return { createWritable: async () => {
@@ -122,15 +141,67 @@ function filePlatform({ mode, delayWritable }) {
       if (delayWritable) {
         await new Promise((resolve) => { window.__releaseSyntheticWritable = resolve; });
       }
-      const output = { bytes: [], closed: false, aborted: false };
+      const output = { bytes: [], closed: false, aborted: false, writeCount: 0 };
       window.__syntheticFiles.push(output);
       return {
-        write: async (chunk) => output.bytes.push(...new Uint8Array(chunk)),
+        write: async (chunk) => {
+          output.writeCount += 1;
+          if (pauseSecondWrite && output.writeCount === 2) {
+            await new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => reject(new Error("Synthetic writable gate exceeded 20 seconds")), 20_000);
+              window.__releaseSyntheticWrite = () => { clearTimeout(timeout); resolve(); };
+            });
+          }
+          // Avoid a large spread argument when the browser coalesces stream chunks.
+          for (const byte of new Uint8Array(chunk)) output.bytes.push(byte);
+        },
         close: async () => { output.closed = true; },
         abort: async () => { output.aborted = true; },
       };
     } };
   };
+}
+
+async function applyMediaDateRange(page, start, end) {
+  await page.click("#media-date-button");
+  await page.waitForSelector("#media-date-dialog[open]");
+  await page.fill("#media-date-from", start);
+  await page.fill("#media-date-to", end);
+  await page.click("#media-date-apply");
+  await page.waitForFunction(() => !document.querySelector("#media-date-dialog").open);
+}
+
+async function installDatedListing(page, dateForName) {
+  await page.route(/\/v1\/session\/[^/]+\/media(?:\?.*)?$/, async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    await route.fulfill({ response, json: {
+      ...payload,
+      items: payload.items.map((item) => ({ ...item, captureTime: dateForName(item.name) })),
+    } });
+  });
+}
+
+async function holdNextResponse(page, pattern, routeCleanups) {
+  let release;
+  const released = new Promise((resolve) => { release = resolve; });
+  let pending;
+  const handler = (route) => {
+    pending = (async () => {
+      // Keep the real Bridge response; only its delivery order is controlled.
+      const response = await route.fetch({ timeout: 12_000 });
+      await released;
+      await route.fulfill({ response });
+    })();
+    return pending;
+  };
+  routeCleanups.push(async () => {
+    release();
+    await page.unroute(pattern, handler);
+    await pending;
+  });
+  await page.route(pattern, handler, { times: 1 });
+  return { release };
 }
 
 async function assertOneCapture(origin) {
@@ -170,6 +241,154 @@ async function assertNarrowRecoveryLayout(page, language) {
 }
 
 const cases = [
+  ...["en", "zh-TW"].map((language) => ({
+    name: `${language} out-of-range capture review stays isolated`,
+    run: async ({ page, simulatorOrigin, listingRequests, cameraWrites, infoRequests, routeCleanups }) => {
+      await page.locator("#control-view .language-select").selectOption(language);
+      await installDatedListing(page, (name) => name.startsWith("SYNTHETIC_OLD_") ? "2026-10-07" : "2026-10-09");
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelector("#media-summary")?.dataset.loadStatus === "COMPLETE");
+      const reads = { listing: listingRequests.length, info: infoRequests.length, writes: cameraWrites.length };
+      await applyMediaDateRange(page, "2026-10-07", "2026-10-07");
+      assert.equal(await page.locator(".media-card").count(), 2);
+      assert.deepEqual({ listing: listingRequests.length, info: infoRequests.length, writes: cameraWrites.length }, reads);
+      await page.click('.tab[data-view="live"]');
+      await configure(simulatorOrigin, { mode: "new-first" });
+      const capabilitiesPattern = /\/v1\/session\/[^/]+\/capabilities$/;
+      const capabilities = await holdNextResponse(page, capabilitiesPattern, routeCleanups);
+      // The capture's contents event refreshes capabilities before reloading the
+      // already-opened library. Hold that real response until review owns the UI.
+      const [contentsEvent] = await Promise.all([
+        page.waitForResponse(async (response) => {
+          if (response.request().method() !== "GET" ||
+            !/\/v1\/session\/[^/]+\/events$/.test(response.url())) return false;
+          return (await response.json()).changedKeys?.some((key) => String(key).toLowerCase().includes("content"));
+        }),
+        page.waitForRequest(capabilitiesPattern),
+        capture(page, simulatorOrigin),
+      ]);
+      assert.ok((await contentsEvent.json()).changedKeys?.some((key) => String(key).toLowerCase().includes("content")),
+        "The held capabilities refresh follows the capture's real contents event");
+      await waitForNew(page);
+      let preview;
+      let readySource;
+      if (language === "en") {
+        await openPreview(page);
+        readySource = await page.locator("#media-preview-image").getAttribute("src");
+      } else {
+        const previewPattern = /\/v1\/session\/[^/]+\/media\/[^/]+\/preview$/;
+        preview = await holdNextResponse(page, previewPattern, routeCleanups);
+        await Promise.all([
+          page.waitForRequest(previewPattern),
+          page.click("#latest-media-button"),
+        ]);
+        await page.waitForSelector("#media-preview-dialog[open]");
+      }
+      const reloaded = page.waitForResponse((response) => response.request().method() === "GET" &&
+        /\/v1\/session\/[^/]+\/media\?limit=61$/.test(response.url()));
+      capabilities.release();
+      await reloaded;
+      // COMPLETE alone could still describe the old two-item listing. Require
+      // the rendered three-item total to prove the new response was consumed.
+      await page.waitForFunction((expectedCount) =>
+        document.querySelector("#media-summary")?.dataset.loadStatus === "COMPLETE" &&
+        document.querySelector("#media-date-summary")?.textContent.includes(expectedCount),
+      language === "en" ? "2 of 3 loaded items match" : "已載入 3 項中符合 2 項");
+      assert.equal(await page.locator("#media-preview-dialog").evaluate((dialog) => dialog.open), true,
+        "A delayed contents refresh must preserve the independently opened capture review");
+      if (preview) {
+        assert.equal(await page.locator("#media-preview-image").getAttribute("src"), null,
+          "The preview response is still held while the contents refresh completes");
+        preview.release();
+      } else {
+        assert.equal(await page.locator("#media-preview-image").getAttribute("src"), readySource,
+          "A contents refresh must preserve the already-decoded preview object URL");
+      }
+      await page.waitForFunction(() => {
+        const image = document.querySelector("#media-preview-image");
+        return document.querySelector("#media-preview-dialog")?.open && image && !image.hidden &&
+          image.complete && image.naturalWidth === 160 && image.naturalHeight === 120;
+      });
+      assert.equal(await page.locator("#media-preview-title").innerText(), "SIM_0003.JPG");
+      assert.match(await page.locator("#media-preview-meta").innerText(), language === "en" ? /1 of 1/ : /第 1 個，共 1 個/);
+      assert.equal(await page.isDisabled("#media-preview-previous"), true);
+      assert.equal(await page.isDisabled("#media-preview-next"), true);
+      fs.mkdirSync(RESULTS_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-media-date-isolated-capture-${language}.png`) });
+      await page.click("#media-preview-close");
+      await page.click('.tab[data-view="media"]');
+      assert.equal(await page.locator("#media-date-summary").isVisible(), true);
+      assert.equal(await page.locator(".media-card").filter({ hasText: "SIM_0003.JPG" }).count(), 0,
+        "Explicit capture review must not insert an out-of-range item into the filtered library");
+      await assertOneCapture(simulatorOrigin);
+    },
+  })),
+  ...[false, true].map((cancel) => ({
+    name: `date filter preserves active original ${cancel ? "cancellation" : "delivery"}`,
+    mode: "direct", pauseSecondWrite: true,
+    run: async ({ page, simulatorOrigin, listingRequests, cameraWrites, originalRequests, infoRequests }) => {
+      await installDatedListing(page, (name) => name === "SYNTHETIC_OLD_A.JPG" ? "2026-10-07" : "2026-10-09");
+      const original = Buffer.from(await (await fetch(`${simulatorOrigin}/__test/representation/original`)).arrayBuffer());
+      const expected = Buffer.alloc(2 * 1024 * 1024, 0x5a);
+      original.copy(expected);
+      // A bounded synthetic original lets Chromium deliver several chunks. The
+      // fake OS writable pauses its second write, after real progress is visible.
+      await page.route(/\/v1\/session\/[^/]+\/media\/[^/]+$/, (route) => route.fulfill({
+        contentType: "image/jpeg", headers: { "content-length": String(expected.length) }, body: expected,
+      }));
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelector("#media-summary")?.dataset.loadStatus === "COMPLETE");
+      const target = page.locator(".media-card").filter({ hasText: "SYNTHETIC_OLD_A.JPG" }).locator("button.media-thumbnail");
+      const targetId = await target.getAttribute("data-media-id");
+      assert.ok(targetId, "The original target is taken from the rendered camera item");
+      await target.click();
+      await page.waitForSelector("#media-preview-dialog[open]");
+      await page.click("#media-preview-download");
+      await page.waitForFunction(() => typeof window.__releaseSyntheticWrite === "function" &&
+        Number(document.querySelector("#media-transfer-progress")?.value) > 0);
+      await page.click("#media-preview-close");
+      assert.equal(await page.locator("#media-transfer").isVisible(), true);
+      const progressBefore = await page.locator("#media-transfer-progress").getAttribute("value");
+      const bytesBefore = await page.evaluate(() => window.__syntheticFiles[0].bytes.length);
+      assert.ok(bytesBefore > 0 && bytesBefore < expected.length, "Filtering interrupts neither an empty nor an already completed transfer");
+      const trafficBefore = { listing: listingRequests.length, info: infoRequests.length, writes: cameraWrites.length, original: originalRequests.length };
+      assert.equal(trafficBefore.original, 1);
+      await applyMediaDateRange(page, "2026-10-09", "2026-10-09");
+      assert.deepEqual(await page.locator(".media-card .media-copy strong").allTextContents(), ["SYNTHETIC_OLD_B.JPG"]);
+      assert.equal(await page.locator("#media-transfer-name").innerText(), "SYNTHETIC_OLD_A.JPG");
+      assert.equal(await page.locator("#media-transfer-progress").getAttribute("value"), progressBefore);
+      assert.equal(await page.evaluate(() => window.__syntheticFiles[0].bytes.length), bytesBefore);
+      assert.equal(await page.isEnabled("#media-transfer-cancel"), true);
+      await page.click("#media-date-clear");
+      assert.equal(await page.locator(".media-card").count(), 2);
+      await applyMediaDateRange(page, "2026-10-09", "2026-10-09");
+      assert.deepEqual({ listing: listingRequests.length, info: infoRequests.length, writes: cameraWrites.length, original: originalRequests.length }, trafficBefore,
+        "Apply/Clear cannot replace a transfer or fan out metadata requests");
+      assert.equal(decodeURIComponent(new URL(originalRequests[0]).pathname.split("/").at(-1)), targetId);
+      assert.equal(await page.locator("#media-transfer-name").innerText(), "SYNTHETIC_OLD_A.JPG");
+      assert.equal(await page.locator("#media-transfer-progress").getAttribute("value"), progressBefore);
+      assert.equal(await page.locator("#media-transfer").isVisible(), true);
+      fs.mkdirSync(RESULTS_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-media-date-active-original-${cancel ? "cancel" : "deliver"}.png`) });
+      if (cancel) await page.click("#media-transfer-cancel");
+      await page.evaluate(() => window.__releaseSyntheticWrite());
+      await page.waitForFunction(() => window.__syntheticFiles[0]?.closed || window.__syntheticFiles[0]?.aborted);
+      const output = await page.evaluate(() => window.__syntheticFiles[0]);
+      if (cancel) {
+        assert.equal(output.aborted, true);
+        assert.equal(output.closed, false);
+        assert.deepEqual(Buffer.from(output.bytes), expected.subarray(0, output.bytes.length),
+          "The aborted OS destination contains only bytes from the original target");
+      } else {
+        assert.equal(output.closed, true);
+        assert.equal(output.aborted, false);
+        assert.deepEqual(Buffer.from(output.bytes), expected, "Filtering preserves the exact selected original bytes");
+      }
+      await page.waitForSelector("#media-transfer[hidden]", { state: "attached" });
+      assert.equal(originalRequests.length, 1);
+      assert.equal((await peerState(simulatorOrigin)).capture_count, 0);
+    },
+  })),
   {
     name: "known candidates reordered",
     run: async ({ page, simulatorOrigin }) => {
@@ -350,13 +569,18 @@ async function run() {
     for (const scenario of selectedCases) {
       await configure(simulatorOrigin, { reset: true });
       const context = await browser.newContext({ locale: "en-US", viewport: { width: 1440, height: 900 } });
-      await context.addInitScript(filePlatform, { mode: scenario.mode || "blob", delayWritable: Boolean(scenario.delayWritable) });
+      await context.addInitScript(filePlatform, {
+        mode: scenario.mode || "blob", delayWritable: Boolean(scenario.delayWritable),
+        pauseSecondWrite: Boolean(scenario.pauseSecondWrite),
+      });
       const page = await context.newPage();
       page.setDefaultTimeout(12_000);
       const listingRequests = [];
       const cameraWrites = [];
       const originalRequests = [];
+      const infoRequests = [];
       const pageErrors = [];
+      const routeCleanups = [];
       page.on("pageerror", (error) => pageErrors.push(error.message));
       page.on("request", (request) => {
         const url = new URL(request.url());
@@ -365,23 +589,66 @@ async function run() {
         if (request.method() === "GET" && /^\/v1\/session\/[^/]+\/media\/[^/]+$/.test(url.pathname)) {
           originalRequests.push(request.url());
         }
+        if (request.method() === "GET" && /^\/v1\/session\/[^/]+\/media\/[^/]+\/info$/.test(url.pathname)) {
+          infoRequests.push(request.url());
+        }
       });
       try {
         await page.goto(bridgeOrigin, { waitUntil: "networkidle" });
         await connect(page, simulatorOrigin);
-        await scenario.run({ page, simulatorOrigin, listingRequests, cameraWrites, originalRequests });
+        await scenario.run({ page, simulatorOrigin, listingRequests, cameraWrites, originalRequests, infoRequests, routeCleanups });
         assert.deepEqual(pageErrors, []);
         console.log(`PASS: synthetic PC capture review: ${scenario.name}`);
       } catch (error) {
         failures.push(scenario.name);
         console.error(`FAIL: synthetic PC capture review: ${scenario.name}`, error);
-      } finally {
-        if (await page.locator("#media-preview-dialog[open]").count()) await page.click("#media-preview-close");
-        if (await page.locator("#control-view:not([hidden])").count()) {
-          await page.click("#disconnect-button");
-          await page.waitForSelector("#connection-view:not([hidden])");
+        // Capture the failed UI before cleanup can close the dialog or reset it.
+        // Evidence failure never replaces the original scenario failure.
+        try {
+          fs.mkdirSync(RESULTS_DIR, { recursive: true });
+          const label = scenario.name.replace(/[^a-zA-Z0-9-]+/g, "-");
+          const preview = await page.evaluate(() => {
+            const image = document.querySelector("#media-preview-image");
+            return {
+              dialogOpen: document.querySelector("#media-preview-dialog")?.open,
+              title: document.querySelector("#media-preview-title")?.textContent,
+              latest: document.querySelector("#latest-media-label")?.textContent,
+              loadingHidden: document.querySelector("#media-preview-loading")?.hidden,
+              unavailableHidden: document.querySelector("#media-preview-unavailable")?.hidden,
+              image: image && { hidden: image.hidden, complete: image.complete,
+                width: image.naturalWidth, height: image.naturalHeight, hasSource: Boolean(image.getAttribute("src")) },
+            };
+          });
+          fs.writeFileSync(path.join(RESULTS_DIR, `capture-review-failure-${label}.json`),
+            JSON.stringify({ scenario: scenario.name, error: String(error), preview, pageErrors,
+              listingRequests, infoRequests, cameraWrites, originalRequests }, null, 2));
+          await page.screenshot({ path: path.join(RESULTS_DIR, `capture-review-failure-${label}.png`) });
+        } catch (evidenceError) {
+          console.error(`Failure evidence also failed: ${scenario.name}`, evidenceError);
         }
-        await context.close();
+      } finally {
+        const routeResults = await Promise.allSettled(routeCleanups.map((cleanup) => cleanup()));
+        for (const result of routeResults) {
+          if (result.status === "fulfilled") continue;
+          failures.push(`${scenario.name} (route cleanup)`);
+          console.error(`Capture review route cleanup failed: ${scenario.name}`, result.reason);
+        }
+        try {
+          if (await page.locator("#media-date-dialog[open]").count()) await page.keyboard.press("Escape");
+          if (await page.locator("#media-preview-dialog[open]").count()) await page.click("#media-preview-close");
+          await page.evaluate(() => window.__releaseSyntheticWrite?.());
+          if (await page.locator("#control-view:not([hidden])").count()) {
+            await page.click("#disconnect-button");
+            await page.waitForSelector("#connection-view:not([hidden])");
+          }
+        } catch (error) {
+          failures.push(`${scenario.name} (cleanup)`);
+          console.error(`Capture review cleanup failed: ${scenario.name}`, error);
+        }
+        try { await context.close(); } catch (error) {
+          failures.push(`${scenario.name} (context close)`);
+          console.error(`Capture review context close failed: ${scenario.name}`, error);
+        }
       }
     }
     assert.deepEqual(failures, [], "Every selected production journey must pass");

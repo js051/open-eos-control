@@ -334,6 +334,8 @@
               <option value="camera" data-i18n="mediaCameraOrder">Camera order</option>
             </select>
           </label>
+          <button id="media-date-button" class="button secondary" type="button" aria-haspopup="dialog" aria-controls="media-date-dialog" aria-pressed="false" data-i18n="mediaDateRange">Media date range</button>
+          <button id="media-date-clear" class="button secondary" type="button" data-i18n="mediaDateClear" hidden>Clear date range</button>
           <nav id="media-pagination" class="media-pagination" data-i18n-aria="mediaPages" hidden>
             <button id="media-page-previous" class="icon-button" type="button" data-i18n-aria="previousMediaPage">
               <span class="icon" data-icon="chevron-left" aria-hidden="true"></span>
@@ -344,6 +346,7 @@
             </button>
           </nav>
         </div>
+        <p id="media-date-summary" class="supporting media-date-summary" role="status" hidden></p>
         <section id="media-transfer" class="media-transfer" aria-live="polite" hidden>
           <span class="media-transfer-icon icon" data-icon="download" aria-hidden="true"></span>
           <div class="media-transfer-copy">
@@ -576,6 +579,27 @@
         </button>
       </div>
     </div>
+  </dialog>
+
+  <dialog id="media-date-dialog" class="setting-dialog media-date-dialog" aria-labelledby="media-date-title" aria-describedby="media-date-help media-date-zone">
+    <form id="media-date-form" novalidate>
+      <div class="dialog-heading">
+        <h2 id="media-date-title" data-i18n="mediaDateRange">Media date range</h2>
+        <button id="media-date-close" class="icon-button" type="button" data-i18n-aria="close"><span class="icon" data-icon="x" aria-hidden="true"></span></button>
+      </div>
+      <div class="media-date-fields">
+        <p id="media-date-help" class="supporting" data-i18n="mediaDateHelp">Filters loaded media only, without reading more dates from the camera.</p>
+        <p id="media-date-zone" class="supporting"></p>
+        <label><span data-i18n="mediaDateFrom">From</span><input id="media-date-from" type="date" min="0001-01-01" max="9999-12-31" required autofocus aria-describedby="media-date-error"></label>
+        <label><span data-i18n="mediaDateTo">To</span><input id="media-date-to" type="date" min="0001-01-01" max="9999-12-31" required aria-describedby="media-date-error"></label>
+        <p id="media-date-error" class="media-date-error" role="alert" hidden></p>
+      </div>
+      <div class="media-date-actions">
+        <button id="media-date-dialog-clear" class="button secondary" type="button" data-i18n="mediaDateClear">Clear date range</button>
+        <button id="media-date-cancel" class="button secondary" type="button" data-i18n="mediaDateCancel">Cancel</button>
+        <button id="media-date-apply" class="button primary" type="submit" data-i18n="mediaDateApply">Apply</button>
+      </div>
+    </form>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

@@ -1226,6 +1226,7 @@ input:disabled {
 
 .media-toolbar {
   display: flex;
+  flex-wrap: wrap;
   margin-bottom: 16px;
   align-items: center;
   justify-content: space-between;
@@ -2048,3 +2049,17 @@ button.media-thumbnail:focus-visible {
 .shutter-af-control label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; font-weight: 600; }
 .shutter-af-control input { width: 22px; height: 22px; flex: 0 0 auto; }
 .shutter-af-control .supporting { display: block; line-height: 1.4; }
+
+/* Local date filtering stays reachable in short windows and enlarged text. */
+.media-toolbar > .button { max-width: 100%; white-space: normal; }
+.media-date-summary { margin: 0 0 16px; overflow-wrap: anywhere; }
+.media-date-dialog { overflow-y: auto; overscroll-behavior: contain; }
+.media-date-dialog .dialog-heading { display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 12px; }
+.media-date-dialog h2 { overflow-wrap: anywhere; }
+.media-date-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 0 24px 20px; }
+.media-date-fields .supporting { min-width: 0; overflow-wrap: anywhere; }
+.media-date-fields label { display: grid; gap: 8px; min-width: 0; }
+.media-date-fields input { width: 100%; min-width: 0; box-sizing: border-box; }
+.media-date-error { color: var(--danger); overflow-wrap: anywhere; }
+.media-date-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; padding: 0 24px 24px; }
+.media-date-actions .button { white-space: normal; min-height: 44px; }
