@@ -2082,3 +2082,8 @@ button.media-thumbnail:focus-visible {
 .media-batch-list li { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 10px; border: 1px solid var(--line); border-radius: 4px; overflow-wrap: anywhere; }
 .media-batch-list li[data-status="completed"] { border-color: var(--accent); }
 .media-batch-list li[data-status="failed"], .media-batch-list li[data-status="cancelled-or-unknown"] { border-color: var(--danger); }
+
+.media-history-dialog { max-height: 85dvh; overflow-y: auto; width: min(42rem, calc(100vw - 2rem)); }
+.media-history-dialog .media-batch-list { max-height: none; }
+.media-history-dialog time { font-size: 0.85em; color: var(--muted); }
+.media-history-dialog [hidden] { display: none; }

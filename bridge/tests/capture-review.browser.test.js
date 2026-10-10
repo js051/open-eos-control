@@ -698,6 +698,31 @@ for (const language of ["en", "zh-TW"]) {
       assert.ok(width.page <= width.viewport + 1, "Batch summary fits narrow 200% layout");
       fs.mkdirSync(RESULTS_DIR, { recursive: true });
       await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-batch-${language}.png`), fullPage: true });
+      await page.locator('#control-view [data-open-media-history]').click();
+      await page.waitForFunction(() => document.querySelectorAll('#media-history-list [data-outcome="completed"]').length === 2);
+      await page.keyboard.press("Escape");
+      await page.reload({ waitUntil: "networkidle" });
+      await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+      await page.locator('#connection-view [data-open-media-history]').click();
+      await page.waitForFunction(() => document.querySelectorAll('#media-history-list [data-outcome="completed"]').length === 2);
+      assert.equal(originalRequests.length, 2, "Opening persisted history must not replay original requests");
+      assert.equal(await page.locator('#media-history-dialog').evaluate(dialog => dialog.contains(document.activeElement)), true);
+      const historyWidth = await page.locator('#media-history-dialog').evaluate(dialog => ({width: dialog.clientWidth, content: dialog.scrollWidth}));
+      assert.ok(historyWidth.content <= historyWidth.width + 1, "History fits narrow 200% layout");
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-batch-history-${language}.png`) });
+      await page.click('#media-history-clear');
+      await page.click('#media-history-confirm-no');
+      assert.equal(await page.locator('#media-history-list li').count(), 2);
+      await page.click('#media-history-clear');
+      await page.click('#media-history-confirm-yes');
+      await page.waitForFunction(() => document.querySelector('#media-history-confirm').hidden && document.querySelectorAll('#media-history-list li').length === 0);
+      await page.keyboard.press("Escape");
+      await page.locator('#connection-view [data-open-media-history]').click();
+      await page.waitForFunction(() => document.querySelector('#media-history-clear').disabled);
+      assert.equal(await page.locator('#media-history-list li').count(), 0);
+      await page.keyboard.press("Escape");
+      assert.equal(await page.locator('#connection-view [data-open-media-history]').evaluate(button => document.activeElement === button), true);
+
     },
   });
 }
@@ -733,6 +758,62 @@ cases.push({
     assert.equal(originalRequests.length, 1, "Cancellation prevents the second camera original request");
     assert.equal(await page.evaluate(() => window.__batchFiles.some(file => file.closed)), false);
     assert.equal(await page.locator('#media-batch-list [data-status="completed"]').count(), 0);
+  },
+});
+
+
+cases.push({
+  name: "unfinished batch history survives reload without automatic requests",
+  batch: { pauseFirstWrite: true },
+  run: async ({ page, originalRequests }) => {
+    await page.click('.tab[data-view="media"]');
+    await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 2);
+    await page.click("#media-select-filtered");
+    await page.click("#media-batch-start");
+    await page.waitForFunction(() => typeof window.__releaseBatchWrite === "function");
+    assert.equal(originalRequests.length, 1);
+    await page.reload({ waitUntil: "networkidle" });
+    await page.locator('#connection-view [data-open-media-history]').click();
+    await page.waitForFunction(() => document.querySelectorAll('#media-history-list [data-outcome="cancelled-or-unknown"]').length === 1);
+    assert.equal(await page.locator('#media-history-list [data-outcome="completed"]').count(), 0);
+    assert.equal(originalRequests.length, 1, "Reload only displays history; it cannot resume camera commands");
+    const stored = await page.evaluate(async () => {
+      const store = OpenEOSMediaTransferHistory.createHistoryStore();
+      const result = await store.list(); store.close(); return result;
+    });
+    assert.equal(stored.ok, true);
+    assert.equal(stored.entries[0].unconfirmed, true);
+    assert.equal(JSON.stringify(stored).includes('/ccapi/'), false);
+    assert.equal(JSON.stringify(stored).includes('synthetic-session'), false);
+    await page.keyboard.press("Escape");
+  },
+});
+cases.push({
+  name: "clearing history from a second tab prevents late batch records without stopping files",
+  batch: { pauseFirstWrite: true },
+  run: async ({ page, originalRequests }) => {
+    await page.click('.tab[data-view="media"]');
+    await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 2);
+    await page.click("#media-select-filtered");
+    await page.click("#media-batch-start");
+    await page.waitForFunction(() => typeof window.__releaseBatchWrite === "function");
+    const observer = await page.context().newPage();
+    try {
+      await observer.goto(page.url(), { waitUntil: "networkidle" });
+      await observer.locator('#connection-view [data-open-media-history]').click();
+      await observer.waitForFunction(() => document.querySelectorAll('#media-history-list li').length === 1);
+      await observer.click('#media-history-clear');
+      await observer.click('#media-history-confirm-yes');
+      await observer.waitForFunction(() => document.querySelector('#media-history-confirm').hidden && document.querySelectorAll('#media-history-list li').length === 0);
+      await page.evaluate(() => window.__releaseBatchWrite());
+      await page.waitForFunction(() => document.querySelectorAll('#media-batch-list [data-status="completed"]').length === 2);
+      assert.equal(originalRequests.length, 2);
+      assert.equal(await page.evaluate(() => window.__batchFiles.filter(file => file.closed).length), 2);
+      await observer.keyboard.press("Escape");
+      await observer.locator('#connection-view [data-open-media-history]').click();
+      await observer.waitForFunction(() => document.querySelector('#media-history-clear').disabled);
+      assert.equal(await observer.locator('#media-history-list li').count(), 0, "Old epoch finish and later attempts cannot rebuild cleared history");
+    } finally { await observer.close(); }
   },
 });
 
