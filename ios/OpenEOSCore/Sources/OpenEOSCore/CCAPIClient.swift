@@ -2132,23 +2132,20 @@ public actor CCAPIClient {
                     )
                 }
             )
+            defer { try? FileManager.default.removeItem(at: download.temporaryFileURL) }
+            // A custom transport can return a file despite task cancellation.
+            try Task.checkCancellation()
             if (200..<300).contains(download.statusCode) {
+                let size = try CameraHTTPResponseIntegrity.validateOriginalMedia(download)
                 let contentType = download.header("content-type")
-                let prefix = (try? Data(contentsOf: download.temporaryFileURL).prefix(2_000)).map { Data($0) } ?? Data()
+                let prefix = try download.readPrefix(limit: Self.maximumErrorBodyCharacters)
                 if Self.isTextContentType(contentType) || Self.looksLikeTextPayload(prefix) {
                     let preview = String(data: prefix, encoding: .utf8) ?? ""
-                    try? FileManager.default.removeItem(at: download.temporaryFileURL)
                     failures.append("\(path): HTTP \(download.statusCode): \(preview)")
                     continue
                 }
-                do {
-                    try FileManager.default.moveItem(at: download.temporaryFileURL, to: destination)
-                } catch {
-                    try? FileManager.default.removeItem(at: download.temporaryFileURL)
-                    throw error
-                }
-                let fileSize = try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize
-                let size = Int64(fileSize ?? 0)
+                try Task.checkCancellation()
+                try FileManager.default.moveItem(at: download.temporaryFileURL, to: destination)
                 progress(
                     CameraMediaTransferProgress(
                         bytesTransferred: size,
@@ -2163,9 +2160,8 @@ public actor CCAPIClient {
                     contentType: contentType
                 )
             }
-            let preview = (try? Data(contentsOf: download.temporaryFileURL).prefix(2_000))
-                .flatMap { String(data: Data($0), encoding: .utf8) } ?? ""
-            try? FileManager.default.removeItem(at: download.temporaryFileURL)
+            let preview = (try? download.readPrefix(limit: Self.maximumErrorBodyCharacters))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? ""
             failures.append("\(path): HTTP \(download.statusCode): \(preview)")
         }
         throw CCAPIError.invalidResponse(

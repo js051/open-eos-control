@@ -38,6 +38,13 @@ public struct CameraHTTPDownloadResponse: Sendable {
     public func header(_ name: String) -> String? {
         headers[name.lowercased()]
     }
+
+    func readPrefix(limit: Int) throws -> Data {
+        guard limit > 0 else { return Data() }
+        let handle = try FileHandle(forReadingFrom: temporaryFileURL)
+        defer { try? handle.close() }
+        return try handle.read(upToCount: limit) ?? Data()
+    }
 }
 
 public struct CameraHTTPUploadResponse: Sendable {
@@ -154,19 +161,59 @@ struct CameraHTTPResponseBodyAccumulator {
 /// Encoded/transfer-decoded responses still rely on URLSession's framing validation.
 enum CameraHTTPResponseIntegrity {
     static func validate(_ response: CameraHTTPResponse, requestMethod: String) throws {
+        try validate(
+            statusCode: response.statusCode, headers: response.headers,
+            decodedBodyBytes: Int64(response.body.count), requestMethod: requestMethod
+        )
+    }
+
+    @discardableResult
+    static func validate(_ response: CameraHTTPDownloadResponse, requestMethod: String) throws -> Int64 {
+        let values = try response.temporaryFileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true, let size = values.fileSize, size >= 0 else {
+            throw CCAPIError.invalidResponse("Camera download did not return a regular file with a known size.")
+        }
+        try validate(
+            statusCode: response.statusCode, headers: response.headers,
+            decodedBodyBytes: Int64(size), requestMethod: requestMethod
+        )
+        return Int64(size)
+    }
+
+    static func validateOriginalMedia(_ response: CameraHTTPDownloadResponse) throws -> Int64 {
+        // Original downloads never request a byte range. Even a 200 carrying
+        // Content-Range cannot establish that this is the complete representation.
+        guard response.statusCode == 200, response.header("content-range") == nil else {
+            throw CCAPIError.invalidResponse("Original media download requires HTTP 200 without Content-Range.")
+        }
+        let size = try validate(response, requestMethod: "GET")
+        guard size > 0 else {
+            throw CCAPIError.invalidResponse("Original media download returned an empty file.")
+        }
+        // CameraMediaItem.sizeBytes comes from unversioned listing metadata. It is
+        // a progress hint, not an authoritative length or a content checksum.
+        return size
+    }
+
+    private static func validate(
+        statusCode: Int,
+        headers: [String: String],
+        decodedBodyBytes: Int64,
+        requestMethod: String
+    ) throws {
         let method = requestMethod.uppercased()
         // RFC 9112 §6.3: these responses have no HTTP message body to compare.
-        guard method != "HEAD", !(100..<200).contains(response.statusCode),
-              response.statusCode != 204, response.statusCode != 304,
-              !(method == "CONNECT" && (200..<300).contains(response.statusCode)) else { return }
+        guard method != "HEAD", !(100..<200).contains(statusCode),
+              statusCode != 204, statusCode != 304,
+              !(method == "CONNECT" && (200..<300).contains(statusCode)) else { return }
         // Transfer-Encoding takes precedence over Content-Length. URLSession removes
         // transfer framing and may decompress content before returning Data, so neither
         // of those wire lengths can safely be compared with the decoded body's count.
-        guard response.header("transfer-encoding") == nil else { return }
+        guard headers["transfer-encoding"] == nil else { return }
         let optionalWhitespace = CharacterSet(charactersIn: " \t")
-        if let encoding = response.header("content-encoding"),
+        if let encoding = headers["content-encoding"],
            encoding.trimmingCharacters(in: optionalWhitespace).lowercased() != "identity" { return }
-        guard let field = response.header("content-length") else { return }
+        guard let field = headers["content-length"] else { return }
 
         // RFC 9110 §8.6 permits normalization of identical, combined length values.
         // Reject signs, empty/conflicting values and overflow rather than losing precision.
@@ -179,7 +226,7 @@ enum CameraHTTPResponseIntegrity {
             }
             expected = length
         }
-        guard let expected, expected == Int64(response.body.count) else {
+        guard let expected, expected == decodedBodyBytes else {
             throw CCAPIError.invalidResponse("Camera HTTP response body did not match Content-Length.")
         }
     }
@@ -251,12 +298,15 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
 
                     do {
                         let http = try Self.httpResponse(response)
+                        let size = try CameraHTTPResponseIntegrity.validate(
+                            CameraHTTPDownloadResponse(
+                                statusCode: http.statusCode, headers: Self.headers(http), temporaryFileURL: url
+                            ),
+                            requestMethod: request.httpMethod ?? "GET"
+                        )
                         let retainedURL = FileManager.default.temporaryDirectory
                             .appendingPathComponent("open-eos-download-\(UUID().uuidString)")
                         try FileManager.default.moveItem(at: url, to: retainedURL)
-                        let size = Int64(
-                            (try? retainedURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-                        )
                         let expected = response.expectedContentLength > 0
                             ? response.expectedContentLength
                             : size

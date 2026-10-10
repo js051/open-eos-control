@@ -481,7 +481,7 @@ final class OpenEOSControlUITests: XCTestCase {
         let actions = app.buttons["media-actions-preview-002"]
         let delete = app.buttons["delete-media-preview-002"]
         XCTAssertTrue(item.waitForExistence(timeout: 5))
-        XCTAssertTrue(waitForInteraction(actions, timeout: 5))
+        XCTAssertTrue(scrollToInteraction(actions, in: app, timeout: 5))
         actions.tap()
         XCTAssertTrue(scrollToInteraction(delete, in: app, timeout: 8))
         delete.tap()

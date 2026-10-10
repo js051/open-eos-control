@@ -953,9 +953,10 @@ public actor DesktopBridgeClient {
                 )
             }
         )
+        defer { try? FileManager.default.removeItem(at: response.temporaryFileURL) }
+        try Task.checkCancellation()
         guard (200..<300).contains(response.statusCode) else {
-            let body = Self.readPrefix(response.temporaryFileURL, limit: Self.maximumErrorBodyBytes)
-            try? FileManager.default.removeItem(at: response.temporaryFileURL)
+            let body = (try? response.readPrefix(limit: Self.maximumErrorBodyBytes)) ?? Data()
             throw Self.httpError(
                 statusCode: response.statusCode,
                 body: body,
@@ -963,23 +964,24 @@ public actor DesktopBridgeClient {
                 url: url
             )
         }
+        let size: Int64
         do {
-            try FileManager.default.moveItem(at: response.temporaryFileURL, to: destination)
-        } catch {
-            try? FileManager.default.removeItem(at: response.temporaryFileURL)
-            throw error
+            size = try CameraHTTPResponseIntegrity.validateOriginalMedia(response)
+        } catch CCAPIError.invalidResponse(let message) {
+            throw DesktopBridgeError.invalidResponse(message)
         }
-        let size = try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        try Task.checkCancellation()
+        try FileManager.default.moveItem(at: response.temporaryFileURL, to: destination)
         progress(
             CameraMediaTransferProgress(
-                bytesTransferred: Int64(size ?? 0),
-                totalBytes: Int64(size ?? 0)
+                bytesTransferred: size,
+                totalBytes: size
             )
         )
         return CameraMediaDownload(
             item: item,
             fileURL: destination,
-            bytesTransferred: Int64(size ?? 0),
+            bytesTransferred: size,
             contentType: response.header("content-type")
         )
     }
@@ -1742,12 +1744,6 @@ public actor DesktopBridgeClient {
             let text = String(data: data, encoding: .utf8)
         else { return "{}" }
         return text
-    }
-
-    private static func readPrefix(_ url: URL, limit: Int) -> Data {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return Data() }
-        defer { try? handle.close() }
-        return (try? handle.read(upToCount: limit)) ?? Data()
     }
 
     private static func httpError(response: CameraHTTPResponse, method: String, url: URL) -> DesktopBridgeError {
