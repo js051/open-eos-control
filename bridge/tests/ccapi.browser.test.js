@@ -297,6 +297,10 @@ function syntheticDatedMedia() {
   return entries.map(([name, captureTime]) => ({
     id: name, name, captureTime, kind: name.endsWith(".MP4") ? "video" : "image",
     sizeBytes: 2048, previewAvailable: true,
+    ...(["DATE_ONLY.JPG", "START.JPG", "END.JPG"].includes(name)
+      ? { folderId: name === "END.JPG" ? "synthetic:B" : "synthetic:A", folderLabel: "card1/DCIM/SAME" }
+      : name.startsWith("EARLIER_") ? { folderId: `synthetic:folder-${Number(name.match(/\d+/)[0]) % 40}`,
+        folderLabel: `long-camera-path/${"folder-name-".repeat(12)}${Number(name.match(/\d+/)[0]) % 40}` } : {}),
     ...({ "DATE_ONLY.JPG": 0, "START.JPG": 5, "END.JPG": 3 }[name] === undefined ? {}
       : { rating: { "DATE_ONLY.JPG": 0, "START.JPG": 5, "END.JPG": 3 }[name] }),
   }));
@@ -375,6 +379,67 @@ async function verifyDateDialogLayout(page, language) {
     await page.locator("html").evaluate((element) => element.style.removeProperty("font-size"));
   }
   await page.setViewportSize({ width: 1440, height: 900 });
+}
+
+async function verifyLoadedFolderJourney(page, language, snapshot) {
+  const names = () => page.locator(".media-card .media-copy strong").allTextContents();
+  const before = snapshot();
+  await page.click("#media-folder-button");
+  const choices = await page.locator("#media-folder-filter-select option").evaluateAll(options =>
+    options.map(option => ({ value: option.value, label: option.textContent })));
+  const sameLabel = choices.filter(option => option.label.startsWith("card1/DCIM/SAME"));
+  assert.equal(sameLabel.length, 2);
+  assert.notEqual(sameLabel[0].label, sameLabel[1].label);
+  assert.ok(choices.length >= 42, "Long loaded folder list remains available");
+  await page.selectOption("#media-folder-filter-select", sameLabel[0].value);
+  await page.click("#media-folder-apply");
+  assert.deepEqual(await names(), ["DATE_ONLY.JPG", "START.JPG"]);
+  await page.click("#media-rating-button");
+  await page.selectOption("#media-rating-filter-select", "5");
+  await page.click("#media-rating-apply");
+  await applyDateRange(page, "2026-10-07", "2026-10-07");
+  assert.deepEqual(await names(), ["START.JPG"], "Folder/date/rating intersect");
+  await page.click("#media-folder-clear");
+  assert.deepEqual(await names(), ["START.JPG"], "Clearing folder retains rating and date");
+  await page.click("#media-rating-clear");
+  await page.click("#media-date-clear");
+  await page.click("#media-folder-button");
+  await page.selectOption("#media-folder-filter-select", "1");
+  await page.click("#media-folder-apply");
+  assert.equal((await names()).length, 7, "Unknown provenance is explicit");
+  await page.click("#media-folder-clear");
+  assert.equal((await names()).length, 60);
+  assert.deepEqual(snapshot(), before, "Folder operations add no listing/info/write requests");
+
+  for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(viewport);
+    await page.locator("html").evaluate(element => { element.style.fontSize = "32px"; });
+    await page.locator("#media-folder-button").focus(); await page.keyboard.press("Enter");
+    await page.waitForSelector("#media-folder-dialog[open]");
+    assert.equal(await page.locator("#media-folder-filter-select").evaluate(element => document.activeElement === element), true);
+    const visited = new Set();
+    for (let step = 0; step < 16; step += 1) {
+      await page.keyboard.press("Tab");
+      const focus = await page.evaluate(() => ({ id: document.activeElement?.id,
+        background: document.activeElement && document.activeElement !== document.body &&
+          !document.querySelector("#media-folder-dialog").contains(document.activeElement) }));
+      assert.equal(Boolean(focus.background), false); visited.add(focus.id);
+    }
+    for (const id of ["media-folder-filter-select", "media-folder-close", "media-folder-dialog-clear", "media-folder-cancel", "media-folder-apply"]) {
+      assert.equal(visited.has(id), true, `Keyboard reaches ${id}`);
+      const control = page.locator(`#${id}`); await control.scrollIntoViewIfNeeded(); await control.click({ trial: true });
+      const bounds = await control.boundingBox();
+      assert.ok(bounds && bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= viewport.width + 1 &&
+        bounds.y + bounds.height <= viewport.height + 1, `${id} fits after scrolling`);
+    }
+    await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-media-folder-${language}-${viewport.width}x${viewport.height}-text200.png`) });
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#media-folder-dialog").open);
+    assert.equal(await page.locator("#media-folder-button").evaluate(element => document.activeElement === element), true);
+    await page.locator("html").evaluate(element => element.style.removeProperty("font-size"));
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  assert.equal((await names()).length, 60, "Escape preserves current folder filter");
 }
 
 async function verifyLoadedRatingJourney(page, language, snapshot) {
@@ -499,6 +564,7 @@ async function verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin) {
       assert.match(await page.locator("#media-summary").innerText(), language === "en" ? /Latest 60.*more on card/ : /最新 60.*尚有更多/);
       await page.selectOption("#media-sort-select", "camera");
       await verifyLoadedRatingJourney(page, language, snapshot);
+      await verifyLoadedFolderJourney(page, language, snapshot);
       const beforeDate = snapshot();
       await applyDateRange(page, "2026-10-07", "2026-10-07");
       await expectNames([...sameDayPhotos.slice(0, 4), "VIDEO.MP4", ...sameDayPhotos.slice(4)]);

@@ -44,7 +44,7 @@ function fixture() {
     "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh", "closeMediaDetails",
     "releaseObjectUrl", "clearBulbTimer", "renderAvailability", "renderHealth"]) s[name] = () => {};
   s.closeMediaPreview = () => { calls.push(["close-preview"]); state.mediaPreviewItem = null; };
-  const names = ["displayedMedia", "renderMediaSummary", "mediaDisplayTimeZone", "renderMediaDateFilter", "renderMediaRatingFilter",
+  const names = ["displayedMedia", "renderMediaSummary", "mediaDisplayTimeZone", "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel",
     "openMediaDateFilter", "applyMediaDateFilter", "clearMediaDateFilter", "previewableMedia", "mediaDateGroup",
     "formatMediaTime", "formatDate", "formatMediaSize", "renderMediaPreviewNavigation", "openAdjacentMedia", "resetSession",
     "deleteMedia"];

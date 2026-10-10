@@ -401,6 +401,14 @@
       nextMediaPage: "Next media page",
       mediaPageStatus: "{start}-{end} of {total}",
       mediaUnknownDate: "Unknown date",
+      mediaFolderFilter: "Camera folder filter",
+      mediaFolderClear: "Clear folder filter",
+      mediaFolderAll: "All loaded folders",
+      mediaFolderUnknown: "Unknown folder",
+      mediaFolderHelp: "Uses only folder information already supplied by the camera backend. No directory or metadata requests are added. Folder labels do not establish physical card slots.",
+      mediaFolderActive: "{matched} of {total} loaded items match; {unknown} have unknown folders. This is not a complete folder inventory.",
+      mediaFolderMissing: "Previously selected folder (not currently loaded)",
+      mediaFolderDuplicate: "distinct folder {index}",
       mediaRatingFilter: "Rating filter",
       mediaRatingClear: "Clear rating filter",
       mediaRatingAll: "All ratings",
@@ -427,7 +435,7 @@
       mediaDateRequired: "Enter both dates.",
       mediaDateInvalid: "Enter valid calendar dates.",
       mediaDateReversed: "The end date must be on or after the start date.",
-      mediaNoMatches: "No loaded media matches these filters. Clear the date or rating filter, or change the media type.",
+      mediaNoMatches: "No loaded media matches these filters. Clear the date, rating or folder filter, or change the media type.",
 
       manageMedia: "Manage {name}",
       mediaDetails: "Media details",
@@ -842,6 +850,14 @@
       nextMediaPage: "下一頁媒體",
       mediaPageStatus: "第 {start}-{end} 個，共 {total} 個",
       mediaUnknownDate: "日期不明",
+      mediaFolderFilter: "相機資料夾篩選",
+      mediaFolderClear: "清除資料夾篩選",
+      mediaFolderAll: "全部已載入資料夾",
+      mediaFolderUnknown: "未知資料夾",
+      mediaFolderHelp: "僅使用相機後端已提供的資料夾資訊，不額外查目錄或中繼資料。資料夾名稱不代表已驗證的實體卡槽。",
+      mediaFolderActive: "已載入{total}項中有{matched}項符合，{unknown}項資料夾未知；這不是完整資料夾目錄。",
+      mediaFolderMissing: "先前選取的資料夾（目前未載入）",
+      mediaFolderDuplicate: "不同資料夾{index}",
       mediaRatingFilter: "評分篩選",
       mediaRatingClear: "清除評分篩選",
       mediaRatingAll: "全部評分",
@@ -868,7 +884,7 @@
       mediaDateRequired: "請輸入開始與結束日期。",
       mediaDateInvalid: "請輸入有效的日曆日期。",
       mediaDateReversed: "結束日期不能早於開始日期。",
-      mediaNoMatches: "已載入素材沒有符合篩選的項目。請清除日期或評分篩選，或變更素材類型。",
+      mediaNoMatches: "已載入素材沒有符合篩選的項目。請清除日期、評分或資料夾篩選，或變更素材類型。",
 
       manageMedia: "管理 {name}",
       mediaDetails: "媒體詳細資料",
@@ -1187,6 +1203,9 @@
     mediaFilter: "all",
     mediaDateRange: null,
     mediaDateDialogSession: null,
+    mediaFolderFilter: { kind: "all" },
+    mediaFolderDialogSession: null,
+    mediaFolderDraftChoices: [],
     mediaRatingFilter: "all",
     mediaRatingDialogSession: null,
     mediaSort: "newest",
@@ -1336,6 +1355,15 @@
     mediaUploadButton: byId("media-upload-button"),
     mediaUploadInput: byId("media-upload-input"),
     mediaSummary: byId("media-summary"),
+    mediaFolderButton: byId("media-folder-button"),
+    mediaFolderClear: byId("media-folder-clear"),
+    mediaFolderSummary: byId("media-folder-summary"),
+    mediaFolderDialog: byId("media-folder-dialog"),
+    mediaFolderForm: byId("media-folder-form"),
+    mediaFolderSelect: byId("media-folder-filter-select"),
+    mediaFolderClose: byId("media-folder-close"),
+    mediaFolderCancel: byId("media-folder-cancel"),
+    mediaFolderDialogClear: byId("media-folder-dialog-clear"),
     mediaRatingButton: byId("media-rating-button"),
     mediaRatingClear: byId("media-rating-clear"),
     mediaRatingSummary: byId("media-rating-summary"),
@@ -1864,6 +1892,10 @@
     state.lastClockSyncAt = null;
     state.lastCreatedDirectoryName = null;
     state.media = [];
+    state.mediaFolderFilter = { kind: "all" };
+    state.mediaFolderDialogSession = null;
+    state.mediaFolderDraftChoices = [];
+    if (ui.mediaFolderDialog?.open) ui.mediaFolderDialog.close();
     state.mediaRatingFilter = "all";
     state.mediaRatingDialogSession = null;
     if (ui.mediaRatingDialog?.open) ui.mediaRatingDialog.close();
@@ -4886,12 +4918,14 @@
       resolvedLanguage(),
       state.mediaDateRange,
       state.mediaRatingFilter,
+      state.mediaFolderFilter,
     );
   }
 
   function renderMediaSummary(visibleItems = displayedMedia()) {
     renderMediaDateFilter(visibleItems);
     renderMediaRatingFilter(visibleItems);
+    renderMediaFolderFilter(visibleItems);
     if (!ui.mediaSummary) return;
     ui.mediaSummary.dataset.loadStatus = state.mediaLoadStatus;
     if (state.mediaLoadStatus === "LOADING") {
@@ -4936,6 +4970,80 @@
         total: state.media.length, unknown: mediaLibrary.countUnknownDates(state.media),
       }) + " " + t("mediaDateZone", { zone: mediaDisplayTimeZone() });
     }
+  }
+
+  function mediaFolderChoiceLabel(folder, folders) {
+    const duplicates = folders.filter(candidate => candidate.label === folder.label);
+    const index = duplicates.findIndex(candidate => candidate.id === folder.id);
+    return duplicates.length > 1
+      ? folder.label + " · " + t("mediaFolderDuplicate", { index: index + 1 }) : folder.label;
+  }
+
+  function renderMediaFolderFilter(visibleItems = displayedMedia()) {
+    if (!ui.mediaFolderButton) return;
+    const filter = state.mediaFolderFilter || { kind: "all" };
+    const active = filter.kind !== "all";
+    ui.mediaFolderButton.disabled = !state.session || !featureSupported(FEATURES.MEDIA_BROWSER);
+    ui.mediaFolderButton.setAttribute("aria-pressed", String(active));
+    ui.mediaFolderClear.hidden = !active;
+    ui.mediaFolderSummary.hidden = !active;
+    if (active) {
+      const folders = mediaLibrary.folderOptions(state.media);
+      const current = folders.find(folder => folder.id === filter.id);
+      const label = filter.kind === "unknown" ? t("mediaFolderUnknown")
+        : current ? mediaFolderChoiceLabel(current, folders) : filter.label + " · " + t("mediaFolderMissing");
+      ui.mediaFolderSummary.textContent = label + ": " + t("mediaFolderActive", {
+        matched: visibleItems.length, total: state.media.length,
+        unknown: mediaLibrary.countUnknownFolders(state.media),
+      });
+    }
+  }
+
+  function openMediaFolderFilter() {
+    if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER) || ui.mediaFolderDialog.open) return;
+    const selected = state.mediaFolderFilter || { kind: "all" };
+    const folders = mediaLibrary.folderOptions(state.media);
+    const choices = [{ kind: "all", label: t("mediaFolderAll") },
+      { kind: "unknown", label: t("mediaFolderUnknown") },
+      ...folders.map(folder => ({ kind: "folder", id: folder.id, label: folder.label,
+        displayLabel: mediaFolderChoiceLabel(folder, folders) }))];
+    if (selected.kind === "folder" && !choices.some(choice => choice.id === selected.id)) {
+      choices.push({ ...selected, displayLabel: selected.label + " · " + t("mediaFolderMissing") });
+    }
+    state.mediaFolderDialogSession = state.session;
+    state.mediaFolderDraftChoices = choices;
+    ui.mediaFolderSelect.replaceChildren();
+    choices.forEach((choice, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = choice.displayLabel || choice.label;
+      option.selected = choice.kind === selected.kind && (choice.kind !== "folder" || choice.id === selected.id);
+      ui.mediaFolderSelect.append(option);
+    });
+    ui.mediaFolderDialog.showModal();
+  }
+
+  function applyMediaFolderFilter() {
+    if (!ui.mediaFolderDialog.open || !state.session || state.mediaFolderDialogSession !== state.session) return;
+    const value = ui.mediaFolderSelect.value;
+    if (!/^(0|[1-9][0-9]*)$/.test(value)) return;
+    const choice = state.mediaFolderDraftChoices[Number(value)];
+    if (!choice) return;
+    state.mediaFolderFilter = choice.kind === "folder"
+      ? { kind: "folder", id: choice.id, label: choice.label } : { kind: choice.kind };
+    state.mediaPage = 0;
+    ui.mediaFolderDialog.close();
+    renderMedia();
+    if (state.mediaPreviewItem) renderMediaPreviewNavigation();
+  }
+
+  function clearMediaFolderFilter() {
+    if (!state.session || (ui.mediaFolderDialog.open && state.mediaFolderDialogSession !== state.session)) return;
+    state.mediaFolderFilter = { kind: "all" };
+    state.mediaPage = 0;
+    if (ui.mediaFolderDialog.open) ui.mediaFolderDialog.close();
+    renderMedia();
+    if (state.mediaPreviewItem) renderMediaPreviewNavigation();
   }
 
   function renderMediaRatingFilter(visibleItems = displayedMedia()) {
@@ -5030,7 +5138,7 @@
 
   function previewableMedia() {
     const source = state.mediaLoaded || state.media.length ? state.media : [];
-    const items = mediaLibrary.itemsForDisplay(source, state.mediaFilter, state.mediaSort, resolvedLanguage(), state.mediaDateRange, state.mediaRatingFilter)
+    const items = mediaLibrary.itemsForDisplay(source, state.mediaFilter, state.mediaSort, resolvedLanguage(), state.mediaDateRange, state.mediaRatingFilter, state.mediaFolderFilter)
       .filter((item) => mediaIsVideo(item)
         ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
         : item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
@@ -5039,6 +5147,7 @@
       ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
       : latest.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
     if (state.mediaDateRange || (state.mediaRatingFilter && state.mediaRatingFilter !== "all")
+      || (state.mediaFolderFilter && state.mediaFolderFilter.kind !== "all")
       || state.mediaSort === "rating-highest" || state.mediaSort === "rating-lowest") {
       // Capture review may open a file outside the filtered/sorted loaded library.
       // Keep that explicit preview alone instead of prepending it ahead of rating order.
@@ -6254,6 +6363,18 @@
           candidate.setAttribute("aria-pressed", String(candidate === button));
         });
       });
+    });
+    ui.mediaFolderButton.addEventListener("click", openMediaFolderFilter);
+    ui.mediaFolderClear.addEventListener("click", clearMediaFolderFilter);
+    ui.mediaFolderDialogClear.addEventListener("click", clearMediaFolderFilter);
+    ui.mediaFolderClose.addEventListener("click", () => ui.mediaFolderDialog.close());
+    ui.mediaFolderCancel.addEventListener("click", () => ui.mediaFolderDialog.close());
+    ui.mediaFolderDialog.addEventListener("close", () => {
+      state.mediaFolderDialogSession = null;
+      state.mediaFolderDraftChoices = [];
+    });
+    ui.mediaFolderForm.addEventListener("submit", (event) => {
+      event.preventDefault(); applyMediaFolderFilter();
     });
     ui.mediaRatingButton.addEventListener("click", openMediaRatingFilter);
     ui.mediaRatingClear.addEventListener("click", clearMediaRatingFilter);

@@ -9,6 +9,7 @@
   const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
   const ISO_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:?\d{2})?$/;
   const PTP_DATE_TIME = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/;
+  const FOLDER_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
 
   function isVideo(item) {
     if (String(item?.kind || "").toLowerCase() === "video") return true;
@@ -128,6 +129,57 @@
     return items.reduce((count, item) => count + (normalizeRating(item?.rating) === null ? 1 : 0), 0);
   }
 
+  function validFolderValue(value, maximumLength) {
+    // String.length is the Bridge contract's UTF-16 code-unit length. Validate
+    // without normalizing: an opaque ID's whitespace and encoding are identity.
+    return typeof value === "string" && value.length <= maximumLength &&
+      value.trim().length > 0 && !FOLDER_CONTROL_CHARACTERS.test(value);
+  }
+
+  function folderForItem(item) {
+    const id = item?.folderId;
+    const label = item?.folderLabel;
+    // A partial pair is unknown. Filenames, media IDs and host paths are not
+    // camera folder evidence and must never fill these optional fields.
+    if (!validFolderValue(id, 4096) || !validFolderValue(label, 1024)) return null;
+    return { id, label };
+  }
+
+  function folderOptions(items) {
+    const folders = new Map();
+    for (const item of items) {
+      const folder = folderForItem(item);
+      if (!folder) continue;
+      const existing = folders.get(folder.id);
+      if (!existing) {
+        folders.set(folder.id, { ...folder, count: 1, labelConflict: false });
+        continue;
+      }
+      existing.count += 1;
+      if (existing.label !== folder.label) {
+        existing.labelConflict = true;
+        // Retain an observed label deterministically; conflicting names neither
+        // change the authoritative ID nor establish any inferred folder path.
+        if (folder.label < existing.label) existing.label = folder.label;
+      }
+    }
+    const compare = (left, right) => left < right ? -1 : left > right ? 1 : 0;
+    return [...folders.values()].sort((left, right) =>
+      compare(left.label, right.label) || compare(left.id, right.id));
+  }
+
+  function countUnknownFolders(items) {
+    return items.reduce((count, item) => count + (folderForItem(item) === null ? 1 : 0), 0);
+  }
+
+  function folderMatchesFilter(item, filter = { kind: "all" }) {
+    if (!filter || typeof filter !== "object" || Array.isArray(filter)) return false;
+    if (filter.kind === "all") return true;
+    if (filter.kind === "unknown") return folderForItem(item) === null;
+    if (filter.kind !== "folder" || !validFolderValue(filter.id, 4096)) return false;
+    return folderForItem(item)?.id === filter.id;
+  }
+
   function naturalName(left, right, locale) {
     return String(left?.name || "").localeCompare(String(right?.name || ""), locale, {
       numeric: true,
@@ -135,13 +187,14 @@
     });
   }
 
-  function itemsForDisplay(items, filter, sort, locale, range = null, ratingFilter = "all") {
+  function itemsForDisplay(items, filter, sort, locale, range = null, ratingFilter = "all", folderFilter = { kind: "all" }) {
     const activeRange = range === null ? null : validateDateRange(range);
     if (activeRange && !activeRange.valid) throw new RangeError(`Invalid media date range: ${activeRange.error}`);
     const filtered = items.filter((item) => {
       if (filter === "video" && !isVideo(item)) return false;
       if (filter === "photo" && isVideo(item)) return false;
       if (!ratingMatchesFilter(item?.rating, ratingFilter)) return false;
+      if (!folderMatchesFilter(item, folderFilter)) return false;
       if (activeRange) {
         const date = mediaDateForItem(item);
         if (!date || date.dateKey < activeRange.range.start || date.dateKey > activeRange.range.end) return false;
@@ -283,6 +336,10 @@
     normalizeRating,
     ratingMatchesFilter,
     countUnknownRatings,
+    folderForItem,
+    folderOptions,
+    countUnknownFolders,
+    folderMatchesFilter,
     naturalName,
     itemsForDisplay,
     page,

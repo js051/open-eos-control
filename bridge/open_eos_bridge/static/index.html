@@ -336,6 +336,8 @@
               <option value="rating-lowest" data-i18n="mediaRatingLowest">Lowest rating first</option>
             </select>
           </label>
+          <button id="media-folder-button" class="button secondary" type="button" aria-haspopup="dialog" aria-controls="media-folder-dialog" aria-pressed="false" data-i18n="mediaFolderFilter">Camera folder filter</button>
+          <button id="media-folder-clear" class="button secondary" type="button" data-i18n="mediaFolderClear" hidden>Clear folder filter</button>
           <button id="media-rating-button" class="button secondary" type="button" aria-haspopup="dialog" aria-controls="media-rating-dialog" aria-pressed="false" data-i18n="mediaRatingFilter">Rating filter</button>
           <button id="media-rating-clear" class="button secondary" type="button" data-i18n="mediaRatingClear" hidden>Clear rating filter</button>
           <button id="media-date-button" class="button secondary" type="button" aria-haspopup="dialog" aria-controls="media-date-dialog" aria-pressed="false" data-i18n="mediaDateRange">Media date range</button>
@@ -350,6 +352,7 @@
             </button>
           </nav>
         </div>
+        <p id="media-folder-summary" class="supporting media-date-summary" role="status" hidden></p>
         <p id="media-rating-summary" class="supporting media-date-summary" role="status" hidden></p>
         <p id="media-date-summary" class="supporting media-date-summary" role="status" hidden></p>
         <section id="media-transfer" class="media-transfer" aria-live="polite" hidden>
@@ -607,6 +610,25 @@
     </form>
   </dialog>
 
+  <dialog id="media-folder-dialog" class="setting-dialog media-date-dialog" aria-labelledby="media-folder-title" aria-describedby="media-folder-help">
+    <form id="media-folder-form">
+      <div class="dialog-heading">
+        <h2 id="media-folder-title" data-i18n="mediaFolderFilter">Camera folder filter</h2>
+        <button id="media-folder-close" class="icon-button" type="button" data-i18n-aria="close"><span class="icon" data-icon="x" aria-hidden="true"></span></button>
+      </div>
+      <div class="media-date-fields">
+        <p id="media-folder-help" class="supporting" data-i18n="mediaFolderHelp">Uses only folder information already supplied by the camera backend. No directory or metadata requests are added.</p>
+        <label><span data-i18n="mediaFolderFilter">Camera folder filter</span>
+          <select id="media-folder-filter-select" autofocus></select>
+        </label>
+      </div>
+      <div class="media-date-actions">
+        <button id="media-folder-dialog-clear" class="button secondary" type="button" data-i18n="mediaFolderClear">Clear folder filter</button>
+        <button id="media-folder-cancel" class="button secondary" type="button" data-i18n="mediaDateCancel">Cancel</button>
+        <button id="media-folder-apply" class="button primary" type="submit" data-i18n="mediaDateApply">Apply</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="media-rating-dialog" class="setting-dialog media-date-dialog" aria-labelledby="media-rating-title" aria-describedby="media-rating-help">
     <form id="media-rating-form">
       <div class="dialog-heading">

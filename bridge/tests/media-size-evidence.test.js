@@ -112,7 +112,7 @@ function context(item = media(), { metadata } = {}) {
     "formatMediaTime", "renderMediaThumbnail", "mediaMetadataSupported", "mediaManagementSupported",
     "mediaTransferActive", "cameraInteractionBusy", "replaceMediaItem",
     "openMediaDetails", "clearMediaDetails",
-    "renderMedia", "renderMediaSummary", "renderMediaDateFilter", "renderMediaRatingFilter", "mediaDisplayTimeZone", "renderMediaDetails", "renderMediaPreviewNavigation",
+    "renderMedia", "renderMediaSummary", "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel", "mediaDisplayTimeZone", "renderMediaDetails", "renderMediaPreviewNavigation",
     "renderMediaTransfer", "renderSession",
   ];
   // The unchanged baseline must fail on its rendered claims, not a missing import.

@@ -146,7 +146,7 @@ function fixture(t, { dated = false } = {}) {
   const names = ["startEventLoop", "cancelEventLoop", "refreshSession", "refreshMedia", "refreshMediaWhenCurrent",
     "mediaTransferActive", "cameraInteractionBusy", "openMediaPreview", "closeMediaPreview", "clearMediaPreview",
     "resetMediaPreviewTransform", "renderMediaPreviewNavigation", "previewableMedia", "displayedMedia",
-    "renderMediaSummary", "renderMediaDateFilter", "renderMediaRatingFilter", "mediaDisplayTimeZone", "resetSession", "cancelLatestMediaRefresh",
+    "renderMediaSummary", "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel", "mediaDisplayTimeZone", "resetSession", "cancelLatestMediaRefresh",
     "retryLatestMedia", "refreshLatestMedia", "latestMediaFrom", "publishLatestMedia",
     "downloadMedia", "cancelMediaDownload"];
   vm.runInContext(names.map(extract).join("\n"), s, { timeout: 1000 });

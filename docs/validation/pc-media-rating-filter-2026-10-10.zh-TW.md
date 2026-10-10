@@ -22,3 +22,21 @@
 正常 browser suite 已加入英文／繁體中文、200% 字體、兩方向 viewport、鍵盤焦點／Escape、日期交集、篩選／排序及相機請求計數檢查。此文件建立時 browser/backend 尚未執行，待本批必要正常 CI。完整 App、視覺與實體相機驗收依使用者指示集中於功能開發後，不以 Node 結果替代。
 
 沒有更改 CI classifier、必要 gates、相機傳輸契約或系統權限。新增功能的發布性質應按 repo minor 版本政策另行評估；本批不發布版本，既有 release HOLD 保留。
+
+## 同批補齊相機資料夾（待整批新版 CI）
+
+評分 head `5fb17840bc9a8aa5460efdcb2553a3d5a5f8b3a2` 的 CI 38086044207 已全適用通過，包含 desktop 模組、四個 browser suites、pytest、Windows 包及 JVM／APK。這份歷史成功不能驗證後續資料夾來源。
+
+資料夾僅使用原有 Bridge 公開 `folderId`／`folderLabel`，不新增 endpoint 或 lookup。有效資料必須成對非空字串，ID／label 上限分別為 4096／1024 UTF-16 units，拒 C0/C1 控制；缺漏／非法保持 unknown，不從檔名、媒體 ID 或 host 路徑猜測。opaque ID 原值比較，不 decode 或 trim；不同 ID 即使同名仍是不同選項。相同 ID 的不同有效 label 取確定性的已觀察名稱，不宣稱名稱是物理卡槽。
+
+資料夾與日期／評分／類型取交集，使用目前已載入清單；最近 60、還有更多、載入失敗或不完整提示仍保留。選項有全部、未知及已知 folder；清除只清此條件，保留日期、評分、預覽與下載。重載後選取的 ID 若暫未出現，保持零匹配並提供清除，不默默切回全部。draft 綁定原 session 物件，重用 ID 的新 session 也不能接收舊草稿。長名稱以 textContent 顯示，原生選項值是本地索引，名稱不進 HTML。
+
+本地 helper 最初 8 例紅；final 9 例綠。owner callbacks 另 10 例綠；19 模組腳本完整通過。中途受 render summary 新依賴影響的 15 個既有 date fixture 失敗保留，僅補 helper 擷取清單後原 assertions 全通過。browser 新增兩語言、兩 viewport、200% 字體、40+ 資料夾、同名不同 ID、未知、日期／評分交集、取消/Escape/focus、原請求數不增檢查；新版 browser runtime 尚未執行，等待完整批次 CI。
+
+## P2 挑片功能群的交付界線
+
+本次整合範圍是已載入素材的日期／評分／資料夾／類型篩選、穩定排序、最近／全部及部分清單提示、單項 preview 與 session 身分。Android 已有對應挑片能力；本輪補 PC／iOS 平台缺口。保留 RAW/JPEG 各自 ID，不推測自動配對或整張卡完整性。
+
+PC 與 iOS 目前沒有 Android 式多選／批次原檔交付 state/UI。單項預覽保留不是隱藏多選保留，不能把本批說成整個 P2 已完成。多選與批次交付仍是原產品計畫的獨立未完成流程；跨程序續傳、背景自動傳輸與真機大型記憶卡也不在本批完成宣稱內。完整人工/實機驗收按使用者指示後置，必要單元／正常 CI 仍保留。
+
+來源 review 另修正資料夾 dialog 樣式 class、同名／刷新／消失的 active label，以及名稱包含 JavaScript replacement 字元時的字面保留。使用真 production t 的 owner 控制已覆蓋 `$&`、`$` 開頭符號及 `{index}`；名稱保持文字，不插入翻譯參數或 HTML。
