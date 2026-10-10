@@ -332,8 +332,12 @@
               <option value="oldest" data-i18n="mediaOldest">Oldest first</option>
               <option value="name" data-i18n="mediaName">File name</option>
               <option value="camera" data-i18n="mediaCameraOrder">Camera order</option>
+              <option value="rating-highest" data-i18n="mediaRatingHighest">Highest rating first</option>
+              <option value="rating-lowest" data-i18n="mediaRatingLowest">Lowest rating first</option>
             </select>
           </label>
+          <button id="media-rating-button" class="button secondary" type="button" aria-haspopup="dialog" aria-controls="media-rating-dialog" aria-pressed="false" data-i18n="mediaRatingFilter">Rating filter</button>
+          <button id="media-rating-clear" class="button secondary" type="button" data-i18n="mediaRatingClear" hidden>Clear rating filter</button>
           <button id="media-date-button" class="button secondary" type="button" aria-haspopup="dialog" aria-controls="media-date-dialog" aria-pressed="false" data-i18n="mediaDateRange">Media date range</button>
           <button id="media-date-clear" class="button secondary" type="button" data-i18n="mediaDateClear" hidden>Clear date range</button>
           <nav id="media-pagination" class="media-pagination" data-i18n-aria="mediaPages" hidden>
@@ -346,6 +350,7 @@
             </button>
           </nav>
         </div>
+        <p id="media-rating-summary" class="supporting media-date-summary" role="status" hidden></p>
         <p id="media-date-summary" class="supporting media-date-summary" role="status" hidden></p>
         <section id="media-transfer" class="media-transfer" aria-live="polite" hidden>
           <span class="media-transfer-icon icon" data-icon="download" aria-hidden="true"></span>
@@ -598,6 +603,35 @@
         <button id="media-date-dialog-clear" class="button secondary" type="button" data-i18n="mediaDateClear">Clear date range</button>
         <button id="media-date-cancel" class="button secondary" type="button" data-i18n="mediaDateCancel">Cancel</button>
         <button id="media-date-apply" class="button primary" type="submit" data-i18n="mediaDateApply">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="media-rating-dialog" class="setting-dialog media-date-dialog" aria-labelledby="media-rating-title" aria-describedby="media-rating-help">
+    <form id="media-rating-form">
+      <div class="dialog-heading">
+        <h2 id="media-rating-title" data-i18n="mediaRatingFilter">Rating filter</h2>
+        <button id="media-rating-close" class="icon-button" type="button" data-i18n-aria="close"><span class="icon" data-icon="x" aria-hidden="true"></span></button>
+      </div>
+      <div class="media-date-fields">
+        <p id="media-rating-help" class="supporting" data-i18n="mediaRatingHelp">Uses loaded ratings only. Unknown is different from unrated (0). No additional camera metadata is requested; Recent or incomplete lists do not cover the whole card.</p>
+        <label><span data-i18n="mediaRatingFilter">Rating filter</span>
+          <select id="media-rating-filter-select" autofocus>
+            <option value="all" data-i18n="mediaRatingAll">All ratings</option>
+            <option value="unrated" data-i18n="mediaRatingUnrated">Unrated (known 0)</option>
+            <option value="1-plus" data-i18n="mediaRatingOne">1 star and above</option>
+            <option value="2-plus" data-i18n="mediaRatingTwo">2 stars and above</option>
+            <option value="3-plus" data-i18n="mediaRatingThree">3 stars and above</option>
+            <option value="4-plus" data-i18n="mediaRatingFour">4 stars and above</option>
+            <option value="5" data-i18n="mediaRatingFive">5 stars</option>
+            <option value="unknown" data-i18n="mediaRatingUnknown">Unknown rating</option>
+          </select>
+        </label>
+      </div>
+      <div class="media-date-actions">
+        <button id="media-rating-dialog-clear" class="button secondary" type="button" data-i18n="mediaRatingClear">Clear rating filter</button>
+        <button id="media-rating-cancel" class="button secondary" type="button" data-i18n="mediaDateCancel">Cancel</button>
+        <button id="media-rating-apply" class="button primary" type="submit" data-i18n="mediaDateApply">Apply</button>
       </div>
     </form>
   </dialog>

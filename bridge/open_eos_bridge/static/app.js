@@ -401,6 +401,20 @@
       nextMediaPage: "Next media page",
       mediaPageStatus: "{start}-{end} of {total}",
       mediaUnknownDate: "Unknown date",
+      mediaRatingFilter: "Rating filter",
+      mediaRatingClear: "Clear rating filter",
+      mediaRatingAll: "All ratings",
+      mediaRatingUnrated: "Unrated (known 0)",
+      mediaRatingOne: "1 star and above",
+      mediaRatingTwo: "2 stars and above",
+      mediaRatingThree: "3 stars and above",
+      mediaRatingFour: "4 stars and above",
+      mediaRatingFive: "5 stars",
+      mediaRatingUnknown: "Unknown rating",
+      mediaRatingHighest: "Highest rating first",
+      mediaRatingLowest: "Lowest rating first",
+      mediaRatingHelp: "Uses loaded ratings only. Unknown is different from unrated (0). No additional camera metadata is requested; Recent or incomplete lists do not cover the whole card.",
+      mediaRatingActive: "{matched} of {total} loaded items match. {unknown} loaded items have unknown ratings. Only loaded ratings are filtered or sorted.",
       mediaDateRange: "Media date range",
       mediaDateFrom: "From",
       mediaDateTo: "To",
@@ -413,7 +427,7 @@
       mediaDateRequired: "Enter both dates.",
       mediaDateInvalid: "Enter valid calendar dates.",
       mediaDateReversed: "The end date must be on or after the start date.",
-      mediaNoMatches: "No loaded media matches these filters. Clear the date range or change the media type.",
+      mediaNoMatches: "No loaded media matches these filters. Clear the date or rating filter, or change the media type.",
 
       manageMedia: "Manage {name}",
       mediaDetails: "Media details",
@@ -828,6 +842,20 @@
       nextMediaPage: "下一頁媒體",
       mediaPageStatus: "第 {start}-{end} 個，共 {total} 個",
       mediaUnknownDate: "日期不明",
+      mediaRatingFilter: "評分篩選",
+      mediaRatingClear: "清除評分篩選",
+      mediaRatingAll: "全部評分",
+      mediaRatingUnrated: "未評星（已知0星）",
+      mediaRatingOne: "1星以上",
+      mediaRatingTwo: "2星以上",
+      mediaRatingThree: "3星以上",
+      mediaRatingFour: "4星以上",
+      mediaRatingFive: "5星",
+      mediaRatingUnknown: "未知評分",
+      mediaRatingHighest: "評分高至低",
+      mediaRatingLowest: "評分低至高",
+      mediaRatingHelp: "僅使用已載入評分。未知不等於未評星（0星），不額外讀取相機資訊；最近或未完成清單不代表整張記憶卡。",
+      mediaRatingActive: "已載入{total}項中有{matched}項符合，{unknown}項評分未知。僅篩選或排序已載入評分。",
       mediaDateRange: "素材日期區間",
       mediaDateFrom: "開始日期",
       mediaDateTo: "結束日期",
@@ -840,7 +868,7 @@
       mediaDateRequired: "請輸入開始與結束日期。",
       mediaDateInvalid: "請輸入有效的日曆日期。",
       mediaDateReversed: "結束日期不能早於開始日期。",
-      mediaNoMatches: "已載入素材沒有符合篩選的項目。請清除日期區間或變更素材類型。",
+      mediaNoMatches: "已載入素材沒有符合篩選的項目。請清除日期或評分篩選，或變更素材類型。",
 
       manageMedia: "管理 {name}",
       mediaDetails: "媒體詳細資料",
@@ -1159,6 +1187,8 @@
     mediaFilter: "all",
     mediaDateRange: null,
     mediaDateDialogSession: null,
+    mediaRatingFilter: "all",
+    mediaRatingDialogSession: null,
     mediaSort: "newest",
     mediaPage: 0,
     mediaThumbnailUrls: new Map(),
@@ -1306,6 +1336,15 @@
     mediaUploadButton: byId("media-upload-button"),
     mediaUploadInput: byId("media-upload-input"),
     mediaSummary: byId("media-summary"),
+    mediaRatingButton: byId("media-rating-button"),
+    mediaRatingClear: byId("media-rating-clear"),
+    mediaRatingSummary: byId("media-rating-summary"),
+    mediaRatingDialog: byId("media-rating-dialog"),
+    mediaRatingForm: byId("media-rating-form"),
+    mediaRatingSelect: byId("media-rating-filter-select"),
+    mediaRatingClose: byId("media-rating-close"),
+    mediaRatingCancel: byId("media-rating-cancel"),
+    mediaRatingDialogClear: byId("media-rating-dialog-clear"),
     mediaDateButton: byId("media-date-button"),
     mediaDateClear: byId("media-date-clear"),
     mediaDateSummary: byId("media-date-summary"),
@@ -1825,6 +1864,9 @@
     state.lastClockSyncAt = null;
     state.lastCreatedDirectoryName = null;
     state.media = [];
+    state.mediaRatingFilter = "all";
+    state.mediaRatingDialogSession = null;
+    if (ui.mediaRatingDialog?.open) ui.mediaRatingDialog.close();
     state.mediaDateRange = null;
     state.mediaDateDialogSession = null;
     if (ui.mediaDateDialog?.open) ui.mediaDateDialog.close();
@@ -4843,11 +4885,13 @@
       state.mediaSort,
       resolvedLanguage(),
       state.mediaDateRange,
+      state.mediaRatingFilter,
     );
   }
 
   function renderMediaSummary(visibleItems = displayedMedia()) {
     renderMediaDateFilter(visibleItems);
+    renderMediaRatingFilter(visibleItems);
     if (!ui.mediaSummary) return;
     ui.mediaSummary.dataset.loadStatus = state.mediaLoadStatus;
     if (state.mediaLoadStatus === "LOADING") {
@@ -4894,6 +4938,54 @@
     }
   }
 
+  function renderMediaRatingFilter(visibleItems = displayedMedia()) {
+    if (!ui.mediaRatingButton) return;
+    const active = Boolean(state.mediaRatingFilter && state.mediaRatingFilter !== "all");
+    const sorting = state.mediaSort === "rating-highest" || state.mediaSort === "rating-lowest";
+    ui.mediaRatingButton.disabled = !state.session || !featureSupported(FEATURES.MEDIA_BROWSER);
+    ui.mediaRatingButton.setAttribute("aria-pressed", String(active));
+    ui.mediaRatingClear.hidden = !active;
+    ui.mediaRatingSummary.hidden = !active && !sorting;
+    if (active || sorting) {
+      const labels = { all: "mediaRatingAll", unrated: "mediaRatingUnrated", "1-plus": "mediaRatingOne",
+        "2-plus": "mediaRatingTwo", "3-plus": "mediaRatingThree", "4-plus": "mediaRatingFour",
+        "5": "mediaRatingFive", unknown: "mediaRatingUnknown" };
+      const criterion = t(labels[state.mediaRatingFilter || "all"]);
+      const order = sorting ? " · " + t(state.mediaSort === "rating-highest" ? "mediaRatingHighest" : "mediaRatingLowest") : "";
+      ui.mediaRatingSummary.textContent = criterion + order + ": " + t("mediaRatingActive", {
+        matched: visibleItems.length, total: state.media.length,
+        unknown: mediaLibrary.countUnknownRatings(state.media),
+      });
+    }
+  }
+
+  function openMediaRatingFilter() {
+    if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER) || ui.mediaRatingDialog.open) return;
+    state.mediaRatingDialogSession = state.session;
+    ui.mediaRatingSelect.value = state.mediaRatingFilter || "all";
+    ui.mediaRatingDialog.showModal();
+  }
+
+  function applyMediaRatingFilter() {
+    if (!ui.mediaRatingDialog.open || !state.session || state.mediaRatingDialogSession !== state.session) return;
+    const filter = ui.mediaRatingSelect.value;
+    if (!["all", "unrated", "1-plus", "2-plus", "3-plus", "4-plus", "5", "unknown"].includes(filter)) return;
+    state.mediaRatingFilter = filter;
+    state.mediaPage = 0;
+    ui.mediaRatingDialog.close();
+    renderMedia();
+    if (state.mediaPreviewItem) renderMediaPreviewNavigation();
+  }
+
+  function clearMediaRatingFilter() {
+    if (!state.session || (ui.mediaRatingDialog.open && state.mediaRatingDialogSession !== state.session)) return;
+    state.mediaRatingFilter = "all";
+    state.mediaPage = 0;
+    if (ui.mediaRatingDialog.open) ui.mediaRatingDialog.close();
+    renderMedia();
+    if (state.mediaPreviewItem) renderMediaPreviewNavigation();
+  }
+
   function openMediaDateFilter() {
     if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER) || ui.mediaDateDialog.open) return;
     state.mediaDateDialogSession = state.session;
@@ -4938,7 +5030,7 @@
 
   function previewableMedia() {
     const source = state.mediaLoaded || state.media.length ? state.media : [];
-    const items = mediaLibrary.itemsForDisplay(source, state.mediaFilter, state.mediaSort, resolvedLanguage(), state.mediaDateRange)
+    const items = mediaLibrary.itemsForDisplay(source, state.mediaFilter, state.mediaSort, resolvedLanguage(), state.mediaDateRange, state.mediaRatingFilter)
       .filter((item) => mediaIsVideo(item)
         ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
         : item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
@@ -4946,8 +5038,10 @@
     const latestPreviewable = latest && (mediaIsVideo(latest)
       ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
       : latest.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
-    if (state.mediaDateRange) {
-      // Capture review may explicitly open a file outside the current library filter.
+    if (state.mediaDateRange || (state.mediaRatingFilter && state.mediaRatingFilter !== "all")
+      || state.mediaSort === "rating-highest" || state.mediaSort === "rating-lowest") {
+      // Capture review may open a file outside the filtered/sorted loaded library.
+      // Keep that explicit preview alone instead of prepending it ahead of rating order.
       const opened = state.mediaPreviewItem;
       if (opened && !items.some((item) => item.id === opened.id)) return [opened];
     } else if (latestPreviewable && !items.some((item) => item.id === latest.id)) items.unshift(latest);
@@ -4955,6 +5049,7 @@
   }
 
   function mediaDateGroup(item) {
+    if (state.mediaSort === "rating-highest" || state.mediaSort === "rating-lowest") return null;
     if (state.mediaSort === "name") {
       return String(item.name || "#").trim().charAt(0).toLocaleUpperCase(resolvedLanguage()) || "#";
     }
@@ -6159,6 +6254,16 @@
           candidate.setAttribute("aria-pressed", String(candidate === button));
         });
       });
+    });
+    ui.mediaRatingButton.addEventListener("click", openMediaRatingFilter);
+    ui.mediaRatingClear.addEventListener("click", clearMediaRatingFilter);
+    ui.mediaRatingDialogClear.addEventListener("click", clearMediaRatingFilter);
+    ui.mediaRatingClose.addEventListener("click", () => ui.mediaRatingDialog.close());
+    ui.mediaRatingCancel.addEventListener("click", () => ui.mediaRatingDialog.close());
+    ui.mediaRatingDialog.addEventListener("close", () => { state.mediaRatingDialogSession = null; });
+    ui.mediaRatingForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      applyMediaRatingFilter();
     });
     ui.mediaDateButton.addEventListener("click", openMediaDateFilter);
     ui.mediaDateClear.addEventListener("click", clearMediaDateFilter);

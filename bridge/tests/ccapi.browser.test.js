@@ -297,6 +297,8 @@ function syntheticDatedMedia() {
   return entries.map(([name, captureTime]) => ({
     id: name, name, captureTime, kind: name.endsWith(".MP4") ? "video" : "image",
     sizeBytes: 2048, previewAvailable: true,
+    ...({ "DATE_ONLY.JPG": 0, "START.JPG": 5, "END.JPG": 3 }[name] === undefined ? {}
+      : { rating: { "DATE_ONLY.JPG": 0, "START.JPG": 5, "END.JPG": 3 }[name] }),
   }));
 }
 
@@ -375,6 +377,72 @@ async function verifyDateDialogLayout(page, language) {
   await page.setViewportSize({ width: 1440, height: 900 });
 }
 
+async function verifyLoadedRatingJourney(page, language, snapshot) {
+  const apply = async (value) => {
+    await page.click("#media-rating-button");
+    await page.waitForSelector("#media-rating-dialog[open]");
+    await page.selectOption("#media-rating-filter-select", value);
+    await page.click("#media-rating-apply");
+    await page.waitForFunction(() => !document.querySelector("#media-rating-dialog").open);
+  };
+  const names = () => page.locator(".media-card .media-copy strong").allTextContents();
+  const before = snapshot();
+  await apply("unrated");
+  assert.deepEqual(await names(), ["DATE_ONLY.JPG"]);
+  await apply("unknown");
+  assert.equal((await names()).length, 57);
+  assert.equal((await names()).includes("DATE_ONLY.JPG"), false);
+  await apply("3-plus");
+  assert.deepEqual(await names(), ["START.JPG", "END.JPG"]);
+  await applyDateRange(page, "2026-10-07", "2026-10-07");
+  assert.deepEqual(await names(), ["START.JPG", "END.JPG"]);
+  await page.click("#media-date-clear");
+  await page.selectOption("#media-sort-select", "rating-highest");
+  assert.deepEqual(await names(), ["START.JPG", "END.JPG"]);
+  assert.equal(await page.locator(".media-date-heading").count(), 0);
+  await page.click("#media-rating-clear");
+  assert.deepEqual((await names()).slice(0, 3), ["START.JPG", "END.JPG", "DATE_ONLY.JPG"]);
+  assert.equal(await page.locator(".media-date-heading").count(), 0);
+  await page.selectOption("#media-sort-select", "camera");
+  assert.deepEqual(snapshot(), before, "Rating operations add no listing/info/write requests");
+
+  for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(viewport);
+    await page.locator("html").evaluate(element => { element.style.fontSize = "32px"; });
+    await page.locator("#media-rating-button").focus();
+    await page.keyboard.press("Enter");
+    await page.waitForSelector("#media-rating-dialog[open]");
+    assert.equal(await page.locator("#media-rating-filter-select").evaluate(element => document.activeElement === element), true);
+    const visited = new Set();
+    for (let step = 0; step < 16; step += 1) {
+      await page.keyboard.press("Tab");
+      const focus = await page.evaluate(() => ({
+        id: document.activeElement?.id,
+        background: document.activeElement && document.activeElement !== document.body &&
+          !document.querySelector("#media-rating-dialog").contains(document.activeElement),
+      }));
+      assert.equal(Boolean(focus.background), false, "Native dialog must not focus background controls");
+      visited.add(focus.id);
+    }
+    for (const id of ["media-rating-filter-select", "media-rating-close", "media-rating-dialog-clear", "media-rating-cancel", "media-rating-apply"]) {
+      assert.equal(visited.has(id), true, `Keyboard reaches ${id}`);
+      const control = page.locator(`#${id}`);
+      await control.scrollIntoViewIfNeeded();
+      await control.click({ trial: true });
+      const bounds = await control.boundingBox();
+      assert.ok(bounds && bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= viewport.width + 1 &&
+        bounds.y + bounds.height <= viewport.height + 1, `${id} fits after scrolling`);
+    }
+    await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-media-rating-${language}-${viewport.width}x${viewport.height}-text200.png`) });
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#media-rating-dialog").open);
+    assert.equal(await page.locator("#media-rating-button").evaluate(element => document.activeElement === element), true);
+    await page.locator("html").evaluate(element => element.style.removeProperty("font-size"));
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  assert.equal(await page.locator(".media-card").count(), 60, "Escape does not change filters");
+}
+
 async function verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin) {
   for (const language of ["en", "zh-TW"]) {
     const reset = await fetch(`${simulatorOrigin}/ccapi/test/reset`, { method: "POST" });
@@ -430,6 +498,7 @@ async function verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin) {
       assert.equal(await page.locator(".media-card").count(), 60);
       assert.match(await page.locator("#media-summary").innerText(), language === "en" ? /Latest 60.*more on card/ : /最新 60.*尚有更多/);
       await page.selectOption("#media-sort-select", "camera");
+      await verifyLoadedRatingJourney(page, language, snapshot);
       const beforeDate = snapshot();
       await applyDateRange(page, "2026-10-07", "2026-10-07");
       await expectNames([...sameDayPhotos.slice(0, 4), "VIDEO.MP4", ...sameDayPhotos.slice(4)]);

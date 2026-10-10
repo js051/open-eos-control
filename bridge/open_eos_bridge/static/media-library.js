@@ -104,6 +104,30 @@
     return items.reduce((count, item) => count + (mediaDateForItem(item) === null ? 1 : 0), 0);
   }
 
+  function normalizeRating(value) {
+    // Missing or malformed evidence is unknown, never an implicit zero rating.
+    return Number.isInteger(value) && value >= 0 && value <= 5 ? value : null;
+  }
+
+  function ratingMatchesFilter(value, filter = "all") {
+    const rating = normalizeRating(value);
+    switch (filter) {
+      case "all": return true;
+      case "unrated": return rating === 0;
+      case "1-plus": return rating !== null && rating >= 1;
+      case "2-plus": return rating !== null && rating >= 2;
+      case "3-plus": return rating !== null && rating >= 3;
+      case "4-plus": return rating !== null && rating >= 4;
+      case "5": return rating === 5;
+      case "unknown": return rating === null;
+      default: return false;
+    }
+  }
+
+  function countUnknownRatings(items) {
+    return items.reduce((count, item) => count + (normalizeRating(item?.rating) === null ? 1 : 0), 0);
+  }
+
   function naturalName(left, right, locale) {
     return String(left?.name || "").localeCompare(String(right?.name || ""), locale, {
       numeric: true,
@@ -111,12 +135,13 @@
     });
   }
 
-  function itemsForDisplay(items, filter, sort, locale, range = null) {
+  function itemsForDisplay(items, filter, sort, locale, range = null, ratingFilter = "all") {
     const activeRange = range === null ? null : validateDateRange(range);
     if (activeRange && !activeRange.valid) throw new RangeError(`Invalid media date range: ${activeRange.error}`);
     const filtered = items.filter((item) => {
       if (filter === "video" && !isVideo(item)) return false;
       if (filter === "photo" && isVideo(item)) return false;
+      if (!ratingMatchesFilter(item?.rating, ratingFilter)) return false;
       if (activeRange) {
         const date = mediaDateForItem(item);
         if (!date || date.dateKey < activeRange.range.start || date.dateKey > activeRange.range.end) return false;
@@ -127,6 +152,16 @@
     return filtered.map((item, index) => ({ item, index })).sort((leftEntry, rightEntry) => {
       const left = leftEntry.item;
       const right = rightEntry.item;
+      if (sort === "rating-highest" || sort === "rating-lowest") {
+        const leftRating = normalizeRating(left?.rating);
+        const rightRating = normalizeRating(right?.rating);
+        if (leftRating === null && rightRating !== null) return 1;
+        if (leftRating !== null && rightRating === null) return -1;
+        if (leftRating !== null && rightRating !== null && leftRating !== rightRating) {
+          return sort === "rating-lowest" ? leftRating - rightRating : rightRating - leftRating;
+        }
+        return leftEntry.index - rightEntry.index;
+      }
       const nameOrder = naturalName(left, right, locale);
       if (sort === "name") {
         return nameOrder || String(left.id).localeCompare(String(right.id), locale, { numeric: true });
@@ -245,6 +280,9 @@
     mediaTime,
     validateDateRange,
     countUnknownDates,
+    normalizeRating,
+    ratingMatchesFilter,
+    countUnknownRatings,
     naturalName,
     itemsForDisplay,
     page,
