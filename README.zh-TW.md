@@ -4,11 +4,11 @@
 
 Open EOS Control 是一個非官方、開源的 Canon EOS 控制專案。第一個真機優先目標是 Canon EOS R6 Mark III，架構上讓 PC、iOS、Android 三端共用同一套相機控制概念。
 
-目前的開發預覽版為 [v0.13.0](docs/releases/v0.13.0.md)，用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
+目前的開發預覽版為 [v0.13.0](docs/releases/v0.13.0.md)（main 的來源版本，尚未發布）；最新已發布版本為 [v0.12.0](https://github.com/js051/open-eos-control/releases/tag/v0.12.0)。開發預覽版用途是測試與收集貢獻者回饋，不建議用於正式拍攝流程。
 
-本次 minor 預覽版新增本次直接 CCAPI 連線的前景 JPEG 自動交付，限 Android 10+ 且須明確啟用。兩次完整、有界的起始清單就緒後，新觀察到且新鮮大小穩定的 JPEG 原檔才以單次下載保存至手機 Gallery，並顯示排隊進度與停止／清理結果。既有檔案不補匯入，新 ID 也不保證由本次快門產生；返回前景或重新連線不會自動重啟。Camera Import artifact 1.1.0／wire 1.0 維持不變。 本次清單保留最多 100 張已公開 JPEG 原檔；明確停止自動匯入後，即使相機斷線也能選片交接至相容 Serein，核對本地完整長度、hash 與工作階段回執。iOS Live View 改用明確按鈕選取點按對焦／白平衡，切換選項不發送相機命令。
+尚未發布的來源新增本次直接 CCAPI 連線的前景 JPEG 自動交付，限 Android 10+ 且須明確啟用。兩次完整、有界的起始清單就緒後，新觀察到且新鮮大小穩定的 JPEG 原檔才以單次下載保存至手機 Gallery，並顯示排隊進度與停止／清理結果。既有檔案不補匯入，新 ID 也不保證由本次快門產生；返回前景或重新連線不會自動重啟。Camera Import artifact 1.1.0／wire 1.0 維持不變。 本次清單保留最多 100 張已公開 JPEG 原檔；明確停止自動匯入後，即使相機斷線也能選片交接至相容 Serein，核對本地完整長度、hash 與工作階段回執。iOS Live View 改用明確按鈕選取點按對焦／白平衡，切換選項不發送相機命令。
 
-關閉仍在載入的 display 預覽仍不會取消該 display HTTP 請求；媒體操作可能持續忙碌直到讀取結束，較晚的失敗也可能成為全域錯誤。這個已知限制與取消原檔保存是不同操作。篩選不代表全卡已掃描，下載紀錄也不驗證檔案仍存在或來源 checksum。新增證據來自自動測試／fixture；實體相機、手機、USB 與第三方文件提供者驗證仍待完成。升級注意、最終證據與其餘限制請見[發行說明](docs/releases/v0.13.0.md)。
+關閉 PC 或 Android HTTP 圖片預覽會取消其 client 請求。Android USB 圖片讀取與影片準備仍沿用原本的完成流程：關閉後媒體操作可能持續忙碌，晚到失敗也可能成為全域錯誤。取消 Bridge HTTP 請求不代表上游相機 I/O 已停止；原檔保存有獨立的取消歸屬。篩選不代表全卡已掃描，下載紀錄也不驗證檔案仍存在或來源 checksum。新增證據來自自動測試／fixture；實體相機、手機、USB 與第三方文件提供者驗證仍待完成。升級注意、最終證據與其餘限制請見[發行說明](docs/releases/v0.13.0.md)。
 
 這個專案不是只做 CCAPI。目前驗證最完整的是 Wi-Fi 上的 CCAPI；Android 也已有標準 USB/PTP backend 與依能力開放的 Canon EOS 控制。Android 與 iOS 現在都能透過同一套 camera contract 使用可執行的 Desktop Bridge，控制以 USB 接在電腦上的相機。Canon USB 路徑以固定版本的 libgphoto2 行為為依據並有可重現測試，但仍需留下 R6 Mark III 真機驗證紀錄。PC bridge 可透過開源 `gphoto2` USB 或原生 HTTP CCAPI 提供經測試的 API 與內建響應式控制介面。原生 Swift CCAPI／Desktop Bridge client 與 iOS 17 SwiftUI App 已實作，具英文／繁中介面及 iPhone Simulator 測試；實體 iPhone 與相機驗證仍待完成。
 

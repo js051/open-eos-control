@@ -773,33 +773,50 @@ class DesktopBridgeClient(
             .build()
         val session = sessionForRequest(request)
         val revision = session?.revision
-        httpClient.newCall(request).execute().use { response ->
-            session?.let(::requireCurrentSession)
-            val body = response.body ?: error("Desktop Bridge returned an empty $label response.")
-            if (!response.isSuccessful) throw bridgeError(response.code, body.string(), "Media $label", session, revision)
-            val contentLength = body.contentLength()
-            check(contentLength <= maxBytes || contentLength < 0L) {
-                "Desktop Bridge $label exceeded $maxBytes bytes."
+        val call = httpClient.newCall(request)
+        val cancelCall = AtomicBoolean(true)
+        val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                if (cancelCall.get()) call.cancel()
             }
-            val output = ByteArrayOutputStream()
-            val buffer = ByteArray(TRANSFER_BUFFER_BYTES)
-            body.byteStream().use { input ->
-                while (true) {
-                    currentCoroutineContext().ensureActive()
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    output.write(buffer, 0, count)
-                    check(output.size().toLong() <= maxBytes) {
-                        "Desktop Bridge $label exceeded $maxBytes bytes."
+        }
+        try {
+            call.execute().use { response ->
+                session?.let(::requireCurrentSession)
+                val body = response.body ?: error("Desktop Bridge returned an empty $label response.")
+                if (!response.isSuccessful) throw bridgeError(response.code, body.string(), "Media $label", session, revision)
+                val contentLength = body.contentLength()
+                check(contentLength <= maxBytes || contentLength < 0L) {
+                    "Desktop Bridge $label exceeded $maxBytes bytes."
+                }
+                val output = ByteArrayOutputStream()
+                val buffer = ByteArray(TRANSFER_BUFFER_BYTES)
+                body.byteStream().use { input ->
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        check(output.size().toLong() <= maxBytes) {
+                            "Desktop Bridge $label exceeded $maxBytes bytes."
+                        }
                     }
                 }
+                val bytes = output.toByteArray()
+                val contentType = response.header("content-type")?.substringBefore(';')?.trim()
+                check(bytes.isNotEmpty() && contentType?.startsWith("image/") == true) {
+                    "Desktop Bridge did not return an image $label."
+                }
+                bytes to contentType
             }
-            val bytes = output.toByteArray()
-            val contentType = response.header("content-type")?.substringBefore(';')?.trim()
-            check(bytes.isNotEmpty() && contentType?.startsWith("image/") == true) {
-                "Desktop Bridge did not return an image $label."
-            }
-            bytes to contentType
+        } catch (exception: Exception) {
+            currentCoroutineContext().ensureActive()
+            throw exception
+        } finally {
+            cancelCall.set(false)
+            cancellationWatcher.cancel()
         }
     }
 
