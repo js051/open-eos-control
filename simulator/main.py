@@ -4,16 +4,18 @@ import json
 import re
 import struct
 import zlib
-from datetime import datetime
+from contextlib import suppress
+from datetime import UTC, datetime
 from email.utils import format_datetime
 from functools import lru_cache
 from io import BytesIO
 from typing import Literal
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import Image, ImageDraw
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 TemperatureStatusValue = Literal[
     "normal",
@@ -97,6 +99,199 @@ class CaptureDeliveryTestSettings(BaseModel):
     display_failures: StrictInt = Field(default=0, ge=0, le=20)
     original_failures: StrictInt = Field(default=0, ge=0, le=20)
     original_delay_ms: StrictInt = Field(default=0, ge=0, le=60_000)
+
+
+class OriginalHoldSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: StrictStr = Field(pattern=r"^SIM_[0-9]{4,}\.JPG$")
+
+
+ORIGINAL_HOLD_PREFIX_BYTES = 64
+ORIGINAL_HOLD_DRIP_SECONDS = 1.0
+ORIGINAL_HOLD_MAX_SECONDS = 180.0
+
+
+class ControlledOriginalAborted(RuntimeError):
+    """Terminate a started response without completing its declared content length."""
+
+
+class OriginalHold:
+    """One in-memory, single-worker fixture; its fixed record contains no live objects."""
+
+    def __init__(self, item_id: str, data: bytes):
+        self.data = data
+        self.signal = asyncio.Event()
+        self.started = asyncio.get_running_loop().time()
+        self.deadline = None
+        self.response_task = None
+        self.digest = hashlib.sha256()
+        self.last_body_time = None
+        self.abort_reason = None
+        self.record = {
+            "gate_id": str(uuid4()),
+            "item_id": item_id,
+            "target_path": canonical_media_path(item_id),
+            "request_id": None,
+            "request_query": None,
+            "phase": "armed",
+            "outcome": None,
+            "stream_active": False,
+            "expected_byte_count": len(data),
+            "expected_sha256": hashlib.sha256(data).hexdigest(),
+            "prefix_bytes": ORIGINAL_HOLD_PREFIX_BYTES,
+            "drip_interval_ms": int(ORIGINAL_HOLD_DRIP_SECONDS * 1_000),
+            "max_hold_ms": int(ORIGINAL_HOLD_MAX_SECONDS * 1_000),
+            "body_bytes_asgi_accepted": 0,
+            "body_sha256_asgi_accepted": self.digest.hexdigest(),
+            "drip_count": 0,
+            "max_drip_interval_ms": 0,
+            "rejected_original_count": 0,
+            "last_rejected_query": None,
+            "timestamps": dict.fromkeys((
+                "armed", "request_arrived", "headers_asgi_accepted", "prefix_asgi_accepted",
+                "last_drip_asgi_accepted", "release_requested", "cancel_requested", "disconnect_observed",
+                "expired", "response_finished", "response_ended", "stream_error",
+            )),
+        }
+        self.stamp("armed")
+
+    def stamp(self, name: str) -> None:
+        self.record["timestamps"][name] = {
+            "utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "elapsed_ms": (asyncio.get_running_loop().time() - self.started) * 1_000,
+        }
+
+    def snapshot(self) -> dict[str, object]:
+        return {**self.record, "timestamps": dict(self.record["timestamps"])}
+
+    def finish(self, outcome: str) -> None:
+        if self.record["outcome"] is None:
+            self.record.update(phase="terminal", outcome=outcome)
+            if outcome in {"expired", "stream_error"}:
+                self.stamp(outcome)
+            self.stamp("response_ended")
+
+    def guard(self) -> None:
+        if self.record["timestamps"]["cancel_requested"] is not None:
+            self.abort_reason = "operator_cancelled"
+        elif asyncio.get_running_loop().time() >= self.deadline:
+            self.abort_reason = "expired"
+        if self.abort_reason is not None:
+            raise ControlledOriginalAborted(self.abort_reason)
+
+    def claim(self, query: str) -> "ControlledOriginalResponse":
+        if self.record["phase"] != "armed":
+            self.record["rejected_original_count"] += 1
+            self.record["last_rejected_query"] = query
+            code = 410 if self.record["outcome"] is not None else 409
+            raise HTTPException(status_code=code, detail="Controlled original already claimed or ended")
+        self.record.update(
+            request_id=f"{self.record['gate_id']}/1", request_query=query, phase="starting", stream_active=True,
+        )
+        self.deadline = asyncio.get_running_loop().time() + ORIGINAL_HOLD_MAX_SECONDS
+        self.stamp("request_arrived")
+        return ControlledOriginalResponse(self)
+
+    async def body(self):
+        offset = ORIGINAL_HOLD_PREFIX_BYTES
+        yield self.data[:offset]
+        while True:
+            self.guard()
+            if self.record["timestamps"]["release_requested"] is not None:
+                break
+            with suppress(TimeoutError):
+                await asyncio.wait_for(
+                    self.signal.wait(),
+                    timeout=min(ORIGINAL_HOLD_DRIP_SECONDS, self.deadline - asyncio.get_running_loop().time()),
+                )
+            self.guard()
+            if self.record["timestamps"]["release_requested"] is not None:
+                break
+            if offset >= len(self.data) - 1:
+                raise ControlledOriginalAborted("Original byte budget exhausted")
+            yield self.data[offset:offset + 1]
+            offset += 1
+        self.guard()
+        yield self.data[offset:]
+
+
+class ControlledOriginalResponse(StreamingResponse):
+    def __init__(self, gate: OriginalHold):
+        self.gate = gate
+        super().__init__(gate.body(), media_type="image/jpeg", headers={
+            "Content-Length": str(len(gate.data)), "Cache-Control": "no-store",
+        })
+
+    async def __call__(self, scope, receive, send) -> None:
+        gate = self.gate
+        gate.response_task = asyncio.current_task()
+
+        async def observed_receive():
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                gate.stamp("disconnect_observed")
+            return message
+
+        async def observed_send(message):
+            # Also guard staged chunks and the final marker, not just generator waits.
+            gate.guard()
+            await send(message)
+            if message["type"] == "http.response.start":
+                gate.stamp("headers_asgi_accepted")
+            elif message["type"] == "http.response.body":
+                body = message.get("body", b"")
+                if body:
+                    now = asyncio.get_running_loop().time()
+                    gate.digest.update(body)
+                    gate.record["body_bytes_asgi_accepted"] += len(body)
+                    gate.record["body_sha256_asgi_accepted"] = gate.digest.hexdigest()
+                    if gate.record["timestamps"]["prefix_asgi_accepted"] is None:
+                        gate.stamp("prefix_asgi_accepted")
+                        gate.record["phase"] = "holding"
+                    elif len(body) == 1:
+                        gate.record["drip_count"] += 1
+                        gate.record["max_drip_interval_ms"] = max(
+                            gate.record["max_drip_interval_ms"], (now - gate.last_body_time) * 1_000,
+                        )
+                        gate.stamp("last_drip_asgi_accepted")
+                    gate.last_body_time = now
+                if not message.get("more_body", False):
+                    if (gate.record["body_bytes_asgi_accepted"] != gate.record["expected_byte_count"]
+                            or gate.digest.hexdigest() != gate.record["expected_sha256"]):
+                        raise ControlledOriginalAborted("Original length or hash mismatch")
+                    gate.stamp("response_finished")
+
+        try:
+            # This absolute bound also interrupts a blocked ASGI send.
+            async with asyncio.timeout_at(gate.deadline):
+                await super().__call__(scope, observed_receive, observed_send)
+        except TimeoutError:
+            gate.abort_reason = "expired"
+            raise
+        except asyncio.CancelledError:
+            if gate.abort_reason is None:
+                gate.abort_reason = "server_cancelled"
+            raise
+        finally:
+            times = gate.record["timestamps"]
+            if times["response_finished"] is not None:
+                outcome = "finished"
+            elif times["cancel_requested"] is not None:
+                outcome = "operator_cancelled"
+            elif times["disconnect_observed"] is not None:
+                outcome = "client_disconnected"
+            else:
+                outcome = gate.abort_reason or "stream_error"
+            gate.finish(outcome)
+            try:
+                await self.body_iterator.aclose()
+            finally:
+                gate.response_task = None
+                gate.record["stream_active"] = False
+
+
+_original_hold: OriginalHold | None = None
 
 
 def initial_capture_delivery_state() -> dict[str, object]:
@@ -375,7 +570,10 @@ async def health() -> dict[str, bool | str]:
 
 @app.post("/ccapi/test/reset")
 async def reset_test_state() -> dict[str, bool]:
-    global _event_poll_reset_generation
+    global _event_poll_reset_generation, _original_hold
+    if _original_hold is not None and _original_hold.record["stream_active"]:
+        raise HTTPException(status_code=409, detail="Cancel the controlled original and wait for cleanup before reset")
+    _original_hold = None
     _event_poll_reset_generation += 1
     state.clear()
     state.update(initial_state())
@@ -570,6 +768,8 @@ async def set_test_media_pagination(payload: dict[str, object]) -> dict[str, int
 @app.post("/ccapi/test/capture-delivery")
 async def set_test_capture_delivery(payload: CaptureDeliveryTestSettings) -> dict[str, object]:
     """Opt in; later configuration changes preserve captures and observed counters."""
+    if _original_hold is not None:
+        raise HTTPException(status_code=409, detail="Reset before changing a controlled original fixture")
     fixture = state["capture_delivery"]
     if not fixture["enabled"]:
         fixture = initial_capture_delivery_state()
@@ -606,7 +806,73 @@ def capture_delivery_test_state() -> dict[str, object]:
                 "width": dimensions[0],
                 "height": dimensions[1],
             }
-    return {**fixture, "representations": representations}
+    return {
+        **fixture, "representations": representations,
+        "original_hold": _original_hold.snapshot() if _original_hold is not None else None,
+    }
+
+
+@app.post("/ccapi/test/capture-delivery/original-hold")
+async def arm_original_hold(payload: OriginalHoldSettings) -> dict[str, object]:
+    global _original_hold
+    fixture = state["capture_delivery"]
+    if _original_hold is not None:
+        raise HTTPException(status_code=409, detail="Reset before arming another controlled original")
+    if (not fixture["enabled"] or payload.item_id not in fixture["captured_ids"]
+            or not any(item["id"] == payload.item_id for item in state["media"])):
+        raise HTTPException(status_code=409, detail="Choose an existing captured item from the enabled fixture")
+    if (fixture["original_delay_ms"] or fixture["original_failures"]
+            or fixture["representation_failures_remaining"]["original"]):
+        raise HTTPException(status_code=409, detail="Original delay and failures must be zero before arming")
+    data = capture_delivery_jpeg("original")
+    if len(data) < ORIGINAL_HOLD_PREFIX_BYTES + ORIGINAL_HOLD_MAX_SECONDS / ORIGINAL_HOLD_DRIP_SECONDS + 1:
+        raise HTTPException(status_code=409, detail="Original is too short for the controlled hold")
+    _original_hold = OriginalHold(payload.item_id, data)
+    return _original_hold.snapshot()
+
+
+def matching_original_hold(gate_id: UUID) -> OriginalHold:
+    if _original_hold is None or str(gate_id) != _original_hold.record["gate_id"]:
+        raise HTTPException(status_code=409, detail="No matching controlled original")
+    return _original_hold
+
+
+@app.post("/ccapi/test/capture-delivery/original-hold/{gate_id}/release")
+async def release_original_hold(gate_id: UUID) -> dict[str, object]:
+    gate = matching_original_hold(gate_id)
+    record = gate.record
+    if record["outcome"] not in {None, "finished"} or record["timestamps"]["cancel_requested"] is not None:
+        raise HTTPException(status_code=409, detail="Controlled original has ended or was cancelled")
+    if record["outcome"] is None and gate.deadline is not None and asyncio.get_running_loop().time() >= gate.deadline:
+        raise HTTPException(status_code=409, detail="Controlled original deadline has passed")
+    if record["timestamps"]["release_requested"] is not None:
+        return gate.snapshot()
+    if (record["phase"] != "holding" or not record["stream_active"]
+            or asyncio.get_running_loop().time() >= gate.deadline):
+        raise HTTPException(status_code=409, detail="Controlled original is not holding before its deadline")
+    gate.stamp("release_requested")
+    record["phase"] = "releasing"
+    gate.signal.set()
+    return gate.snapshot()
+
+
+@app.post("/ccapi/test/capture-delivery/original-hold/{gate_id}/cancel")
+async def cancel_original_hold(gate_id: UUID) -> dict[str, object]:
+    gate = matching_original_hold(gate_id)
+    if gate.record["timestamps"]["cancel_requested"] is not None:
+        return gate.snapshot()
+    if gate.record["outcome"] is not None:
+        raise HTTPException(status_code=409, detail="Controlled original already ended")
+    if gate.record["body_bytes_asgi_accepted"] == gate.record["expected_byte_count"]:
+        raise HTTPException(status_code=409, detail="Original bytes already accepted; cancellation cannot undo them")
+    gate.stamp("cancel_requested")
+    gate.signal.set()
+    if gate.record["phase"] == "armed":
+        gate.finish("operator_cancelled")
+    elif gate.response_task is not None:
+        # Interrupt blocked sends too; generator-only cancellation is insufficient.
+        gate.response_task.cancel()
+    return gate.snapshot()
 
 
 @app.post("/ccapi/test/temperature")
@@ -2623,7 +2889,7 @@ async def canon_contents(
 
 
 @app.get("/ccapi/ver100/contents/card1/100CANON/{item_id}")
-async def canon_media(item_id: str, kind: str | None = None) -> Response:
+async def canon_media(item_id: str, kind: str | None = None, request: Request = None) -> Response:
     item = canonical_media_item(item_id)
     fixture = state["capture_delivery"]
     if fixture["enabled"] and item_id in fixture["captured_ids"]:
@@ -2631,6 +2897,11 @@ async def canon_media(item_id: str, kind: str | None = None) -> Response:
         if representation not in fixture["representation_get_counts"]:
             raise HTTPException(status_code=422, detail="Unsupported media representation")
         fixture["representation_get_counts"][representation] += 1
+        if representation == "original" and _original_hold is not None and item_id == _original_hold.record["item_id"]:
+            query = request.scope["query_string"].decode("ascii") if request is not None else ""
+            if query not in {"", "kind=main", "type=main"}:
+                raise HTTPException(status_code=422, detail="Unsupported controlled original query")
+            return _original_hold.claim(query)
         if representation == "info":
             return JSONResponse(content={**media_info(item), "filesize": len(capture_delivery_jpeg("original"))})
         remaining = fixture["representation_failures_remaining"]
