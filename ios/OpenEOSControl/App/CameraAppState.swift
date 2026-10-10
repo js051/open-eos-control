@@ -799,29 +799,38 @@ final class CameraAppState: ObservableObject {
 
     func syncCameraClock() async {
         guard !isPreview, supports(.cameraClockSync), begin(.clock) else { return }
-        defer { end(.clock) }
+        let generation = sessionGeneration
+        defer { end(.clock, generation: generation) }
         guard let session else { return }
         do {
-            updateStatus(try await session.syncCameraClock())
+            let status = try await session.syncCameraClock()
+            guard generation == sessionGeneration else { return }
+            updateStatus(status)
             lastClockSyncAt = Date()
             lastError = nil
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
         }
     }
 
     func createDirectory(name: String) async {
         guard !isPreview, supports(.directoryControl), begin(.directory) else { return }
-        defer { end(.directory) }
+        let generation = sessionGeneration
+        defer { end(.directory, generation: generation) }
         guard let session else { return }
         do {
-            lastCreatedDirectoryName = try await session.createDirectory(name: name)
+            let directoryName = try await session.createDirectory(name: name)
+            guard generation == sessionGeneration else { return }
+            lastCreatedDirectoryName = directoryName
             let capabilities = try await session.capabilities()
+            guard generation == sessionGeneration else { return }
             if let snapshot {
                 self.snapshot = CameraSnapshot(info: snapshot.info, status: snapshot.status, capabilities: capabilities)
             }
             lastError = nil
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
         }
     }
@@ -833,11 +842,14 @@ final class CameraAppState: ObservableObject {
             snapshot?.capabilities.fileNaming?.accepts(field, value: value) == true,
             begin(.setting)
         else { return }
-        defer { end(.setting) }
+        let generation = sessionGeneration
+        defer { end(.setting, generation: generation) }
         guard let session else { return }
         do {
             _ = try await session.setFileNaming(field: field, value: value)
+            guard generation == sessionGeneration else { return }
             let capabilities = try await session.capabilities()
+            guard generation == sessionGeneration else { return }
             if let snapshot {
                 self.snapshot = CameraSnapshot(
                     info: snapshot.info,
@@ -847,6 +859,7 @@ final class CameraAppState: ObservableObject {
             }
             lastError = nil
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
         }
     }
@@ -860,7 +873,8 @@ final class CameraAppState: ObservableObject {
             busyOperations.isEmpty,
             begin(.power)
         else { return }
-        defer { end(.power) }
+        let generation = sessionGeneration
+        defer { end(.power, generation: generation) }
         guard let session else { return }
 
         let wasLiveViewActive = activeLiveViewSource != nil
@@ -870,8 +884,10 @@ final class CameraAppState: ObservableObject {
         resetMediaUploadState()
         do {
             try await session.sleepCamera()
+            guard generation == sessionGeneration else { return }
             await disconnect()
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
             beginEventLoop(session: session)
             if wasLiveViewActive { await startLiveView() }
@@ -887,7 +903,8 @@ final class CameraAppState: ObservableObject {
             busyOperations.isEmpty,
             begin(.maintenance)
         else { return }
-        defer { end(.maintenance) }
+        let generation = sessionGeneration
+        defer { end(.maintenance, generation: generation) }
         guard let session else { return }
 
         let wasLiveViewActive = activeLiveViewSource != nil
@@ -895,17 +912,22 @@ final class CameraAppState: ObservableObject {
         stopEventLoop()
         do {
             try await session.cleanSensor(autoPowerOff: autoPowerOff)
+            guard generation == sessionGeneration else { return }
             if autoPowerOff {
                 await disconnect()
             } else {
-                snapshot = try await session.connectSnapshot()
+                let refreshedSnapshot = try await session.connectSnapshot()
+                guard generation == sessionGeneration else { return }
+                snapshot = refreshedSnapshot
                 clampLiveViewRequest()
                 beginEventLoop(session: session)
                 activeLiveViewSource = nil
                 if wasLiveViewActive { await startLiveView() }
+                guard generation == sessionGeneration else { return }
                 lastError = nil
             }
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
             beginEventLoop(session: session)
             activeLiveViewSource = nil
@@ -1012,17 +1034,21 @@ final class CameraAppState: ObservableObject {
 
     func autofocus() async {
         guard supports(.autofocus), begin(.focus) else { return }
-        defer { end(.focus) }
+        let generation = sessionGeneration
+        defer { end(.focus, generation: generation) }
         if isPreview {
             showFocusMarker(x: 0.5, y: 0.5, accepted: true)
             return
         }
         guard let session else { return }
         do {
-            updateStatus(try await session.autofocus())
+            let status = try await session.autofocus()
+            guard generation == sessionGeneration else { return }
+            updateStatus(status)
             showFocusMarker(x: 0.5, y: 0.5, accepted: true)
             lastError = nil
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
             showFocusMarker(x: 0.5, y: 0.5, accepted: false)
         }
@@ -1030,17 +1056,21 @@ final class CameraAppState: ObservableObject {
 
     func halfPressShutter() async {
         guard supports(.shutterHalfPress), begin(.focus) else { return }
-        defer { end(.focus) }
+        let generation = sessionGeneration
+        defer { end(.focus, generation: generation) }
         if isPreview {
             showFocusMarker(x: 0.5, y: 0.5, accepted: true)
             return
         }
         guard let session else { return }
         do {
-            updateStatus(try await session.halfPressShutter())
+            let status = try await session.halfPressShutter()
+            guard generation == sessionGeneration else { return }
+            updateStatus(status)
             showFocusMarker(x: 0.5, y: 0.5, accepted: true)
             lastError = nil
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
             showFocusMarker(x: 0.5, y: 0.5, accepted: false)
         }
@@ -1049,7 +1079,8 @@ final class CameraAppState: ObservableObject {
     func toggleRecording() async {
         let wasRecording = recording
         guard (wasRecording || supports(.videoRecording)), begin(.recording) else { return }
-        defer { end(.recording) }
+        let generation = sessionGeneration
+        defer { end(.recording, generation: generation) }
         guard wasRecording || movieRecordingTemperatureAllowed else { return }
         if isPreview {
             guard let snapshot else { return }
@@ -1059,16 +1090,19 @@ final class CameraAppState: ObservableObject {
         guard let session else { return }
         do {
             let newStatus = wasRecording ? try await session.stopRecording() : try await session.startRecording()
+            guard generation == sessionGeneration else { return }
             updateStatus(newStatus)
             lastError = nil
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
         }
     }
 
     func tapFocus(x: Double, y: Double) async {
         guard supports(.tapFocus), begin(.focus) else { return }
-        defer { end(.focus) }
+        let generation = sessionGeneration
+        defer { end(.focus, generation: generation) }
         let normalizedX = min(max(x, 0), 1)
         let normalizedY = min(max(y, 0), 1)
         if isPreview {
@@ -1078,9 +1112,11 @@ final class CameraAppState: ObservableObject {
         guard let session else { return }
         do {
             let result = try await session.tapFocus(x: normalizedX, y: normalizedY)
+            guard generation == sessionGeneration else { return }
             showFocusMarker(x: result.x, y: result.y, accepted: result.accepted)
             lastError = nil
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
             showFocusMarker(x: normalizedX, y: normalizedY, accepted: false)
         }
@@ -1088,7 +1124,8 @@ final class CameraAppState: ObservableObject {
 
     func clickWhiteBalance(x: Double, y: Double) async {
         guard supports(.clickWhiteBalance), begin(.setting) else { return }
-        defer { end(.setting) }
+        let generation = sessionGeneration
+        defer { end(.setting, generation: generation) }
         let normalizedX = min(max(x, 0), 1)
         let normalizedY = min(max(y, 0), 1)
         if isPreview {
@@ -1100,10 +1137,13 @@ final class CameraAppState: ObservableObject {
         }
         guard let session else { return }
         do {
-            updateStatus(try await session.clickWhiteBalance(x: normalizedX, y: normalizedY))
+            let status = try await session.clickWhiteBalance(x: normalizedX, y: normalizedY)
+            guard generation == sessionGeneration else { return }
+            updateStatus(status)
             showFocusMarker(x: normalizedX, y: normalizedY, accepted: true)
             lastError = nil
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
             showFocusMarker(x: normalizedX, y: normalizedY, accepted: false)
         }
@@ -1111,7 +1151,8 @@ final class CameraAppState: ObservableObject {
 
     func driveFocus(direction: FocusDriveDirection, step: FocusDriveStep) async {
         guard supports(.focusDrive), begin(.focus) else { return }
-        defer { end(.focus) }
+        let generation = sessionGeneration
+        defer { end(.focus, generation: generation) }
         if isPreview {
             showFocusMarker(x: direction == .near ? 0.4 : 0.6, y: 0.5, accepted: true)
             return
@@ -1119,9 +1160,11 @@ final class CameraAppState: ObservableObject {
         guard let session else { return }
         do {
             let result = try await session.driveFocus(direction: direction, step: step)
+            guard generation == sessionGeneration else { return }
             showFocusMarker(x: result.direction == .near ? 0.4 : 0.6, y: 0.5, accepted: result.accepted)
             lastError = nil
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
         }
     }
@@ -1132,7 +1175,8 @@ final class CameraAppState: ObservableObject {
               capabilities?.matrix.supports(.liveViewMagnification) == true,
               liveView.magnifications.contains(magnification),
               begin(.liveView) else { return }
-        defer { end(.liveView) }
+        let generation = sessionGeneration
+        defer { end(.liveView, generation: generation) }
         if isPreview {
             liveViewMagnification = magnification
             return
@@ -1140,11 +1184,13 @@ final class CameraAppState: ObservableObject {
         guard let session, activeLiveViewSource != nil else { return }
         do {
             let result = try await session.setLiveViewMagnification(magnification)
+            guard generation == sessionGeneration else { return }
             if result.accepted {
                 liveViewMagnification = result.magnification
             }
             lastError = nil
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
         }
     }
@@ -1180,7 +1226,8 @@ final class CameraAppState: ObservableObject {
 
     func setSetting(key: String, value: String) async {
         guard let setting = capabilities?.setting(key), setting.accepts(value), begin(.setting) else { return }
-        defer { end(.setting) }
+        let generation = sessionGeneration
+        defer { end(.setting, generation: generation) }
         lastError = nil
         if isPreview {
             guard let snapshot else { return }
@@ -1195,12 +1242,15 @@ final class CameraAppState: ObservableObject {
         guard let session else { return }
         do {
             let status = try await session.setSetting(key: key, value: value)
+            guard generation == sessionGeneration else { return }
             let capabilities = try await session.capabilities()
+            guard generation == sessionGeneration else { return }
             if let snapshot {
                 self.snapshot = CameraSnapshot(info: snapshot.info, status: status, capabilities: capabilities)
             }
             lastError = nil
         } catch {
+            guard generation == sessionGeneration else { return }
             record(error)
         }
     }
