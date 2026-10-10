@@ -140,6 +140,7 @@ final class CameraAppState: ObservableObject {
     private var observedMediaIDs = Set<String>()
     private var pendingCaptureReviewIDs: Set<String>?
     private var mediaPreviewToken: UUID?
+    private var mediaPreviewImageTask: Task<CameraMediaPreview, Error>?
     private var rateTracker = LiveViewRateTracker()
     private var downloadedMediaID: String?
     private var unavailableMediaThumbnailIDs = Set<String>()
@@ -1450,11 +1451,21 @@ final class CameraAppState: ObservableObject {
         let token = UUID()
         let generation = sessionGeneration
         mediaPreviewToken = token
+        // Image GETs can be cancelled without losing a server-side allocation.
+        // Keep video allocation in the caller: a late ticket still needs close().
+        let imageTask: Task<CameraMediaPreview, Error>? = video ? nil : Task {
+            try Task.checkCancellation()
+            let preview = try await session.mediaPreview(item)
+            try Task.checkCancellation()
+            return preview
+        }
+        mediaPreviewImageTask = imageTask
         mediaPreviewItem = item
         mediaPreviewLoading = true
         defer {
             if generation == sessionGeneration, mediaPreviewToken == token {
                 mediaPreviewToken = nil
+                mediaPreviewImageTask = nil
                 mediaPreviewLoading = false
                 end(.media)
             }
@@ -1470,14 +1481,20 @@ final class CameraAppState: ObservableObject {
                 mediaPreviewItem = playbackItem
                 applyUpdatedMedia(playbackItem)
                 mediaVideoPlayback = CameraMediaPlayback(item: playbackItem, session: session, playbackStream: playbackStream)
-            } else {
-                let preview = try await session.mediaPreview(item)
+            } else if let imageTask {
+                let preview = try await withTaskCancellationHandler {
+                    try await imageTask.value
+                } onCancel: {
+                    imageTask.cancel()
+                }
+                try Task.checkCancellation()
                 guard generation == sessionGeneration, mediaPreviewToken == token else { return }
                 mediaPreviewData = preview.data
             }
             lastError = nil
         } catch {
             guard generation == sessionGeneration, mediaPreviewToken == token else { return }
+            if imageTask != nil, Task.isCancelled || imageTask?.isCancelled == true { return }
             record(error)
         }
     }
@@ -2381,10 +2398,13 @@ final class CameraAppState: ObservableObject {
     }
 
     private func resetMediaPreview() {
+        let imageTask = mediaPreviewImageTask
+        mediaPreviewImageTask = nil
         // Closing a pending viewer releases only its own operation. A completed
         // preview must not clear a download or metadata operation's MEDIA busy.
         if mediaPreviewToken != nil {
             mediaPreviewToken = nil
+            imageTask?.cancel()
             end(.media)
         }
         mediaVideoPlayback?.close()
