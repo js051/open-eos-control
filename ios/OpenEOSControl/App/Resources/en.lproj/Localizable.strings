@@ -529,3 +529,22 @@
 "media_folder_missing" = "The selected folder is not in the currently loaded list. Clear the filter to see other loaded media.";
 "media_folder_duplicate" = "%@ · distinct folder %d";
 "media_folder_summary" = "%d matching of %d loaded; %d unknown folders in the other filter conditions.";
+
+"media_batch_selection_count" = "%d selected · %d hidden by filters · %d not currently loaded";
+"media_batch_select_visible" = "Select filtered loaded items";
+"media_batch_clear_selection" = "Clear selection";
+"media_batch_select_item" = "Select %@";
+"media_batch_selected" = "Selected";
+"media_batch_not_selected" = "Not selected";
+"media_batch_prepare" = "Prepare selected originals";
+"media_batch_cancel" = "Stop after current transfer settles";
+"media_batch_cancelling" = "Stopping current transfer…";
+"media_batch_bytes" = "%lld bytes received for current item";
+"media_batch_result_notice" = "Ready files are temporary copies in this app. Choose Save or Share to hand them to a destination. This does not confirm external saving; destinations may handle duplicate names differently.";
+"media_batch_share_ready" = "Save or share ready originals";
+"media_batch_status_notStarted" = "Not started";
+"media_batch_status_downloading" = "Preparing original…";
+"media_batch_status_ready" = "Original ready in app";
+"media_batch_status_failed" = "Failed";
+"media_batch_status_cancelledOrUnknown" = "Cancelled or result unconfirmed";
+"media_batch_offline_notice" = "Offline preview supports selection only; connect a camera to prepare originals.";

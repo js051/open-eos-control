@@ -41,6 +41,7 @@ struct MediaView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     mediaToolbar
+                    MediaBatchPanel(displayedItems: displayedMedia)
                     if camera.mediaLibraryLoading, camera.mediaItems.isEmpty {
                         ProgressView("loading_media").tint(Color.cameraAccent)
                             .accessibilityIdentifier("media-library-loading-empty")
@@ -67,7 +68,7 @@ struct MediaView: View {
                                         .padding(.top, 4)
                                 }
                                 LazyVGrid(columns: mediaColumns, alignment: .leading, spacing: 10) {
-                                    ForEach(group.items) { item in
+                                    ForEach(group.items, id: \.idBytes) { item in
                                         mediaCard(item)
                                             .task(id: item.id) { await camera.loadMediaThumbnail(item) }
                                     }
@@ -481,6 +482,15 @@ struct MediaView: View {
                         .foregroundStyle(Color.cameraSecondaryText)
                 }
                 HStack(spacing: 0) {
+                    Button {
+                        camera.toggleMediaSelection(item)
+                    } label: {
+                        Image(systemName: camera.isMediaSelected(item) ? "checkmark.circle.fill" : "circle")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .accessibilityLabel(language.format("media_batch_select_item", item.name))
+                    .accessibilityValue(language.string(camera.isMediaSelected(item) ? "media_batch_selected" : "media_batch_not_selected"))
+                    .accessibilityIdentifier("media-select-\(item.id)")
                     Spacer(minLength: 0)
                     mediaActions(item)
                 }
@@ -1538,4 +1548,8 @@ private struct CameraVideoPreview: View {
 
 private extension CameraMediaFolder {
     var folderViewIdentity: Data { mediaFolderIdentity(self) }
+}
+
+private extension CameraMediaItem {
+    var idBytes: Data { Data(id.utf8) }
 }

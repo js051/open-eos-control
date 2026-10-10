@@ -115,6 +115,11 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var downloadedFileName: String?
     @Published private(set) var activeMediaDownloadID: String?
     @Published private(set) var mediaDownloadProgress: CameraMediaTransferProgress?
+    @Published private(set) var selectedMediaItems: [CameraMediaItem] = []
+    @Published private(set) var mediaBatchResults: [MediaBatchResult] = []
+    @Published private(set) var mediaBatchState = MediaBatchState.idle
+    @Published private(set) var mediaBatchProgress: CameraMediaTransferProgress?
+    @Published private(set) var mediaBatchCancellationRequested = false
     @Published private(set) var activeMediaUploadName: String?
     @Published private(set) var mediaUploadProgress: CameraMediaTransferProgress?
     @Published private(set) var uploadedMediaName: String?
@@ -133,6 +138,8 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaFolderFilter = MediaFolderFilter.all
     private var session: CameraSession? {
         didSet {
+            resetMediaBatchState()
+            selectedMediaItems = []
             exportGeneration = UUID()
             mediaLibrarySessionID = UUID()
             mediaDateRange = nil
@@ -163,6 +170,9 @@ final class CameraAppState: ObservableObject {
     private var operationRevision: UInt64 = 0
     private(set) var mediaDownloadTask: Task<Void, Never>?
     private var mediaDownloadToken: UUID?
+    private(set) var mediaBatchTask: Task<Void, Never>?
+    private var mediaBatchToken: UUID?
+    private var mediaBatchItemToken: UUID?
     private(set) var mediaUploadTask: Task<Void, Never>?
     private var mediaUploadToken: UUID?
     private var mediaLibraryTask: Task<Void, Never>?
@@ -1746,6 +1756,155 @@ final class CameraAppState: ObservableObject {
         mediaDownloadTask?.cancel()
     }
 
+    func isMediaSelected(_ item: CameraMediaItem) -> Bool {
+        selectedMediaItems.contains { mediaItemIdentity($0) == mediaItemIdentity(item) }
+    }
+
+    func toggleMediaSelection(_ item: CameraMediaItem) {
+        let identity = mediaItemIdentity(item)
+        if let index = selectedMediaItems.firstIndex(where: { mediaItemIdentity($0) == identity }) {
+            selectedMediaItems.remove(at: index)
+        } else if let loaded = mediaItems.first(where: { mediaItemIdentity($0) == identity }) {
+            selectedMediaItems.append(loaded)
+        }
+    }
+
+    /// The caller supplies its displayed subset. This never requests more media.
+    func selectMediaItems(_ displayedLoadedItems: [CameraMediaItem]) {
+        var identities = Set(selectedMediaItems.map(mediaItemIdentity))
+        var loadedByID: [Data: CameraMediaItem] = [:]
+        for item in mediaItems { loadedByID[mediaItemIdentity(item)] = item }
+        for displayed in displayedLoadedItems {
+            let identity = mediaItemIdentity(displayed)
+            guard let loaded = loadedByID[identity], identities.insert(identity).inserted else { continue }
+            selectedMediaItems.append(loaded)
+        }
+    }
+
+    func clearMediaSelection() { selectedMediaItems = [] }
+
+    var canStartMediaBatchDownload: Bool {
+        !isPreview && connected && session != nil && !selectedMediaItems.isEmpty
+            && !mediaLibraryLoading && supports(.mediaDownload) && !isBusy(.media)
+            && !shutterReleaseRequired
+    }
+
+    @discardableResult
+    func startMediaBatchDownload() -> Bool {
+        guard canStartMediaBatchDownload, let session, begin(.media) else { return false }
+        let token = UUID()
+        let generation = sessionGeneration
+        // Selection, metadata, session object and generation are frozen together.
+        let results = selectedMediaItems.map { MediaBatchResult(item: $0) }
+        mediaBatchToken = token
+        mediaBatchItemToken = nil
+        mediaBatchResults = results
+        mediaBatchProgress = nil
+        mediaBatchCancellationRequested = false
+        mediaBatchState = .running
+        mediaBatchTask = Task { [weak self] in
+            await self?.performMediaBatchDownload(results, session: session, token: token, generation: generation)
+        }
+        return true
+    }
+
+    func cancelMediaBatchDownload() {
+        guard mediaBatchToken != nil else { return }
+        mediaBatchCancellationRequested = true
+        mediaBatchItemToken = nil
+        mediaBatchTask?.cancel()
+        // Keep MEDIA owned until a non-cooperative request has actually settled.
+    }
+
+    func makeMediaBatchExportPayload() -> MediaBatchExportPayload? {
+        MediaBatchExportPayload(results: mediaBatchResults)
+    }
+
+    private func ownsMediaBatch(token: UUID, generation: UUID) -> Bool {
+        mediaBatchToken == token && sessionGeneration == generation
+    }
+
+    private func performMediaBatchDownload(
+        _ results: [MediaBatchResult], session: CameraSession, token: UUID, generation: UUID
+    ) async {
+        guard ownsMediaBatch(token: token, generation: generation) else { return }
+        defer {
+            if ownsMediaBatch(token: token, generation: generation) {
+                mediaBatchTask = nil
+                mediaBatchToken = nil
+                mediaBatchItemToken = nil
+                mediaBatchProgress = nil
+                end(.media)
+            }
+        }
+        for (index, entry) in results.enumerated() {
+            guard ownsMediaBatch(token: token, generation: generation) else { return }
+            guard !Task.isCancelled, !mediaBatchCancellationRequested else {
+                mediaBatchState = .cancelled
+                return
+            }
+            let itemToken = UUID()
+            mediaBatchItemToken = itemToken
+            mediaBatchResults[index].status = .downloading
+            mediaBatchProgress = CameraMediaTransferProgress(bytesTransferred: 0, totalBytes: entry.item.sizeBytes)
+            do {
+                // The local lease also retains an incomplete destination until
+                // the request settles, including after disconnect or cancellation.
+                let ownedFile = try MediaBatchOwnedFile.create(filename: entry.item.name)
+                try Task.checkCancellation()
+                let download = try await session.downloadMedia(entry.item, to: ownedFile.fileURL) { [weak self] progress in
+                    Task { @MainActor in
+                        guard let self, self.ownsMediaBatch(token: token, generation: generation),
+                              self.mediaBatchItemToken == itemToken,
+                              !self.mediaBatchCancellationRequested else { return }
+                        self.mediaBatchProgress = progress
+                    }
+                }
+                try Task.checkCancellation()
+                guard ownsMediaBatch(token: token, generation: generation) else { return }
+                guard download.fileURL == ownedFile.fileURL,
+                      (try ownedFile.fileURL.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
+                mediaBatchItemToken = nil
+                mediaBatchResults[index].ownedFile = ownedFile
+                mediaBatchResults[index].status = .ready
+                mediaBatchProgress = nil
+            } catch {
+                guard ownsMediaBatch(token: token, generation: generation) else { return }
+                mediaBatchItemToken = nil
+                let cancelled = Task.isCancelled || mediaBatchCancellationRequested || error is CancellationError
+                    || (error as? URLError)?.code == .cancelled
+                mediaBatchResults[index].status = cancelled ? .cancelledOrUnknown : .failed
+                mediaBatchResults[index].errorMessage = cancelled ? nil : error.localizedDescription
+                mediaBatchState = cancelled ? .cancelled : .failed
+                return // Earlier ready files survive. Later entries remain not started.
+            }
+            await Task.yield()
+        }
+        guard ownsMediaBatch(token: token, generation: generation) else { return }
+        mediaBatchState = .completed
+    }
+
+    private func resetMediaBatchState() {
+        let ownedMedia = mediaBatchToken != nil
+        mediaBatchToken = nil
+        mediaBatchItemToken = nil
+        mediaBatchTask?.cancel()
+        mediaBatchTask = nil
+        mediaBatchResults = []
+        mediaBatchState = .idle
+        mediaBatchProgress = nil
+        mediaBatchCancellationRequested = false
+        if ownedMedia { end(.media) }
+    }
+
+    private func refreshSelectedMediaMetadata(from items: [CameraMediaItem]) {
+        var updated: [Data: CameraMediaItem] = [:]
+        for item in items { updated[mediaItemIdentity(item)] = item }
+        selectedMediaItems = selectedMediaItems.map { updated[mediaItemIdentity($0)] ?? $0 }
+    }
+
     @discardableResult
     func startMediaUpload(_ fileURL: URL, securityScoped: Bool = false) -> Bool {
         guard !isPreview, let session, !mediaLibraryLoading, supports(.mediaUpload), begin(.media) else { return false }
@@ -2541,6 +2700,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func applyMediaBatch(_ items: [CameraMediaItem], scope: MediaLibraryScope) {
+        refreshSelectedMediaMetadata(from: items)
         observedMediaIDs.formUnion(items.map(\.id))
         let batch = mediaLibraryBatch(
             items,
@@ -2580,26 +2740,30 @@ final class CameraAppState: ObservableObject {
     }
 
     private func applyDeletedMedia(_ item: CameraMediaItem) {
-        if downloadedMediaID == item.id {
+        let identity = mediaItemIdentity(item)
+        selectedMediaItems.removeAll { mediaItemIdentity($0) == identity }
+        if downloadedMediaID.map({ Data($0.utf8) }) == identity {
             removeDownloadedFile()
         }
-        mediaItems.removeAll { $0.id == item.id }
+        mediaItems.removeAll { mediaItemIdentity($0) == identity }
         mediaThumbnailCache.removeValue(for: item.id)
         mediaThumbnails = mediaThumbnailCache.values
         loadingMediaThumbnailIDs.remove(item.id)
         unavailableMediaThumbnailIDs.remove(item.id)
-        if latestMediaItem?.id == item.id {
+        if latestMediaItem.map(mediaItemIdentity) == identity {
             latestMediaItem = nil
             latestMediaThumbnail = nil
         }
-        if mediaPreviewItem?.id == item.id { resetMediaPreview() }
+        if mediaPreviewItem.map(mediaItemIdentity) == identity { resetMediaPreview() }
         deletedMediaName = item.name
     }
 
     private func applyUpdatedMedia(_ item: CameraMediaItem) {
-        mediaItems = mediaItems.map { $0.id == item.id ? item : $0 }
-        if latestMediaItem?.id == item.id { latestMediaItem = item }
-        if mediaPreviewItem?.id == item.id { mediaPreviewItem = item }
+        let identity = mediaItemIdentity(item)
+        refreshSelectedMediaMetadata(from: [item])
+        mediaItems = mediaItems.map { mediaItemIdentity($0) == identity ? item : $0 }
+        if latestMediaItem.map(mediaItemIdentity) == identity { latestMediaItem = item }
+        if mediaPreviewItem.map(mediaItemIdentity) == identity { mediaPreviewItem = item }
     }
 
     private func resetMediaThumbnails() {

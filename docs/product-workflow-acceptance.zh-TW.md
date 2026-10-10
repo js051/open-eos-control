@@ -2,6 +2,12 @@
 
 稽核日期：2026-10-04。程式基準：`5a042d24724ca2f4d2b5dc2988d2e9ef99711c6f`，即 PR #194 本次取得的 head。本文是該基準的產品流程稽核快照；各修正分支的測試與交付另記，不將進行中的工作計入完成。
 
+## 跨平台 P2 挑片與批次交付進度（2026-10-10 UTC，開發草稿）
+
+- [PC PR #237](https://github.com/js051/open-eos-control/pull/237) 已整合日期／評分／資料夾／類型挑片、多選與明選目的地後循序保存。精確 head `5585ea71582f87704191f4c63b5cc12eca35868a` 的 [CI 38091355470](https://github.com/js051/open-eos-control/actions/runs/38091355470) 全適用成功；四個新增 synthetic browser 旅程實際通過，包含英／繁中隱藏選取與 closed bytes、API 不支援及取消後不下載後項。仍為 draft，真 OS 目錄 provider 未驗；前一輪 checkbox／preview selector 歧義失敗保留。
+- [iOS PR #236](https://github.com/js051/open-eos-control/pull/236) 延續相同完整挑片功能群，本地新批次再加入多選、循序準備原檔與原生分享入口。新批次編譯／測試尚待 exact-head 正常 CI，不能沿用前版結果；[批次說明](validation/ios-media-batch-delivery-2026-10-10.zh-TW.md)明列 ownership、部分結果、來源檔案生命週期及外部保存未證明的界線。
+- 以上不等於 P2 全部完成。跨程序狀態恢復／已交付工作清單、重複下載處理、各平台前景自動交付與真實 provider 行為仍須按原矩陣個別盤點與證明，沒有宣稱任意 HTTP Range 續傳。完整 App 人工／實機驗收依使用者最新方向在開發後集中；必要編譯、單元、回歸與原 CI gates 保留，未驗收不發布。
+
 ## 後續交付狀態（2026-10-04 UTC）
 
 以下補記目前交付狀態；後面的原始結論、缺口矩陣、程式行號與驗收契約保留上述基準，不把已完成的修正重新列為當前 blocker，也不回寫歷史測試結果。

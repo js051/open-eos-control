@@ -529,3 +529,22 @@
 "media_folder_missing" = "目前載入清單沒有先前選取的資料夾；清除篩選可查看其他已載入素材。";
 "media_folder_duplicate" = "%1$@ · 不同資料夾 %2$d";
 "media_folder_summary" = "已載入 %2$d 項中符合 %1$d 項；其他篩選條件內有 %3$d 項未知資料夾。";
+
+"media_batch_selection_count" = "已選 %d 項 · 篩選隱藏 %d 項 · 目前未載入 %d 項";
+"media_batch_select_visible" = "選取篩選後已載入素材";
+"media_batch_clear_selection" = "清除選取";
+"media_batch_select_item" = "選取 %@";
+"media_batch_selected" = "已選取";
+"media_batch_not_selected" = "未選取";
+"media_batch_prepare" = "準備所選原檔";
+"media_batch_cancel" = "目前傳輸結束後停止";
+"media_batch_cancelling" = "正在停止目前傳輸…";
+"media_batch_bytes" = "目前素材已接收 %lld 位元組";
+"media_batch_result_notice" = "已備妥檔案是 App 內的暫存副本。請選擇儲存或分享以交付至目的地，這不代表外部已保存；不同目的地可能以不同方式處理同名檔案。";
+"media_batch_share_ready" = "儲存或分享已備妥原檔";
+"media_batch_status_notStarted" = "未開始";
+"media_batch_status_downloading" = "正在準備原檔…";
+"media_batch_status_ready" = "原檔已在 App 內備妥";
+"media_batch_status_failed" = "失敗";
+"media_batch_status_cancelledOrUnknown" = "已取消或結果未確認";
+"media_batch_offline_notice" = "離線預覽只提供選取操作；請連接相機以準備原檔。";

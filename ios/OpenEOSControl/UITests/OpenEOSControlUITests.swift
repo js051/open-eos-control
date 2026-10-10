@@ -17,6 +17,82 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertFalse(Self.targetIsAboveScrollViewport(.zero, viewport: viewport))
     }
 
+    func testOfflineBatchSelectionRemainsSeparateFromPreviewAndCannotFakeDownloads() throws {
+        for (language, apple, locale, selected, notSelected) in [
+            ("english", "en", "en_US", "Selected", "Not selected"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "已選取", "未選取"),
+        ] {
+            let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
+                             contentSizeCategory: "UICTContentSizeCategoryAccessibilityXXXL")
+            defer { app.terminate() }
+            XCTAssertTrue(waitForInteraction(app.buttons["offline-preview-button"], timeout: 8))
+            app.buttons["offline-preview-button"].tap()
+            openMoreActions(in: app)
+            XCTAssertTrue(tapCameraAction(app.buttons["camera-media-menu-button"], in: app))
+            let checkbox = app.buttons["media-select-preview-001"]
+            XCTAssertTrue(scrollToInteraction(checkbox, in: app, timeout: 8))
+            XCTAssertEqual(checkbox.value as? String, notSelected)
+            checkbox.tap()
+            XCTAssertEqual(checkbox.value as? String, selected)
+            XCTAssertFalse(app.buttons["close-media-preview"].exists)
+            let prepare = app.buttons["media-batch-prepare"]
+            XCTAssertTrue(prepare.waitForExistence(timeout: 8))
+            XCTAssertFalse(prepare.isEnabled)
+            XCTAssertFalse(app.buttons["media-batch-share-ready"].exists)
+            let clear = app.buttons["media-batch-clear-selection"]
+            XCTAssertTrue(scrollToInteraction(clear, in: app, timeout: 8))
+            clear.tap()
+            XCTAssertTrue(scrollToInteraction(checkbox, in: app, timeout: 8))
+            XCTAssertEqual(checkbox.value as? String, notSelected)
+            addScreenshot(name: "media-batch-offline-selection-\(language)")
+        }
+    }
+
+    @MainActor
+    func testCanonicalBatchPreparesTwoOriginalsWithoutCapturingOrClaimingExternalSave() async throws {
+        continueAfterFailure = true
+        guard try await waitForSimulatorHealth() else {
+            #if OEC_REQUIRE_SIMULATOR_E2E
+            XCTFail("The required synthetic camera is not reachable")
+            return
+            #else
+            throw XCTSkip("Start the synthetic camera for the batch original journey")
+            #endif
+        }
+        _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
+        _ = try await simulatorRequest(path: "/ccapi/test/capture-delivery", method: "POST",
+                                       jsonBody: ["enabled": true])
+        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US",
+                         environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString])
+        defer { app.terminate() }
+        try tapForAsyncTest(app.buttons["preset-http-button"])
+        _ = try XCTUnwrap(scrollConnectionButtonIntoView(in: app, timeout: 8) ? true : nil)
+        try tapForAsyncTest(app.buttons["connect-button"])
+        _ = try XCTUnwrap(waitForInteraction(app.buttons["shutter-button"], timeout: 30) ? true : nil)
+        try openMoreActionsForAsyncTest(in: app)
+        guard try tapCameraActionForAsyncTest(app.buttons["camera-media-menu-button"], in: app) else { return }
+        for name in ["SIM_0001.PNG", "SIM_0002.PNG"] {
+            let id = "/ccapi/ver100/contents/card1/100CANON/" + name
+            let checkbox = app.buttons["media-select-" + id]
+            _ = try XCTUnwrap(scrollToInteraction(checkbox, in: app, timeout: 8) ? true : nil)
+            try tapForAsyncTest(checkbox)
+            _ = try XCTUnwrap((checkbox.value as? String) == "Selected" ? true : nil)
+        }
+        let prepare = app.buttons["media-batch-prepare"]
+        _ = try XCTUnwrap(scrollToInteraction(prepare, in: app, timeout: 8) ? true : nil)
+        try tapForAsyncTest(prepare)
+        let share = app.buttons["media-batch-share-ready"]
+        _ = try XCTUnwrap(scrollToInteraction(share, in: app, timeout: 20) ? true : nil)
+        for name in ["SIM_0001.PNG", "SIM_0002.PNG"] {
+            let result = app.descendants(matching: .any)["media-batch-result-/ccapi/ver100/contents/card1/100CANON/" + name].firstMatch
+            _ = try XCTUnwrap(waitForLabel(result, containing: "Original ready in app", timeout: 5) ? true : nil)
+        }
+        let state = try await simulatorRequest(path: "/ccapi/test/state")
+        _ = try XCTUnwrap((state["capture_count"] as? NSNumber)?.intValue == 0 ? true : nil)
+        // The share entry is ready. No external activity is selected or claimed saved.
+        addScreenshot(name: "media-batch-two-originals-ready")
+    }
+
     func testConnectionHitGeometryRejectsOffscreenOrClippedButtons() {
         let window = CGRect(x: 0, y: 0, width: 874, height: 402)
         let visible = CGRect(x: 157, y: 200, width: 560, height: 77.33333333333337)
