@@ -241,7 +241,24 @@ async function run() {
         }
 
         resume() {
-          return Promise.resolve();
+          if (!testState.delayNextAudioResume) return Promise.resolve();
+          testState.delayNextAudioResume = false;
+          testState.pendingAudioResume = true;
+          testState.audioResumeConsumed = false;
+          return new Promise((resolve, reject) => {
+            testState.releasePendingAudioResume = (shouldReject) => {
+              testState.pendingAudioResume = false;
+              if (shouldReject) reject(new Error("Synthetic old resume rejection"));
+              else resolve();
+              // Observe a task after the production resume continuation has run.
+              const channel = new MessageChannel();
+              channel.port1.onmessage = () => {
+                testState.audioResumeConsumed = true;
+                channel.port1.close(); channel.port2.close();
+              };
+              channel.port2.postMessage(null);
+            };
+          });
         }
 
         close() {
@@ -899,6 +916,32 @@ async function run() {
     await page.click("#rtp-audio-button");
     await page.waitForFunction(() => globalThis.__openEosLocalVideoTest.audioCloses === 1);
     assert.equal(await page.locator("#rtp-audio-button").getAttribute("aria-pressed"), "false");
+
+    for (const rejected of [false, true]) {
+      const closesBefore = await page.evaluate(() => globalThis.__openEosLocalVideoTest.audioCloses);
+      await page.evaluate(() => { globalThis.__openEosLocalVideoTest.delayNextAudioResume = true; });
+      await page.click("#rtp-audio-button");
+      await page.waitForFunction(() => globalThis.__openEosLocalVideoTest.pendingAudioResume === true);
+      assert.equal(await page.locator("#rail-live-button").isEnabled(), true);
+      await page.click("#rail-live-button");
+      await page.waitForFunction(() => document.querySelector("#live-toggle-button").getAttribute("aria-label") === "Start Live View");
+      await page.waitForFunction((previous) => globalThis.__openEosLocalVideoTest.audioCloses > previous, closesBefore);
+      await page.click("#rail-live-button");
+      await page.waitForSelector("#rtp-audio-button:not([hidden]):not([disabled])");
+      assert.equal(await page.locator("#rtp-audio-button").getAttribute("aria-pressed"), "false");
+      const requestsBeforeResume = audioRequests;
+      const operationBeforeResume = await page.locator("#operation-state").innerText();
+      const toastBeforeResume = await page.locator("#toast").textContent();
+      await page.evaluate((shouldReject) => globalThis.__openEosLocalVideoTest.releasePendingAudioResume(shouldReject), rejected);
+      await page.waitForFunction(() => globalThis.__openEosLocalVideoTest.audioResumeConsumed === true);
+      assert.equal(audioRequests, requestsBeforeResume, "An old resume cannot unmute the new live run");
+      assert.equal(await page.locator("#rtp-audio-button").getAttribute("aria-pressed"), "false");
+      assert.equal(await page.locator("#rtp-audio-button").isEnabled(), true);
+      assert.equal(await page.locator("#operation-state").innerText(), operationBeforeResume);
+      assert.equal(await page.locator("#toast").textContent(), toastBeforeResume, "Old completion stays silent");
+      assert.deepEqual(pageErrors, []);
+      console.log(`RTP audio ownership: stopped resume ${rejected ? "rejection" : "success"} passed`);
+    }
 
     await page.selectOption("#preview-input-select", "LOCAL_VIDEO");
     await page.waitForFunction(() => !document.querySelector("#local-video").hidden);

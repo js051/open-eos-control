@@ -32,6 +32,7 @@ function element(tagName = "div") {
     setAttribute(name, value) { attributes.set(name, String(value)); },
     removeAttribute(name) { attributes.delete(name); },
     getAttribute(name) { return attributes.get(name) ?? null; },
+    showModal() { this.open = true; },
     addEventListener() {},
     querySelectorAll() { return []; },
   };
@@ -46,7 +47,7 @@ function media(overrides = {}) {
   };
 }
 
-function context(item = media()) {
+function context(item = media(), { metadata } = {}) {
   const nodes = {};
   const ui = new Proxy(nodes, { get(target, key) {
     if (!target[key]) target[key] = element();
@@ -57,20 +58,22 @@ function context(item = media()) {
     session: { id: "synthetic-session" }, capabilities: {}, status: { media: {} },
     captureMode: "photo", busy: false,
     media: [item], mediaLoaded: true, mediaLoadStatus: "COMPLETE", mediaHasMore: false,
-    mediaSort: "camera", mediaScope: "all", mediaFilter: "all", mediaPage: 0,
+    mediaDateRange: null, mediaSort: "camera", mediaScope: "all", mediaFilter: "all", mediaPage: 0,
     mediaThumbnailUrls: new Map(), mediaThumbnailLoads: new Set(),
-    mediaDetailsItem: item, mediaDetailsBusy: false, mediaPreviewItem: item,
+    mediaDetailsItem: item, mediaDetailsBusy: false, mediaDetailsGeneration: 0, mediaPreviewItem: item,
     latestMediaItem: null, mediaDownloadPreparing: false, mediaDownloadOwner: null,
     mediaDownload: null, mediaUpload: null,
   };
   const effects = [];
+  const requests = [];
   const unexpected = (name) => (...args) => {
     effects.push({ name, args });
     assert.fail(`Rendering must not initiate ${name}`);
   };
   const supported = new Set(["MEDIA_BROWSER", "MEDIA_DOWNLOAD", "MEDIA_PREVIEW"]);
+  if (metadata) supported.add("MEDIA_RATING");
   const sandbox = vm.createContext({
-    state, ui, mediaLibrary, effects, Map, Set,
+    state, ui, mediaLibrary, effects, requests, Map, Set,
     MEDIA_PAGE_SIZE: 24, mediaThumbnailObserver: null,
     FEATURES: new Proxy({}, { get: (_, key) => key }),
     featureSupported: (feature) => supported.has(feature),
@@ -78,6 +81,8 @@ function context(item = media()) {
     t: (key, values = {}) => {
       if (key === "mediaPreviewPosition") return `${values.position} / ${values.total}`;
       if (key === "mediaCount") return `${values.count} files`;
+      if (key === "mediaFilteredCount") return `${values.visible} / ${values.total} files`;
+      if (key === "mediaDateActive") return `${values.matched} / ${values.total}; unknown ${values.unknown}`;
       if (key === "downloadProgressUnknown") return `${values.transferred} downloaded`;
       if (key === "downloadProgress" || key === "uploadProgress") {
         return `${values.transferred} / ${values.total} (${values.percent}%)`;
@@ -85,7 +90,12 @@ function context(item = media()) {
       return key;
     },
     document: { createElement: element }, window: {},
-    api: unexpected("API request"), fetch: unexpected("fetch"),
+    api: metadata ? async (url, options = {}) => {
+      requests.push({ url, method: options.method || "GET" });
+      assert.equal(url, `/v1/session/synthetic-session/media/${encodeURIComponent(item.id)}/info`);
+      assert.equal(options.method, undefined);
+      return metadata;
+    } : unexpected("API request"), fetch: unexpected("fetch"),
     downloadMedia: unexpected("download"), chooseMediaWritable: unexpected("destination picker"),
     cancelMediaDownload: unexpected("download cancellation"),
     observeMediaThumbnail: unexpected("thumbnail request"),
@@ -101,7 +111,8 @@ function context(item = media()) {
     "mediaIsVideo", "mediaTime", "displayedMedia", "previewableMedia", "mediaDateGroup",
     "formatMediaTime", "renderMediaThumbnail", "mediaMetadataSupported", "mediaManagementSupported",
     "mediaTransferActive", "cameraInteractionBusy", "replaceMediaItem",
-    "renderMedia", "renderMediaSummary", "renderMediaDetails", "renderMediaPreviewNavigation",
+    "openMediaDetails", "clearMediaDetails",
+    "renderMedia", "renderMediaSummary", "renderMediaDateFilter", "mediaDisplayTimeZone", "renderMediaDetails", "renderMediaPreviewNavigation",
     "renderMediaTransfer", "renderSession",
   ];
   // The unchanged baseline must fail on its rendered claims, not a missing import.
@@ -264,5 +275,55 @@ test("media size rerenders make no requests and preserve active download ownersh
     assert.equal(subject.ui.mediaPreviewDownload.disabled, true);
     assert.equal(subject.ui.mediaDetailsDownload.disabled, true);
   }
+  assert.deepEqual(subject.effects, []);
+});
+
+test("explicit metadata with an active date range removes a previous known size", async () => {
+  const item = media({ captureTime: "2026-10-01", sizeBytes: 1048576 });
+  const subject = context(item, { metadata: { ...item, sizeBytes: 0 } });
+  const range = { start: "2026-10-01", end: "2026-10-01" };
+  subject.state.mediaDateRange = range;
+  for (const surface of surfaces) {
+    surface.render(subject);
+    assert.match(surface.text(subject), /1\.0 MB/);
+  }
+  await subject.openMediaDetails(item);
+  assert.equal(subject.state.mediaDateRange, range);
+  assert.deepEqual(Array.from(subject.displayedMedia(), value => value.id), [item.id]);
+  assert.equal(surfaces[0].text(subject), "6000 x 4000");
+  assert.equal(surfaces[1].text(subject), `${subject.formatDate(item.captureTime)} · 6000 x 4000 · image/jpeg`);
+  // A newly selected preview uses refreshed listing metadata; an already-open
+  // preview owns its original reference and is not claimed to refresh itself.
+  subject.state.mediaPreviewItem = subject.state.media[0];
+  subject.renderMediaPreviewNavigation();
+  assert.equal(surfaces[2].text(subject), "1 / 1 · 6000 x 4000");
+  assert.match(subject.ui.mediaDateSummary.textContent, /^1 \/ 1; unknown 0 /);
+  assert.deepEqual(subject.requests, [{ url: "/v1/session/synthetic-session/media/synthetic-photo/info", method: "GET" }]);
+  assert.deepEqual(subject.effects, []);
+});
+
+test("metadata moving outside the active date range removes its card and retains the explicit details target", async () => {
+  const item = media({ captureTime: "2026-10-01", sizeBytes: 1048576 });
+  const updated = { ...item, captureTime: "2026-10-02" };
+  const subject = context(item, { metadata: updated });
+  const range = { start: "2026-10-01", end: "2026-10-01" };
+  subject.state.mediaDateRange = range;
+  subject.renderMedia();
+  assert.match(surfaces[0].text(subject), /1\.0 MB/);
+  await subject.openMediaDetails(item);
+  assert.equal(subject.state.mediaDateRange, range);
+  assert.deepEqual(Array.from(subject.displayedMedia()), []);
+  assert.equal(subject.ui.mediaList.children.filter(child => child.className === "media-card").length, 0);
+  assert.equal(subject.ui.mediaList.children[0].textContent, "mediaNoMatches");
+  assert.equal(subject.ui.mediaSummary.textContent, "0 / 1 files");
+  assert.match(subject.ui.mediaDateSummary.textContent, /^0 \/ 1; unknown 0 /);
+  assert.equal(subject.state.media.length, 1, "Filtering does not delete the loaded item");
+  assert.equal(subject.ui.mediaDetailsDialog.open, true);
+  assert.equal(subject.state.mediaDetailsItem.id, item.id);
+  assert.equal(subject.state.mediaDetailsItem.captureTime, updated.captureTime);
+  assert.equal(subject.state.mediaDetailsBusy, false);
+  assert.equal(subject.ui.mediaDetailsName.textContent, item.name);
+  assert.equal(surfaces[1].text(subject), `${subject.formatDate(updated.captureTime)} · 6000 x 4000 · 1.0 MB · image/jpeg`);
+  assert.deepEqual(subject.requests, [{ url: "/v1/session/synthetic-session/media/synthetic-photo/info", method: "GET" }]);
   assert.deepEqual(subject.effects, []);
 });

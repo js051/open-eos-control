@@ -185,6 +185,429 @@ async function verifyCapabilityResponseOwnership(browser, origin) {
   }
 }
 
+async function verifyMediaDeleteResponseOwnership(browser, origin) {
+  for (const rejected of [false, true]) {
+    const context = await browser.newContext({ locale: "en-US" });
+    const page = await context.newPage();
+    const writes = [], pageErrors = [];
+    let releaseResponse;
+    const gate = new Promise(resolve => { releaseResponse = resolve; });
+    const item = { id: "SYNTHETIC_SHARED.JPG", name: "SYNTHETIC_SHARED.JPG", kind: "image",
+      sizeBytes: 1024, captureTime: null, previewAvailable: false };
+    // Observe consumption of the synthetic response, then a new browser task.
+    // The production api/delete continuation microtasks finish before this marker.
+    await context.addInitScript(() => {
+      const fetchOriginal = window.fetch;
+      window.fetch = async (...args) => {
+        const response = await fetchOriginal(...args);
+        if (args[1]?.method === "DELETE" && String(args[0]).includes("/media/")) {
+          const json = response.json.bind(response);
+          response.json = async () => {
+            const value = await json();
+            const channel = new MessageChannel();
+            channel.port1.onmessage = () => {
+              window.__deleteResponseConsumed = true;
+              channel.port1.close(); channel.port2.close();
+            };
+            channel.port2.postMessage(null);
+            return value;
+          };
+        }
+        return response;
+      };
+    });
+    page.on("pageerror", error => pageErrors.push(error.message));
+    page.on("request", request => {
+      if (request.method() !== "GET") writes.push({ method: request.method(), path: new URL(request.url()).pathname });
+    });
+    await page.route(/\/capabilities$/, async route => {
+      const response = await route.fetch();
+      const capabilities = await response.json();
+      capabilities.supported = ["MEDIA_BROWSER", "MEDIA_DELETE"];
+      capabilities.settings = [];
+      await route.fulfill({ response, json: capabilities });
+    });
+    await page.route(/\/v1\/session\/[^/]+\/media(?:\?.*)?$/, route => route.fulfill({ json: { items: [item] } }));
+    await page.route(/\/v1\/session\/[^/]+\/media\/SYNTHETIC_SHARED.JPG$/, async route => {
+      assert.equal(route.request().method(), "DELETE");
+      // This synthetic delete never reaches the fake backend or a physical camera.
+      await page.evaluate(() => { window.__deleteResponsePending = true; });
+      await gate;
+      await route.fulfill({ status: rejected ? 500 : 200,
+        json: rejected ? { error: { code: "SYNTHETIC_DELETE_FAILURE", message: "Old A deletion failed" } } : {} });
+    });
+    try {
+      await page.goto(origin, { waitUntil: "networkidle" });
+      await page.waitForSelector("#connect-button:not([disabled])");
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      await page.click('.tab[data-view="media"]');
+      await page.locator(".media-card .media-actions button").click();
+      await page.waitForSelector("#media-details-dialog[open]");
+      page.once("dialog", dialog => dialog.accept());
+      await page.click("#media-details-delete");
+      await page.waitForFunction(() => window.__deleteResponsePending === true);
+      await page.keyboard.press("Escape");
+      await page.waitForSelector("#media-details-dialog:not([open])", { state: "attached" });
+      assert.equal(await page.locator("#disconnect-button").isEnabled(), true);
+      await page.click("#disconnect-button");
+      await page.waitForSelector("#connection-view:not([hidden])");
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      await page.click('.tab[data-view="media"]');
+      await page.locator(".media-card .media-actions button").click();
+      await page.waitForSelector("#media-details-dialog[open]");
+      assert.equal(await page.locator("#media-details-delete").isEnabled(), true);
+      const requestsBefore = writes.slice();
+      const errorBefore = JSON.parse(await page.locator("#diagnostics-output").textContent()).lastError;
+      releaseResponse();
+      await page.waitForFunction(() => window.__deleteResponseConsumed === true);
+      assert.equal(await page.locator(".media-card").count(), 1, "B's same-ID media survives A's response");
+      assert.equal(await page.locator("#media-details-dialog").evaluate(dialog => dialog.open), true);
+      assert.equal(await page.locator("#media-details-delete").isEnabled(), true);
+      assert.deepEqual(JSON.parse(await page.locator("#diagnostics-output").textContent()).lastError, errorBefore);
+      assert.deepEqual(writes, requestsBefore, "Late response never retries or deletes from B");
+      assert.equal(writes.filter(x => x.method === "DELETE" && x.path.includes("/media/")).length, 1);
+      assert.deepEqual(pageErrors, []);
+      await page.keyboard.press("Escape");
+      await page.click("#disconnect-button");
+      await page.waitForSelector("#connection-view:not([hidden])");
+      console.log(`Media delete response ownership: stale ${rejected ? "rejection" : "success"} passed`);
+    } finally {
+      releaseResponse();
+      await context.close();
+    }
+  }
+}
+
+function syntheticDatedMedia() {
+  const entries = [
+    ["DATE_ONLY.JPG", "2026-10-07"],
+    ["START.JPG", "2026-10-07T00:00:00-07:00"],
+    ["END.JPG", "2026-10-07T23:59:59-07:00"],
+    ["OFFSET_IN.JPG", "2026-10-08T01:00:00Z"],
+    ["OFFSET_OUT.JPG", "2026-10-07T01:00:00Z"],
+    ["VIDEO.MP4", "2026-10-07T12:00:00-07:00"],
+    ["UNKNOWN.JPG", null],
+    ["INVALID.JPG", "2026-02-30T12:00:00Z"],
+    ["COMPACT.JPG", "20261007T120000"],
+    ["ENRICH.JPG", "2026-10-07T15:00:00-07:00"],
+    ...Array.from({ length: 75 }, (_, index) => [`EARLIER_${index + 1}.JPG`, "2026-10-05"]),
+  ];
+  return entries.map(([name, captureTime]) => ({
+    id: name, name, captureTime, kind: name.endsWith(".MP4") ? "video" : "image",
+    sizeBytes: 2048, previewAvailable: true,
+  }));
+}
+
+async function applyDateRange(page, start, end) {
+  await page.click("#media-date-button");
+  await page.waitForSelector("#media-date-dialog[open]");
+  await page.fill("#media-date-from", start);
+  await page.fill("#media-date-to", end);
+  await page.click("#media-date-apply");
+  await page.waitForFunction(() => !document.querySelector("#media-date-dialog").open);
+}
+
+async function verifyDateDialogLayout(page, language) {
+  for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(viewport);
+    // Enlarge text through the public document styling, never the app's state.
+    await page.locator("html").evaluate((element) => { element.style.fontSize = "32px"; });
+    await page.locator("#media-date-button").focus();
+    assert.equal(await page.locator("#media-date-button").evaluate((element) => document.activeElement === element), true);
+    await page.keyboard.press("Enter");
+    await page.waitForSelector("#media-date-dialog[open]");
+    assert.equal(await page.locator("#media-date-from").evaluate((element) => document.activeElement === element), true);
+    const visited = new Set();
+    const focusTrace = [];
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    const evidenceName = `desktop-media-date-${language}-${viewport.width}x${viewport.height}-text200`;
+    await page.screenshot({ path: path.join(RESULTS_DIR, `${evidenceName}-focus-start.png`) });
+    for (let index = 0; index <= 28; index += 1) {
+      const focus = await page.evaluate(() => {
+        const active = document.activeElement;
+        const dialog = document.querySelector("#media-date-dialog");
+        return {
+          id: active?.id || "", tag: active?.tagName || null,
+          inside: dialog.contains(active), documentHasFocus: document.hasFocus(),
+          documentRoot: active === document.body || active === document.documentElement,
+          open: dialog.open, modal: dialog.matches(":modal"),
+        };
+      });
+      focusTrace.push({ index, ...focus });
+      fs.writeFileSync(path.join(RESULTS_DIR, `${evidenceName}-focus.json`), JSON.stringify(focusTrace, null, 2));
+      assert.equal(focus.open && focus.modal, true, "Keyboard traversal retains the native modal");
+      // HTML sequential navigation permits the browser's own controls at the
+      // document boundary. Only its unfocused root sentinel is acceptable here;
+      // a background app control must fail regardless of document focus.
+      assert.equal(focus.inside || (!focus.documentHasFocus && focus.documentRoot), true,
+        `Keyboard focus must not enter the background app: ${JSON.stringify(focus)}`);
+      if (focus.inside && focus.documentHasFocus) visited.add(focus.id);
+      if (index < 28) await page.keyboard.press("Tab");
+    }
+    for (const id of ["media-date-from", "media-date-to", "media-date-close", "media-date-dialog-clear", "media-date-cancel", "media-date-apply"]) {
+      assert.ok(visited.has(id), `${language}: ${id} is keyboard reachable`);
+      const control = page.locator(`#${id}`);
+      await control.scrollIntoViewIfNeeded();
+      await control.click({ trial: true });
+      const bounds = await control.boundingBox();
+      assert.ok(bounds && bounds.x >= 0 && bounds.y >= 0 &&
+        bounds.x + bounds.width <= viewport.width + 1 && bounds.y + bounds.height <= viewport.height + 1,
+      `${language}: ${id} fits the ${viewport.width}x${viewport.height} viewport after scrolling`);
+    }
+    const geometry = await page.locator("#media-date-dialog").evaluate((dialog) => ({
+      width: dialog.clientWidth, scrollWidth: dialog.scrollWidth,
+      clipped: [...dialog.querySelectorAll("h2, p, label, button")].filter((element) => !element.hidden)
+        .filter((element) => element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1)
+        .map((element) => element.id || element.tagName),
+    }));
+    fs.writeFileSync(path.join(RESULTS_DIR, `${evidenceName}-geometry.json`), JSON.stringify(geometry, null, 2));
+    assert.ok(geometry.scrollWidth <= geometry.width + 1, `${language}: dialog has no horizontal overflow`);
+    assert.deepEqual(geometry.clipped, [], `${language}: enlarged labels and actions are not clipped`);
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-media-date-${language}-${viewport.width}x${viewport.height}-text200.png`) });
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#media-date-dialog").open);
+    assert.equal(await page.locator("#media-date-button").evaluate((element) => document.activeElement === element), true);
+    await page.locator("html").evaluate((element) => element.style.removeProperty("font-size"));
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+
+async function verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin) {
+  for (const language of ["en", "zh-TW"]) {
+    const reset = await fetch(`${simulatorOrigin}/ccapi/test/reset`, { method: "POST" });
+    assert.equal(reset.ok, true);
+    const context = await browser.newContext({
+      locale: language === "en" ? "en-US" : "zh-TW", timezoneId: "America/Los_Angeles",
+      viewport: { width: 1440, height: 900 },
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(12_000);
+    const items = syntheticDatedMedia();
+    const requests = { listing: [], info: [], writes: [] };
+    const errors = [];
+    let failListing = false;
+    let allDatesUnknown = false;
+    let scenarioError = null;
+    const snapshot = () => Object.fromEntries(Object.entries(requests).map(([key, value]) => [key, value.length]));
+    const names = () => page.locator(".media-card .media-copy strong").allTextContents();
+    const expectNames = async (expected) => assert.deepEqual(await names(), expected);
+    const sameDayPhotos = ["DATE_ONLY.JPG", "START.JPG", "END.JPG", "OFFSET_IN.JPG", "COMPACT.JPG", "ENRICH.JPG"];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (!pathname.startsWith("/v1/session")) return;
+      if (request.method() !== "GET") requests.writes.push(pathname);
+      else if (/\/media$/.test(pathname)) requests.listing.push(request.url());
+      else if (/\/media\/[^/]+\/info$/.test(pathname)) requests.info.push(pathname);
+    });
+    await page.route(/\/v1\/session\/[^/]+\/media(?:\?.*)?$/, (route) => {
+      if (failListing) return route.fulfill({ status: 503, json: { message: "Synthetic listing unavailable" } });
+      const limit = Number(new URL(route.request().url()).searchParams.get("limit"));
+      const listed = allDatesUnknown ? items.map((item) => ({ ...item, captureTime: null })) : items;
+      return route.fulfill({ json: { items: limit > 0 ? listed.slice(0, limit) : listed } });
+    });
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+    await page.route(/\/media\/[^/]+\/(?:thumbnail|preview)$/, (route) => route.fulfill({ contentType: "image/png", body: png }));
+    await page.route(/\/media\/[^/]+\/info$/, (route) => {
+      const id = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-2));
+      const item = items.find((entry) => entry.id === id);
+      assert.ok(item, "Only synthetic items may receive an explicit details read");
+      if (id === "ENRICH.JPG") item.captureTime = "2026-10-09";
+      return route.fulfill({ json: item });
+    });
+    try {
+      await page.goto(bridgeOrigin, { waitUntil: "networkidle" });
+      await page.click("#ccapi-mode-button");
+      await page.fill("#ccapi-url-input", simulatorOrigin);
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      await page.locator("#control-view .language-select").selectOption(language);
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelector("#media-summary")?.dataset.loadStatus === "COMPLETE");
+      assert.equal(await page.locator(".media-card").count(), 60);
+      assert.match(await page.locator("#media-summary").innerText(), language === "en" ? /Latest 60.*more on card/ : /最新 60.*尚有更多/);
+      await page.selectOption("#media-sort-select", "camera");
+      const beforeDate = snapshot();
+      await applyDateRange(page, "2026-10-07", "2026-10-07");
+      await expectNames([...sameDayPhotos.slice(0, 4), "VIDEO.MP4", ...sameDayPhotos.slice(4)]);
+      assert.deepEqual(snapshot(), beforeDate, "Apply adds no listing, per-item info, or camera-write request");
+      const summary = await page.locator("#media-date-summary").innerText();
+      assert.match(summary, language === "en" ? /7 of 60 loaded.*2 loaded items have unknown dates/ : /60 項中符合 7 項.*2 項日期不明/);
+      assert.match(summary, /America\/Los_Angeles/);
+      assert.match(await page.locator("#media-summary").innerText(), language === "en" ? /more on card/ : /尚有更多/);
+
+      // Inclusive boundaries, literal dates and UTC offsets agree with the visible day heading.
+      await page.selectOption("#media-sort-select", "newest");
+      assert.deepEqual(await page.locator(".media-date-heading").allTextContents(), [language === "en" ? "October 7, 2026" : "2026年10月7日"]);
+      assert.equal(await page.locator(".media-card").filter({ hasText: "DATE_ONLY.JPG" }).locator(".media-copy span").innerText(), "IMAGE",
+        "A date-only file must not acquire an invented time of day");
+      await page.click('#media-filter-control [data-media-filter="video"]');
+      await expectNames(["VIDEO.MP4"]);
+      await page.click('#media-filter-control [data-media-filter="photo"]');
+      await page.selectOption("#media-sort-select", "name");
+      await expectNames(["COMPACT.JPG", "DATE_ONLY.JPG", "END.JPG", "ENRICH.JPG", "OFFSET_IN.JPG", "START.JPG"]);
+      await page.selectOption("#media-sort-select", "camera");
+      await expectNames(sameDayPhotos);
+
+      for (const dismiss of ["cancel", "close", "escape"]) {
+        await page.click("#media-date-button");
+        await page.fill("#media-date-from", "2026-10-01");
+        await page.fill("#media-date-to", "2026-10-09");
+        if (dismiss === "escape") await page.keyboard.press("Escape");
+        else await page.click(`#media-date-${dismiss}`);
+        await page.waitForFunction(() => !document.querySelector("#media-date-dialog").open);
+        assert.equal(await page.locator("#media-date-button").evaluate((element) => document.activeElement === element), true);
+        await expectNames(sameDayPhotos);
+        await page.click("#media-date-button");
+        assert.equal(await page.inputValue("#media-date-from"), "2026-10-07");
+        assert.equal(await page.inputValue("#media-date-to"), "2026-10-07");
+        await page.click("#media-date-cancel");
+        await page.waitForFunction(() => !document.querySelector("#media-date-dialog").open);
+      }
+      await page.click("#media-date-button");
+      await page.fill("#media-date-from", "2026-10-08");
+      await page.click("#media-date-apply");
+      assert.match(await page.locator("#media-date-error").innerText(), language === "en" ? /on or after/ : /不能早於/);
+      assert.equal(await page.locator("#media-date-dialog").evaluate((dialog) => dialog.open), true);
+      await expectNames(sameDayPhotos);
+      // Native date inputs normalize impossible dates to an empty value. Empty
+      // required input is the real browser invalid-input path; parser edge cases
+      // are covered by the strict helper tests without replacing the input type.
+      await page.fill("#media-date-from", "");
+      await page.click("#media-date-apply");
+      assert.match(await page.locator("#media-date-error").innerText(), language === "en" ? /both dates/ : /開始與結束日期/);
+      assert.equal(await page.getAttribute("#media-date-from", "aria-invalid"), "true");
+      await expectNames(sameDayPhotos);
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => !document.querySelector("#media-date-dialog").open);
+
+      // Viewer navigation enumerates exactly the filtered photo sequence.
+      await page.locator('.media-card [data-media-id="DATE_ONLY.JPG"]').click();
+      for (let index = 0; index < sameDayPhotos.length; index += 1) {
+        await page.waitForFunction((name) => document.querySelector("#media-preview-title")?.textContent === name, sameDayPhotos[index]);
+        assert.match(await page.locator("#media-preview-meta").innerText(), language === "en"
+          ? new RegExp(`${index + 1} of 6`) : new RegExp(`第 ${index + 1} 個，共 6 個`));
+        assert.equal(await page.isDisabled("#media-preview-previous"), index === 0);
+        assert.equal(await page.isDisabled("#media-preview-next"), index === sameDayPhotos.length - 1);
+        if (index < sameDayPhotos.length - 1) await page.click("#media-preview-next");
+      }
+      await page.click("#media-preview-previous");
+      await page.waitForFunction(() => document.querySelector("#media-preview-title")?.textContent === "COMPACT.JPG");
+      await page.click("#media-preview-close");
+      const beforeInfo = snapshot();
+      await page.locator(".media-card").filter({ hasText: "ENRICH.JPG" }).locator(".media-actions button").click();
+      await page.waitForFunction(() => document.querySelector("#media-details-summary")?.textContent?.includes("2026") &&
+        document.querySelector("#media-details-loading")?.hidden);
+      await expectNames(sameDayPhotos.slice(0, -1));
+      assert.equal(await page.locator("#media-details-name").innerText(), "ENRICH.JPG",
+        "Enrichment can remove the card without changing the explicitly opened item");
+      assert.deepEqual(snapshot(), { ...beforeInfo, info: beforeInfo.info + 1 });
+      await page.click("#media-details-close");
+
+      await page.click('#media-scope-control [data-media-scope="all"]');
+      await page.waitForFunction(() => document.querySelector("#media-summary")?.dataset.loadStatus === "COMPLETE");
+      assert.match(await page.locator("#media-date-summary").innerText(), language === "en" ? /5 of 85/ : /85 項中符合 5 項/);
+      failListing = true;
+      await page.click("#media-refresh-button");
+      await page.waitForFunction(() => document.querySelector("#media-summary")?.dataset.loadStatus === "FAILED");
+      const failedReads = snapshot();
+      await applyDateRange(page, "2026-09-01", "2026-09-01");
+      assert.equal(await page.locator(".media-card").count(), 0);
+      assert.match(await page.locator("#media-date-summary").innerText(), language === "en" ? /0 of 85.*2 loaded items have unknown dates/ : /85 項中符合 0 項.*2 項日期不明/);
+      assert.match(await page.locator("#media-list").innerText(), language === "en" ? /No loaded media matches/ : /沒有符合篩選/);
+      assert.match(await page.locator("#media-summary").innerText(), language === "en" ? /refresh failed.*85 previous/ : /重新整理失敗.*85/);
+      assert.deepEqual(snapshot(), failedReads, "Applying a zero-match range preserves the failed-refresh warning without retries");
+      await verifyDateDialogLayout(page, language);
+
+      await page.click('#media-filter-control [data-media-filter="all"]');
+      await applyDateRange(page, "2026-10-05", "2026-10-09");
+      await page.selectOption("#media-sort-select", "newest");
+      assert.deepEqual(await page.locator(".media-date-heading").allTextContents(), language === "en"
+        ? ["October 9, 2026", "October 7, 2026", "October 6, 2026", "October 5, 2026"]
+        : ["2026年10月9日", "2026年10月7日", "2026年10月6日", "2026年10月5日"],
+      "Mixed date-only and offset timestamps keep each displayed day in one ordered group");
+      await page.selectOption("#media-sort-select", "camera");
+      await page.click("#media-page-next");
+      assert.match(await page.locator("#media-page-status").innerText(), /73.*83/);
+      const beforeClear = snapshot();
+      await page.click("#media-date-clear");
+      assert.deepEqual(snapshot(), beforeClear, "Clear adds no metadata, listing or camera-write traffic");
+      assert.match(await page.locator("#media-page-status").innerText(), /1.*72.*85/);
+      assert.ok((await names()).includes("UNKNOWN.JPG"));
+      assert.ok((await names()).includes("INVALID.JPG"));
+      assert.equal(await page.locator("#media-date-summary").isHidden(), true);
+      assert.equal(await page.getAttribute("#media-date-button", "aria-pressed"), "false");
+      await applyDateRange(page, "2026-10-07", "2026-10-07");
+      await page.click("#media-date-button");
+      await page.fill("#media-date-from", "2026-01-01");
+      const beforeDialogClear = snapshot();
+      await page.click("#media-date-dialog-clear");
+      await page.waitForFunction(() => !document.querySelector("#media-date-dialog").open);
+      assert.deepEqual(snapshot(), beforeDialogClear);
+      assert.equal(await page.locator("#media-date-summary").isHidden(), true);
+
+      // Disconnect and reconnect through the normal controls; no synthetic session
+      // replacement can accidentally make the reset assertions pass.
+      await applyDateRange(page, "2026-10-07", "2026-10-07");
+      await page.click("#media-date-button");
+      await page.fill("#media-date-from", "2026-01-01");
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => !document.querySelector("#media-date-dialog").open);
+      await page.click("#disconnect-button");
+      await page.waitForSelector("#connection-view:not([hidden])");
+      failListing = false;
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelector("#media-summary")?.dataset.loadStatus === "COMPLETE");
+      assert.equal(await page.getAttribute("#media-date-button", "aria-pressed"), "false");
+      assert.equal(await page.locator("#media-date-summary").isHidden(), true);
+      await page.click("#media-date-button");
+      assert.equal(await page.inputValue("#media-date-from"), "");
+      assert.equal(await page.inputValue("#media-date-to"), "");
+      assert.equal(await page.locator("#media-date-error").isHidden(), true);
+      await page.click("#media-date-cancel");
+      await page.waitForFunction(() => !document.querySelector("#media-date-dialog").open);
+      allDatesUnknown = true;
+      await page.click("#media-refresh-button");
+      await page.waitForFunction(() => document.querySelector("#media-summary")?.dataset.loadStatus === "COMPLETE");
+      const beforeUnknownRange = snapshot();
+      const unknownTotal = await page.locator("#media-page-status").innerText();
+      assert.match(unknownTotal, /85/);
+      await applyDateRange(page, "2026-10-07", "2026-10-07");
+      assert.equal(await page.locator(".media-card").count(), 0);
+      assert.match(await page.locator("#media-date-summary").innerText(), language === "en"
+        ? /0 of 85 loaded.*85 loaded items have unknown dates/ : /85 項中符合 0 項.*85 項日期不明/);
+      await page.click("#media-date-clear");
+      assert.equal(await page.locator(".media-card").count(), 72);
+      assert.deepEqual(snapshot(), beforeUnknownRange,
+        "A CCAPI list with no dates remains honest and causes no fallback info fan-out");
+      assert.deepEqual(errors, []);
+      console.log(`PASS: synthetic PC media date range: ${language}`);
+    } catch (error) {
+      scenarioError = error;
+      throw error;
+    } finally {
+      const cleanupErrors = [];
+      try {
+        if (await page.locator("dialog[open]").count()) await page.keyboard.press("Escape");
+        if (await page.locator("#control-view:not([hidden])").count()) {
+          await page.click("#disconnect-button");
+          await page.waitForSelector("#connection-view:not([hidden])");
+        }
+      } catch (error) { cleanupErrors.push(error); }
+      try { await context.close(); } catch (error) { cleanupErrors.push(error); }
+      if (cleanupErrors.length) {
+        if (!scenarioError) throw new AggregateError(cleanupErrors, `Date journey cleanup failed: ${language}`);
+        console.error(`Date journey cleanup also failed: ${language}`, cleanupErrors);
+      }
+    }
+  }
+}
+
 async function run() {
   const [simulatorPort, bridgePort] = await Promise.all([freePort(), freePort()]);
   const simulatorOrigin = `http://127.0.0.1:${simulatorPort}`;
@@ -1012,6 +1435,8 @@ async function run() {
     assert.deepEqual(pageErrors, []);
     await context.close();
     await verifyCapabilityResponseOwnership(browser, bridgeOrigin);
+    await verifyMediaDeleteResponseOwnership(browser, bridgeOrigin);
+    await verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin);
   } finally {
     if (browser) await browser.close();
     await stopProcess(bridge?.process);
