@@ -278,6 +278,15 @@ class CameraViewModel(
     private val mediaPickerRequests = CameraMediaPickerRequests()
     private var cameraStateRevision = 0L
     private val cameraOperationJobs = mutableMapOf<CameraOperation, Job>()
+    private class HttpMediaPreviewRead {
+        var job: Job? = null
+        var cancelled = false
+        fun cancel() {
+            cancelled = true
+            job?.cancel()
+        }
+    }
+    private var httpMediaPreviewRead: HttpMediaPreviewRead? = null
     private var disconnectJob: Job? = null
     private val liveViewReconciliationJobs = mutableSetOf<Job>()
     private var eventMediaJob: Job? = null
@@ -390,6 +399,7 @@ class CameraViewModel(
     }
 
     fun setUiMode(mode: UiMode) {
+        val previewToCancel = httpMediaPreviewRead.takeIf { mode != UiMode.MEDIA }
         if (mode != UiMode.CONTROL) stopHeldAutofocus()
         if (mode == UiMode.MEDIA) invalidateCameraFocusInfo()
         if (mode != UiMode.MEDIA) _uiState.value.mediaStreamSource?.close()
@@ -403,6 +413,7 @@ class CameraViewModel(
                 mediaStreamSource = if (mode == UiMode.MEDIA) it.mediaStreamSource else null,
             )
         }
+        previewToCancel?.cancel()
         if (mode == UiMode.MEDIA && _uiState.value.mediaItems.isEmpty()) refreshMedia()
     }
 
@@ -1839,6 +1850,14 @@ class CameraViewModel(
             if (isVideo) !item.streamAvailable
             else !state.supports(CameraFeature.MEDIA_PREVIEW) || !item.previewAvailable
         ) return
+        val generation = cameraSessionGeneration
+        val connection = state.info
+        val cancellableImageRead = !isVideo && state.transport in setOf(
+            CameraTransport.CCAPI_NETWORK, CameraTransport.DESKTOP_BRIDGE,
+        )
+        // Own admission before StateFlow observers can dismiss the new viewer.
+        val read = if (cancellableImageRead) HttpMediaPreviewRead() else null
+        if (read != null) httpMediaPreviewRead = read
         state.mediaStreamSource?.close()
         _uiState.update {
             it.copy(
@@ -1848,11 +1867,36 @@ class CameraViewModel(
                 mediaStreamSource = null,
             )
         }
-        val generation = cameraSessionGeneration
-        val connection = state.info
+        if (read != null && (read.cancelled || httpMediaPreviewRead !== read ||
+                generation != cameraSessionGeneration || _uiState.value.info !== connection)) {
+            if (httpMediaPreviewRead === read) httpMediaPreviewRead = null
+            return
+        }
         launchCameraOperation(
             operation = CameraOperation.MEDIA,
             cancelMediaReads = false,
+            onRegistered = { job ->
+                if (read != null) {
+                    read.job = job
+                    job.invokeOnCompletion {
+                        if (httpMediaPreviewRead === read) {
+                            httpMediaPreviewRead = null
+                            // Cancellation before lazy dispatch can skip execute's finally.
+                            // The generic completion handler has already removed this job;
+                            // a successor must retain its own MEDIA pending state.
+                            if (generation == cameraSessionGeneration && _uiState.value.info === connection &&
+                                cameraOperationJobs[CameraOperation.MEDIA] == null &&
+                                _uiState.value.isBusy(CameraOperation.MEDIA)) {
+                                cameraStateRevision += 1
+                                _uiState.update { it.copy(pendingOperations = it.pendingOperations - CameraOperation.MEDIA) }
+                            }
+                        }
+                    }
+                    // MEDIA pending publication can also trigger dismissal before registration.
+                    if (read.cancelled || httpMediaPreviewRead !== read ||
+                        generation != cameraSessionGeneration || _uiState.value.info !== connection) job.cancel()
+                }
+            },
             onError = {
                 _uiState.update { current ->
                     if (generation == cameraSessionGeneration && current.info === connection &&
@@ -1861,7 +1905,16 @@ class CameraViewModel(
             },
         ) {
             val stream = if (isVideo) repository.openMediaStream(item) else null
-            val preview = if (isVideo) null else repository.mediaPreview(item)
+            val preview = if (isVideo) null else try {
+                repository.mediaPreview(item).also {
+                    if (cancellableImageRead) coroutineContext.ensureActive()
+                }
+            } catch (exception: Exception) {
+                // A cancelled HTTP read may surface IOException while unwinding.
+                // Keep this suppression local to display reads, not safety commands.
+                if (cancellableImageRead) coroutineContext.ensureActive()
+                throw exception
+            }
             _uiState.update { current ->
                 if (generation == cameraSessionGeneration && current.info === connection &&
                     current.mediaPreviewItem?.id == item.id) {
@@ -1879,6 +1932,7 @@ class CameraViewModel(
     }
 
     fun closeMediaPreview() {
+        val previewToCancel = httpMediaPreviewRead
         _uiState.value.mediaStreamSource?.close()
         _uiState.update {
             it.copy(
@@ -1888,6 +1942,7 @@ class CameraViewModel(
                 mediaStreamSource = null,
             )
         }
+        previewToCancel?.cancel()
     }
 
     fun loadMediaInfo(item: CameraMediaItem) {
