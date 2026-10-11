@@ -44,11 +44,16 @@
             <span id="health-dot" class="status-dot warning" aria-hidden="true"></span>
           </div>
 
+          <p class="supporting connection-help" data-i18n="connectionBridgeHelp">This page uses the Bridge running on your computer to reach the camera. Keep that Bridge running.</p>
+          <button id="health-retry-button" class="button secondary" type="button" data-i18n="connectionCheckBridge">Check Bridge again</button>
+
           <label class="field">
             <span data-i18n="bearerToken">Bearer token</span>
             <input id="token-input" type="password" autocomplete="off" spellcheck="false"
-                   data-i18n-placeholder="tokenOptional" placeholder="Optional on loopback">
+                   aria-describedby="token-help" data-i18n-placeholder="tokenOptional" placeholder="Optional on loopback">
           </label>
+
+          <p id="token-help" class="supporting" data-i18n="connectionTokenHelp">Use the token configured for this computer’s Bridge, if required.</p>
 
           <div id="connection-mode" class="connection-mode" role="group" aria-label="Connection type" data-i18n-aria="connectionType">
             <button id="usb-mode-button" class="active" type="button" data-connection-mode="usb">
@@ -62,6 +67,7 @@
           </div>
 
           <div id="usb-connection-fields">
+            <p class="supporting connection-help" data-i18n="connectionUsbHelp">Turn on the camera, connect a USB data cable, and close other camera-control apps. USB needs an available libgphoto2 or configured Canon EDSDK engine on this computer.</p>
             <label class="field">
               <span data-i18n="camera">Camera</span>
               <select id="camera-select" disabled>
@@ -71,13 +77,17 @@
           </div>
 
           <div id="ccapi-connection-fields" hidden>
+            <p class="supporting connection-help" data-i18n="connectionCcapiHelp">Enable CCAPI on a compatible camera and connect this computer to a network that can reach it. Use the address and port shown by the camera. Camera Connect pairing alone does not enable CCAPI.</p>
             <label class="field">
               <span data-i18n="cameraUrl">Camera URL</span>
               <input id="ccapi-url-input" type="url" inputmode="url" autocomplete="url" spellcheck="false"
-                     data-i18n-placeholder="cameraUrlPlaceholder" placeholder="http://192.168.1.2:8080">
+                     aria-describedby="ccapi-url-help ccapi-url-validation" data-i18n-placeholder="cameraUrlPlaceholder" placeholder="http://192.168.1.2:8080">
             </label>
-            <details class="credential-fields">
+            <p id="ccapi-url-help" class="supporting" data-i18n="connectionOriginHelp">Use only http:// or https://, the camera address, and its port. Do not add /ccapi, credentials, a query, or a fragment.</p>
+            <p id="ccapi-url-validation" class="inline-error" role="status" hidden></p>
+            <details id="camera-credentials" class="credential-fields">
               <summary data-i18n="cameraCredentials">Camera credentials</summary>
+              <p class="supporting connection-help" data-i18n="connectionCredentialHelp">Enter the camera’s CCAPI username and password only if the camera requires them. These are separate from the Bridge token.</p>
               <label class="field">
                 <span data-i18n="username">Username</span>
                 <input id="ccapi-username-input" type="text" autocomplete="username" spellcheck="false">
@@ -89,6 +99,7 @@
             </details>
           </div>
 
+          <p id="connection-status" class="supporting connection-help" role="status" aria-live="polite"></p>
           <div class="connection-actions">
             <button id="scan-button" class="button secondary" type="button">
               <span class="icon" data-icon="refresh-cw" aria-hidden="true"></span>
@@ -99,7 +110,9 @@
               <span data-i18n="connect">Connect</span>
             </button>
           </div>
+          <button id="scan-cancel-button" class="button secondary" type="button" data-i18n="connectionCancelScan" hidden>Cancel scan</button>
           <p id="connection-error" class="inline-error" role="alert" hidden></p>
+          <button id="connection-fix-button" class="button secondary" type="button" hidden></button>
         </div>
       </main>
     </section>
@@ -733,6 +746,7 @@
   <script src="/app/media-batch-destination.js"></script>
   <script src="/app/media-transfer-history.js"></script>
   <script src="/app/media-auto-import.js"></script>
+  <script src="/app/connection-guidance.js"></script>
   <script src="/app/app.js"></script>
 </body>
 </html>

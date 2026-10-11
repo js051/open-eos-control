@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
+from .errors import ConnectionFailureReason
 from .media_folders import MAX_FOLDER_ID_LENGTH, MAX_FOLDER_LABEL_LENGTH, optional_folder_value
 
 
@@ -534,6 +535,7 @@ class ErrorDetail(ApiModel):
     message: str
     feature: str | None = None
     engine: str | None = None
+    connection_reason: ConnectionFailureReason | None = None
 
 
 class ErrorResponse(ApiModel):

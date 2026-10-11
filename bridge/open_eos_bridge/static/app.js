@@ -1,6 +1,8 @@
 (() => {
   "use strict";
 
+  const connectionGuidance = globalThis.OpenEOSConnectionGuidance;
+  if (!connectionGuidance) throw new Error("Open EOS connection guidance module is unavailable.");
   const diagnostics = globalThis.OpenEOSDiagnostics;
   if (!diagnostics) throw new Error("Open EOS diagnostics module is unavailable.");
   const monitoring = globalThis.OpenEOSMonitoring;
@@ -79,6 +81,43 @@
       language: "Language",
       auto: "Auto",
       connectCamera: "Connect camera",
+      connectionBridgeHelp: "This page uses the Bridge running on your computer to reach the camera. Keep that Bridge running.",
+      connectionCheckBridge: "Check Bridge again",
+      connectionTokenHelp: "Use the token configured for this computer’s Bridge, if required.",
+      connectionUsbHelp: "Turn on the camera, connect a USB data cable, and close other camera-control apps. USB needs an available libgphoto2 or configured Canon EDSDK engine on this computer.",
+      connectionCcapiHelp: "Enable CCAPI on a compatible camera and connect this computer to a network that can reach it. Use the address and port shown by the camera. Camera Connect pairing alone does not enable CCAPI.",
+      connectionOriginHelp: "Use only http:// or https://, the camera address, and its port. Do not add /ccapi, credentials, a query, or a fragment.",
+      connectionCredentialHelp: "Enter the camera’s CCAPI username and password only if the camera requires them. These are separate from the Bridge token.",
+      connectionInvalidOrigin: "Enter a camera origin such as http://192.168.1.2:8080. Remove /ccapi, credentials, query parameters, and fragments.",
+      connectionAddressRequired: "Enter the CCAPI address shown by the camera to enable Connect.",
+      connectionUsbEngine: "No USB camera engine is available. Check the Bridge’s libgphoto2 or Canon EDSDK setup on this computer, then check Bridge again.",
+      connectionCcapiEngine: "The Bridge’s CCAPI engine is unavailable. Check the running Bridge and try Check Bridge again.",
+      connectionBridgeAuth: "The Bridge rejected its token. Enter the token configured for this computer’s Bridge, then retry.",
+      connectionBridgeAccess: "The Bridge denied access. Check whether you opened its local page and whether its access settings allow this connection.",
+      connectionBridgeEndpoint: "This Bridge API endpoint was not found. Check that this page and the running Bridge belong to the same installation, then check Bridge again.",
+      connectionBridgeCheckFailed: "Bridge check failed. Follow the guidance below, then check again.",
+      connectionBridgeNetwork: "This page could not reach the Bridge. Keep the Bridge running and check the computer connection, then check Bridge again. The browser did not identify the exact cause.",
+      connectionCameraAuth: "The camera rejected CCAPI authentication. Check its CCAPI username, password, and authentication settings, then retry Connect.",
+      connectionCameraEndpoint: "The camera’s CCAPI discovery endpoints were not found. Check CCAPI support, enable it on the camera, and verify its address and port before retrying.",
+      connectionCameraHttp: "The camera returned an HTTP error during CCAPI discovery. Check its screen and CCAPI setup, then retry. Authentication failure was not established.",
+      connectionCameraTls: "The Bridge could not establish the camera’s TLS connection. Verify the camera’s HTTPS address and certificate setup before retrying.",
+      connectionCameraHost: "The Bridge could not resolve the camera’s host name. Verify its current address on the camera and this computer’s network, then retry.",
+      connectionCameraTimeout: "The camera’s CCAPI request timed out. Check that the camera is awake and reachable from this computer, then retry.",
+      connectionCameraNetwork: "The Bridge could not complete the camera network connection. Check camera power, network, address, and port, then retry.",
+      connectionCameraDiscovery: "CCAPI discovery did not complete; the exact cause is unknown. Check CCAPI is enabled and verify the camera’s address, port, and network before retrying.",
+      connectionUnknownFailure: "The connection request failed without a verified recovery reason. Check the Bridge and camera setup, then retry explicitly.",
+      connectionScanIdle: "Choose Scan after checking the USB connection.",
+      connectionScanEmpty: "Scan finished with no cameras. Check the USB data cable, camera power and USB mode, and close other camera apps; then choose Scan again.",
+      connectionScanFailed: "Scan failed. Follow the guidance below, then choose Scan again.",
+      connectionScanCancelled: "Scan cancelled. Choose Scan again when you are ready.",
+      connectionScanReady: "Choose a detected camera, then Connect.",
+      connectionCcapiReady: "Check the camera’s CCAPI setup, then choose Connect. No camera command is sent until you connect.",
+      connectionScanAgain: "Scan again",
+      connectionCancelScan: "Cancel scan",
+      connectionRetry: "Retry connection",
+      connectionEditToken: "Edit Bridge token",
+      connectionEditAddress: "Edit camera address",
+      connectionEditCredentials: "Edit camera credentials",
       checkingBridge: "Checking bridge",
       bearerToken: "Bridge Bearer token",
       tokenOptional: "Optional on loopback",
@@ -633,6 +672,43 @@
       language: "語言",
       auto: "自動",
       connectCamera: "連接相機",
+      connectionBridgeHelp: "此頁面透過電腦上的 Bridge 連接相機。請保持 Bridge 執行。",
+      connectionCheckBridge: "重新檢查 Bridge",
+      connectionTokenHelp: "若 Bridge 要求驗證，請輸入此電腦 Bridge 設定的 token。",
+      connectionUsbHelp: "開啟相機、接上可傳輸資料的 USB 線，並關閉其他相機控制程式。此電腦需有可用的 libgphoto2 或已設定的 Canon EDSDK 引擎。",
+      connectionCcapiHelp: "在支援的相機上啟用 CCAPI，並讓電腦連上可存取相機的網路。使用相機顯示的位址與連接埠。只完成 Camera Connect 配對不代表已啟用 CCAPI。",
+      connectionOriginHelp: "只填 http:// 或 https://、相機位址與連接埠。請勿加入 /ccapi、帳密、查詢參數或片段。",
+      connectionCredentialHelp: "僅在相機要求驗證時填入相機的 CCAPI 帳密；這與 Bridge token 是兩組不同的資料。",
+      connectionInvalidOrigin: "請填入相機原始位址，例如 http://192.168.1.2:8080，並移除 /ccapi、帳密、查詢參數與片段。",
+      connectionAddressRequired: "填入相機顯示的 CCAPI 位址後，即可按連線。",
+      connectionUsbEngine: "目前沒有可用的 USB 相機引擎。請檢查此電腦 Bridge 的 libgphoto2 或 Canon EDSDK 設定，再重新檢查 Bridge。",
+      connectionCcapiEngine: "Bridge 的 CCAPI 引擎無法使用。請檢查正在執行的 Bridge，再按重新檢查 Bridge。",
+      connectionBridgeAuth: "Bridge 拒絕了 token。請填入此電腦 Bridge 設定的 token，再重試。",
+      connectionBridgeAccess: "Bridge 拒絕存取。請確認是否開啟本機的 Bridge 頁面，以及其存取設定是否允許此連線。",
+      connectionBridgeEndpoint: "找不到此 Bridge API 端點。請確認此頁面與執行中的 Bridge 來自同一份安裝，再重新檢查 Bridge。",
+      connectionBridgeCheckFailed: "Bridge 檢查失敗。請依下方說明處理後，再重新檢查。",
+      connectionBridgeNetwork: "此頁面無法連上 Bridge。請保持 Bridge 執行並檢查電腦連線，再重新檢查 Bridge。瀏覽器未提供確切原因。",
+      connectionCameraAuth: "相機拒絕了 CCAPI 驗證。請檢查相機的 CCAPI 帳號、密碼與驗證設定，再重試連線。",
+      connectionCameraEndpoint: "找不到相機的 CCAPI 探索端點。請確認相機支援並已啟用 CCAPI，核對位址與連接埠後再重試。",
+      connectionCameraHttp: "相機在 CCAPI 探索時回傳 HTTP 錯誤。請檢查相機畫面與 CCAPI 設定後重試；目前無法確認是驗證失敗。",
+      connectionCameraTls: "Bridge 無法建立相機的 TLS 連線。請核對相機的 HTTPS 位址與憑證設定後重試。",
+      connectionCameraHost: "Bridge 無法解析相機主機名稱。請核對相機目前顯示的位址與此電腦的網路後重試。",
+      connectionCameraTimeout: "相機的 CCAPI 請求逾時。請確認相機已喚醒，且此電腦可連上相機後重試。",
+      connectionCameraNetwork: "Bridge 無法完成相機網路連線。請檢查相機電源、網路、位址與連接埠後重試。",
+      connectionCameraDiscovery: "CCAPI 探索未完成，確切原因不明。請確認已啟用 CCAPI，並核對相機位址、連接埠與網路後再重試。",
+      connectionUnknownFailure: "連線請求失敗，目前沒有可確認的原因。請檢查 Bridge 與相機設定，再手動重試。",
+      connectionScanIdle: "確認 USB 連線後，請按掃描。",
+      connectionScanEmpty: "掃描已完成，但未找到相機。請檢查 USB 資料線、相機電源與 USB 模式，關閉其他相機程式後再按重新掃描。",
+      connectionScanFailed: "掃描失敗。請依下方說明處理後，再按重新掃描。",
+      connectionScanCancelled: "已取消掃描。準備好後可按重新掃描。",
+      connectionScanReady: "請選擇偵測到的相機，再按連線。",
+      connectionCcapiReady: "確認相機的 CCAPI 設定後，請按連線。連線前不會傳送相機指令。",
+      connectionScanAgain: "重新掃描",
+      connectionCancelScan: "取消掃描",
+      connectionRetry: "重試連線",
+      connectionEditToken: "編輯 Bridge token",
+      connectionEditAddress: "編輯相機位址",
+      connectionEditCredentials: "編輯相機帳密",
       checkingBridge: "正在檢查 Bridge",
       bearerToken: "Bridge Bearer token",
       tokenOptional: "本機連線可留空",
@@ -1285,6 +1361,11 @@
     connectionMode: "usb",
     token: "",
     health: null,
+    healthAttempt: null,
+    healthFailed: false,
+    scanAttempt: null,
+    scanState: "idle",
+    connectionFailure: null,
     cameras: [],
     session: null,
     info: null,
@@ -1448,6 +1529,12 @@
     scanButton: byId("scan-button"),
     connectButton: byId("connect-button"),
     connectionError: byId("connection-error"),
+    connectionStatus: byId("connection-status"),
+    connectionFixButton: byId("connection-fix-button"),
+    healthRetryButton: byId("health-retry-button"),
+    scanCancelButton: byId("scan-cancel-button"),
+    ccapiUrlValidation: byId("ccapi-url-validation"),
+    cameraCredentials: byId("camera-credentials"),
     shutterDisconnectWarning: byId("shutter-disconnect-warning"),
     shutterDisconnectConfirm: byId("shutter-disconnect-confirm"),
     cameraName: byId("camera-name"),
@@ -1655,13 +1742,14 @@
   };
 
   class ApiError extends Error {
-    constructor(message, { code = "HTTP_ERROR", status = 0, feature = null, engine = null } = {}) {
+    constructor(message, { code = "HTTP_ERROR", status = 0, feature = null, engine = null, connectionReason = null } = {}) {
       super(message);
       this.name = "ApiError";
       this.code = code;
       this.status = status;
       this.feature = feature;
       this.engine = engine;
+      this.connectionReason = connectionReason;
     }
   }
 
@@ -1747,7 +1835,8 @@
       let detail = null;
       try {
         detail = await response.json();
-      } catch (_) {
+      } catch (error) {
+        if (mediaTransfer.isAbortError(error)) throw error;
         // Keep the stable fallback when an intermediary returns non-JSON content.
       }
       const error = detail?.error || {};
@@ -1756,6 +1845,7 @@
         status: response.status,
         feature: error.feature,
         engine: error.engine,
+        connectionReason: error.connectionReason,
       });
     }
     if (responseType === "response") return response;
@@ -1782,14 +1872,60 @@
   }
 
   function showConnectionError(error) {
+    if (mediaTransfer.isAbortError(error)) return;
     const normalized = captureError(error);
-    ui.connectionError.textContent = normalized.message;
-    ui.connectionError.hidden = false;
+    if (normalized.code === "SHUTTER_RELEASE_UNCONFIRMED") {
+      state.shutterDisconnectWarning = true;
+      state.connectionFailure = ["previousShutterWarning", null];
+    } else {
+      state.connectionFailure = connectionGuidance.failureGuidance(normalized, state.connectionMode);
+    }
+    renderConnectionGuidance();
   }
 
   function clearConnectionError() {
+    state.connectionFailure = null;
     ui.connectionError.textContent = "";
     ui.connectionError.hidden = true;
+    ui.connectionFixButton.hidden = true;
+  }
+
+  function renderConnectionGuidance() {
+    const network = state.connectionMode === "ccapi";
+    const invalid = network && Boolean(ui.ccapiUrlInput.value.trim()) && !validCcapiUrl();
+    ui.ccapiUrlInput.setAttribute("aria-invalid", String(invalid));
+    ui.ccapiUrlValidation.hidden = !invalid;
+    ui.ccapiUrlValidation.textContent = invalid ? t("connectionInvalidOrigin") : "";
+    ui.healthRetryButton.disabled = state.busy || Boolean(state.healthAttempt) || Boolean(state.scanAttempt);
+    ui.scanCancelButton.hidden = !state.scanAttempt;
+    ui.scanButton.querySelector("span[data-i18n]").textContent = t(state.scanState === "idle" ? "scan" : "connectionScanAgain");
+    ui.connectButton.querySelector("span[data-i18n]").textContent = t(state.connectionFailure ? "connectionRetry" : "connect");
+    let statusKey;
+    if (state.healthAttempt) statusKey = "checkingBridge";
+    else if (state.healthFailed) statusKey = "connectionBridgeCheckFailed";
+    else if (state.health && (network ? !state.health.engines?.ccapi?.available : !connectionGuidance.availableUsbEngine(state.health))) {
+      statusKey = network ? "connectionCcapiEngine" : "connectionUsbEngine";
+    } else if (network) statusKey = ui.ccapiUrlInput.value.trim() ? "connectionCcapiReady" : "connectionAddressRequired";
+    else statusKey = ({ idle: "connectionScanIdle", scanning: "scanning", empty: "connectionScanEmpty",
+      failed: "connectionScanFailed", cancelled: "connectionScanCancelled", ready: "connectionScanReady" })[state.scanState];
+    ui.connectionStatus.textContent = t(statusKey || "connectionScanIdle");
+    if (state.connectionFailure) {
+      const [key, action] = state.connectionFailure;
+      ui.connectionError.textContent = t(key);
+      ui.connectionError.hidden = false;
+      ui.connectionFixButton.hidden = !action;
+      ui.connectionFixButton.textContent = t(({ token: "connectionEditToken", address: "connectionEditAddress",
+        credentials: "connectionEditCredentials", bridge: "connectionCheckBridge" })[action] || "connectionRetry");
+    }
+  }
+
+  function correctConnection() {
+    const action = state.connectionFailure?.[1];
+    if (state.busy || state.scanAttempt) return;
+    if (action === "bridge") { void refreshHealth(); return; }
+    if (action === "credentials") ui.cameraCredentials.open = true;
+    const input = ({ token: ui.tokenInput, address: ui.ccapiUrlInput, credentials: ui.ccapiUsernameInput })[action];
+    input?.focus();
   }
 
   function showToast(message, error = false) {
@@ -1809,11 +1945,12 @@
 
   function renderHealth() {
     if (!state.health) {
-      ui.engineState.textContent = t("checkingBridge");
+      ui.engineState.textContent = t(state.healthFailed ? "bridgeError" : "checkingBridge");
       ui.healthDot.className = "status-dot warning";
+      renderConnectionGuidance();
       return;
     }
-    const engineName = state.connectionMode === "ccapi" ? "ccapi" : "libgphoto2";
+    const engineName = state.connectionMode === "ccapi" ? "ccapi" : connectionGuidance.availableUsbEngine(state.health);
     const engine = state.health.engines?.[engineName] || null;
     if (engine?.available) {
       const display = engine.version || engineName;
@@ -1821,22 +1958,14 @@
       ui.engineState.title = engine.detail || "";
       ui.healthDot.className = "status-dot success";
     } else {
-      ui.engineState.textContent = engine?.detail || t("bridgeUnavailable");
+      ui.engineState.textContent = t(state.connectionMode === "ccapi" ? "connectionCcapiEngine" : "connectionUsbEngine");
       ui.engineState.title = "";
       ui.healthDot.className = "status-dot warning";
     }
   }
 
   function validCcapiUrl() {
-    try {
-      const value = new URL(ui.ccapiUrlInput.value.trim());
-      return (
-        ["http:", "https:"].includes(value.protocol) && Boolean(value.hostname) &&
-        !value.username && !value.password && value.pathname === "/" && !value.search && !value.hash
-      );
-    } catch (_) {
-      return false;
-    }
+    return connectionGuidance.validCameraOrigin(ui.ccapiUrlInput.value);
   }
 
   function renderConnectionMode() {
@@ -1848,16 +1977,17 @@
     ui.usbConnectionFields.hidden = network;
     ui.ccapiConnectionFields.hidden = !network;
     ui.scanButton.hidden = network;
+    renderConnectionGuidance();
     renderAvailability();
   }
 
   function selectConnectionMode(mode) {
     if (!["usb", "ccapi"].includes(mode) || state.busy) return;
+    cancelCameraScan();
     state.connectionMode = mode;
     clearConnectionError();
     renderConnectionMode();
     renderHealth();
-    if (mode === "usb" && !state.cameras.length && !state.health?.authRequired) scanCameras();
   }
 
   function renderCameras() {
@@ -1866,7 +1996,7 @@
     const placeholder = document.createElement("option");
     placeholder.value = "";
     if (!state.cameras.length) {
-      placeholder.textContent = t("scanFirst");
+      placeholder.textContent = t(state.scanState === "empty" ? "noCameras" : "scanFirst");
       ui.cameraSelect.append(placeholder);
       ui.cameraSelect.disabled = true;
       renderAvailability();
@@ -1887,46 +2017,89 @@
   }
 
   async function refreshHealth() {
+    if (state.healthAttempt || state.busy || state.scanAttempt) return;
+    const attempt = {};
+    state.healthAttempt = attempt;
+    renderConnectionGuidance();
     try {
-      state.health = await api("/health");
-      renderHealth();
-      if (state.health.authRequired) ui.tokenInput.placeholder = t("authRequired");
+      const health = await api("/health");
+      if (state.healthAttempt !== attempt) return;
+      state.health = health;
+      state.healthFailed = false;
+      if (state.connectionFailure?.[1] === "bridge") clearConnectionError();
+      ui.tokenInput.placeholder = t(health.authRequired ? "authRequired" : "tokenOptional");
     } catch (error) {
+      if (state.healthAttempt !== attempt || mediaTransfer.isAbortError(error)) return;
       state.health = null;
-      captureError(error);
-      ui.engineState.textContent = t("bridgeError");
-      ui.healthDot.className = "status-dot warning";
+      state.healthFailed = true;
+      showConnectionError(error);
+    } finally {
+      if (state.healthAttempt === attempt) {
+        state.healthAttempt = null;
+        renderHealth();
+        renderConnectionGuidance();
+        renderAvailability();
+      }
     }
   }
 
+  function cancelCameraScan() {
+    const attempt = state.scanAttempt;
+    if (!attempt) return;
+    state.scanAttempt = null;
+    attempt.controller.abort();
+    state.scanState = "cancelled";
+    renderHealth();
+    renderConnectionGuidance();
+    renderAvailability();
+  }
+
   async function scanCameras() {
-    if (state.connectionMode !== "usb") return;
+    if (state.connectionMode !== "usb" || state.busy || state.scanAttempt || state.healthAttempt || state.session) return;
     clearConnectionError();
     state.token = ui.tokenInput.value.trim();
-    ui.scanButton.disabled = true;
-    ui.connectButton.disabled = true;
+    const attempt = { controller: new AbortController(), session: state.session };
+    state.scanAttempt = attempt;
+    state.scanState = "scanning";
+    state.cameras = [];
+    renderCameras();
+    renderConnectionGuidance();
     ui.engineState.textContent = t("scanning");
+    const current = () => state.scanAttempt === attempt && state.connectionMode === "usb" && state.session === attempt.session;
     try {
-      const response = await api("/v1/cameras");
-      state.cameras = response.cameras || [];
+      const response = await api("/v1/cameras", { signal: attempt.controller.signal });
+      if (!current()) return;
+      state.cameras = Array.isArray(response.cameras) ? response.cameras : [];
+      state.scanState = state.cameras.length ? "ready" : "empty";
       renderCameras();
       ui.engineState.textContent = state.cameras.length
         ? t("camerasFound", { count: state.cameras.length })
         : t("noCameras");
     } catch (error) {
+      if (!current()) return;
+      state.scanState = mediaTransfer.isAbortError(error) ? "cancelled" : "failed";
       state.cameras = [];
       renderCameras();
-      showConnectionError(error);
+      if (!mediaTransfer.isAbortError(error)) showConnectionError(error);
       renderHealth();
     } finally {
-      ui.scanButton.disabled = false;
+      if (state.scanAttempt === attempt) {
+        state.scanAttempt = null;
+        if (state.session === attempt.session) {
+          renderConnectionGuidance();
+          renderAvailability();
+        }
+      }
     }
   }
 
   async function connectCamera() {
+    if (state.busy || state.scanAttempt || state.healthAttempt || state.session || state.healthFailed) return;
     const network = state.connectionMode === "ccapi";
     const cameraId = ui.cameraSelect.value;
     const ccapiUrl = ui.ccapiUrlInput.value.trim();
+    const engineName = network ? "ccapi" : state.cameras.find((camera) => camera.id === cameraId)?.engine;
+    if (state.health?.engines?.[engineName]?.available === false) return;
     if ((!network && !cameraId) || (network && !validCcapiUrl())) return;
     clearConnectionError();
     state.token = ui.tokenInput.value.trim();
@@ -1964,7 +2137,7 @@
       setOperationState(t("ready"));
       if (network) {
         writeCameraPreference(CCAPI_URL_KEY, ccapiUrl);
-        writeCameraPreference(CCAPI_USERNAME_KEY, ui.ccapiUsernameInput.value.trim());
+        writeCameraPreference(CCAPI_USERNAME_KEY, sessionPayload.ccapiUsername);
       }
       ui.tokenInput.value = "";
       ui.ccapiPasswordInput.value = "";
@@ -4837,9 +5010,18 @@
     const videoSupported = featureSupported(FEATURES.VIDEO_RECORDING);
     const recording = Boolean(state.status?.recording);
     const videoAvailable = videoSupported || recording;
-    ui.scanButton.disabled = state.busy;
+    [ui.usbModeButton, ui.ccapiModeButton, ui.tokenInput, ui.ccapiUrlInput,
+      ui.ccapiUsernameInput, ui.ccapiPasswordInput].forEach((input) => {
+      if (input) input.disabled = state.busy;
+    });
+    ui.scanButton.disabled = state.busy || Boolean(state.scanAttempt) || Boolean(state.healthAttempt);
     const connectionReady = state.connectionMode === "ccapi" ? validCcapiUrl() : Boolean(ui.cameraSelect.value);
-    ui.connectButton.disabled = state.busy || !connectionReady;
+    const selectedEngine = state.connectionMode === "ccapi" ? "ccapi"
+      : state.cameras.find((camera) => camera.id === ui.cameraSelect.value)?.engine;
+    ui.connectButton.disabled = state.busy || Boolean(state.scanAttempt) || Boolean(state.healthAttempt) ||
+      state.healthFailed || state.health?.engines?.[selectedEngine]?.available === false || !connectionReady;
+    if (ui.healthRetryButton) ui.healthRetryButton.disabled = state.busy || Boolean(state.scanAttempt) || Boolean(state.healthAttempt);
+    if (ui.connectionFixButton) ui.connectionFixButton.disabled = state.busy || Boolean(state.scanAttempt);
     ui.refreshButton.disabled = !connected || interactionBusy;
     ui.disconnectButton.disabled = !connected || state.busy;
     ui.photoModeButton.disabled = interactionBusy || bulbActive || Boolean(state.status?.recording);
@@ -7266,7 +7448,22 @@
     ui.usbModeButton.addEventListener("click", () => selectConnectionMode("usb"));
     ui.ccapiModeButton.addEventListener("click", () => selectConnectionMode("ccapi"));
     ui.cameraSelect.addEventListener("change", renderAvailability);
-    ui.ccapiUrlInput.addEventListener("input", renderAvailability);
+    ui.ccapiUrlInput.addEventListener("input", () => {
+      clearConnectionError();
+      renderConnectionGuidance();
+      renderAvailability();
+    });
+    ui.tokenInput.addEventListener("input", () => {
+      cancelCameraScan();
+      clearConnectionError();
+      state.cameras = [];
+      state.scanState = "idle";
+      renderCameras();
+      renderConnectionGuidance();
+    });
+    ui.scanCancelButton.addEventListener("click", cancelCameraScan);
+    ui.healthRetryButton.addEventListener("click", refreshHealth);
+    ui.connectionFixButton.addEventListener("click", correctConnection);
     ui.tokenInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         if (state.connectionMode === "ccapi") connectCamera();
@@ -7603,6 +7800,7 @@
       if (previewActive()) applyLiveViewLayout();
     });
     window.addEventListener("beforeunload", () => {
+      cancelCameraScan();
       stopMediaAutoImport("backgrounded");
       lutPreviewRenderer?.dispose();
       lutPreviewRenderer = null;
@@ -7636,8 +7834,7 @@
     renderAvailability();
     await refreshLocalVideoInputs();
     await refreshHealth();
-    const engine = state.health?.engines?.libgphoto2;
-    if (engine?.available && !state.health.authRequired) await scanCameras();
+    if (connectionGuidance.availableUsbEngine(state.health) && !state.health.authRequired) await scanCameras();
   }
 
   initialize();

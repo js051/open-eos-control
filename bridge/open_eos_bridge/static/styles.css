@@ -286,6 +286,20 @@ input:disabled {
   box-shadow: 0 18px 52px rgb(0 0 0 / 28%);
 }
 
+.connection-help {
+  margin: 14px 0;
+}
+
+#health-retry-button,
+#connection-fix-button,
+#scan-cancel-button {
+  margin-top: 10px;
+}
+
+#ccapi-url-input[aria-invalid="true"] {
+  border-color: #ff9094;
+}
+
 .connection-mode {
   display: grid;
   height: 56px;

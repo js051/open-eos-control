@@ -4,6 +4,8 @@ import base64
 import json
 import mimetypes
 import re
+import socket
+import ssl
 import threading
 import time
 from collections import deque
@@ -19,7 +21,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, unquote, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
-from .errors import BridgeError, unsupported
+from .errors import BridgeError, ConnectionFailureReason, unsupported
 from .media_folders import camera_folder_fields
 from .models import (
     BatteryStatus,
@@ -763,6 +765,35 @@ class _CcapiHTTPError(BridgeError):
             self.camera_message = value["message"].strip()
 
 
+def _connection_failure_reason(error: BridgeError) -> ConnectionFailureReason:
+    # The upstream HTTP status is retained separately from the legacy Bridge 502.
+    # Neither the camera body nor a diagnostic message can grant auth/TLS evidence.
+    if isinstance(error, _CcapiHTTPError):
+        if error.camera_status in {401, 403}:
+            return ConnectionFailureReason.AUTHENTICATION_REJECTED
+        if error.camera_status == 404:
+            return ConnectionFailureReason.ENDPOINT_NOT_FOUND
+        return ConnectionFailureReason.HTTP_ERROR
+    cause: BaseException | None = error
+    for _ in range(16):
+        if isinstance(cause, ssl.SSLError):
+            return ConnectionFailureReason.TLS_ERROR
+        if isinstance(cause, socket.gaierror):
+            return ConnectionFailureReason.HOST_NOT_FOUND
+        if isinstance(cause, TimeoutError):
+            return ConnectionFailureReason.TIMEOUT
+        if isinstance(cause, URLError):
+            # URLError may carry plain diagnostic text, which is not evidence.
+            cause = cause.reason if isinstance(cause.reason, BaseException) else cause.__cause__
+            continue
+        if isinstance(cause, (OSError, HTTPException)):
+            return ConnectionFailureReason.UNREACHABLE
+        if cause is None:
+            break
+        cause = cause.__cause__
+    return ConnectionFailureReason.DISCOVERY_FAILED
+
+
 class CcapiEngine:
     name = ENGINE_NAME
 
@@ -882,6 +913,7 @@ class CcapiSession:
             self._discovery_trace.clear()
             self._discovery_trace_truncated = False
             failures: list[str] = []
+            reasons: set[ConnectionFailureReason] = set()
             for path in ("/ccapi", "/ccapi/"):
                 try:
                     try:
@@ -914,6 +946,7 @@ class CcapiSession:
                             endpoint=f"GET {path}", outcome="NO_API_LIST", response=value
                         )
 
+                    reasons.add(ConnectionFailureReason.DISCOVERY_FAILED)
                     developer_endpoint = f"GET {CCAPI_DEVELOPER_API_PATH}"
                     try:
                         value = self._request_json("GET", CCAPI_DEVELOPER_API_PATH)
@@ -950,6 +983,7 @@ class CcapiSession:
                     return
                 except BridgeError as error:
                     failures.append(f"GET {path}: {error.message}")
+                    reasons.add(_connection_failure_reason(error))
 
             for prefix in ("/ccapi/ver110", "/ccapi/ver100"):
                 path = f"{prefix}/deviceinformation"
@@ -984,6 +1018,7 @@ class CcapiSession:
                     return
                 except BridgeError as error:
                     failures.append(f"GET {path}: {error.message}")
+                    reasons.add(_connection_failure_reason(error))
 
             detail = "\n".join(f"- {failure}" for failure in failures[-6:])
             raise BridgeError(
@@ -991,6 +1026,9 @@ class CcapiSession:
                 f"Failed to discover a Canon CCAPI camera at {self.base_url}.\n{detail}",
                 status_code=502,
                 engine=self.engine_name,
+                # Enum declaration order is the bounded recovery priority. A fallback
+                # 404 must not hide earlier auth, TLS, or transport evidence.
+                connection_reason=next(reason for reason in ConnectionFailureReason if reason in reasons),
             )
 
     def close(self) -> None:

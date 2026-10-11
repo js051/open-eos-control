@@ -449,6 +449,11 @@ def create_app(
                 message=error.message,
                 feature=error.feature,
                 engine=error.engine,
+                connection_reason=(
+                    error.connection_reason
+                    if error.code == "CCAPI_DISCOVERY_FAILED" and error.status_code == 502 and error.engine == "ccapi"
+                    else None
+                ),
             )
         )
         return JSONResponse(

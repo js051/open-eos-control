@@ -743,6 +743,171 @@ async function verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin) {
   }
 }
 
+async function verifyConnectionRecoveryJourneys(browser, origin, simulatorOrigin) {
+  for (const language of ["en", "zh-TW"]) {
+    const context = await browser.newContext({ locale: language === "en" ? "en-US" : "zh-TW",
+      viewport: { width: 1100, height: 850 } });
+    const page = await context.newPage();
+    page.setDefaultTimeout(12_000);
+    const pageErrors = [], writes = [], scanGates = new Map();
+    let enginesAvailable = false, scans = 0, connections = 0;
+    const text = language === "en" ? {
+      unavailable: /No USB camera engine/, empty: /Scan finished with no cameras/, scanFailed: /Scan failed/,
+      token: /Bridge rejected its token/, cancelled: /Scan cancelled/, invalid: /Enter a camera origin/,
+      cameraAuth: /camera rejected CCAPI authentication/, missing: /discovery endpoints were not found/,
+      unknown: /exact cause is unknown/, generic: /without a verified recovery reason/, tls: /TLS connection/,
+      bridgeNetwork: /could not reach the Bridge/,
+    } : {
+      unavailable: /沒有可用的 USB 相機引擎/, empty: /掃描已完成，但未找到相機/, scanFailed: /掃描失敗/,
+      token: /Bridge 拒絕了 token/, cancelled: /已取消掃描/, invalid: /請填入相機原始位址/,
+      cameraAuth: /相機拒絕了 CCAPI 驗證/, missing: /找不到相機的 CCAPI 探索端點/,
+      unknown: /確切原因不明/, generic: /目前沒有可確認的原因/, tls: /TLS 連線/,
+      bridgeNetwork: /無法連上 Bridge/,
+    };
+    await context.addInitScript(() => {
+      // Deliberately deliver retired scan responses even after AbortSignal fires.
+      // The production owner check, not the browser's network cancellation, must
+      // protect the replacement state. A task marker proves the body was consumed.
+      const original = window.fetch;
+      window.__scanBodiesConsumed = 0;
+      window.fetch = async (input, options) => {
+        const scan = new URL(String(input), location.href).pathname === "/v1/cameras";
+        const response = await original(input, scan ? { ...options, signal: undefined } : options);
+        if (scan) {
+          const json = response.json.bind(response);
+          response.json = async () => {
+            try { return await json(); }
+            finally { setTimeout(() => { window.__scanBodiesConsumed += 1; }, 0); }
+          };
+        }
+        return response;
+      };
+    });
+    page.on("pageerror", error => pageErrors.push(error.message));
+    page.on("request", request => {
+      if (request.method() !== "GET") writes.push({ method: request.method(), path: new URL(request.url()).pathname });
+    });
+    await page.route("**/health", route => route.fulfill({ json: {
+      authRequired: true, engines: { libgphoto2: { available: false },
+        edsdk: { available: enginesAvailable, version: "SYNTHETIC EDSDK" }, ccapi: { available: true } },
+    } }));
+    const camera = id => ({ id, model: `SYNTHETIC ${id}`, port: "USB", engine: "edsdk" });
+    await page.route("**/v1/cameras", async route => {
+      const attempt = ++scans;
+      let gate = null;
+      if ([4, 6].includes(attempt)) {
+        let resolve;
+        gate = new Promise(done => { resolve = done; });
+        scanGates.set(attempt, resolve);
+      }
+      await page.evaluate(count => { window.__scanRequests = count; }, attempt);
+      if (gate) await gate;
+      if ([2, 6].includes(attempt)) {
+        await route.fulfill({ status: 401, json: { error: { code: "SYNTHETIC", message: "Synthetic" } } });
+      } else {
+        await route.fulfill({ json: { cameras: attempt === 1 ? [] : [camera(attempt === 4 ? "OLD" : "NEW")] } });
+      }
+    });
+    await page.route("**/v1/session", async route => {
+      if (route.request().method() !== "POST") return route.continue();
+      const attempt = ++connections;
+      if (attempt === 8) return route.continue();
+      if (attempt === 6) return route.abort("failed");
+      const reason = ["AUTHENTICATION_REJECTED", "ENDPOINT_NOT_FOUND", { malformed: true },
+        "TLS_ERROR", "AUTHENTICATION_REJECTED", null, "TLS_ERROR"][attempt - 1];
+      await route.fulfill({ status: attempt === 4 ? 401 : attempt === 5 ? 503 : 502, json: { error: {
+        code: attempt === 5 ? "UNAUTHORIZED" : "CCAPI_DISCOVERY_FAILED", engine: "ccapi",
+        connectionReason: reason, message: "401 Unauthorized: synthetic body cannot establish authentication",
+      } } });
+    });
+    try {
+      await page.goto(origin, { waitUntil: "networkidle" });
+      await page.locator("#connection-view .language-select").selectOption(language);
+      assert.match(await page.locator("#connection-status").innerText(), text.unavailable);
+      assert.equal(scans, 0);
+      enginesAvailable = true;
+      await page.click("#health-retry-button");
+      await page.waitForFunction(() => document.querySelector("#engine-state").textContent.includes("SYNTHETIC EDSDK"));
+      assert.equal(scans, 0, "Check Bridge never silently retries a scan");
+      await page.click("#scan-button");
+      await page.waitForFunction(() => window.__scanBodiesConsumed === 1);
+      assert.match(await page.locator("#connection-status").innerText(), text.empty);
+      assert.equal(await page.locator("#connect-button").isDisabled(), true);
+      await page.click("#scan-button");
+      await page.waitForFunction(() => window.__scanBodiesConsumed === 2);
+      assert.match(await page.locator("#connection-status").innerText(), text.scanFailed);
+      assert.match(await page.locator("#connection-error").innerText(), text.token);
+      await page.click("#connection-fix-button");
+      assert.equal(await page.locator("#token-input").evaluate(input => input === document.activeElement), true);
+      await page.fill("#token-input", "SYNTHETIC-TOKEN");
+      await page.click("#scan-button");
+      await page.waitForSelector("#connect-button:not([disabled])");
+      assert.equal(await page.locator("#camera-select").inputValue(), "NEW");
+      await page.click("#scan-button");
+      await page.waitForSelector("#scan-cancel-button:not([hidden])");
+      await page.waitForFunction(() => window.__scanRequests === 4);
+      await page.click("#ccapi-mode-button");
+      await page.click("#usb-mode-button");
+      assert.equal(scans, 4, "Switching modes requires an explicit scan retry");
+      await page.click("#scan-button");
+      await page.waitForSelector("#connect-button:not([disabled])");
+      const consumedBeforeOld = await page.evaluate(() => window.__scanBodiesConsumed);
+      scanGates.get(4)();
+      await page.waitForFunction(before => window.__scanBodiesConsumed > before, consumedBeforeOld);
+      assert.equal(await page.locator("#camera-select").inputValue(), "NEW");
+      assert.equal(await page.locator("#connection-error").isHidden(), true);
+      await page.click("#scan-button");
+      await page.waitForSelector("#scan-cancel-button:not([hidden])");
+      await page.waitForFunction(() => window.__scanRequests === 6);
+      await page.click("#scan-cancel-button");
+      assert.match(await page.locator("#connection-status").innerText(), text.cancelled);
+      const consumedBeforeCancel = await page.evaluate(() => window.__scanBodiesConsumed);
+      scanGates.get(6)();
+      await page.waitForFunction(before => window.__scanBodiesConsumed > before, consumedBeforeCancel);
+      assert.match(await page.locator("#connection-status").innerText(), text.cancelled);
+      assert.equal(await page.locator("#connection-error").isHidden(), true);
+      assert.deepEqual(writes, [], "Setup, scans, cancellation and guidance send no camera writes");
+
+      await page.click("#ccapi-mode-button");
+      await page.fill("#ccapi-url-input", `${simulatorOrigin}/ccapi`);
+      assert.match(await page.locator("#ccapi-url-validation").innerText(), text.invalid);
+      assert.equal(await page.locator("#ccapi-url-input").getAttribute("aria-invalid"), "true");
+      assert.equal(await page.locator("#connect-button").isDisabled(), true);
+      await page.fill("#ccapi-url-input", simulatorOrigin);
+      assert.equal(await page.locator("#ccapi-url-validation").isHidden(), true);
+      for (const [index, expected] of [text.cameraAuth, text.missing, text.unknown, text.token,
+        text.generic, text.bridgeNetwork, text.tls].entries()) {
+        await page.click("#connect-button");
+        await page.waitForSelector("#connection-error:not([hidden])");
+        await page.waitForSelector("#connect-button:not([disabled])");
+        assert.equal(connections, index + 1);
+        assert.match(await page.locator("#connection-error").innerText(), expected);
+        assert.doesNotMatch(await page.locator("#connection-error").innerText(), /synthetic body/);
+        if (index === 0) {
+          await page.click("#connection-fix-button");
+          assert.equal(await page.locator("#camera-credentials").getAttribute("open"), "");
+          assert.equal(await page.locator("#ccapi-username-input").evaluate(input => input === document.activeElement), true);
+        }
+      }
+      assert.equal(writes.length, 7, "Only explicit Connect attempts send POST requests");
+      assert.equal(writes.every(write => write.method === "POST" && write.path === "/v1/session"), true);
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      assert.equal(connections, 8);
+      await page.click("#disconnect-button");
+      await page.waitForSelector("#connection-view:not([hidden])");
+      assert.equal(writes.every(write => (write.method === "POST" && write.path === "/v1/session") ||
+        (write.method === "DELETE" && /^\/v1\/session\/[^/]+(?:\/events)?$/.test(write.path))), true,
+      "Recovery and connection lifecycle send no shutter, focus, Live View or setting commands");
+      assert.deepEqual(pageErrors, []);
+      console.log(`PC connection setup, scan ownership and recovery journey passed: ${language}`);
+    } finally {
+      for (const release of scanGates.values()) release();
+      await context.close();
+    }
+  }
+}
+
 async function run() {
   const [simulatorPort, bridgePort] = await Promise.all([freePort(), freePort()]);
   const simulatorOrigin = `http://127.0.0.1:${simulatorPort}`;
@@ -1569,6 +1734,7 @@ async function run() {
     assert.deepEqual(await page.evaluate(() => window.__objectUrlRevocationViolations), []);
     assert.deepEqual(pageErrors, []);
     await context.close();
+    await verifyConnectionRecoveryJourneys(browser, bridgeOrigin, simulatorOrigin);
     await verifyCapabilityResponseOwnership(browser, bridgeOrigin);
     await verifyMediaDeleteResponseOwnership(browser, bridgeOrigin);
     await verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin);
