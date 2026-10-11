@@ -33,17 +33,66 @@ final class ForegroundJSONTests: XCTestCase {
     }
 
     func testSupportedUnicodeEncodingsPreserveDuplicateEvidenceAndValidObjects() throws {
-        let encodings: [(String.Encoding, [UInt8])] = [
-            (.utf8, [0xEF, 0xBB, 0xBF]),
-            (.utf16LittleEndian, [0xFF, 0xFE]), (.utf16BigEndian, [0xFE, 0xFF]),
-            (.utf32LittleEndian, [0xFF, 0xFE, 0, 0]), (.utf32BigEndian, [0, 0, 0xFE, 0xFF]),
+        let encodings: [(String, String.Encoding, [UInt8], [UInt8])] = [
+            ("UTF-8", .utf8, [0xEF, 0xBB, 0xBF], [0x20, 0x7B]),
+            ("UTF-16LE", .utf16LittleEndian, [0xFF, 0xFE], [0x20, 0, 0x7B, 0]),
+            ("UTF-16BE", .utf16BigEndian, [0xFE, 0xFF], [0, 0x20, 0, 0x7B]),
+            ("UTF-32LE", .utf32LittleEndian, [0xFF, 0xFE, 0, 0], [0x20, 0, 0, 0, 0x7B, 0, 0, 0]),
+            ("UTF-32BE", .utf32BigEndian, [0, 0, 0xFE, 0xFF], [0, 0, 0, 0x20, 0, 0, 0, 0x7B]),
         ]
-        for (encoding, bom) in encodings {
-            for prefix in [Data(), Data(bom)] {
+        for (name, encoding, bom, leadingBytes) in encodings {
+            for withBOM in [false, true] {
+                let prefix = withBOM ? Data(bom) : Data()
+                let label = "\(name), BOM=\(withBOM)"
                 let valid = try prefix + XCTUnwrap(#" {"path":[],"label":"📷"}"#.data(using: encoding))
-                XCTAssertEqual(try decodeForegroundJSONObject(valid)["label"] as? String, "📷")
-                let invalid = try prefix + XCTUnwrap(#" {"path":[],"pa\u0074h":[]}"#.data(using: encoding))
-                XCTAssertThrowsError(try decodeForegroundJSONObject(invalid))
+                let duplicate = try prefix + XCTUnwrap(#" {"path":[],"pa\u0074h":[]}"#.data(using: encoding))
+                let expectedPrefix = prefix + Data(leadingBytes)
+                XCTAssertTrue(valid.starts(with: expectedPrefix), label)
+                XCTAssertTrue(duplicate.starts(with: expectedPrefix), label)
+                print("Foreground JSON fixture \(label), firstBytes=\(Array(valid.prefix(16)))")
+
+                // Fixed scanner expectations for all ten valid encodings. The
+                // whole-document Foundation gate cannot mask scanner failures.
+                var validScanner = try ForegroundJSONMembers(valid)
+                XCTAssertNoThrow(try validScanner.validate(), label)
+                var duplicateScanner = try ForegroundJSONMembers(duplicate)
+                XCTAssertThrowsError(try duplicateScanner.validate(), label) { error in
+                    XCTAssertEqual(error as? CameraForegroundMediaError, .invalidInventory, label)
+                }
+
+                // The public-path contract retains this platform's ordinary
+                // Foundation acceptance. Capture each result independently so a
+                // strict failure cannot be mistaken for a baseline rejection.
+                let ordinary = Result { try decodeJSONObject(valid) }
+                let strict = Result { try decodeForegroundJSONObject(valid) }
+                switch (ordinary, strict) {
+                case let (.success(baseline), .success(actual)):
+                    XCTAssertEqual(try encodeJSONObject(actual), try encodeJSONObject(baseline), label)
+                    XCTAssertEqual(actual["label"] as? String, "📷", label)
+                    print("Foreground JSON compatibility \(label): ordinary=accepted strict=accepted")
+                case let (.failure(baseline), .failure(actual)):
+                    let baselineError = baseline as NSError
+                    let strictError = actual as NSError
+                    XCTAssertEqual(strictError.domain, baselineError.domain, label)
+                    XCTAssertEqual(strictError.code, baselineError.code, label)
+                    print("Foreground JSON compatibility \(label): ordinary=\(baselineError.domain)/\(baselineError.code) strict=\(strictError.domain)/\(strictError.code)")
+                case (.success, .failure(let error)):
+                    XCTFail("\(label): strict rejected ordinary-accepted JSON: \(error)")
+                case (.failure(let error), .success):
+                    XCTFail("\(label): strict accepted ordinary-rejected JSON: \(error)")
+                }
+
+                let ordinaryDuplicate = Result { try decodeJSONObject(duplicate) }
+                let strictDuplicate = Result { try decodeForegroundJSONObject(duplicate) }
+                switch (ordinaryDuplicate, strictDuplicate) {
+                case (.success, .failure(let error)):
+                    XCTAssertEqual(error as? CameraForegroundMediaError, .invalidInventory, label)
+                case let (.failure(baseline), .failure(actual)):
+                    XCTAssertEqual((actual as NSError).domain, (baseline as NSError).domain, label)
+                    XCTAssertEqual((actual as NSError).code, (baseline as NSError).code, label)
+                default:
+                    XCTFail("\(label): strict decoder accepted duplicate members")
+                }
             }
         }
     }

@@ -118,6 +118,46 @@ final class OpenEOSControlUITests: XCTestCase {
         }
     }
 
+    func testDistantSeekVelocityHasFiniteDistanceAndAttemptBounds() {
+        let viewport = CGRect(x: 0, y: 80, width: 390, height: 700)
+        for extra in [CGFloat(-1), 0, 1] {
+            let travel = viewport.height * 1.5 + extra
+            let above = CGRect(x: 12, y: viewport.minY - travel + 12, width: 100, height: 44)
+            let below = CGRect(x: 12, y: viewport.maxY + travel - 12 - 44, width: 100, height: 44)
+            for target in [above, below] {
+                for count in [0, 1] {
+                    XCTAssertEqual(Self.useDistantSeekVelocity(target: target, viewport: viewport,
+                        mode: .targetSeek, priorDistantSeeks: count), extra > 0)
+                }
+                for count in [-1, 2, Int.max] {
+                    XCTAssertFalse(Self.useDistantSeekVelocity(target: target, viewport: viewport,
+                        mode: .targetSeek, priorDistantSeeks: count))
+                }
+                for mode in [ScrollDragMode.searchFlick, .targetCorrection, .targetReacquisition, .cameraActions] {
+                    XCTAssertFalse(Self.useDistantSeekVelocity(target: target, viewport: viewport,
+                        mode: mode, priorDistantSeeks: 0))
+                }
+            }
+        }
+        let actualViewport = CGRect(x: 0, y: 180 + 2.0 / 3.0, width: 402, height: 693 + 1.0 / 3.0)
+        for (y, expected) in [(CGFloat(-2164 - 1.0 / 3.0), true), (-1313 - 1.0 / 3.0, true), (-452, false), (800, false)] {
+            XCTAssertEqual(Self.useDistantSeekVelocity(
+                target: CGRect(x: 12, y: y, width: 378, height: 125 + 1.0 / 3.0),
+                viewport: actualViewport, mode: .targetSeek, priorDistantSeeks: 0), expected)
+        }
+        for invalid in [CGRect.null, .infinite, .zero, CGRect(x: CGFloat.nan, y: 0, width: 40, height: 40)] {
+            XCTAssertFalse(Self.useDistantSeekVelocity(target: invalid, viewport: viewport,
+                mode: .targetSeek, priorDistantSeeks: 0))
+            XCTAssertFalse(Self.useDistantSeekVelocity(target: CGRect(x: 12, y: -2000, width: 100, height: 44),
+                viewport: invalid, mode: .targetSeek, priorDistantSeeks: 0))
+        }
+        // A visible target beyond the bottom after overshoot needs an ordinary
+        // stopped reverse correction, not another accelerated flick.
+        let overshot = CGRect(x: 12, y: 800, width: 100, height: 44)
+        XCTAssertEqual(Self.scrollDragMode(target: overshot, viewport: viewport, cameraActions: false), .targetCorrection)
+        XCTAssertGreaterThan(Self.scrollDragOffset(target: overshot, viewport: viewport) ?? 0, 0)
+    }
+
     func testMissingTargetAfterSeekHasOneBoundedReverseAttempt() throws {
         let viewport = CGRect(x: 0, y: 80, width: 390, height: 700)
         let unavailable = [CGRect.null, .infinite, .zero,
@@ -1718,6 +1758,7 @@ final class OpenEOSControlUITests: XCTestCase {
         var lastDragMode: ScrollDragMode?
         var dragCount = 0
         var searchFlickCount = 0
+        var distantSeekCount = 0
         var genericSelection: GenericScrollSelection?
         var lastKnownSeekOffset: CGFloat?
         var attemptedReacquisition = false
@@ -1813,7 +1854,14 @@ final class OpenEOSControlUITests: XCTestCase {
             // Seek in the known direction when one stopped stroke cannot reach
             // the target. Re-read its position before a precise stopped correction.
             // Camera-action navigation keeps its existing velocity and hold.
-            let velocity: XCUIGestureVelocity = cameraActions ? .default : .fast
+            let distantSeek = Self.useDistantSeekVelocity(
+                target: targetFrame, viewport: viewport, mode: mode,
+                priorDistantSeeks: distantSeekCount
+            )
+            let velocity: XCUIGestureVelocity = cameraActions ? .default
+                : distantSeek ? XCUIGestureVelocity(rawValue: 1_500) : .fast
+            if distantSeek { distantSeekCount += 1 }
+            dragFrames.append("drag=\(dragCount) velocity=\(velocity.rawValue) distant-seeks=\(distantSeekCount)")
             start.press(forDuration: 0.01, thenDragTo: end, withVelocity: velocity, thenHoldForDuration: mode.holdDuration)
         }
         let interactive = element.exists && element.isEnabled && element.isHittable
@@ -2031,6 +2079,17 @@ final class OpenEOSControlUITests: XCTestCase {
         case cameraActions = "camera-actions"
 
         var holdDuration: TimeInterval { self == .searchFlick || self == .targetSeek ? 0 : 0.1 }
+    }
+
+    private static func useDistantSeekVelocity(
+        target: CGRect, viewport: CGRect, mode: ScrollDragMode, priorDistantSeeks: Int
+    ) -> Bool {
+        guard mode == .targetSeek, (0..<2).contains(priorDistantSeeks),
+              validScrollFrame(target), validScrollFrame(viewport),
+              let travel = scrollTargetTravel(target: target, viewport: viewport), travel.isFinite
+        else { return false }
+        let threshold = viewport.height * 1.5
+        return threshold.isFinite && abs(travel) > threshold
     }
 
     private static func scrollDragMode(target: CGRect, viewport: CGRect, cameraActions: Bool) -> ScrollDragMode {

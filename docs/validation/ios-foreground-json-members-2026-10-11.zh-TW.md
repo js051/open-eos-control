@@ -24,3 +24,24 @@ Swift String dictionary 也會將 canonical-equivalent Unicode 鍵視為相同�
 - 一般手動 decoder 的重複成員與空回應相容行為保留，不固定哪個 duplicate value 勝出。
 - 本地只完成 source diff 檢查及 Python 對 10 個 Swift fixture 原始 JSON 的語法／重複鍵核對；這不是 Swift parser 執行。
 - Swift 編譯、Core XCTest、完整 App／真相機驗收均 **NOT_RUN**。本地完整來源 review 已完成；沿原 PR236 一次交付正常 CI，以新 exact head 的實際結果判定，不沿用 parent f2f6b9a7 的綠燈。完整 App 人工集中驗收仍後置，不以來源審查宣稱 runtime 修正成立。
+
+## 首次必要 CI 與相容性控制修正
+
+Head `9a4b8df864138376de2c76b36783bf504d38adef`、CI `38136280671` 的 Core job `114460721491` 已實際編譯並執行 318 項，317 pass／1 failure。duplicate、escaped／nested、512／513 深度及 client 停止請求控制均通過。唯一失敗為 Unicode encoding loop 的合法資料期待，Foundation 拋 NSCocoaErrorDomain／3840；原 loop 沒有 case 標識，因此尚不能確定哪個 encoding／BOM 組合，不能宣稱 double BOM 或 scanner 根因。
+
+原 production 契約是先使用既有 Foundation 的語法／encoding 接受範圍，再額外拒絕重複鍵。測試候選保留全部十組資料，增加固定 byte prefix／encoding／BOM 標識；scanner 對十組合法資料都必須成功，對十組 duplicate 都必須以 invalidInventory 拒絕。完整 decoder 的 ordinary 與 strict 結果分別捕捉，再雙向比較接受／拒絕，拒絕時也比對 NSError domain/code；不能以包住兩者的 catch 吞掉 strict 錯誤。既有 UTF-8 無 BOM 完整 decoder 正例保持無條件成功。
+
+這是收斂相容性測試契約，不改 production parser、不刪除失敗 encoding、不加入 permissive fallback。新增逐 case 診斷只記合成資料前 16 bytes 與錯誤 domain/code。修正候選本地 Swift runtime 仍 NOT_RUN；原失敗保留，等待本 run 全部 job 終態後才交同分支下一完整必要驗證。
+
+官方參考：[CFString 外部表示與 BOM](https://developer.apple.com/documentation/corefoundation/cfstringcreateexternalrepresentation(_:_:_:_:))明示顯式 UTF16/32 BE/LE 不自動加 BOM；[Swift corelibs JSONSerialization](https://github.com/swiftlang/swift-corelibs-foundation/blob/main/Sources/Foundation/JSONSerialization.swift)記載五種 encoding／BOM 支援。這些不代替此 run 的 Darwin macOS 15.7.9／Swift 6.1.2 實際接受結果。
+# 同輪 UI 導航失敗及有界候選
+
+原 `38136280671` 已完整 failure：Core 317/318、App 344/344、UI 34/35。UI 失敗在日期／資料夾旅程返回 `media-folder-filter` 的第 879 行，不可歸因於 JSON production 改動。兩次 cache 都 `geometry-matches=true`／`reuse=true`，因此本次證據否定繼續調 cache tolerance 的方向。
+
+實際 viewport 為 y=180.667、height=693.333，target 起於 y=-2164.333。兩次 649.333pt、750px/s 的 clipped target-seek 分別移動 851／861.333pt，最後 target y=-452；兩次手勢加 AX 已耗 8.456 秒。8 秒是新動作准入截止，並非同步 XCTest gesture 的硬 wall-time 保證。完整顯示 target 約需總位移 2361–2901pt，原兩次只有 1712.333pt。
+
+候選只在已知有限 target 距離超過 1.5 個 viewport 時，使用官方 `XCUIGestureVelocity(rawValue: 1500)`，每次 helper 最多兩次。未知 lazy target、cameraActions、近距離 correction 的原速度／hold、clipped 端點、8 秒准入及所有業務斷言保留。每次重讀 target；近距離過頭沿原停止手勢反向修正，frame 消失僅沿既有一次 0.8 viewport 反向回收，仍找不到就失敗。
+
+649.333pt 觸控段的理論時間由 0.866 降至 0.433 秒，但 XCTest event／idle、慣性位移不可由此換算。需要比原兩次多約38%位移只是本次 geometry 的最低需求，不是候選提供的保證。1.5 viewport 只控制速度，不改原0.8 viewport的seek／停止修正分界；介於兩者仍沿原750px/s、零hold seek。因此不預測固定手勢數，首滑若不足約1802pt，剩餘距離仍超過一次完整停止修正。純 helper 測試覆蓋雙向距離臨界值、有限 frame、次數上限、原模式不加速、實際位置及近距離過頭；尚未本地執行 Swift，也不能由策略測試宣稱真實手勢通過。
+
+官方 API：https://developer.apple.com/documentation/xcuiautomation/xcuigesturevelocity
