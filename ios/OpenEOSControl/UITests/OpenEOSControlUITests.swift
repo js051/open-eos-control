@@ -101,6 +101,20 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertNil(Self.scrollDragOffset(target: .null, viewport: .infinite))
     }
 
+    func testInteractionWaitTraceKeepsOnlyBoundedRecentObservations() {
+        var trace = InteractionWaitTrace()
+        for index in 0..<20 {
+            trace.record("stage-\(index)", elapsed: Double(index))
+        }
+        XCTAssertEqual(trace.total, 20)
+        XCTAssertEqual(trace.samples.count, 16)
+        XCTAssertEqual(trace.samples.first, "4.0: stage-4")
+        XCTAssertEqual(trace.samples.last, "19.0: stage-19")
+        trace.record(String(repeating: "x", count: 200), elapsed: 20)
+        XCTAssertEqual(trace.samples.count, 16)
+        XCTAssertEqual(trace.samples.last, "20.0: " + String(repeating: "x", count: 80))
+    }
+
     func testKnownTargetSeekBeginsOnlyBeyondOneStoppedStroke() {
         let viewport = CGRect(x: 0, y: 80, width: 390, height: 700)
         let stroke = viewport.height * 0.8
@@ -1311,7 +1325,7 @@ final class OpenEOSControlUITests: XCTestCase {
             addScreenshot(name: "shutter-af-new-jpeg-original-share-\(language)")
             try tapForAsyncTest(app.buttons["close-media-preview"])
             try tapForAsyncTest(app.buttons["media-back-button"])
-            try openMoreActionsForAsyncTest(in: app)
+            try openMoreActionsForAsyncTest(in: app, context: "\(language): after preview close and media back")
             guard try tapCameraActionForAsyncTest(app.buttons["disconnect-menu-button"], in: app) else { return }
             _ = try XCTUnwrap((waitForConnectionScreen(in: app, timeout: 15)) ? true : nil)
             _ = try XCTUnwrap((scrollConnectionButtonIntoView(in: app, timeout: 8)) ? true : nil)
@@ -1319,7 +1333,7 @@ final class OpenEOSControlUITests: XCTestCase {
             _ = try XCTUnwrap((waitForInteraction(toggle, timeout: 30)) ? true : nil)
             _ = try XCTUnwrap((toggle.isSelected) ? true : nil)
             _ = try XCTUnwrap(((toggle.value as? String) == (onValue)) ? true : nil)
-            try openMoreActionsForAsyncTest(in: app)
+            try openMoreActionsForAsyncTest(in: app, context: "\(language): after reconnect and autofocus checks")
             guard try tapCameraActionForAsyncTest(app.buttons["disconnect-menu-button"], in: app) else { return }
             _ = try XCTUnwrap((waitForConnectionScreen(in: app, timeout: 15)) ? true : nil)
         }
@@ -1662,10 +1676,23 @@ final class OpenEOSControlUITests: XCTestCase {
         return app
     }
 
-    private func waitForInteraction(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+    private func waitForInteraction(
+        _ element: XCUIElement, timeout: TimeInterval, trace: ((String) -> Void)? = nil
+    ) -> Bool {
         let predicate = NSPredicate { value, _ in
             guard let element = value as? XCUIElement else { return false }
-            return element.exists && element.isEnabled && element.isHittable
+            trace?("exists:start")
+            let exists = element.exists
+            trace?("exists=\(exists)")
+            guard exists else { return false }
+            trace?("enabled:start")
+            let enabled = element.isEnabled
+            trace?("enabled=\(enabled)")
+            guard enabled else { return false }
+            trace?("hittable:start")
+            let hittable = element.isHittable
+            trace?("hittable=\(hittable)")
+            return hittable
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
@@ -2238,9 +2265,47 @@ final class OpenEOSControlUITests: XCTestCase {
         try requireNoRecordedUIFailure(file: file, line: line)
     }
 
-    private func openMoreActionsForAsyncTest(in app: XCUIApplication) throws {
+    private struct InteractionWaitTrace {
+        private(set) var samples: [String] = []
+        private(set) var total = 0
+
+        mutating func record(_ stage: String, elapsed: TimeInterval) {
+            total += 1
+            if samples.count == 16 { samples.removeFirst() }
+            samples.append("\(elapsed): \(stage.prefix(80))")
+        }
+    }
+
+    private func openMoreActionsForAsyncTest(
+        in app: XCUIApplication, context: String = "caller",
+        file: StaticString = #filePath, line: UInt = #line
+    ) throws {
         let moreActions = app.buttons["more-actions-button"]
-        _ = try XCTUnwrap(waitForInteraction(moreActions, timeout: 8) ? true : nil)
+        let start = ProcessInfo.processInfo.systemUptime
+        var trace = InteractionWaitTrace()
+        let interactive = waitForInteraction(moreActions, timeout: 8) { stage in
+            trace.record(stage, elapsed: ProcessInfo.processInfo.systemUptime - start)
+        }
+        if !interactive {
+            // Persist existing predicate observations before any screenshot IPC.
+            // Do not query AX again or turn a later observation into a pass.
+            let summary = "[OEC_MORE_ACTIONS_WAIT] timeout=8 elapsed=\(ProcessInfo.processInfo.systemUptime - start) samples=\(trace.total)\n"
+                + "context=\(context.prefix(160)) caller=\(file):\(line)\n"
+                + "target=more-actions-button; current root/frame NOT_OBSERVED\n"
+                + trace.samples.joined(separator: "\n")
+            print(summary)
+            let attachment = XCTAttachment(string: summary)
+            attachment.name = "more-actions-wait-failure-trace"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            // Exactly one synchronous capture. XCTest exposes no per-call
+            // cancellation/deadline; only the unchanged outer job bounds it.
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "more-actions-wait-failure"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+        }
+        _ = try XCTUnwrap(interactive ? true : nil, file: file, line: line)
         try tapForAsyncTest(moreActions)
     }
 

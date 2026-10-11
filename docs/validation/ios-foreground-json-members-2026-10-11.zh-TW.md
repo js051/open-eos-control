@@ -45,3 +45,15 @@ Head `9a4b8df864138376de2c76b36783bf504d38adef`、CI `38136280671` 的 Core job 
 649.333pt 觸控段的理論時間由 0.866 降至 0.433 秒，但 XCTest event／idle、慣性位移不可由此換算。需要比原兩次多約38%位移只是本次 geometry 的最低需求，不是候選提供的保證。1.5 viewport 只控制速度，不改原0.8 viewport的seek／停止修正分界；介於兩者仍沿原750px/s、零hold seek。因此不預測固定手勢數，首滑若不足約1802pt，剩餘距離仍超過一次完整停止修正。純 helper 測試覆蓋雙向距離臨界值、有限 frame、次數上限、原模式不加速、實際位置及近距離過頭；尚未本地執行 Swift，也不能由策略測試宣稱真實手勢通過。
 
 官方 API：https://developer.apple.com/documentation/xcuiautomation/xcuigesturevelocity
+
+## df6dc77 終態與必要失敗取證
+
+CI `38138774161` 完整 failure；Core318/318、App344/344、UI35/36，其他適用 gates 成功。實際 encoding trace 確定 UTF-32LE＋單 BOM（prefix FF FE 00 00）在該 macOS Foundation 的 ordinary 與 strict 都拒絕 NSCocoaErrorDomain/3840，其他9組都接受；scanner10組固定正負控制通過。原失敗未標case的限制仍保留，不把新資料追認為原run已記錄的case。
+
+日期／資料夾雙語旅程12:41:19實際通過，遠距helper幾何控制也通過；成功路徑未輸出位移，因此不能宣稱已量測1500的慣性或每次必成功。唯一失敗改為 canonical shutter AF旅程的繁中段：拍攝、新JPEG預覽及原檔ready/share控制通過，close preview／media back後更多操作按鈕未在原8秒wait內可互動。該步不經generic加速helper，不因此判定兩者有因果。
+
+Artifact `11702771829` 已下載核對179540501bytes、SHA256 `cbdbe3db44d255b4accd637d819b12faebc943716cee4613f3622a61faf3a842`。ZIP2114項無絕對／上行／symlink檔名。xcresult只有more-actions query chain、沒有匹配元素frame或完整AX；最後PNG為12:32:52預覽分享ready，已實看，但不是失敗瞬間。back tap完成後exists查詢2.60秒、下一Find4.03秒，不能單憑耗時確定環境慢、頁面未返回或遮擋。
+
+診斷候選保持wait8秒與原short-circuit exists→enabled→hittable，只在原讀取前後記stage、結果及elapsed。最多16個80字stage、160字caller context，總count保留；不額外讀frame、identifier、root或debugDescription。失敗先print並保存文字attachment，再至多一次app screenshot；原interactive結果固定，隨後原XCTUnwrap必失敗，不能由晚到snapshot變pass。root/frame明記NOT_OBSERVED。純trace控制驗容量與長度，Swift此新候選尚未本地執行。
+
+文字容量與截圖呼叫次數有界，但app.screenshot是同步IPC，XCTest無可用per-call timeout/cancel；取證只能受原job外層timeout，不承諾幾秒必返，不建立background假取消。若同步呼叫長掛可能尚未到原assert，先前文字及原wait失敗已保存，不能當pass。無新產品修改、timeout增加或自動重跑。
