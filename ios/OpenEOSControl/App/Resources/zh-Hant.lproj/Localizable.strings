@@ -552,7 +552,7 @@
 // Local preparation history and retained originals. External saving is unconfirmed.
 "media_delivery_history_title" = "最近準備的原檔";
 "media_delivery_history_help" = "離線也能使用，不會重新下載。「先前已備妥」記錄過去的下載結果，仍需查看 App 副本目前是否可用。儲存或分享不代表已確認目的地保存了檔案。";
-"media_delivery_history_limits" = "歷史紀錄最多保留 100 次準備嘗試及 512 MiB 的 App 副本。達到上限時，不再加入新紀錄或副本。清除歷史紀錄可釋放此空間。";
+"media_delivery_history_limits" = "工作清單項目與其他準備嘗試合計最多保留 100 項，以及 512 MiB 的 App 副本。達到上限時，不再加入新紀錄或副本。清除歷史紀錄可釋放此空間。";
 "media_delivery_history_counts" = "%d 次嘗試 · %d 份副本目前可用";
 "media_delivery_history_retained_bytes" = "App 保留的副本：%lld 位元組";
 "media_delivery_history_retained_unknown" = "無法確認 App 副本佔用的空間。";
@@ -586,7 +586,7 @@
 "media_delivery_history_clear" = "清除歷史紀錄與 App 副本";
 "media_delivery_history_clearing" = "正在清除歷史紀錄與 App 副本…";
 "media_delivery_history_clear_title" = "清除歷史紀錄與 App 副本？";
-"media_delivery_history_clear_message" = "移除此處的所有歷史紀錄及保留副本。正在分享的副本會在分享結束後移除。已儲存至其他目的地的檔案，以及目前批次的暫存原檔，不會被移除。";
+"media_delivery_history_clear_message" = "移除此處的所有工作清單、歷史紀錄及保留副本。正在分享的副本會在分享結束後移除。已儲存至其他目的地的檔案，以及目前批次的暫存原檔，不會被移除。";
 "media_delivery_history_clear_confirm" = "移除歷史紀錄與 App 副本";
 
 "foreground_media_title" = "前景 JPEG 副本";
@@ -626,3 +626,11 @@
 "foreground_media_reason_storage" = "App 無法保留原檔。請查看「最近準備的原檔」；下方仍可能有可用的暫存原檔。";
 "foreground_media_reason_transfer" = "無法確認原檔傳輸完成。請檢查連線後再開始。";
 "foreground_media_reason_limit" = "此次準備因安全上限或檔案檢查而停止。請查看適用範圍與上限後再開始。";
+
+"media_worklist_counts" = "%d 份工作清單 · %d 項未開始";
+"media_worklist_help" = "已保存的工作清單保留原選取順序及未開始項目。名稱只是標籤，不能證明相機或檔案身分。開啟此頁不會重連、重試或要求目的地。";
+"media_worklist_position" = "第 %d 項，共 %d 項";
+"media_worklist_queued" = "未開始：此項尚未記錄任何準備嘗試。";
+"media_worklist_created" = "工作清單建立於 %@";
+"media_worklist_legacy_attempts" = "其他已記錄嘗試 · 完整選取清單未知";
+"media_worklist_recording_warning" = "完整工作清單無法保存或更新。請查看目前各項結果；已備妥的檔案仍可使用。未記錄的選取清單不保證能在關閉 App 後恢復。";

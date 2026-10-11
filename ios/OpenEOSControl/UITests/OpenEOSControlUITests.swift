@@ -179,6 +179,46 @@ final class OpenEOSControlUITests: XCTestCase {
                                            viewport: media.offsetBy(dx: 0, dy: -1)))
     }
 
+    func testLazySearchTravelUsesClippedViewportWithoutChangingKnownCorrections() throws {
+        let media = CGRect(x: 0, y: 180 + 2.0 / 3.0, width: 402, height: 693 + 1.0 / 3.0)
+        let cases = [
+            (surface: media, viewport: media),
+            (surface: CGRect(x: -40, y: -80, width: 480, height: 1_020),
+             viewport: CGRect(x: 0, y: 100, width: 402, height: 640)),
+            (surface: CGRect(x: 100, y: 60, width: 674, height: 342),
+             viewport: CGRect(x: 100, y: 60, width: 674, height: 257)),
+            (surface: CGRect(x: 0, y: 20, width: 100, height: 44),
+             viewport: CGRect(x: 0, y: 20, width: 100, height: 44)),
+        ]
+        for geometry in cases {
+            let points = try XCTUnwrap(Self.scrollSearchDragOffsets(surface: geometry.surface, viewport: geometry.viewport))
+            let start = CGPoint(x: geometry.surface.minX + points.start.dx, y: geometry.surface.minY + points.start.dy)
+            let end = CGPoint(x: geometry.surface.minX + points.end.dx, y: geometry.surface.minY + points.end.dy)
+            let inset = min(CGFloat(22), geometry.viewport.height * 0.1)
+            XCTAssertTrue(geometry.viewport.contains(start))
+            XCTAssertTrue(geometry.viewport.contains(end))
+            XCTAssertEqual(start.x, geometry.viewport.midX, accuracy: 0.000_001)
+            XCTAssertEqual(end.x, start.x, accuracy: 0.000_001)
+            XCTAssertEqual(start.y, geometry.viewport.maxY - inset, accuracy: 0.000_001)
+            XCTAssertEqual(end.y, geometry.viewport.minY + inset, accuracy: 0.000_001)
+        }
+        let search = try XCTUnwrap(Self.scrollSearchDragOffsets(surface: media, viewport: media))
+        XCTAssertEqual(search.start.dy - search.end.dy, 649 + 1.0 / 3.0, accuracy: 0.000_001)
+        // This is touch travel, not proof of content displacement or runtime
+        // reachability. Preserve the exact known-target correction separately.
+        let finalTarget = CGRect(x: 140, y: 940 + 1.0 / 3.0, width: 48, height: 48)
+        XCTAssertEqual(try XCTUnwrap(Self.scrollDragOffset(target: finalTarget, viewport: media)),
+                       126 + 1.0 / 3.0, accuracy: 0.000_001)
+        let known = try XCTUnwrap(Self.scrollDragOffsets(offset: 126 + 1.0 / 3.0, surface: media, viewport: media))
+        XCTAssertEqual(known.start.dy, 624, accuracy: 0.000_001)
+        XCTAssertEqual(known.start.dy - known.end.dy, 126 + 1.0 / 3.0, accuracy: 0.000_001)
+        for invalid in [CGRect.null, .infinite, .zero] {
+            XCTAssertNil(Self.scrollSearchDragOffsets(surface: invalid, viewport: media))
+            XCTAssertNil(Self.scrollSearchDragOffsets(surface: media, viewport: invalid))
+        }
+        XCTAssertNil(Self.scrollSearchDragOffsets(surface: media, viewport: media.offsetBy(dx: 0, dy: -1)))
+    }
+
     func testOfflineBatchSelectionRemainsSeparateFromPreviewAndCannotFakeDownloads() throws {
         for (language, apple, locale, selected, notSelected) in [
             ("english", "en", "en_US", "Selected", "Not selected"),
@@ -1542,23 +1582,24 @@ final class OpenEOSControlUITests: XCTestCase {
                 continue
             }
             guard ProcessInfo.processInfo.systemUptime < deadline else { break }
-            guard let offsets = Self.scrollDragOffsets(offset: offset, surface: surfaceFrame, viewport: viewport) else {
-                break
-            }
+            let mode = Self.scrollDragMode(target: targetFrame, cameraActions: cameraActions)
+            let candidateOffsets = mode == .searchFlick
+                ? Self.scrollSearchDragOffsets(surface: surfaceFrame, viewport: viewport)
+                : Self.scrollDragOffsets(offset: offset, surface: surfaceFrame, viewport: viewport)
+            guard let offsets = candidateOffsets else { break }
             let origin = surface.coordinate(withNormalizedOffset: .zero)
             let start = origin.withOffset(offsets.start)
             let end = origin.withOffset(offsets.end)
             lastDragStart = start
             lastDragEnd = end
             lastDragSurface = surface
-            let mode = Self.scrollDragMode(target: targetFrame, cameraActions: cameraActions)
             lastDragMode = mode
             dragCount += 1
             if mode == .searchFlick { searchFlickCount += 1 }
-            // Lazy discovery has no target position yet. Release without a
-            // terminal hold to allow momentum, keeping both touch endpoints in
-            // the clipped viewport. Known targets retain their precise stopped
-            // correction; camera-action navigation keeps its existing gesture.
+            // Lazy discovery has no target position yet. Use the visible
+            // viewport minus bounded touch margins; do not rely on momentum.
+            // Known targets retain their precise stopped correction, and
+            // camera-action navigation keeps its existing gesture.
             let velocity: XCUIGestureVelocity = cameraActions ? .default : .fast
             start.press(forDuration: 0.01, thenDragTo: end, withVelocity: velocity, thenHoldForDuration: mode.holdDuration)
         }
@@ -1651,6 +1692,21 @@ final class OpenEOSControlUITests: XCTestCase {
         }
         guard bottom - top >= 44, visible.width >= 44 else { return nil }
         return CGRect(x: visible.minX, y: top, width: visible.width, height: bottom - top)
+    }
+
+    private static func scrollSearchDragOffsets(
+        surface: CGRect, viewport: CGRect
+    ) -> (start: CGVector, end: CGVector)? {
+        // Reuse the finite/containment checks. For lazy discovery, a percentage
+        // margin wastes increasing travel as the viewport gets taller. A 22pt
+        // touch margin stays within the already header/footer-clipped surface;
+        // small viewports retain the original 10% inset.
+        guard scrollDragOffsets(offset: 44, surface: surface, viewport: viewport) != nil else { return nil }
+        let inset = min(CGFloat(22), viewport.height * 0.1)
+        return (
+            CGVector(dx: viewport.midX - surface.minX, dy: viewport.maxY - inset - surface.minY),
+            CGVector(dx: viewport.midX - surface.minX, dy: viewport.minY + inset - surface.minY)
+        )
     }
 
     private static func scrollDragOffsets(

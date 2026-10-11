@@ -552,7 +552,7 @@
 // Local preparation history and retained originals. External saving is unconfirmed.
 "media_delivery_history_title" = "Recent originals";
 "media_delivery_history_help" = "Works offline, without downloading again. Prepared earlier describes a past download; check whether an app copy is available now. Saving or sharing does not confirm that a destination saved the file.";
-"media_delivery_history_limits" = "History keeps up to 100 preparation attempts and 512 MiB of app copies. At the limit, new records or copies are not added. Clear history to free this space.";
+"media_delivery_history_limits" = "Worklist rows and other preparation attempts share a 100-entry limit, plus 512 MiB of app copies. At the limit, new records or copies are not added. Clear history to free this space.";
 "media_delivery_history_counts" = "%d attempts · %d copies available now";
 "media_delivery_history_retained_bytes" = "Copies kept in app: %lld bytes";
 "media_delivery_history_retained_unknown" = "The size of app copies could not be checked.";
@@ -586,7 +586,7 @@
 "media_delivery_history_clear" = "Clear history and app copies";
 "media_delivery_history_clearing" = "Clearing history and app copies…";
 "media_delivery_history_clear_title" = "Clear history and app copies?";
-"media_delivery_history_clear_message" = "Remove all history records and copies kept here. Copies being shared are removed after sharing ends. Files saved elsewhere and temporary originals in the current batch are not removed.";
+"media_delivery_history_clear_message" = "Remove all saved worklists, history records and copies kept here. Copies being shared are removed after sharing ends. Files saved elsewhere and temporary originals in the current batch are not removed.";
 "media_delivery_history_clear_confirm" = "Remove history and app copies";
 
 "foreground_media_title" = "Foreground JPEG copies";
@@ -626,3 +626,11 @@
 "foreground_media_reason_storage" = "The app could not keep the original. Check Recent originals; a temporary original may still be available below.";
 "foreground_media_reason_transfer" = "The original transfer could not be confirmed. Check the connection before starting again.";
 "foreground_media_reason_limit" = "A safety limit or file check stopped this run. Review the scope and limits before starting again.";
+
+"media_worklist_counts" = "%d worklists · %d rows not started";
+"media_worklist_help" = "Saved worklists keep the original selection order, including items not started. Names are labels, not proof of camera or file identity. Opening this screen never reconnects, retries, or asks for a destination.";
+"media_worklist_position" = "Item %d of %d";
+"media_worklist_queued" = "Not started: no attempt was recorded for this row.";
+"media_worklist_created" = "Worklist created %@";
+"media_worklist_legacy_attempts" = "Other recorded attempts · complete selection unknown";
+"media_worklist_recording_warning" = "The complete worklist could not be saved or updated. Check each current result; files already prepared remain available. Do not assume an unrecorded selection can be recovered after closing the app.";

@@ -21,6 +21,13 @@ struct MediaDeliveryTicket: Sendable {
     fileprivate let epoch: UUID
 }
 
+/// The caller pairs these local row IDs with its in-memory selection only. The
+/// manifest never stores a camera media ID or anything that can reconnect it.
+struct MediaDeliveryPlannedBatch: Sendable {
+    let ticket: MediaDeliveryTicket
+    let rowIDs: [UUID]
+}
+
 struct MediaDeliveryRecord: Identifiable, Sendable {
     let id: UUID
     let batchID: UUID
@@ -33,10 +40,34 @@ struct MediaDeliveryRecord: Identifiable, Sendable {
     let availability: MediaDeliveryAvailability
 }
 
+struct MediaDeliveryPlannedRowRecord: Identifiable, Sendable {
+    let id: UUID
+    let filename: String
+    /// Nil means this validated row has no admitted attempt: it is queued.
+    /// A prepared receipt remains prepared even when its copy is unavailable.
+    let receipt: MediaDeliveryRecord?
+}
+
+struct MediaDeliveryPlannedBatchRecord: Identifiable, Sendable {
+    let id: UUID
+    let createdAt: Date
+    /// Original selection order, including every still-queued row.
+    let rows: [MediaDeliveryPlannedRowRecord]
+}
+
 struct MediaDeliverySnapshot: Sendable {
     let records: [MediaDeliveryRecord]
+    let plannedBatches: [MediaDeliveryPlannedBatchRecord]
     let retainedBytes: Int64?
     let warning: MediaDeliveryStoreError?
+
+    init(records: [MediaDeliveryRecord], plannedBatches: [MediaDeliveryPlannedBatchRecord] = [],
+         retainedBytes: Int64?, warning: MediaDeliveryStoreError?) {
+        self.records = records
+        self.plannedBatches = plannedBatches
+        self.retainedBytes = retainedBytes
+        self.warning = warning
+    }
 }
 
 /// Holding a lease pins its retained copy through clear and subsequent batches.
@@ -113,11 +144,38 @@ actor MediaDeliveryStore {
         let identity: RetainedIdentity
     }
 
+    private struct PlannedRow: Codable, Sendable {
+        let id: UUID
+        let filename: String
+    }
+
+    private struct PlannedBatch: Codable, Sendable {
+        let id: UUID
+        let createdAt: Date
+        let rows: [PlannedRow]
+    }
+
     private struct Manifest: Codable, Sendable {
-        var version = 1
+        var version = 2
         var epoch = UUID()
         var receipts: [Receipt] = []
         var tombstones: [RetainedFile] = []
+        var plannedBatches: [PlannedBatch] = []
+
+        private enum CodingKeys: String, CodingKey { case version, epoch, receipts, tombstones, plannedBatches }
+
+        init() {}
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            version = try values.decode(Int.self, forKey: .version)
+            epoch = try values.decode(UUID.self, forKey: .epoch)
+            receipts = try values.decode([Receipt].self, forKey: .receipts)
+            tombstones = try values.decode([RetainedFile].self, forKey: .tombstones)
+            // Only validated v1 data may omit the complete selection roster.
+            if version == 1 { plannedBatches = [] }
+            else { plannedBatches = try values.decode([PlannedBatch].self, forKey: .plannedBatches) }
+        }
     }
 
     private final class Descriptor {
@@ -155,20 +213,63 @@ actor MediaDeliveryStore {
         return MediaDeliveryTicket(batchID: UUID(), epoch: manifest!.epoch)
     }
 
+    /// Atomically admit the entire inert roster before the caller issues its
+    /// first original GET. Capacity reserves queued rows, never truncates or
+    /// evicts history, and does not promise retained space for unknown sizes.
+    func beginPlannedBatch(filenames: [String]) throws -> MediaDeliveryPlannedBatch {
+        try load()
+        guard !filenames.isEmpty else { throw MediaDeliveryStoreError.invalidReceipt }
+        guard filenames.count <= limits.maximumRecords - reservedRecordCount(manifest!) else {
+            throw MediaDeliveryStoreError.recordLimit
+        }
+        _ = try diskUsage()
+        let ticket = MediaDeliveryTicket(batchID: UUID(), epoch: manifest!.epoch)
+        let rows = filenames.map { PlannedRow(id: UUID(), filename: plannedFilename($0)) }
+        var next = manifest!
+        next.plannedBatches.append(PlannedBatch(id: ticket.batchID, createdAt: Date(), rows: rows))
+        try commit(next)
+        return MediaDeliveryPlannedBatch(ticket: ticket, rowIDs: rows.map(\.id))
+    }
+
+    /// The reserved row ID becomes the receipt ID. Admission is single-use;
+    /// neither filenames nor a restored roster grant permission to retry I/O.
+    func beginPlannedItem(_ ticket: MediaDeliveryTicket, rowID: UUID,
+                          expectedBytes: Int64? = nil) throws -> UUID {
+        try validate(ticket)
+        guard let batch = manifest!.plannedBatches.first(where: { $0.id == ticket.batchID }),
+              let row = batch.rows.first(where: { $0.id == rowID }),
+              !manifest!.receipts.contains(where: { $0.id == rowID }) else {
+            throw MediaDeliveryStoreError.invalidReceipt
+        }
+        try validateExpectedBytes(expectedBytes)
+        var next = manifest!
+        next.receipts.append(Receipt(id: row.id, batchID: batch.id,
+            filename: row.filename, startedAt: Date(), status: .started))
+        try commit(next)
+        return row.id
+    }
+
     func beginItem(_ ticket: MediaDeliveryTicket, filename: String, expectedBytes: Int64? = nil) throws -> UUID {
         try validate(ticket)
-        guard manifest!.receipts.count < limits.maximumRecords else { throw MediaDeliveryStoreError.recordLimit }
-        let used = try diskUsage()
-        if let expectedBytes {
-            guard expectedBytes > 0, used <= limits.maximumRetainedBytes,
-                  expectedBytes <= limits.maximumRetainedBytes - used else { throw MediaDeliveryStoreError.byteLimit }
+        guard !manifest!.plannedBatches.contains(where: { $0.id == ticket.batchID }) else {
+            throw MediaDeliveryStoreError.invalidTicket
         }
+        guard reservedRecordCount(manifest!) < limits.maximumRecords else { throw MediaDeliveryStoreError.recordLimit }
+        try validateExpectedBytes(expectedBytes)
         let receipt = Receipt(id: UUID(), batchID: ticket.batchID,
             filename: MediaBatchOwnedFile.safeFilename(filename), startedAt: Date(), status: .started)
         var next = manifest!
         next.receipts.append(receipt)
         try commit(next)
         return receipt.id
+    }
+
+    private func validateExpectedBytes(_ expectedBytes: Int64?) throws {
+        let used = try diskUsage()
+        if let expectedBytes {
+            guard expectedBytes > 0, used <= limits.maximumRetainedBytes,
+                  expectedBytes <= limits.maximumRetainedBytes - used else { throw MediaDeliveryStoreError.byteLimit }
+        }
     }
 
     /// The temporary source is never moved, unlinked, or otherwise adopted.
@@ -229,11 +330,21 @@ actor MediaDeliveryStore {
         do {
             try load()
             let used = try diskUsage()
-            return MediaDeliverySnapshot(records: projectedRecords(), retainedBytes: used,
-                warning: used > limits.maximumRetainedBytes ? .byteLimit : nil)
+            return projectedSnapshot(retainedBytes: used, warning: used > limits.maximumRetainedBytes ? .byteLimit : nil)
         } catch {
-            return MediaDeliverySnapshot(records: projectedRecords(), retainedBytes: nil, warning: fixedError(error))
+            return projectedSnapshot(retainedBytes: nil, warning: fixedError(error))
         }
+    }
+
+    private func projectedSnapshot(retainedBytes: Int64?, warning: MediaDeliveryStoreError?) -> MediaDeliverySnapshot {
+        let records = projectedRecords()
+        let receipts = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
+        let batches = (manifest?.plannedBatches ?? []).map { batch in
+            MediaDeliveryPlannedBatchRecord(id: batch.id, createdAt: batch.createdAt, rows: batch.rows.map { row in
+                MediaDeliveryPlannedRowRecord(id: row.id, filename: row.filename, receipt: receipts[row.id])
+            })
+        }
+        return MediaDeliverySnapshot(records: records, plannedBatches: batches, retainedBytes: retainedBytes, warning: warning)
     }
 
     private func projectedRecords() -> [MediaDeliveryRecord] {
@@ -274,6 +385,7 @@ actor MediaDeliveryStore {
         next.epoch = UUID()
         next.tombstones += next.receipts.compactMap(\.file)
         next.receipts = []
+        next.plannedBatches = []
         try commit(next)
         try cleanTombstones()
     }
@@ -353,6 +465,9 @@ actor MediaDeliveryStore {
                 do { saved = try JSONDecoder().decode(Manifest.self, from: data) }
                 catch { throw MediaDeliveryStoreError.invalidManifest }
                 try validateManifest(saved)
+                // Migration is in memory only. Reading legacy receipts must not
+                // invent a full roster or rewrite their ownership evidence.
+                saved.version = 2
                 // A previous process cannot establish how far started work got.
                 for index in saved.receipts.indices where saved.receipts[index].status == .started {
                     saved.receipts[index].status = .unknown
@@ -369,15 +484,43 @@ actor MediaDeliveryStore {
     }
 
     private func validateManifest(_ value: Manifest) throws {
-        guard value.version == 1 else { throw MediaDeliveryStoreError.unsupportedSchema }
+        guard value.version == 1 || value.version == 2 else { throw MediaDeliveryStoreError.unsupportedSchema }
         let ids = value.receipts.map(\.id) + value.tombstones.map(\.id)
-        guard value.receipts.count <= limits.maximumRecords,
+        let batches = value.plannedBatches
+        let rows = batches.flatMap(\.rows)
+        let rowIDs = rows.map(\.id)
+        let batchIDs = batches.map(\.id)
+        guard (value.version != 1 || batches.isEmpty),
+              reservedRecordCount(value) <= limits.maximumRecords,
               value.tombstones.count <= Self.maximumDirectoryEntries,
-              Set(ids).count == ids.count else { throw MediaDeliveryStoreError.invalidManifest }
+              Set(ids).count == ids.count,
+              Set(batchIDs).count == batchIDs.count,
+              Set(rowIDs).count == rowIDs.count,
+              Set(rowIDs).isDisjoint(with: value.tombstones.map(\.id)),
+              Set(batchIDs).isDisjoint(with: ids + rowIDs) else { throw MediaDeliveryStoreError.invalidManifest }
+        for batch in batches {
+            guard validDate(batch.createdAt), !batch.rows.isEmpty else { throw MediaDeliveryStoreError.invalidManifest }
+            for row in batch.rows {
+                guard safeName(row.filename), row.filename == plannedFilename(row.filename) else {
+                    throw MediaDeliveryStoreError.invalidManifest
+                }
+                if let receipt = value.receipts.first(where: { $0.id == row.id }) {
+                    guard receipt.batchID == batch.id, receipt.filename == row.filename else {
+                        throw MediaDeliveryStoreError.invalidManifest
+                    }
+                }
+            }
+        }
         for receipt in value.receipts {
             guard safeName(receipt.filename), validDate(receipt.startedAt),
                   receipt.completedAt.map(validDate) != false,
                   receipt.actualBytes.map({ $0 >= 0 }) != false else {
+                throw MediaDeliveryStoreError.invalidManifest
+            }
+            // A receipt claiming a planned batch must belong to its roster.
+            // Legacy/dynamic receipts make no complete-roster claim.
+            if let batch = batches.first(where: { $0.id == receipt.batchID }),
+               !batch.rows.contains(where: { $0.id == receipt.id }) {
                 throw MediaDeliveryStoreError.invalidManifest
             }
             switch receipt.status {
@@ -409,13 +552,35 @@ actor MediaDeliveryStore {
         }
     }
 
+    private func reservedRecordCount(_ value: Manifest) -> Int {
+        let receiptIDs = Set(value.receipts.map(\.id))
+        return value.receipts.count + value.plannedBatches.reduce(0) { count, batch in
+            count + batch.rows.filter { !receiptIDs.contains($0.id) }.count
+        }
+    }
+
     private func validateKeys(_ data: Data) throws {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let version = object["version"] as? Int else { throw MediaDeliveryStoreError.invalidManifest }
-        guard version == 1 else { throw MediaDeliveryStoreError.unsupportedSchema }
-        guard Set(object.keys) == Set(["version", "epoch", "receipts", "tombstones"]),
+        guard version == 1 || version == 2 else { throw MediaDeliveryStoreError.unsupportedSchema }
+        let manifestKeys: Set<String> = version == 1
+            ? ["version", "epoch", "receipts", "tombstones"]
+            : ["version", "epoch", "receipts", "tombstones", "plannedBatches"]
+        guard Set(object.keys) == manifestKeys,
               let receipts = object["receipts"] as? [[String: Any]],
               let tombstones = object["tombstones"] as? [[String: Any]] else { throw MediaDeliveryStoreError.invalidManifest }
+        if version == 2 {
+            guard let batches = object["plannedBatches"] as? [[String: Any]] else {
+                throw MediaDeliveryStoreError.invalidManifest
+            }
+            for batch in batches {
+                guard Set(batch.keys) == Set(["id", "createdAt", "rows"]),
+                      let rows = batch["rows"] as? [[String: Any]],
+                      rows.allSatisfy({ Set($0.keys) == Set(["id", "filename"]) }) else {
+                    throw MediaDeliveryStoreError.invalidManifest
+                }
+            }
+        }
         let receiptKeys: Set<String> = ["id", "batchID", "filename", "startedAt", "completedAt", "status", "actualBytes", "reason", "identity"]
         for receipt in receipts where !Set(receipt.keys).isSubset(of: receiptKeys) {
             throw MediaDeliveryStoreError.invalidManifest
@@ -778,6 +943,17 @@ actor MediaDeliveryStore {
         date.timeIntervalSince1970.isFinite && date >= .distantPast && date <= .distantFuture
     }
     private func safeName(_ name: String) -> Bool { !name.isEmpty && name == MediaBatchOwnedFile.safeFilename(name) }
+    private func plannedFilename(_ value: String) -> String {
+        // A hostile display label must not persist URL query/fragment secrets.
+        // Drop the authority too if a caller accidentally supplies a full URL.
+        let label = String(value.prefix { $0 != "?" && $0 != "#" })
+        if let scheme = label.range(of: "://") {
+            let authorityAndPath = label[scheme.upperBound...]
+            guard let path = authorityAndPath.firstIndex(of: "/") else { return "original-media" }
+            return MediaBatchOwnedFile.safeFilename(String(authorityAndPath[path...]))
+        }
+        return MediaBatchOwnedFile.safeFilename(label)
+    }
     private func canonicalUUID(_ name: String) -> Bool { UUID(uuidString: name)?.uuidString == name }
     private func isManifestTemporary(_ name: String) -> Bool {
         guard name.hasPrefix(".manifest-"), name.hasSuffix(".tmp") else { return false }

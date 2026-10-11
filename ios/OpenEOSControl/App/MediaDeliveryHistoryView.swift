@@ -24,6 +24,19 @@ struct MediaDeliveryHistoryView: View {
     private var availableIDs: [UUID] {
         records.filter { $0.status == .prepared && $0.availability == .available }.map(\.id)
     }
+    private var worklists: [MediaDeliveryPlannedBatchRecord] {
+        camera.mediaDeliverySnapshot.plannedBatches.sorted {
+            if $0.createdAt == $1.createdAt { return $0.id.uuidString < $1.id.uuidString }
+            return $0.createdAt > $1.createdAt
+        }
+    }
+    private var queuedCount: Int {
+        worklists.reduce(0) { $0 + $1.rows.filter { $0.receipt == nil }.count }
+    }
+    private var legacyRecords: [MediaDeliveryRecord] {
+        let plannedIDs = Set(worklists.flatMap { $0.rows.map(\.id) })
+        return records.filter { !plannedIDs.contains($0.id) }
+    }
     private var hasWarning: Bool {
         camera.mediaDeliveryHistoryWarning || camera.mediaDeliverySnapshot.warning != nil
     }
@@ -41,6 +54,12 @@ struct MediaDeliveryHistoryView: View {
                     Text(language.format("media_delivery_history_counts", records.count, availableIDs.count))
                         .font(.callout)
                         .accessibilityIdentifier("media-delivery-history-counts")
+                    Text(language.format("media_worklist_counts", worklists.count, queuedCount))
+                        .font(.callout)
+                        .accessibilityIdentifier("media-delivery-worklist-counts")
+                    Text(language.string("media_worklist_help"))
+                        .font(.caption)
+                        .foregroundStyle(Color.cameraSecondaryText)
                     retainedSize
                 }
 
@@ -62,6 +81,12 @@ struct MediaDeliveryHistoryView: View {
                     Section {
                         Label(language.string("media_delivery_history_warning"), systemImage: "exclamationmark.triangle")
                             .accessibilityIdentifier("media-delivery-history-warning")
+                    }
+                }
+                if camera.mediaBatchWorklistWarning {
+                    Section {
+                        Text(language.string("media_worklist_recording_warning"))
+                            .accessibilityIdentifier("media-delivery-worklist-warning")
                     }
                 }
 
@@ -103,17 +128,44 @@ struct MediaDeliveryHistoryView: View {
                     .accessibilityIdentifier("media-delivery-history-refresh")
                 }
 
-                if records.isEmpty && !camera.mediaDeliveryHistoryLoading && !hasWarning {
+                ForEach(worklists) { worklist in
+                    Section {
+                        ForEach(Array(worklist.rows.enumerated()), id: \.element.id) { index, row in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(language.format("media_worklist_position", index + 1, worklist.rows.count))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(Color.cameraSecondaryText)
+                                if let receipt = row.receipt {
+                                    historyRow(receipt)
+                                } else {
+                                    Text(verbatim: row.filename)
+                                        .font(.headline)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Text(language.string("media_worklist_queued"))
+                                        .accessibilityIdentifier("media-delivery-worklist-queued-\(row.id.uuidString)")
+                                }
+                            }
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("media-delivery-worklist-row-\(row.id.uuidString)")
+                        }
+                    } header: {
+                        Text(language.format("media_worklist_created", dateLabel(worklist.createdAt)))
+                    }
+                }
+
+                if records.isEmpty && worklists.isEmpty && !camera.mediaDeliveryHistoryLoading && !hasWarning {
                     Section {
                         Text(language.string("media_delivery_history_empty"))
                             .foregroundStyle(Color.cameraSecondaryText)
                             .accessibilityIdentifier("media-delivery-history-empty")
                     }
-                } else if !records.isEmpty {
+                } else if !legacyRecords.isEmpty {
                     Section {
-                        ForEach(records) { record in
+                        ForEach(legacyRecords) { record in
                             historyRow(record)
                         }
+                    } header: {
+                        Text(language.string("media_worklist_legacy_attempts"))
                     }
                 }
 
@@ -129,7 +181,7 @@ struct MediaDeliveryHistoryView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(minHeight: 44, alignment: .leading)
                     }
-                    .disabled(actionsDisabled || (records.isEmpty && camera.mediaDeliverySnapshot.retainedBytes == 0 && !hasWarning))
+                    .disabled(actionsDisabled || (records.isEmpty && worklists.isEmpty && camera.mediaDeliverySnapshot.retainedBytes == 0 && !hasWarning))
                     .accessibilityIdentifier("media-delivery-history-clear")
                 }
             }

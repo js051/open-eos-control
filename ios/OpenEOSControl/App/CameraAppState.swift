@@ -2,7 +2,7 @@ import Foundation
 import OpenEOSCore
 
 /// Narrow reply-publication seam for controlled cancellation/retirement tests.
-enum MediaDeliveryReplyStage: Sendable, Equatable { case itemStarted, originalRetained, snapshot, shareAcquired }
+enum MediaDeliveryReplyStage: Sendable, Equatable { case batchPlanned, itemStarted, originalRetained, snapshot, shareAcquired }
 
 /// Prepared text retains its admitting connection through the final UI publish.
 struct CameraSessionExport {
@@ -126,6 +126,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaDeliverySnapshot = MediaDeliverySnapshot(records: [], retainedBytes: 0, warning: nil)
     @Published private(set) var mediaDeliveryHistoryLoading = false
     @Published private(set) var mediaDeliveryHistoryWarning = false
+    @Published private(set) var mediaBatchWorklistWarning = false
     let foregroundMedia: ForegroundMediaController
     @Published private(set) var foregroundTemporaryResults: [MediaBatchResult] = []
     private var foregroundMediaOwner = UUID()
@@ -1993,6 +1994,7 @@ final class CameraAppState: ObservableObject {
         mediaBatchProgress = nil
         mediaBatchCancellationRequested = false
         mediaDeliveryRecordingWarning = mediaDeliveryStore == nil
+        mediaBatchWorklistWarning = mediaDeliveryStore == nil
         mediaDeliveryHistoryWarning = mediaDeliveryRecordingWarning || mediaDeliverySnapshot.warning != nil
         mediaBatchState = .running
         mediaBatchTask = Task { [weak self] in
@@ -2063,6 +2065,7 @@ final class CameraAppState: ObservableObject {
             try await mediaDeliveryStore.clear()
             guard mediaDeliveryHistoryOwner == owner else { return }
             mediaDeliveryRecordingWarning = false
+            mediaBatchWorklistWarning = false
         } catch {
             guard mediaDeliveryHistoryOwner == owner else { return }
             mediaDeliveryRecordingWarning = true
@@ -2092,12 +2095,19 @@ final class CameraAppState: ObservableObject {
             }
         }
         var deliveryTicket: MediaDeliveryTicket?
+        var plannedRowIDs: [UUID]?
         if let mediaDeliveryStore {
-            do { deliveryTicket = try await mediaDeliveryStore.beginBatch() }
+            do {
+                let plan = try await mediaDeliveryStore.beginPlannedBatch(filenames: results.map { $0.item.name })
+                deliveryTicket = plan.ticket
+                plannedRowIDs = plan.rowIDs
+                await mediaDeliveryReplyDelay?(.batchPlanned)
+            }
             catch {
                 if ownsMediaBatch(token: token, generation: generation) {
                     mediaDeliveryRecordingWarning = true
                     mediaDeliveryHistoryWarning = true
+                    mediaBatchWorklistWarning = true
                 }
             }
         }
@@ -2108,15 +2118,31 @@ final class CameraAppState: ObservableObject {
                 return
             }
             var deliveryReceiptID: UUID?
-            if let mediaDeliveryStore, let deliveryTicket {
+            if let mediaDeliveryStore, let ticket = deliveryTicket, let rowIDs = plannedRowIDs {
                 do {
-                    deliveryReceiptID = try await mediaDeliveryStore.beginItem(deliveryTicket, filename: entry.item.name)
+                    guard rowIDs.indices.contains(index) else { throw MediaDeliveryStoreError.invalidReceipt }
+                    deliveryReceiptID = try await mediaDeliveryStore.beginPlannedItem(ticket, rowID: rowIDs[index])
                     await mediaDeliveryReplyDelay?(.itemStarted)
                 }
                 catch {
-                    if ownsMediaBatch(token: token, generation: generation) {
-                        mediaDeliveryRecordingWarning = true
-                        mediaDeliveryHistoryWarning = true
+                    guard ownsMediaBatch(token: token, generation: generation) else { return }
+                    mediaDeliveryRecordingWarning = true
+                    mediaDeliveryHistoryWarning = true
+                    mediaBatchWorklistWarning = true
+                    if Task.isCancelled || mediaBatchCancellationRequested {
+                        mediaBatchState = .cancelled
+                        return
+                    }
+                    if (error as? MediaDeliveryStoreError) == .invalidTicket {
+                        // A confirmed clear retires the entire plan. Preserve
+                        // the existing manual operation without rebuilding it.
+                        deliveryTicket = nil
+                        plannedRowIDs = nil
+                    } else {
+                        // The plan still describes this row as unstarted. Do
+                        // not perform an unrecorded GET that would make it lie.
+                        mediaBatchState = .failed
+                        return
                     }
                 }
             }

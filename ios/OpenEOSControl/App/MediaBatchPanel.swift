@@ -82,6 +82,12 @@ struct MediaBatchPanel: View {
                     .foregroundStyle(Color.cameraSecondaryText)
                     .accessibilityIdentifier("media-batch-history-warning")
             }
+            if camera.mediaBatchWorklistWarning {
+                Text(language.string("media_worklist_recording_warning"))
+                    .font(.caption)
+                    .foregroundStyle(Color.cameraSecondaryText)
+                    .accessibilityIdentifier("media-batch-worklist-warning")
+            }
             Button {
                 camera.activeSheet = .deliveryHistory
             } label: {
