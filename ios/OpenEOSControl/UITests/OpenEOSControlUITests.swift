@@ -1403,8 +1403,7 @@ final class OpenEOSControlUITests: XCTestCase {
             _ = try XCTUnwrap(waitForLabel(latest, containing: "SIM_0003.JPG", timeout: 10) ? true : nil)
             _ = try XCTUnwrap(waitForInteraction(latest, timeout: 5) ? true : nil)
             try tapForAsyncTest(latest)
-            _ = try XCTUnwrap(app.alerts.firstMatch.waitForExistence(timeout: 10) ? true : nil)
-            try tapForAsyncTest(app.alerts.buttons.firstMatch)
+            try dismissExpectedOperationAlert(in: app, context: "capture-preview-\(language)")
             let previewRetry = app.buttons["retry-media-preview"]
             _ = try XCTUnwrap(waitForInteraction(previewRetry, timeout: 5) ? true : nil)
             try tapForAsyncTest(previewRetry)
@@ -1415,8 +1414,7 @@ final class OpenEOSControlUITests: XCTestCase {
             let cancel = app.buttons["media-preview-cancel-download-\(mediaID)"]
             _ = try XCTUnwrap(waitForInteraction(download, timeout: 5) ? true : nil)
             try tapForAsyncTest(download)
-            _ = try XCTUnwrap(app.alerts.firstMatch.waitForExistence(timeout: 10) ? true : nil)
-            try tapForAsyncTest(app.alerts.buttons.firstMatch)
+            try dismissExpectedOperationAlert(in: app, context: "capture-original-\(language)")
             _ = try XCTUnwrap(!share.exists ? true : nil)
             _ = try await simulatorRequest(path: "/ccapi/test/capture-delivery", method: "POST",
                                            jsonBody: ["original_failures": 0, "original_delay_ms": 60_000])
@@ -2274,6 +2272,38 @@ final class OpenEOSControlUITests: XCTestCase {
             if samples.count == 16 { samples.removeFirst() }
             samples.append("\(elapsed): \(stage.prefix(80))")
         }
+    }
+
+    private func dismissExpectedOperationAlert(
+        in app: XCUIApplication, context: String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) throws {
+        let dismiss = app.alerts.firstMatch.buttons.firstMatch
+        let start = ProcessInfo.processInfo.systemUptime
+        var trace = InteractionWaitTrace()
+        let interactive = waitForInteraction(dismiss, timeout: 10) { stage in
+            trace.record(stage, elapsed: ProcessInfo.processInfo.systemUptime - start)
+        }
+        if !interactive {
+            // Keep the original ten-second admission budget. Persist observations
+            // already made by the predicate; a later screenshot cannot rescue it.
+            let summary = "[OEC_OPERATION_ALERT_WAIT] timeout=10 elapsed=\(ProcessInfo.processInfo.systemUptime - start) samples=\(trace.total)\n"
+                + "context=\(context.prefix(160)) caller=\(file):\(line)\n"
+                + "target=first button inside first Alert; presentation time NOT_OBSERVED\n"
+                + trace.samples.joined(separator: "\n")
+            print(summary)
+            let attachment = XCTAttachment(string: summary)
+            attachment.name = "operation-alert-wait-failure-trace"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            // One synchronous capture; XCTest supplies no per-call hard timeout.
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "operation-alert-wait-failure"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+        }
+        _ = try XCTUnwrap(interactive ? true : nil, file: file, line: line)
+        try tapForAsyncTest(dismiss, file: file, line: line)
     }
 
     private func openMoreActionsForAsyncTest(

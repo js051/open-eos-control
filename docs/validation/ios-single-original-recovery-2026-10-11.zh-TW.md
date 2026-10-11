@@ -27,6 +27,16 @@
 
 本批僅完成來源實作與測試來源；`git diff --check` 通過。此環境無可用 iOS／Xcode 建置，Swift 編譯、XCTest、Simulator、UI 分享呈現及實機／真 provider runtime 全部 **NOT_RUN**。沒有安裝、網路查詢、CI、commit 或 push；必須先完成來源審查，再按原開發分支整批正常 CI。任何舊 head 的通過不算本批證據。
 
+## 首輪實際 CI 與操作提示等待候選
+
+遠端 `3cfa1b59fd74e39f2b1ee2710bf7aa3d3f6be4e9`／CI `38161489829` 的必要軟體驗證已執行，整體 **FAILURE**。App 368/368（新增18方法全部）、Core、JVM/APK 與 secret gates 通過；UI 36/37。上段 NOT_RUN 是交付前狀態，不能用本輪 App 通過抵銷 UI 失敗。
+
+唯一失敗是既有 `testCanonicalCaptureReviewRetriesReadsAndFailedPreviewOriginalWithoutReshooting` 繁中分支，點最新照片後等待第一個 Alert 10秒沒有取得成功，尚未進該語言的原檔下載步驟。英文同旅程已通過。保留 artifact `11710589198`，197815479 bytes，SHA256 `afc341aa3cdca398798c8abf4fec3c8a4434bddac0f6b86bf1dcfa03b4a4ee9e`。
+
+伺服器紀錄確認 display GET 回503；18:08:13.822 的失敗 AX hierarchy 包含真實「相機操作失敗」Alert、該503內容、關閉按鈕以及預覽重試控制。這只能證明取證時已呈現，不能證明在原10秒期限內已呈現。原 trace 首次 exists 查詢後約9秒進入內建 debug capture，之後錯誤取證另跨約18秒；尚未確定延遲來自呈現、AX或平台負載，不能宣稱根因已修。
+
+最小候選將本旅程兩處「等 Alert 存在，再立刻點按」統一為既有 `waitForInteraction` 等同一 Alert 內首按鈕可互動，仍10秒，仍必須有 Alert 且成功點按後繼續原重試／下載／取消／不重拍斷言。沒有產品、fixture故障次數、測試選取或 timeout 變更。失敗保存最多16筆既有 predicate 觀察與一張截圖，不額外 AX 查詢、不拿遲到畫面改成通過。同步 XCTest 操作與截圖沒有可取消的每呼叫硬期限，因此10秒不是整段 wall-clock 完成保證。此更強的可互動等待是待新 runtime 驗證的候選。
+
 ## Release Assessment
 
 沿原 P2 本機恢復能力補齊既有單項入口，對使用者可見且向後相容；沿原草稿 PR 的 minor 評估，不自行升版或發布。實機與完整產品人工驗收依使用者指示最後集中；目前僅 implemented 候選，未達 PR ready／main accepted／preview released。
