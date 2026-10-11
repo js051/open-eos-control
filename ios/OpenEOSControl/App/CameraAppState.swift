@@ -43,20 +43,45 @@ final class CameraAppState: ObservableObject {
     }
 
     @Published var connectionMode: AppConnectionMode {
-        didSet { if connectionMode != oldValue { invalidateBridgeScan() } }
+        didSet {
+            if connectionMode != oldValue {
+                invalidateConnectionGuidance()
+                invalidateBridgeScan()
+            }
+        }
     }
-    @Published var baseURL: String
+    @Published var baseURL: String {
+        didSet { if baseURL != oldValue { invalidateConnectionGuidance() } }
+    }
     @Published private(set) var ccapiConnectionMode = CCAPIConnectionMode.automatic
-    @Published var username: String
-    @Published var password = ""
+    @Published var username: String {
+        didSet { if username != oldValue { invalidateConnectionGuidance() } }
+    }
+    @Published var password = "" {
+        didSet { if password != oldValue { invalidateConnectionGuidance() } }
+    }
     @Published var bridgeURL: String {
-        didSet { if bridgeURL != oldValue { invalidateBridgeScan() } }
+        didSet {
+            if bridgeURL != oldValue {
+                invalidateConnectionGuidance()
+                invalidateBridgeScan()
+            }
+        }
     }
     @Published var bridgeToken = "" {
-        didSet { if bridgeToken != oldValue { invalidateBridgeScan() } }
+        didSet {
+            if bridgeToken != oldValue {
+                invalidateConnectionGuidance()
+                invalidateBridgeScan()
+            }
+        }
     }
+    @Published private(set) var connectionRecovery: ConnectionRecovery?
+    @Published private(set) var bridgeScanState = BridgeScanState.notScanned
     @Published private(set) var bridgeCameras: [DesktopBridgeCamera] = []
-    @Published var selectedBridgeCameraID: String?
+    @Published var selectedBridgeCameraID: String? {
+        didSet { if selectedBridgeCameraID != oldValue { invalidateConnectionGuidance() } }
+    }
     @Published private(set) var snapshot: CameraSnapshot? {
         didSet {
             liveViewMagnification = snapshot?.capabilities.liveView.currentMagnification
@@ -170,6 +195,7 @@ final class CameraAppState: ObservableObject {
     private let cubeLutLoader: (@Sendable (URL) async throws -> CubeLut)?
     private let focusMarkerDelay: (@Sendable () async throws -> Void)?
     private var bridgeScanOwner = UUID()
+    private var connectionConfigurationOwner = UUID()
     private var cubeLutOwner = UUID()
     private var focusMarkerOwner = UUID()
     private(set) var focusMarkerExpiryTask: Task<Void, Never>?
@@ -374,7 +400,6 @@ final class CameraAppState: ObservableObject {
     func setConnectionMode(_ value: AppConnectionMode) {
         connectionMode = value
         defaults.set(value.rawValue, forKey: DefaultsKey.connectionMode)
-        lastError = nil
     }
 
     func setBridgeURL(_ value: String) {
@@ -388,18 +413,26 @@ final class CameraAppState: ObservableObject {
     }
 
     func useHTTPPreset() {
+        if ccapiConnectionMode != .camera { invalidateConnectionGuidance() }
         ccapiConnectionMode = .camera
         setBaseURL(Self.defaultCameraURL)
     }
 
     func useHTTPSPreset() {
+        if ccapiConnectionMode != .camera { invalidateConnectionGuidance() }
         ccapiConnectionMode = .camera
         setBaseURL(Self.defaultSecureCameraURL)
     }
 
     func useSimulatorPreset() {
+        if ccapiConnectionMode != .simulator { invalidateConnectionGuidance() }
         ccapiConnectionMode = .simulator
         setBaseURL(Self.simulatorURL)
+    }
+
+    private func invalidateConnectionGuidance() {
+        connectionConfigurationOwner = UUID()
+        connectionRecovery = nil
     }
 
     private func invalidateBridgeScan() {
@@ -407,19 +440,37 @@ final class CameraAppState: ObservableObject {
         end(.scan)
         bridgeCameras = []
         selectedBridgeCameraID = nil
+        bridgeScanState = .notScanned
     }
 
     func scanBridgeCameras() async {
-        guard !Task.isCancelled, begin(.scan) else { return }
+        // Both operations publish connection guidance; admission is exclusive
+        // even for callers that do not go through the disabled UI controls.
+        guard !Task.isCancelled, !busyOperations.contains(.connect), begin(.scan) else { return }
         let owner = UUID()
         bridgeScanOwner = owner
-        defer { if bridgeScanOwner == owner { end(.scan) } }
+        let previousScanState = bridgeScanState
+        let previousRecovery = connectionRecovery
+        let requestURL = bridgeURL
+        let requestToken = bridgeToken
+        bridgeScanState = .scanning
+        connectionRecovery = nil
+        defer {
+            if bridgeScanOwner == owner {
+                // Cancellation retains the last completed result and its guidance.
+                if bridgeScanState == .scanning {
+                    bridgeScanState = previousScanState
+                    connectionRecovery = previousRecovery
+                }
+                end(.scan)
+            }
+        }
         do {
             let cameras: [DesktopBridgeCamera]
             if let bridgeCameraDiscovery {
-                cameras = try await bridgeCameraDiscovery(bridgeURL, bridgeToken)
+                cameras = try await bridgeCameraDiscovery(requestURL, requestToken)
             } else {
-                let probe = try DesktopBridgeClient(baseURL: bridgeURL, token: bridgeToken)
+                let probe = try DesktopBridgeClient(baseURL: requestURL, token: requestToken)
                 cameras = try await probe.discoverCameras()
             }
             guard bridgeScanOwner == owner, !Task.isCancelled else { return }
@@ -429,22 +480,31 @@ final class CameraAppState: ObservableObject {
             } else {
                 selectedBridgeCameraID = cameras.first?.id
             }
+            bridgeScanState = .completed
+            connectionRecovery = nil
             lastError = nil
         } catch {
-            guard bridgeScanOwner == owner, !Task.isCancelled else { return }
+            guard bridgeScanOwner == owner, !Task.isCancelled,
+                  let reason = CameraConnectionFailureReason.classify(error) else { return }
             bridgeCameras = []
             selectedBridgeCameraID = nil
-            record(error)
+            bridgeScanState = .failed
+            connectionRecovery = ConnectionRecovery(mode: .desktopBridge, operation: .scan, reason: reason)
         }
     }
 
     func connect() async {
-        guard session == nil, !isPreview, begin(.connect) else { return }
+        guard !Task.isCancelled, session == nil, !isPreview,
+              !busyOperations.contains(.scan), begin(.connect) else { return }
         exportGeneration = UUID()
         let generation = sessionGeneration
+        let configurationOwner = connectionConfigurationOwner
+        let requestedMode = connectionMode
+        connectionRecovery = nil
         defer { end(.connect, generation: generation) }
         await disconnectTask?.value
-        guard generation == sessionGeneration, !Task.isCancelled else { return }
+        guard generation == sessionGeneration, configurationOwner == connectionConfigurationOwner,
+              !Task.isCancelled else { return }
         cancelLiveViewFPSUpdate()
         shutterAutofocus = true
         operatorConfirmedFeatures.removeAll()
@@ -500,7 +560,7 @@ final class CameraAppState: ObservableObject {
             }
             let release = await newSession.shutterReleaseState()
             guard generation == sessionGeneration else { return }
-            if Task.isCancelled {
+            if Task.isCancelled || configurationOwner != connectionConfigurationOwner {
                 let release = await newSession.closeWithShutterReleaseState()
                 guard generation == sessionGeneration else { return }
                 preservePreviousReleaseWarning(release, generation: generation)
@@ -524,6 +584,7 @@ final class CameraAppState: ObservableObject {
             lastClockSyncAt = nil
             lastCreatedDirectoryName = nil
             lastError = nil
+            connectionRecovery = nil
             clampLiveViewRequest()
             beginEventLoop(session: newSession)
             startLatestMediaRefresh(session: newSession)
@@ -531,8 +592,9 @@ final class CameraAppState: ObservableObject {
                 await startLiveView()
             }
         } catch {
-            guard generation == sessionGeneration else { return }
-            record(error)
+            guard generation == sessionGeneration, configurationOwner == connectionConfigurationOwner,
+                  !Task.isCancelled, let reason = CameraConnectionFailureReason.classify(error) else { return }
+            connectionRecovery = ConnectionRecovery(mode: requestedMode, operation: .connect, reason: reason)
         }
     }
 
@@ -630,6 +692,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func prepareDisconnect() -> CameraSession? {
+        invalidateConnectionGuidance()
         foregroundMedia.retire()
         foregroundMediaOwner = UUID()
         foregroundMediaIOOwner = nil

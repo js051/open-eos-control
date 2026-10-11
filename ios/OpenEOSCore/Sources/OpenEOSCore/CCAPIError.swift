@@ -4,6 +4,9 @@ public enum CCAPIError: Error, Equatable, Sendable {
     case invalidBaseURL(String)
     case notInitialized
     case discoveryFailed([String])
+    // The legacy case remains available to existing callers and fixtures.
+    case discoveryFailedWithReasons([String], Set<CameraConnectionFailureReason>)
+    case connectionReadFailed([String], Set<CameraConnectionFailureReason>)
     case http(statusCode: Int, method: String, url: String, body: String)
     case invalidResponse(String)
     case unsupported(CameraFeature)
@@ -21,8 +24,10 @@ extension CCAPIError: LocalizedError {
             "Invalid camera URL: \(value)"
         case .notInitialized:
             "The CCAPI client has not finished discovery."
-        case let .discoveryFailed(errors):
+        case let .discoveryFailed(errors), let .discoveryFailedWithReasons(errors, _):
             "Camera CCAPI discovery failed.\n" + errors.map { "- \($0)" }.joined(separator: "\n")
+        case let .connectionReadFailed(errors, _):
+            "Camera JSON request failed.\n" + errors.map { "- \($0)" }.joined(separator: "\n")
         case let .http(statusCode, method, url, body):
             "Camera request failed: \(method) \(url) returned HTTP \(statusCode).\nBody: \(body)"
         case let .invalidResponse(message):

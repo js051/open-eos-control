@@ -451,6 +451,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     }
 
     public func initialize() async throws {
+        try Task.checkCancellation()
         guard !initialized else { return }
         discoveryTrace.removeAll()
         discoveryTraceTruncated = false
@@ -462,13 +463,15 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         }
 
         var errors: [String] = []
+        var failureReasons = Set<CameraConnectionFailureReason>()
         for path in ["/ccapi", "/ccapi/"] {
             do {
                 let rootDiscovery: JSONDictionary
                 do {
                     rootDiscovery = try await requestJSON(path: path)
+                    try Task.checkCancellation()
                 } catch {
-                    if error is CancellationError { throw error }
+                    if CameraConnectionFailureReason.isCancellation(error) { throw error }
                     recordDiscoveryFailure(endpoint: "GET \(path)", error: error)
                     throw error
                 }
@@ -495,8 +498,9 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 let discovery: JSONDictionary
                 do {
                     discovery = try await requestJSON(path: Self.developerAPIPath)
+                    try Task.checkCancellation()
                 } catch {
-                    if error is CancellationError { throw error }
+                    if CameraConnectionFailureReason.isCancellation(error) { throw error }
                     recordDiscoveryFailure(endpoint: developerEndpoint, error: error)
                     throw error
                 }
@@ -517,7 +521,9 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 initialized = true
                 return
             } catch {
-                if error is CancellationError { throw error }
+                if CameraConnectionFailureReason.isCancellation(error) { throw error }
+                try Task.checkCancellation()
+                failureReasons.insert(CameraConnectionFailureReason.classify(error) ?? .discoveryFailed)
                 errors.append("GET \(path): \(error.localizedDescription)")
             }
         }
@@ -525,6 +531,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         for prefix in ["/ccapi/ver110", "/ccapi/ver100"] {
             do {
                 let value = try await requestJSON(path: "\(prefix)/deviceinformation")
+                try Task.checkCancellation()
                 apiVersionPrefixes = [prefix]
                 preferredVersionPrefix = prefix
                 discoverySource = "GET \(prefix)/deviceinformation (identity fallback)"
@@ -540,17 +547,19 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 initialized = true
                 return
             } catch {
-                if error is CancellationError { throw error }
+                if CameraConnectionFailureReason.isCancellation(error) { throw error }
+                try Task.checkCancellation()
+                failureReasons.insert(CameraConnectionFailureReason.classify(error) ?? .discoveryFailed)
                 recordDiscoveryFailure(endpoint: "GET \(prefix)/deviceinformation", error: error)
                 errors.append("GET \(prefix)/deviceinformation: \(error.localizedDescription)")
             }
         }
-        throw CCAPIError.discoveryFailed(errors)
+        throw CCAPIError.discoveryFailedWithReasons(errors, failureReasons)
     }
 
     public func connectSnapshot() async throws -> CameraSnapshot {
         try await initialize()
-        let cameraInfo = try await info()
+        let cameraInfo = try await readInfo(preservingConnectionEvidence: true)
         let cameraStatus = try await status()
         let cameraCapabilities = try await capabilities()
         return CameraSnapshot(info: cameraInfo, status: cameraStatus, capabilities: cameraCapabilities)
@@ -604,6 +613,10 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     }
 
     public func info() async throws -> CameraInfo {
+        try await readInfo(preservingConnectionEvidence: false)
+    }
+
+    private func readInfo(preservingConnectionEvidence: Bool) async throws -> CameraInfo {
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let value = try await requestJSON(path: "/ccapi/info")
@@ -617,7 +630,8 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             )
         }
 
-        let value = try await firstJSON(paths: versionedPaths("/deviceinformation"), required: true)
+        let value = try await firstJSON(paths: versionedPaths("/deviceinformation"), required: true,
+                                        preservingConnectionEvidence: preservingConnectionEvidence)
         let info = CameraInfo(
             model: value?.string("productname", default: "Canon Camera") ?? "Canon Camera",
             serial: value?.string("serialnumber", default: "unknown") ?? "unknown",
@@ -4631,17 +4645,27 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         return value
     }
 
-    private func firstJSON(paths: [String], required: Bool) async throws -> JSONDictionary? {
+    private func firstJSON(paths: [String], required: Bool,
+                           preservingConnectionEvidence: Bool = false) async throws -> JSONDictionary? {
         var failures: [String] = []
+        var reasons = Set<CameraConnectionFailureReason>()
         for path in paths {
             do {
-                return try await requestJSON(path: path)
+                let result = try await requestJSON(path: path)
+                if preservingConnectionEvidence { try Task.checkCancellation() }
+                return result
             } catch {
                 if error is CancellationError { throw error }
+                if preservingConnectionEvidence {
+                    if CameraConnectionFailureReason.isCancellation(error) { throw error }
+                    try Task.checkCancellation()
+                    reasons.insert(CameraConnectionFailureReason.classify(error) ?? .unknown)
+                }
                 failures.append("\(path): \(error.localizedDescription)")
             }
         }
         if required {
+            if preservingConnectionEvidence { throw CCAPIError.connectionReadFailed(failures, reasons) }
             throw CCAPIError.invalidResponse("Camera JSON request failed.\n" + failures.map { "- \($0)" }.joined(separator: "\n"))
         }
         return nil

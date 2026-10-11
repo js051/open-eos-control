@@ -595,20 +595,40 @@ final class OpenEOSControlUITests: XCTestCase {
         )
 
         XCTAssertTrue(app.staticTexts["連接你的 EOS"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["CCAPI 設定與 Camera Connect 配對"].exists)
         XCTAssertTrue(app.buttons["offline-preview-button"].exists)
         addScreenshot(name: "connection-zh-Hant")
     }
 
     func testDesktopBridgeConnectionFormRequiresScannedCamera() throws {
-        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
+        let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US",
+                         environment: ["OEC_HTTP_PRESET_URL": "invalid-camera-address"])
         let modePicker = app.segmentedControls["connection-mode-picker"]
         XCTAssertTrue(modePicker.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["CCAPI setup and Camera Connect pairing"].exists)
+        XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
+        assertConnectionButtonHitFrame(in: app)
+        app.buttons["connect-button"].tap()
+        let recovery = app.staticTexts["connection-recovery-message"]
+        XCTAssertTrue(recovery.waitForExistence(timeout: 5))
+        XCTAssertTrue(recovery.label.contains("complete http:// or https:// camera address"))
+        XCTAssertFalse(app.alerts.firstMatch.exists, "Connection guidance is inline")
+        XCTAssertFalse(app.textFields["camera-username-field"].exists,
+                       "An invalid address must not expand camera authentication")
+        XCTAssertTrue(scrollToInteraction(app.buttons["preset-simulator-button"], in: app, timeout: 8))
+        app.buttons["preset-simulator-button"].tap()
+        XCTAssertTrue(recovery.waitForNonExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["shutter-button"].exists, "Editing a preset must not connect")
+        XCTAssertTrue(scrollToInteraction(modePicker, in: app, timeout: 8))
 
         modePicker.buttons["Desktop Bridge"].tap()
 
         XCTAssertTrue(app.textFields["bridge-url-field"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.secureTextFields["bridge-token-field"].exists)
         XCTAssertTrue(app.buttons["bridge-scan-button"].exists)
+        XCTAssertTrue(app.staticTexts["bridge-scan-status"].label.contains("No scan yet"))
+        XCTAssertFalse(app.staticTexts["bridge-scan-status"].label.contains("Scan completed"))
+        XCTAssertFalse(app.textFields["camera-username-field"].exists)
         XCTAssertFalse(app.buttons["connect-button"].isEnabled)
         addScreenshot(name: "connection-desktop-bridge")
     }
@@ -631,7 +651,9 @@ final class OpenEOSControlUITests: XCTestCase {
         ] {
             let app = launch(appLanguage: language, appleLanguage: appleLanguage, locale: locale,
                              contentSizeCategory: "UICTContentSizeCategoryAccessibilityXXXL")
-            XCTAssertTrue(app.buttons["offline-preview-button"].waitForExistence(timeout: 8))
+            XCTAssertTrue(scrollConnectionButtonIntoView(
+                in: app, buttonIdentifier: "offline-preview-button", timeout: 8
+            ))
             app.buttons["offline-preview-button"].tap()
             let moreActions = app.buttons["more-actions-button"]
             XCTAssertTrue(moreActions.waitForExistence(timeout: 5))

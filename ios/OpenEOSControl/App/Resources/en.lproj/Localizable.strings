@@ -634,3 +634,36 @@
 "media_worklist_created" = "Worklist created %@";
 "media_worklist_legacy_attempts" = "Other recorded attempts · complete selection unknown";
 "media_worklist_recording_warning" = "The complete worklist could not be saved or updated. Check each current result; files already prepared remain available. Do not assume an unrecorded selection can be recovered after closing the app.";
+
+// First connection guidance and evidence-based recovery.
+"connection_camera_setup_title" = "CCAPI setup and Camera Connect pairing";
+"connection_bridge_setup_title" = "USB uses a computer; direct iOS USB is unavailable";
+"connection_camera_setup" = "Enable CCAPI on a supported EOS, connect this iPhone or iPad to the camera’s network, and enter the camera’s CCAPI URL including its port.";
+"connection_camera_pairing_help" = "Canon Camera Connect pairing alone does not enable CCAPI. Use the CCAPI settings shown on the camera; support and setup vary by model.";
+"connection_bridge_setup" = "Connect the camera to a computer by USB and run Open EOS Control Desktop Bridge there. Enter that computer’s network URL and Bridge token, then scan and select a camera.";
+"connection_ios_usb_limit" = "Direct USB/PTP control from this iOS app is not implemented. Desktop Bridge requires the computer to stay connected to both the camera and this device’s network.";
+"connection_camera_auth_help" = "Use the username and password configured for camera CCAPI authentication, if enabled. These are separate from Wi-Fi pairing and the Desktop Bridge token.";
+"connection_bridge_token_help" = "Use the bearer token configured on Desktop Bridge. Do not enter the camera’s CCAPI password here.";
+"connection_recovery_title" = "Connection needs attention";
+"connection_camera_invalid_address" = "Enter a complete http:// or https:// camera address with its port. Leave out paths, query text, and credentials; enter authentication below.";
+"connection_bridge_invalid_address" = "Enter the computer’s complete http:// or https:// Bridge address and port. Keep the Bridge token in its separate field.";
+"connection_camera_authentication" = "The camera endpoint rejected authentication (HTTP 401 or 403). Check its CCAPI username and password, then retry.";
+"connection_bridge_authentication" = "Desktop Bridge rejected access (HTTP 401 or 403). Check the Bridge bearer token and its server configuration, then retry.";
+"connection_camera_endpoint_missing" = "The requested CCAPI endpoint was not found. Check that CCAPI is enabled and that the address and port match the camera’s CCAPI settings.";
+"connection_bridge_endpoint_missing" = "The requested Bridge endpoint was not found. Check the computer’s Bridge address and port, and that the expected service is running.";
+"connection_tls_error" = "A secure connection could not be established. Check the configured HTTPS address and certificate with the camera or Bridge administrator.";
+"connection_host_not_found" = "The host could not be found. Check the address spelling and the network used to reach it.";
+"connection_timeout" = "The connection timed out. Check that the camera or computer is awake and reachable, then retry.";
+"connection_camera_unreachable" = "The camera could not be reached over the network. Check this device’s Wi-Fi connection and Local Network access in iOS Settings.";
+"connection_bridge_unreachable" = "The computer could not be reached over the network. Check its Bridge service, this device’s network, and Local Network access in iOS Settings.";
+"connection_http_error" = "The service returned an HTTP error. Check the camera or Bridge service and retry when it is ready.";
+"connection_discovery_failed" = "Discovery did not produce a usable camera API. Check CCAPI setup and the selected address before retrying.";
+"connection_unknown_error" = "The connection failed without a confirmed cause. Check the selected connection method and its settings, then retry.";
+"connection_edit_then_connect" = "Review or edit the fields above, then use the connection button below when ready. No retry starts automatically.";
+"connection_edit_then_scan" = "Review or edit the fields above, then use the scan button again. Scanning does not start camera control or shooting.";
+"connection_edit_settings" = "Edit settings";
+"connection_retry_connect" = "Retry connection";
+"connection_retry_scan" = "Retry scan";
+"connection_bridge_unscanned" = "No scan yet. Tap Scan cameras to look for cameras on the computer.";
+"connection_bridge_scan_failed" = "The scan failed. Review the connection guidance before trying again.";
+"connection_bridge_empty" = "Scan completed with no cameras. Check the camera’s power, USB cable, and availability in Desktop Bridge on the computer, then scan again.";

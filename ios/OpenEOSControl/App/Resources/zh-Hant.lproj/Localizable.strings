@@ -634,3 +634,36 @@
 "media_worklist_created" = "工作清單建立於 %@";
 "media_worklist_legacy_attempts" = "其他已記錄嘗試 · 完整選取清單未知";
 "media_worklist_recording_warning" = "完整工作清單無法保存或更新。請查看目前各項結果；已備妥的檔案仍可使用。未記錄的選取清單不保證能在關閉 App 後恢復。";
+
+// First connection guidance and evidence-based recovery.
+"connection_camera_setup_title" = "CCAPI 設定與 Camera Connect 配對";
+"connection_bridge_setup_title" = "USB 需透過電腦；iOS 尚不支援直接 USB 控制";
+"connection_camera_setup" = "請在支援的 EOS 啟用 CCAPI，將 iPhone 或 iPad 連上相機所在網路，再輸入相機的 CCAPI 網址（含連接埠）。";
+"connection_camera_pairing_help" = "僅完成 Canon Camera Connect 配對不代表已啟用 CCAPI。請依相機顯示的 CCAPI 設定操作；支援程度與設定方式會因機型而異。";
+"connection_bridge_setup" = "請以 USB 將相機接到電腦，並在電腦執行 Open EOS Control Desktop Bridge。輸入該電腦的網路網址與 Bridge 權杖，再掃描並選取相機。";
+"connection_ios_usb_limit" = "此 iOS App 尚未實作直接 USB/PTP 控制。使用 Desktop Bridge 時，電腦必須持續連接相機，並與本裝置保持網路連線。";
+"connection_camera_auth_help" = "若相機啟用 CCAPI 驗證，請使用該驗證設定的使用者名稱與密碼；這與 Wi-Fi 配對及 Desktop Bridge 權杖不同。";
+"connection_bridge_token_help" = "請使用 Desktop Bridge 設定的 Bearer 權杖；此欄位不是相機的 CCAPI 密碼。";
+"connection_recovery_title" = "需要檢查連線設定";
+"connection_camera_invalid_address" = "請輸入完整的 http:// 或 https:// 相機網址及連接埠，不要包含路徑、查詢字串或帳密；驗證資料請填在下方。";
+"connection_bridge_invalid_address" = "請輸入電腦完整的 http:// 或 https:// Bridge 網址及連接埠，並將 Bridge 權杖填在獨立欄位。";
+"connection_camera_authentication" = "相機端點拒絕驗證（HTTP 401 或 403）。請確認相機的 CCAPI 使用者名稱與密碼，再重試。";
+"connection_bridge_authentication" = "Desktop Bridge 拒絕存取（HTTP 401 或 403）。請確認 Bridge 的 Bearer 權杖及伺服器設定，再重試。";
+"connection_camera_endpoint_missing" = "找不到要求的 CCAPI 端點。請確認已啟用 CCAPI，且網址與連接埠符合相機的 CCAPI 設定。";
+"connection_bridge_endpoint_missing" = "找不到要求的 Bridge 端點。請確認電腦的 Bridge 網址與連接埠，以及對應服務是否正在執行。";
+"connection_tls_error" = "無法建立安全連線。請與相機或 Bridge 管理者確認 HTTPS 網址及憑證設定。";
+"connection_host_not_found" = "找不到主機。請確認網址拼寫，以及可連到該主機的網路。";
+"connection_timeout" = "連線逾時。請確認相機或電腦未休眠且可透過網路連線，再重試。";
+"connection_camera_unreachable" = "無法透過網路連到相機。請檢查本裝置的 Wi-Fi 連線，以及 iOS「設定」中的區域網路存取權限。";
+"connection_bridge_unreachable" = "無法透過網路連到電腦。請檢查電腦的 Bridge 服務、本裝置的網路，以及 iOS「設定」中的區域網路存取權限。";
+"connection_http_error" = "服務回傳 HTTP 錯誤。請檢查相機或 Bridge 服務，待服務就緒後再重試。";
+"connection_discovery_failed" = "探索未取得可用的相機 API。請檢查 CCAPI 設定與選取的網址，再重試。";
+"connection_unknown_error" = "連線失敗，尚無法確認原因。請檢查選取的連線方式與設定，再重試。";
+"connection_edit_then_connect" = "確認或修改上方欄位後，再點選下方的連線按鈕。App 不會自動重試。";
+"connection_edit_then_scan" = "確認或修改上方欄位後，再次點選掃描按鈕。掃描不會開始控制相機或拍攝。";
+"connection_edit_settings" = "修改設定";
+"connection_retry_connect" = "重試連線";
+"connection_retry_scan" = "重新掃描";
+"connection_bridge_unscanned" = "尚未掃描。點選「掃描相機」以尋找電腦上的相機。";
+"connection_bridge_scan_failed" = "掃描失敗。請先查看連線提示，再重新掃描。";
+"connection_bridge_empty" = "掃描完成，但未找到相機。請確認相機電源、USB 線材，以及電腦上的 Desktop Bridge 是否能偵測相機，再重新掃描。";

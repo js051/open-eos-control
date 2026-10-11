@@ -25,6 +25,7 @@ Focus drive without a camera/engine-advertised operation and direct iOS USB/PTP 
 ## Implemented App
 
 - Direct HTTP/HTTPS/Simulator presets or Desktop Bridge URL/token with USB scan and camera selection; passwords/tokens stay in memory while non-secret URLs and usernames may be remembered
+- Localized first-connection setup help and typed inline recovery, with distinct CCAPI credentials and Bridge token guidance, explicit retries, and unscanned/scanning/failed/completed Bridge results. See [iOS connection recovery](ios-connection-recovery.md) for ownership boundaries and the current verification limits.
 - Full-screen Photo/Video control with camera-capability gating, exposure sheets, still capture, AF-ON, recording, a Tap AF/Click White Balance action selector, manual focus drive when advertised, and adjustable JPEG polling, multipart JPEG, or Canon RTP H.264 Live View
 - AUTO/RTP/multipart/JPEG source selection from camera-advertised paths; iOS uses Wi-Fi-only `NWListener` instances, RFC 6184 video depacketization and `AVSampleBufferVideoRenderer`, plus a separately gated default-muted AAC-LATM monitor. AUTO closes each failed native session before trying RTP, multipart, then JPEG polling.
 - Live View FPS from 1-30, clamped to the camera-advertised range, plus JPEG size, automatic refresh, grid, rolling FPS, frame bytes, source type and endpoint diagnostics; RTP FPS is explicitly a display cap because Canon's start payload has no encoder-FPS field
