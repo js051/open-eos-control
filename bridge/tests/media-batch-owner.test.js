@@ -60,22 +60,26 @@ function fixture(options = {}) {
     mediaFolderFilter: { kind: "all" }, operatorConfirmedFeatures: new Set(),
   };
   const ui = new Proxy({}, { get(target, key) { return target[key] ||= element(); } });
-  const calls = { pickers: [], requests: [], raw: [], feedback: [], renders: [], history: [], historyWarnings: 0,
+  const calls = { pickers: [], requests: [], opens: [], raw: [], feedback: [], renders: [], history: [], historyWarnings: 0,
     historyRenders: 0, anchor: 0, directories: 0 };
   const entered = { writer: deferred(), write: deferred(), close: deferred(), abort: deferred(), api: deferred(),
-    createBatchTicket: deferred(), startAttempt: deferred(), finishAttempt: deferred(), clear: deferred(), historyRender: deferred() };
+    createBatchTicket: deferred(), startAttempt: deferred(), beginPlannedBatch: deferred(), beginPlannedAttempt: deferred(),
+    finishAttempt: deferred(), clear: deferred(), historyRender: deferred() };
   // Script only the storage API boundary. IndexedDB transaction/epoch behavior is
   // covered separately; these records establish what the production caller sends
   // and whether it retries or recreates receipts after a rejected store operation.
   const historyPlan = options.history || {};
   const historyRows = new Map();
+  const historyPlans = new Map();
   const historyTicket = Object.freeze({ batchId: "synthetic-batch", epoch: 0 });
   let nextReceipt = 0;
   async function historyOperation(operation, args, defaultResult) {
     const call = { operation, args };
     calls.history.push(call);
     entered[operation]?.resolve();
-    const plan = historyPlan[operation] || {};
+    const configured = historyPlan[operation] || {};
+    const operationIndex = calls.history.filter(entry => entry.operation === operation).length - 1;
+    const plan = Array.isArray(configured) ? configured[operationIndex] || {} : configured;
     plan.entered?.resolve();
     if (plan.gate) await plan.gate.promise;
     if (plan.error) throw plan.error;
@@ -96,9 +100,37 @@ function fixture(options = {}) {
       Object.assign(row, input);
       return { ok: true, updated: true };
     }),
-    list: (...args) => historyOperation("list", args, () => ({ ok: true, entries: Array.from(historyRows.values()) })),
-    clear: (...args) => historyOperation("clear", args, () => { historyRows.clear(); return { ok: true }; }),
+    list: (...args) => historyOperation("list", args, () => {
+      const entries = Array.from(historyRows.values(), row => options.planned && row.outcome === "in-progress"
+        ? { ...row, outcome: "cancelled-or-unknown", outcomeUnknown: true } : { ...row });
+      return { ok: true, entries, plans: Array.from(historyPlans.values(), plan => ({ ...plan,
+        rows: plan.rows.map(row => ({ ...row, receipt: entries.find(entry => entry.receiptId === row.rowId) || null })),
+      })) };
+    }),
+    clear: (...args) => historyOperation("clear", args, () => { historyRows.clear(); historyPlans.clear(); return { ok: true }; }),
   };
+  // Planned mode is opt-in so every existing legacy test keeps exercising the
+  // compatibility API. Only storage replies are synthetic; destination and queue
+  // behavior still come from the production modules below.
+  if (options.planned) Object.assign(mediaHistoryStore, {
+    beginPlannedBatch: filenames => historyOperation("beginPlannedBatch", [filenames], () => {
+      const rows = Object.freeze(Array.from(filenames, (filename, order) => Object.freeze({
+        rowId: `synthetic-row-${order}`, order, filename,
+      })));
+      const ticket = Object.freeze({ ...historyTicket, rows });
+      historyPlans.set(ticket.batchId, { batchId: ticket.batchId, createdAtMillis: 1700000000000, rows });
+      return { ok: true, ticket };
+    }),
+    beginPlannedAttempt: (ticket, rowId) => historyOperation("beginPlannedAttempt", [ticket, rowId], () => {
+      const row = historyPlans.get(ticket.batchId)?.rows.find(entry => entry.rowId === rowId);
+      assert.ok(row, "a successful mock admission requires a saved plan row");
+      assert.ok(!Array.from(historyRows.values()).some(entry => entry.receiptId === rowId), "one receipt per planned row");
+      const receipt = Object.freeze({ receiptId: rowId, batchId: ticket.batchId, epoch: ticket.epoch });
+      historyRows.set(receipt, { ...receipt, filename: row.filename, destination: "browser-directory", startedAtMillis: 1700000000000,
+        outcome: "in-progress", mayRemain: false, outcomeUnknown: false, bytesTransferred: null });
+      return { ok: true, receipt };
+    }),
+  });
   const historyWarning = element();
   if (options.historyWarningError) Object.defineProperty(historyWarning, "textContent", {
     set() { throw options.historyWarningError; },
@@ -148,7 +180,14 @@ function fixture(options = {}) {
     } };
   } };
   const context = vm.createContext({
-    state, ui, calls, mediaBatch, mediaBatchDestination, mediaTransfer, mediaLibrary, mediaHistoryStore,
+    state, ui, calls, mediaBatch, mediaTransfer, mediaLibrary, mediaHistoryStore,
+    mediaBatchDestination: { createDirectoryBatchDestination(args) {
+      const destination = mediaBatchDestination.createDirectoryBatchDestination(args);
+      return { ...destination, open(item, index) {
+        calls.opens.push({ item, index });
+        return destination.open(item, index);
+      } };
+    } },
     AbortController, crypto: { randomUUID: () => "00000000-0000-4000-8000-000000000001" },
     window: { showDirectoryPicker(opts) {
       calls.pickers.push(opts);
@@ -189,10 +228,320 @@ function fixture(options = {}) {
     "renderMediaBatch", "ownsMediaBatch", "assertMediaBatchCurrent", "transferMediaBatchItem",
     "downloadSelectedMedia", "cancelMediaBatch", "cancelMediaDownload", "resetSession"].map(extract).join("\n") + "\n" + extractHistoryEvents(), context);
   context.renderMediaTransfer = () => context.renderMediaBatch();
-  return { ...context, context, state, ui, calls, entered, root, items, historyRows, historyTicket, historyPlan, historyWarning };
+  return { ...context, context, state, ui, calls, entered, root, items, historyRows, historyPlans, historyTicket, historyPlan, historyWarning };
 }
 const statuses = subject => Array.from(subject.state.mediaBatch.queue.results, entry => entry.status);
 const historyCalls = (subject, operation) => subject.calls.history.filter(call => call.operation === operation);
+const plannedRows = subject => Array.from(subject.historyPlans.values()).flatMap(plan => plan.rows);
+function assertNoOriginalIO(subject) {
+  assert.equal(subject.calls.opens.length, 0, "destination.open has not been called");
+  assert.equal(subject.calls.directories, 0);
+  assert.equal(subject.calls.raw.length, 0);
+  assert.equal(subject.calls.requests.length, 0);
+  assert.equal(subject.calls.anchor, 0);
+}
+
+test("planned batch confirms the entire ordered roster and first row before destination.open or GET", async () => {
+  const planGate = deferred(), rowGate = deferred();
+  const c = fixture({ planned: true, count: 3, history: {
+    beginPlannedBatch: { gate: planGate }, beginPlannedAttempt: [{ gate: rowGate }],
+  } });
+  const pending = c.downloadSelectedMedia();
+  assert.equal(c.calls.pickers.length, 1, "picker runs directly in the initiating task");
+  await c.entered.beginPlannedBatch.promise;
+  assert.equal(c.cameraInteractionBusy(), true);
+  assert.deepEqual(Array.from(historyCalls(c, "beginPlannedBatch")[0].args[0]), c.items.map(item => item.name));
+  assert.equal(c.historyPlans.size, 0);
+  assert.equal(historyCalls(c, "beginPlannedAttempt").length, 0);
+  assertNoOriginalIO(c);
+  planGate.resolve();
+  await c.entered.beginPlannedAttempt.promise;
+  const ticket = historyCalls(c, "beginPlannedBatch")[0].result.ticket;
+  assert.deepEqual(plannedRows(c).map(({ order, filename }) => ({ order, filename })),
+    c.items.map((item, order) => ({ order, filename: item.name })));
+  assert.equal(new Set(ticket.rows.map(row => row.rowId)).size, 3);
+  assert.equal(c.historyRows.size, 0, "the entire roster exists while first attempt admission is still pending");
+  assertNoOriginalIO(c);
+  rowGate.resolve();
+  await pending;
+  assert.deepEqual(statuses(c), ["completed", "completed", "completed"]);
+  assert.equal(historyCalls(c, "beginPlannedBatch").length, 1);
+  const starts = historyCalls(c, "beginPlannedAttempt"), finishes = historyCalls(c, "finishAttempt");
+  assert.equal(starts.length, 3);
+  assert.equal(finishes.length, 3);
+  for (let index = 0; index < starts.length; index += 1) {
+    assert.deepEqual(starts[index].args, [ticket, ticket.rows[index].rowId]);
+    assert.equal(finishes[index].args[0], starts[index].result.receipt);
+    assert.equal(finishes[index].args[1].outcome, "completed");
+  }
+  assert.equal(historyCalls(c, "createBatchTicket").length, 0);
+  assert.equal(historyCalls(c, "startAttempt").length, 0);
+  assert.equal(c.calls.opens.length, 3);
+  assert.equal(c.calls.requests.length, 3);
+  assert.ok(c.calls.raw.every(file => file.closes === 1 && file.aborts === 0));
+});
+
+test("planned roster follows selected exact-ID order even when the current listing omits an item", async () => {
+  const c = fixture({ planned: true, count: 3 });
+  c.state.mediaSelection.clear();
+  const selected = [c.items[2], c.items[0], c.items[1]];
+  c.state.mediaSelection.setMany(selected.map(item => item.id), true);
+  c.state.media = [c.items[0]];
+  c.state.mediaSelection.replaceLoaded(c.state.media);
+  await c.downloadSelectedMedia();
+  assert.deepEqual(Array.from(historyCalls(c, "beginPlannedBatch")[0].args[0]), selected.map(item => item.name));
+  assert.deepEqual(c.calls.requests.map(call => decodeURIComponent(call.url.split("/media/")[1])), selected.map(item => item.id));
+  assert.deepEqual(plannedRows(c).map(row => row.filename), selected.map(item => item.name));
+  assert.deepEqual(statuses(c), ["completed", "completed", "completed"]);
+});
+
+test("only an explicitly absent initial plan allows manual unrecorded saving with a warning", async () => {
+  const c = fixture({ planned: true, history: { beginPlannedBatch: {
+    result: { ok: false, code: "unavailable", planAbsent: true },
+  } } });
+  await c.downloadSelectedMedia();
+  assert.deepEqual(statuses(c), ["completed", "completed"]);
+  assert.equal(c.calls.requests.length, 2);
+  assert.equal(c.calls.opens.length, 2);
+  assert.ok(c.calls.raw.every(file => file.closes === 1 && file.aborts === 0));
+  assert.equal(c.historyPlans.size, 0);
+  assert.equal(c.historyRows.size, 0);
+  assert.equal(historyCalls(c, "beginPlannedBatch").length, 1);
+  for (const operation of ["beginPlannedAttempt", "createBatchTicket", "startAttempt", "finishAttempt"]) {
+    assert.equal(historyCalls(c, operation).length, 0, operation);
+  }
+  assert.equal(c.calls.historyWarnings, 1);
+  assert.equal(c.historyWarning.hidden, false);
+  assert.match(c.historyWarning.textContent, /mediaHistoryWarning/);
+  assert.equal(c.calls.anchor, 0);
+});
+
+test("unconfirmed initial plan results and exceptions stop the entire batch before destination or camera I/O", async () => {
+  for (const failure of [
+    { result: { ok: false, code: "transaction-unconfirmed", planAbsent: false } },
+    { result: { ok: false, code: "transaction-failed" } },
+    { result: { ok: false, code: "unavailable", planAbsent: "true" } },
+    { result: undefined }, { result: false }, { error: new Error("Synthetic plan admission exception") },
+  ]) {
+    const c = fixture({ planned: true, count: 3, history: { beginPlannedBatch: failure } });
+    await c.downloadSelectedMedia();
+    assertNoOriginalIO(c);
+    assert.deepEqual(statuses(c), ["not-started", "not-started", "not-started"]);
+    assert.match(c.state.mediaBatch.errorMessage, /mediaWorklistAdmissionUnknown/);
+    assert.equal(c.state.mediaBatchOwner, null);
+    assert.equal(historyCalls(c, "beginPlannedBatch").length, 1);
+    for (const operation of ["beginPlannedAttempt", "createBatchTicket", "startAttempt", "finishAttempt"]) {
+      assert.equal(historyCalls(c, operation).length, 0, operation);
+    }
+  }
+});
+
+test("failed row admission preserves the completed receipt and every remaining queued row without I/O or retry", async () => {
+  for (const failure of [
+    ...["transaction-failed", "transaction-unconfirmed", "missing-plan-row", "missing-receipt", "invalid-ticket", "already-started"]
+      .map(code => ({ result: { ok: false, code } })),
+    { result: undefined }, { error: new Error("Synthetic row admission exception") },
+  ]) {
+    const c = fixture({ planned: true, count: 3, history: { beginPlannedAttempt: [{}, failure] } });
+    await c.downloadSelectedMedia();
+    assert.deepEqual(statuses(c), ["completed", "not-started", "not-started"]);
+    assert.equal(c.state.mediaBatch.queue.stopReason, "not-started");
+    assert.match(c.state.mediaBatch.queue.results[1].error.message, /mediaWorklistAdmissionFailed/);
+    assert.equal(c.calls.requests.length, 1);
+    assert.equal(c.calls.opens.length, 1);
+    assert.equal(c.calls.raw.length, 1);
+    assert.equal(c.calls.raw[0].closes, 1);
+    assert.equal(c.calls.raw[0].aborts, 0);
+    assert.equal(plannedRows(c).length, 3);
+    assert.equal(c.historyRows.size, 1);
+    assert.equal(Array.from(c.historyRows.values())[0].outcome, "completed");
+    assert.equal(historyCalls(c, "beginPlannedBatch").length, 1);
+    assert.equal(historyCalls(c, "beginPlannedAttempt").length, 2);
+    assert.equal(historyCalls(c, "finishAttempt").length, 1);
+    assert.equal(historyCalls(c, "startAttempt").length, 0);
+    c.ui.mediaHistoryDialog.open = true;
+    await c.refreshMediaHistory();
+    assert.deepEqual(c.ui.mediaHistoryList.children.map(row => row.dataset.outcome), ["completed", "queued", "queued"]);
+  }
+});
+
+test("a missing planned-attempt API fails closed before the first open without falling back to legacy recording", async () => {
+  const c = fixture({ planned: true, count: 3 });
+  delete c.mediaHistoryStore.beginPlannedAttempt;
+  await c.downloadSelectedMedia();
+  assertNoOriginalIO(c);
+  assert.deepEqual(statuses(c), ["not-started", "not-started", "not-started"]);
+  assert.equal(c.state.mediaBatch.queue.stopReason, "not-started");
+  assert.equal(plannedRows(c).length, 3);
+  assert.equal(c.historyRows.size, 0);
+  assert.equal(historyCalls(c, "beginPlannedBatch").length, 1);
+  assert.equal(historyCalls(c, "createBatchTicket").length, 0);
+  assert.equal(historyCalls(c, "startAttempt").length, 0);
+  assert.equal(historyCalls(c, "finishAttempt").length, 0);
+  assert.equal(c.calls.historyWarnings, 1);
+});
+
+test("a planned finish failure cannot undo successful closes or hide any selected row", async () => {
+  for (const failure of [{ result: { ok: false, code: "transaction-failed" } }, { error: new Error("Synthetic finish exception") }]) {
+    const c = fixture({ planned: true, count: 3, history: { finishAttempt: failure } });
+    await c.downloadSelectedMedia();
+    assert.deepEqual(statuses(c), ["completed", "completed", "completed"]);
+    assert.equal(c.calls.requests.length, 3);
+    assert.ok(c.calls.raw.every(file => file.closes === 1 && file.aborts === 0));
+    assert.equal(historyCalls(c, "beginPlannedBatch").length, 1);
+    assert.equal(historyCalls(c, "beginPlannedAttempt").length, 3);
+    assert.equal(historyCalls(c, "finishAttempt").length, 3);
+    assert.equal(c.calls.historyWarnings, 3);
+    assert.equal(plannedRows(c).length, 3);
+    assert.equal(c.historyRows.size, 3);
+    c.ui.mediaHistoryDialog.open = true;
+    await c.refreshMediaHistory();
+    assert.equal(c.ui.mediaHistoryList.children.length, 3);
+    assert.ok(c.ui.mediaHistoryList.children.every(row => row.dataset.outcome === "cancelled-or-unknown"));
+  }
+});
+
+for (const operation of ["beginPlannedBatch", "beginPlannedAttempt"]) {
+  for (const interruption of ["cancel", "disconnect", "replace-owner", "replace-session"]) {
+    test(`${interruption} while ${operation} waits preserves the roster and prevents late file/network I/O`, async () => {
+      const gate = deferred(), c = fixture({ planned: true, count: 3, history: { [operation]: { gate } } });
+      const pending = c.downloadSelectedMedia();
+      await c.entered[operation].promise;
+      const owner = c.state.mediaBatchOwner;
+      const replacement = { session: interruption === "replace-session" ? { id: "synthetic-session" } : c.state.session,
+        controller: new AbortController() };
+      const replacementBatch = { newBatch: true };
+      if (interruption === "cancel") c.cancelMediaBatch();
+      else if (interruption === "disconnect") c.resetSession();
+      else {
+        c.state.session = replacement.session;
+        c.state.mediaBatchOwner = replacement;
+        c.state.mediaBatch = replacementBatch;
+      }
+      const renders = c.calls.renders.length, feedback = c.calls.feedback.length;
+      if (interruption === "cancel") assert.equal(c.cameraInteractionBusy(), true);
+      assertNoOriginalIO(c);
+      gate.resolve();
+      await pending;
+      assertNoOriginalIO(c);
+      assert.equal(plannedRows(c).length, 3);
+      assert.equal(historyCalls(c, "beginPlannedBatch").length, 1);
+      assert.equal(historyCalls(c, "beginPlannedAttempt").length, operation === "beginPlannedBatch" ? 0 : 1);
+      assert.equal(historyCalls(c, "finishAttempt").length, operation === "beginPlannedBatch" ? 0 : 1);
+      if (operation === "beginPlannedAttempt") {
+        assert.deepEqual({ ...historyCalls(c, "finishAttempt")[0].args[1] }, {
+          outcome: "cancelled-or-unknown", mayRemain: false, outcomeUnknown: false,
+        });
+      }
+      if (interruption.startsWith("replace")) {
+        assert.equal(c.state.mediaBatchOwner, replacement);
+        assert.equal(c.state.mediaBatch, replacementBatch);
+        assert.equal(c.calls.renders.length, renders);
+        assert.equal(c.calls.feedback.length, feedback);
+      } else if (interruption === "disconnect") {
+        assert.equal(c.state.mediaBatchOwner, null);
+        assert.equal(c.state.mediaBatch, null);
+        assert.equal(c.calls.renders.length, renders);
+        assert.equal(c.calls.feedback.length, feedback);
+      } else {
+        assert.notEqual(c.state.mediaBatchOwner, owner);
+        assert.equal(c.cameraInteractionBusy(), false);
+        assert.deepEqual(statuses(c), [operation === "beginPlannedBatch" ? "not-started" : "cancelled-or-unknown", "not-started", "not-started"]);
+      }
+    });
+  }
+}
+
+test("clear during a planned close retires the complete roster and later saves never recreate it", async () => {
+  const closeGate = deferred(), c = fixture({ planned: true, count: 3, closeGate, historyOpen: true });
+  const pending = c.downloadSelectedMedia();
+  await c.entered.close.promise;
+  assert.equal(plannedRows(c).length, 3);
+  assert.equal(c.historyRows.size, 1);
+  c.historyPlan.finishAttempt = { result: { ok: false, code: "stale-ticket" } };
+  c.historyPlan.beginPlannedAttempt = { result: { ok: false, code: "stale-ticket" } };
+  await c.clearMediaHistory();
+  assert.equal(c.historyPlans.size, 0);
+  assert.equal(c.historyRows.size, 0);
+  closeGate.resolve();
+  await pending;
+  await c.refreshMediaHistory();
+  assert.deepEqual(statuses(c), ["completed", "completed", "completed"]);
+  assert.equal(c.calls.requests.length, 3);
+  assert.equal(c.calls.opens.length, 3);
+  assert.ok(c.calls.raw.every(file => file.closes === 1 && file.aborts === 0));
+  assert.equal(historyCalls(c, "beginPlannedBatch").length, 1);
+  assert.equal(historyCalls(c, "beginPlannedAttempt").length, 2, "the stale second row clears the ticket before the third save");
+  assert.equal(historyCalls(c, "finishAttempt").length, 1);
+  assert.equal(historyCalls(c, "createBatchTicket").length, 0);
+  assert.equal(historyCalls(c, "startAttempt").length, 0);
+  assert.equal(c.historyPlans.size, 0);
+  assert.equal(c.historyRows.size, 0);
+  assert.equal(c.calls.historyWarnings, 0);
+  assert.equal(c.ui.mediaHistoryList.children.length, 0);
+});
+
+test("complete history renders duplicate labels as distinct ordered rows without duplicating their receipts", async () => {
+  const c = fixture({ planned: true, count: 3, failIndex: 1, writeError: new Error("Synthetic disk full") });
+  c.items[0].name = c.items[2].name = "<img src=x> $& {filename}.JPG";
+  await c.downloadSelectedMedia();
+  c.ui.mediaHistoryDialog.open = true;
+  await c.refreshMediaHistory();
+  const ticket = historyCalls(c, "beginPlannedBatch")[0].result.ticket;
+  assert.notEqual(ticket.rows[0].rowId, ticket.rows[2].rowId);
+  const rows = c.ui.mediaHistoryList.children;
+  assert.equal(rows.length, 3, "two receipts already represented by planned rows do not appear again");
+  assert.deepEqual(rows.map(row => row.children[0].textContent), c.items.map(item => item.name));
+  assert.deepEqual(rows.map(row => row.dataset.outcome), ["completed", "failed", "queued"]);
+  assert.ok(rows.every(row => row.dataset.worklist === ticket.batchId));
+  rows.forEach((row, index) => {
+    assert.match(row.children[1].textContent, new RegExp(`"position":${index + 1},"total":3`));
+    assert.ok(row.children.every(child => child.innerHTML === undefined));
+  });
+  assert.match(rows[2].children[2].textContent, /mediaHistoryQueued/);
+  assert.match(c.ui.mediaHistoryStatus.textContent, /"count":3/);
+  assert.equal(historyCalls(c, "beginPlannedAttempt").length, 2);
+  assert.equal(c.historyRows.size, 2);
+});
+
+test("planned history deduplicates by row identity while retaining a same-label legacy receipt", async () => {
+  const c = fixture({ planned: true, count: 1 });
+  await c.downloadSelectedMedia();
+  const legacyReceipt = { receiptId: "synthetic-legacy-receipt", batchId: "synthetic-legacy-batch", epoch: 0 };
+  c.historyRows.set(legacyReceipt, { ...legacyReceipt, filename: c.items[0].name, startedAtMillis: 1700000000000,
+    outcome: "failed", mayRemain: false, outcomeUnknown: false });
+  c.ui.mediaHistoryDialog.open = true;
+  await c.refreshMediaHistory();
+  const rows = c.ui.mediaHistoryList.children;
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map(row => row.children[0].textContent), [c.items[0].name, c.items[0].name]);
+  assert.deepEqual(rows.map(row => row.dataset.outcome), ["completed", "failed"]);
+  assert.equal(rows[0].dataset.worklist, historyCalls(c, "beginPlannedBatch")[0].result.ticket.batchId);
+  assert.equal(rows[1].dataset.worklist, undefined);
+  assert.match(rows[1].children[1].textContent, /mediaHistoryLegacyAttempt/);
+  assert.match(c.ui.mediaHistoryStatus.textContent, /"count":2/);
+});
+
+test("history keeps untouched queued rows distinct from an admitted attempt whose close is still unknown", async () => {
+  const closeGate = deferred(), c = fixture({ planned: true, count: 3, closeGate });
+  const pending = c.downloadSelectedMedia();
+  await c.entered.close.promise;
+  c.ui.mediaHistoryDialog.open = true;
+  await c.refreshMediaHistory();
+  const rows = c.ui.mediaHistoryList.children;
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map(row => row.dataset.outcome), ["cancelled-or-unknown", "queued", "queued"]);
+  assert.match(rows[0].children[2].textContent, /mediaHistoryUnconfirmed/);
+  assert.match(rows[0].children[4].textContent, /mediaHistoryLeftover/);
+  assert.ok(rows.slice(1).every(row => row.children.length === 4 && /mediaHistoryQueued/.test(row.children[2].textContent)));
+  c.cancelMediaBatch();
+  closeGate.resolve();
+  await pending;
+  await c.refreshMediaHistory();
+  assert.deepEqual(c.ui.mediaHistoryList.children.map(row => row.dataset.outcome), ["completed", "queued", "queued"]);
+  assert.deepEqual(statuses(c), ["completed", "not-started", "not-started"]);
+  assert.equal(c.calls.requests.length, 1);
+});
 
 test("batch uses one user picker and sequential exact-ID GETs with close receipts", async () => {
   const c = fixture();

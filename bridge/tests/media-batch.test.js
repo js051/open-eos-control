@@ -198,6 +198,82 @@ test("failure preserves earlier completion and stops later items without retry",
   assert.equal(final.results[1].error.message, failure.message);
 });
 
+test("trusted no-I/O rejection keeps its row not-started and preserves earlier completion", async () => {
+  const calls = [], updates = [];
+  const failure = Object.assign(new Error("Synthetic attempt admission was not confirmed"), { transferNotStarted: true });
+  const result = await runSequentialBatch([item("saved"), item("queued"), item("later")], {
+    transfer: async value => {
+      calls.push(value.id);
+      if (value.id === "queued") throw failure;
+      return receipt("saved.JPG");
+    },
+    onUpdate: state => updates.push(state),
+  });
+  assert.deepEqual(calls, ["saved", "queued"]);
+  assert.deepEqual(statuses(result), ["completed", "not-started", "not-started"]);
+  assert.equal(result.status, "stopped");
+  assert.equal(result.stopReason, "not-started");
+  assert.equal(result.results[0].receipt.name, "saved.JPG");
+  assert.equal(result.results[1].receipt, null);
+  assert.equal(result.results[1].error.message, failure.message);
+  assert.ok(updates.every(state => !["failed", "cancelled-or-unknown"].includes(state.results[1].status)),
+    "a rejected pre-I/O admission must not publish a failed or uncertain transfer");
+});
+
+test("arbitrary admission-like errors and truthy marker values still report failure", async () => {
+  for (const marker of [undefined, false, "true", 1]) {
+    const failure = Object.assign(new Error("Synthetic admission error"), { code: "ADMISSION_FAILED" });
+    if (marker !== undefined) failure.transferNotStarted = marker;
+    const calls = [];
+    const result = await runSequentialBatch([item("one"), item("later")], {
+      transfer: async value => { calls.push(value.id); throw failure; },
+    });
+    assert.deepEqual(calls, ["one"]);
+    assert.deepEqual(statuses(result), ["failed", "not-started"]);
+    assert.equal(result.stopReason, "failed");
+    assert.equal(result.results[0].receipt, null);
+  }
+});
+
+test("an explicit uncertain outcome overrides the no-I/O marker", async () => {
+  const failure = Object.freeze(Object.assign(new Error("Synthetic cleanup result unknown"), {
+    transferNotStarted: true, outcomeUnknown: true,
+  }));
+  const calls = [];
+  const result = await runSequentialBatch([item("one"), item("later")], {
+    transfer: async value => { calls.push(value.id); throw failure; },
+  });
+  assert.deepEqual(calls, ["one"]);
+  assert.deepEqual(statuses(result), ["cancelled-or-unknown", "not-started"]);
+  assert.equal(result.stopReason, "unknown");
+  assert.equal(result.results[0].error.message, failure.message);
+  assert.equal(result.results[0].receipt, null);
+});
+
+for (const interruption of ["cancelled", "retired"]) {
+  test(`a trusted late no-I/O rejection remains not-started after the queue is ${interruption}`, async () => {
+    const controller = new AbortController(), gate = deferred();
+    const calls = [], updates = [];
+    let current = true;
+    const pending = runSequentialBatch([item("one"), item("later")], {
+      signal: controller.signal,
+      isCurrent: () => current,
+      transfer: value => { calls.push(value.id); return gate.promise; },
+      onUpdate: state => updates.push(state),
+    });
+    if (interruption === "cancelled") controller.abort();
+    else current = false;
+    const before = updates.slice();
+    gate.reject(Object.assign(new Error("Synthetic no-I/O admission rejection"), { transferNotStarted: true }));
+    const result = await pending;
+    assert.deepEqual(calls, ["one"]);
+    assert.deepEqual(statuses(result), ["not-started", "not-started"]);
+    assert.equal(result.stopReason, interruption);
+    assert.equal(result.results[0].receipt, null);
+    if (interruption === "retired") assert.deepEqual(updates, before, "a retired queue cannot publish its late result");
+  });
+}
+
 for (const outcome of ["reject", "unconfirmed", "closed"]) {
   test(`cancel during noncooperative transfer preserves completion and waits for ${outcome}`, async () => {
     const controller = new AbortController();

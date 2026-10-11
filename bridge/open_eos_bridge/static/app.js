@@ -451,18 +451,23 @@
       mediaSelectionHelp: "Selects loaded matches across pages, not unseen files on the card. Selection is kept when filters or scope change. Hidden and no-longer-loaded selections are included in the batch.",
       mediaHistoryTitle: "Batch saving history",
       mediaHistoryOpen: "Batch saving history",
-      mediaHistoryHelp: "The latest 100 started batch attempts in this browser profile and Bridge address. Saved means the browser confirmed close at that time, not that the file still exists. Pending results may still be running in another tab. Queued items and single-file browser downloads are not included.",
+      mediaHistoryHelp: "Worklists and other started attempts share 100 rows in this browser profile and Bridge address. Queued rows have no confirmed attempt. Saved means the browser confirmed close at that time, not that the file still exists. Unconfirmed attempts may still be running in another tab. Names are display labels, not camera identity. Nothing reconnects or retries automatically; single-file browser downloads are excluded.",
       mediaHistoryWarning: "Saving history is unavailable or incomplete. This does not change the actual file transfer result. Inspect the destination before retrying.",
       mediaHistoryLoading: "Loading history…",
       mediaHistoryUnavailable: "History could not be read. Existing records have not been cleared.",
-      mediaHistoryEmpty: "No recorded batch attempts.",
-      mediaHistoryCount: "{count} recent attempts",
+      mediaHistoryEmpty: "No worklists or recorded attempts.",
+      mediaHistoryCount: "{count} worklist rows and other attempts",
+      mediaHistoryQueued: "Queued; no confirmed attempt",
+      mediaHistoryWorklistPosition: "Worklist {created} · item {position} of {total}",
+      mediaHistoryLegacyAttempt: "Separate attempt; no complete worklist",
+      mediaWorklistAdmissionFailed: "The next worklist attempt could not be recorded. Saving stopped before opening its file or requesting the original. Inspect history before retrying.",
+      mediaWorklistAdmissionUnknown: "The worklist save could not be confirmed. No files were opened or originals requested. Inspect history before starting a new batch.",
       mediaHistoryCompleted: "Saved at the time of transfer",
       mediaHistoryFailed: "Failed",
       mediaHistoryUnconfirmed: "Result unconfirmed; check the destination",
       mediaHistoryLeftover: "A file may remain or its final state is uncertain.",
       mediaHistoryClear: "Clear history…",
-      mediaHistoryClearQuestion: "Clear these history records only? Destination files and current transfers are unchanged. Late results from existing batches will not restore cleared records.",
+      mediaHistoryClearQuestion: "Clear these worklists and history records only? Destination files and current transfers are unchanged. Late results from existing batches will not restore cleared records.",
       mediaHistoryClearConfirm: "Clear records",
       mediaHistoryClearCancel: "Keep records",
       mediaHistoryClearFailed: "History could not be cleared. Records may remain; reload history to check.",
@@ -976,18 +981,23 @@
       mediaSelectionHelp: "跨頁選取已載入且符合篩選的項目，不包含記憶卡上尚未載入的檔案。變更篩選或範圍會保留選取；已隱藏與目前未載入的選取項目也包含在批次中。",
       mediaHistoryTitle: "批次儲存紀錄",
       mediaHistoryOpen: "批次儲存紀錄",
-      mediaHistoryHelp: "此瀏覽器設定檔及 Bridge 網址最近 100 筆已開始的批次嘗試。已儲存只代表當時瀏覽器確認 close，不保證檔案現在仍存在；未確認項目也可能仍在另一分頁執行。不包含未開始排隊項目及單檔瀏覽器下載。",
+      mediaHistoryHelp: "此瀏覽器設定檔及 Bridge 網址的工作清單與其他已開始嘗試共用 100 列。排隊列尚未確認開始嘗試；已儲存只代表當時瀏覽器確認 close，不保證檔案現在仍存在。未確認嘗試也可能仍在另一分頁執行。名稱僅供顯示，不能識別相機來源；不會自動連線或重試，不含單檔瀏覽器下載。",
       mediaHistoryWarning: "儲存紀錄無法使用或不完整，不影響實際檔案傳輸結果。重試前請先查看目的地。",
       mediaHistoryLoading: "正在讀取紀錄…",
       mediaHistoryUnavailable: "無法讀取紀錄，未清除既有資料。",
-      mediaHistoryEmpty: "尚無批次嘗試紀錄。",
-      mediaHistoryCount: "最近 {count} 筆嘗試",
+      mediaHistoryEmpty: "尚無工作清單或嘗試紀錄。",
+      mediaHistoryCount: "共 {count} 列工作清單與其他嘗試",
+      mediaHistoryQueued: "排隊中；尚未確認開始嘗試",
+      mediaHistoryWorklistPosition: "工作清單 {created} · 第 {position} / {total} 項",
+      mediaHistoryLegacyAttempt: "獨立嘗試；沒有完整工作清單",
+      mediaWorklistAdmissionFailed: "無法記錄下一項工作清單嘗試，已在開啟檔案或請求原檔前停止。重試前請查看紀錄。",
+      mediaWorklistAdmissionUnknown: "無法確認工作清單已儲存，尚未開啟檔案或請求原檔。開始新批次前請查看紀錄。",
       mediaHistoryCompleted: "傳輸當時已儲存",
       mediaHistoryFailed: "失敗",
       mediaHistoryUnconfirmed: "結果未確認，請查看目的地",
       mediaHistoryLeftover: "可能留有檔案或最終狀態未確認。",
       mediaHistoryClear: "清除紀錄…",
-      mediaHistoryClearQuestion: "只清除這些紀錄？目的檔案與目前傳輸不變；既有批次晚到的結果不會重新建立已清除的紀錄。",
+      mediaHistoryClearQuestion: "只清除這些工作清單與紀錄？目的檔案與目前傳輸不變；既有批次晚到的結果不會重新建立已清除的紀錄。",
       mediaHistoryClearConfirm: "清除紀錄",
       mediaHistoryClearCancel: "保留紀錄",
       mediaHistoryClearFailed: "未能確認紀錄已清除；紀錄可能仍在，請重新載入查看。",
@@ -5204,24 +5214,34 @@
     const result = await mediaHistoryCall("list");
     if (generation !== mediaHistoryViewGeneration || !ui.mediaHistoryDialog.open) return;
     ui.mediaHistoryList.replaceChildren();
-    ui.mediaHistoryClear.disabled = !!mediaHistoryClearOwner || !result.ok || !result.entries.length;
+    const plans = result.ok ? (result.plans || []) : [];
+    const plannedIDs = new Set(plans.flatMap((plan) => plan.rows.map((row) => row.rowId)));
+    const legacy = result.ok ? result.entries.filter((entry) => !plannedIDs.has(entry.receiptId)) : [];
+    const rows = plans.flatMap((plan) => plan.rows.map((row, index) => ({
+      entry: row.receipt || { filename: row.filename, outcome: "queued", startedAtMillis: plan.createdAtMillis },
+      plan, position: index + 1,
+    }))).concat(legacy.map((entry) => ({ entry, plan: null })));
+    ui.mediaHistoryClear.disabled = !!mediaHistoryClearOwner || !result.ok || !rows.length;
     if (!result.ok) {
       ui.mediaHistoryStatus.textContent = t("mediaHistoryUnavailable");
       return;
     }
-    ui.mediaHistoryStatus.textContent = result.entries.length ? t("mediaHistoryCount", { count: result.entries.length }) : t("mediaHistoryEmpty");
-    const outcomeKeys = { completed: "mediaHistoryCompleted", failed: "mediaHistoryFailed", "cancelled-or-unknown": "mediaHistoryUnconfirmed" };
-    for (const entry of result.entries) {
+    ui.mediaHistoryStatus.textContent = rows.length ? t("mediaHistoryCount", { count: rows.length }) : t("mediaHistoryEmpty");
+    const outcomeKeys = { completed: "mediaHistoryCompleted", failed: "mediaHistoryFailed", queued: "mediaHistoryQueued", "cancelled-or-unknown": "mediaHistoryUnconfirmed" };
+    for (const { entry, plan, position } of rows) {
       const row = document.createElement("li");
       row.dataset.outcome = entry.outcome;
+      if (plan) row.dataset.worklist = plan.batchId;
       const name = document.createElement("strong");
       name.textContent = entry.filename;
+      const scope = document.createElement("span");
+      scope.textContent = plan ? t("mediaHistoryWorklistPosition", { position, total: plan.rows.length, created: new Date(plan.createdAtMillis).toLocaleString(resolvedLanguage() === "zh-TW" ? "zh-TW" : "en") }) : t("mediaHistoryLegacyAttempt");
       const detail = document.createElement("span");
       detail.textContent = t(outcomeKeys[entry.outcome] || "mediaHistoryUnconfirmed");
       const when = document.createElement("time");
       when.dateTime = new Date(entry.startedAtMillis).toISOString();
       when.textContent = new Date(entry.startedAtMillis).toLocaleString(resolvedLanguage() === "zh-TW" ? "zh-TW" : "en");
-      row.append(name, detail, when);
+      row.append(name, scope, detail, when);
       if (entry.mayRemain || entry.outcomeUnknown) {
         const warning = document.createElement("span");
         warning.textContent = t("mediaHistoryLeftover");
@@ -5329,7 +5349,23 @@
     try {
       assertMediaBatchCurrent(owner);
       if (owner.historyTicket) {
-        const recorded = await mediaHistoryCall("startAttempt", owner.historyTicket, { filename: item.name, destination: "browser-directory" });
+        const recorded = owner.historyPlan
+          ? await mediaHistoryCall("beginPlannedAttempt", owner.historyTicket, owner.historyPlan.rows[index].rowId)
+          : await mediaHistoryCall("startAttempt", owner.historyTicket, { filename: item.name, destination: "browser-directory" });
+        if (owner.historyPlan && !recorded.ok) {
+          if (recorded.code === "stale-ticket") {
+            // A deliberate clear retires the whole plan. Keep manual saving
+            // available without rebuilding cleared rows in the new epoch.
+            owner.historyPlan = null;
+            owner.historyTicket = null;
+          } else {
+            // The planned row still says queued. Do not open a destination or
+            // issue a GET unless its durable attempt admission is confirmed.
+            const failure = new Error(t("mediaWorklistAdmissionFailed"));
+            failure.transferNotStarted = true;
+            throw failure;
+          }
+        }
         historyReceipt = recorded.ok ? recorded.receipt : null;
       }
       assertMediaBatchCurrent(owner);
@@ -5425,9 +5461,18 @@
       // or fall back to automatic anchor downloads when folder access fails.
       const directoryHandle = await window.showDirectoryPicker({ mode: "readwrite" });
       assertMediaBatchCurrent(owner);
-      const history = await mediaHistoryCall("createBatchTicket");
-      owner.historyTicket = history.ok ? history.ticket : null;
+      const planned = typeof mediaHistoryStore?.beginPlannedBatch === "function";
+      const history = planned
+        ? await mediaHistoryCall("beginPlannedBatch", items.map((item) => item.name))
+        : await mediaHistoryCall("createBatchTicket");
       assertMediaBatchCurrent(owner);
+      if (planned && !history.ok && history.planAbsent !== true) {
+        // IndexedDB may have committed before losing its acknowledgement.
+        // An unknown plan result must not fall through to unrecorded saving.
+        throw new Error(t("mediaWorklistAdmissionUnknown"));
+      }
+      owner.historyTicket = history.ok ? history.ticket : null;
+      owner.historyPlan = planned && history.ok ? history.ticket : null;
       destination = mediaBatchDestination.createDirectoryBatchDestination({
         directoryHandle,
         nonce: globalThis.crypto.randomUUID(),

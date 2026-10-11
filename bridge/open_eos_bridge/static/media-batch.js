@@ -73,7 +73,9 @@
 
   // transfer must resolve { completed: true, bytesTransferred, name } only after
   // its destination has closed successfully. Reject uncertain close outcomes
-  // with error.outcomeUnknown = true. Never retry or start another item here.
+  // with error.outcomeUnknown = true. The trusted transfer adapter may reject
+  // with transferNotStarted === true only before any destination/file/network
+  // side effect. Never retry or start another item here.
   async function runSequentialBatch(items, {
     transfer, signal = null, isCurrent = () => true, onUpdate = () => {},
   } = {}) {
@@ -151,8 +153,9 @@
           const uncertain = signal?.aborted || !isCurrent() || error?.outcomeUnknown === true ||
             error?.name === "AbortError";
           result.error = errorDetails(error);
-          result.status = uncertain ? "cancelled-or-unknown" : "failed";
-          stop(uncertain ? "unknown" : "failed");
+          const notStarted = error?.transferNotStarted === true && error?.outcomeUnknown !== true;
+          result.status = notStarted ? "not-started" : uncertain ? "cancelled-or-unknown" : "failed";
+          stop(notStarted ? "not-started" : uncertain ? "unknown" : "failed");
         } finally {
           inFlight = false;
         }

@@ -6,7 +6,11 @@
   "use strict";
 
   const DATABASE_NAME = "open-eos-media-transfer-history";
-  const SCHEMA_VERSION = 1;
+  // The object-store layout stays at IDB version 1. Snapshot v1 is read without
+  // inventing a selected roster, and upgraded in the same atomic transaction as
+  // the next mutation. Old clients reject v2 snapshots instead of overwriting them.
+  const DATABASE_VERSION = 1;
+  const SCHEMA_VERSION = 2;
   const MAX_ENTRIES = 100;
   const MAX_FILENAME_LENGTH = 120;
   const MAX_SNAPSHOT_LENGTH = 100 * 1024;
@@ -14,7 +18,10 @@
   const KEY = "state";
   const DESTINATION = "browser-directory";
   const OUTCOMES = ["in-progress", "completed", "failed", "cancelled-or-unknown"];
-  const SNAPSHOT_FIELDS = ["schemaVersion", "epoch", "nextSequence", "entries"];
+  const LEGACY_SNAPSHOT_FIELDS = ["schemaVersion", "epoch", "nextSequence", "entries"];
+  const SNAPSHOT_FIELDS = [...LEGACY_SNAPSHOT_FIELDS, "plans"];
+  const PLAN_FIELDS = ["batchId", "createdAtMillis", "rows"];
+  const ROW_FIELDS = ["rowId", "order", "filename"];
   const ENTRY_FIELDS = ["receiptId", "batchId", "sequence", "filename", "destination", "startedAtMillis",
     "finishedAtMillis", "outcome", "mayRemain", "outcomeUnknown", "bytesTransferred"];
   const ID_PATTERN = /^(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/i;
@@ -41,18 +48,86 @@
     return leaf.slice(0, MAX_FILENAME_LENGTH).replace(/[\uD800-\uDBFF]$/, "").trim() || "download";
   }
 
+  // Plan labels are sanitized display text, never identity or source locators.
+  // Keep the same conservative query/fragment removal as actual-attempt labels.
+  function sanitizePlannedFilename(value) {
+    return sanitizeFilename(value);
+  }
+
+  function encodedSize(value) {
+    return new TextEncoder().encode(JSON.stringify(value)).length;
+  }
+
+  const plansOf = (snapshot) => snapshot.schemaVersion === 1 ? [] : snapshot.plans;
+  const plannedRows = (snapshot) => new Map(plansOf(snapshot).flatMap((plan) =>
+    plan.rows.map((row) => [row.rowId, { row, batchId: plan.batchId }])));
+  function occupiedRows(snapshot) {
+    const rows = plannedRows(snapshot);
+    return rows.size + snapshot.entries.filter((entry) => !rows.has(entry.receiptId)).length;
+  }
+
+  function migrateSnapshot(snapshot) {
+    if (snapshot.schemaVersion === 1) {
+      snapshot.schemaVersion = SCHEMA_VERSION;
+      snapshot.plans = [];
+    }
+  }
+
+  // Reserve the encoded footprint of every planned receipt before admitting the
+  // roster. Starting a queued row must not consume another row or depend on old
+  // records being evicted. Account for the largest valid terminal metadata too.
+  function fitsCapacity(snapshot) {
+    if (occupiedRows(snapshot) > MAX_ENTRIES) return false;
+    const entries = new Map(snapshot.entries.map((entry) => [entry.receiptId, entry]));
+    for (const plan of plansOf(snapshot)) {
+      for (const row of plan.rows) {
+        if (!entries.has(row.rowId)) entries.set(row.rowId, {
+          receiptId: row.rowId, batchId: plan.batchId, filename: row.filename, destination: DESTINATION,
+        });
+      }
+    }
+    const reserved = { ...snapshot, schemaVersion: SCHEMA_VERSION, plans: plansOf(snapshot),
+      epoch: Number.MAX_SAFE_INTEGER, nextSequence: Number.MAX_SAFE_INTEGER,
+      entries: [...entries.values()].map((entry) => ({ ...entry, sequence: Number.MAX_SAFE_INTEGER,
+        startedAtMillis: 8640000000000000, finishedAtMillis: 8640000000000000,
+        outcome: "cancelled-or-unknown", mayRemain: false, outcomeUnknown: false,
+        bytesTransferred: Number.MAX_SAFE_INTEGER })),
+    };
+    return encodedSize(reserved) <= MAX_SNAPSHOT_LENGTH;
+  }
+
   function validateSnapshot(snapshot) {
-    if (snapshot && snapshot.schemaVersion !== SCHEMA_VERSION) return "unsupported-schema";
-    if (!exactFields(snapshot, SNAPSHOT_FIELDS) || !integer(snapshot.epoch)
+    if (snapshot && snapshot.schemaVersion !== 1 && snapshot.schemaVersion !== SCHEMA_VERSION) return "unsupported-schema";
+    if (!exactFields(snapshot, snapshot?.schemaVersion === 1 ? LEGACY_SNAPSHOT_FIELDS : SNAPSHOT_FIELDS) || !integer(snapshot.epoch)
       || !integer(snapshot.nextSequence) || !Array.isArray(snapshot.entries)
       || snapshot.entries.length > MAX_ENTRIES) return "corrupt";
+    const plans = plansOf(snapshot);
+    if (!Array.isArray(plans) || plans.length > MAX_ENTRIES) return "corrupt";
+    const batches = new Set();
+    const rows = new Map();
+    for (const plan of plans) {
+      if (!exactFields(plan, PLAN_FIELDS) || !identifier(plan.batchId) || batches.has(plan.batchId)
+        || !timestamp(plan.createdAtMillis) || !Array.isArray(plan.rows)
+        || plan.rows.length === 0 || plan.rows.length > MAX_ENTRIES) return "corrupt";
+      batches.add(plan.batchId);
+      for (const [index, row] of plan.rows.entries()) {
+        if (!exactFields(row, ROW_FIELDS) || !identifier(row.rowId) || rows.has(row.rowId)
+          || row.order !== index || typeof row.filename !== "string" || row.filename.length > MAX_FILENAME_LENGTH
+          || sanitizePlannedFilename(row.filename) !== row.filename) return "corrupt";
+        rows.set(row.rowId, { row, batchId: plan.batchId });
+      }
+    }
+    if (rows.size > MAX_ENTRIES || [...rows.keys()].some((rowId) => batches.has(rowId))) return "corrupt";
     const receipts = new Set();
     let priorSequence = snapshot.nextSequence;
     for (const entry of snapshot.entries) {
+      const planned = rows.get(entry?.receiptId);
       if (!exactFields(entry, ENTRY_FIELDS) || !identifier(entry.receiptId) || !identifier(entry.batchId)
         || receipts.has(entry.receiptId) || !integer(entry.sequence) || entry.sequence >= priorSequence
         || typeof entry.filename !== "string" || entry.filename.length > MAX_FILENAME_LENGTH
-        || sanitizeFilename(entry.filename) !== entry.filename || entry.destination !== DESTINATION
+        || (planned ? planned.batchId !== entry.batchId || planned.row.filename !== entry.filename
+          : batches.has(entry.batchId) || sanitizeFilename(entry.filename) !== entry.filename)
+        || entry.destination !== DESTINATION
         || !timestamp(entry.startedAtMillis) || !OUTCOMES.includes(entry.outcome)
         || typeof entry.mayRemain !== "boolean" || typeof entry.outcomeUnknown !== "boolean"
         || !(entry.bytesTransferred === null || integer(entry.bytesTransferred))) return "corrupt";
@@ -63,7 +138,8 @@
       receipts.add(entry.receiptId);
       priorSequence = entry.sequence;
     }
-    return JSON.stringify(snapshot).length <= MAX_SNAPSHOT_LENGTH ? null : "corrupt";
+    if (occupiedRows(snapshot) > MAX_ENTRIES) return "corrupt";
+    return encodedSize(snapshot) <= MAX_SNAPSHOT_LENGTH ? null : "corrupt";
   }
 
   function displayEntry(entry) {
@@ -78,6 +154,17 @@
     });
   }
 
+  function displayPlan(plan, entries) {
+    const receipts = new Map(entries.map((entry) => [entry.receiptId, entry]));
+    return Object.freeze({ batchId: plan.batchId, createdAtMillis: plan.createdAtMillis,
+      rows: Object.freeze(plan.rows.map((row) => {
+        const entry = receipts.get(row.rowId);
+        const receipt = entry ? displayEntry(entry) : null;
+        return Object.freeze({ ...row, receipt, outcome: receipt?.outcome || "queued" });
+      })),
+    });
+  }
+
   function secureId() {
     const crypto = globalThis.crypto;
     if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
@@ -87,16 +174,19 @@
   }
 
   /**
-   * Optional receipt journal, not a resumable queue or evidence that a file still
-   * exists. Only actual attempted originals are admitted, immediately before
-   * destination.open. Capture one ticket after the picker, before the first item.
+   * Offline selected-batch worklist plus optional actual-attempt receipts. A
+   * planned batch persists every selected row atomically before any original or
+   * destination is opened. Dynamic foreground imports only record actual starts.
+   * Neither is a resumable queue or evidence that a completed file still exists;
+   * completion only records a confirmed writer.close, not fsync or existence.
    * Await admission, then recheck the transfer's cancellation/session ownership.
    * Call finish at confirmed close or failure, independent of current UI ownership.
-   * History failures must never change the transfer's return value or exception.
+   * Once a transfer actually runs, finishing history must never change its return
+   * value or exception. A planned row's admission failure must block its start.
    *
    * A single bounded snapshot uses IndexedDB readwrite transactions for all state
    * changes. The read and write stay in the same transaction, so another tab cannot
-   * lose an update. clear changes the epoch and empties entries atomically; old
+   * lose an update. clear changes the epoch and empties plans/entries atomically; old
    * batch tickets cannot recreate entries. No handles, camera identifiers, URLs,
    * errors, reconnects, picker requests, retries or destination deletion live here.
    */
@@ -105,6 +195,7 @@
     let opening = null;
     let closed = false;
     const tickets = new WeakSet();
+    const plannedTickets = new WeakSet();
     const receipts = new WeakSet();
     const transactions = new Set();
     const timeoutMs = Number.isInteger(options.timeoutMs) && options.timeoutMs >= 1 && options.timeoutMs <= 10000
@@ -133,7 +224,7 @@
         try {
           const backend = Object.hasOwn(options, "indexedDB") ? options.indexedDB : globalThis.indexedDB;
           if (!backend || typeof backend.open !== "function") return finish(failure("unavailable"));
-          request = backend.open(options.databaseName || DATABASE_NAME, SCHEMA_VERSION);
+          request = backend.open(options.databaseName || DATABASE_NAME, DATABASE_VERSION);
           request.onblocked = () => finish(failure("blocked"));
           request.onerror = () => finish(failure(request.error?.name === "VersionError" ? "unsupported-schema" : "unavailable"));
           request.onupgradeneeded = (event) => {
@@ -144,7 +235,7 @@
                 return finish(failure(closed ? "closed" : "unsupported-schema"));
               }
               const store = request.result.createObjectStore(STORE);
-              store.put({ schemaVersion: SCHEMA_VERSION, epoch: 0, nextSequence: 0, entries: [] }, KEY);
+              store.put({ schemaVersion: SCHEMA_VERSION, epoch: 0, nextSequence: 0, entries: [], plans: [] }, KEY);
             } catch (_) {
               try { upgrade.abort(); } catch (_) { /* Handled by the open result. */ }
               finish(failure("unavailable"));
@@ -222,6 +313,7 @@
                   const change = operation(snapshot);
                   result = change.result;
                   if (change.write) {
+                    migrateSnapshot(snapshot);
                     const invalidWrite = validateSnapshot(snapshot);
                     if (invalidWrite) return cancel(invalidWrite);
                     store.put(snapshot, KEY);
@@ -239,22 +331,109 @@
     }
 
     async function list() {
-      return transact("readonly", (snapshot) => ({ result: success({ entries: Object.freeze(snapshot.entries.map(displayEntry)) }) }));
+      return transact("readonly", (snapshot) => ({ result: success({
+        entries: Object.freeze(snapshot.entries.map(displayEntry)),
+        plans: Object.freeze(plansOf(snapshot).map((plan) => displayPlan(plan, snapshot.entries))),
+      }) }));
     }
 
     async function createBatchTicket() {
       return transact("readonly", (snapshot) => {
         const batchId = randomId();
-        if (!identifier(batchId)) return { result: failure("invalid-input") };
+        if (!identifier(batchId) || plansOf(snapshot).some((plan) => plan.batchId === batchId)
+          || snapshot.entries.some((entry) => entry.batchId === batchId || entry.receiptId === batchId)
+          || plannedRows(snapshot).has(batchId)) return { result: failure("invalid-input") };
         const ticket = Object.freeze({ batchId, epoch: snapshot.epoch });
         tickets.add(ticket);
         return { result: success({ ticket }) };
       });
     }
 
+    async function beginPlannedBatch(filenames) {
+      let admitted = null;
+      let persistedPlan = null;
+      const result = await transact("readwrite", (snapshot) => {
+        if (!Array.isArray(filenames) || filenames.length === 0) {
+          return { result: failure("invalid-input") };
+        }
+        if (filenames.length > MAX_ENTRIES || occupiedRows(snapshot) + filenames.length > MAX_ENTRIES) {
+          return { result: failure("capacity-exceeded") };
+        }
+        for (const name of filenames) {
+          if (typeof name !== "string" || name.length > 4096) return { result: failure("invalid-input") };
+        }
+        const createdAtMillis = now();
+        const batchId = randomId();
+        const used = new Set(snapshot.entries.flatMap((entry) => [entry.receiptId, entry.batchId]));
+        for (const plan of plansOf(snapshot)) {
+          used.add(plan.batchId);
+          for (const row of plan.rows) used.add(row.rowId);
+        }
+        if (!timestamp(createdAtMillis) || !identifier(batchId) || used.has(batchId)) {
+          return { result: failure("invalid-input") };
+        }
+        used.add(batchId);
+        const rows = [];
+        for (const [order, filename] of filenames.entries()) {
+          const rowId = randomId();
+          if (!identifier(rowId) || used.has(rowId)) return { result: failure("invalid-input") };
+          used.add(rowId);
+          rows.push({ rowId, order, filename: sanitizePlannedFilename(filename) });
+        }
+        const plan = { batchId, createdAtMillis, rows };
+        migrateSnapshot(snapshot);
+        snapshot.plans.unshift(plan);
+        if (!fitsCapacity(snapshot)) return { result: failure("capacity-exceeded") };
+        const ticket = Object.freeze({ batchId, epoch: snapshot.epoch,
+          rows: Object.freeze(rows.map((row) => Object.freeze({ ...row }))) });
+        tickets.add(ticket);
+        plannedTickets.add(ticket);
+        persistedPlan = JSON.stringify(plan);
+        admitted = success({ ticket, plan: displayPlan(plan, []) });
+        return { write: true, result: admitted };
+      });
+      if (result.ok) return result;
+      if (result.code !== "transaction-unconfirmed") return Object.freeze({ ...result, planAbsent: true });
+      // A refused abort may mean the write committed before its completion event.
+      // Verify the entire unique roster before giving its capability to a caller.
+      // Failed verification is never permission to run an unrecorded batch.
+      if (!admitted) return Object.freeze({ ...result, planAbsent: false });
+      const verified = await transact("readonly", (snapshot) => {
+        if (snapshot.epoch !== admitted.ticket.epoch) return { result: Object.freeze({
+          ...failure("stale-ticket"), planAbsent: true,
+        }) };
+        const plan = plansOf(snapshot).find((candidate) => candidate.batchId === admitted.ticket.batchId);
+        if (!plan) return { result: Object.freeze({ ...result, planAbsent: true }) };
+        if (JSON.stringify(plan) !== persistedPlan) return { result: failure("corrupt") };
+        return { result: success({ ticket: admitted.ticket, plan: displayPlan(plan, snapshot.entries) }) };
+      });
+      return verified.ok || verified.planAbsent === true ? verified : Object.freeze({ ...result, planAbsent: false });
+    }
+
+    async function beginPlannedAttempt(ticket, rowId) {
+      return transact("readwrite", (snapshot) => {
+        if (!plannedTickets.has(ticket)) return { result: failure("invalid-ticket") };
+        if (ticket.epoch !== snapshot.epoch) return { result: failure("stale-ticket") };
+        const plan = plansOf(snapshot).find((candidate) => candidate.batchId === ticket.batchId);
+        const row = plan?.rows.find((candidate) => candidate.rowId === rowId);
+        if (!row) return { result: failure("missing-plan-row") };
+        if (snapshot.entries.some((entry) => entry.receiptId === rowId)) return { result: failure("already-started") };
+        const startedAtMillis = now();
+        if (!timestamp(startedAtMillis) || snapshot.nextSequence >= Number.MAX_SAFE_INTEGER) {
+          return { result: failure("invalid-input") };
+        }
+        const receipt = Object.freeze({ receiptId: rowId, batchId: ticket.batchId, epoch: ticket.epoch });
+        snapshot.entries.unshift({ receiptId: rowId, batchId: ticket.batchId, sequence: snapshot.nextSequence++,
+          filename: row.filename, destination: DESTINATION, startedAtMillis, finishedAtMillis: null,
+          outcome: "in-progress", mayRemain: false, outcomeUnknown: false, bytesTransferred: null });
+        receipts.add(receipt);
+        return { write: true, result: success({ receipt }) };
+      });
+    }
+
     async function startAttempt(ticket, input = {}) {
       return transact("readwrite", (snapshot) => {
-        if (!tickets.has(ticket)) return { result: failure("invalid-ticket") };
+        if (!tickets.has(ticket) || plannedTickets.has(ticket)) return { result: failure("invalid-ticket") };
         if (ticket.epoch !== snapshot.epoch) return { result: failure("stale-ticket") };
         if (input.destination !== DESTINATION || typeof input.filename !== "string"
           || input.filename.length > 4096 || snapshot.nextSequence >= Number.MAX_SAFE_INTEGER) {
@@ -263,12 +442,19 @@
         const receiptId = randomId();
         const startedAtMillis = now();
         if (!identifier(receiptId) || !timestamp(startedAtMillis)
-          || snapshot.entries.some((entry) => entry.receiptId === receiptId)) return { result: failure("invalid-input") };
+          || snapshot.entries.some((entry) => entry.receiptId === receiptId)
+          || plannedRows(snapshot).has(receiptId)
+          || plansOf(snapshot).some((plan) => plan.batchId === receiptId)) return { result: failure("invalid-input") };
+        const planned = plannedRows(snapshot);
         const receipt = Object.freeze({ receiptId, batchId: ticket.batchId, epoch: ticket.epoch });
         snapshot.entries.unshift({ receiptId, batchId: ticket.batchId, sequence: snapshot.nextSequence++,
           filename: sanitizeFilename(input.filename), destination: DESTINATION, startedAtMillis,
           finishedAtMillis: null, outcome: "in-progress", mayRemain: false, outcomeUnknown: false, bytesTransferred: null });
-        snapshot.entries.length = Math.min(snapshot.entries.length, MAX_ENTRIES);
+        while (!fitsCapacity(snapshot)) {
+          const removable = snapshot.entries.findLastIndex((entry) => !planned.has(entry.receiptId) && entry.outcome !== "in-progress");
+          if (removable < 0) return { result: failure("capacity-exceeded") };
+          snapshot.entries.splice(removable, 1);
+        }
         receipts.add(receipt);
         return { write: true, result: success({ receipt }) };
       });
@@ -298,6 +484,8 @@
         if (snapshot.epoch >= Number.MAX_SAFE_INTEGER) return { result: failure("epoch-exhausted") };
         snapshot.epoch += 1;
         snapshot.entries = [];
+        snapshot.plans = [];
+        snapshot.schemaVersion = SCHEMA_VERSION;
         return { write: true, result: success() };
       });
     }
@@ -309,8 +497,10 @@
       db = null;
     }
 
-    return Object.freeze({ open, list, createBatchTicket, startAttempt, finishAttempt, clear, close });
+    return Object.freeze({ open, list, createBatchTicket, startAttempt, beginPlannedBatch, beginPlannedAttempt,
+      finishAttempt, clear, close });
   }
 
-  return { createHistoryStore, sanitizeFilename, DATABASE_NAME, SCHEMA_VERSION, MAX_ENTRIES, MAX_FILENAME_LENGTH };
+  return { createHistoryStore, sanitizeFilename, sanitizePlannedFilename, DATABASE_NAME, SCHEMA_VERSION,
+    MAX_ENTRIES, MAX_FILENAME_LENGTH, MAX_SNAPSHOT_LENGTH };
 });

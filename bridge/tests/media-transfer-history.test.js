@@ -5,7 +5,8 @@
 // separately exercise the platform implementation, persistence and multiple tabs.
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { createHistoryStore, sanitizeFilename, MAX_ENTRIES } = require("../open_eos_bridge/static/media-transfer-history.js");
+const { createHistoryStore, sanitizeFilename, sanitizePlannedFilename, MAX_ENTRIES, MAX_SNAPSHOT_LENGTH,
+  SCHEMA_VERSION } = require("../open_eos_bridge/static/media-transfer-history.js");
 
 function fakeIndexedDB() {
   const databases = new Map();
@@ -283,13 +284,16 @@ test("clear failure rolls back its epoch and leaves existing batch usable", asyn
   assert.equal((await start(store, ticket, "later.JPG")).ok, true);
 });
 
-test("latest 100 actual starts follow admission order across wall-clock reversal; evicted completion cannot recreate", async () => {
+test("latest 100 actual starts safely trim terminal unplanned records; evicted completion cannot recreate", async () => {
   const { store, time } = fixture();
   const { ticket } = await store.createBatchTicket();
   const first = await start(store, ticket, "evicted.JPG");
+  await store.finishAttempt(first.receipt, { outcome: "completed" });
   for (let i = 0; i < MAX_ENTRIES; i += 1) {
     time(999 - i);
-    assert.equal((await start(store, ticket, `IMG_${i}.JPG`)).ok, true);
+    const next = await start(store, ticket, `IMG_${i}.JPG`);
+    assert.equal(next.ok, true);
+    await store.finishAttempt(next.receipt, { outcome: "completed" });
   }
   const entries = (await store.list()).entries;
   assert.equal(entries.length, MAX_ENTRIES);
@@ -355,7 +359,7 @@ test("corrupt, excessive and unknown-version data is preserved, never repaired o
   await start(store, ticket);
   const valid = indexedDB.persisted();
   const corruptions = [
-    { ...valid, schemaVersion: 2 }, { ...valid, extra: "secret" }, { ...valid, epoch: -1 },
+    { ...valid, schemaVersion: SCHEMA_VERSION + 1 }, { ...valid, extra: "secret" }, { ...valid, epoch: -1 },
     { ...valid, entries: Array(101).fill(valid.entries[0]) },
     ...[
       { filename: "https://private.invalid" }, { url: "https://private.invalid" },
@@ -368,7 +372,7 @@ test("corrupt, excessive and unknown-version data is preserved, never repaired o
   ];
   for (const snapshot of corruptions) {
     indexedDB.replace(snapshot);
-    const code = snapshot.schemaVersion === 2 ? "unsupported-schema" : "corrupt";
+    const code = snapshot.schemaVersion === SCHEMA_VERSION + 1 ? "unsupported-schema" : "corrupt";
     assert.deepEqual(await store.list(), { ok: false, code });
     assert.deepEqual(await store.clear(), { ok: false, code });
     assert.deepEqual(await start(store, ticket), { ok: false, code });
@@ -510,4 +514,377 @@ test("receipt timestamps remain renderable throughout the valid JavaScript Date 
     assert.doesNotThrow(() => new Date(entry.startedAtMillis).toISOString());
     if (entry.finishedAtMillis !== null) assert.doesNotThrow(() => new Date(entry.finishedAtMillis).toISOString());
   }
+});
+
+test("a 50-row selected batch survives interruption as five completed, one unknown and 44 queued", async () => {
+  const { store, second, indexedDB } = fixture();
+  const names = Array.from({ length: 50 }, (_, index) => `IMG_${index}.JPG`);
+  const batch = await store.beginPlannedBatch(names);
+  assert.equal(batch.ok, true);
+  assert.equal(batch.ticket.rows.length, 50);
+  assert.equal((await store.list()).entries.length, 0, "persisting the selection is not a claim that any original started");
+  assert.deepEqual(indexedDB.persisted().plans[0].rows.map((row) => row.filename), names);
+  for (const row of batch.ticket.rows.slice(0, 5)) {
+    const begun = await store.beginPlannedAttempt(batch.ticket, row.rowId);
+    assert.equal(begun.receipt.receiptId, row.rowId);
+    assert.equal((await store.finishAttempt(begun.receipt, { outcome: "completed", bytesTransferred: 7 })).ok, true);
+  }
+  await store.beginPlannedAttempt(batch.ticket, batch.ticket.rows[5].rowId);
+  const persistedBeforeRead = indexedDB.persisted();
+  const reader = second();
+  const cold = await reader.list();
+  const rows = cold.plans[0].rows;
+  assert.deepEqual(rows.map((row) => row.filename), names);
+  assert.deepEqual(rows.map((row) => row.order), Array.from({ length: 50 }, (_, index) => index));
+  assert.deepEqual(rows.map((row) => row.outcome), [
+    ...Array(5).fill("completed"), "cancelled-or-unknown", ...Array(44).fill("queued"),
+  ]);
+  assert.equal(cold.entries.length, 6, "compatibility receipts contain only actual starts");
+  assert.equal(rows[5].receipt.unconfirmed, true);
+  assert.equal(rows[5].receipt.outcomeUnknown, true);
+  assert.equal(rows[5].receipt.finishedAtMillis, null);
+  assert.ok(rows.slice(6).every((row) => row.receipt === null));
+  assert.deepEqual(indexedDB.persisted(), persistedBeforeRead, "cold projection never rewrites the active tab's records");
+  assert.ok(Object.isFrozen(cold.plans) && Object.isFrozen(cold.plans[0]) && Object.isFrozen(rows) && Object.isFrozen(rows[0]));
+  assert.ok(Object.isFrozen(batch.ticket) && Object.isFrozen(batch.ticket.rows) && Object.isFrozen(batch.ticket.rows[0]));
+  assert.deepEqual(await reader.beginPlannedAttempt(batch.ticket, rows[6].rowId), { ok: false, code: "invalid-ticket" });
+  assert.deepEqual(await store.beginPlannedAttempt({ ...batch.ticket }, rows[6].rowId), { ok: false, code: "invalid-ticket" });
+  assert.deepEqual(await start(store, batch.ticket), { ok: false, code: "invalid-ticket" });
+});
+
+test("full plan commit is an all-or-nothing gate before the caller can open an original or destination", async () => {
+  const { store, indexedDB } = fixture();
+  await store.open();
+  const before = indexedDB.persisted();
+  let originalRequests = 0;
+  let destinationOpens = 0;
+  indexedDB.fault.put = true;
+  const result = await store.beginPlannedBatch(["one.JPG", "two.JPG", "three.JPG"]);
+  if (result.ok) {
+    originalRequests += 1;
+    destinationOpens += 1;
+  }
+  assert.deepEqual(result, { ok: false, code: "transaction-failed", planAbsent: true });
+  assert.equal(originalRequests, 0);
+  assert.equal(destinationOpens, 0);
+  assert.deepEqual(indexedDB.persisted(), before);
+  const successful = await store.beginPlannedBatch(["one.JPG", "two.JPG", "three.JPG"]);
+  assert.equal(successful.ok, true);
+  assert.equal(indexedDB.persisted().plans[0].rows.length, 3);
+  assert.equal(indexedDB.persisted().entries.length, 0);
+});
+
+test("planned attempt failure leaves the row queued, and terminal write failure leaves it unknown", async () => {
+  const { store, indexedDB, second } = fixture();
+  const { ticket } = await store.beginPlannedBatch(["same.JPG", "same.JPG"]);
+  const rowId = ticket.rows[0].rowId;
+  const before = indexedDB.persisted();
+  indexedDB.fault.put = true;
+  assert.deepEqual(await store.beginPlannedAttempt(ticket, rowId), { ok: false, code: "transaction-failed" });
+  assert.deepEqual(indexedDB.persisted(), before);
+  assert.equal((await second().list()).plans[0].rows[0].outcome, "queued");
+  const { receipt } = await store.beginPlannedAttempt(ticket, rowId);
+  assert.equal(receipt.receiptId, rowId);
+  indexedDB.fault.put = true;
+  assert.deepEqual(await store.finishAttempt(receipt, { outcome: "completed" }), { ok: false, code: "transaction-failed" });
+  assert.equal((await second().list()).plans[0].rows[0].outcome, "cancelled-or-unknown");
+  assert.deepEqual(await store.beginPlannedAttempt(ticket, rowId), { ok: false, code: "already-started" });
+  assert.equal((await store.finishAttempt(receipt, { outcome: "completed", bytesTransferred: 4 })).ok, true);
+  const rows = (await second().list()).plans[0].rows;
+  assert.equal(rows[0].outcome, "completed");
+  assert.equal(rows[1].outcome, "queued", "equal filenames are separate rows, never implicit matches");
+  assert.notEqual(rows[0].rowId, rows[1].rowId);
+});
+
+test("full-plan admission never truncates the new roster or evicts existing records", async () => {
+  const { store, indexedDB } = fixture();
+  const { ticket } = await store.createBatchTicket();
+  const { receipt } = await start(store, ticket, "existing.JPG");
+  await store.finishAttempt(receipt, { outcome: "completed" });
+  const before = indexedDB.persisted();
+  assert.deepEqual(await store.beginPlannedBatch(Array(100).fill("photo.JPG")), {
+    ok: false, code: "capacity-exceeded", planAbsent: true,
+  });
+  assert.deepEqual(indexedDB.persisted(), before);
+  assert.deepEqual(await store.beginPlannedBatch(Array(101).fill("photo.JPG")), {
+    ok: false, code: "capacity-exceeded", planAbsent: true,
+  });
+  assert.deepEqual(indexedDB.persisted(), before);
+  assert.equal((await store.beginPlannedBatch(Array(99).fill("photo.JPG"))).ok, true);
+  assert.equal((await store.list()).entries[0].receiptId, receipt.receiptId);
+});
+
+test("shared capacity protects every plan and live dynamic receipt while trimming only terminal dynamic history", async () => {
+  const { store, indexedDB } = fixture();
+  const planned = await store.beginPlannedBatch(Array(98).fill("planned.JPG"));
+  const { ticket } = await store.createBatchTicket();
+  const first = await start(store, ticket, "live-one.JPG");
+  const second = await start(store, ticket, "live-two.JPG");
+  const before = indexedDB.persisted();
+  assert.deepEqual(await start(store, ticket, "cannot-fit.JPG"), { ok: false, code: "capacity-exceeded" });
+  assert.deepEqual(indexedDB.persisted(), before);
+  const plannedReceipt = await store.beginPlannedAttempt(planned.ticket, planned.ticket.rows[0].rowId);
+  assert.equal(plannedReceipt.ok, true, "an admitted planned row has already reserved its capacity");
+  await store.finishAttempt(plannedReceipt.receipt, { outcome: "completed" });
+  await store.finishAttempt(first.receipt, { outcome: "failed", mayRemain: true });
+  for (let index = 0; index < 105; index += 1) {
+    const dynamic = await start(store, ticket, `new-${index}.JPG`);
+    assert.equal(dynamic.ok, true);
+    await store.finishAttempt(dynamic.receipt, { outcome: "completed" });
+  }
+  const latest = await store.list();
+  assert.equal(latest.plans[0].rows.length, 98);
+  assert.equal(latest.plans[0].rows[0].outcome, "completed", "dynamic rolling can never turn a completed planned row back into queued");
+  assert.equal(latest.plans[0].rows.filter((row) => row.outcome === "queued").length, 97);
+  assert.equal(latest.entries.length, 3);
+  assert.ok(latest.entries.some((entry) => entry.receiptId === second.receipt.receiptId));
+  assert.equal((await store.finishAttempt(second.receipt, { outcome: "completed" })).ok, true);
+});
+
+test("100 planned rows admit all of their receipts without another slot, and reject any dynamic addition", async () => {
+  const { store, indexedDB } = fixture();
+  const { ticket } = await store.beginPlannedBatch(Array.from({ length: 100 }, (_, index) => `${index}.JPG`));
+  for (const row of ticket.rows) {
+    const { receipt } = await store.beginPlannedAttempt(ticket, row.rowId);
+    assert.ok(receipt);
+    await store.finishAttempt(receipt, { outcome: "completed" });
+  }
+  const before = indexedDB.persisted();
+  const dynamic = await store.createBatchTicket();
+  assert.deepEqual(await start(store, dynamic.ticket), { ok: false, code: "capacity-exceeded" });
+  assert.deepEqual(indexedDB.persisted(), before);
+  assert.ok((await store.list()).plans[0].rows.every((row) => row.outcome === "completed"));
+});
+
+test("concurrent plan admissions use one atomic shared capacity calculation", async () => {
+  const { store, second, indexedDB } = fixture();
+  const other = second();
+  const results = await Promise.all([
+    store.beginPlannedBatch(Array(60).fill("one.JPG")),
+    other.beginPlannedBatch(Array(50).fill("two.JPG")),
+  ]);
+  assert.equal(results.filter((result) => result.ok).length, 1);
+  assert.deepEqual(results.find((result) => !result.ok), { ok: false, code: "capacity-exceeded", planAbsent: true });
+  assert.equal(indexedDB.persisted().plans.length, 1);
+  assert.equal(indexedDB.persisted().plans[0].rows.length, results.find((result) => result.ok).ticket.rows.length);
+});
+
+test("cross-tab clear removes plans and receipts in one epoch and old capabilities cannot resurrect either", async () => {
+  const { store, second, indexedDB } = fixture();
+  const other = second();
+  const { ticket } = await store.beginPlannedBatch(["finished.JPG", "active.JPG", "queued.JPG"]);
+  const completed = await store.beginPlannedAttempt(ticket, ticket.rows[0].rowId);
+  await store.finishAttempt(completed.receipt, { outcome: "completed" });
+  const active = await store.beginPlannedAttempt(ticket, ticket.rows[1].rowId);
+  const before = indexedDB.persisted();
+  await other.open();
+  const [cleared, lateStart, lateFinish] = await Promise.all([
+    other.clear(), store.beginPlannedAttempt(ticket, ticket.rows[2].rowId),
+    store.finishAttempt(active.receipt, { outcome: "completed" }),
+  ]);
+  assert.deepEqual(cleared, { ok: true });
+  assert.deepEqual(lateStart, { ok: false, code: "stale-ticket" });
+  assert.deepEqual(lateFinish, { ok: false, code: "stale-ticket" });
+  assert.equal(indexedDB.persisted().epoch, before.epoch + 1);
+  assert.deepEqual(await store.list(), { ok: true, entries: [], plans: [] });
+  assert.equal((await other.beginPlannedBatch(["new.JPG"])).ok, true);
+  assert.deepEqual(await store.beginPlannedAttempt(ticket, ticket.rows[2].rowId), { ok: false, code: "stale-ticket" });
+  assert.equal((await store.list()).plans.length, 1);
+});
+
+test("failed clear leaves the exact plan, receipts and epoch intact and the plan remains usable", async () => {
+  const { store, second, indexedDB } = fixture();
+  const { ticket } = await store.beginPlannedBatch(["active.JPG", "queued.JPG"]);
+  const { receipt } = await store.beginPlannedAttempt(ticket, ticket.rows[0].rowId);
+  const before = indexedDB.persisted();
+  indexedDB.fault.put = true;
+  assert.deepEqual(await second().clear(), { ok: false, code: "transaction-failed" });
+  assert.deepEqual(indexedDB.persisted(), before);
+  assert.equal((await store.finishAttempt(receipt, { outcome: "completed" })).ok, true);
+  assert.equal((await store.beginPlannedAttempt(ticket, ticket.rows[1].rowId)).ok, true);
+});
+
+test("v1 receipts remain readable without an invented roster and migrate atomically without losing history", async () => {
+  const { store, indexedDB, second } = fixture();
+  const dynamic = await store.createBatchTicket();
+  const { receipt } = await start(store, dynamic.ticket, "legacy.JPG");
+  await store.finishAttempt(receipt, { outcome: "completed", bytesTransferred: 42 });
+  const { plans: _plans, ...persisted } = indexedDB.persisted();
+  const legacy = { ...persisted, schemaVersion: 1 };
+  indexedDB.replace(legacy);
+  const reader = second();
+  assert.equal((await reader.open()).ok, true);
+  const old = await reader.list();
+  assert.equal(old.entries.length, 1);
+  assert.deepEqual(old.plans, []);
+  assert.deepEqual(indexedDB.persisted(), legacy, "readonly access does not claim a new schema or selected roster");
+  indexedDB.fault.put = true;
+  assert.deepEqual(await reader.beginPlannedBatch(["new.JPG"]), { ok: false, code: "transaction-failed", planAbsent: true });
+  assert.deepEqual(indexedDB.persisted(), legacy, "failed migration and admission roll back together");
+  assert.equal((await reader.beginPlannedBatch(["new.JPG"])).ok, true);
+  const migrated = indexedDB.persisted();
+  assert.equal(migrated.schemaVersion, SCHEMA_VERSION);
+  assert.deepEqual(migrated.entries, legacy.entries);
+  assert.equal(migrated.epoch, legacy.epoch);
+  assert.equal(migrated.plans.length, 1);
+  assert.equal((await store.list()).entries[0].bytesTransferred, 42);
+});
+
+test("new plan labels exclude locators and query secrets, while duplicate labels keep separate local identities", async () => {
+  const { store, indexedDB } = fixture();
+  const input = ["https://private.invalid/secret.JPG?token=abc#hidden", "foo.JPG?token=abc#hidden",
+    "/private/foo.JPG", "C:\\private\\foo.JPG", "content://private/secret", "secret%3Ftoken%3Dabc", "foo.JPG"];
+  const { ticket } = await store.beginPlannedBatch(input);
+  assert.deepEqual(ticket.rows.map((row) => row.filename), ["download", "foo.JPG", "foo.JPG", "foo.JPG", "download", "download", "foo.JPG"]);
+  assert.equal(new Set(ticket.rows.map((row) => row.rowId)).size, input.length);
+  assert.equal(sanitizePlannedFilename("foo.JPG?token=secret"), "foo.JPG");
+  const serialized = JSON.stringify(indexedDB.persisted());
+  for (const secret of ["private", "token", "abc", "hidden", "secret", "https", "content", "directoryHandle", "serial", "session"]) {
+    assert.ok(!serialized.includes(secret), secret);
+  }
+  for (const row of ticket.rows) {
+    const { receipt } = await store.beginPlannedAttempt(ticket, row.rowId);
+    assert.equal(receipt.receiptId, row.rowId);
+  }
+});
+
+test("malformed or hostile full plans are preserved and never projected as trustworthy queued rows", async () => {
+  const { store, indexedDB } = fixture();
+  const { ticket } = await store.beginPlannedBatch(["first.JPG", "second.JPG"]);
+  await store.beginPlannedAttempt(ticket, ticket.rows[0].rowId);
+  const valid = indexedDB.persisted();
+  const plan = valid.plans[0];
+  const corruptions = [
+    { ...valid, plans: null }, { ...valid, plans: [{ ...plan, rows: [] }] },
+    { ...valid, plans: [{ ...plan, session: "secret" }] },
+    { ...valid, plans: [{ ...plan, createdAtMillis: -1 }] },
+    { ...valid, plans: [{ ...plan, rows: [plan.rows[1], plan.rows[0]] }] },
+    { ...valid, plans: [{ ...plan, rows: [plan.rows[0], { ...plan.rows[1], rowId: plan.rows[0].rowId }] }] },
+    { ...valid, plans: [{ ...plan, rows: [plan.rows[0], { ...plan.rows[1], rowId: plan.batchId }] }] },
+    { ...valid, plans: [{ ...plan, rows: [plan.rows[0], { ...plan.rows[1], url: "https://secret.invalid" }] }] },
+    { ...valid, plans: [{ ...plan, rows: [plan.rows[0], { ...plan.rows[1], filename: "image.JPG?token=secret" }] }] },
+    { ...valid, plans: [plan, plan] },
+    { ...valid, entries: [{ ...valid.entries[0], filename: "mismatch.JPG" }] },
+    { ...valid, entries: [{ ...valid.entries[0], receiptId: "f".repeat(32) }] },
+    { ...valid, entries: [{ ...valid.entries[0], batchId: "f".repeat(32) }] },
+    { ...valid, schemaVersion: 1 },
+  ];
+  for (const snapshot of corruptions) {
+    indexedDB.replace(snapshot);
+    assert.deepEqual(await store.list(), { ok: false, code: "corrupt" });
+    assert.deepEqual(await store.clear(), { ok: false, code: "corrupt" });
+    assert.deepEqual(await store.beginPlannedAttempt(ticket, ticket.rows[1].rowId), { ok: false, code: "corrupt" });
+    assert.deepEqual(await store.beginPlannedBatch(["new.JPG"]), { ok: false, code: "corrupt", planAbsent: true });
+    assert.deepEqual(indexedDB.persisted(), snapshot);
+  }
+});
+
+test("invalid batch inputs and colliding local IDs never persist a partial roster", async () => {
+  const { store, indexedDB } = fixture();
+  await store.open();
+  const before = indexedDB.persisted();
+  for (const names of [null, [], "photo.JPG", [null], ["x".repeat(4097)], new Array(2), [{ filename: "photo.JPG", url: "secret" }]]) {
+    assert.deepEqual(await store.beginPlannedBatch(names), { ok: false, code: "invalid-input", planAbsent: true });
+    assert.deepEqual(indexedDB.persisted(), before);
+  }
+  const hostileNames = ["photo.JPG"];
+  Object.defineProperty(hostileNames, "0", { get() { throw new Error("secret private address"); } });
+  assert.deepEqual(await store.beginPlannedBatch(hostileNames), { ok: false, code: "invalid-input", planAbsent: true });
+  assert.deepEqual(indexedDB.persisted(), before);
+  const collisions = fixture({ randomId: () => "a".repeat(32) });
+  assert.deepEqual(await collisions.store.beginPlannedBatch(["photo.JPG"]), { ok: false, code: "invalid-input", planAbsent: true });
+  assert.equal(collisions.indexedDB.persisted().plans.length, 0);
+});
+
+test("encoded capacity reserves future receipts and bounds multibyte plans before admission", async () => {
+  const { store, indexedDB, time } = fixture();
+  await store.open();
+  const before = indexedDB.persisted();
+  assert.deepEqual(await store.beginPlannedBatch(Array(100).fill("界".repeat(120))), {
+    ok: false, code: "capacity-exceeded", planAbsent: true,
+  });
+  assert.deepEqual(indexedDB.persisted(), before);
+  const admitted = await store.beginPlannedBatch(Array(50).fill("界".repeat(120)));
+  assert.equal(admitted.ok, true);
+  time(8640000000000000);
+  for (const row of admitted.ticket.rows) {
+    const { receipt } = await store.beginPlannedAttempt(admitted.ticket, row.rowId);
+    assert.ok(receipt);
+    assert.equal((await store.finishAttempt(receipt, {
+      outcome: "cancelled-or-unknown", mayRemain: false, outcomeUnknown: false, bytesTransferred: Number.MAX_SAFE_INTEGER,
+    })).ok, true);
+  }
+  assert.ok(Buffer.byteLength(JSON.stringify(indexedDB.persisted()), "utf8") <= MAX_SNAPSHOT_LENGTH);
+});
+
+test("a timeout that confirms rollback reports the plan absent and late writes cannot resurrect it", async () => {
+  const { store, indexedDB } = fixture({ timeoutMs: 5 });
+  await store.open();
+  const before = indexedDB.persisted();
+  indexedDB.fault.holdWriteSuccess = true;
+  assert.deepEqual(await store.beginPlannedBatch(["one.JPG", "two.JPG"]), { ok: false, code: "timeout", planAbsent: true });
+  assert.deepEqual(indexedDB.persisted(), before);
+  indexedDB.releaseRequest();
+  await nextTurn();
+  assert.deepEqual(indexedDB.persisted(), before);
+});
+
+test("uncertain plan commit never reports absent when readonly verification also cannot finish", async () => {
+  const { store, indexedDB } = fixture({ timeoutMs: 5 });
+  await store.open();
+  indexedDB.fault.holdComplete = true;
+  const result = await store.beginPlannedBatch(["one.JPG", "two.JPG"]);
+  assert.deepEqual(result, { ok: false, code: "transaction-unconfirmed", planAbsent: false });
+  assert.equal(indexedDB.persisted().plans[0].rows.length, 2);
+  indexedDB.releaseComplete();
+  await nextTurn();
+  assert.equal((await store.list()).plans[0].rows.length, 2);
+});
+
+test("uncertain commit can publish a ticket only after the whole persisted plan is verified", async () => {
+  const { store, indexedDB } = fixture({ timeoutMs: 20 });
+  await store.open();
+  indexedDB.fault.holdComplete = true;
+  const pending = store.beginPlannedBatch(["one.JPG", "two.JPG"]);
+  const release = setTimeout(() => indexedDB.releaseComplete(), 25);
+  const result = await pending;
+  clearTimeout(release);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.ticket.rows.map((row) => row.filename), ["one.JPG", "two.JPG"]);
+  assert.equal((await store.beginPlannedAttempt(result.ticket, result.ticket.rows[0].rowId)).ok, true);
+});
+
+test("storage errors are never classified as a clear epoch and absent backend is safe to label plan absent", async () => {
+  assert.deepEqual(await createHistoryStore({ indexedDB: null }).beginPlannedBatch(["one.JPG"]), {
+    ok: false, code: "unavailable", planAbsent: true,
+  });
+  const { store, indexedDB } = fixture();
+  const { ticket } = await store.beginPlannedBatch(["one.JPG"]);
+  indexedDB.fault.transactionThrows = true;
+  assert.deepEqual(await store.beginPlannedAttempt(ticket, ticket.rows[0].rowId), { ok: false, code: "transaction-failed" });
+  indexedDB.fault.transactionThrows = false;
+  assert.equal((await store.beginPlannedAttempt(ticket, ticket.rows[0].rowId)).ok, true);
+});
+
+test("committed but unacknowledged planned attempt returns no capability and cold read stays unknown", async () => {
+  const { store, indexedDB, second } = fixture({ timeoutMs: 5 });
+  const { ticket } = await store.beginPlannedBatch(["first.JPG", "second.JPG"]);
+  indexedDB.fault.holdComplete = true;
+  const result = await store.beginPlannedAttempt(ticket, ticket.rows[0].rowId);
+  assert.deepEqual(result, { ok: false, code: "transaction-unconfirmed" });
+  assert.equal(Object.hasOwn(result, "receipt"), false);
+  assert.equal(indexedDB.persisted().entries.length, 1);
+  assert.equal(indexedDB.persisted().entries[0].outcome, "in-progress");
+  indexedDB.releaseComplete();
+  await nextTurn();
+  const cold = second();
+  const before = structuredClone(indexedDB.persisted());
+  const listed = await cold.list();
+  assert.equal(listed.ok, true);
+  assert.deepEqual(listed.plans[0].rows.map(row => row.outcome), ["cancelled-or-unknown", "queued"]);
+  assert.equal(listed.plans[0].rows[0].receipt.unconfirmed, true);
+  assert.equal(listed.plans[0].rows[1].receipt, null);
+  assert.deepEqual(indexedDB.persisted(), before, "Cold projection cannot retry or settle the unacknowledged attempt");
+  assert.deepEqual(await store.beginPlannedAttempt(ticket, ticket.rows[0].rowId), { ok: false, code: "already-started" });
+  cold.close(); store.close();
 });

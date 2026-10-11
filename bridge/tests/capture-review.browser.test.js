@@ -793,7 +793,7 @@ cases.push({
 
 
 cases.push({
-  name: "unfinished batch history survives reload without automatic requests",
+  name: "complete batch worklist survives reload with uncertain attempt and queued row without automatic requests",
   batch: { pauseFirstWrite: true },
   run: async ({ page, originalRequests }) => {
     await page.click('.tab[data-view="media"]');
@@ -813,6 +813,13 @@ cases.push({
     });
     assert.equal(stored.ok, true);
     assert.equal(stored.entries[0].unconfirmed, true);
+    assert.equal(stored.plans.length, 1);
+    assert.equal(stored.plans[0].rows.length, 2, "The complete selected roster survives reload");
+    assert.deepEqual(stored.plans[0].rows.map(row => row.outcome), ["cancelled-or-unknown", "queued"]);
+    assert.equal(stored.plans[0].rows[0].receipt.receiptId, stored.plans[0].rows[0].rowId);
+    assert.equal(stored.plans[0].rows[1].receipt, null);
+    assert.equal(await page.locator('#media-history-list [data-outcome="queued"]').count(), 1);
+    assert.equal(await page.locator('#media-history-list li').count(), 2, "The first receipt is not duplicated outside its worklist");
     assert.equal(JSON.stringify(stored).includes('/ccapi/'), false);
     assert.equal(JSON.stringify(stored).includes('synthetic-session'), false);
     await page.keyboard.press("Escape");
@@ -831,7 +838,9 @@ cases.push({
     try {
       await observer.goto(page.url(), { waitUntil: "networkidle" });
       await observer.locator('#connection-view [data-open-media-history]').click();
-      await observer.waitForFunction(() => document.querySelectorAll('#media-history-list li').length === 1);
+      await observer.waitForFunction(() => document.querySelectorAll('#media-history-list li').length === 2);
+      assert.equal(await observer.locator('#media-history-list [data-outcome="cancelled-or-unknown"]').count(), 1);
+      assert.equal(await observer.locator('#media-history-list [data-outcome="queued"]').count(), 1);
       await observer.click('#media-history-clear');
       await observer.click('#media-history-confirm-yes');
       await observer.waitForFunction(() => document.querySelector('#media-history-confirm').hidden && document.querySelectorAll('#media-history-list li').length === 0);
