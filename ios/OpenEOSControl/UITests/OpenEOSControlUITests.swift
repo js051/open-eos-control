@@ -41,25 +41,27 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertNil(Self.scrollDragOffset(target: .null, viewport: .infinite))
     }
 
-    func testScrollDragModeSeparatesLazyDiscoveryFromKnownTargetCorrection() throws {
+    func testScrollDragModeSeparatesDiscoveryDistantSeekAndNearCorrection() throws {
         let viewport = CGRect(x: 0, y: 180 + 2.0 / 3.0, width: 402, height: 693 + 1.0 / 3.0)
         // An absent AX row is represented by .null without querying its frame.
         let unavailable = [CGRect.null, .infinite, .zero,
                            CGRect(x: CGFloat.nan, y: 0, width: 48, height: 48)]
         for target in unavailable {
-            let mode = Self.scrollDragMode(target: target, cameraActions: false)
+            let mode = Self.scrollDragMode(target: target, viewport: viewport, cameraActions: false)
             XCTAssertEqual(mode, .searchFlick)
             XCTAssertEqual(mode.holdDuration, 0)
             XCTAssertEqual(try XCTUnwrap(Self.scrollDragOffset(target: target, viewport: viewport)),
                            viewport.height * 0.8, accuracy: 0.000_001)
         }
         let finalTarget = CGRect(x: 140, y: 904, width: 48, height: 48)
-        let distantTarget = CGRect(x: 140, y: 2_000, width: 48, height: 48)
+        let distantTargets = [CGFloat(-2_000), CGFloat(2_000)].map {
+            CGRect(x: 140, y: $0, width: 48, height: 48)
+        }
         let coveredTarget = CGRect(x: 140, y: 160, width: 48, height: 48)
         let visibleTarget = CGRect(x: 140, y: 400, width: 48, height: 48)
-        let known = [finalTarget, distantTarget, coveredTarget, visibleTarget]
+        let known = [finalTarget, coveredTarget, visibleTarget]
         for target in known {
-            let mode = Self.scrollDragMode(target: target, cameraActions: false)
+            let mode = Self.scrollDragMode(target: target, viewport: viewport, cameraActions: false)
             XCTAssertEqual(mode, .targetCorrection)
             XCTAssertEqual(mode.holdDuration, 0.1)
         }
@@ -67,24 +69,119 @@ final class OpenEOSControlUITests: XCTestCase {
         // Once known, it needs a short correction rather than another flick.
         XCTAssertEqual(try XCTUnwrap(Self.scrollDragOffset(target: finalTarget, viewport: viewport)),
                        90, accuracy: 0.000_001)
-        // Equal drag distances do not imply equal modes: a distant known target
-        // must retain its stop even when the offset reaches the search maximum.
-        XCTAssertEqual(Self.scrollDragOffset(target: distantTarget, viewport: viewport),
-                       Self.scrollDragOffset(target: .null, viewport: viewport))
+        for target in distantTargets {
+            let mode = Self.scrollDragMode(target: target, viewport: viewport, cameraActions: false)
+            XCTAssertEqual(mode, .targetSeek)
+            XCTAssertEqual(mode.holdDuration, 0)
+            let offset = try XCTUnwrap(Self.scrollDragOffset(target: target, viewport: viewport))
+            XCTAssertEqual(abs(offset), viewport.height * 0.8, accuracy: 0.000_001)
+            XCTAssertEqual(offset < 0, target.minY < viewport.minY)
+            let points = try XCTUnwrap(Self.scrollSearchDragOffsets(
+                surface: viewport, viewport: viewport, upward: offset < 0
+            ))
+            XCTAssertEqual(points.start.dy < points.end.dy, offset < 0)
+            XCTAssertTrue(viewport.contains(CGPoint(x: viewport.minX + points.start.dx,
+                                                   y: viewport.minY + points.start.dy)))
+            XCTAssertTrue(viewport.contains(CGPoint(x: viewport.minX + points.end.dx,
+                                                   y: viewport.minY + points.end.dy)))
+        }
         XCTAssertLessThan(try XCTUnwrap(Self.scrollDragOffset(target: coveredTarget, viewport: viewport)), 0)
         XCTAssertNil(Self.scrollDragOffset(target: visibleTarget, viewport: viewport))
         let ratingViewport = CGRect(x: 0, y: 128, width: 402, height: 746)
         let coveredRating = CGRect(x: 20, y: 25 + 1.0 / 3.0, width: 362, height: 85 + 1.0 / 3.0)
-        XCTAssertEqual(Self.scrollDragMode(target: coveredRating, cameraActions: false), .targetCorrection)
+        XCTAssertEqual(Self.scrollDragMode(target: coveredRating, viewport: ratingViewport, cameraActions: false), .targetCorrection)
         XCTAssertEqual(try XCTUnwrap(Self.scrollDragOffset(target: coveredRating, viewport: ratingViewport)),
                        -(114 + 2.0 / 3.0), accuracy: 0.000_001)
-        for target in unavailable + known + [coveredRating] {
-            let mode = Self.scrollDragMode(target: target, cameraActions: true)
+        for target in unavailable + known + distantTargets + [coveredRating] {
+            let mode = Self.scrollDragMode(target: target, viewport: viewport, cameraActions: true)
             XCTAssertEqual(mode, .cameraActions)
             XCTAssertEqual(mode.holdDuration, 0.1)
         }
         XCTAssertNil(Self.scrollDragOffset(target: .null, viewport: .zero))
         XCTAssertNil(Self.scrollDragOffset(target: .null, viewport: .infinite))
+    }
+
+    func testKnownTargetSeekBeginsOnlyBeyondOneStoppedStroke() {
+        let viewport = CGRect(x: 0, y: 80, width: 390, height: 700)
+        let stroke = viewport.height * 0.8
+        for extra in [CGFloat(-1), 0, 1] {
+            let travel = stroke + extra
+            let above = CGRect(x: 12, y: viewport.minY - travel + 12, width: 100, height: 44)
+            let below = CGRect(x: 12, y: viewport.maxY + travel - 12 - 44, width: 100, height: 44)
+            for target in [above, below] {
+                XCTAssertEqual(Self.scrollDragMode(target: target, viewport: viewport, cameraActions: false),
+                               extra > 0 ? .targetSeek : .targetCorrection)
+            }
+        }
+        for y in [viewport.minY, viewport.maxY - 44] {
+            XCTAssertNil(Self.scrollDragOffset(target: CGRect(x: 12, y: y, width: 100, height: 44), viewport: viewport))
+        }
+    }
+
+    func testMissingTargetAfterSeekHasOneBoundedReverseAttempt() throws {
+        let viewport = CGRect(x: 0, y: 80, width: 390, height: 700)
+        let unavailable = [CGRect.null, .infinite, .zero,
+                           CGRect(x: CGFloat.nan, y: 0, width: 48, height: 48)]
+        for target in unavailable {
+            let initial = try XCTUnwrap(Self.scrollDragPlan(target: target, viewport: viewport, cameraActions: false))
+            XCTAssertEqual(initial.mode, .searchFlick)
+            XCTAssertGreaterThan(initial.offset, 0)
+            for seek in [CGFloat(-560), 560] {
+                let reverse = try XCTUnwrap(Self.scrollDragPlan(
+                    target: target, viewport: viewport, cameraActions: false, lastKnownSeekOffset: seek
+                ))
+                XCTAssertEqual(reverse.mode, .targetReacquisition)
+                XCTAssertEqual(reverse.offset, -seek)
+                XCTAssertEqual(reverse.mode.holdDuration, 0.1)
+                XCTAssertNil(Self.scrollDragPlan(target: target, viewport: viewport, cameraActions: false,
+                                                lastKnownSeekOffset: seek, attemptedReacquisition: true),
+                             "A missing frame cannot distinguish overshoot from a target still ahead; do not keep guessing")
+                let camera = try XCTUnwrap(Self.scrollDragPlan(
+                    target: target, viewport: viewport, cameraActions: true,
+                    lastKnownSeekOffset: seek, attemptedReacquisition: true
+                ))
+                XCTAssertEqual(camera.mode, .cameraActions)
+                XCTAssertEqual(camera.offset, 560)
+            }
+        }
+        let reappeared = try XCTUnwrap(Self.scrollDragPlan(
+            target: CGRect(x: 12, y: 60, width: 100, height: 44), viewport: viewport, cameraActions: false,
+            lastKnownSeekOffset: 560, attemptedReacquisition: true
+        ))
+        XCTAssertEqual(reappeared.mode, .targetCorrection)
+        XCTAssertEqual(reappeared.offset, -44)
+        for invalid in [CGFloat.nan, .infinity, -.infinity, 0] {
+            XCTAssertNil(Self.scrollDragPlan(target: .null, viewport: viewport, cameraActions: false, lastKnownSeekOffset: invalid))
+        }
+        for invalid in [CGRect.null, .infinite, .zero] {
+            XCTAssertNil(Self.scrollDragPlan(target: .null, viewport: invalid, cameraActions: false, lastKnownSeekOffset: 560))
+        }
+    }
+
+    func testGenericScrollCacheRejectsAmbiguousFallbackEvenWithUnchangedGeometry() {
+        let frame = CGRect(x: 0, y: 80, width: 390, height: 700)
+        // A missing or unmatched target may materialize in a different one of
+        // several containers. The fallback must be resolved again even if the
+        // previously chosen container remains visible at exactly the same frame.
+        XCTAssertFalse(Self.canReuseGenericScrollSelection(
+            match: .ambiguousFallback, previous: frame, current: frame, hittable: true
+        ))
+        for match in [GenericScrollMatch.soleContainer, .targetAncestor] {
+            XCTAssertTrue(Self.canReuseGenericScrollSelection(
+                match: match, previous: frame, current: frame, hittable: true
+            ))
+            XCTAssertFalse(Self.canReuseGenericScrollSelection(
+                match: match, previous: frame, current: frame.offsetBy(dx: 0, dy: 1), hittable: true
+            ))
+            XCTAssertFalse(Self.canReuseGenericScrollSelection(
+                match: match, previous: frame, current: frame, hittable: false
+            ))
+            for invalid in [CGRect.null, .infinite, .zero] {
+                XCTAssertFalse(Self.canReuseGenericScrollSelection(
+                    match: match, previous: invalid, current: invalid, hittable: true
+                ))
+            }
+        }
     }
 
     func testCameraActionsScrollViewportExcludesFixedFooter() throws {
@@ -606,11 +703,23 @@ final class OpenEOSControlUITests: XCTestCase {
         let modePicker = app.segmentedControls["connection-mode-picker"]
         XCTAssertTrue(modePicker.waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["CCAPI setup and Camera Connect pairing"].exists)
+        XCTAssertEqual(app.textFields["camera-url-field"].value as? String, "invalid-camera-address",
+                       "The launch override must reach the real connection field before this recovery journey")
         XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
         assertConnectionButtonHitFrame(in: app)
         app.buttons["connect-button"].tap()
         let recovery = app.staticTexts["connection-recovery-message"]
-        XCTAssertTrue(recovery.waitForExistence(timeout: 5))
+        let recoveryAppeared = recovery.waitForExistence(timeout: 5)
+        if !recoveryAppeared {
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "connection-recovery-accessibility-hierarchy"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+            addScreenshot(name: "connection-recovery-missing-message")
+        }
+        XCTAssertTrue(recoveryAppeared)
+        XCTAssertEqual(app.staticTexts.matching(identifier: "connection-recovery-message").count, 1)
+        XCTAssertTrue(app.buttons["connection-edit-settings-button"].exists)
         XCTAssertTrue(recovery.label.contains("complete http:// or https:// camera address"))
         XCTAssertFalse(app.alerts.firstMatch.exists, "Connection guidance is inline")
         XCTAssertFalse(app.textFields["camera-username-field"].exists,
@@ -1568,6 +1677,11 @@ final class OpenEOSControlUITests: XCTestCase {
         var lastDragMode: ScrollDragMode?
         var dragCount = 0
         var searchFlickCount = 0
+        var genericSelection: GenericScrollSelection?
+        var lastKnownSeekOffset: CGFloat?
+        var attemptedReacquisition = false
+        var awaitingPostDragFrame = false
+        var dragFrames: [String] = []
         while ProcessInfo.processInfo.systemUptime < deadline {
             let exists = element.exists
             if exists, element.isEnabled, element.isHittable { return true }
@@ -1585,28 +1699,53 @@ final class OpenEOSControlUITests: XCTestCase {
                 viewport = selection.viewport
                 lastSurface = "\(selection.kind) frame=\(surfaceFrame) viewport=\(viewport)"
             } else {
-                guard let selection = genericScrollSurface(for: element, in: app) else {
+                // Reuse only a sole container or verified ancestor. An ambiguous
+                // fallback must resolve again: the target may materialize in a
+                // different container without changing this container's frame.
+                if let selection = genericSelection {
+                    let currentFrame = selection.element.exists ? selection.element.frame : .null
+                    if !Self.canReuseGenericScrollSelection(
+                        match: selection.match, previous: selection.frame, current: currentFrame,
+                        hittable: currentFrame == selection.frame && selection.element.isHittable
+                    ) {
+                        genericSelection = nil
+                    }
+                }
+                if genericSelection == nil {
+                    genericSelection = genericScrollSurface(for: element, targetExists: exists, in: app)
+                }
+                guard let selection = genericSelection else {
                     lastSurface = "no visible scroll, collection, or table container"
                     Thread.sleep(forTimeInterval: min(0.05, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
                     continue
                 }
                 surface = selection.element
-                surfaceFrame = surface.frame
+                surfaceFrame = selection.frame
                 viewport = selection.viewport
                 lastSurface = "\(selection.kind) frame=\(surfaceFrame) viewport=\(viewport)"
             }
             let targetFrame = exists ? element.frame : .null
             lastTargetFrame = targetFrame
-            guard let offset = Self.scrollDragOffset(target: targetFrame, viewport: viewport) else {
+            if awaitingPostDragFrame {
+                dragFrames.append("drag=\(dragCount) post-target-frame=\(targetFrame)")
+                awaitingPostDragFrame = false
+            }
+            if Self.validScrollFrame(targetFrame) { lastKnownSeekOffset = nil }
+            guard let plan = Self.scrollDragPlan(
+                target: targetFrame, viewport: viewport, cameraActions: cameraActions,
+                lastKnownSeekOffset: lastKnownSeekOffset, attemptedReacquisition: attemptedReacquisition
+            ) else {
+                if !cameraActions, !Self.validScrollFrame(targetFrame), lastKnownSeekOffset != nil { break }
                 // Visible but disabled/covered controls need state to settle;
                 // scrolling them away cannot make them interactive.
                 Thread.sleep(forTimeInterval: min(0.05, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
                 continue
             }
+            let offset = plan.offset
+            let mode = plan.mode
             guard ProcessInfo.processInfo.systemUptime < deadline else { break }
-            let mode = Self.scrollDragMode(target: targetFrame, cameraActions: cameraActions)
-            let candidateOffsets = mode == .searchFlick
-                ? Self.scrollSearchDragOffsets(surface: surfaceFrame, viewport: viewport)
+            let candidateOffsets = mode == .searchFlick || mode == .targetSeek
+                ? Self.scrollSearchDragOffsets(surface: surfaceFrame, viewport: viewport, upward: offset < 0)
                 : Self.scrollDragOffsets(offset: offset, surface: surfaceFrame, viewport: viewport)
             guard let offsets = candidateOffsets else { break }
             let origin = surface.coordinate(withNormalizedOffset: .zero)
@@ -1618,10 +1757,13 @@ final class OpenEOSControlUITests: XCTestCase {
             lastDragMode = mode
             dragCount += 1
             if mode == .searchFlick { searchFlickCount += 1 }
-            // Lazy discovery has no target position yet. Use the visible
-            // viewport minus bounded touch margins; do not rely on momentum.
-            // Known targets retain their precise stopped correction, and
-            // camera-action navigation keeps its existing gesture.
+            if mode == .targetSeek { lastKnownSeekOffset = offset }
+            if mode == .targetReacquisition { attemptedReacquisition = true }
+            dragFrames.append("drag=\(dragCount) mode=\(mode.rawValue) pre-target-frame=\(targetFrame) bounded-offset=\(offset) touch-travel=\(offsets.start.dy - offsets.end.dy)")
+            awaitingPostDragFrame = true
+            // Seek in the known direction when one stopped stroke cannot reach
+            // the target. Re-read its position before a precise stopped correction.
+            // Camera-action navigation keeps its existing velocity and hold.
             let velocity: XCUIGestureVelocity = cameraActions ? .default : .fast
             start.press(forDuration: 0.01, thenDragTo: end, withVelocity: velocity, thenHoldForDuration: mode.holdDuration)
         }
@@ -1637,6 +1779,9 @@ final class OpenEOSControlUITests: XCTestCase {
         } else if !interactive {
             let exists = element.exists
             let finalFrame = exists ? element.frame : .null
+            if awaitingPostDragFrame {
+                dragFrames.append("drag=\(dragCount) post-target-frame=\(finalFrame)")
+            }
             var lines = [
                 "[OEC_SCROLL_NAVIGATION] surface=\(lastSurface)",
                 "drags=\(dragCount) timeout=\(timeout) elapsed=\(ProcessInfo.processInfo.systemUptime - (deadline - timeout))",
@@ -1646,6 +1791,9 @@ final class OpenEOSControlUITests: XCTestCase {
             if let lastDragMode {
                 lines.append("search-flicks=\(searchFlickCount) last-drag-mode=\(lastDragMode.rawValue) terminal-hold=\(lastDragMode.holdDuration)")
             }
+            // These samples reuse navigation/failure reads; no extra AX frame
+            // lookup is performed just to record pre/post gesture diagnostics.
+            lines.append(contentsOf: dragFrames)
             // Resolve coordinates only after failure, so diagnostics do not add
             // AX round trips to every drag. These are current resolved points,
             // not a claim about the earlier synthesized event's touch samples.
@@ -1663,35 +1811,64 @@ final class OpenEOSControlUITests: XCTestCase {
         return interactive
     }
 
+    private enum GenericScrollMatch: Equatable {
+        case soleContainer
+        case targetAncestor
+        case ambiguousFallback
+    }
+
+    private struct GenericScrollSelection {
+        let element: XCUIElement
+        let frame: CGRect
+        let viewport: CGRect
+        let kind: String
+        var match: GenericScrollMatch = .ambiguousFallback
+    }
+
+    private static func canReuseGenericScrollSelection(
+        match: GenericScrollMatch, previous: CGRect, current: CGRect, hittable: Bool
+    ) -> Bool {
+        match != .ambiguousFallback && validScrollFrame(current) && current == previous && hittable
+    }
+
     private func genericScrollSurface(
-        for target: XCUIElement, in app: XCUIApplication
-    ) -> (element: XCUIElement, viewport: CGRect, kind: String)? {
+        for target: XCUIElement, targetExists: Bool, in app: XCUIApplication
+    ) -> GenericScrollSelection? {
         let window = app.frame
         let headers = app.navigationBars.allElementsBoundByIndex.filter { $0.exists && $0.isHittable }.map(\.frame)
         let footers = (app.tabBars.allElementsBoundByIndex + app.toolbars.allElementsBoundByIndex)
             .filter { $0.exists && $0.isHittable }.map(\.frame)
-        let identifier = target.exists ? target.identifier : ""
-        var fallback: (element: XCUIElement, viewport: CGRect, kind: String)?
+        var choices: [GenericScrollSelection] = []
         // SwiftUI Form/List may expose collection or table containers. Prefer
         // the target's actual ancestor; a whole-application frame includes the
         // sheet navigation bar and misclassifies covered rows as visible.
         for (query, kind) in [(app.collectionViews, "collection"), (app.tables, "table"), (app.scrollViews, "scroll")] {
             for candidate in query.allElementsBoundByIndex.reversed() {
-                guard candidate.exists, candidate.isHittable,
-                      let viewport = Self.genericScrollViewport(surface: candidate.frame, window: window,
+                guard candidate.exists, candidate.isHittable else { continue }
+                let frame = candidate.frame
+                guard let viewport = Self.genericScrollViewport(surface: frame, window: window,
                                                                 headers: headers, footers: footers)
                 else { continue }
-                let choice = (element: candidate, viewport: viewport, kind: kind)
-                if !identifier.isEmpty,
-                   candidate.descendants(matching: .any).matching(identifier: identifier).firstMatch.exists {
-                    return choice
-                }
-                if fallback == nil { fallback = choice }
+                choices.append(GenericScrollSelection(element: candidate, frame: frame, viewport: viewport, kind: kind))
             }
+        }
+        // One valid surface needs no descendant lookup, which can force an
+        // expensive lazy-tree search even for a known offscreen target.
+        if choices.count == 1 {
+            choices[0].match = .soleContainer
+            return choices[0]
+        }
+        let identifier = targetExists ? target.identifier : ""
+        if !identifier.isEmpty,
+           var ancestor = choices.first(where: {
+               $0.element.descendants(matching: .any).matching(identifier: identifier).firstMatch.exists
+           }) {
+            ancestor.match = .targetAncestor
+            return ancestor
         }
         // An unmaterialized lazy row has no ancestor yet. Search only an actual
         // visible scrolling container, never the app's fixed chrome.
-        return fallback
+        return choices.first
     }
 
     private static func genericScrollViewport(
@@ -1717,7 +1894,7 @@ final class OpenEOSControlUITests: XCTestCase {
     }
 
     private static func scrollSearchDragOffsets(
-        surface: CGRect, viewport: CGRect
+        surface: CGRect, viewport: CGRect, upward: Bool = false
     ) -> (start: CGVector, end: CGVector)? {
         // Reuse the finite/containment checks. For lazy discovery, a percentage
         // margin wastes increasing travel as the viewport gets taller. A 22pt
@@ -1725,9 +1902,11 @@ final class OpenEOSControlUITests: XCTestCase {
         // small viewports retain the original 10% inset.
         guard scrollDragOffsets(offset: 44, surface: surface, viewport: viewport) != nil else { return nil }
         let inset = min(CGFloat(22), viewport.height * 0.1)
+        let top = viewport.minY + inset - surface.minY
+        let bottom = viewport.maxY - inset - surface.minY
         return (
-            CGVector(dx: viewport.midX - surface.minX, dy: viewport.maxY - inset - surface.minY),
-            CGVector(dx: viewport.midX - surface.minX, dy: viewport.minY + inset - surface.minY)
+            CGVector(dx: viewport.midX - surface.minX, dy: upward ? top : bottom),
+            CGVector(dx: viewport.midX - surface.minX, dy: upward ? bottom : top)
         )
     }
 
@@ -1785,35 +1964,60 @@ final class OpenEOSControlUITests: XCTestCase {
 
     private enum ScrollDragMode: String {
         case searchFlick = "search-flick"
+        case targetSeek = "target-seek"
         case targetCorrection = "target-correction"
+        case targetReacquisition = "target-reacquisition"
         case cameraActions = "camera-actions"
 
-        var holdDuration: TimeInterval { self == .searchFlick ? 0 : 0.1 }
+        var holdDuration: TimeInterval { self == .searchFlick || self == .targetSeek ? 0 : 0.1 }
     }
 
-    private static func scrollDragMode(target: CGRect, cameraActions: Bool) -> ScrollDragMode {
+    private static func scrollDragMode(target: CGRect, viewport: CGRect, cameraActions: Bool) -> ScrollDragMode {
         if cameraActions { return .cameraActions }
-        guard !target.isNull, !target.isInfinite, !target.isEmpty,
-              [target.minX, target.minY, target.maxX, target.maxY].allSatisfy({ $0.isFinite })
-        else { return .searchFlick }
+        guard validScrollFrame(target) else { return .searchFlick }
+        if let travel = scrollTargetTravel(target: target, viewport: viewport), abs(travel) > viewport.height * 0.8 {
+            return .targetSeek
+        }
         return .targetCorrection
     }
 
     private static func scrollDragOffset(target: CGRect, viewport: CGRect) -> CGFloat? {
-        guard !viewport.isNull, !viewport.isInfinite, !viewport.isEmpty,
-              [viewport.minX, viewport.minY, viewport.maxX, viewport.maxY].allSatisfy({ $0.isFinite })
-        else { return nil }
+        guard validScrollFrame(viewport) else { return nil }
         let maximum = viewport.height * 0.8
-        guard !target.isNull, !target.isInfinite, !target.isEmpty,
-              [target.minX, target.minY, target.maxX, target.maxY].allSatisfy({ $0.isFinite })
-        else { return maximum } // Search downward until a lazy cell has a frame.
+        guard validScrollFrame(target) else { return maximum } // Initial lazy discovery searches down.
+        guard let travel = scrollTargetTravel(target: target, viewport: viewport) else { return nil }
+        return travel > 0 ? min(maximum, travel) : -min(maximum, -travel)
+    }
+
+    private static func scrollTargetTravel(target: CGRect, viewport: CGRect) -> CGFloat? {
+        guard validScrollFrame(target), validScrollFrame(viewport) else { return nil }
         if targetIsAboveScrollViewport(target, viewport: viewport) {
-            return -min(maximum, max(44, viewport.minY - target.minY + 12))
+            return -max(44, viewport.minY - target.minY + 12)
         }
         if target.maxY > viewport.maxY {
-            return min(maximum, max(44, target.maxY - viewport.maxY + 12))
+            return max(44, target.maxY - viewport.maxY + 12)
         }
         return nil
+    }
+
+    private static func scrollDragPlan(
+        target: CGRect, viewport: CGRect, cameraActions: Bool,
+        lastKnownSeekOffset: CGFloat? = nil, attemptedReacquisition: Bool = false
+    ) -> (mode: ScrollDragMode, offset: CGFloat)? {
+        if !cameraActions, !validScrollFrame(target), let seek = lastKnownSeekOffset {
+            guard !attemptedReacquisition, seek.isFinite, seek != 0, validScrollFrame(viewport) else { return nil }
+            // Missing AX geometry cannot distinguish overshoot from a target
+            // still ahead. Try one bounded, stopped reverse as a heuristic,
+            // then fail if still missing rather than restarting a downward search.
+            return (.targetReacquisition, (seek > 0 ? -1 : 1) * viewport.height * 0.8)
+        }
+        guard let offset = scrollDragOffset(target: target, viewport: viewport) else { return nil }
+        return (scrollDragMode(target: target, viewport: viewport, cameraActions: cameraActions), offset)
+    }
+
+    private static func validScrollFrame(_ frame: CGRect) -> Bool {
+        !frame.isNull && !frame.isInfinite && !frame.isEmpty
+            && [frame.minX, frame.minY, frame.maxX, frame.maxY].allSatisfy { $0.isFinite }
     }
 
     private static func targetIsAboveScrollViewport(_ target: CGRect, viewport: CGRect) -> Bool {

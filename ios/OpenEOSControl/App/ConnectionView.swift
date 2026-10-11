@@ -166,6 +166,9 @@ struct ConnectionView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.cameraSurface)
         .clipShape(RoundedRectangle(cornerRadius: 6))
+        // Keep the message and edit action as distinct accessible children;
+        // the group's identifier must not replace their leaf identifiers.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("connection-recovery-guidance")
     }
 

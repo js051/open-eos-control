@@ -31,7 +31,7 @@ Presentation state contains only the connection mode, operation, reason, scan ph
 - Existing controlled async tests now include scan phase and recovery in ownership assertions, distinguish completed-empty results, preserve unrelated warnings, and cover old authentication failures arriving after newer network guidance and cancelled retry restoration.
 - The existing shutter-recovery test also checks that mode/credential edits retain an unresolved release warning. The existing Bridge form UI journey is extended with invalid-address recovery, unchanged authentication disclosure, correction without connection, and the initial unscanned state. Existing wait deadlines and hit-frame checks are retained.
 
-## Verification state for this local batch
+## Initial source-only preparation
 
 Prepared against draft base `df3f24329f5937cf19f7fa3ec302e1d173b8e647` on 2026-10-11. Source review, whitespace checks, and localization key/format checks are local validation only.
 
@@ -41,6 +41,24 @@ Prepared against draft base `df3f24329f5937cf19f7fa3ec302e1d173b8e647` on 2026-1
 - New-head CI: **NOT_RUN**
 - Physical iPhone/iPad and EOS validation: **NOT_RUN**
 
-The local environment has no Swift/Xcode compiler. No toolchain install, build, CI trigger, push, merge, or release is part of this batch. Prior Core 301 / App 332 / UI 31 results apply only to the old exact base, not these edits. Development implementation is ready for the consolidated automated App acceptance stage; physical-camera compatibility and reliability are not claimed.
+The initial local environment had no Swift/Xcode compiler. That preparation did not install a toolchain, build, trigger CI, push, merge, or release. Prior Core 301 / App 332 / UI 31 results applied only to the old exact base, not these edits. Physical-camera compatibility and reliability are not claimed.
 
 Source review also replaced the existing large-text date-filter journey’s initial Offline Preview existence-only wait with the existing bounded connection-scroll helper. The same eight-second budget and all media assertions remain. This is a reachability precaution for variable-height setup guidance, not evidence that a prior runtime failure was caused or fixed by this change.
+
+## Observed recovery accessibility failure and candidate correction
+
+[CI run 38119070005](https://github.com/js051/open-eos-control/actions/runs/38119070005), on head `d6e744d`, passed App 344/344 and UI 28/31. The connection-recovery journey failed at its unchanged five-second wait for the `connection-recovery-message` static text. Its Connect action had passed the enabled/hit-frame checks and synthesized a tap.
+
+The failing test's actual xcresult accessibility hierarchy establishes the cause of that missing identifier: the invalid-address recovery text was present at `(32.0, 537.7)` with size `326.0 × 82.3`, and Connect had changed to “Retry connection.” However, the title, recovery message, retry explanation, and “Edit settings” button all exposed the parent identifier `connection-recovery-guidance`. The message's `connection-recovery-message` and the action's `connection-edit-settings-button` identifiers had been replaced. The invalid address was also present in the camera URL field. This evidence identifies identifier propagation through the recovery stack; it does not support a clipping, disabled-button, or missing-error explanation.
+
+The narrow correction gives the recovery stack explicit `.accessibilityElement(children: .contain)` semantics before assigning its group identifier, matching other app groups that preserve independently addressable children. The existing journey now checks that the launch override reaches the actual URL field, retains the same five-second message deadline and exact message-content assertion, requires a unique message leaf and the separate edit-action child, and saves a textual accessibility hierarchy plus screenshot if the leaf remains missing. No URL default, generic scrolling helper, or unrelated journey is changed by this correction.
+
+The correction has passed source review and `git diff --check` only. Its Swift compilation, App/UI runtime, and new-head CI are **NOT_RUN** at this handoff. The observed failure mechanism is established; successful post-correction behavior still requires the next exact-head acceptance run. The two unrelated generic-navigation UI failures in that run remain separate work.
+
+## Same-run media navigation evidence and bounded candidate
+
+The same `d6e744d` run also failed the existing batch-selection and date/folder UI journeys at their fixed eight-second generic navigation checks (original lines 237 and 729). The helper and media layout were unchanged from the earlier green `df3f243` tree. Original failure PNGs show ordinary large-text media content with the requested controls outside the viewport; final-frame equality alone does not prove that a gesture failed to move content. Full artifact `11695585246` was verified at 258,379,516 bytes and SHA-256 `7734eb44c8d5eae3fe83bea8db2b042f10fa9e98084b39247f1adca4a5e90fa5`.
+
+The candidate resolves a visible scrolling container and reuses only an unambiguous sole container or a verified target ancestor while its frame remains valid, avoiding repeated descendant searches. Ambiguous fallbacks remain uncached so a newly materialized target can resolve to another container. A known target farther than one bounded stopped stroke uses a directional seek; nearby or covered targets retain stopped correction. If that target disappears after seeking, one bounded stopped reverse is permitted as an explicit heuristic, then unresolved geometry fails. It does not assume that a missing target proves overshoot. Initial missing-target discovery, clipping, camera-action gestures, all business assertions, existing sleeps, and call-site deadlines remain unchanged.
+
+Pure policy controls cover both directions, the exact coarse/fine boundary, covered and invalid frames, missing-after-seek exhaustion/reappearance, and the unchanged camera-action behavior. Failure diagnostics retain pre/post target samples from existing reads rather than adding accessibility queries solely for logging. Source checks pass; Swift compilation and all new policy/runtime behavior remain NOT_RUN locally. The next normal exact-head CI must determine whether these candidates resolve the failures; no successful navigation or product root cause is presumed from source review.
