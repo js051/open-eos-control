@@ -485,11 +485,11 @@ final class CameraAppState: ObservableObject {
             lastError = nil
         } catch {
             guard bridgeScanOwner == owner, !Task.isCancelled,
-                  let reason = CameraConnectionFailureReason.classify(error) else { return }
+                  let recovery = ConnectionRecovery.classify(error, mode: .desktopBridge, operation: .scan) else { return }
             bridgeCameras = []
             selectedBridgeCameraID = nil
             bridgeScanState = .failed
-            connectionRecovery = ConnectionRecovery(mode: .desktopBridge, operation: .scan, reason: reason)
+            connectionRecovery = recovery
         }
     }
 
@@ -593,8 +593,9 @@ final class CameraAppState: ObservableObject {
             }
         } catch {
             guard generation == sessionGeneration, configurationOwner == connectionConfigurationOwner,
-                  !Task.isCancelled, let reason = CameraConnectionFailureReason.classify(error) else { return }
-            connectionRecovery = ConnectionRecovery(mode: requestedMode, operation: .connect, reason: reason)
+                  !Task.isCancelled,
+                  let recovery = ConnectionRecovery.classify(error, mode: requestedMode, operation: .connect) else { return }
+            connectionRecovery = recovery
         }
     }
 

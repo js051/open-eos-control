@@ -649,6 +649,15 @@
 "connection_bridge_invalid_address" = "Enter the computer’s complete http:// or https:// Bridge address and port. Keep the Bridge token in its separate field.";
 "connection_camera_authentication" = "The camera endpoint rejected authentication (HTTP 401 or 403). Check its CCAPI username and password, then retry.";
 "connection_bridge_authentication" = "Desktop Bridge rejected access (HTTP 401 or 403). Check the Bridge bearer token and its server configuration, then retry.";
+"connection_bridge_camera_authentication" = "Desktop Bridge reached the camera, but the camera rejected CCAPI authentication. Check the camera’s CCAPI username and password in the Bridge’s camera connection settings on the computer. The Bridge token field here is separate.";
+"connection_bridge_camera_tls_error" = "Desktop Bridge could not establish a secure connection to the camera. Check the camera’s HTTPS address and certificate in the Bridge’s camera connection settings on the computer.";
+"connection_bridge_camera_host_not_found" = "Desktop Bridge could not find the camera host. Check the camera address in the Bridge’s camera connection settings and the computer’s network access to that host.";
+"connection_bridge_camera_timeout" = "Desktop Bridge’s connection to the camera timed out. Check that the camera is awake and reachable from the computer, and review the Bridge’s camera connection settings.";
+"connection_bridge_camera_unreachable" = "Desktop Bridge could not reach the camera. Check the network between the computer and camera, and the Bridge’s camera connection settings.";
+"connection_bridge_camera_http_error" = "The camera returned an HTTP error to Desktop Bridge. Check the camera’s CCAPI service and the Bridge’s camera connection settings on the computer.";
+"connection_bridge_camera_discovery_failed" = "Desktop Bridge could not discover a usable camera API. Check that camera CCAPI is enabled and review the Bridge’s camera connection settings on the computer.";
+"connection_bridge_camera_endpoint_missing" = "Desktop Bridge could not find the camera’s CCAPI endpoint. Check that CCAPI is enabled and that the camera address and port in the Bridge’s camera connection settings match the camera.";
+"connection_bridge_camera_retry_help" = "Review the camera connection settings on the computer running Desktop Bridge, then retry the connection or scan here when ready. No retry starts automatically.";
 "connection_camera_endpoint_missing" = "The requested CCAPI endpoint was not found. Check that CCAPI is enabled and that the address and port match the camera’s CCAPI settings.";
 "connection_bridge_endpoint_missing" = "The requested Bridge endpoint was not found. Check the computer’s Bridge address and port, and that the expected service is running.";
 "connection_tls_error" = "A secure connection could not be established. Check the configured HTTPS address and certificate with the camera or Bridge administrator.";

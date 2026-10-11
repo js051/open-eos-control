@@ -17,6 +17,8 @@ public enum CameraConnectionFailureReason: String, CaseIterable, Hashable, Senda
     public static func classify(_ error: Error) -> Self? {
         if isCancellation(error) { return nil }
         switch error {
+        case let error as DesktopBridgeCameraConnectionError:
+            return error.reason.failureReason
         case CCAPIError.invalidBaseURL, DesktopBridgeError.invalidBaseURL:
             return .invalidAddress
         case let CCAPIError.http(status, _, _, _):

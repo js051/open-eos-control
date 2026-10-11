@@ -649,6 +649,15 @@
 "connection_bridge_invalid_address" = "請輸入電腦完整的 http:// 或 https:// Bridge 網址及連接埠，並將 Bridge 權杖填在獨立欄位。";
 "connection_camera_authentication" = "相機端點拒絕驗證（HTTP 401 或 403）。請確認相機的 CCAPI 使用者名稱與密碼，再重試。";
 "connection_bridge_authentication" = "Desktop Bridge 拒絕存取（HTTP 401 或 403）。請確認 Bridge 的 Bearer 權杖及伺服器設定，再重試。";
+"connection_bridge_camera_authentication" = "Desktop Bridge 已連到相機，但相機拒絕 CCAPI 驗證。請在電腦上檢查 Bridge 相機連線設定中的 CCAPI 使用者名稱與密碼；此處的 Bridge 權杖是另一組驗證資料。";
+"connection_bridge_camera_tls_error" = "Desktop Bridge 無法與相機建立安全連線。請在電腦上檢查 Bridge 相機連線設定中的相機 HTTPS 網址及憑證。";
+"connection_bridge_camera_host_not_found" = "Desktop Bridge 找不到相機主機。請檢查 Bridge 相機連線設定中的相機位址，以及電腦連往該主機的網路。";
+"connection_bridge_camera_timeout" = "Desktop Bridge 連往相機時逾時。請確認相機未休眠且可從電腦連線，並檢查 Bridge 的相機連線設定。";
+"connection_bridge_camera_unreachable" = "Desktop Bridge 無法連到相機。請檢查電腦與相機之間的網路，以及 Bridge 的相機連線設定。";
+"connection_bridge_camera_http_error" = "相機向 Desktop Bridge 回傳 HTTP 錯誤。請檢查相機的 CCAPI 服務，以及電腦上 Bridge 的相機連線設定。";
+"connection_bridge_camera_discovery_failed" = "Desktop Bridge 未探索到可用的相機 API。請確認相機已啟用 CCAPI，並檢查電腦上 Bridge 的相機連線設定。";
+"connection_bridge_camera_endpoint_missing" = "Desktop Bridge 找不到相機的 CCAPI 端點。請確認已啟用 CCAPI，且 Bridge 相機連線設定中的相機位址與連接埠符合相機設定。";
+"connection_bridge_camera_retry_help" = "請在執行 Desktop Bridge 的電腦上檢查相機連線設定，就緒後再回到此處重試連線或掃描；不會自動重試。";
 "connection_camera_endpoint_missing" = "找不到要求的 CCAPI 端點。請確認已啟用 CCAPI，且網址與連接埠符合相機的 CCAPI 設定。";
 "connection_bridge_endpoint_missing" = "找不到要求的 Bridge 端點。請確認電腦的 Bridge 網址與連接埠，以及對應服務是否正在執行。";
 "connection_tls_error" = "無法建立安全連線。請與相機或 Bridge 管理者確認 HTTPS 網址及憑證設定。";

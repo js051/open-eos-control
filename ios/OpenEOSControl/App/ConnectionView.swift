@@ -146,20 +146,22 @@ struct ConnectionView: View {
             Text(LocalizedStringKey(recovery.messageKey))
                 .font(.callout)
                 .accessibilityIdentifier("connection-recovery-message")
-            Text(LocalizedStringKey(recovery.operation == .scan ? "connection_edit_then_scan" : "connection_edit_then_connect"))
+            Text(LocalizedStringKey(recovery.nextStepKey))
                 .font(.footnote)
-            Button("connection_edit_settings") {
-                if recovery.needsCameraAuthentication {
-                    showAuthentication = true
-                    focusedField = .cameraUsername
-                } else if recovery.mode == .desktopBridge && recovery.reason == .authenticationRejected {
-                    focusedField = .bridgeToken
-                } else {
-                    focusedField = recovery.mode == .ccapi ? .cameraURL : .bridgeURL
+            if recovery.canEditLocalSettings {
+                Button("connection_edit_settings") {
+                    if recovery.needsCameraAuthentication {
+                        showAuthentication = true
+                        focusedField = .cameraUsername
+                    } else if recovery.mode == .desktopBridge && recovery.reason == .authenticationRejected {
+                        focusedField = .bridgeToken
+                    } else {
+                        focusedField = recovery.mode == .ccapi ? .cameraURL : .bridgeURL
+                    }
                 }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("connection-edit-settings-button")
             }
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("connection-edit-settings-button")
         }
         .foregroundStyle(Color.cameraWarning)
         .padding(12)

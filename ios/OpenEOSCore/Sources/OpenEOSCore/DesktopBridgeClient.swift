@@ -67,6 +67,45 @@ extension DesktopBridgeError: LocalizedError {
     }
 }
 
+/// Closed, optional Bridge wire evidence about its connection to a CCAPI camera.
+public enum DesktopBridgeCameraConnectionReason: String, CaseIterable, Equatable, Sendable {
+    case authenticationRejected = "AUTHENTICATION_REJECTED"
+    case tlsError = "TLS_ERROR"
+    case hostNotFound = "HOST_NOT_FOUND"
+    case timeout = "TIMEOUT"
+    case unreachable = "UNREACHABLE"
+    case httpError = "HTTP_ERROR"
+    case discoveryFailed = "DISCOVERY_FAILED"
+    case endpointNotFound = "ENDPOINT_NOT_FOUND"
+
+    public var failureReason: CameraConnectionFailureReason {
+        switch self {
+        case .authenticationRejected: .authenticationRejected
+        case .tlsError: .tlsError
+        case .hostNotFound: .hostNotFound
+        case .timeout: .timeout
+        case .unreachable: .unreachable
+        case .httpError: .httpError
+        case .discoveryFailed: .discoveryFailed
+        case .endpointNotFound: .endpointNotFound
+        }
+    }
+}
+
+/// Only scan/session creation may produce this supplemental connection error.
+/// Keeps the existing seven-value HTTP error and its diagnostics available intact.
+public struct DesktopBridgeCameraConnectionError: Error, Equatable, Sendable, LocalizedError {
+    public let httpError: DesktopBridgeError
+    public let reason: DesktopBridgeCameraConnectionReason
+
+    fileprivate init(httpError: DesktopBridgeError, reason: DesktopBridgeCameraConnectionReason) {
+        self.httpError = httpError
+        self.reason = reason
+    }
+
+    public var errorDescription: String? { httpError.errorDescription }
+}
+
 public actor DesktopBridgeClient {
     private static let maxDeviceStatusTextCharacters = 512
     private static let serviceName = "open-eos-control-bridge"
@@ -171,7 +210,9 @@ public actor DesktopBridgeClient {
 
     public func discoverCameras() async throws -> [DesktopBridgeCamera] {
         try await validateService()
-        let body = try await getJSON(endpoint(["v1", "cameras"]))
+        let body = try await requestJSON(
+            url: endpoint(["v1", "cameras"]), method: "GET", payload: nil, connectionGuidance: true
+        )
         return body.array("cameras").compactMap { value in
             guard
                 let camera = value as? BridgeJSON,
@@ -207,7 +248,9 @@ public actor DesktopBridgeClient {
         var payload: BridgeJSON = ["engine": cameraEngine ?? "auto"]
         if let cameraID { payload["cameraId"] = cameraID }
         if let profileHint { payload["profileHint"] = profileHint }
-        let body = try await postJSON(endpoint(["v1", "session"]), payload: payload)
+        let body = try await requestJSON(
+            url: endpoint(["v1", "session"]), method: "POST", payload: payload, connectionGuidance: true
+        )
         guard let id = body.nonEmptyString("id") else {
             throw DesktopBridgeError.invalidResponse("Desktop Bridge did not return a session ID.")
         }
@@ -1321,7 +1364,8 @@ public actor DesktopBridgeClient {
         payload: BridgeJSON?,
         timeoutInterval: TimeInterval = 10,
         maximumBytes: Int? = nil,
-        shutterOperation: Bool = false
+        shutterOperation: Bool = false,
+        connectionGuidance: Bool = false
     ) async throws -> BridgeJSON {
         try validateMutation(url: url, method: method, shutterOperation: shutterOperation)
         let generation = sessionGeneration
@@ -1353,6 +1397,12 @@ public actor DesktopBridgeClient {
             if scopedToSession, revision == releaseRevision, !shutterOperation,
                Self.isShutterReleaseError(error) {
                 try adoptShutterRelease(unconfirmed: true, acceptsLegacyStop: false)
+            }
+            if connectionGuidance {
+                try Task.checkCancellation()
+                if let cameraError = Self.cameraConnectionError(response: response, httpError: error) {
+                    throw cameraError
+                }
             }
             throw error
         }
@@ -1753,6 +1803,23 @@ public actor DesktopBridgeClient {
             method: method,
             url: url
         )
+    }
+
+    private static func cameraConnectionError(
+        response: CameraHTTPResponse, httpError: DesktopBridgeError
+    ) -> DesktopBridgeCameraConnectionError? {
+        // Never infer camera evidence from a Bridge token failure or diagnostic text.
+        // Use exact wire strings, without trimming/coercion or accepting future values.
+        guard response.statusCode == 502,
+              let object = (try? JSONSerialization.jsonObject(
+                with: Data(response.body.prefix(maximumErrorBodyBytes))
+              )) as? BridgeJSON,
+              let detail = object["error"] as? BridgeJSON,
+              detail["code"] as? String == "CCAPI_DISCOVERY_FAILED",
+              detail["engine"] as? String == "ccapi",
+              let rawReason = detail["connectionReason"] as? String,
+              let reason = DesktopBridgeCameraConnectionReason(rawValue: rawReason) else { return nil }
+        return DesktopBridgeCameraConnectionError(httpError: httpError, reason: reason)
     }
 
     private static func playbackHTTPError(statusCode: Int) -> DesktopBridgeError {
