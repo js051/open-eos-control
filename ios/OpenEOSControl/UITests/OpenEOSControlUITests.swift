@@ -184,6 +184,47 @@ final class OpenEOSControlUITests: XCTestCase {
         }
     }
 
+    func testGenericScrollCacheAcceptsOnlyCoordinateRoundingDifferences() {
+        // Equivalent one-third-point geometry can have different binary
+        // representations. This is not a recorded cache-invalidation pair.
+        let previous = CGRect(x: 0, y: 180 + 2.0 / 3.0, width: 402, height: 693 + 1.0 / 3.0)
+        let current = CGRect(x: 0, y: 180.66666666666663, width: 402, height: 693.333333333333)
+        XCTAssertNotEqual(previous, current)
+        XCTAssertTrue(Self.sameGenericScrollGeometry(previous, current))
+        for match in [GenericScrollMatch.soleContainer, .targetAncestor] {
+            XCTAssertTrue(Self.canReuseGenericScrollSelection(
+                match: match, previous: previous, current: current, hittable: true
+            ))
+            XCTAssertFalse(Self.canReuseGenericScrollSelection(
+                match: match, previous: previous, current: current, hittable: false
+            ))
+        }
+        XCTAssertFalse(Self.canReuseGenericScrollSelection(
+            match: .ambiguousFallback, previous: previous, current: current, hittable: true
+        ))
+        for changed in [
+            previous.offsetBy(dx: 0.000_002, dy: 0),
+            previous.offsetBy(dx: 0, dy: 0.000_002),
+            CGRect(x: previous.minX, y: previous.minY, width: previous.width + 0.000_002, height: previous.height),
+            CGRect(x: previous.minX, y: previous.minY, width: previous.width, height: previous.height + 0.000_002),
+        ] {
+            XCTAssertFalse(Self.sameGenericScrollGeometry(previous, changed))
+            XCTAssertFalse(Self.canReuseGenericScrollSelection(
+                match: .soleContainer, previous: previous, current: changed, hittable: true
+            ))
+        }
+        for invalid in [CGRect.null, .infinite, .zero, CGRect(x: CGFloat.nan, y: 0, width: 402, height: 693)] {
+            XCTAssertFalse(Self.sameGenericScrollGeometry(invalid, current))
+            XCTAssertFalse(Self.sameGenericScrollGeometry(previous, invalid))
+            XCTAssertFalse(Self.canReuseGenericScrollSelection(
+                match: .soleContainer, previous: invalid, current: current, hittable: true
+            ))
+            XCTAssertFalse(Self.canReuseGenericScrollSelection(
+                match: .targetAncestor, previous: previous, current: invalid, hittable: true
+            ))
+        }
+    }
+
     func testCameraActionsScrollViewportExcludesFixedFooter() throws {
         let window = CGRect(x: 0, y: 0, width: 874, height: 402)
         let footer = CGRect(x: 100, y: 317, width: 674, height: 64)
@@ -1682,6 +1723,7 @@ final class OpenEOSControlUITests: XCTestCase {
         var attemptedReacquisition = false
         var awaitingPostDragFrame = false
         var dragFrames: [String] = []
+        var cacheDecisions: [String] = []
         while ProcessInfo.processInfo.systemUptime < deadline {
             let exists = element.exists
             if exists, element.isEnabled, element.isHittable { return true }
@@ -1704,10 +1746,17 @@ final class OpenEOSControlUITests: XCTestCase {
                 // different container without changing this container's frame.
                 if let selection = genericSelection {
                     let currentFrame = selection.element.exists ? selection.element.frame : .null
-                    if !Self.canReuseGenericScrollSelection(
+                    let geometryMatches = Self.sameGenericScrollGeometry(selection.frame, currentFrame)
+                    let hittable = geometryMatches && selection.element.isHittable
+                    let reusable = Self.canReuseGenericScrollSelection(
                         match: selection.match, previous: selection.frame, current: currentFrame,
-                        hittable: currentFrame == selection.frame && selection.element.isHittable
-                    ) {
+                        hittable: hittable
+                    )
+                    // Retain only the last four decisions, using values already
+                    // read for navigation rather than issuing diagnostic AX queries.
+                    if cacheDecisions.count == 4 { cacheDecisions.removeFirst() }
+                    cacheDecisions.append("cache-match=\(selection.match) previous-frame=\(selection.frame) current-frame=\(currentFrame) geometry-matches=\(geometryMatches) hittable-queried=\(geometryMatches) hittable=\(hittable) reuse=\(reusable)")
+                    if !reusable {
                         genericSelection = nil
                     }
                 }
@@ -1793,6 +1842,7 @@ final class OpenEOSControlUITests: XCTestCase {
             }
             // These samples reuse navigation/failure reads; no extra AX frame
             // lookup is performed just to record pre/post gesture diagnostics.
+            lines.append(contentsOf: cacheDecisions)
             lines.append(contentsOf: dragFrames)
             // Resolve coordinates only after failure, so diagnostics do not add
             // AX round trips to every drag. These are current resolved points,
@@ -1828,7 +1878,18 @@ final class OpenEOSControlUITests: XCTestCase {
     private static func canReuseGenericScrollSelection(
         match: GenericScrollMatch, previous: CGRect, current: CGRect, hittable: Bool
     ) -> Bool {
-        match != .ambiguousFallback && validScrollFrame(current) && current == previous && hittable
+        match != .ambiguousFallback && sameGenericScrollGeometry(previous, current) && hittable
+    }
+
+    private static func sameGenericScrollGeometry(_ previous: CGRect, _ current: CGRect) -> Bool {
+        guard validScrollFrame(previous), validScrollFrame(current) else { return false }
+        // Match the existing AX coordinate-rounding allowance. This affects
+        // cache admission only; viewport clipping and drag geometry are unchanged.
+        let coordinateRoundingTolerance: CGFloat = 0.000_001
+        return abs(previous.minX - current.minX) <= coordinateRoundingTolerance
+            && abs(previous.minY - current.minY) <= coordinateRoundingTolerance
+            && abs(previous.maxX - current.maxX) <= coordinateRoundingTolerance
+            && abs(previous.maxY - current.maxY) <= coordinateRoundingTolerance
     }
 
     private func genericScrollSurface(
