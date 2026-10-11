@@ -247,6 +247,7 @@ class CameraRecordingMediaJourneyTest {
         assertTrue("Polling must be active, rather than disabled to fake missing hints", camera.eventPolls.get() > 0)
         assertEquals("No contents or other event may drive this review", 0, camera.deliveredEvents.get())
         assertTrue(history.state.value.entries.isEmpty())
+        assertTrue(history.state.value.worklists.isEmpty())
         assertTrue(savedRows().isEmpty())
 
         compose.onNodeWithTag("capture-review-button").assertIsDisplayed().assertIsEnabled().performClick()
@@ -273,7 +274,9 @@ class CameraRecordingMediaJourneyTest {
             .assertIsDisplayed()
         assertPublishedOriginal()
         runBlocking { withTimeout(SESSION_TEST_TIMEOUT_MILLIS) { history.awaitIdle() } }
-        val receipt = history.state.value.entries.single()
+        assertTrue(history.state.value.entries.isEmpty())
+        assertEquals(listOf(movieName), history.state.value.worklists.single().rows.map { it.filename })
+        val receipt = history.state.value.actualReceipts().single()
         assertEquals(movieName, receipt.filename)
         assertEquals(DownloadHistoryDestination.GALLERY, receipt.destination)
         assertEquals(DownloadHistoryOutcome.COMPLETED, receipt.outcome)

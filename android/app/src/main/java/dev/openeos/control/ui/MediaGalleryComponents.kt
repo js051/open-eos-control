@@ -681,6 +681,7 @@ private fun MediaSaveFeedbackPanel(
         val status = when (feedback) {
             MediaSaveFeedback.SelectingDestination -> stringResource(R.string.media_save_choose_destination)
             MediaSaveFeedback.Queued -> stringResource(R.string.media_save_queued)
+            MediaSaveFeedback.NotStarted -> stringResource(R.string.media_save_not_started)
             is MediaSaveFeedback.Saving -> stringResource(R.string.downloading_media, item.name)
             is MediaSaveFeedback.Saved -> stringResource(R.string.media_saved_location, feedback.location)
             is MediaSaveFeedback.Failed -> stringResource(R.string.media_save_failed, feedback.message)
@@ -708,7 +709,7 @@ private fun MediaSaveFeedbackPanel(
         if (feedback is MediaSaveFeedback.Saving || feedback is MediaSaveFeedback.Queued || otherDownloadName != null) {
             TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel_media_download)) }
         }
-        if (feedback is MediaSaveFeedback.Failed || feedback is MediaSaveFeedback.Cancelled || feedback is MediaSaveFeedback.IncompleteFile) {
+        if (feedback is MediaSaveFeedback.Failed || feedback is MediaSaveFeedback.Cancelled || feedback is MediaSaveFeedback.IncompleteFile || feedback is MediaSaveFeedback.NotStarted) {
             TextButton(onClick = onRetry, enabled = retryEnabled) { Text(stringResource(R.string.media_save_retry)) }
         }
         captureTime?.let { Text(it, color = AppSubtleText) }

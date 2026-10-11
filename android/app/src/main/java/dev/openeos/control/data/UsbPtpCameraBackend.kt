@@ -145,7 +145,7 @@ class UsbPtpCameraBackend(
         val info = requireDeviceInfo()
         refreshCanonPropertyState(info)
         refreshPropertyValuesIfNeeded(info)
-        val storageResult = refreshStorageSnapshot(info)
+        refreshStorageSnapshot(info, observeStatus = true)
         val batteryLevel = propertyValues[PtpDevicePropertyCode.BATTERY_LEVEL]
             ?.unsignedLong()
             ?.takeIf { it <= 100UL }
@@ -153,7 +153,6 @@ class UsbPtpCameraBackend(
         if (PtpDevicePropertyCode.BATTERY_LEVEL in propertyValues) {
             observedFeatures.add(CameraFeature.BATTERY_STATUS)
         }
-        if (storageResult?.isSuccess == true) observedFeatures.add(CameraFeature.STORAGE_STATUS)
         val standardFreeImages = storageSnapshot.mapNotNull {
             it.freeSpaceImages.takeIf { value -> value >= 0 && value != 0xFFFF_FFFFL }
         }
@@ -1873,8 +1872,9 @@ class UsbPtpCameraBackend(
 
     private suspend fun readStorageSnapshot(context: MediaFolderContext): List<PtpStorageInfo> {
         val ptp = context.session
+        ensureMediaListingSession(context)
         val storageIds = ptp.storageIds()
-        synchronized(mediaFolderLock) {
+        completeMediaOperation(context) {
             if (isCurrentMediaFolderContext(context)) {
                 val refreshedIds = storageIds.toSet()
                 if (confirmedStorageIds?.let { it != refreshedIds } == true) {
@@ -1883,15 +1883,27 @@ class UsbPtpCameraBackend(
                 confirmedStorageIds = refreshedIds
             }
         }
-        return storageIds.map { storageId -> ptp.storageInfo(storageId) }
+        return storageIds.map { storageId ->
+            ensureMediaListingSession(context)
+            ptp.storageInfo(storageId)
+        }
     }
 
-    private suspend fun refreshStorageSnapshot(info: PtpDeviceInfo): Result<List<PtpStorageInfo>>? {
+    private suspend fun refreshStorageSnapshot(
+        info: PtpDeviceInfo,
+        observeStatus: Boolean = false,
+    ): Result<List<PtpStorageInfo>>? {
         if (!supportsStorage(info)) return null
         val context = captureMediaFolderContext(requireSession())
-        return runCatching { readStorageSnapshot(context) }.also { result ->
+        val result = runCatching { readStorageSnapshot(context) }.onFailure {
+            if (it is CancellationException) throw it
+        }
+        // Success and rejection belong to the captured session, including after a newer listing.
+        return completeMediaOperation(context) {
             storageSnapshot = result.getOrDefault(emptyList())
             storageError = result.exceptionOrNull()?.message
+            if (observeStatus && result.isSuccess) observedFeatures.add(CameraFeature.STORAGE_STATUS)
+            result
         }
     }
 

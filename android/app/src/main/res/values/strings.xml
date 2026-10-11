@@ -784,18 +784,18 @@
 
     <!-- Process-owned original-download receipts; no destination identifiers are stored. -->
     <string name="download_history_title">Recent downloads</string>
-    <string name="download_history_scope">The latest 100 original-file downloads that actually started on this app. Older attempts and items that never started are not listed.</string>
+    <string name="download_history_scope">Complete selected worklists and other started attempts share 100 rows on this app. Worklist names are display labels, not source identity. Nothing reconnects or resumes automatically.</string>
     <string name="download_history_outcome_hint">Completed means the file was saved then; it may have been moved or deleted since. If the result is unconfirmed, check the destination before saving again. Failed or cancelled attempts may leave an incomplete file.</string>
     <string name="download_history_loading">Loading download records…</string>
-    <string name="download_history_empty">No download records to show.</string>
+    <string name="download_history_empty">No worklists or download records to show.</string>
     <string name="download_history_warning_read">Download records could not be read. Downloads are still available. Clear records to start a new history.</string>
-    <string name="download_history_warning_write">These records may not survive an app restart because they could not be saved. Your download result is unchanged.</string>
-    <string name="download_history_warning_clear">Records could not be cleared. Existing records are kept; try clearing again.</string>
+    <string name="download_history_warning_write">Some history could not be saved or confirmed. If the next item cannot be recorded, saving stops before opening a file or requesting its original. Completed downloads remain unchanged; check history and the destination before retrying.</string>
+    <string name="download_history_warning_clear">Clearing could not be fully confirmed. Inspect the list again; records may remain or may already have been removed.</string>
     <string name="download_history_warning_stopped">Download history is unavailable in this app session. Downloads are still available.</string>
     <string name="download_history_clear">Clear records</string>
     <string name="download_history_close">Close</string>
     <string name="download_history_clear_title">Clear download records?</string>
-    <string name="download_history_clear_confirmation">This only clears this list. It does not delete files or cancel downloads. The remaining items of a download batch already started will not reappear in this history.</string>
+    <string name="download_history_clear_confirmation">This only clears worklists and records. It does not delete files or cancel downloads. Old batches cannot recreate cleared records.</string>
     <string name="download_history_destination_gallery">Destination: Gallery</string>
     <string name="download_history_destination_document">Destination: Selected file</string>
     <string name="download_history_destination_folder">Destination: Selected folder</string>
@@ -805,7 +805,7 @@
     <string name="download_history_outcome_completed">Completed</string>
     <string name="download_history_outcome_failed">Failed</string>
     <string name="download_history_outcome_cancelled">Cancelled</string>
-    <string name="download_history_outcome_unconfirmed">Unconfirmed after app restart</string>
+    <string name="download_history_outcome_unconfirmed">Result unconfirmed</string>
     <string name="media_folder_filter_current">Folder: %1$s</string>
     <string name="media_folder_all">All folders</string>
     <string name="media_folder_unknown">Unknown folder</string>
@@ -920,4 +920,13 @@
     <string name="shutter_af_off_description">Shutter request does not ask for autofocus. Camera or lens settings may still focus.</string>
     <string name="shutter_af_unavailable">This session cannot request AF off. Enable shutter autofocus or reconnect.</string>
     <string name="shutter_af_on">AF ON</string>
+    <string name="download_history_worklist_created">Worklist: %1$s</string>
+    <string name="download_history_worklist_position">Selected item %1$d of %2$d</string>
+    <string name="download_history_outcome_queued">Queued; no confirmed attempt</string>
+    <string name="download_history_legacy_attempts">Other attempts; no complete worklist</string>
+    <string name="media_worklist_unavailable">A complete worklist could not be saved. Manual downloads remain available, but this batch may be missing from history after restart.</string>
+    <string name="media_worklist_admission_failed">The next worklist attempt could not be recorded. Saving stopped before opening its file or requesting the original. Check history before retrying.</string>
+    <string name="media_worklist_admission_unknown">The worklist save could not be confirmed. No files were opened or originals requested. Check history before starting another batch.</string>
+    <string name="media_save_not_started">Not started; saving stopped before this file or original request.</string>
+    <string name="download_history_warning_capacity">History capacity is full. Existing worklists and uncertain items are preserved. Review history before clearing records; manual downloads remain available.</string>
 </resources>

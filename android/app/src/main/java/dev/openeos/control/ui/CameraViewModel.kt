@@ -134,6 +134,9 @@ internal suspend fun executeMediaBatch(
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
+            // Storage admission failed before any destination/original I/O.
+            // Stop the remaining roster rather than pretending each row failed.
+            if (operation == MediaBatchOperation.DOWNLOAD && exception is MediaWorklistAdmissionException) throw exception
             exception.printStackTrace()
             failures += item.name
         }
@@ -2164,6 +2167,7 @@ class CameraViewModel(
         updateMediaSave(request) {
             it.copy(
                 mediaSaveFeedback = items.associate { item -> item.id to initial },
+                mediaWorklistUnavailable = false,
                 lastDownloadedMediaName = null,
                 lastDownloadLocation = null,
                 lastMediaBatchResult = null,
@@ -2515,8 +2519,17 @@ class CameraViewModel(
         val historyDestination = if (destinationTree == null) DownloadHistoryDestination.GALLERY else DownloadHistoryDestination.FOLDER
         val job = launchCameraOperation(
             CameraOperation.MEDIA,
-            onError = { finishPendingMediaSave(request, MediaSaveFeedback.Failed(formatException(it))) },
+            onError = { finishPendingMediaSave(request, if (it is MediaWorklistAdmissionException)
+                MediaSaveFeedback.NotStarted else MediaSaveFeedback.Failed(formatException(it))) },
         ) {
+            val planned = PlannedMediaDownloadBatch(
+                history, historyRequest, selectedItems.map(CameraMediaItem::name), historyDestination,
+                isCurrent = { request.owns(mediaSaveRequest, cameraSessionGeneration, _uiState.value.info) },
+                admissionFailedMessage = context.getString(R.string.media_worklist_admission_failed),
+                admissionUnknownMessage = context.getString(R.string.media_worklist_admission_unknown),
+            )
+            val recorded = planned.prepare()
+            updateMediaSave(request) { it.copy(mediaWorklistUnavailable = !recorded) }
             val result = executeMediaBatch(
                 items = selectedItems,
                 operation = MediaBatchOperation.DOWNLOAD,
@@ -2524,7 +2537,7 @@ class CameraViewModel(
                     updateMediaSave(request) { it.copy(mediaBatchProgress = progress) }
                 },
             ) { item ->
-                withDownloadHistoryReceipt(history, historyRequest, item.name, historyDestination) { completed ->
+                planned.transfer(selectedItems.indexOfFirst { it.id == item.id }) { completed ->
                     publishMediaSaveProgress(request, item, CameraMediaTransferProgress(0L, item.sizeBytes))
                     val onFinalized = {
                         completed()
@@ -3765,6 +3778,7 @@ class CameraViewModel(
         captureReviewThumbnail = null,
         captureReviewLoading = false,
         mediaSaveFeedback = emptyMap(),
+        mediaWorklistUnavailable = false,
         foregroundJpegImport = ForegroundJpegImportStatus(),
         captureReviewStatus = CaptureReviewStatus.IDLE,
         captureStatusReadbackFailed = false,

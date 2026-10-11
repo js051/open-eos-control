@@ -140,7 +140,10 @@ class CameraDownloadHistorySafJourneyTest {
         val moves = AtomicInteger()
         val directory = File(root, "write-failure-history")
         history = newHistory(directory) { phase ->
-            if (phase == DownloadHistoryWritePhase.BEFORE_MOVE && moves.incrementAndGet() > 1) {
+            if (phase == DownloadHistoryWritePhase.BEFORE_MOVE && moves.incrementAndGet() == 2) {
+                // A single picker-created document keeps legacy actual-start admission.
+                // Its second write follows successful output close, not roster admission.
+                assertArrayEquals(camera.imageBytes, provider.destination.readBytes())
                 throw IOException("Synthetic terminal receipt write failure")
             }
         }
@@ -154,6 +157,7 @@ class CameraDownloadHistorySafJourneyTest {
         awaitHistoryIdle()
 
         val completed = history.state.value.entries.single()
+        assertTrue(history.state.value.worklists.isEmpty())
         assertEquals(DownloadHistoryDestination.DOCUMENT, completed.destination)
         assertEquals(DownloadHistoryOutcome.COMPLETED, completed.outcome)
         assertEquals(item.name, completed.filename)
@@ -171,6 +175,7 @@ class CameraDownloadHistorySafJourneyTest {
         val restored = newHistory(directory)
         awaitHistoryLoaded(restored)
         val pending = restored.state.value.entries.single()
+        assertTrue(restored.state.value.worklists.isEmpty())
         assertEquals(completed.receiptId, pending.receiptId)
         assertEquals(DownloadHistoryDestination.DOCUMENT, pending.destination)
         assertEquals(DownloadHistoryOutcome.UNCONFIRMED, pending.outcome)
@@ -213,6 +218,7 @@ class CameraDownloadHistorySafJourneyTest {
         compose.runOnIdle { model.downloadMedia(documentContext, item, provider.destinationUri) }
         assertTrue(gate.entered.await(SESSION_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS))
         val pending = history.state.value.entries.single()
+        assertTrue(history.state.value.worklists.isEmpty())
         assertEquals(DownloadHistoryDestination.DOCUMENT, pending.destination)
         assertEquals(DownloadHistoryOutcome.IN_PROGRESS, pending.outcome)
         assertNull(pending.finishedAtMillis)
@@ -246,6 +252,7 @@ class CameraDownloadHistorySafJourneyTest {
         val restored = newHistory(directory)
         awaitHistoryLoaded(restored)
         assertEquals(cancelled, restored.state.value.entries.single())
+        assertTrue(restored.state.value.worklists.isEmpty())
         assertFalse(provider.destination.exists())
         assertArrayEquals(unrelatedBytes, unrelated.readBytes())
         assertEquals(listOf("/ccapi/media/${item.id}"), camera.originalReads.toList())

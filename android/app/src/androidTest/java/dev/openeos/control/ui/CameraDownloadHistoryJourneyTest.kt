@@ -5,7 +5,10 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -25,6 +28,8 @@ import dev.openeos.control.data.DownloadHistoryOutcome
 import dev.openeos.control.data.DownloadHistoryStore
 import dev.openeos.control.data.DownloadHistoryWarning
 import dev.openeos.control.data.DownloadHistoryWritePhase
+import dev.openeos.control.data.DownloadWorklistAdmission
+import dev.openeos.control.data.DownloadWorklistRowStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,6 +37,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -126,11 +132,96 @@ class CameraDownloadHistoryJourneyTest {
         assertEquals(0, camera.server.requestCount)
     }
 
+    @Test fun coldOfflineWorklistKeepsFiveCompletedOneUnconfirmedAndFortyFourQueuedRows() {
+        val directory = File(root, "cold-worklist")
+        val filenames = (1..50).map { "SYNTHETIC-${it.toString().padStart(2, '0')}.JPG" }
+        val prior = newHistory(directory)
+        runBlocking {
+            withTimeout(SESSION_TEST_TIMEOUT_MILLIS) {
+                prior.state.first { !it.loading }
+                val admission = prior.admitWorklist(prior.captureRequest(), filenames, DownloadHistoryDestination.GALLERY)
+                assertTrue(admission is DownloadWorklistAdmission.Admitted)
+                val token = (admission as DownloadWorklistAdmission.Admitted).token
+                repeat(5) { index ->
+                    val started = prior.beginWorklistRow(token, index)
+                    assertTrue(started is DownloadWorklistRowStart.Started)
+                    prior.recordFinished((started as DownloadWorklistRowStart.Started).receipt, DownloadHistoryOutcome.COMPLETED)
+                }
+                assertTrue(prior.beginWorklistRow(token, 5) is DownloadWorklistRowStart.Started)
+                prior.awaitIdle()
+            }
+        }
+        val originalRows = prior.state.value.worklists.single().rows
+        assertEquals(DownloadHistoryOutcome.IN_PROGRESS, originalRows[5].receipt?.outcome)
+        val durable = DownloadHistoryFileStorage(directory).readSnapshot()
+        assertTrue(durable.entries.isEmpty())
+        assertEquals(originalRows, durable.worklists.single().rows)
+        historyScopes.first().cancel()
+        runBlocking { withTimeout(SESSION_TEST_TIMEOUT_MILLIS) { historyScopes.first().coroutineContext[Job]?.join() } }
+
+        history = newHistory(directory)
+        installApp()
+        val cold = history.state.value
+        val rows = cold.worklists.single().rows
+        assertTrue(cold.entries.isEmpty())
+        assertEquals(50, rows.size)
+        assertEquals(filenames, rows.map { it.filename })
+        assertEquals(originalRows.map { it.rowId }, rows.map { it.rowId })
+        assertEquals(50, rows.map { it.rowId }.toSet().size)
+        assertEquals(6, cold.actualReceipts().size)
+        assertEquals(List(5) { DownloadHistoryOutcome.COMPLETED } + DownloadHistoryOutcome.UNCONFIRMED,
+            rows.take(6).map { it.receipt?.outcome })
+        assertEquals(44, rows.count { it.receipt == null })
+        assertTrue(rows.drop(6).all { it.receipt == null })
+        assertNull(rows[5].receipt?.finishedAtMillis)
+        assertTrue(!model.uiState.value.connected)
+        assertTrue(model.uiState.value.mediaSaveFeedback.isEmpty())
+        assertTrue(savedUris().isEmpty())
+
+        openHistory()
+        compose.onNodeWithTag("download-history-list").performScrollToNode(hasText(filenames.first()))
+        compose.onNodeWithTag("download-worklist-row-${rows.first().rowId}")
+            .assert(hasAnyDescendant(hasText(text(R.string.download_history_outcome_completed))))
+        compose.onNodeWithTag("download-history-list").performScrollToNode(hasText(filenames[5]))
+        compose.onNodeWithTag("download-worklist-row-${rows[5].rowId}")
+            .assert(hasAnyDescendant(hasText(text(R.string.download_history_outcome_unconfirmed))))
+        compose.onNodeWithTag("download-history-list").performScrollToNode(hasText(filenames.last()))
+        compose.onNodeWithTag("download-worklist-row-${rows.last().rowId}").assertIsDisplayed()
+            .assert(hasAnyDescendant(hasText(text(R.string.download_history_outcome_queued))))
+            .assert(hasAnyDescendant(hasText(text(R.string.download_history_worklist_position, 50, 50))))
+        assertEquals(0, camera.server.requestCount)
+        compose.onNodeWithTag("download-history-close").assertIsDisplayed().performClick()
+        openHistory()
+        compose.onNodeWithTag("download-history-list").performScrollToNode(hasText(filenames.last()))
+        compose.onNodeWithTag("download-history-clear").assertIsDisplayed().assertIsEnabled().performClick()
+        compose.onNodeWithTag("download-history-clear-confirm-button").performClick()
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            model.downloadHistoryState.value.let { it.entries.isEmpty() && it.worklists.isEmpty() }
+        }
+        compose.onNodeWithText(text(R.string.download_history_empty)).assertIsDisplayed()
+        assertNull(history.state.value.warning)
+        assertTrue(history.state.value.writable)
+        val clearedSnapshot = DownloadHistoryFileStorage(directory).readSnapshot()
+        assertTrue(clearedSnapshot.entries.isEmpty())
+        assertTrue(clearedSnapshot.worklists.isEmpty())
+        val restored = newHistory(directory)
+        runBlocking { withTimeout(SESSION_TEST_TIMEOUT_MILLIS) { restored.state.first { !it.loading } } }
+        assertNull(restored.state.value.warning)
+        assertTrue(restored.state.value.writable)
+        assertTrue(restored.state.value.entries.isEmpty())
+        assertTrue(restored.state.value.worklists.isEmpty())
+        assertTrue(savedUris().isEmpty())
+        assertEquals(0, camera.server.requestCount)
+    }
+
     @Test fun historyWriteFailureAfterGalleryPublicationPreservesSavedBytesAndDoesNotRetry() {
         val moves = AtomicInteger()
         val directory = File(root, "write-failure")
         history = newHistory(directory) { phase ->
-            if (phase == DownloadHistoryWritePhase.BEFORE_MOVE && moves.incrementAndGet() > 1) {
+            if (phase == DownloadHistoryWritePhase.BEFORE_MOVE && moves.incrementAndGet() == 3) {
+                // The whole roster and the pending row must both be durable before the GET.
+                // Fail only the terminal replacement, after the real Gallery publication.
+                assertSavedOriginals(1)
                 throw IOException("Synthetic receipt write failure")
             }
         }
@@ -146,13 +237,21 @@ class CameraDownloadHistoryJourneyTest {
         }
         runBlocking { history.awaitIdle() }
         assertEquals(DownloadHistoryWarning.WRITE_FAILED, history.state.value.warning)
-        assertEquals(DownloadHistoryOutcome.COMPLETED, history.state.value.entries.single().outcome)
+        assertEquals(3, moves.get())
+        assertTrue(history.state.value.entries.isEmpty())
+        assertEquals(listOf(item.name), history.state.value.worklists.single().rows.map { it.filename })
+        val completed = history.state.value.actualReceipts().single()
+        assertEquals(DownloadHistoryOutcome.COMPLETED, completed.outcome)
         assertNull(model.uiState.value.error)
         assertEquals(listOf("/ccapi/media/" + item.id), camera.originalReads.toList())
         assertSavedOriginals(1)
         val restored = newHistory(directory)
         runBlocking { restored.state.first { !it.loading } }
-        assertEquals(DownloadHistoryOutcome.UNCONFIRMED, restored.state.value.entries.single().outcome)
+        assertTrue(restored.state.value.entries.isEmpty())
+        assertEquals(listOf(item.name), restored.state.value.worklists.single().rows.map { it.filename })
+        val pending = restored.state.value.actualReceipts().single()
+        assertEquals(completed.receiptId, pending.receiptId)
+        assertEquals(DownloadHistoryOutcome.UNCONFIRMED, pending.outcome)
         assertTrue(model.uiState.value.mediaSaveFeedback[item.id] is MediaSaveFeedback.Saved)
     }
 
@@ -174,17 +273,26 @@ class CameraDownloadHistoryJourneyTest {
         compose.onNodeWithContentDescription(text(R.string.select_all_media)).performClick()
         compose.onNodeWithContentDescription(text(R.string.download_selected_media, 3)).performClick()
         assertTrue(gate.entered.await(SESSION_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS))
-        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { model.downloadHistoryState.value.entries.size == 2 }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { model.downloadHistoryState.value.actualReceipts().size == 2 }
+        val rows = history.state.value.worklists.single().rows
+        assertTrue(history.state.value.entries.isEmpty())
+        assertEquals(items.map { it.second }, rows.map { it.filename })
+        assertEquals(DownloadHistoryOutcome.COMPLETED, rows[0].receipt?.outcome)
+        assertEquals(DownloadHistoryOutcome.IN_PROGRESS, rows[1].receipt?.outcome)
+        assertNull(rows[2].receipt)
         openHistory() // Must remain reachable while MEDIA is busy and the selection toolbar is shown.
         compose.onNodeWithTag("download-history-clear").performClick()
         compose.onNodeWithTag("download-history-clear-confirm-button").performClick()
-        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { model.downloadHistoryState.value.entries.isEmpty() }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            model.downloadHistoryState.value.let { it.entries.isEmpty() && it.worklists.isEmpty() }
+        }
         gate.release()
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
             model.uiState.value.lastMediaBatchResult?.succeededItems == 3 && !model.uiState.value.isBusy(CameraOperation.MEDIA)
         }
         runBlocking { history.awaitIdle() }
         assertTrue(history.state.value.entries.isEmpty())
+        assertTrue(history.state.value.worklists.isEmpty())
         assertEquals(listOf("/ccapi/media/one", "/ccapi/media/two", "/ccapi/media/three"), camera.originalReads.toList())
         assertSavedOriginals(3)
         compose.onNodeWithTag("download-history-close").performClick()
@@ -237,11 +345,13 @@ class CameraDownloadHistoryJourneyTest {
         // and asynchronously submits its terminal receipt to the process writer. A barrier
         // queued before that submission is not evidence that cancellation has finished.
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
-            history.state.value.entries.singleOrNull()?.outcome == DownloadHistoryOutcome.CANCELLED
+            history.state.value.actualReceipts().singleOrNull()?.outcome == DownloadHistoryOutcome.CANCELLED
         }
         runBlocking { history.awaitIdle() }
-        assertEquals(DownloadHistoryOutcome.CANCELLED, history.state.value.entries.single().outcome)
-        val previousReceipt = history.state.value.entries.single().receiptId
+        assertTrue(history.state.value.entries.isEmpty())
+        assertEquals(listOf(firstItem.name), history.state.value.worklists.single().rows.map { it.filename })
+        assertEquals(DownloadHistoryOutcome.CANCELLED, history.state.value.actualReceipts().single().outcome)
+        val previousReceipt = history.state.value.actualReceipts().single().receiptId
         connectAndOpenAlbum()
         val replacement = model.uiState.value.mediaItems.first { it.id == "one" }
         compose.runOnIdle { model.downloadMediaBatch(compose.activity, listOf(replacement)) }
@@ -249,12 +359,16 @@ class CameraDownloadHistoryJourneyTest {
             model.uiState.value.mediaSaveFeedback[replacement.id] is MediaSaveFeedback.Saved && !model.uiState.value.busy
         }
         runBlocking { history.awaitIdle() }
-        val entries = history.state.value.entries
+        assertTrue(history.state.value.entries.isEmpty())
+        assertEquals(2, history.state.value.worklists.size)
+        assertTrue(history.state.value.worklists.all { it.rows.size == 1 })
+        val entries = history.state.value.actualReceipts()
         assertEquals(2, entries.size)
         assertEquals(listOf(DownloadHistoryOutcome.COMPLETED, DownloadHistoryOutcome.CANCELLED), entries.map { it.outcome })
         assertEquals(listOf("ONE.JPG", "ONE.JPG"), entries.map { it.filename })
         assertEquals(previousReceipt, entries.last().receiptId)
         assertNotEquals(previousReceipt, entries.first().receiptId)
+        assertEquals(listOf("/ccapi/media/one", "/ccapi/media/one"), camera.originalReads.toList())
         assertSavedOriginals(1)
     }
 

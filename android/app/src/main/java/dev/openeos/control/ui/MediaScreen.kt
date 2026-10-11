@@ -571,6 +571,14 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
             }
         }
 
+        if (state.mediaWorklistUnavailable) {
+            Text(
+                stringResource(R.string.media_worklist_unavailable),
+                color = AppWarning,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
         state.lastDownloadedMediaName?.let { name ->
             Text(
                 stringResource(R.string.media_downloaded, name),

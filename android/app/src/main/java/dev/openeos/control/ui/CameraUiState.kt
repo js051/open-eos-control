@@ -124,6 +124,7 @@ data class CameraUiState(
     val mediaPreviewLoading: Boolean = false,
     val mediaStreamSource: CameraMediaStreamSource? = null,
     val mediaSaveFeedback: Map<String, MediaSaveFeedback> = emptyMap(),
+    val mediaWorklistUnavailable: Boolean = false,
     val foregroundJpegImport: ForegroundJpegImportStatus = ForegroundJpegImportStatus(),
     // A previous connection's local-output cleanup warning does not belong to the new camera.
     val foregroundImportCleanupUnconfirmed: Boolean = false,

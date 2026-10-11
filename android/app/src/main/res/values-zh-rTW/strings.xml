@@ -547,18 +547,18 @@
 
     <!-- Process-owned original-download receipts; no destination identifiers are stored. -->
     <string name="download_history_title">最近下載紀錄</string>
-    <string name="download_history_scope">此 App 最近 100 筆實際開始的原檔下載。較早的嘗試與尚未開始的項目不會列出。</string>
+    <string name="download_history_scope">完整選取工作清單與其他已開始嘗試共用此 App 的 100 列。名稱僅供顯示，不能識別來源；不會自動連線或續傳。</string>
     <string name="download_history_outcome_hint">完成表示當時儲存成功；檔案之後可能被移動或刪除。結果未確認時，請先檢查目的地再儲存。失敗／取消可能留下未完成檔案。</string>
     <string name="download_history_loading">正在載入下載紀錄…</string>
-    <string name="download_history_empty">目前沒有可顯示的下載紀錄。</string>
+    <string name="download_history_empty">尚無工作清單或下載紀錄。</string>
     <string name="download_history_warning_read">無法讀取下載紀錄，仍可下載原檔。清除紀錄後可重新記錄。</string>
-    <string name="download_history_warning_write">無法儲存這些紀錄，重新啟動 App 後可能遺失；下載結果不受影響。</string>
-    <string name="download_history_warning_clear">無法清除紀錄。既有紀錄已保留，可再次嘗試清除。</string>
+    <string name="download_history_warning_write">部分紀錄無法保存或確認。工作清單項目未確認開始時，會在開檔或請求原檔前停止；實際已完成下載不受影響。重試前請查看紀錄及目的地。</string>
+    <string name="download_history_warning_clear">未能完整確認清除結果，請重新查看清單；紀錄可能仍在，也可能已被移除。</string>
     <string name="download_history_warning_stopped">此次 App 執行期間無法使用下載紀錄，仍可下載原檔。</string>
     <string name="download_history_clear">清除紀錄</string>
     <string name="download_history_close">關閉</string>
     <string name="download_history_clear_title">清除下載紀錄？</string>
-    <string name="download_history_clear_confirmation">僅清除此清單，不會刪除檔案或取消下載。已開始的下載批次，其剩餘項目不會重新加入此紀錄。</string>
+    <string name="download_history_clear_confirmation">只清除工作清單與紀錄，不會刪檔或取消下載。舊批次不能重新建立已清除的紀錄。</string>
     <string name="download_history_destination_gallery">目的地：相簿</string>
     <string name="download_history_destination_document">目的地：所選檔案</string>
     <string name="download_history_destination_folder">目的地：所選資料夾</string>
@@ -568,7 +568,7 @@
     <string name="download_history_outcome_completed">已完成</string>
     <string name="download_history_outcome_failed">失敗</string>
     <string name="download_history_outcome_cancelled">已取消</string>
-    <string name="download_history_outcome_unconfirmed">App 重啟後結果未確認</string>
+    <string name="download_history_outcome_unconfirmed">結果未確認</string>
     <string name="media_folder_filter_current">資料夾：%1$s</string>
     <string name="media_folder_all">所有資料夾</string>
     <string name="media_folder_unknown">未知資料夾</string>
@@ -683,4 +683,13 @@
     <string name="shutter_af_off_description">拍攝請求不要求自動對焦；相機或鏡頭設定仍可能使其對焦。</string>
     <string name="shutter_af_unavailable">此連線不支援不要求自動對焦的拍攝。請開啟快門自動對焦或重新連線。</string>
     <string name="shutter_af_on">AF 開</string>
+    <string name="download_history_worklist_created">工作清單：%1$s</string>
+    <string name="download_history_worklist_position">所選第 %1$d / %2$d 項</string>
+    <string name="download_history_outcome_queued">排隊中；尚未確認開始嘗試</string>
+    <string name="download_history_legacy_attempts">其他嘗試；沒有完整工作清單</string>
+    <string name="media_worklist_unavailable">無法保存完整工作清單，仍可手動下載；重新啟動後，紀錄可能缺少此批內容。</string>
+    <string name="media_worklist_admission_failed">無法記錄下一項工作清單嘗試，已在開啟檔案或請求原檔前停止。重試前請查看紀錄。</string>
+    <string name="media_worklist_admission_unknown">無法確認工作清單已儲存，尚未開啟檔案或請求原檔。開始另一批前請查看紀錄。</string>
+    <string name="media_save_not_started">尚未開始；已在開檔或請求此原檔前停止。</string>
+    <string name="download_history_warning_capacity">紀錄容量已滿。既有工作清單與未確認項目會保留。請先查看紀錄再決定是否清除；仍可手動下載。</string>
 </resources>
