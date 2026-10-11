@@ -4,6 +4,7 @@
 
 ## 跨平台 P2 挑片與批次交付進度（2026-10-10 UTC，開發草稿）
 
+- 2026-10-11 補記：iOS 同原 PR236 已加入可冷啟動查詢的已準備原檔紀錄／保留副本；head `9f0202b` 的 App 281項與英／繁中冷啟動旅程實際通過，但整體 UI 尚有導航失敗，不能稱全批驗收成功。下一完整本地候選是[明確啟用的前景 JPEG 準備](validation/ios-foreground-original-preparation-2026-10-11.zh-TW.md)：直接 CCAPI、完整 baseline、新鮮 size、單次原檔請求與 App 副本，另由使用者明確分享。此新候選 Swift/runtime 尚未執行，Bridge 與真 provider 未包含。
 - [PC PR #237](https://github.com/js051/open-eos-control/pull/237) 已整合日期／評分／資料夾／類型挑片、多選與明選目的地後循序保存。精確 head `5585ea71582f87704191f4c63b5cc12eca35868a` 的 [CI 38091355470](https://github.com/js051/open-eos-control/actions/runs/38091355470) 全適用成功；四個新增 synthetic browser 旅程實際通過，包含英／繁中隱藏選取與 closed bytes、API 不支援及取消後不下載後項。仍為 draft，真 OS 目錄 provider 未驗；前一輪 checkbox／preview selector 歧義失敗保留。
 - [iOS PR #236](https://github.com/js051/open-eos-control/pull/236) 延續相同完整挑片功能群，本地新批次再加入多選、循序準備原檔與原生分享入口。新批次編譯／測試尚待 exact-head 正常 CI，不能沿用前版結果；[批次說明](validation/ios-media-batch-delivery-2026-10-10.zh-TW.md)明列 ownership、部分結果、來源檔案生命週期及外部保存未證明的界線。
 - 以上不等於 P2 全部完成。跨程序狀態恢復／已交付工作清單、重複下載處理、各平台前景自動交付與真實 provider 行為仍須按原矩陣個別盤點與證明，沒有宣稱任意 HTTP Range 續傳。完整 App 人工／實機驗收依使用者最新方向在開發後集中；必要編譯、單元、回歸與原 CI gates 保留，未驗收不發布。

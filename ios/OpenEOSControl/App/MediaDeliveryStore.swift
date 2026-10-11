@@ -155,10 +155,14 @@ actor MediaDeliveryStore {
         return MediaDeliveryTicket(batchID: UUID(), epoch: manifest!.epoch)
     }
 
-    func beginItem(_ ticket: MediaDeliveryTicket, filename: String) throws -> UUID {
+    func beginItem(_ ticket: MediaDeliveryTicket, filename: String, expectedBytes: Int64? = nil) throws -> UUID {
         try validate(ticket)
         guard manifest!.receipts.count < limits.maximumRecords else { throw MediaDeliveryStoreError.recordLimit }
-        _ = try diskUsage()
+        let used = try diskUsage()
+        if let expectedBytes {
+            guard expectedBytes > 0, used <= limits.maximumRetainedBytes,
+                  expectedBytes <= limits.maximumRetainedBytes - used else { throw MediaDeliveryStoreError.byteLimit }
+        }
         let receipt = Receipt(id: UUID(), batchID: ticket.batchID,
             filename: MediaBatchOwnedFile.safeFilename(filename), startedAt: Date(), status: .started)
         var next = manifest!

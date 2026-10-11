@@ -6,6 +6,32 @@ import XCTest
 
 @MainActor
 final class MediaDeliveryStoreTests: XCTestCase {
+    func testExpectedSizePreflightRejectsWithoutCreatingReceiptAndKeepsManualCompatibility() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store(bytes: 4)
+        let ticket = try await store.beginBatch()
+        for size in [Int64(-1), 0, 5] {
+            await expect(.byteLimit) {
+                _ = try await store.beginItem(ticket, filename: "REJECT.JPG", expectedBytes: size)
+            }
+        }
+        let rejected = await store.snapshot()
+        XCTAssertTrue(rejected.records.isEmpty)
+        let exact = try await store.beginItem(ticket, filename: "EXACT.JPG", expectedBytes: 4)
+        let source = try original(Data([1, 2, 3, 4]))
+        try await store.finishPrepared(ticket, receiptID: exact, source: source, actualBytes: 4)
+        await expect(.byteLimit) {
+            _ = try await store.beginItem(ticket, filename: "FULL.JPG", expectedBytes: 1)
+        }
+        // Legacy manual preparation has no expected-size admission promise.
+        // Its existing finishPrepared check still enforces actual retained bytes.
+        let manual = try await store.beginItem(ticket, filename: "MANUAL.JPG")
+        let snapshot = await store.snapshot()
+        XCTAssertEqual(snapshot.records.map(\.id), [exact, manual])
+        XCTAssertEqual(snapshot.retainedBytes, 4)
+    }
+
     func testColdStartPreservesTerminalFactsAndProjectsInterruptedWorkUnknown() async throws {
         let fixture = try DeliveryFixture()
         defer { fixture.remove() }

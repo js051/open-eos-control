@@ -22,7 +22,10 @@ struct RootView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            ShutterReleaseRecoveryView()
+            VStack(spacing: 0) {
+                ForegroundMediaBanner(controller: camera.foregroundMedia)
+                ShutterReleaseRecoveryView()
+            }
         }
         .background(Color.cameraBackground.ignoresSafeArea())
         .sheet(item: $camera.activeSheet) { sheet in
@@ -31,6 +34,9 @@ struct RootView: View {
             VStack(spacing: 0) {
                 CameraSheetHost(sheet: sheet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if sheet != .foregroundImport {
+                    ForegroundMediaBanner(controller: camera.foregroundMedia)
+                }
                 if camera.shutterReleaseRequired {
                     ShutterReleaseRecoveryView()
                         .layoutPriority(1)

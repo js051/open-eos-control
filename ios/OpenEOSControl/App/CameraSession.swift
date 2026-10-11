@@ -10,6 +10,36 @@ enum CameraSession: Sendable {
     case ccapi(CCAPIClient)
     case desktopBridge(DesktopBridgeClient)
 
+    func foregroundMediaReadsAvailable() async -> Bool {
+        switch self {
+        case let .ccapi(client): return await client.foregroundMediaReadsAvailable()
+        case .desktopBridge: return false
+        }
+    }
+
+    func foregroundMediaInventory() async throws -> [CameraMediaItem] {
+        switch self {
+        case let .ccapi(client): return try await client.foregroundMediaInventory()
+        case .desktopBridge: throw CameraForegroundMediaError.unsupported
+        }
+    }
+
+    func foregroundMediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {
+        switch self {
+        case let .ccapi(client): return try await client.foregroundMediaInfo(item)
+        case .desktopBridge: throw CameraForegroundMediaError.unsupported
+        }
+    }
+
+    func downloadForegroundOriginal(_ item: CameraMediaItem, expectedBytes: Int64, to destination: URL,
+                                    progress: @escaping CameraMediaProgressHandler) async throws -> CameraMediaDownload {
+        switch self {
+        case let .ccapi(client):
+            return try await client.downloadForegroundOriginal(item, expectedBytes: expectedBytes, to: destination, progress: progress)
+        case .desktopBridge: throw CameraForegroundMediaError.unsupported
+        }
+    }
+
     func connectSnapshot() async throws -> CameraSnapshot {
         switch self {
         case let .ccapi(client): return try await client.connectSnapshot()

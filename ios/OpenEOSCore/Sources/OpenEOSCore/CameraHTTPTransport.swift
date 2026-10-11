@@ -376,6 +376,33 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
     }
 }
 
+extension URLSessionCameraHTTPTransport: CameraForegroundHTTPTransport {
+    public func sendForeground(
+        _ request: URLRequest,
+        maximumResponseBytes: Int
+    ) async throws -> CameraHTTPResponse {
+        let response = try await CameraForegroundHTTPTask(
+            configuration: streamConfiguration, maximumBytes: Int64(maximumResponseBytes), progress: { _ in }
+        ).run(request)
+        defer { try? FileManager.default.removeItem(at: response.temporaryFileURL) }
+        try Task.checkCancellation()
+        return CameraHTTPResponse(
+            statusCode: response.statusCode, headers: response.headers,
+            body: try Data(contentsOf: response.temporaryFileURL)
+        )
+    }
+
+    public func downloadForeground(
+        _ request: URLRequest,
+        maximumBytes: Int64,
+        progress: @escaping CameraMediaProgressHandler
+    ) async throws -> CameraHTTPDownloadResponse {
+        try await CameraForegroundHTTPTask(
+            configuration: streamConfiguration, maximumBytes: maximumBytes, progress: progress
+        ).run(request)
+    }
+}
+
 private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let configuration: URLSessionConfiguration
     private let lock = NSLock()

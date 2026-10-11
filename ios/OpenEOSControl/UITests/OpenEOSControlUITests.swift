@@ -60,6 +60,30 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertNil(Self.cameraActionsScrollViewport(surface: list, window: window, footer: .zero))
     }
 
+    func testGenericScrollViewportExcludesSheetChromeAndFindsCoveredRatingRow() throws {
+        let window = CGRect(x: 0, y: 0, width: 402, height: 874)
+        let sheet = CGRect(x: 0, y: 72, width: 402, height: 802)
+        let header = CGRect(x: 0, y: 72, width: 402, height: 56)
+        let viewport = try XCTUnwrap(Self.genericScrollViewport(
+            surface: sheet, window: window, headers: [header], footers: []
+        ))
+        XCTAssertEqual(viewport, CGRect(x: 0, y: 128, width: 402, height: 746))
+        // Exact final target frame from 39d2de7's failure attachment. The old
+        // full-app fallback called this visible even though the sheet hid it.
+        let covered = CGRect(x: 20, y: 25 + 1.0 / 3.0, width: 362, height: 85 + 1.0 / 3.0)
+        XCTAssertNil(Self.scrollDragOffset(target: covered, viewport: window))
+        XCTAssertLessThan(try XCTUnwrap(Self.scrollDragOffset(target: covered, viewport: viewport)), 0)
+        let footer = CGRect(x: 0, y: 800, width: 402, height: 74)
+        XCTAssertEqual(Self.genericScrollViewport(surface: sheet, window: window,
+            headers: [header], footers: [footer]), CGRect(x: 0, y: 128, width: 402, height: 672))
+        let separate = CGRect(x: 600, y: 100, width: 100, height: 50)
+        XCTAssertEqual(Self.genericScrollViewport(surface: sheet, window: window,
+            headers: [separate], footers: []), sheet)
+        XCTAssertNil(Self.genericScrollViewport(surface: .null, window: window, headers: [], footers: []))
+        XCTAssertNil(Self.genericScrollViewport(surface: sheet, window: window, headers: [.infinite], footers: []))
+        XCTAssertNil(Self.genericScrollViewport(surface: header, window: window, headers: [header], footers: []))
+    }
+
     func testScrollDragOffsetsPreserveAbsoluteViewportBounds() throws {
         let media = CGRect(x: 0, y: 180 + 2.0 / 3.0, width: 402, height: 693 + 1.0 / 3.0)
         let cases = [
@@ -1451,13 +1475,15 @@ final class OpenEOSControlUITests: XCTestCase {
                 viewport = selection.viewport
                 lastSurface = "\(selection.kind) frame=\(surfaceFrame) viewport=\(viewport)"
             } else {
-                let scrollSurface = app.scrollViews.allElementsBoundByIndex.last {
-                    $0.exists && $0.isHittable
+                guard let selection = genericScrollSurface(for: element, in: app) else {
+                    lastSurface = "no visible scroll, collection, or table container"
+                    Thread.sleep(forTimeInterval: min(0.05, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
+                    continue
                 }
-                surface = scrollSurface ?? app
+                surface = selection.element
                 surfaceFrame = surface.frame
-                viewport = surfaceFrame.intersection(app.frame)
-                lastSurface = "\(scrollSurface == nil ? "application fallback" : "scroll") frame=\(surfaceFrame) viewport=\(viewport)"
+                viewport = selection.viewport
+                lastSurface = "\(selection.kind) frame=\(surfaceFrame) viewport=\(viewport)"
             }
             let targetFrame = exists ? element.frame : .null
             lastTargetFrame = targetFrame
@@ -1519,6 +1545,59 @@ final class OpenEOSControlUITests: XCTestCase {
             addScreenshot(name: "scroll-navigation-failure")
         }
         return interactive
+    }
+
+    private func genericScrollSurface(
+        for target: XCUIElement, in app: XCUIApplication
+    ) -> (element: XCUIElement, viewport: CGRect, kind: String)? {
+        let window = app.frame
+        let headers = app.navigationBars.allElementsBoundByIndex.filter { $0.exists && $0.isHittable }.map(\.frame)
+        let footers = (app.tabBars.allElementsBoundByIndex + app.toolbars.allElementsBoundByIndex)
+            .filter { $0.exists && $0.isHittable }.map(\.frame)
+        let identifier = target.exists ? target.identifier : ""
+        var fallback: (element: XCUIElement, viewport: CGRect, kind: String)?
+        // SwiftUI Form/List may expose collection or table containers. Prefer
+        // the target's actual ancestor; a whole-application frame includes the
+        // sheet navigation bar and misclassifies covered rows as visible.
+        for (query, kind) in [(app.collectionViews, "collection"), (app.tables, "table"), (app.scrollViews, "scroll")] {
+            for candidate in query.allElementsBoundByIndex.reversed() {
+                guard candidate.exists, candidate.isHittable,
+                      let viewport = Self.genericScrollViewport(surface: candidate.frame, window: window,
+                                                                headers: headers, footers: footers)
+                else { continue }
+                let choice = (element: candidate, viewport: viewport, kind: kind)
+                if !identifier.isEmpty,
+                   candidate.descendants(matching: .any).matching(identifier: identifier).firstMatch.exists {
+                    return choice
+                }
+                if fallback == nil { fallback = choice }
+            }
+        }
+        // An unmaterialized lazy row has no ancestor yet. Search only an actual
+        // visible scrolling container, never the app's fixed chrome.
+        return fallback
+    }
+
+    private static func genericScrollViewport(
+        surface: CGRect, window: CGRect, headers: [CGRect], footers: [CGRect]
+    ) -> CGRect? {
+        func valid(_ frame: CGRect) -> Bool {
+            !frame.isNull && !frame.isInfinite && !frame.isEmpty
+                && [frame.minX, frame.minY, frame.maxX, frame.maxY].allSatisfy { $0.isFinite }
+        }
+        guard valid(surface), valid(window), (headers + footers).allSatisfy(valid) else { return nil }
+        let visible = surface.intersection(window)
+        guard valid(visible) else { return nil }
+        var top = visible.minY
+        var bottom = visible.maxY
+        for bar in headers where bar.intersection(visible).width >= visible.width / 2 {
+            if bar.minY < visible.midY { top = max(top, bar.maxY) }
+        }
+        for bar in footers where bar.intersection(visible).width >= visible.width / 2 {
+            if bar.maxY > visible.midY { bottom = min(bottom, bar.minY) }
+        }
+        guard bottom - top >= 44, visible.width >= 44 else { return nil }
+        return CGRect(x: visible.minX, y: top, width: visible.width, height: bottom - top)
     }
 
     private static func scrollDragOffsets(

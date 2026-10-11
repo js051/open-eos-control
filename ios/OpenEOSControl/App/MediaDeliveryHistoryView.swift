@@ -44,6 +44,20 @@ struct MediaDeliveryHistoryView: View {
                     retainedSize
                 }
 
+                if camera.connected {
+                    Section {
+                        Button {
+                            camera.activeSheet = .foregroundImport
+                        } label: {
+                            Label(language.string("foreground_media_title"), systemImage: "photo.badge.arrow.down")
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(minHeight: 44, alignment: .leading)
+                        }
+                        .disabled(actionsDisabled)
+                        .accessibilityIdentifier("media-delivery-history-foreground-button")
+                    }
+                }
+
                 if hasWarning {
                     Section {
                         Label(language.string("media_delivery_history_warning"), systemImage: "exclamationmark.triangle")

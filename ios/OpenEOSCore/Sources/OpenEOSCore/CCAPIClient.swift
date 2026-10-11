@@ -58,7 +58,7 @@ private struct CCAPIDetailedLiveView {
     let geometry: CCAPILiveViewGeometry?
 }
 
-public actor CCAPIClient {
+public actor CCAPIClient: CameraForegroundMediaReading {
     private static let maxDeviceStatusTextCharacters = 512
     private static let maximumErrorBodyCharacters = 2_000
     private static let noAPIListValue = "No list of APIs"
@@ -1988,6 +1988,202 @@ public actor CCAPIClient {
         throw CCAPIError.invalidResponse(
             "Live View failed on every advertised JPEG endpoint.\n" + failures.map { "- \($0)" }.joined(separator: "\n")
         )
+    }
+
+    public func foregroundMediaReadsAvailable() async -> Bool {
+        initialized && !closing && resolvedMode == .camera && supports(.get, suffix: "/contents") &&
+            transport is any CameraForegroundHTTPTransport
+    }
+
+    public func foregroundMediaInventory() async throws -> [CameraMediaItem] {
+        try await foregroundMediaInventory(timeout: .seconds(30))
+    }
+
+    // A shorter budget is available only to deterministic deadline tests.
+    func foregroundMediaInventory(timeout: Duration) async throws -> [CameraMediaItem] {
+        let strictTransport = try foregroundTransport()
+        var budget = CameraForegroundReadBudget(timeout: timeout)
+        let root = apiPath(.get, suffix: "/contents")
+        _ = try foregroundResourcePath(root, root: root)
+        var containers = [root]
+        var seenContainers: Set<Data> = [Data(root.utf8)]
+        var index = 0
+        var seenItems = Set<Data>()
+        var items: [CameraMediaItem] = []
+
+        func append(_ body: JSONDictionary) throws {
+            guard let paths = body["path"] as? [String] else {
+                throw CameraForegroundMediaError.invalidInventory
+            }
+            for rawID in paths {
+                _ = try budget.remaining()
+                let path = try foregroundResourcePath(rawID, root: root)
+                if Self.isMediaPath(path) {
+                    // Swift String equality folds Unicode canonical equivalents;
+                    // camera identities are exact UTF-8 byte sequences instead.
+                    if seenItems.insert(Data(rawID.utf8)).inserted {
+                        guard items.count < CameraForegroundReadBudget.maximumItems else {
+                            throw CameraForegroundMediaError.inventoryLimitExceeded
+                        }
+                        items.append(CameraMediaItem(
+                            id: rawID, name: (path as NSString).lastPathComponent,
+                            kind: Self.mediaKind(path),
+                            previewAvailable: Self.isCCAPIDisplayPreviewPath(path),
+                            folder: Self.listedMediaFolder(path)
+                        ))
+                    }
+                } else if seenContainers.insert(Data(path.utf8)).inserted {
+                    guard containers.count < CameraForegroundReadBudget.maximumContainers else {
+                        throw CameraForegroundMediaError.inventoryLimitExceeded
+                    }
+                    containers.append(path)
+                }
+            }
+        }
+
+        while index < containers.count {
+            _ = try budget.remaining()
+            let container = containers[index]
+            index += 1
+            let count = try await foregroundJSON(
+                path: "\(container)?kind=number", transport: strictTransport, budget: &budget
+            )
+            if count["pagenumber"] == nil {
+                // An explicit, well-typed unpaged path array is positive evidence;
+                // a missing/malformed count alone is never an empty baseline.
+                try append(count)
+                continue
+            }
+            guard let pageCount = Self.foregroundInteger(count["pagenumber"]), pageCount >= 0 else {
+                throw CameraForegroundMediaError.invalidInventory
+            }
+            guard pageCount <= Int64(CameraForegroundReadBudget.maximumRequests - budget.requests) else {
+                throw CameraForegroundMediaError.inventoryLimitExceeded
+            }
+            if pageCount == 0 {
+                let body = try await foregroundJSON(path: container, transport: strictTransport, budget: &budget)
+                try append(body)
+            } else {
+                // Plain ascending pages avoid the manual browser's ordering probe
+                // and compatibility retries. Every advertised page must succeed.
+                for page in 1...Int(pageCount) {
+                    let body = try await foregroundJSON(
+                        path: "\(container)?page=\(page)", transport: strictTransport, budget: &budget
+                    )
+                    try append(body)
+                }
+            }
+        }
+        _ = try budget.remaining()
+        return items
+    }
+
+    public func foregroundMediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {
+        let strictTransport = try foregroundTransport()
+        var budget = CameraForegroundReadBudget()
+        let path = try foregroundResourcePath(item.id, root: apiPath(.get, suffix: "/contents"))
+        guard Self.isMediaPath(path) else { throw CameraForegroundMediaError.invalidInventory }
+        let body = try await foregroundJSON(path: "\(path)?kind=info", transport: strictTransport, budget: &budget)
+        guard let size = Self.foregroundInteger(body["filesize"]), size > 0 else {
+            throw CameraForegroundMediaError.freshSizeUnavailable
+        }
+        // parseMediaInfo's legacy fallback cannot be reached with this validated
+        // integer field, and the caller's identity bytes/provenance stay unchanged.
+        return parseMediaInfo(item, body: body)
+    }
+
+    public func downloadForegroundOriginal(
+        _ item: CameraMediaItem,
+        expectedBytes: Int64,
+        to destination: URL,
+        progress: @escaping CameraMediaProgressHandler = { _ in }
+    ) async throws -> CameraMediaDownload {
+        let strictTransport = try foregroundTransport()
+        try Task.checkCancellation()
+        guard expectedBytes > 0, item.sizeBytes == expectedBytes else {
+            throw CameraForegroundMediaError.freshSizeUnavailable
+        }
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw CCAPIError.destinationExists(destination.path)
+        }
+        let path = try foregroundResourcePath(item.id, root: apiPath(.get, suffix: "/contents"))
+        guard Self.isMediaPath(path) else { throw CameraForegroundMediaError.invalidInventory }
+        let budget = CameraForegroundReadBudget()
+        var request = try request(path: path, method: .get, timeoutInterval: try budget.remaining())
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+        let response = try await strictTransport.downloadForeground(
+            request, maximumBytes: expectedBytes, progress: progress
+        )
+        defer { try? FileManager.default.removeItem(at: response.temporaryFileURL) }
+        _ = try budget.remaining()
+        let size = try CameraHTTPResponseIntegrity.validateOriginalMedia(response)
+        guard size == expectedBytes else { throw CameraForegroundMediaError.originalSizeMismatch }
+        let contentType = response.header("content-type")
+        let prefix = try response.readPrefix(limit: Self.maximumErrorBodyCharacters)
+        guard !Self.isTextContentType(contentType), !Self.looksLikeTextPayload(prefix) else {
+            throw CCAPIError.invalidResponse("The canonical original returned text instead of media bytes.")
+        }
+        _ = try budget.remaining()
+        try FileManager.default.moveItem(at: response.temporaryFileURL, to: destination)
+        return CameraMediaDownload(item: item, fileURL: destination, bytesTransferred: size, contentType: contentType)
+    }
+
+    private func foregroundTransport() throws -> any CameraForegroundHTTPTransport {
+        try Task.checkCancellation()
+        // Initialization belongs to the explicit connection flow. Never discover,
+        // open a Bridge session, or mutate a camera to enable an automatic read.
+        guard initialized, !closing, resolvedMode == .camera, supports(.get, suffix: "/contents"),
+              let transport = transport as? any CameraForegroundHTTPTransport else {
+            throw CameraForegroundMediaError.unsupported
+        }
+        return transport
+    }
+
+    private func foregroundJSON(
+        path: String,
+        transport: any CameraForegroundHTTPTransport,
+        budget: inout CameraForegroundReadBudget
+    ) async throws -> JSONDictionary {
+        var request = try request(path: path, method: .get, timeoutInterval: budget.nextRequestTimeout())
+        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+        let response = try await transport.sendForeground(
+            request, maximumResponseBytes: CameraForegroundReadBudget.maximumJSONBytes
+        )
+        _ = try budget.remaining()
+        guard response.statusCode == 200, response.header("content-range") == nil,
+              !response.body.isEmpty, response.body.count <= CameraForegroundReadBudget.maximumJSONBytes else {
+            throw CameraForegroundMediaError.invalidInventory
+        }
+        try CameraHTTPResponseIntegrity.validate(response, requestMethod: "GET")
+        return try decodeJSONObject(response.body)
+    }
+
+    private func foregroundResourcePath(_ rawID: String, root: String) throws -> String {
+        guard !rawID.isEmpty, rawID.utf8.count <= 4_096,
+              let components = URLComponents(string: rawID),
+              components.query == nil, components.fragment == nil,
+              components.user == nil, components.password == nil,
+              let decoded = rawID.removingPercentEncoding,
+              !decoded.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw CameraForegroundMediaError.invalidInventory
+        }
+        let path = try normalizeCameraResource(rawID)
+        guard root.range(of: #"^/ccapi/ver[0-9]+/contents$"#, options: .regularExpression) != nil,
+              path == root || path.hasPrefix(root + "/"),
+              !path.hasSuffix("/"), !path.contains("//") else {
+            throw CameraForegroundMediaError.invalidInventory
+        }
+        return path
+    }
+
+    private static func foregroundInteger(_ value: Any?) -> Int64? {
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(),
+              ["c", "s", "i", "l", "q", "C", "S", "I", "L", "Q"].contains(String(cString: number.objCType)) else {
+            return nil
+        }
+        return Int64(number.stringValue)
     }
 
     public func listMedia(

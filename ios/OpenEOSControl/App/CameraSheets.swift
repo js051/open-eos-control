@@ -23,6 +23,8 @@ struct CameraSheetHost: View {
             LanguageSettingsView()
         case .deliveryHistory:
             MediaDeliveryHistoryView()
+        case .foregroundImport:
+            ForegroundMediaView()
         }
     }
 }

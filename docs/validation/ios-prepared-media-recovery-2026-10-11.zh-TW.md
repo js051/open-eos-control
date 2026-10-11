@@ -35,6 +35,8 @@ XCResult的真實 `XCSynthesizedEventRecord` 顯示最後手勢screen端點為(2
 
 ## 限制與 Release Assessment
 
+第三輪 `39d2de7`／CI `38106141493` 仍 FAILURE：App 281/281、UI 27/28，唯一失敗改為 rating Form 的五星 row。新增失敗截圖與 target frame 已保存，揭露 generic helper 僅選 ScrollView／整個 App fallback 未排除 sheet chrome 的問題。具體圖像證據、原 artifact hash 與同批容器候選見[前景準備批次中的導航收斂紀錄](ios-foreground-original-preparation-2026-10-11.zh-TW.md#同批原-ui-失敗收斂)。沒有刪除原失敗或放寬 timeout／業務 assertions。
+
 副本長度／本機檔案身分核對不等同來源hash、可解碼或硬體fsync；備份還原或外部替換可能改變檔案身分，此時保守停用分享並保留資料。原子rename不承諾斷電耐久。只有單一App store actor管理本機紀錄，不承諾跨App／多程序並行編輯。磁碟被外部修改、未知目錄或損壞manifest會保留資料且拒絕不安全自動清理。保留副本會額外使用儲存空間；512 MiB不包含既有相機下載暫存，亦不保證OS永久保留資料。
 
 Latest release v0.12.0 Development Preview。本批是向後相容的iOS可見新能力，impact minor；保持原PR236草稿、必要gates、release HOLD。不main合併、不發版、不改KVM，不含私有消費端資料，不宣稱原P2或完整產品已驗收。

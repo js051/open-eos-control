@@ -126,6 +126,12 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaDeliverySnapshot = MediaDeliverySnapshot(records: [], retainedBytes: 0, warning: nil)
     @Published private(set) var mediaDeliveryHistoryLoading = false
     @Published private(set) var mediaDeliveryHistoryWarning = false
+    let foregroundMedia: ForegroundMediaController
+    @Published private(set) var foregroundTemporaryResults: [MediaBatchResult] = []
+    private var foregroundMediaOwner = UUID()
+    private var foregroundMediaIOOwner: UUID?
+    private var foregroundLiveViewRestartOwner: UUID?
+    private var foregroundMediaTicket: MediaDeliveryTicket?
     private var mediaDeliveryRecordingWarning = false
     private var mediaDeliveryHistoryOwner = UUID()
     private let mediaDeliveryStore: MediaDeliveryStore?
@@ -304,9 +310,11 @@ final class CameraAppState: ObservableObject {
         focusMarkerDelay: (@Sendable () async throws -> Void)? = nil,
         rtpEventDispatcher: (@Sendable (@escaping @MainActor @Sendable () -> Void) -> Void)? = nil,
         mediaDeliveryStore: MediaDeliveryStore? = nil,
-        mediaDeliveryReplyDelay: (@Sendable (MediaDeliveryReplyStage) async -> Void)? = nil
+        mediaDeliveryReplyDelay: (@Sendable (MediaDeliveryReplyStage) async -> Void)? = nil,
+        foregroundMedia: ForegroundMediaController? = nil
     ) {
         self.defaults = defaults
+        self.foregroundMedia = foregroundMedia ?? ForegroundMediaController()
         self.mediaDeliveryStore = mediaDeliveryStore
         self.mediaDeliveryReplyDelay = mediaDeliveryReplyDelay
         self.sessionFactory = sessionFactory
@@ -354,7 +362,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func isBusy(_ operation: CameraOperation) -> Bool {
-        busyOperations.contains(operation) || (shutterReleaseRequired && operation != .refresh)
+        foregroundMediaIOOwner != nil || busyOperations.contains(operation) || (shutterReleaseRequired && operation != .refresh)
     }
 
     func setBaseURL(_ value: String) {
@@ -621,6 +629,12 @@ final class CameraAppState: ObservableObject {
     }
 
     private func prepareDisconnect() -> CameraSession? {
+        foregroundMedia.retire()
+        foregroundMediaOwner = UUID()
+        foregroundMediaIOOwner = nil
+        foregroundLiveViewRestartOwner = nil
+        foregroundMediaTicket = nil
+        foregroundTemporaryResults = []
         rtpController.retireDelivery()
         invalidateBridgeScan()
         retireFocusMarker()
@@ -742,13 +756,15 @@ final class CameraAppState: ObservableObject {
     }
 
     func setLiveViewSize(_ value: LiveViewSize) async {
-        guard !usesRTPLiveView, capabilities?.liveView.sizes.contains(value) == true else { return }
+        guard foregroundMediaIOOwner == nil, foregroundLiveViewRestartOwner == nil, !usesRTPLiveView,
+              capabilities?.liveView.sizes.contains(value) == true else { return }
         liveViewSize = value
         defaults.set(value.rawValue, forKey: DefaultsKey.liveViewSize)
         if session != nil, autoRefresh { await restartLiveView() }
     }
 
     func setLiveViewSource(_ value: LiveViewSource) async {
+        guard foregroundMediaIOOwner == nil, foregroundLiveViewRestartOwner == nil else { return }
         let available = capabilities?.liveView.sources ?? []
         guard value == .auto || available.contains(value) else { return }
         selectedLiveViewSource = value
@@ -785,6 +801,7 @@ final class CameraAppState: ObservableObject {
         applicationActive = active
         rtpController.setApplicationActive(active)
         if !active {
+            foregroundMedia.stop(reason: .background)
             stopLiveViewLoop()
         } else if let session {
             resumeLiveViewAfterBulb(session: session, generation: sessionGeneration)
@@ -830,7 +847,13 @@ final class CameraAppState: ObservableObject {
     }
 
     func restartLiveView() async {
-        guard !shutterReleaseRequired else { return }
+        guard !shutterReleaseRequired, foregroundMediaIOOwner == nil,
+              foregroundLiveViewRestartOwner == nil else { return }
+        let restartOwner = UUID()
+        foregroundLiveViewRestartOwner = restartOwner
+        defer {
+            if foregroundLiveViewRestartOwner == restartOwner { foregroundLiveViewRestartOwner = nil }
+        }
         let generation = sessionGeneration
         stopLiveViewLoop()
         if let session { await session.stopLiveView() }
@@ -1565,6 +1588,7 @@ final class CameraAppState: ObservableObject {
         }
         guard
             !isPreview,
+            foregroundMediaIOOwner == nil,
             supports(.mediaThumbnail),
             !loadingMediaThumbnailIDs.contains(item.id),
             !unavailableMediaThumbnailIDs.contains(item.id),
@@ -1797,6 +1821,159 @@ final class CameraAppState: ObservableObject {
 
     func clearMediaSelection() { selectedMediaItems = [] }
 
+    var canStartForegroundMedia: Bool {
+        connected && !isPreview && connectionMode == .ccapi && session != nil
+            && applicationActive && mediaDeliveryStore != nil && !foregroundMedia.isRunning
+            && supports(.mediaBrowser) && supports(.mediaDownload) && !shutterReleaseRequired
+    }
+
+    var foregroundTemporaryCount: Int { foregroundTemporaryResults.filter { $0.completedFileURL != nil }.count }
+
+    func makeForegroundMediaExportPayload() -> MediaBatchExportPayload? {
+        MediaBatchExportPayload(results: foregroundTemporaryResults)
+    }
+
+    @discardableResult
+    func startForegroundMedia() -> Bool {
+        guard canStartForegroundMedia, let session else { return false }
+        let owner = UUID()
+        let generation = sessionGeneration
+        foregroundMediaOwner = owner
+        foregroundMediaTicket = nil
+        foregroundTemporaryResults = []
+        return foregroundMedia.start(.init(
+            admission: { [weak self] in self?.foregroundAdmission(owner, generation: generation) ?? .retired },
+            available: { await session.foregroundMediaReadsAvailable() },
+            inventory: { [weak self] in
+                guard let self else { throw ForegroundMediaController.Failure.retired }
+                try self.beginForegroundRead(owner, generation: generation)
+                defer { self.endForegroundRead(owner, generation: generation) }
+                let result = try await session.foregroundMediaInventory()
+                try self.checkForegroundOwner(owner, generation: generation)
+                return result
+            },
+            freshInfo: { [weak self] item in
+                guard let self else { throw ForegroundMediaController.Failure.retired }
+                try self.beginForegroundRead(owner, generation: generation)
+                defer { self.endForegroundRead(owner, generation: generation) }
+                let result = try await session.foregroundMediaInfo(item)
+                try self.checkForegroundOwner(owner, generation: generation)
+                return result
+            },
+            prepare: { [weak self] item, bytes in
+                guard let self else { throw ForegroundMediaController.Failure.retired }
+                try await self.prepareForegroundOriginal(item, bytes: bytes, session: session,
+                                                         owner: owner, generation: generation)
+            }
+        ))
+    }
+
+    func stopForegroundMedia() { foregroundMedia.stop() }
+
+    private func foregroundAdmission(_ owner: UUID, generation: UUID) -> ForegroundMediaController.Admission {
+        guard owner == foregroundMediaOwner, generation == sessionGeneration,
+              applicationActive, connected, !isPreview,
+              supports(.mediaBrowser), supports(.mediaDownload) else { return .retired }
+        if !busyOperations.isEmpty || foregroundLiveViewRestartOwner != nil
+            || recording || shutterReleaseRequired || bulbExposureActive
+            || mediaLibraryLoading || mediaPreviewLoading || latestMediaTask != nil || latestMediaThumbnailLoading
+            || !loadingMediaThumbnailIDs.isEmpty || captureReviewState == .searching {
+            return .busy
+        }
+        return .ready
+    }
+
+    private func checkForegroundOwner(_ owner: UUID, generation: UUID) throws {
+        try Task.checkCancellation()
+        guard owner == foregroundMediaOwner, generation == sessionGeneration, applicationActive else {
+            throw ForegroundMediaController.Failure.retired
+        }
+    }
+
+    private func beginForegroundRead(_ owner: UUID, generation: UUID) throws {
+        try checkForegroundOwner(owner, generation: generation)
+        guard case .ready = foregroundAdmission(owner, generation: generation), begin(.media) else {
+            throw ForegroundMediaController.Failure.unavailable
+        }
+        foregroundMediaIOOwner = owner
+    }
+
+    private func endForegroundRead(_ owner: UUID, generation: UUID) {
+        guard foregroundMediaIOOwner == owner, foregroundMediaOwner == owner,
+              sessionGeneration == generation else { return }
+        foregroundMediaIOOwner = nil
+        end(.media)
+    }
+
+    private func prepareForegroundOriginal(
+        _ item: CameraMediaItem, bytes: Int64, session: CameraSession, owner: UUID, generation: UUID
+    ) async throws {
+        try beginForegroundRead(owner, generation: generation)
+        defer { endForegroundRead(owner, generation: generation) }
+        guard let mediaDeliveryStore else { throw ForegroundMediaController.Failure.storage }
+        let ticket: MediaDeliveryTicket
+        do {
+            if let existing = foregroundMediaTicket { ticket = existing }
+            else {
+                ticket = try await mediaDeliveryStore.beginBatch()
+                try checkForegroundOwner(owner, generation: generation)
+                foregroundMediaTicket = ticket
+            }
+        } catch {
+            try checkForegroundOwner(owner, generation: generation)
+            throw ForegroundMediaController.Failure.storage
+        }
+        let receipt: UUID
+        do {
+            receipt = try await mediaDeliveryStore.beginItem(ticket, filename: item.name, expectedBytes: bytes)
+        } catch {
+            try checkForegroundOwner(owner, generation: generation)
+            throw ForegroundMediaController.Failure.storage
+        }
+        var validOriginal = false
+        do {
+            await mediaDeliveryReplyDelay?(.itemStarted)
+            try checkForegroundOwner(owner, generation: generation)
+            let owned = try MediaBatchOwnedFile.create(filename: item.name)
+            let result = try await session.downloadForegroundOriginal(item, expectedBytes: bytes, to: owned.fileURL) { _ in }
+            try checkForegroundOwner(owner, generation: generation)
+            guard result.fileURL == owned.fileURL, result.bytesTransferred == bytes,
+                  (try owned.fileURL.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true else {
+                throw ForegroundMediaController.Failure.transfer
+            }
+            validOriginal = true
+            var temporary = MediaBatchResult(item: item)
+            temporary.ownedFile = owned
+            temporary.status = .ready
+            foregroundTemporaryResults = [temporary]
+            do {
+                try await mediaDeliveryStore.finishPrepared(ticket, receiptID: receipt, source: owned, actualBytes: bytes)
+                await mediaDeliveryReplyDelay?(.originalRetained)
+            } catch {
+                if foregroundMediaOwner == owner, sessionGeneration == generation {
+                    mediaDeliveryRecordingWarning = true
+                    mediaDeliveryHistoryWarning = true
+                }
+                throw ForegroundMediaController.Failure.storage
+            }
+            // The durable copy now supplies future explicit shares. Keep at most
+            // one valid temporary fallback when retention fails, not two copies
+            // of every successful automatically prepared original.
+            if foregroundMediaOwner == owner, sessionGeneration == generation {
+                foregroundTemporaryResults = []
+                await refreshMediaDeliveryHistory()
+            }
+        } catch {
+            if !validOriginal {
+                let cancelled = Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
+                try? await mediaDeliveryStore.finishFailure(ticket, receiptID: receipt, cancelled: cancelled)
+            }
+            // finishPrepared already records an honest prepared-but-not-retained
+            // fact on failure. Do not replace that true fact with downloadFailed.
+            throw error
+        }
+    }
+
     var canStartMediaBatchDownload: Bool {
         !isPreview && connected && session != nil && !selectedMediaItems.isEmpty
             && !mediaLibraryLoading && supports(.mediaDownload) && !isBusy(.media)
@@ -1877,6 +2054,7 @@ final class CameraAppState: ObservableObject {
     /// Called only after the UI confirms removal of records and retained App copies.
     func clearMediaDeliveryHistory() async {
         guard !mediaDeliveryHistoryLoading, let mediaDeliveryStore else { return }
+        foregroundMedia.stop()
         let owner = UUID()
         mediaDeliveryHistoryOwner = owner
         mediaDeliveryHistoryLoading = true
@@ -2455,6 +2633,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func begin(_ operation: CameraOperation) -> Bool {
+        if foregroundMediaIOOwner != nil { return false }
         if shutterReleaseRequired && operation != .refresh { return false }
         let inserted = busyOperations.insert(operation).inserted
         if inserted { operationRevision &+= 1 }
