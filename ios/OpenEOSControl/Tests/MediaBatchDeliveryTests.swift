@@ -486,20 +486,22 @@ final class MediaBatchDeliveryTests: XCTestCase {
     func testUnavailableHistoryNeverTurnsValidOriginalIntoFailedDownload() async throws {
         let parent = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("MissingDeliveryParent-\(UUID().uuidString)")
         let store = MediaDeliveryStore(root: parent.appendingPathComponent("not-created"))
-        let peer = BatchMediaPeer(items: [item("A")])
-        let state = makeState([peer], deliveryStore: store)
-        defer { state.requestDisconnect(); Task { await peer.releaseAll() }; try? FileManager.default.removeItem(at: parent) }
-        try await connectAndLoad(state)
-        state.selectMediaItems(state.mediaItems)
-        XCTAssertTrue(state.startMediaBatchDownload())
-        await state.mediaBatchTask?.value
-        XCTAssertEqual(state.mediaBatchState, .completed)
-        XCTAssertEqual(state.mediaBatchResults.map(\.status), [.ready])
-        XCTAssertTrue(state.mediaDeliveryHistoryWarning)
-        let payload = try XCTUnwrap(state.makeMediaBatchExportPayload())
-        XCTAssertEqual(try Data(contentsOf: payload.fileURLs[0]), BatchMediaPeer.original)
-        let downloads = await peer.downloadIDs()
-        XCTAssertEqual(downloads, [Data("A".utf8)])
+        for unavailable in [nil, store] as [MediaDeliveryStore?] {
+            let peer = BatchMediaPeer(items: [item("A")])
+            let state = makeState([peer], deliveryStore: unavailable)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() }; try? FileManager.default.removeItem(at: parent) }
+            try await connectAndLoad(state)
+            state.selectMediaItems(state.mediaItems)
+            XCTAssertTrue(state.startMediaBatchDownload())
+            await state.mediaBatchTask?.value
+            XCTAssertEqual(state.mediaBatchState, .completed)
+            XCTAssertEqual(state.mediaBatchResults.map(\.status), [.ready])
+            XCTAssertTrue(state.mediaDeliveryHistoryWarning)
+            let payload = try XCTUnwrap(state.makeMediaBatchExportPayload())
+            XCTAssertEqual(try Data(contentsOf: payload.fileURLs[0]), BatchMediaPeer.original)
+            let downloads = await peer.downloadIDs()
+            XCTAssertEqual(downloads, [Data("A".utf8)])
+        }
     }
 
     func testClearedHistoryCannotBeRecreatedByPendingBatchCompletion() async throws {

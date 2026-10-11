@@ -1815,6 +1815,8 @@ final class CameraAppState: ObservableObject {
         mediaBatchResults = results
         mediaBatchProgress = nil
         mediaBatchCancellationRequested = false
+        mediaDeliveryRecordingWarning = mediaDeliveryStore == nil
+        mediaDeliveryHistoryWarning = mediaDeliveryRecordingWarning || mediaDeliverySnapshot.warning != nil
         mediaBatchState = .running
         mediaBatchTask = Task { [weak self] in
             await self?.performMediaBatchDownload(results, session: session, token: token, generation: generation)

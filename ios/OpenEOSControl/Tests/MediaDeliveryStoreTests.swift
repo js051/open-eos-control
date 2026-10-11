@@ -393,7 +393,7 @@ final class MediaDeliveryStoreTests: XCTestCase {
                 try handle.close()
                 // Force an unmistakably changed timestamp even on a filesystem
                 // whose write timestamp resolution is coarser than this test.
-                try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_000_000)], atPath: retained.path)
+                try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_000_000)], ofItemAtPath: retained.path)
             }
             let restarted = fixture.store()
             let snapshot = await restarted.snapshot()

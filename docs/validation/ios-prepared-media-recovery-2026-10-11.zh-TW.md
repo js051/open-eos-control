@@ -17,6 +17,12 @@
 
 已存在058d7af的導航修正正常CI38101232791全部適用成功（App248/UI27全過），只驗該舊head，不是本批恢復能力的證據。PC前景JPEG候選與其publication阻擋分開記錄，不混入iOS範圍。
 
+## 首次正常 CI 與後續修正
+
+Exact head `211894224ba79560005d6280c68e7e7e529615ee` 的正常 CI `38103181314`，iOS App production build完成，但App tests編譯在 `MediaDeliveryStoreTests.swift:396` 失敗：Foundation `setAttributes` 第二參數須 `ofItemAtPath:`，來源誤寫 `atPath:`。保留 job `114363199964` 的01:54:56原始編譯失敗；App／UI runtime尚未開始，不說新增測試通過。後續只修正參數標籤，不改原替換／時間戳負例或assertions。
+
+同批來源補上App factory無法建立store（nil）時的批次警告；原有效temp原檔仍ready可分享，既有failure-isolation控制延伸nil與unwritable兩種。這是持久副本不可用的提示，沒有將下載標失敗。原run剩餘gates終態後才整批更新一次，完整App人工／實機仍後置。
+
 ## 限制與 Release Assessment
 
 副本長度／本機檔案身分核對不等同來源hash、可解碼或硬體fsync；備份還原或外部替換可能改變檔案身分，此時保守停用分享並保留資料。原子rename不承諾斷電耐久。只有單一App store actor管理本機紀錄，不承諾跨App／多程序並行編輯。磁碟被外部修改、未知目錄或損壞manifest會保留資料且拒絕不安全自動清理。保留副本會額外使用儲存空間；512 MiB不包含既有相機下載暫存，亦不保證OS永久保留資料。
