@@ -23,6 +23,16 @@ Exact head `211894224ba79560005d6280c68e7e7e529615ee` 的正常 CI `38103181314`
 
 同批來源補上App factory無法建立store（nil）時的批次警告；原有效temp原檔仍ready可分享，既有failure-isolation控制延伸nil與unwritable兩種。這是持久副本不可用的提示，沒有將下載標失敗。原run剩餘gates終態後才整批更新一次，完整App人工／實機仍後置。
 
+## 第二輪執行證據與導航候選
+
+Exact head `9f0202bfcb645f32254e4886111ccde05098e499` 的正常 CI `38104167802` 已終態 FAILURE。Core 277/277、App 281/281、JVM/APK及secret通過；新增27個store與6個整合方法已實際執行。既有canonical兩原檔旅程擴充的英／繁中 terminate→relaunch→離線兩份副本控制於02:17:01 UTC通過。這些結果不等同外部分享provider或實機驗收。
+
+UI 27中26通過，唯一失敗是 `testOfflineMediaDateRangeApplyCancelAndClearInBothLanguages:546`：套用已知資料夾後，8秒內未讓 `media-actions-preview-001` 可互動。原artifact `11690075418` 為207767217 bytes，SHA256 `1ee278456a5e328e0481ce8570a9bdc8155f014f43db63d0b4f05cbcbf0253a6`，已核完整bytes。四次搜尋拖曳後才取得目標，最後仍不可互動；沒有盲目重跑。
+
+XCResult的真實 `XCSynthesizedEventRecord` 顯示最後手勢screen端點為(201,804.67)→(201,250)，位於y180.67至874的ScrollView內。log的(201,624)→(201,69.3)是相對surface原點offset，不能據此宣稱越界或missing-origin bug。每次554.67pt移動使用500pt/s、movement約1.11秒，另hold0.1秒及AX/settling成本；8秒只完成四次lazy-cell搜尋。此test沒有保存最終target frame或失敗截圖，只有此前清除日期的截圖，因此搜尋預算是待驗候選，不是已確證唯一根因。
+
+後續最小fixture候選集中generic helper的幾何與搜尋契約：保留原caller timeout、0.8 viewport重疊、停止後hold及全部業務assertions，較快的受支援drag速度僅用於一般導航；camera actions原速度不變。抽出絕對座標／surface offset轉換並補非零原點、截短viewport的純幾何控制，失敗時保存有界target/viewport與actual screenPoint及截圖供判讀。這不是放寬互動判準，也不改production版面追逐測試。此後續候選Swift/runtime仍NOT_RUN，必須以新head正常CI判定。
+
 ## 限制與 Release Assessment
 
 副本長度／本機檔案身分核對不等同來源hash、可解碼或硬體fsync；備份還原或外部替換可能改變檔案身分，此時保守停用分享並保留資料。原子rename不承諾斷電耐久。只有單一App store actor管理本機紀錄，不承諾跨App／多程序並行編輯。磁碟被外部修改、未知目錄或損壞manifest會保留資料且拒絕不安全自動清理。保留副本會額外使用儲存空間；512 MiB不包含既有相機下載暫存，亦不保證OS永久保留資料。

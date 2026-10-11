@@ -60,6 +60,55 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertNil(Self.cameraActionsScrollViewport(surface: list, window: window, footer: .zero))
     }
 
+    func testScrollDragOffsetsPreserveAbsoluteViewportBounds() throws {
+        let media = CGRect(x: 0, y: 180 + 2.0 / 3.0, width: 402, height: 693 + 1.0 / 3.0)
+        let cases = [
+            (surface: media, viewport: media),
+            (surface: CGRect(x: -40, y: -80, width: 480, height: 1_020),
+             viewport: CGRect(x: 0, y: 100, width: 402, height: 640)),
+            (surface: CGRect(x: 100, y: 60, width: 674, height: 342),
+             viewport: CGRect(x: 100, y: 60, width: 674, height: 257)),
+        ]
+        for geometry in cases {
+            for requested in [CGFloat(-10_000), -44, 44, 10_000] {
+                let offsets = try XCTUnwrap(Self.scrollDragOffsets(
+                    offset: requested, surface: geometry.surface, viewport: geometry.viewport
+                ))
+                let start = CGPoint(x: geometry.surface.minX + offsets.start.dx,
+                                    y: geometry.surface.minY + offsets.start.dy)
+                let end = CGPoint(x: geometry.surface.minX + offsets.end.dx,
+                                  y: geometry.surface.minY + offsets.end.dy)
+                XCTAssertTrue(geometry.viewport.contains(start))
+                XCTAssertTrue(geometry.viewport.contains(end))
+                XCTAssertEqual(start.x, geometry.viewport.midX, accuracy: 0.000_001)
+                XCTAssertEqual(end.x, start.x, accuracy: 0.000_001)
+                let distance = min(abs(requested), geometry.viewport.height * 0.8)
+                XCTAssertEqual(start.y - end.y, requested > 0 ? distance : -distance, accuracy: 0.000_001)
+                XCTAssertGreaterThanOrEqual(min(start.y, end.y), geometry.viewport.minY + geometry.viewport.height * 0.1 - 0.000_001)
+                XCTAssertLessThanOrEqual(max(start.y, end.y), geometry.viewport.maxY - geometry.viewport.height * 0.1 + 0.000_001)
+            }
+        }
+        let mediaDrag = try XCTUnwrap(Self.scrollDragOffsets(
+            offset: try XCTUnwrap(Self.scrollDragOffset(target: .null, viewport: media)),
+            surface: media, viewport: media
+        ))
+        // XCTest logs these local offsets. The synthesized screen endpoints
+        // add the nonzero surface origin and must stay below the fixed header.
+        XCTAssertEqual(mediaDrag.start.dy, 624, accuracy: 0.000_001)
+        XCTAssertEqual(mediaDrag.end.dy, 69 + 1.0 / 3.0, accuracy: 0.000_001)
+        XCTAssertEqual(media.minY + mediaDrag.start.dy, 804 + 2.0 / 3.0, accuracy: 0.000_001)
+        XCTAssertEqual(media.minY + mediaDrag.end.dy, 250, accuracy: 0.000_001)
+        for invalid in [CGRect.null, .infinite, .zero] {
+            XCTAssertNil(Self.scrollDragOffsets(offset: 44, surface: invalid, viewport: media))
+            XCTAssertNil(Self.scrollDragOffsets(offset: 44, surface: media, viewport: invalid))
+        }
+        for invalid in [CGFloat.nan, .infinity, -.infinity, 0] {
+            XCTAssertNil(Self.scrollDragOffsets(offset: invalid, surface: media, viewport: media))
+        }
+        XCTAssertNil(Self.scrollDragOffsets(offset: 44, surface: media,
+                                           viewport: media.offsetBy(dx: 0, dy: -1)))
+    }
+
     func testOfflineBatchSelectionRemainsSeparateFromPreviewAndCannotFakeDownloads() throws {
         for (language, apple, locale, selected, notSelected) in [
             ("english", "en", "en_US", "Selected", "Not selected"),
@@ -1380,6 +1429,11 @@ final class OpenEOSControlUITests: XCTestCase {
     ) -> Bool {
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
         var lastSurface = "not selected"
+        var lastTargetFrame = CGRect.null
+        var lastDragStart: XCUICoordinate?
+        var lastDragEnd: XCUICoordinate?
+        var lastDragSurface: XCUIElement?
+        var dragCount = 0
         while ProcessInfo.processInfo.systemUptime < deadline {
             let exists = element.exists
             if exists, element.isEnabled, element.isHittable { return true }
@@ -1403,8 +1457,10 @@ final class OpenEOSControlUITests: XCTestCase {
                 surface = scrollSurface ?? app
                 surfaceFrame = surface.frame
                 viewport = surfaceFrame.intersection(app.frame)
+                lastSurface = "\(scrollSurface == nil ? "application fallback" : "scroll") frame=\(surfaceFrame) viewport=\(viewport)"
             }
             let targetFrame = exists ? element.frame : .null
+            lastTargetFrame = targetFrame
             guard let offset = Self.scrollDragOffset(target: targetFrame, viewport: viewport) else {
                 // Visible but disabled/covered controls need state to settle;
                 // scrolling them away cannot make them interactive.
@@ -1412,13 +1468,23 @@ final class OpenEOSControlUITests: XCTestCase {
                 continue
             }
             guard ProcessInfo.processInfo.systemUptime < deadline else { break }
-            let startY = offset > 0 ? viewport.maxY - viewport.height * 0.1 : viewport.minY + viewport.height * 0.1
+            guard let offsets = Self.scrollDragOffsets(offset: offset, surface: surfaceFrame, viewport: viewport) else {
+                break
+            }
             let origin = surface.coordinate(withNormalizedOffset: .zero)
-            let start = origin.withOffset(CGVector(dx: viewport.midX - surfaceFrame.minX, dy: startY - surfaceFrame.minY))
-            let end = origin.withOffset(CGVector(dx: viewport.midX - surfaceFrame.minX, dy: startY - surfaceFrame.minY - offset))
+            let start = origin.withOffset(offsets.start)
+            let end = origin.withOffset(offsets.end)
+            lastDragStart = start
+            lastDragEnd = end
+            lastDragSurface = surface
+            dragCount += 1
             // Release only after stopping. Whole-view swipes coast, consuming
             // the deadline and potentially passing a newly materialized cell.
-            start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .default, thenHoldForDuration: 0.1)
+            // Lazy media searches can span several accessibility-size screens.
+            // Use the supported fast drag while retaining overlap and the stop;
+            // camera-action navigation keeps its independently verified velocity.
+            let velocity: XCUIGestureVelocity = cameraActions ? .default : .fast
+            start.press(forDuration: 0.01, thenDragTo: end, withVelocity: velocity, thenHoldForDuration: 0.1)
         }
         let interactive = element.exists && element.isEnabled && element.isHittable
         if cameraActions, !interactive {
@@ -1429,8 +1495,48 @@ final class OpenEOSControlUITests: XCTestCase {
             attachment.lifetime = .keepAlways
             add(attachment)
             addScreenshot(name: "camera-action-navigation-failure")
+        } else if !interactive {
+            let exists = element.exists
+            let finalFrame = exists ? element.frame : .null
+            var lines = [
+                "[OEC_SCROLL_NAVIGATION] surface=\(lastSurface)",
+                "drags=\(dragCount) timeout=\(timeout) elapsed=\(ProcessInfo.processInfo.systemUptime - (deadline - timeout))",
+                "last-target-frame=\(lastTargetFrame) final-target-frame=\(finalFrame)",
+                "exists=\(exists) enabled=\(exists && element.isEnabled) hittable=\(exists && element.isHittable)",
+            ]
+            // Resolve coordinates only after failure, so diagnostics do not add
+            // AX round trips to every drag. These are current resolved points,
+            // not a claim about the earlier synthesized event's touch samples.
+            if lastDragSurface?.exists == true, let lastDragStart, let lastDragEnd {
+                lines.append("last-drag-points-resolved-after-failure start=\(lastDragStart.screenPoint) end=\(lastDragEnd.screenPoint)")
+            }
+            let summary = String(lines.joined(separator: "\n").prefix(4_096))
+            print(summary)
+            let attachment = XCTAttachment(string: summary)
+            attachment.name = "scroll-navigation-failure"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            addScreenshot(name: "scroll-navigation-failure")
         }
         return interactive
+    }
+
+    private static func scrollDragOffsets(
+        offset: CGFloat, surface: CGRect, viewport: CGRect
+    ) -> (start: CGVector, end: CGVector)? {
+        guard [surface, viewport].allSatisfy({ frame in
+            !frame.isNull && !frame.isInfinite && !frame.isEmpty
+                && [frame.minX, frame.minY, frame.maxX, frame.maxY].allSatisfy { $0.isFinite }
+        }), surface.contains(viewport), offset.isFinite, offset != 0 else { return nil }
+        let distance = min(abs(offset), viewport.height * 0.8)
+        let startY = offset > 0 ? viewport.maxY - viewport.height * 0.1 : viewport.minY + viewport.height * 0.1
+        let endY = startY - (offset > 0 ? distance : -distance)
+        // Both endpoints are screen points inside the visible scrolling area.
+        // Convert once to offsets from the surface's normalized-zero origin.
+        return (
+            CGVector(dx: viewport.midX - surface.minX, dy: startY - surface.minY),
+            CGVector(dx: viewport.midX - surface.minX, dy: endY - surface.minY)
+        )
     }
 
     private func cameraActionsScrollSurface(in app: XCUIApplication) -> (element: XCUIElement, viewport: CGRect, kind: String)? {
