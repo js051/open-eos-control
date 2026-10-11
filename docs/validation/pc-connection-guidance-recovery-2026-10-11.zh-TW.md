@@ -46,15 +46,34 @@ Bridge 自己的 token 失敗仍是原本的 HTTP 401 與 Bearer challenge，沒
 - `bridge/tests/ccapi.browser.test.js`：擴充既有旅程，在兩種語言中連續涵蓋 setup／掃描／取消／晚到回應／各類復原／成功連線／中斷連線。保留原有旅程與斷言；新增旅程沿用 12 秒 timeout。瀏覽器刻意送達取消後的舊掃描回應，並等到 JSON 已被讀取，避免提前斷言造成假通過。
 - 對照既有 Android `ConnectionFailure.kt` 與 `ConnectionFailureProtocolTest.kt` 的「實際 HTTP 證據優先、fallback 404 不覆蓋具體原因、成功 fallback 優先、取消不變成一般錯誤」原則。
 
-### 實際執行結果（2026-10-11 UTC）
+### 本地實際執行結果（2026-10-11 06:29 UTC）
 
 - 06:29:27 至 06:29:38：4 個變更 JavaScript 檔案的 `node --check` 通過；`test:modules` 的全部 26 個 script 依序執行、exit 0。包含本批 13 個新測試，以及既有 session ownership、Bulb、媒體、RTP 音訊等回歸測試。各 script 的 `node:test` 合計 462 個通過；其他既有 script 使用自身 assertion／通過訊息，不能只用 462 表示全部 assertion 數量。
 - 此次 Node 執行耗時 10.82 秒，限制一個 CPU、96 MiB Node heap 與 120 秒總期限。RSS 監測 helper 因本執行器沒有 `/proc/<pid>/task/<pid>/children`，錯誤回報 aggregate RSS 為 0；因此不能聲稱已驗證或有效執行 512 MiB 整體記憶體上限。這不改寫各 script 的實際 exit 0。
 - 保留前次紀錄：首次以 512 MiB 虛擬位址上限啟動 V8 時，程序在測試開始前配置失敗，該次為 NOT_RUN。之後的首輪新套件有 9 個通過、1 個測試 selector 失敗（將 state 的 `connectionMode` 誤算為文案 key）；修正 selector 後，最終套件 13 個全部通過。該首輪單一 Node 程序觀測到 RSS 39,616 KiB，不能替代整批 aggregate 記憶體證據。
-- Python 修改檔案 AST 語法檢查與 `git diff --check` 通過。Python pytest／ruff：NOT_RUN，尚無可用的完整測試環境；不能把語法檢查當作後端執行測試。
-- Playwright 瀏覽器旅程、完整 App 驗收、真機與新 exact-head CI：NOT_RUN。瀏覽器測試僅完成原始碼與 JavaScript 語法檢查。
+- Python 修改檔案 AST 語法檢查與 `git diff --check` 通過。本地 Python pytest／ruff：NOT_RUN，尚無可用的完整測試環境；不能把語法檢查當作後端執行測試。
+- 當時本地 Playwright 瀏覽器旅程、完整 App 驗收、真機與新 exact-head CI：NOT_RUN。此階段的瀏覽器測試僅完成原始碼與 JavaScript 語法檢查；後續正式 CI 的實際結果見下節。
 
 受控 Node suite 完整輸出之 SHA-256：`0263a6617ab4a15f45f61196dbb305715dbab60b582c9e0a4822bceb16807fb2`。任務用監測 helper 已在 repo 外改為依 `/proc/*/status` 的 PPid 建立程序樹，且缺少有效遙測時直接停止；此 helper 尚未重新執行或自測，需在下一次已授權執行前先驗證。
+
+
+### 首次正式 CI 與舊 fixture 修正（2026-10-11 UTC）
+
+來源：[GitHub Actions run 38118879567／Desktop Bridge job 114409345307](https://github.com/js051/open-eos-control/actions/runs/38118879567/job/114409345307)，發布 head `c3142eee`；本地對應 tree 的 commit 為 `fc266231f134096da2beb2eb548b74de64c0b45f`。
+
+- Ruff：`2026-10-11T06:42:25.8385398Z All checks passed!`。
+- 新增的兩個 Chromium 連線復原旅程：英文於 `06:43:00.530 UTC`、繁體中文於 `06:43:02.632 UTC` 通過。這是正式 CI 瀏覽器 fixture 證據，並非真機或完整 App 驗收。
+- 原始失敗保留：`2026-10-11T06:45:45.9968491Z FAILED tests/test_static_ui.py::test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication`，原因是舊 fixture 仍要求程式含有 `engine?.detail`；`06:45:46.2399084 UTC` 程序 exit 1。沒有取得完整 pytest 數字摘要，因此不列未確認的通過／總數。
+- 該 run 最終為 FAILURE。JVM／APK 必要測試、Windows 與 secret scan 成功，Desktop Bridge 與其相依的 `ci-complete` 失敗；前面的 Ruff／瀏覽器通過不代表整個 run 成功。
+
+失敗原因已回查正式 `renderHealth`：健康狀態仍來自所選的實際 engine，已就緒的 engine 仍將 `engine.detail` 放在 tooltip；不可用的 engine 則改用 USB／CCAPI 的在地化復原說明。舊的 `engine?.detail` 字串僅出現在已移除的 raw-detail fallback，不能再代表目前行為。
+
+本次只更新該 static fixture：限制在 `renderHealth` 區塊，驗證真實 health engine 選擇、USB engine selector、ready 文案與 detail tooltip，以及 unavailable 分支的在地化說明；驗證 unavailable 分支不回復 raw detail。既有 API 路徑、token／密碼不持久化、安全警示與其他斷言保留。正式產品碼未改動。
+
+- `06:51:23.065923` 至 `06:51:25.000374 UTC`：使用 Python 標準函式庫直接執行 `test_static_ui.py` 既有 6 個無參數測試，全部通過，exit 0；未安裝 pytest、未匯入後端。
+- 此次檢查耗時 1.9345 秒，一個 CPU，128 MiB 虛擬位址上限；`ru_maxrss` 為 16,176 KiB。`git diff --check` 通過。
+- 本次檢查輸出 SHA-256：`bdfbb41938160dadafb06a7b5d8b50e89d4b082c482ddb6392fcb2be1c6a827b`。
+- 修正後的新 exact-head 全套 CI 尚未執行；本地單獨修正檢查不會覆蓋或改寫原 run 的 FAILURE。
 
 ## Release Assessment
 

@@ -397,7 +397,16 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "const viewfinderBounds = ui.viewfinder.getBoundingClientRect()" in script
     assert 'source: state.liveSource || "AUTO"' in script
     assert "CCAPI_RTP" in script
-    assert "engine?.detail" in script
+    # Health comes from the selected real engine; unavailable-engine recovery is
+    # localized. Behavioral readiness checks live in connection-guidance.test.js.
+    health_source = script.split("function renderHealth()", 1)[1].split("\n  function ", 1)[0]
+    assert "state.health.engines?.[engineName]" in health_source
+    assert "connectionGuidance.availableUsbEngine(state.health)" in health_source
+    ready_health, unavailable_health = health_source.split("if (engine?.available)", 1)[1].split("} else {", 1)
+    assert 't("bridgeReady", { engine: display })' in ready_health
+    assert 'ui.engineState.title = engine.detail || ""' in ready_health
+    assert 't(state.connectionMode === "ccapi" ? "connectionCcapiEngine" : "connectionUsbEngine")' in unavailable_health
+    assert "engine.detail" not in unavailable_health
     assert 'state.previewInput === "LOCAL_VIDEO"' in script
     assert "await localVideo.start(navigator.mediaDevices" in script
     assert "localVideo.stop(state.localVideoStream)" in script
