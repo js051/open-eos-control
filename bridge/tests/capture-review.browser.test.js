@@ -107,6 +107,36 @@ async function openPreview(page) {
   });
 }
 
+async function startForegroundImportAfterGallerySettles(page) {
+  // The fixture starts with exactly two old JPEGs. Finish their real gallery
+  // reads before the single Start gesture; lazy thumbnail admission can otherwise
+  // change the button's availability while that gesture is being delivered.
+  await page.waitForFunction(() => document.querySelector("#media-summary")?.dataset.loadStatus === "COMPLETE" &&
+    document.querySelectorAll("#media-list .media-thumbnail").length === 2);
+  assert.deepEqual((await page.locator("#media-list .media-copy strong").allTextContents()).sort(),
+    ["SYNTHETIC_OLD_A.JPG", "SYNTHETIC_OLD_B.JPG"]);
+  for (let index = 0; index < 2; index += 1) {
+    // Both cards need their own observation at the narrow 200% layout.
+    await page.locator("#media-list .media-thumbnail").nth(index).scrollIntoViewIfNeeded();
+    await page.waitForFunction((position) => {
+      const thumbnail = document.querySelectorAll("#media-list .media-thumbnail")[position];
+      const image = thumbnail?.querySelector("img");
+      return !thumbnail?.classList.contains("loading") && image?.complete &&
+        image.naturalWidth === 32 && image.naturalHeight === 24;
+    }, index);
+  }
+  await page.waitForFunction(() => {
+    const image = document.querySelector("#latest-media-thumbnail img");
+    return document.querySelector("#latest-media-label")?.textContent === "SYNTHETIC_OLD_A.JPG" &&
+      image?.complete && image.naturalWidth === 32 && image.naturalHeight === 24;
+  });
+  await page.locator("#media-auto-start").scrollIntoViewIfNeeded();
+  await page.waitForFunction(() => document.querySelector("#media-auto-start")?.disabled === false);
+  assert.equal(await page.evaluate(() => window.__batchPickerCalls), 0);
+  await page.click("#media-auto-start");
+  await page.waitForFunction(() => window.__batchPickerCalls === 1);
+}
+
 function filePlatform({ mode, delayWritable, pauseSecondWrite }) {
   if (mode === "blob") {
     Object.defineProperty(window, "showSaveFilePicker", { configurable: true, value: undefined });
@@ -827,7 +857,7 @@ for (const language of ["en", "zh-TW"]) {
       await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
       await page.click('.tab[data-view="media"]');
       assert.equal(await page.evaluate(() => window.__batchPickerCalls), 0);
-      await page.click("#media-auto-start");
+      await startForegroundImportAfterGallerySettles(page);
       await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "watching");
       assert.deepEqual(originalRequests, [], "Baseline files are never imported");
       assert.equal(await page.evaluate(() => window.__batchFiles.length), 0);
@@ -874,7 +904,7 @@ cases.push({
     await page.route(pattern, handler);
     routeCleanups.push(() => page.unroute(pattern, handler));
     await page.click('.tab[data-view="media"]');
-    await page.click("#media-auto-start");
+    await startForegroundImportAfterGallerySettles(page);
     await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "stopped");
     assert.deepEqual(originalRequests, []);
     assert.equal(infoRequests.filter((url) => new URL(url).searchParams.has("fresh")).length, 0);
@@ -888,7 +918,7 @@ cases.push({
   batch: { pauseFirstWrite: true },
   run: async ({ page, simulatorOrigin, originalRequests }) => {
     await page.click('.tab[data-view="media"]');
-    await page.click("#media-auto-start");
+    await startForegroundImportAfterGallerySettles(page);
     await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "watching");
     await configure(simulatorOrigin, { mode: "new-first" });
     await page.click('.tab[data-view="live"]');
@@ -979,6 +1009,20 @@ async function run() {
               unavailableHidden: document.querySelector("#media-preview-unavailable")?.hidden,
               image: image && { hidden: image.hidden, complete: image.complete,
                 width: image.naturalWidth, height: image.naturalHeight, hasSource: Boolean(image.getAttribute("src")) },
+              foregroundImport: {
+                phase: document.querySelector("#media-auto-panel")?.dataset.phase,
+                operation: document.querySelector("#media-auto-panel")?.dataset.operation,
+                status: document.querySelector("#media-auto-status")?.textContent,
+                reason: document.querySelector("#media-auto-import-reason")?.textContent,
+                startDisabled: document.querySelector("#media-auto-start")?.disabled,
+                pickerCalls: window.__batchPickerCalls,
+                galleryLoadStatus: document.querySelector("#media-summary")?.dataset.loadStatus,
+                thumbnails: Array.from(document.querySelectorAll("#media-list .media-thumbnail"), (thumbnail) => {
+                  const image = thumbnail.querySelector("img");
+                  return { id: thumbnail.dataset.mediaId, loading: thumbnail.classList.contains("loading"),
+                    image: image && { complete: image.complete, width: image.naturalWidth, height: image.naturalHeight } };
+                }),
+              },
             };
           });
           fs.writeFileSync(path.join(RESULTS_DIR, `capture-review-failure-${label}.json`),

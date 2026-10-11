@@ -697,6 +697,44 @@ test("visible return during latest-thumbnail work restores Start only after the 
   assert.equal(originalCalls(c).length, 0);
 });
 
+test("initial gallery thumbnail blocks Start until settlement, then one explicit gesture establishes the baseline", async () => {
+  const gate = deferred(), c = fixture({ thumbnailGate: gate });
+  vm.runInContext(extract("updateVisibleMediaThumbnail"), c.context);
+  c.context.renderMediaThumbnail = () => {};
+  const thumbnail = element();
+  thumbnail.dataset.mediaId = c.base.id;
+  c.ui.mediaList.children = [thumbnail];
+  c.context.renderMediaAutoImport();
+  assert.equal(c.ui.mediaAutoImportPanel.dataset.phase, "off");
+  assert.equal(c.ui.mediaAutoImportStart.disabled, false);
+  const pending = c.context.loadMediaThumbnail(c.base);
+  await c.entered.thumbnail.promise;
+  assert.equal(c.state.mediaThumbnailLoads.size, 1);
+  assert.equal(c.ui.mediaAutoImportStart.disabled, true);
+  await c.context.startMediaAutoImport();
+  assert.equal(c.calls.picker, 0, "The admission guard also refuses a call during gallery I/O");
+  assert.equal(c.state.mediaAutoImportOwner, null);
+  assert.equal(c.timers.size, 0);
+  assert.equal(originalCalls(c).length, 0);
+  gate.resolve();
+  await pending;
+  assert.equal(c.state.mediaThumbnailLoads.size, 0);
+  assert.equal(c.ui.mediaAutoImportStart.disabled, false);
+  assert.equal(c.ui.mediaAutoImportPanel.dataset.phase, "off");
+  assert.equal(c.calls.picker, 0, "Thumbnail settlement cannot open the picker or enable import itself");
+  assert.equal(c.state.mediaAutoImportOwner, null);
+  assert.equal(c.timers.size, 0);
+  const started = c.ui.mediaAutoImportStart.dispatch("click");
+  assert.equal(c.calls.picker, 1, "The one explicit gesture opens its picker synchronously");
+  await started;
+  await c.step(0);
+  await c.step(1000);
+  assert.equal(c.ui.mediaAutoImportPanel.dataset.phase, "watching");
+  assert.equal(c.calls.requests.filter(call => call.url.includes("inventory=strict")).length, 2);
+  assert.equal(c.calls.directories, 0);
+  assert.equal(originalCalls(c).length, 0);
+});
+
 test("grid thumbnail settlement refreshes stopped import Start without restarting it", async () => {
   const gate = deferred(), c = fixture({ thumbnailGate: gate });
   await c.baseline();
