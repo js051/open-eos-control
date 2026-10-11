@@ -41,6 +41,25 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertNil(Self.scrollDragOffset(target: .null, viewport: .infinite))
     }
 
+    func testCameraActionsScrollViewportExcludesFixedFooter() throws {
+        let window = CGRect(x: 0, y: 0, width: 874, height: 402)
+        let footer = CGRect(x: 100, y: 317, width: 674, height: 64)
+        let list = CGRect(x: 100, y: 60, width: 674, height: 257)
+        XCTAssertEqual(Self.cameraActionsScrollViewport(surface: list, window: window, footer: footer), list)
+        let clipped = try XCTUnwrap(Self.cameraActionsScrollViewport(
+            surface: CGRect(x: 100, y: 60, width: 674, height: 342), window: window, footer: footer
+        ))
+        XCTAssertEqual(clipped, list)
+        let start = CGPoint(x: clipped.midX, y: clipped.maxY - clipped.height * 0.1)
+        XCTAssertTrue(list.contains(start))
+        XCTAssertFalse(footer.contains(start))
+        // The failed full-window search began at y=361.8, inside this footer.
+        XCTAssertTrue(footer.contains(CGPoint(x: window.midX, y: window.height * 0.9)))
+        XCTAssertNil(Self.cameraActionsScrollViewport(surface: footer, window: window, footer: footer))
+        XCTAssertNil(Self.cameraActionsScrollViewport(surface: .null, window: window, footer: footer))
+        XCTAssertNil(Self.cameraActionsScrollViewport(surface: list, window: window, footer: .zero))
+    }
+
     func testOfflineBatchSelectionRemainsSeparateFromPreviewAndCannotFakeDownloads() throws {
         for (language, apple, locale, selected, notSelected) in [
             ("english", "en", "en_US", "Selected", "Not selected"),
@@ -1335,18 +1354,35 @@ final class OpenEOSControlUITests: XCTestCase {
     private func scrollToInteraction(
         _ element: XCUIElement,
         in app: XCUIApplication,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        cameraActions: Bool = false
     ) -> Bool {
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        var lastSurface = "not selected"
         while ProcessInfo.processInfo.systemUptime < deadline {
             let exists = element.exists
             if exists, element.isEnabled, element.isHittable { return true }
-            let scrollSurface = app.scrollViews.allElementsBoundByIndex.last {
-                $0.exists && $0.isHittable
+            let surface: XCUIElement
+            let surfaceFrame: CGRect
+            let viewport: CGRect
+            if cameraActions {
+                guard let selection = cameraActionsScrollSurface(in: app) else {
+                    lastSurface = "no visible action-list container"
+                    Thread.sleep(forTimeInterval: min(0.05, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
+                    continue
+                }
+                surface = selection.element
+                surfaceFrame = surface.frame
+                viewport = selection.viewport
+                lastSurface = "\(selection.kind) frame=\(surfaceFrame) viewport=\(viewport)"
+            } else {
+                let scrollSurface = app.scrollViews.allElementsBoundByIndex.last {
+                    $0.exists && $0.isHittable
+                }
+                surface = scrollSurface ?? app
+                surfaceFrame = surface.frame
+                viewport = surfaceFrame.intersection(app.frame)
             }
-            let surface = scrollSurface ?? app
-            let surfaceFrame = surface.frame
-            let viewport = surfaceFrame.intersection(app.frame)
             let targetFrame = exists ? element.frame : .null
             guard let offset = Self.scrollDragOffset(target: targetFrame, viewport: viewport) else {
                 // Visible but disabled/covered controls need state to settle;
@@ -1363,7 +1399,51 @@ final class OpenEOSControlUITests: XCTestCase {
             // the deadline and potentially passing a newly materialized cell.
             start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .default, thenHoldForDuration: 0.1)
         }
-        return element.exists && element.isEnabled && element.isHittable
+        let interactive = element.exists && element.isEnabled && element.isHittable
+        if cameraActions, !interactive {
+            let summary = "[OEC_CAMERA_ACTION_NAVIGATION] surface=\(lastSurface)"
+            print(summary)
+            let attachment = XCTAttachment(string: summary + "\n" + String(app.debugDescription.prefix(16_384)))
+            attachment.name = "camera-action-navigation-failure"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            addScreenshot(name: "camera-action-navigation-failure")
+        }
+        return interactive
+    }
+
+    private func cameraActionsScrollSurface(in app: XCUIApplication) -> (element: XCUIElement, viewport: CGRect, kind: String)? {
+        let footer = app.buttons["disconnect-menu-button"]
+        guard footer.exists else { return nil }
+        let footerFrame = footer.frame
+        let window = app.frame
+        let actionRows = NSPredicate(format: "identifier IN %@", [
+            "camera-media-menu-button", "focus-drive-menu-button", "monitoring-menu-button",
+            "more-settings-menu-button", "half-press-button", "debug-menu-button", "language-menu-button",
+        ])
+        // SwiftUI List can expose a collection/table rather than a ScrollView.
+        // Require an action row descendant; never choose an unrelated list or
+        // fall back to dragging the whole app through the fixed footer.
+        for (query, kind) in [(app.collectionViews, "collection"), (app.tables, "table"), (app.scrollViews, "scroll")] {
+            for candidate in query.containing(actionRows).allElementsBoundByIndex {
+                guard candidate.exists, candidate.isHittable,
+                      let viewport = Self.cameraActionsScrollViewport(surface: candidate.frame, window: window, footer: footerFrame)
+                else { continue }
+                return (candidate, viewport, kind)
+            }
+        }
+        return nil
+    }
+
+    private static func cameraActionsScrollViewport(surface: CGRect, window: CGRect, footer: CGRect) -> CGRect? {
+        guard [surface, window, footer].allSatisfy({ frame in
+            !frame.isNull && !frame.isInfinite && !frame.isEmpty
+                && [frame.minX, frame.minY, frame.maxX, frame.maxY].allSatisfy { $0.isFinite }
+        }), footer.minY > window.minY else { return nil }
+        let aboveFooter = CGRect(x: window.minX, y: window.minY, width: window.width, height: footer.minY - window.minY)
+        let viewport = surface.intersection(window).intersection(aboveFooter)
+        guard viewport.width >= 44, viewport.height >= 44 else { return nil }
+        return viewport
     }
 
     private static func scrollDragOffset(target: CGRect, viewport: CGRect) -> CGFloat? {
@@ -1488,7 +1568,7 @@ final class OpenEOSControlUITests: XCTestCase {
     }
 
     private func tapCameraActionForAsyncTest(_ element: XCUIElement, in app: XCUIApplication) throws -> Bool {
-        guard scrollToInteraction(element, in: app, timeout: 8) else {
+        guard scrollToInteraction(element, in: app, timeout: 8, cameraActions: true) else {
             XCTFail("The requested camera action did not become interactive")
             return false
         }
@@ -1632,7 +1712,7 @@ final class OpenEOSControlUITests: XCTestCase {
 
     @discardableResult
     private func tapCameraAction(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
-        guard scrollToInteraction(element, in: app, timeout: 8) else {
+        guard scrollToInteraction(element, in: app, timeout: 8, cameraActions: true) else {
             XCTFail("The requested camera action did not become interactive")
             return false
         }
