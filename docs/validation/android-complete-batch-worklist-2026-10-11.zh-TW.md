@@ -35,3 +35,11 @@
 ## Android 完整交付群組準備
 
 2026-10-11 13:29 UTC：worklist已保存本地commit `16e76e27f2cf931dd918727c962bbfdb6d5da21b`；本次與USB storage重建commit `525d99f5801f566f3ec7fdc08b653aa034766b5a` 合成23檔獨立候選，路徑無重疊且同基底，不混PC／iOS或diagnostic workflow。上述原「另列待重建」是早期狀態，USB已完成來源重建，但不能繼承原遺失候選驗證。工具恢復不等於編譯成功：原AGP解析Network unreachable，Kotlin/JUnit/Android仍NOT_RUN。正常CI的API34／36含sudo udev KVM權限變更，未取得本批批准前不觸發；新draft亦待當次明確答覆。
+
+## 首次正常 CI 及 nullable fixture 修正
+
+PR240 head `2e19c7d4b3022f2d373c2fd636dde75fa17068d0`、run `38144341957` 已完整 FAILURE。原 API34／API36 instrumented suite 各358項通過、0 failures／0 skipped；原 log 分別14:21:57、14:23:54 BUILD SUCCESSFUL。這證明該head production／instrumented Kotlin編譯與該兩個合成emulator完整suite，不能替代實體USB／EOS／真provider驗收。
+
+JVM job在 `compileDebugUnitTestKotlin` 失敗，尚未執行JUnit：`UsbPtpStorageOwnershipTest.kt` 的3處Boolean?誤傳assertTrue／assertFalse。修正為 `assertEquals(true/false, actual)`，明確要求true或false，null仍失敗，不用預設false弱化語意；其他取消／owner／命令數／cache檢查不變。獨立來源review確認JUnit Object overload，尚須修正head的完整正常CI。
+
+以上早期NOT_RUN／工具與批准待答文字保留為來源準備歷史；13:34已取得本批新draft及既有臨時runner KVM執行批准，首次CI結果如上。Lint與實體機仍未驗，原失敗不得改列通過；新版不能繼承旧head的358項结果。

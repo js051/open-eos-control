@@ -190,7 +190,7 @@ class UsbPtpStorageOwnershipTest {
         val backend = backend(wire)
         backend.initialize()
         val successful = backend.status()
-        assertTrue(successful.mediaAvailable)
+        assertEquals(true, successful.mediaAvailable)
         assertEquals(1, successful.storageDeviceCount)
         assertEquals(1_048_576L, successful.storageTotalBytes)
         assertEquals(524_288L, successful.storageFreeBytes)
@@ -200,7 +200,7 @@ class UsbPtpStorageOwnershipTest {
 
         wire.rejection = PtpOperationCode.GET_STORAGE_INFO to PtpResponseCode.DEVICE_BUSY
         val rejected = backend.status()
-        assertFalse(rejected.mediaAvailable)
+        assertEquals(false, rejected.mediaAvailable)
         assertEquals(0, rejected.storageDeviceCount)
         assertNull(rejected.storageTotalBytes)
         assertTrue(rejected.rawStorageJson.contains("DeviceBusy"))
@@ -229,7 +229,7 @@ class UsbPtpStorageOwnershipTest {
         backend.initialize()
         val status = backend.status()
         val capabilities = backend.capabilities()
-        assertFalse(status.mediaAvailable)
+        assertEquals(false, status.mediaAvailable)
         assertEquals(0, status.storageDeviceCount)
         assertEquals("[]", status.rawStorageJson)
         assertFalse(capabilities.matrix.supports(CameraFeature.STORAGE_STATUS))
