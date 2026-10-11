@@ -22,6 +22,7 @@
 
   const mediaTransferHistory = globalThis.OpenEOSMediaTransferHistory;
   const mediaHistoryStore = mediaTransferHistory?.createHistoryStore();
+  const mediaAutoImport = globalThis.OpenEOSMediaAutoImport;
 
   const FEATURES = {
     RECORDABLE_STATUS: "RECORDABLE_STATUS",
@@ -484,6 +485,41 @@
       mediaBatchNotStarted: "Not started",
       mediaBatchFinished: "Batch finished. Review the per-file results.",
       mediaBatchStopped: "Batch stopped. Saved files are retained.",
+      mediaAutoImportTitle: "Foreground JPEG auto-import",
+      mediaAutoImportStart: "Enable JPEG import to folder…",
+      mediaAutoImportStop: "Stop JPEG import",
+      mediaAutoImportPurpose: "Choose a folder to save new JPEGs while this tab stays visible. Existing photos, RAW and video are excluded.",
+      mediaAutoImportHelp: "Limits and file verification",
+      mediaAutoImportEvidence: "Two matching complete CCAPI inventories establish the existing files. Only JPEG identities observed afterward are considered; this does not prove which device or app took the photo. Each pending JPEG needs two fresh matching positive byte sizes at least one second apart. A single original request must match that size exactly before the browser confirms file close. Camera timestamps and capture events are not proof of a completed file.",
+      mediaAutoImportLimits: "CCAPI with media browsing and downloads only; unavailable during recording or Bulb. Foreground only, with a complete inventory about every 5 seconds. Limits: 1,000 entries per inventory, 4,096 known identities, 20 pending JPEGs, 30 seconds to confirm each file, and the latest 100 results. Manual camera work takes priority between reads.",
+      mediaAutoImportNotice: "Stop, hiding this tab, leaving the page, disconnecting, or losing support ends this run; returning does not restart it. A read or file close already in progress may still finish, and Bridge camera reads may continue after browser cancellation. Partial files or an empty folder may remain. Check the destination before retrying. Folder access is chosen each time and is never restored automatically.",
+      mediaAutoImportUnavailable: "Auto-import needs folder access and secure UUID support in this browser. Single-file manual downloads remain available.",
+      mediaAutoImportSummary: "{saved} saved · {pending} pending · {known} known identities · {results} recent results (maximum 100)",
+      mediaAutoImportOff: "Off. Enable explicitly to begin a new run.",
+      mediaAutoImportChoosing: "Choose a folder. No camera inventory or output folder has started yet.",
+      mediaAutoImportBaseline: "Confirming the existing-file baseline; existing photos will not be imported.",
+      mediaAutoImportWatching: "Enabled while this page is visible. Waiting for new, stable JPEG files and yielding to manual work.",
+      mediaAutoImportInventory: "Reading a complete camera inventory…",
+      mediaAutoImportMetadata: "Checking a pending JPEG's fresh size…",
+      mediaAutoImportSaving: "Saving one verified JPEG original…",
+      mediaAutoImportStopping: "Stopping. An active read or file close may still finish; no later files will start.",
+      mediaAutoImportStopped: "Stopped. Review saved and uncertain results before starting a new run.",
+      mediaAutoImportUserStopped: "Stopped by you. Starting again creates a new baseline.",
+      mediaAutoImportBackgrounded: "The page left the foreground. Enable again to start a new run.",
+      mediaAutoImportDisconnected: "The owning camera session ended. Enable again after connecting.",
+      mediaAutoImportCameraUnavailable: "CCAPI support changed, recording started, or Bulb became active. This run has stopped.",
+      mediaAutoImportBaselineChanged: "The two baseline inventories differed. No existing files were imported; wait for the camera to settle and enable again.",
+      mediaAutoImportLimit: "An inventory, identity, or pending-file limit was reached. Review the destination and enable again only when ready.",
+      mediaAutoImportDisappeared: "A pending JPEG disappeared from the complete inventory. Its result is unconfirmed.",
+      mediaAutoImportMetadataDeadline: "A pending JPEG did not obtain stable fresh size evidence within 30 seconds. It was not saved.",
+      mediaAutoImportInventoryUnavailable: "The Bridge could not confirm a complete bounded inventory. Import stopped without trusting a partial or legacy response.",
+      mediaAutoImportMetadataUnavailable: "Fresh matching metadata could not be confirmed. No original was requested for this candidate.",
+      mediaAutoImportUnconfirmed: "The save result is unconfirmed. Inspect the destination; do not assume the camera read was cancelled.",
+      mediaAutoImportFailed: "The original request or save failed. Inspect any partial file before retrying.",
+      mediaAutoImportDestinationUnavailable: "The selected folder could not be prepared. Enable again to choose a writable folder.",
+      mediaAutoImportUnknown: "Import stopped for an unrecognized reason ({reason}). Inspect the destination before retrying.",
+      mediaAutoImportProtocol: "Required strict Bridge response evidence is unavailable or inconsistent.",
+      mediaAutoImportBusy: "Manual camera work has priority.",
 
       manageMedia: "Manage {name}",
       mediaDetails: "Media details",
@@ -974,6 +1010,41 @@
       mediaBatchNotStarted: "未開始",
       mediaBatchFinished: "批次已結束，請查看各檔案結果。",
       mediaBatchStopped: "批次已停止，已儲存檔案會保留。",
+      mediaAutoImportTitle: "前景 JPEG 自動匯入",
+      mediaAutoImportStart: "啟用 JPEG 匯入並選擇資料夾…",
+      mediaAutoImportStop: "停止 JPEG 匯入",
+      mediaAutoImportPurpose: "選擇資料夾，在此分頁保持可見時儲存新增的 JPEG；排除既有照片、RAW 與影片。",
+      mediaAutoImportHelp: "限制與檔案確認",
+      mediaAutoImportEvidence: "以兩次相同的完整 CCAPI 清單建立既有檔案基準，只處理之後新出現的 JPEG 識別碼；這不代表已確認由哪個裝置或程式拍攝。每個待處理 JPEG 必須取得至少相隔一秒、大小相同且大於零的兩次即時中繼資料。原檔只請求一次，且位元組數必須完全符合後才關閉檔案；瀏覽器確認 close 才標示已儲存。時間戳與拍攝事件不代表檔案已完成。",
+      mediaAutoImportLimits: "限支援媒體瀏覽及下載的 CCAPI 連線，錄影或 Bulb 期間不可用。只在前景執行，完整清單約每 5 秒一次。上限：每次清單 1,000 筆、已知識別碼 4,096 筆、待處理 JPEG 20 筆、每檔確認期限 30 秒、最近結果 100 筆。每次讀取之間優先讓手動操作執行。",
+      mediaAutoImportNotice: "停止、切到背景、離開頁面、斷線或失去支援都會結束本輪，回到頁面不會自動重啟。已開始的讀取或檔案關閉仍可能完成；瀏覽器取消後，Bridge 相機讀取仍可能繼續。可能留有不完整檔案或空資料夾，重試前請檢查目的地。每次都需重新選擇資料夾，不會自動還原存取權限。",
+      mediaAutoImportUnavailable: "自動匯入需要瀏覽器支援資料夾存取與安全 UUID；仍可手動逐一下載原檔。",
+      mediaAutoImportSummary: "已儲存 {saved} · 待處理 {pending} · 已知識別碼 {known} · 最近結果 {results}（最多 100）",
+      mediaAutoImportOff: "未啟用。請明確啟用以開始新的一輪。",
+      mediaAutoImportChoosing: "請選擇資料夾。目前尚未讀取相機清單或建立輸出資料夾。",
+      mediaAutoImportBaseline: "正在確認既有檔案基準，不會匯入既有照片。",
+      mediaAutoImportWatching: "頁面可見時持續啟用，等待新增且穩定的 JPEG，並讓手動操作優先。",
+      mediaAutoImportInventory: "正在讀取相機完整清單…",
+      mediaAutoImportMetadata: "正在檢查待處理 JPEG 的即時大小…",
+      mediaAutoImportSaving: "正在儲存一個已確認的 JPEG 原檔…",
+      mediaAutoImportStopping: "正在停止。進行中的讀取或檔案關閉仍可能完成，不會開始後續檔案。",
+      mediaAutoImportStopped: "已停止。重新啟用前請查看已儲存及結果不確定的項目。",
+      mediaAutoImportUserStopped: "已依您的操作停止。再次啟用會建立新的基準。",
+      mediaAutoImportBackgrounded: "頁面已離開前景。需要重新啟用才能開始新的一輪。",
+      mediaAutoImportDisconnected: "本輪所屬相機連線已結束。重新連線後需再次啟用。",
+      mediaAutoImportCameraUnavailable: "CCAPI 支援改變、開始錄影或 Bulb 已啟動，本輪已停止。",
+      mediaAutoImportBaselineChanged: "兩次基準清單不同，未匯入既有檔案。請待相機穩定後重新啟用。",
+      mediaAutoImportLimit: "已達清單、識別碼或待處理檔案上限。檢查目的地並準備好後再重新啟用。",
+      mediaAutoImportDisappeared: "待處理 JPEG 已從完整清單消失，其結果未確認。",
+      mediaAutoImportMetadataDeadline: "待處理 JPEG 未在 30 秒內取得穩定的即時大小證據，未儲存該檔案。",
+      mediaAutoImportInventoryUnavailable: "Bridge 無法確認有界限的完整清單，已停止匯入，不會信任部分清單或舊版回應。",
+      mediaAutoImportMetadataUnavailable: "無法確認最新且相符的中繼資料，未請求此候選檔案的原檔。",
+      mediaAutoImportUnconfirmed: "儲存結果未確認，請檢查目的地；不可假定相機讀取已取消。",
+      mediaAutoImportFailed: "原檔請求或儲存失敗。重試前請檢查可能留下的不完整檔案。",
+      mediaAutoImportDestinationUnavailable: "無法準備選定的資料夾，請重新啟用並選擇可寫入的資料夾。",
+      mediaAutoImportUnknown: "因未識別的原因（{reason}）停止匯入，重試前請檢查目的地。",
+      mediaAutoImportProtocol: "缺少必要的嚴格 Bridge 回應證據，或證據不一致。",
+      mediaAutoImportBusy: "手動相機操作優先。",
 
       manageMedia: "管理 {name}",
       mediaDetails: "媒體詳細資料",
@@ -1287,6 +1358,10 @@
     mediaSelection: mediaBatch.createSelection(),
     mediaBatchOwner: null,
     mediaBatch: null,
+    mediaAutoImportOwner: null,
+    mediaAutoImportReading: null,
+    mediaAutoImport: null,
+    mediaAutoImportThumbnailsDeferred: false,
     mediaLoaded: false,
     mediaLoadStatus: "NOT_LOADED",
     mediaRefreshPromise: null,
@@ -1502,6 +1577,15 @@
     mediaBatchList: byId("media-batch-list"),
     mediaBatchCancel: byId("media-batch-cancel"),
     mediaBatchNotice: byId("media-batch-notice"),
+    mediaAutoImportPanel: byId("media-auto-panel"),
+    mediaAutoImportStart: byId("media-auto-start"),
+    mediaAutoImportStop: byId("media-auto-stop"),
+    mediaAutoImportStatus: byId("media-auto-status"),
+    mediaAutoImportDestination: byId("media-auto-import-destination"),
+    mediaAutoImportSummary: byId("media-auto-import-summary"),
+    mediaAutoImportReason: byId("media-auto-import-reason"),
+    mediaAutoImportList: byId("media-auto-list"),
+    mediaAutoImportUnavailable: byId("media-auto-import-unavailable"),
     mediaHistoryDialog: byId("media-history-dialog"),
     mediaHistoryList: byId("media-history-list"),
     mediaHistoryStatus: byId("media-history-status"),
@@ -1629,7 +1713,7 @@
 
   async function api(
     path,
-    { method = "GET", json, responseType = "json", keepalive = false, signal = null } = {},
+    { method = "GET", json, responseType = "json", keepalive = false, signal = null, redirect = "follow" } = {},
   ) {
     const headers = new Headers();
     if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
@@ -1643,6 +1727,7 @@
         cache: "no-store",
         keepalive,
         signal,
+        redirect,
       });
     } catch (error) {
       if (mediaTransfer.isAbortError(error)) throw error;
@@ -1948,6 +2033,7 @@
 
   async function disconnectCamera() {
     if (!state.session) return;
+    if (typeof stopMediaAutoImport === "function") stopMediaAutoImport("disconnected");
     const sessionId = state.session.id;
     const hadBulbResponsibility = bulbControlLocked();
     let disconnectError = null;
@@ -1984,6 +2070,7 @@
   }
 
   function resetSession() {
+    if (typeof stopMediaAutoImport === "function") stopMediaAutoImport("session-retired");
     state.refreshGeneration += 1;
     stopLiveLoop();
     stopLocalVideo({ announce: false });
@@ -2010,6 +2097,10 @@
     state.mediaSelection?.replaceLoaded([]);
     state.mediaBatchOwner = null;
     state.mediaBatch = null;
+    state.mediaAutoImportOwner = null;
+    state.mediaAutoImport = null;
+    state.mediaAutoImportThumbnailsDeferred = false;
+    // An in-flight owner's reservation is released only when its operation settles.
     state.mediaFolderFilter = { kind: "all" };
     state.mediaFolderDialogSession = null;
     state.mediaFolderDraftChoices = [];
@@ -2127,7 +2218,7 @@
   }
 
   function cameraInteractionBusy() {
-    return state.busy || mediaTransferActive();
+    return state.busy || mediaTransferActive() || Boolean(state.mediaAutoImportReading);
   }
 
   function beginCameraInteraction() {
@@ -3349,7 +3440,20 @@
   }
 
   async function loadLatestMediaThumbnail(item, generation, rawSessionId, signal) {
+    const session = state.session;
     try {
+      if (session?.id !== rawSessionId || generation !== state.latestMediaGeneration ||
+          state.latestMediaItem?.id !== item.id || signal?.aborted) return;
+      // Capture review normally owns a busy promise already. If it reaches this
+      // stage during an older import read, wait for that reservation, not a timer.
+      while (state.mediaAutoImportReading) {
+        const reservation = state.mediaAutoImportReading;
+        if (!reservation.readSettled) return;
+        await reservation.readSettled;
+        if (state.session !== session || generation !== state.latestMediaGeneration || signal?.aborted) return;
+      }
+      if (state.session !== session || generation !== state.latestMediaGeneration ||
+          state.latestMediaItem?.id !== item.id || signal?.aborted) return;
       const blob = await api(
         `/v1/session/${encodeURIComponent(rawSessionId)}/media/${encodeURIComponent(item.id)}/thumbnail`,
         { responseType: "blob", signal },
@@ -3359,7 +3463,7 @@
       }
       if (
         generation !== state.latestMediaGeneration ||
-        state.session?.id !== rawSessionId ||
+        state.session !== session || state.session?.id !== rawSessionId ||
         state.latestMediaItem?.id !== item.id
       ) return;
       state.latestMediaThumbnailUrl = URL.createObjectURL(blob);
@@ -3368,7 +3472,7 @@
     } finally {
       if (
         generation === state.latestMediaGeneration &&
-        state.session?.id === rawSessionId &&
+        state.session === session && state.session?.id === rawSessionId &&
         state.latestMediaItem?.id === item.id
       ) {
         state.latestMediaThumbnailLoading = false;
@@ -3378,6 +3482,7 @@
   }
 
   function renderLatestMedia() {
+    if (typeof renderMediaAutoImport === "function") renderMediaAutoImport();
     const button = ui.latestMediaButton;
     if (!button) return;
     const supported = Boolean(state.session) && featureSupported(FEATURES.MEDIA_BROWSER);
@@ -4707,6 +4812,9 @@
   }
 
   function renderAvailability() {
+    if (state.mediaAutoImportOwner && !state.mediaAutoImportOwner.cancelled && !mediaAutoImportEligible()) {
+      stopMediaAutoImport("camera-unavailable");
+    }
     ui.shutterDisconnectWarning.hidden = !state.shutterDisconnectWarning;
     const connected = Boolean(state.session);
     const warningHost = connected ? ui.shutterButton.parentElement : ui.connectionError.parentElement;
@@ -4835,6 +4943,7 @@
     renderMediaTransfer();
     renderLatestMedia();
     renderMediaDetails();
+    if (state.mediaAutoImportThumbnailsDeferred && !cameraInteractionBusy()) retryMediaAutoImportThumbnails();
   }
 
   function setOperationState(message, error = false) {
@@ -5381,6 +5490,346 @@
     renderMediaBatch();
   }
 
+  function mediaAutoImportEligible() {
+    return Boolean(state.session?.engine === "ccapi" &&
+      featureSupported(FEATURES.MEDIA_BROWSER) && featureSupported(FEATURES.MEDIA_DOWNLOAD) &&
+      !state.status?.recording && !bulbControlLocked());
+  }
+
+  function ownsMediaAutoImport(owner) {
+    return state.mediaAutoImportOwner === owner && state.session === owner.session;
+  }
+
+  function mediaAutoImportManualBusy(owner) {
+    return Boolean(state.busy || mediaTransferActive() || state.mediaRefreshPromise ||
+      state.mediaLoadStatus === "LOADING" || state.latestMediaRefreshPromise ||
+      state.latestMediaThumbnailLoading || state.mediaPreviewItem || state.mediaDetailsBusy ||
+      state.mediaThumbnailLoads?.size || (state.mediaAutoImportReading && state.mediaAutoImportReading !== owner));
+  }
+
+  function assertMediaAutoImportCurrent(owner) {
+    if (!ownsMediaAutoImport(owner) || owner.cancelled || owner.controller.signal.aborted ||
+        document.visibilityState !== "visible" || !mediaAutoImportEligible()) {
+      throw mediaTransfer.cancellationError();
+    }
+  }
+
+  async function withMediaAutoImportRead(owner, work) {
+    assertMediaAutoImportCurrent(owner);
+    if (mediaAutoImportManualBusy(owner)) throw new Error(t("mediaAutoImportBusy"));
+    let releaseRead;
+    owner.readSettled = new Promise((resolve) => { releaseRead = resolve; });
+    state.mediaAutoImportReading = owner;
+    try {
+      renderAvailability();
+      renderMediaPreviewNavigation();
+      assertMediaAutoImportCurrent(owner);
+      return await work();
+    } finally {
+      releaseRead();
+      if (state.mediaAutoImportReading === owner) {
+        state.mediaAutoImportReading = null;
+        // Release only this reservation, then refresh the current connection's
+        // controls. A retired owner never publishes its old view or history.
+        renderAvailability();
+        renderMediaPreviewNavigation();
+      }
+    }
+  }
+
+  function requireMediaAutoImportResponse(response, header, value) {
+    if (response.status !== 200 || response.redirected || response.headers.get("content-range") !== null ||
+        response.headers.get(header) !== value) {
+      throw new Error(t("mediaAutoImportProtocol"));
+    }
+  }
+
+  async function readMediaAutoImportInventory(owner, { signal, limit }) {
+    return withMediaAutoImportRead(owner, async () => {
+      const response = await api(`/v1/session/${encodeURIComponent(owner.session.id)}/media?inventory=strict&limit=${limit}`, {
+        responseType: "response", signal, redirect: "error",
+      });
+      assertMediaAutoImportCurrent(owner);
+      requireMediaAutoImportResponse(response, "X-Open-EOS-Inventory", "complete-v1");
+      const data = await response.json();
+      assertMediaAutoImportCurrent(owner);
+      return { complete: true, items: data.items };
+    });
+  }
+
+  async function readMediaAutoImportMetadata(owner, item, { signal }) {
+    return withMediaAutoImportRead(owner, async () => {
+      const response = await api(`/v1/session/${encodeURIComponent(owner.session.id)}/media/${encodeURIComponent(item.id)}/info?fresh=true`, {
+        responseType: "response", signal, redirect: "error",
+      });
+      assertMediaAutoImportCurrent(owner);
+      requireMediaAutoImportResponse(response, "X-Open-EOS-Fresh-Metadata", "v1");
+      const updated = await response.json();
+      assertMediaAutoImportCurrent(owner);
+      return { fresh: true, item: updated };
+    });
+  }
+
+  async function mediaAutoImportHistoryCall(owner, operation, ...args) {
+    let result;
+    try {
+      result = mediaHistoryStore && typeof mediaHistoryStore[operation] === "function"
+        ? await mediaHistoryStore[operation](...args) : { ok: false, code: "unavailable" };
+    } catch (_) { result = { ok: false, code: "unavailable" }; }
+    if (ownsMediaAutoImport(owner) && !result?.ok && !["stale-ticket", "missing-receipt"].includes(result?.code)) {
+      mediaHistoryWarning = true;
+      try {
+        document.querySelectorAll("[data-media-history-warning]").forEach((node) => {
+          node.hidden = false;
+          node.textContent = t("mediaHistoryWarning");
+        });
+      } catch (_) { /* Optional history rendering never changes a close receipt. */ }
+    }
+    return result || { ok: false, code: "unavailable" };
+  }
+
+  async function transferMediaAutoImportItem(owner, item, { signal, expectedBytes }) {
+    return withMediaAutoImportRead(owner, async () => {
+      const destination = owner.destination;
+      const index = owner.nextFileIndex++;
+      let writable = null, closed = false, historyReceipt = null;
+      try {
+        assertMediaAutoImportCurrent(owner);
+        if (!Number.isSafeInteger(expectedBytes) || expectedBytes <= 0 || expectedBytes !== item.sizeBytes) {
+          throw new Error(t("mediaAutoImportProtocol"));
+        }
+        if (!owner.historyStarted) {
+          owner.historyStarted = true;
+          const history = await mediaAutoImportHistoryCall(owner, "createBatchTicket");
+          owner.historyTicket = history.ok ? history.ticket : null;
+        }
+        assertMediaAutoImportCurrent(owner);
+        if (owner.historyTicket) {
+          const history = await mediaAutoImportHistoryCall(owner, "startAttempt", owner.historyTicket, { filename: item.name, destination: "browser-directory" });
+          historyReceipt = history.ok ? history.receipt : null;
+        }
+        assertMediaAutoImportCurrent(owner);
+        const file = await destination.open(item, index);
+        writable = file.writable;
+        assertMediaAutoImportCurrent(owner);
+        const response = await api(`/v1/session/${encodeURIComponent(owner.session.id)}/media/${encodeURIComponent(item.id)}?attempt=single`, {
+          responseType: "response", signal, redirect: "error",
+        });
+        assertMediaAutoImportCurrent(owner);
+        requireMediaAutoImportResponse(response, "X-Open-EOS-Original-Attempt", "single-v1");
+        const contentLength = response.headers.get("content-length");
+        if (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) !== expectedBytes)) {
+          throw mediaTransfer.lengthMismatchError(expectedBytes, Number(contentLength));
+        }
+        // The independently observed stable size is authoritative, even when an
+        // older proxy supplies a different Content-Length or no length at all.
+        let received = 0;
+        const result = await mediaTransfer.readResponse(response, {
+          signal, expectedBytes,
+          writeChunk: async (chunk) => {
+            assertMediaAutoImportCurrent(owner);
+            if (chunk.byteLength > expectedBytes - received) {
+              throw mediaTransfer.lengthMismatchError(expectedBytes, received + chunk.byteLength);
+            }
+            await writable.write(chunk);
+            received += chunk.byteLength;
+            assertMediaAutoImportCurrent(owner);
+          },
+        });
+        if (received !== expectedBytes || result.bytesTransferred !== expectedBytes) {
+          throw mediaTransfer.lengthMismatchError(expectedBytes, received);
+        }
+        assertMediaAutoImportCurrent(owner);
+        await writable.close();
+        closed = true;
+        if (historyReceipt) await mediaAutoImportHistoryCall(owner, "finishAttempt", historyReceipt, {
+          outcome: "completed", mayRemain: false, outcomeUnknown: false, bytesTransferred: received,
+        });
+        // A successful close remains a receipt after Stop or session retirement.
+        return { completed: true, bytesTransferred: received, name: file.name };
+      } catch (error) {
+        let cleanupError = null;
+        if (writable && !closed) {
+          try { await writable.abort(error); } catch (failure) { cleanupError = failure; }
+        }
+        const file = destination.snapshot().files.find((entry) => entry.index === index);
+        const unknown = Boolean(cleanupError || file?.outcomeUnknown);
+        if (historyReceipt) await mediaAutoImportHistoryCall(owner, "finishAttempt", historyReceipt, {
+          outcome: unknown || owner.cancelled || mediaTransfer.isAbortError(error) ? "cancelled-or-unknown" : "failed",
+          mayRemain: Boolean(file && !closed), outcomeUnknown: unknown,
+        });
+        if (unknown) {
+          const failure = new Error(error?.message || String(error));
+          failure.name = error?.name || "Error";
+          failure.cause = error;
+          failure.outcomeUnknown = true;
+          throw failure;
+        }
+        throw error;
+      } finally {
+        if (ownsMediaAutoImport(owner)) owner.view.destination = destination.snapshot();
+        if (ownsMediaAutoImport(owner) && ui.mediaHistoryDialog?.open) void refreshMediaHistory().catch(() => {});
+      }
+    });
+  }
+
+  function finishMediaAutoImportOwner(owner) {
+    if (!ownsMediaAutoImport(owner) || owner.choosing || owner.running || state.mediaAutoImportReading === owner) return;
+    if (!owner.cancelled && owner.policy?.snapshot().phase !== "stopped") return;
+    if (owner.timer !== null) window.clearTimeout(owner.timer);
+    owner.timer = null;
+    owner.controller.abort();
+    state.mediaAutoImportOwner = null;
+    renderMediaAutoImport();
+    renderAvailability();
+  }
+
+  function scheduleMediaAutoImport(owner) {
+    if (!ownsMediaAutoImport(owner) || owner.cancelled || owner.timer !== null || owner.running) return;
+    // The policy owns the 5-second inventory cadence. This foreground scheduler
+    // only offers sequential steps, at least one second apart, without event fanout.
+    owner.timer = window.setTimeout(() => {
+      owner.timer = null;
+      void stepMediaAutoImport(owner);
+    }, 1000);
+  }
+
+  async function stepMediaAutoImport(owner) {
+    if (!ownsMediaAutoImport(owner) || owner.cancelled || owner.running) return;
+    if (document.visibilityState !== "visible" || !mediaAutoImportEligible()) {
+      stopMediaAutoImport(document.visibilityState !== "visible" ? "backgrounded" : "camera-unavailable");
+      return;
+    }
+    owner.running = true;
+    try {
+      await owner.policy.step();
+    } finally {
+      owner.running = false;
+      if (ownsMediaAutoImport(owner)) {
+        owner.view.snapshot = owner.policy.snapshot();
+        renderMediaAutoImport();
+        finishMediaAutoImportOwner(owner);
+        scheduleMediaAutoImport(owner);
+      }
+    }
+  }
+
+  async function startMediaAutoImport() {
+    if (!mediaAutoImport || !mediaAutoImportEligible() || document.visibilityState !== "visible" ||
+        state.mediaAutoImportOwner || mediaAutoImportManualBusy(null)) return;
+    if (typeof window.showDirectoryPicker !== "function" || typeof globalThis.crypto?.randomUUID !== "function") return;
+    const owner = { session: state.session, controller: new AbortController(), cancelled: false,
+      choosing: true, running: false, timer: null, policy: null, destination: null, nextFileIndex: 0,
+      view: { destinationName: "", destination: null, snapshot: { phase: "choosing", reason: null, completed: 0, pendingCount: 0, knownCount: 0, results: [] } } };
+    state.mediaAutoImportOwner = owner;
+    state.mediaAutoImport = owner.view;
+    renderMediaAutoImport();
+    try {
+      // Must be invoked in the initiating click task, before any awaited work.
+      const directoryHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+      assertMediaAutoImportCurrent(owner);
+      owner.destination = mediaBatchDestination.createDirectoryBatchDestination({ directoryHandle,
+        nonce: globalThis.crypto.randomUUID(), safeDownloadName: mediaTransfer.safeDownloadName,
+        signal: owner.controller.signal, isCurrent: () => ownsMediaAutoImport(owner),
+      });
+      owner.view.destination = owner.destination.snapshot();
+      owner.view.destinationName = `${directoryHandle.name} / ${owner.view.destination.batchName}`;
+      owner.policy = mediaAutoImport.createController({
+        inventory: (options) => readMediaAutoImportInventory(owner, options),
+        metadata: (item, options) => readMediaAutoImportMetadata(owner, item, options),
+        transfer: (item, options) => transferMediaAutoImportItem(owner, item, options),
+        isCurrent: () => ownsMediaAutoImport(owner),
+        isForeground: () => document.visibilityState === "visible" && mediaAutoImportEligible(),
+        isBusy: () => mediaAutoImportManualBusy(owner),
+        now: () => performance.now(),
+        onUpdate: (snapshot) => {
+          if (!ownsMediaAutoImport(owner)) return;
+          owner.view.snapshot = snapshot;
+          renderMediaAutoImport();
+        },
+      });
+      owner.view.snapshot = owner.policy.snapshot();
+    } catch (error) {
+      if (!ownsMediaAutoImport(owner)) return;
+      owner.cancelled = true;
+      owner.view.snapshot = { ...owner.view.snapshot, phase: "stopped",
+        reason: owner.view.snapshot.reason || (mediaTransfer.isAbortError(error) ? "user-stopped" : "destination-unavailable") };
+    } finally {
+      owner.choosing = false;
+      if (ownsMediaAutoImport(owner)) {
+        renderMediaAutoImport();
+        finishMediaAutoImportOwner(owner);
+        scheduleMediaAutoImport(owner);
+      }
+    }
+  }
+
+  function stopMediaAutoImport(reason = "user-stopped") {
+    const owner = state.mediaAutoImportOwner;
+    if (!owner || !ownsMediaAutoImport(owner)) return;
+    owner.cancelled = true;
+    if (owner.timer !== null) window.clearTimeout(owner.timer);
+    owner.timer = null;
+    owner.controller.abort();
+    owner.view.snapshot = owner.policy ? owner.policy.stop(reason) : {
+      ...owner.view.snapshot, phase: owner.choosing ? "stopping" : "stopped", reason,
+    };
+    renderMediaAutoImport();
+    finishMediaAutoImportOwner(owner);
+  }
+
+  function renderMediaAutoImport() {
+    if (!ui.mediaAutoImportPanel) return;
+    const owner = state.mediaAutoImportOwner;
+    const view = state.mediaAutoImport;
+    const snapshot = view?.snapshot;
+    ui.mediaAutoImportPanel.dataset.phase = snapshot?.phase || "off";
+    ui.mediaAutoImportPanel.dataset.operation = snapshot?.operation || "";
+    const available = Boolean(mediaAutoImport && typeof window.showDirectoryPicker === "function" && typeof globalThis.crypto?.randomUUID === "function");
+    ui.mediaAutoImportStart.disabled = !available || !mediaAutoImportEligible() || Boolean(owner) ||
+      document.visibilityState !== "visible" || mediaAutoImportManualBusy(null);
+    ui.mediaAutoImportUnavailable.hidden = available;
+    ui.mediaAutoImportStop.hidden = !owner;
+    ui.mediaAutoImportStop.disabled = !owner || owner.cancelled;
+    const phases = { choosing: "mediaAutoImportChoosing", "baseline-first": "mediaAutoImportBaseline",
+      "baseline-confirm": "mediaAutoImportBaseline", watching: "mediaAutoImportWatching",
+      stopping: "mediaAutoImportStopping", stopped: "mediaAutoImportStopped" };
+    const operations = { inventory: "mediaAutoImportInventory", metadata: "mediaAutoImportMetadata", transfer: "mediaAutoImportSaving" };
+    const operationKey = !snapshot?.reason && operations[snapshot?.operation];
+    ui.mediaAutoImportStatus.textContent = t(operationKey || phases[snapshot?.phase] || "mediaAutoImportOff");
+    ui.mediaAutoImportDestination.textContent = view?.destinationName ? t("mediaBatchDestination", { name: view.destinationName }) : "";
+    ui.mediaAutoImportSummary.textContent = t("mediaAutoImportSummary", {
+      saved: snapshot?.completed || 0, pending: snapshot?.pendingCount || 0,
+      known: snapshot?.knownCount || 0, results: snapshot?.results.length || 0,
+    });
+    const reasons = {
+      "user-stopped": "mediaAutoImportUserStopped", backgrounded: "mediaAutoImportBackgrounded",
+      disconnected: "mediaAutoImportDisconnected", "session-retired": "mediaAutoImportDisconnected",
+      "camera-unavailable": "mediaAutoImportCameraUnavailable", "baseline-changed": "mediaAutoImportBaselineChanged",
+      "identity-limit": "mediaAutoImportLimit", "queue-limit": "mediaAutoImportLimit",
+      "pending-disappeared": "mediaAutoImportDisappeared", "metadata-deadline": "mediaAutoImportMetadataDeadline",
+      "inventory-unavailable": "mediaAutoImportInventoryUnavailable", "metadata-unavailable": "mediaAutoImportMetadataUnavailable",
+      "fresh-metadata-unavailable": "mediaAutoImportMetadataUnavailable", "transfer-unconfirmed": "mediaAutoImportUnconfirmed",
+      "transfer-failed": "mediaAutoImportFailed", "destination-unavailable": "mediaAutoImportDestinationUnavailable",
+    };
+    ui.mediaAutoImportReason.hidden = !snapshot?.reason;
+    ui.mediaAutoImportReason.textContent = snapshot?.reason ? t(reasons[snapshot.reason] || "mediaAutoImportUnknown", { reason: snapshot.reason }) : "";
+    if (view?.destination?.leftoverCount) ui.mediaAutoImportReason.textContent += " " + t("mediaBatchLeftovers", { count: view.destination.leftoverCount });
+    ui.mediaAutoImportList.replaceChildren();
+    const labels = { running: "mediaBatchRunning", completed: "mediaBatchCompleted", failed: "mediaBatchFailed", "cancelled-or-unknown": "mediaBatchUncertain" };
+    for (const result of snapshot?.results || []) {
+      const row = document.createElement("li");
+      row.dataset.status = result.status;
+      row.dataset.id = result.id;
+      const name = document.createElement("strong");
+      name.textContent = result.name;
+      const status = document.createElement("span");
+      status.textContent = t(labels[result.status] || "mediaBatchUncertain");
+      row.append(name, status);
+      ui.mediaAutoImportList.append(row);
+    }
+  }
+
   function mediaTime(item) {
     return mediaLibrary.mediaTime(item);
   }
@@ -5686,6 +6135,12 @@
       state.mediaThumbnailLoads.has(item.id) ||
       state.mediaThumbnailFailures.has(item.id)
     ) return;
+    if (state.mediaAutoImportReading) {
+      // The observer may already have unobserved this intersecting element.
+      // One flag retains demand without storing an unbounded list of media IDs.
+      state.mediaAutoImportThumbnailsDeferred = true;
+      return;
+    }
     const generation = state.mediaGeneration;
     state.mediaThumbnailLoads.add(item.id);
     updateVisibleMediaThumbnail(item);
@@ -5749,13 +6204,24 @@
     mediaThumbnailObserver.observe(container);
   }
 
+  function retryMediaAutoImportThumbnails() {
+    if (!state.mediaAutoImportThumbnailsDeferred || !state.session || cameraInteractionBusy()) return;
+    state.mediaAutoImportThumbnailsDeferred = false;
+    // Re-observe only the currently rendered bounded page. IntersectionObserver
+    // decides what is visible; off-page demand never becomes a new request queue.
+    Array.from(ui.mediaList.querySelectorAll(".media-thumbnail")).slice(0, MEDIA_PAGE_SIZE)
+      .forEach((container) => observeMediaThumbnail(container));
+  }
+
   function updateVisibleMediaThumbnail(item) {
+    if (typeof renderMediaAutoImport === "function") renderMediaAutoImport();
     const container = Array.from(ui.mediaList.querySelectorAll(".media-thumbnail"))
       .find((candidate) => candidate.dataset.mediaId === item.id);
     if (container) renderMediaThumbnail(container, item, state.mediaThumbnailUrls.get(item.id));
   }
 
   function clearMediaThumbnails() {
+    state.mediaAutoImportThumbnailsDeferred = false;
     mediaThumbnailObserver?.disconnect();
     ui.mediaList.querySelectorAll("img[src]").forEach((image) => image.removeAttribute("src"));
     state.mediaThumbnailUrls.forEach((url) => releaseObjectUrl(url));
@@ -5886,6 +6352,7 @@
   }
 
   function renderMediaDetails() {
+    if (typeof renderMediaAutoImport === "function") renderMediaAutoImport();
     if (!ui.mediaDetailsDialog?.open || !state.mediaDetailsItem) return;
     const item = state.mediaDetailsItem;
     const disabled = state.mediaDetailsBusy || cameraInteractionBusy();
@@ -5948,6 +6415,7 @@
     state.mediaDetailsGeneration += 1;
     state.mediaDetailsItem = null;
     state.mediaDetailsBusy = false;
+    if (typeof renderMediaAutoImport === "function") renderMediaAutoImport();
   }
 
   function closeMediaDetails() {
@@ -6022,6 +6490,7 @@
     const video = mediaIsVideo(item);
     if (
       !state.session ||
+      Boolean(state.mediaAutoImportReading) ||
       Boolean(state.mediaBatchOwner) ||
       (video && !featureSupported(FEATURES.MEDIA_DOWNLOAD)) ||
       (!video && (item.previewAvailable !== true || !featureSupported(FEATURES.MEDIA_PREVIEW)))
@@ -6095,11 +6564,12 @@
   }
 
   function renderMediaPreviewNavigation() {
+    if (typeof renderMediaAutoImport === "function") renderMediaAutoImport();
     const items = previewableMedia();
     const index = items.findIndex((item) => item.id === state.mediaPreviewItem?.id);
-    ui.mediaPreviewPrevious.disabled = Boolean(state.mediaBatchOwner) || index <= 0;
-    ui.mediaPreviewNext.disabled = Boolean(state.mediaBatchOwner) || index < 0 || index >= items.length - 1;
-    ui.mediaPreviewRetry.disabled = Boolean(state.mediaBatchOwner);
+    ui.mediaPreviewPrevious.disabled = Boolean(state.mediaBatchOwner || state.mediaAutoImportReading) || index <= 0;
+    ui.mediaPreviewNext.disabled = Boolean(state.mediaBatchOwner || state.mediaAutoImportReading) || index < 0 || index >= items.length - 1;
+    ui.mediaPreviewRetry.disabled = Boolean(state.mediaBatchOwner || state.mediaAutoImportReading);
     ui.mediaPreviewFailureDownload.disabled = cameraInteractionBusy();
     const item = state.mediaPreviewItem;
     if (!item) return;
@@ -6141,6 +6611,7 @@
   function renderMediaTransfer() {
     renderMediaSelection();
     renderMediaBatch();
+    if (typeof renderMediaAutoImport === "function") renderMediaAutoImport();
     const transfer = state.mediaUpload || state.mediaDownload;
     const uploading = Boolean(state.mediaUpload);
     ui.mediaTransfer.hidden = !transfer;
@@ -6910,6 +7381,20 @@
     ui.mediaHistoryConfirmYes.addEventListener("click", clearMediaHistory);
     ui.mediaBatchStart.addEventListener("click", downloadSelectedMedia);
     ui.mediaBatchCancel.addEventListener("click", () => cancelMediaBatch());
+    ui.mediaAutoImportStart?.addEventListener("click", startMediaAutoImport);
+    ui.mediaAutoImportStop?.addEventListener("click", () => stopMediaAutoImport());
+    document.addEventListener?.("visibilitychange", () => {
+      if (document.visibilityState !== "visible") stopMediaAutoImport("backgrounded");
+      else {
+        renderAvailability();
+        renderMediaAutoImport();
+      }
+    });
+    window.addEventListener("pagehide", () => stopMediaAutoImport("backgrounded"));
+    window.addEventListener("pageshow", () => {
+      renderAvailability();
+      renderMediaAutoImport();
+    });
     ui.mediaScopeControl.addEventListener("click", (event) => {
       const button = event.target.closest?.("[data-media-scope]");
       if (!button || button.dataset.mediaScope === state.mediaScope) return;
@@ -7073,6 +7558,7 @@
       if (previewActive()) applyLiveViewLayout();
     });
     window.addEventListener("beforeunload", () => {
+      stopMediaAutoImport("backgrounded");
       lutPreviewRenderer?.dispose();
       lutPreviewRenderer = null;
       cancelMediaDownload({ silent: true });

@@ -817,6 +817,96 @@ cases.push({
   },
 });
 
+for (const language of ["en", "zh-TW"]) {
+  cases.push({
+    name: `foreground JPEG import establishes baseline and saves only a new original ${language}`,
+    batch: {},
+    run: async ({ page, simulatorOrigin, originalRequests, infoRequests }) => {
+      await page.locator("#control-view .language-select").selectOption(language);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+      await page.click('.tab[data-view="media"]');
+      assert.equal(await page.evaluate(() => window.__batchPickerCalls), 0);
+      await page.click("#media-auto-start");
+      await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "watching");
+      assert.deepEqual(originalRequests, [], "Baseline files are never imported");
+      assert.equal(await page.evaluate(() => window.__batchFiles.length), 0);
+      await configure(simulatorOrigin, { mode: "new-first" });
+      await page.click('.tab[data-view="live"]');
+      await capture(page, simulatorOrigin);
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelectorAll('#media-auto-list [data-status="completed"]').length === 1,
+        null, { timeout: 20_000 });
+      await page.click("#media-auto-stop");
+      await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "stopped");
+      const files = await page.evaluate(() => window.__batchFiles);
+      const expected = Buffer.from(await (await fetch(`${simulatorOrigin}/__test/representation/original`)).arrayBuffer());
+      assert.equal(files.length, 1); assert.equal(files[0].name, "SIM_0003.JPG");
+      assert.equal(files[0].closed, true); assert.equal(files[0].aborted, false);
+      assert.deepEqual(Buffer.from(files[0].bytes), expected);
+      assert.equal(originalRequests.length, 1);
+      assert.equal(new URL(originalRequests[0]).searchParams.get("attempt"), "single");
+      const fresh = infoRequests.filter((url) => new URL(url).searchParams.get("fresh") === "true");
+      assert.equal(fresh.length, 2, "Only the new JPEG receives two current size observations");
+      assert.equal(new Set(fresh.map((url) => new URL(url).pathname)).size, 1);
+      await assertOneCapture(simulatorOrigin);
+      const width = await page.evaluate(() => ({ viewport: innerWidth, content: document.documentElement.scrollWidth }));
+      assert.ok(width.content <= width.viewport + 1, "Foreground status fits narrow 200% layout");
+      await page.locator("#media-auto-panel").scrollIntoViewIfNeeded();
+      fs.mkdirSync(RESULTS_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-foreground-import-${language}.png`), fullPage: true });
+      await page.reload({ waitUntil: "networkidle" });
+      assert.equal(originalRequests.length, 1, "Reload cannot restart the foreground import");
+      assert.equal(await page.evaluate(() => window.__batchPickerCalls), 0, "No restored handle or permission request");
+    },
+  });
+}
+cases.push({
+  name: "foreground import refuses a legacy response without complete inventory evidence",
+  batch: {},
+  run: async ({ page, originalRequests, infoRequests, simulatorOrigin, routeCleanups }) => {
+    const pattern = /\/v1\/session\/[^/]+\/media\?.*inventory=strict/;
+    const handler = async (route) => {
+      const response = await route.fetch();
+      const headers = response.headers(); delete headers["x-open-eos-inventory"];
+      await route.fulfill({ response, headers });
+    };
+    await page.route(pattern, handler);
+    routeCleanups.push(() => page.unroute(pattern, handler));
+    await page.click('.tab[data-view="media"]');
+    await page.click("#media-auto-start");
+    await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "stopped");
+    assert.deepEqual(originalRequests, []);
+    assert.equal(infoRequests.filter((url) => new URL(url).searchParams.has("fresh")).length, 0);
+    assert.equal(await page.evaluate(() => window.__batchFiles.length), 0);
+    assert.equal((await peerState(simulatorOrigin)).capture_count, 0);
+    assert.equal(await page.isDisabled("#media-auto-start"), false, "A later attempt needs a new explicit gesture");
+  },
+});
+cases.push({
+  name: "foreground import cancellation preserves uncertain output and prevents later reads",
+  batch: { pauseFirstWrite: true },
+  run: async ({ page, simulatorOrigin, originalRequests }) => {
+    await page.click('.tab[data-view="media"]');
+    await page.click("#media-auto-start");
+    await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "watching");
+    await configure(simulatorOrigin, { mode: "new-first" });
+    await page.click('.tab[data-view="live"]');
+    await capture(page, simulatorOrigin);
+    await page.click('.tab[data-view="media"]');
+    await page.waitForFunction(() => typeof window.__releaseBatchWrite === "function", null, { timeout: 20_000 });
+    await page.click("#media-auto-stop");
+    await page.evaluate(() => window.__releaseBatchWrite());
+    await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "stopped");
+    assert.equal(originalRequests.length, 1);
+    assert.equal(await page.evaluate(() => window.__batchFiles[0]?.closed), false);
+    assert.equal(await page.evaluate(() => window.__batchFiles[0]?.aborted), true);
+    assert.equal(await page.locator('#media-auto-list [data-status="completed"]').count(), 0);
+    assert.equal(await page.locator('#media-auto-list [data-status="cancelled-or-unknown"]').count(), 1);
+    await assertOneCapture(simulatorOrigin);
+  },
+});
+
 async function run() {
   const [simulatorPort, bridgePort] = await Promise.all([freePort(), freePort()]);
   const simulatorOrigin = `http://127.0.0.1:${simulatorPort}`;

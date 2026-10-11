@@ -2085,5 +2085,10 @@ button.media-thumbnail:focus-visible {
 
 .media-history-dialog { max-height: 85dvh; overflow-y: auto; width: min(42rem, calc(100vw - 2rem)); }
 .media-history-dialog .media-batch-list { max-height: none; }
+.media-auto-panel { min-width: 0; margin: 0 0 16px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; }
+.media-auto-panel p { margin: 0 0 10px; overflow-wrap: anywhere; }
+.media-auto-panel details { margin: 0 0 10px; }
+.media-auto-panel summary { cursor: pointer; overflow-wrap: anywhere; margin-bottom: 10px; }
+.media-auto-panel [hidden] { display: none; }
 .media-history-dialog time { font-size: 0.85em; color: var(--muted); }
 .media-history-dialog [hidden] { display: none; }

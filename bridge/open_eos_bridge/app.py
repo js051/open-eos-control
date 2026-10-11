@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request, Response
@@ -289,9 +290,25 @@ def create_app(
         *,
         inline: bool,
         playback_token: str | None = None,
+        single_attempt: bool = False,
     ) -> Response:
         session = manager.get(session_id)
+        if single_attempt:
+            if not isinstance(session, CcapiSession):
+                raise unsupported("MEDIA_SINGLE_ORIGINAL", session.engine_name)
+            if request.method != "GET":
+                raise BridgeError(
+                    "INVALID_ORIGINAL_ATTEMPT",
+                    "Single original evidence requires a GET transfer.",
+                    status_code=422,
+                )
         range_header = request.headers.get("range")
+        if single_attempt and range_header is not None:
+            raise BridgeError(
+                "INVALID_ORIGINAL_ATTEMPT",
+                "Single original evidence requires a complete response without Range.",
+                status_code=422,
+            )
         cached = playback_cache.get(playback_token) if playback_token else None
         cache_owned = cached is not None
         if cached is not None:
@@ -301,7 +318,10 @@ def create_app(
             item = session.media_info(media_id)
             staged = None
         else:
-            item, chunks = session.download_media(media_id)
+            item, chunks = (
+                session.download_media(media_id, single_attempt=True)
+                if single_attempt else session.download_media(media_id)
+            )
             item, staged = _stage_media(
                 item,
                 chunks,
@@ -347,6 +367,8 @@ def create_app(
             "Cache-Control": "private, no-store, max-age=0",
             "Content-Disposition": f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(item.name)}",
         }
+        if single_attempt:
+            headers["X-Open-EOS-Original-Attempt"] = "single-v1"
         if byte_range is not None:
             headers["X-Open-EOS-Range-Mode"] = "staged-file"
         status_code = 200
@@ -672,9 +694,19 @@ def create_app(
     @router.get("/session/{session_id}/media", response_model=MediaList)
     def media(
         session_id: str,
+        response: Response,
         limit: int | None = Query(default=None, ge=1, le=1000),
+        inventory: Literal["strict"] | None = Query(default=None),
     ) -> MediaList:
-        return MediaList(items=manager.get(session_id).list_media(limit))
+        session = manager.get(session_id)
+        if inventory == "strict":
+            if not isinstance(session, CcapiSession):
+                raise unsupported("MEDIA_STRICT_INVENTORY", session.engine_name)
+            items = session.list_media_strict(limit if limit is not None else 1000)
+            response.headers["X-Open-EOS-Inventory"] = "complete-v1"
+            response.headers["Cache-Control"] = "private, no-store, max-age=0"
+            return MediaList(items=items)
+        return MediaList(items=session.list_media(limit))
 
     @router.post("/session/{session_id}/media", response_model=MediaItem, status_code=201)
     async def upload_media(session_id: str, request: Request, filename: str = Query(..., min_length=1)) -> MediaItem:
@@ -739,8 +771,16 @@ def create_app(
         )
 
     @router.get("/session/{session_id}/media/{media_id}/info", response_model=MediaItem)
-    def media_info(session_id: str, media_id: str) -> MediaItem:
-        return manager.get(session_id).media_info(media_id)
+    def media_info(session_id: str, media_id: str, response: Response, fresh: bool = Query(default=False)) -> MediaItem:
+        session = manager.get(session_id)
+        if fresh:
+            if not isinstance(session, CcapiSession):
+                raise unsupported("MEDIA_FRESH_METADATA", session.engine_name)
+            item = session.media_info(media_id, fresh=True)
+            response.headers["X-Open-EOS-Fresh-Metadata"] = "v1"
+            response.headers["Cache-Control"] = "private, no-store, max-age=0"
+            return item
+        return session.media_info(media_id)
 
     @router.post(
         "/session/{session_id}/media/{media_id}/playback",
@@ -797,8 +837,13 @@ def create_app(
         return manager.get(session_id).set_media_archive(media_id, update.enabled)
 
     @router.api_route("/session/{session_id}/media/{media_id}", methods=["GET", "HEAD"])
-    def download_media(session_id: str, media_id: str, request: Request) -> Response:
-        return media_response(session_id, media_id, request, inline=False)
+    def download_media(
+        session_id: str,
+        media_id: str,
+        request: Request,
+        attempt: Literal["single"] | None = Query(default=None),
+    ) -> Response:
+        return media_response(session_id, media_id, request, inline=False, single_attempt=attempt == "single")
 
     @router.delete("/session/{session_id}/media/{media_id}", status_code=204)
     def delete_media(session_id: str, media_id: str) -> Response:

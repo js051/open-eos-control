@@ -369,6 +369,28 @@
           <p id="media-batch-unavailable" class="supporting" data-i18n="mediaBatchUnavailable" hidden>Batch saving needs a browser with folder access. You can still download originals individually.</p>
         </section>
         <p class="supporting" data-media-history-warning hidden role="status"></p>
+        <section id="media-auto-panel" class="media-auto-panel" aria-labelledby="media-auto-import-title" aria-describedby="media-auto-import-purpose media-auto-import-notice">
+          <div class="media-batch-heading">
+            <h3 id="media-auto-import-title" data-i18n="mediaAutoImportTitle">Foreground JPEG auto-import</h3>
+            <div class="media-selection-actions">
+              <button id="media-auto-start" class="button secondary" type="button" data-i18n="mediaAutoImportStart">Enable JPEG import to folder…</button>
+              <button id="media-auto-stop" class="button secondary" type="button" data-i18n="mediaAutoImportStop" hidden>Stop JPEG import</button>
+            </div>
+          </div>
+          <p id="media-auto-import-purpose" class="supporting" data-i18n="mediaAutoImportPurpose"></p>
+          <p id="media-auto-status" role="status"></p>
+          <p id="media-auto-import-destination" class="supporting"></p>
+          <p id="media-auto-import-summary" role="status"></p>
+          <p id="media-auto-import-reason" class="supporting" role="status" hidden></p>
+          <p id="media-auto-import-unavailable" class="supporting" data-i18n="mediaAutoImportUnavailable" hidden></p>
+          <details>
+            <summary data-i18n="mediaAutoImportHelp">Limits and file verification</summary>
+            <p class="supporting" data-i18n="mediaAutoImportLimits"></p>
+            <p class="supporting" data-i18n="mediaAutoImportEvidence"></p>
+          </details>
+          <p id="media-auto-import-notice" class="supporting" data-i18n="mediaAutoImportNotice"></p>
+          <ol id="media-auto-list" class="media-batch-list"></ol>
+        </section>
         <section id="media-batch-panel" class="media-batch-panel" aria-labelledby="media-batch-title" hidden>
           <div class="media-batch-heading">
             <h3 id="media-batch-title" data-i18n="mediaBatchTitle">Original file batch</h3>
@@ -710,6 +732,7 @@
   <script src="/app/media-batch.js"></script>
   <script src="/app/media-batch-destination.js"></script>
   <script src="/app/media-transfer-history.js"></script>
+  <script src="/app/media-auto-import.js"></script>
   <script src="/app/app.js"></script>
 </body>
 </html>

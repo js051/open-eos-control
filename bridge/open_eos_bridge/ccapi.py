@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import BinaryIO, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, unquote, urlencode, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from .errors import BridgeError, unsupported
 from .media_folders import camera_folder_fields
@@ -71,6 +71,12 @@ MAX_RTP_SESSION_DESCRIPTION_BYTES = 64 * 1024
 RTP_AUDIO_FEATURE = "LIVE_VIEW_RTP_AUDIO"
 MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
+MAX_MEDIA_INVENTORY_ITEMS = 1000
+MAX_MEDIA_INVENTORY_REQUESTS = 512
+MAX_MEDIA_INVENTORY_CONTAINERS = 512
+MAX_MEDIA_INVENTORY_SECONDS = 30.0
+MEDIA_INVENTORY_READ_TIMEOUT = 2.0
+MAX_MEDIA_INVENTORY_PATH_CHARS = 2048
 MULTIPART_START_RETRY_DELAYS = (0.1, 0.2, 0.4, 0.8)
 JPEG_FRAME_BUSY_RETRY_DELAYS = (0.05, 0.1)
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
@@ -626,9 +632,15 @@ class CcapiTransport(Protocol):
         *,
         headers: Mapping[str, str] | None = None,
         timeout: float = 60.0,
+        follow_redirects: bool = True,
     ) -> CcapiStreamResponse: ...
 
     def close(self) -> None: ...
+
+
+class _NoCcapiRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 class UrllibCcapiTransport:
@@ -685,8 +697,9 @@ class UrllibCcapiTransport:
         *,
         headers: Mapping[str, str] | None = None,
         timeout: float = 60.0,
+        follow_redirects: bool = True,
     ) -> CcapiStreamResponse:
-        return self._open(method, url, headers=headers, timeout=timeout)
+        return self._open(method, url, headers=headers, timeout=timeout, follow_redirects=follow_redirects)
 
     def close(self) -> None:
         self._authorization = None
@@ -699,6 +712,7 @@ class UrllibCcapiTransport:
         body: bytes | None = None,
         headers: Mapping[str, str] | None = None,
         timeout: float,
+        follow_redirects: bool = True,
     ) -> CcapiStreamResponse:
         request_headers = {
             "Accept": "application/json,*/*",
@@ -712,7 +726,10 @@ class UrllibCcapiTransport:
             request_headers.setdefault("Content-Type", "application/json; charset=utf-8")
         request = Request(url, data=body, headers=request_headers, method=method)
         try:
-            response = urlopen(request, timeout=timeout)  # noqa: S310 - user-selected camera origin is intentional.
+            if follow_redirects:
+                response = urlopen(request, timeout=timeout)  # noqa: S310 - user-selected camera origin is intentional.
+            else:
+                response = build_opener(_NoCcapiRedirect()).open(request, timeout=timeout)
         except HTTPError as error:
             response = error
         except (OSError, HTTPException, URLError) as error:
@@ -2498,7 +2515,91 @@ class CcapiSession:
             self._observed.add(CameraFeature.MEDIA_BROWSER)
             return items
 
-    def media_info(self, media_id: str) -> MediaItem:
+    def list_media_strict(self, maximum_items: int = MAX_MEDIA_INVENTORY_ITEMS) -> list[MediaItem]:
+        """Exhaust the camera's reachable topology, or fail without publishing partial evidence.
+
+        This is an observation of source-reported identities, not an atomic card snapshot.
+        The deadline is checked cooperatively, including between bounded read1 body reads.
+        A blocking network read can overshoot by its short inactivity timeout; urllib's
+        response-header parsing does not expose a cancellable whole-header deadline.
+        """
+        if not 1 <= maximum_items <= MAX_MEDIA_INVENTORY_ITEMS:
+            raise ValueError("maximum_items must be between 1 and 1000")
+        deadline = time.monotonic() + MAX_MEDIA_INVENTORY_SECONDS
+        if not self._lock.acquire(timeout=MAX_MEDIA_INVENTORY_SECONDS):
+            raise self._inventory_incomplete("observation deadline exceeded waiting for the camera")
+        try:
+            self._require_open()
+            # Open sessions have already completed discovery. Never start unbudgeted
+            # discovery or legacy listing as a side effect of a strict observation.
+            if not self._initialized:
+                raise self._inventory_incomplete("camera discovery has not completed")
+            if not self._supports("GET", "/contents"):
+                raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
+            requests = 0
+
+            def request(path: str) -> object:
+                nonlocal requests
+                if requests >= MAX_MEDIA_INVENTORY_REQUESTS:
+                    raise self._inventory_incomplete("request budget exceeded")
+                requests += 1
+                return self._inventory_json(path, deadline)
+
+            root = self._inventory_path(self._api_path("GET", "/contents"))
+            pending = deque([root])
+            containers = {root}
+            media_paths: dict[str, None] = {}
+            while pending:
+                self._inventory_remaining(deadline)
+                container = pending.popleft()
+                for paths in self._inventory_pages(container, request):
+                    for path in paths:
+                        self._inventory_remaining(deadline)
+                        if _is_media_path(path):
+                            media_paths.setdefault(path, None)
+                            # Reserve a sentinel beyond the caller's output budget.
+                            # Reaching the budget alone is not proof of exhaustion.
+                            if len(media_paths) > maximum_items:
+                                raise self._inventory_incomplete("item budget exceeded")
+                        elif path not in containers:
+                            if len(containers) >= MAX_MEDIA_INVENTORY_CONTAINERS:
+                                raise self._inventory_incomplete("container budget exceeded")
+                            containers.add(path)
+                            pending.append(path)
+            self._inventory_remaining(deadline)
+            items = [MediaItem(
+                id=_media_id(path),
+                name=path.rsplit("/", 1)[-1],
+                kind=_media_kind(path),
+                content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
+                preview_available=_supports_ccapi_display_preview(path),
+                **_media_folder_fields(path),
+            ) for path in media_paths]
+            self._inventory_remaining(deadline)
+            # Preserve metadata used by manual browsing. The returned strict items
+            # deliberately carry no cached size evidence; fresh info is separate.
+            for item in items:
+                self._media_cache.setdefault(item.id, item)
+            self._observed.add(CameraFeature.MEDIA_BROWSER)
+            return items
+        finally:
+            self._lock.release()
+
+    def media_info(self, media_id: str, *, fresh: bool = False) -> MediaItem:
+        if fresh:
+            deadline = time.monotonic() + MAX_MEDIA_INVENTORY_SECONDS
+            if not self._lock.acquire(timeout=MAX_MEDIA_INVENTORY_SECONDS):
+                raise self._inventory_incomplete("metadata observation deadline exceeded waiting for the camera")
+            try:
+                self._inventory_remaining(deadline)
+                self._require_open()
+                if not self._initialized:
+                    raise self._inventory_incomplete("camera discovery has not completed")
+                if not self._supports("GET", "/contents"):
+                    raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
+                return self._media_info(media_id, fresh=True, deadline=deadline)
+            finally:
+                self._lock.release()
         with self._lock:
             self._ensure_initialized()
             if not self._supports("GET", "/contents"):
@@ -2557,9 +2658,27 @@ class CcapiSession:
             matches=lambda item: item.archived is enabled,
         )
 
-    def _media_info(self, media_id: str) -> MediaItem:
+    def _media_info(self, media_id: str, *, fresh: bool = False, deadline: float | None = None) -> MediaItem:
         path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
-        value = self._request_json("GET", f"{path}?kind=info")
+        if fresh:
+            path = self._inventory_path(_decode_media_id(media_id))
+            if _media_id(path) != media_id:
+                raise self._inventory_incomplete("metadata identity is not canonical")
+            if not _is_media_path(path):
+                raise self._inventory_incomplete("metadata identity is not a media file")
+            # Invalidate before I/O too: a failed read must not leave stale positive
+            # size/type evidence for a later consumer of this same session cache.
+            cached = self._media_cache.get(media_id)
+            if cached is not None:
+                self._media_cache[media_id] = cached.model_copy(
+                    update={"size_bytes": 0, "content_type": "application/octet-stream"},
+                )
+            value = self._inventory_json(
+                f"{path}?kind=info",
+                deadline if deadline is not None else time.monotonic() + MAX_MEDIA_INVENTORY_SECONDS,
+            )
+        else:
+            value = self._request_json("GET", f"{path}?kind=info")
         if not isinstance(value, dict):
             raise BridgeError(
                 "INVALID_CCAPI_MEDIA_INFO",
@@ -2577,7 +2696,11 @@ class CcapiSession:
         )
         item = base.model_copy(
             update={
-                "size_bytes": _positive_int(value.get("filesize")) or base.size_bytes,
+                "size_bytes": (
+                    _strict_positive_int(value.get("filesize")) or 0
+                    if fresh else _positive_int(value.get("filesize")) or base.size_bytes
+                ),
+                **({"content_type": "application/octet-stream"} if fresh else {}),
                 "capture_time": _optional_string(value.get("lastmodifieddate")) or base.capture_time,
                 "protected": _canon_protection(value.get("protect")),
                 "rating": _canon_rating(value.get("rating")),
@@ -2621,22 +2744,51 @@ class CcapiSession:
                 engine=self.engine_name,
             )
 
-    def download_media(self, media_id: str) -> tuple[MediaItem, Iterator[bytes]]:
+    def download_media(self, media_id: str, *, single_attempt: bool = False) -> tuple[MediaItem, Iterator[bytes]]:
         with self._lock:
-            self._ensure_initialized()
+            if single_attempt:
+                self._require_open()
+                if not self._initialized:
+                    raise self._inventory_incomplete("camera discovery has not completed")
+            else:
+                self._ensure_initialized()
             if not self._supports("GET", "/contents"):
                 raise unsupported(CameraFeature.MEDIA_DOWNLOAD.value, self.engine_name)
             path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
+            if single_attempt:
+                path = self._inventory_path(_decode_media_id(media_id))
+                if _media_id(path) != media_id:
+                    raise self._inventory_incomplete("original identity is not canonical")
+                if not _is_media_path(path):
+                    raise self._inventory_incomplete("original identity is not a media file")
             cached = self._media_cache.get(media_id)
             name = path.rsplit("/", 1)[-1]
             failures: list[str] = []
-            for candidate in (path, f"{path}?kind=main", f"{path}?type=main"):
+            candidates = (path,) if single_attempt else (path, f"{path}?kind=main", f"{path}?type=main")
+            for candidate in candidates:
                 response = self.transport.open_stream(
                     "GET",
                     self._url(candidate),
                     headers={"Accept": "application/octet-stream,*/*", "Cache-Control": "no-cache"},
                     timeout=600.0,
+                    **({"follow_redirects": False} if single_attempt else {}),
                 )
+                strict_length = None
+                if single_attempt:
+                    try:
+                        strict_length = self._strict_media_length(response)
+                    except BridgeError:
+                        response.close()
+                        raise
+                if single_attempt and (response.status != 200 or "content-range" in response.headers):
+                    response.close()
+                    raise BridgeError(
+                        "CCAPI_MEDIA_DOWNLOAD_FAILED",
+                        f"The single original request returned HTTP {response.status} or partial content.",
+                        status_code=502,
+                        feature=CameraFeature.MEDIA_DOWNLOAD.value,
+                        engine=self.engine_name,
+                    )
                 if 200 <= response.status < 300:
                     content_type = response.headers.get("content-type", "").split(";", 1)[0]
                     if _is_text_content_type(content_type):
@@ -2647,7 +2799,11 @@ class CcapiSession:
                             response.close()
                         continue
                     content_type = content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
-                    size = _positive_int(response.headers.get("content-length")) or (cached.size_bytes if cached else 0)
+                    size = (
+                        strict_length if single_attempt and strict_length is not None
+                        else (_positive_int(response.headers.get("content-length"))
+                              or (cached.size_bytes if cached else 0))
+                    )
                     item = cached or MediaItem(
                         id=media_id,
                         name=name,
@@ -2915,6 +3071,156 @@ class CcapiSession:
                 engine=self.engine_name,
             )
         self._request_ok(operation.method, operation.path, payload)
+
+    def _inventory_incomplete(self, reason: str) -> BridgeError:
+        return BridgeError(
+            "CCAPI_INVENTORY_INCOMPLETE",
+            f"Camera media inventory is incomplete: {reason}.",
+            status_code=502,
+            feature=CameraFeature.MEDIA_BROWSER.value,
+            engine=self.engine_name,
+        )
+
+    def _inventory_remaining(self, deadline: float) -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise self._inventory_incomplete("observation deadline exceeded")
+        return remaining
+
+    def _strict_media_length(self, response: CcapiStreamResponse) -> int | None:
+        # HTTPMessage preserves duplicate wire headers; the compatibility
+        # dictionary alone may have discarded a conflicting middle value.
+        get_all = getattr(getattr(response.body, "headers", None), "get_all", None)
+        values = get_all("Content-Length", []) if callable(get_all) else []
+        if not values and "content-length" in response.headers:
+            values = [response.headers["content-length"]]
+        if not values:
+            return None
+        if "transfer-encoding" in response.headers:
+            raise self._inventory_incomplete("ambiguous response framing")
+        tokens = [part.strip(" \t") for value in values for part in value.split(",")]
+        if any(not part.isascii() or not part.isdigit() or len(part) > 20 for part in tokens):
+            raise self._inventory_incomplete("invalid response length")
+        lengths = {int(part) for part in tokens}
+        if len(lengths) != 1:
+            raise self._inventory_incomplete("conflicting response lengths")
+        return lengths.pop()
+
+    def _inventory_json(self, path: str, deadline: float) -> object:
+        """Strict-only bounded body reader; no retries, redirects, or legacy fallback."""
+        remaining = self._inventory_remaining(deadline)
+        response = self.transport.open_stream(
+            "GET", self._url(path), timeout=min(MEDIA_INVENTORY_READ_TIMEOUT, remaining), follow_redirects=False,
+        )
+        try:
+            self._inventory_remaining(deadline)
+            if response.status != 200:
+                raise _CcapiHTTPError("GET", path, CcapiResponse(response.status, response.headers, b""))
+            if "content-range" in response.headers:
+                raise self._inventory_incomplete("partial JSON response")
+            declared_length = self._strict_media_length(response)
+            reader = getattr(response.body, "read1", None)
+            if not callable(reader):
+                raise self._inventory_incomplete("transport does not support bounded body reads")
+            payload = bytearray()
+            while True:
+                self._inventory_remaining(deadline)
+                chunk = reader(min(TRANSFER_CHUNK_BYTES, MAX_JSON_BYTES + 1 - len(payload)))
+                self._inventory_remaining(deadline)
+                if not chunk:
+                    break
+                payload.extend(chunk)
+                if len(payload) > MAX_JSON_BYTES:
+                    raise self._inventory_incomplete("JSON response byte budget exceeded")
+            if declared_length is not None and declared_length != len(payload):
+                raise self._inventory_incomplete("invalid or truncated JSON response length")
+            try:
+                value = json.loads(payload, object_pairs_hook=_strict_json_object)
+            except (UnicodeDecodeError, ValueError, RecursionError) as error:
+                raise self._inventory_incomplete("invalid JSON response") from error
+            self._inventory_remaining(deadline)
+            return value
+        except (OSError, HTTPException) as error:
+            raise self._inventory_incomplete("camera response interrupted or timed out") from error
+        finally:
+            response.close()
+
+    def _inventory_path(self, value: object) -> str:
+        if (
+            not isinstance(value, str)
+            or not value
+            or len(value) > MAX_MEDIA_INVENTORY_PATH_CHARS
+            or any(character in value for character in "?#\\")
+            or any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value)
+        ):
+            raise self._inventory_incomplete("invalid media identity")
+        try:
+            parsed = urlsplit(value)
+            if parsed.username is not None or parsed.password is not None:
+                raise self._inventory_incomplete("invalid media identity credentials")
+            # Require canonical escapes; do not turn encoded separators, nested
+            # traversal, or unreserved aliases into different apparent identities.
+            if re.search(r"%(?![0-9A-F]{2})", parsed.path):
+                raise self._inventory_incomplete("invalid or noncanonical media path escape")
+            for escape in re.findall(r"%([0-9A-F]{2})", parsed.path):
+                character = chr(int(escape, 16))
+                if (
+                    character in "/\\%?#-._~"
+                    or character.isascii() and character.isalnum()
+                    or ord(character) < 32
+                    or ord(character) == 127
+                ):
+                    raise self._inventory_incomplete("ambiguous encoded media identity")
+            path = self._normalize_resource(value)
+        except ValueError as error:
+            raise self._inventory_incomplete("invalid media identity URL") from error
+        if not re.fullmatch(r"/ccapi/ver[0-9]+/contents(?:/[^/]+)*", path):
+            raise self._inventory_incomplete("media identity is outside CCAPI contents")
+        return path
+
+    def _inventory_paths(self, value: object) -> list[str]:
+        if not isinstance(value, dict) or not isinstance(value.get("path"), list):
+            raise self._inventory_incomplete("invalid media path listing")
+        return [self._inventory_path(path) for path in value["path"]]
+
+    def _inventory_pages(self, container: str, request: Callable[[str], object]) -> Iterator[list[str]]:
+        unsupported_count = object()
+        page_info = unsupported_count
+        for path in (f"{container}?kind=number", f"{container}?type=all,kind=number"):
+            try:
+                page_info = request(path)
+                break
+            except _CcapiHTTPError as error:
+                if error.camera_status not in {400, 404, 405}:
+                    raise
+        page_count = 0
+        if page_info is not unsupported_count:
+            if not isinstance(page_info, dict):
+                raise self._inventory_incomplete("invalid media page count response")
+            if "pagenumber" in page_info:
+                page_count = page_info["pagenumber"]
+                if type(page_count) is not int or not 0 <= page_count <= 2**31 - 1:
+                    raise self._inventory_incomplete("invalid media page count")
+            else:
+                # A camera may ignore kind=number and return an unpaged listing.
+                self._inventory_paths(page_info)
+        if page_count == 0:
+            yield self._inventory_paths(request(container))
+            return
+        for page in range(1, page_count + 1):
+            plain = f"{container}?page={page}"
+            if self._media_descending_order_supported is False:
+                value = request(plain)
+            else:
+                try:
+                    value = request(f"{plain}&order=desc")
+                    self._media_descending_order_supported = True
+                except _CcapiHTTPError as error:
+                    if error.camera_status != 400:
+                        raise
+                    self._media_descending_order_supported = False
+                    value = request(plain)
+            yield self._inventory_paths(value)
 
     def _content_paths(self, container: str, maximum_media_paths: int | None = None) -> list[str]:
         page_info = self._first_json([f"{container}?kind=number", f"{container}?type=all,kind=number"])
@@ -4261,6 +4567,20 @@ def _first_positive(value: dict[str, object], *keys: str) -> int | None:
         if parsed is not None:
             return parsed
     return None
+
+
+def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("Duplicate JSON keys cannot provide strict camera evidence")
+        value[key] = item
+    return value
+
+
+def _strict_positive_int(value: object) -> int | None:
+    # No boolean/float coercion or digit extraction from arbitrary camera text.
+    return value if type(value) is int and value > 0 else None
 
 
 def _positive_int(value: object) -> int | None:

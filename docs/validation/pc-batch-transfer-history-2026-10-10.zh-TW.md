@@ -28,4 +28,5 @@
 - production callback ownership 保留既有17項並新增14項：紀錄start/finish故障、晚ticket/admission、取消／disconnect時close真實成功、close拒絕與abort失敗、clear/eviction不補寫、不重試、warning/render例外不改傳輸結果，以及pending clear與refresh競爭、失敗恢復、close/reopen與晚list不得搶新dialog焦點。
 - 完整23個Node模組腳本的結果另存本地 receipt；獨立來源審查指出的清除視窗owner/focus競爭已補最小修正與受控測試。正常 secret scan 在交付前完成。
 - 原 browser 雙語批次旅程延伸真 IndexedDB reload、離線入口、窄200%、清除確認與焦點；新增 pending reload 不自動請求及第二分頁clear後晚finish不重建。此文件初版的 browser runtime **NOT_RUN**，待同 PR 下一完整 normal CI；synthetic目錄不代替真 OS provider 驗收。
+- 後續 exact head `644ced49a74331b9fdbc4e67558b5e66cc4e54e4` 的正常 CI `38093214237` 已全適用成功；原始 desktop job `114333747212` 確認英繁中完成後 reload／離線／clear、pending reload、第二分頁 clear／late finish 四個紀錄旅程通過，另含 backend/package、Windows、JVM/APK、secret 及 aggregate。此證據只驗該 head，不繼承到後續前景 auto-import 修改。
 - 完整 App 人工／實機驗收依使用者方向開發後集中。不新增workflow、不改KVM／安全設定、不移除既有gate、不發版。
