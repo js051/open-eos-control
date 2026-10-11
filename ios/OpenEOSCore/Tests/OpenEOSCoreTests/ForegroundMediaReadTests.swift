@@ -102,6 +102,32 @@ final class ForegroundMediaReadTests: XCTestCase {
         }
     }
 
+    func testDuplicateMembersCannotEstablishCompleteInventoryOrFreshSize() async throws {
+        for body in [#"{"pagenumber":2,"pagenumber":0}"#,
+                     #"{"path":[null],"path":[]}"#,
+                     #"{"pagenumber":0,"page\u006eumber":0}"#] {
+            let (client, transport) = try await makeClient()
+            await transport.base.enqueueJSON(path: "\(root)?kind=number", body: body)
+            await assertFailure(.invalidInventory) { try await client.foregroundMediaInventory() }
+            let requests = await transport.base.requests()
+            XCTAssertEqual(requests.map(\.path), ["/ccapi", "\(root)?kind=number"])
+        }
+        let (client, transport) = try await makeClient()
+        await transport.base.enqueueJSON(path: "\(root)?kind=number", body: #"{"pagenumber":1}"#)
+        await transport.base.enqueueJSON(path: "\(root)?page=1", body: #"{"path":[null],"path":[]}"#)
+        await assertFailure(.invalidInventory) { try await client.foregroundMediaInventory() }
+        let requests = await transport.base.requests()
+        XCTAssertEqual(requests.map(\.path), ["/ccapi", "\(root)?kind=number", "\(root)?page=1"])
+
+        let item = CameraMediaItem(id: itemPath, name: "IMG.JPG", kind: "image", sizeBytes: 999)
+        await transport.base.enqueueJSON(path: "\(itemPath)?kind=info", body: #"{"filesize":9,"filesize":4}"#)
+        await assertFailure(.invalidInventory) { try await client.foregroundMediaInfo(item) }
+        let metadataRequests = await transport.base.requests()
+        XCTAssertEqual(metadataRequests.count, requests.count + 1)
+        XCTAssertEqual(metadataRequests.last?.path, "\(itemPath)?kind=info")
+        XCTAssertTrue(metadataRequests.allSatisfy { $0.method == "GET" })
+    }
+
     func testUnsafeAndVariantPathsCannotBecomeForegroundIdentities() async throws {
         for path in ["http://untrusted.invalid\(itemPath)", "\(root)/%2e%2e/IMG.JPG",
                      "\(root)/IMG.JPG?kind=display", "\(root)/IMG.JPG#fragment", "\(root)/bad%00.JPG",

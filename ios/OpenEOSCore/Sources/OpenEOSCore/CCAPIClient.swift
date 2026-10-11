@@ -2170,7 +2170,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             throw CameraForegroundMediaError.invalidInventory
         }
         try CameraHTTPResponseIntegrity.validate(response, requestMethod: "GET")
-        return try decodeJSONObject(response.body)
+        return try decodeForegroundJSONObject(response.body)
     }
 
     private func foregroundResourcePath(_ rawID: String, root: String) throws -> String {
