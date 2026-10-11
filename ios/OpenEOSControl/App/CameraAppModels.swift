@@ -41,6 +41,7 @@ enum CameraSheet: String, Identifiable {
     case more
     case focusDrive
     case language
+    case deliveryHistory
 
     var id: String { rawValue }
 }

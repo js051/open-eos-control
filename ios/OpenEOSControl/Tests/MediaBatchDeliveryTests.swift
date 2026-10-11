@@ -440,13 +440,184 @@ final class MediaBatchDeliveryTests: XCTestCase {
         XCTAssertNil(state.makeMediaBatchExportPayload(), "Preview cannot fabricate an exported original")
     }
 
+    func testPreparedHistoryReopensOfflineWithoutCameraRequestsAndClearKeepsActiveExport() async throws {
+        for bridge in [false, true] {
+            let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("DeliveryIntegration-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let store = MediaDeliveryStore(root: root)
+            let peer = BatchMediaPeer(items: [item("A", name: "ORIGINAL.JPG")])
+            let state = makeState([peer], bridge: bridge, deliveryStore: store)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            state.selectMediaItems(state.mediaItems)
+            XCTAssertTrue(state.startMediaBatchDownload())
+            await state.mediaBatchTask?.value
+            XCTAssertEqual(state.mediaBatchState, .completed)
+            XCTAssertEqual(state.mediaBatchResults.map(\.status), [.ready])
+            let originalPayload = try XCTUnwrap(state.makeMediaBatchExportPayload())
+            await state.refreshMediaDeliveryHistory()
+            XCTAssertFalse(state.mediaDeliveryHistoryWarning)
+            XCTAssertEqual(state.mediaDeliverySnapshot.records.count, 1)
+            let record = try XCTUnwrap(state.mediaDeliverySnapshot.records.first)
+            XCTAssertEqual(record.status, .prepared)
+            XCTAssertEqual(record.availability, .available)
+            await state.disconnect()
+            let requests = await peer.requests()
+            XCTAssertTrue(state.mediaBatchResults.isEmpty)
+
+            let offline = makeState([], deliveryStore: MediaDeliveryStore(root: root))
+            await offline.refreshMediaDeliveryHistory()
+            XCTAssertFalse(offline.connected)
+            XCTAssertEqual(offline.mediaDeliverySnapshot.records.map(\.id), [record.id])
+            let payload = await offline.makeStoredMediaExportPayload(ids: [record.id])
+            let retained = try XCTUnwrap(payload)
+            XCTAssertEqual(try Data(contentsOf: retained.fileURLs[0]), BatchMediaPeer.original)
+            await offline.clearMediaDeliveryHistory()
+            XCTAssertTrue(offline.mediaDeliverySnapshot.records.isEmpty)
+            XCTAssertEqual(try Data(contentsOf: retained.fileURLs[0]), BatchMediaPeer.original,
+                "A presented exporter retains its own source through confirmed history clearing")
+            XCTAssertEqual(try Data(contentsOf: originalPayload.fileURLs[0]), BatchMediaPeer.original,
+                "History owns a separate retained copy, not the current temporary original")
+            let after = await peer.requests()
+            XCTAssertEqual(after, requests, "Offline recovery and sharing must not issue camera requests")
+        }
+    }
+
+    func testUnavailableHistoryNeverTurnsValidOriginalIntoFailedDownload() async throws {
+        let parent = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("MissingDeliveryParent-\(UUID().uuidString)")
+        let store = MediaDeliveryStore(root: parent.appendingPathComponent("not-created"))
+        let peer = BatchMediaPeer(items: [item("A")])
+        let state = makeState([peer], deliveryStore: store)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() }; try? FileManager.default.removeItem(at: parent) }
+        try await connectAndLoad(state)
+        state.selectMediaItems(state.mediaItems)
+        XCTAssertTrue(state.startMediaBatchDownload())
+        await state.mediaBatchTask?.value
+        XCTAssertEqual(state.mediaBatchState, .completed)
+        XCTAssertEqual(state.mediaBatchResults.map(\.status), [.ready])
+        XCTAssertTrue(state.mediaDeliveryHistoryWarning)
+        let payload = try XCTUnwrap(state.makeMediaBatchExportPayload())
+        XCTAssertEqual(try Data(contentsOf: payload.fileURLs[0]), BatchMediaPeer.original)
+        let downloads = await peer.downloadIDs()
+        XCTAssertEqual(downloads, [Data("A".utf8)])
+    }
+
+    func testClearedHistoryCannotBeRecreatedByPendingBatchCompletion() async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("DeliveryClear-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MediaDeliveryStore(root: root)
+        let peer = BatchMediaPeer(items: [item("A")])
+        let state = makeState([peer], deliveryStore: store)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectAndLoad(state)
+        state.selectMediaItems(state.mediaItems)
+        await peer.enqueueDownload(gate: "history-clear")
+        XCTAssertTrue(state.startMediaBatchDownload())
+        let task = try XCTUnwrap(state.mediaBatchTask)
+        try await waitForGate("history-clear", peer: peer)
+        await state.refreshMediaDeliveryHistory()
+        XCTAssertEqual(state.mediaDeliverySnapshot.records.count, 1)
+        await state.clearMediaDeliveryHistory()
+        XCTAssertTrue(state.mediaDeliverySnapshot.records.isEmpty)
+        await peer.release("history-clear")
+        await task.value
+        await state.refreshMediaDeliveryHistory()
+        XCTAssertTrue(state.mediaDeliverySnapshot.records.isEmpty)
+        XCTAssertEqual(state.mediaBatchResults.map(\.status), [.ready])
+        XCTAssertNotNil(state.makeMediaBatchExportPayload())
+        let downloads = await peer.downloadIDs()
+        XCTAssertEqual(downloads, [Data("A".utf8)])
+    }
+
+    func testCancelAfterStartedReceiptReplyCannotIssueOriginalGET() async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("DeliveryStarted-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MediaDeliveryStore(root: root)
+        let gate = DeliveryReplyGate(stage: .itemStarted)
+        let peer = BatchMediaPeer(items: [item("A")])
+        let state = makeState([peer], deliveryStore: store, deliveryDelay: { await gate.enter($0) })
+        defer { state.requestDisconnect(); Task { await gate.release(); await peer.releaseAll() } }
+        try await connectAndLoad(state)
+        state.selectMediaItems(state.mediaItems)
+        XCTAssertTrue(state.startMediaBatchDownload())
+        let task = try XCTUnwrap(state.mediaBatchTask)
+        try await waitUntil { await gate.waiting }
+        let cold = await MediaDeliveryStore(root: root).snapshot()
+        XCTAssertEqual(cold.records.map(\.status), [.unknown], "A cold reader cannot infer completion from started")
+        state.cancelMediaBatchDownload()
+        await gate.release()
+        await task.value
+        let downloads = await peer.downloadIDs()
+        XCTAssertTrue(downloads.isEmpty)
+        XCTAssertEqual(state.mediaBatchState, .cancelled)
+        let snapshot = await store.snapshot()
+        XCTAssertEqual(snapshot.records.map(\.status), [.cancelled])
+        XCTAssertEqual(snapshot.records.map(\.availability), [.notRetained])
+    }
+
+    func testRetainedReplyAfterDisconnectCannotOverwriteNewBatchUI() async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("DeliveryRetired-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MediaDeliveryStore(root: root)
+        let gate = DeliveryReplyGate(stage: .originalRetained)
+        let oldPeer = BatchMediaPeer(items: [item("OLD")])
+        let newPeer = BatchMediaPeer(items: [item("NEW")])
+        let state = makeState([oldPeer, newPeer], deliveryStore: store, deliveryDelay: { await gate.enter($0) })
+        defer { state.requestDisconnect(); Task { await gate.release(); await oldPeer.releaseAll(); await newPeer.releaseAll() } }
+        try await connectAndLoad(state)
+        state.selectMediaItems(state.mediaItems)
+        XCTAssertTrue(state.startMediaBatchDownload())
+        let oldTask = try XCTUnwrap(state.mediaBatchTask)
+        try await waitUntil { await gate.waiting }
+        await state.disconnect()
+        try await connectAndLoad(state)
+        state.selectMediaItems(state.mediaItems)
+        XCTAssertTrue(state.startMediaBatchDownload())
+        await state.mediaBatchTask?.value
+        XCTAssertEqual(state.mediaBatchResults.map(\.item.id), ["NEW"])
+        XCTAssertEqual(state.mediaBatchState, .completed)
+        await gate.release()
+        await oldTask.value
+        XCTAssertEqual(state.mediaBatchResults.map(\.item.id), ["NEW"])
+        XCTAssertEqual(state.mediaBatchResults.map(\.status), [.ready])
+        XCTAssertEqual(state.mediaBatchState, .completed)
+        XCTAssertFalse(state.isBusy(.media))
+        let snapshot = await store.snapshot()
+        XCTAssertEqual(Set(snapshot.records.map(\.filename)), Set(["OLD.JPG", "NEW.JPG"]))
+        XCTAssertTrue(snapshot.records.allSatisfy { $0.status == .prepared && $0.availability == .available })
+    }
+
+    func testLateHistorySnapshotCannotRepopulateConfirmedClear() async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("DeliverySnapshot-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MediaDeliveryStore(root: root)
+        let ticket = try await store.beginBatch()
+        let receipt = try await store.beginItem(ticket, filename: "FAILED.JPG")
+        try await store.finishFailure(ticket, receiptID: receipt, cancelled: false)
+        let gate = DeliveryReplyGate(stage: .snapshot)
+        let state = makeState([], deliveryStore: store, deliveryDelay: { await gate.enter($0) })
+        let oldRefresh = Task { await state.refreshMediaDeliveryHistory() }
+        defer { Task { await gate.release(); await oldRefresh.value } }
+        try await waitUntil { await gate.waiting }
+        await state.refreshMediaDeliveryHistory()
+        XCTAssertEqual(state.mediaDeliverySnapshot.records.count, 1)
+        XCTAssertFalse(state.mediaDeliveryHistoryLoading)
+        await state.clearMediaDeliveryHistory()
+        XCTAssertTrue(state.mediaDeliverySnapshot.records.isEmpty)
+        await gate.release()
+        await oldRefresh.value
+        XCTAssertTrue(state.mediaDeliverySnapshot.records.isEmpty)
+        XCTAssertFalse(state.mediaDeliveryHistoryLoading)
+    }
+
     private func item(_ id: String, name: String? = nil, kind: String = "image", rating: Int = 0) -> CameraMediaItem {
         CameraMediaItem(id: id, name: name ?? "\(id).JPG", kind: kind,
             sizeBytes: Int64(BatchMediaPeer.original.count), previewAvailable: true,
             rating: rating, contentType: "image/jpeg")
     }
 
-    private func makeState(_ peers: [BatchMediaPeer], bridge: Bool = true) -> CameraAppState {
+    private func makeState(_ peers: [BatchMediaPeer], bridge: Bool = true, deliveryStore: MediaDeliveryStore? = nil,
+                           deliveryDelay: (@Sendable (MediaDeliveryReplyStage) async -> Void)? = nil) -> CameraAppState {
         var remaining = peers
         let defaults = UserDefaults(suiteName: "MediaBatchDeliveryTests.\(UUID().uuidString)")!
         let state = CameraAppState(defaults: defaults, sessionFactory: {
@@ -454,7 +625,7 @@ final class MediaBatchDeliveryTests: XCTestCase {
             return bridge
                 ? .desktopBridge(try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: peer))
                 : .ccapi(try CCAPIClient(baseURL: "http://127.0.0.1:18080", mode: .simulator, transport: peer))
-        })
+        }, mediaDeliveryStore: deliveryStore, mediaDeliveryReplyDelay: deliveryDelay)
         state.autoRefresh = false
         return state
     }
@@ -627,5 +798,31 @@ private actor BatchMediaPeer: CameraHTTPTransport {
         json[simulator ? "protect" : "protected"] = item.protected
         json[simulator ? "content_type" : "contentType"] = item.contentType
         return json
+    }
+}
+
+/// Holds one reply without cooperating with cancellation; tests explicitly drain it.
+private actor DeliveryReplyGate {
+    private let stage: MediaDeliveryReplyStage
+    private var armed = true
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var waiting = false
+
+    init(stage: MediaDeliveryReplyStage) { self.stage = stage }
+
+    func enter(_ current: MediaDeliveryReplyStage) async {
+        guard armed, current == stage else { return }
+        armed = false
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            waiting = true
+        }
+    }
+
+    func release() {
+        waiting = false
+        let pending = continuation
+        continuation = nil
+        pending?.resume()
     }
 }

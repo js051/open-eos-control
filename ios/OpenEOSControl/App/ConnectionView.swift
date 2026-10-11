@@ -83,6 +83,17 @@ struct ConnectionView: View {
                 .buttonBorderShape(.roundedRectangle(radius: 6))
                 .tint(Color.cameraText)
                 .accessibilityIdentifier("offline-preview-button")
+
+                Button {
+                    camera.activeSheet = .deliveryHistory
+                } label: {
+                    Label("media_delivery_history_title", systemImage: "clock.arrow.circlepath")
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.roundedRectangle(radius: 6))
+                .tint(Color.cameraText)
+                .accessibilityIdentifier("connection-delivery-history-button")
             }
             .frame(maxWidth: 560)
             .padding(.horizontal, 20)

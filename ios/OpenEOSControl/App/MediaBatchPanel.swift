@@ -76,6 +76,19 @@ struct MediaBatchPanel: View {
                 .disabled(camera.mediaBatchState == .running || !camera.mediaBatchResults.contains { $0.completedFileURL != nil })
                 .accessibilityIdentifier("media-batch-share-ready")
             }
+            if camera.mediaDeliveryHistoryWarning {
+                Text(language.string("media_delivery_history_batch_warning"))
+                    .font(.caption)
+                    .foregroundStyle(Color.cameraSecondaryText)
+                    .accessibilityIdentifier("media-batch-history-warning")
+            }
+            Button {
+                camera.activeSheet = .deliveryHistory
+            } label: {
+                Label(language.string("media_delivery_history_title"), systemImage: "clock.arrow.circlepath")
+                    .frame(minHeight: 44, alignment: .leading)
+            }
+            .accessibilityIdentifier("media-batch-delivery-history-button")
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -101,7 +114,7 @@ struct MediaBatchPanel: View {
 /// The coordinator retains the immutable file leases for the actual activity
 /// controller lifetime, independently of a camera reset or a later batch.
 /// A completed activity is not proof that an external provider saved the bytes.
-private struct MediaBatchActivityView: UIViewControllerRepresentable {
+struct MediaBatchActivityView: UIViewControllerRepresentable {
     let payload: MediaBatchExportPayload
 
     final class Coordinator {

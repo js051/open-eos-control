@@ -1,6 +1,9 @@
 import Foundation
 import OpenEOSCore
 
+/// Narrow reply-publication seam for controlled cancellation/retirement tests.
+enum MediaDeliveryReplyStage: Sendable, Equatable { case itemStarted, originalRetained, snapshot, shareAcquired }
+
 /// Prepared text retains its admitting connection through the final UI publish.
 struct CameraSessionExport {
     let text: String
@@ -120,6 +123,13 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaBatchState = MediaBatchState.idle
     @Published private(set) var mediaBatchProgress: CameraMediaTransferProgress?
     @Published private(set) var mediaBatchCancellationRequested = false
+    @Published private(set) var mediaDeliverySnapshot = MediaDeliverySnapshot(records: [], retainedBytes: 0, warning: nil)
+    @Published private(set) var mediaDeliveryHistoryLoading = false
+    @Published private(set) var mediaDeliveryHistoryWarning = false
+    private var mediaDeliveryRecordingWarning = false
+    private var mediaDeliveryHistoryOwner = UUID()
+    private let mediaDeliveryStore: MediaDeliveryStore?
+    private let mediaDeliveryReplyDelay: (@Sendable (MediaDeliveryReplyStage) async -> Void)?
     @Published private(set) var activeMediaUploadName: String?
     @Published private(set) var mediaUploadProgress: CameraMediaTransferProgress?
     @Published private(set) var uploadedMediaName: String?
@@ -292,9 +302,13 @@ final class CameraAppState: ObservableObject {
         bridgeCameraDiscovery: (@Sendable (String, String) async throws -> [DesktopBridgeCamera])? = nil,
         cubeLutLoader: (@Sendable (URL) async throws -> CubeLut)? = nil,
         focusMarkerDelay: (@Sendable () async throws -> Void)? = nil,
-        rtpEventDispatcher: (@Sendable (@escaping @MainActor @Sendable () -> Void) -> Void)? = nil
+        rtpEventDispatcher: (@Sendable (@escaping @MainActor @Sendable () -> Void) -> Void)? = nil,
+        mediaDeliveryStore: MediaDeliveryStore? = nil,
+        mediaDeliveryReplyDelay: (@Sendable (MediaDeliveryReplyStage) async -> Void)? = nil
     ) {
         self.defaults = defaults
+        self.mediaDeliveryStore = mediaDeliveryStore
+        self.mediaDeliveryReplyDelay = mediaDeliveryReplyDelay
         self.sessionFactory = sessionFactory
         self.bridgeCameraDiscovery = bridgeCameraDiscovery
         self.cubeLutLoader = cubeLutLoader
@@ -1820,6 +1834,66 @@ final class CameraAppState: ObservableObject {
         MediaBatchExportPayload(results: mediaBatchResults)
     }
 
+    /// History belongs to this App installation, independently of any camera session.
+    func refreshMediaDeliveryHistory() async {
+        let owner = UUID()
+        mediaDeliveryHistoryOwner = owner
+        mediaDeliveryHistoryLoading = true
+        defer { if mediaDeliveryHistoryOwner == owner { mediaDeliveryHistoryLoading = false } }
+        guard let mediaDeliveryStore else {
+            mediaDeliveryHistoryWarning = true
+            return
+        }
+        let snapshot = await mediaDeliveryStore.snapshot()
+        await mediaDeliveryReplyDelay?(.snapshot)
+        guard mediaDeliveryHistoryOwner == owner else { return }
+        mediaDeliverySnapshot = snapshot
+        mediaDeliveryHistoryWarning = mediaDeliveryRecordingWarning || snapshot.warning != nil
+    }
+
+    func makeStoredMediaExportPayload(ids: [UUID]) async -> MediaBatchExportPayload? {
+        guard !mediaDeliveryHistoryLoading, let mediaDeliveryStore else { return nil }
+        let owner = UUID()
+        mediaDeliveryHistoryOwner = owner
+        mediaDeliveryHistoryLoading = true
+        defer { if mediaDeliveryHistoryOwner == owner { mediaDeliveryHistoryLoading = false } }
+        do {
+            let files = try await mediaDeliveryStore.acquireShare(receiptIDs: ids)
+            await mediaDeliveryReplyDelay?(.shareAcquired)
+            guard mediaDeliveryHistoryOwner == owner else { return nil }
+            return MediaBatchExportPayload(storedFiles: files)
+        } catch {
+            guard mediaDeliveryHistoryOwner == owner else { return nil }
+            let snapshot = await mediaDeliveryStore.snapshot()
+            guard mediaDeliveryHistoryOwner == owner else { return nil }
+            mediaDeliveryHistoryWarning = true
+            mediaDeliverySnapshot = snapshot
+            return nil
+        }
+    }
+
+    /// Called only after the UI confirms removal of records and retained App copies.
+    func clearMediaDeliveryHistory() async {
+        guard !mediaDeliveryHistoryLoading, let mediaDeliveryStore else { return }
+        let owner = UUID()
+        mediaDeliveryHistoryOwner = owner
+        mediaDeliveryHistoryLoading = true
+        defer { if mediaDeliveryHistoryOwner == owner { mediaDeliveryHistoryLoading = false } }
+        do {
+            try await mediaDeliveryStore.clear()
+            guard mediaDeliveryHistoryOwner == owner else { return }
+            mediaDeliveryRecordingWarning = false
+        } catch {
+            guard mediaDeliveryHistoryOwner == owner else { return }
+            mediaDeliveryRecordingWarning = true
+        }
+        let snapshot = await mediaDeliveryStore.snapshot()
+        await mediaDeliveryReplyDelay?(.snapshot)
+        guard mediaDeliveryHistoryOwner == owner else { return }
+        mediaDeliverySnapshot = snapshot
+        mediaDeliveryHistoryWarning = mediaDeliveryRecordingWarning || snapshot.warning != nil
+    }
+
     private func ownsMediaBatch(token: UUID, generation: UUID) -> Bool {
         mediaBatchToken == token && sessionGeneration == generation
     }
@@ -1837,12 +1911,36 @@ final class CameraAppState: ObservableObject {
                 end(.media)
             }
         }
+        var deliveryTicket: MediaDeliveryTicket?
+        if let mediaDeliveryStore {
+            do { deliveryTicket = try await mediaDeliveryStore.beginBatch() }
+            catch {
+                if ownsMediaBatch(token: token, generation: generation) {
+                    mediaDeliveryRecordingWarning = true
+                    mediaDeliveryHistoryWarning = true
+                }
+            }
+        }
         for (index, entry) in results.enumerated() {
             guard ownsMediaBatch(token: token, generation: generation) else { return }
             guard !Task.isCancelled, !mediaBatchCancellationRequested else {
                 mediaBatchState = .cancelled
                 return
             }
+            var deliveryReceiptID: UUID?
+            if let mediaDeliveryStore, let deliveryTicket {
+                do {
+                    deliveryReceiptID = try await mediaDeliveryStore.beginItem(deliveryTicket, filename: entry.item.name)
+                    await mediaDeliveryReplyDelay?(.itemStarted)
+                }
+                catch {
+                    if ownsMediaBatch(token: token, generation: generation) {
+                        mediaDeliveryRecordingWarning = true
+                        mediaDeliveryHistoryWarning = true
+                    }
+                }
+            }
+            guard ownsMediaBatch(token: token, generation: generation) else { return }
             let itemToken = UUID()
             mediaBatchItemToken = itemToken
             mediaBatchResults[index].status = .downloading
@@ -1870,11 +1968,37 @@ final class CameraAppState: ObservableObject {
                 mediaBatchResults[index].ownedFile = ownedFile
                 mediaBatchResults[index].status = .ready
                 mediaBatchProgress = nil
+                // Optional retention has its own error boundary. The validated
+                // temporary original remains ready even if history or disk fails.
+                if let mediaDeliveryStore, let deliveryTicket, let deliveryReceiptID {
+                    do {
+                        try await mediaDeliveryStore.finishPrepared(deliveryTicket, receiptID: deliveryReceiptID,
+                            source: ownedFile, actualBytes: download.bytesTransferred)
+                        await mediaDeliveryReplyDelay?(.originalRetained)
+                    } catch {
+                        if ownsMediaBatch(token: token, generation: generation) {
+                            mediaDeliveryRecordingWarning = true
+                            mediaDeliveryHistoryWarning = true
+                        }
+                    }
+                    if ownsMediaBatch(token: token, generation: generation) {
+                        await refreshMediaDeliveryHistory()
+                    }
+                }
             } catch {
-                guard ownsMediaBatch(token: token, generation: generation) else { return }
-                mediaBatchItemToken = nil
                 let cancelled = Task.isCancelled || mediaBatchCancellationRequested || error is CancellationError
                     || (error as? URLError)?.code == .cancelled
+                if let mediaDeliveryStore, let deliveryTicket, let deliveryReceiptID {
+                    do { try await mediaDeliveryStore.finishFailure(deliveryTicket, receiptID: deliveryReceiptID, cancelled: cancelled) }
+                    catch {
+                        if ownsMediaBatch(token: token, generation: generation) {
+                            mediaDeliveryRecordingWarning = true
+                            mediaDeliveryHistoryWarning = true
+                        }
+                    }
+                }
+                guard ownsMediaBatch(token: token, generation: generation) else { return }
+                mediaBatchItemToken = nil
                 mediaBatchResults[index].status = cancelled ? .cancelledOrUnknown : .failed
                 mediaBatchResults[index].errorMessage = cancelled ? nil : error.localizedDescription
                 mediaBatchState = cancelled ? .cancelled : .failed

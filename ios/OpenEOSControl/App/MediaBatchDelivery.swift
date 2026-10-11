@@ -34,6 +34,7 @@ struct MediaBatchExportPayload: Identifiable {
     let id = UUID()
     let fileURLs: [URL]
     private let ownedFiles: [MediaBatchOwnedFile]
+    private let storedFiles: [MediaDeliveryFileLease]
 
     init?(results: [MediaBatchResult]) {
         let files = results.compactMap { result in
@@ -41,7 +42,15 @@ struct MediaBatchExportPayload: Identifiable {
         }
         guard !files.isEmpty else { return nil }
         ownedFiles = files
+        storedFiles = []
         fileURLs = files.map(\.fileURL)
+    }
+
+    init?(storedFiles: [MediaDeliveryFileLease]) {
+        guard !storedFiles.isEmpty else { return nil }
+        ownedFiles = []
+        self.storedFiles = storedFiles
+        fileURLs = storedFiles.map(\.fileURL)
     }
 }
 
@@ -57,7 +66,7 @@ final class MediaBatchOwnedFile: @unchecked Sendable {
     }
 
     static func create(filename: String, directoryID: UUID = UUID()) throws -> MediaBatchOwnedFile {
-        let root = FileManager.default.temporaryDirectory
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
             .appendingPathComponent("OpenEOSControl", isDirectory: true)
             .appendingPathComponent("BatchMedia", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

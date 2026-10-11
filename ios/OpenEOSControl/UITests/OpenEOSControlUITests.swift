@@ -136,6 +136,27 @@ final class OpenEOSControlUITests: XCTestCase {
         _ = try XCTUnwrap((state["capture_count"] as? NSNumber)?.intValue == 0 ? true : nil)
         // The share entry is ready. No external activity is selected or claimed saved.
         addScreenshot(name: "media-batch-two-originals-ready")
+        // Relaunch genuinely discards CameraAppState and its temporary leases.
+        // These receipts/copies must be readable offline from the app-owned store.
+        for (language, apple, locale, expectedCounts) in [
+            ("english", "en", "en_US", "2 attempts · 2 copies available now"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "2 次嘗試 · 2 份副本目前可用"),
+        ] {
+            app.terminate()
+            app.launchArguments = ["-resetState", "-disableAnimations", "-app-language", language,
+                                   "-AppleLanguages", "(\(apple))", "-AppleLocale", locale]
+            app.launch()
+            _ = try XCTUnwrap(scrollConnectionButtonIntoView(in: app,
+                buttonIdentifier: "connection-delivery-history-button", timeout: 8) ? true : nil)
+            try tapForAsyncTest(app.buttons["connection-delivery-history-button"])
+            let counts = app.staticTexts["media-delivery-history-counts"]
+            _ = try XCTUnwrap(waitForLabel(counts, containing: expectedCounts, timeout: 8) ? true : nil)
+            XCTAssertFalse(app.buttons["shutter-button"].exists, "History does not reconnect the camera")
+            XCTAssertFalse(app.descendants(matching: .any)["media-delivery-history-warning"].firstMatch.exists)
+            addScreenshot(name: "media-delivery-offline-relaunch-\(language)")
+        }
+        let afterHistory = try await simulatorRequest(path: "/ccapi/test/state")
+        _ = try XCTUnwrap((afterHistory["capture_count"] as? NSNumber)?.intValue == 0 ? true : nil)
     }
 
     func testConnectionHitGeometryRejectsOffscreenOrClippedButtons() {

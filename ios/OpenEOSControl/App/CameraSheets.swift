@@ -21,6 +21,8 @@ struct CameraSheetHost: View {
             FocusDriveView()
         case .language:
             LanguageSettingsView()
+        case .deliveryHistory:
+            MediaDeliveryHistoryView()
         }
     }
 }
