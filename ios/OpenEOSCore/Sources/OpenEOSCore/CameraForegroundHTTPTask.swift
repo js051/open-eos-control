@@ -10,6 +10,7 @@ final class CameraForegroundHTTPTask: NSObject, URLSessionDataDelegate, @uncheck
     private let lock = NSLock()
     private let configuration: URLSessionConfiguration
     private let maximumBytes: Int64
+    private let temporaryDirectory: URL
     private let progress: CameraMediaProgressHandler
     private var continuation: CheckedContinuation<CameraHTTPDownloadResponse, Error>?
     private var session: URLSession?
@@ -21,9 +22,15 @@ final class CameraForegroundHTTPTask: NSObject, URLSessionDataDelegate, @uncheck
     private var headers: [String: String] = [:]
     private var cancellationRequested = false
 
-    init(configuration: URLSessionConfiguration, maximumBytes: Int64, progress: @escaping CameraMediaProgressHandler) {
+    init(
+        configuration: URLSessionConfiguration,
+        maximumBytes: Int64,
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory,
+        progress: @escaping CameraMediaProgressHandler
+    ) {
         self.configuration = configuration.copy() as! URLSessionConfiguration
         self.maximumBytes = maximumBytes
+        self.temporaryDirectory = temporaryDirectory
         self.progress = progress
         super.init()
     }
@@ -42,7 +49,7 @@ final class CameraForegroundHTTPTask: NSObject, URLSessionDataDelegate, @uncheck
                     continuation.resume(throwing: CancellationError())
                     return
                 }
-                let url = FileManager.default.temporaryDirectory
+                let url = temporaryDirectory
                     .appendingPathComponent("open-eos-foreground-\(UUID().uuidString)")
                 do {
                     guard FileManager.default.createFile(atPath: url.path, contents: nil) else {

@@ -41,6 +41,52 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertNil(Self.scrollDragOffset(target: .null, viewport: .infinite))
     }
 
+    func testScrollDragModeSeparatesLazyDiscoveryFromKnownTargetCorrection() throws {
+        let viewport = CGRect(x: 0, y: 180 + 2.0 / 3.0, width: 402, height: 693 + 1.0 / 3.0)
+        // An absent AX row is represented by .null without querying its frame.
+        let unavailable = [CGRect.null, .infinite, .zero,
+                           CGRect(x: CGFloat.nan, y: 0, width: 48, height: 48)]
+        for target in unavailable {
+            let mode = Self.scrollDragMode(target: target, cameraActions: false)
+            XCTAssertEqual(mode, .searchFlick)
+            XCTAssertEqual(mode.holdDuration, 0)
+            XCTAssertEqual(try XCTUnwrap(Self.scrollDragOffset(target: target, viewport: viewport)),
+                           viewport.height * 0.8, accuracy: 0.000_001)
+        }
+        let finalTarget = CGRect(x: 140, y: 904, width: 48, height: 48)
+        let distantTarget = CGRect(x: 140, y: 2_000, width: 48, height: 48)
+        let coveredTarget = CGRect(x: 140, y: 160, width: 48, height: 48)
+        let visibleTarget = CGRect(x: 140, y: 400, width: 48, height: 48)
+        let known = [finalTarget, distantTarget, coveredTarget, visibleTarget]
+        for target in known {
+            let mode = Self.scrollDragMode(target: target, cameraActions: false)
+            XCTAssertEqual(mode, .targetCorrection)
+            XCTAssertEqual(mode.holdDuration, 0.1)
+        }
+        // The failed search materialized this button only after its third drag.
+        // Once known, it needs a short correction rather than another flick.
+        XCTAssertEqual(try XCTUnwrap(Self.scrollDragOffset(target: finalTarget, viewport: viewport)),
+                       90, accuracy: 0.000_001)
+        // Equal drag distances do not imply equal modes: a distant known target
+        // must retain its stop even when the offset reaches the search maximum.
+        XCTAssertEqual(Self.scrollDragOffset(target: distantTarget, viewport: viewport),
+                       Self.scrollDragOffset(target: .null, viewport: viewport))
+        XCTAssertLessThan(try XCTUnwrap(Self.scrollDragOffset(target: coveredTarget, viewport: viewport)), 0)
+        XCTAssertNil(Self.scrollDragOffset(target: visibleTarget, viewport: viewport))
+        let ratingViewport = CGRect(x: 0, y: 128, width: 402, height: 746)
+        let coveredRating = CGRect(x: 20, y: 25 + 1.0 / 3.0, width: 362, height: 85 + 1.0 / 3.0)
+        XCTAssertEqual(Self.scrollDragMode(target: coveredRating, cameraActions: false), .targetCorrection)
+        XCTAssertEqual(try XCTUnwrap(Self.scrollDragOffset(target: coveredRating, viewport: ratingViewport)),
+                       -(114 + 2.0 / 3.0), accuracy: 0.000_001)
+        for target in unavailable + known + [coveredRating] {
+            let mode = Self.scrollDragMode(target: target, cameraActions: true)
+            XCTAssertEqual(mode, .cameraActions)
+            XCTAssertEqual(mode.holdDuration, 0.1)
+        }
+        XCTAssertNil(Self.scrollDragOffset(target: .null, viewport: .zero))
+        XCTAssertNil(Self.scrollDragOffset(target: .null, viewport: .infinite))
+    }
+
     func testCameraActionsScrollViewportExcludesFixedFooter() throws {
         let window = CGRect(x: 0, y: 0, width: 874, height: 402)
         let footer = CGRect(x: 100, y: 317, width: 674, height: 64)
@@ -1457,7 +1503,9 @@ final class OpenEOSControlUITests: XCTestCase {
         var lastDragStart: XCUICoordinate?
         var lastDragEnd: XCUICoordinate?
         var lastDragSurface: XCUIElement?
+        var lastDragMode: ScrollDragMode?
         var dragCount = 0
+        var searchFlickCount = 0
         while ProcessInfo.processInfo.systemUptime < deadline {
             let exists = element.exists
             if exists, element.isEnabled, element.isHittable { return true }
@@ -1503,14 +1551,16 @@ final class OpenEOSControlUITests: XCTestCase {
             lastDragStart = start
             lastDragEnd = end
             lastDragSurface = surface
+            let mode = Self.scrollDragMode(target: targetFrame, cameraActions: cameraActions)
+            lastDragMode = mode
             dragCount += 1
-            // Release only after stopping. Whole-view swipes coast, consuming
-            // the deadline and potentially passing a newly materialized cell.
-            // Lazy media searches can span several accessibility-size screens.
-            // Use the supported fast drag while retaining overlap and the stop;
-            // camera-action navigation keeps its independently verified velocity.
+            if mode == .searchFlick { searchFlickCount += 1 }
+            // Lazy discovery has no target position yet. Release without a
+            // terminal hold to allow momentum, keeping both touch endpoints in
+            // the clipped viewport. Known targets retain their precise stopped
+            // correction; camera-action navigation keeps its existing gesture.
             let velocity: XCUIGestureVelocity = cameraActions ? .default : .fast
-            start.press(forDuration: 0.01, thenDragTo: end, withVelocity: velocity, thenHoldForDuration: 0.1)
+            start.press(forDuration: 0.01, thenDragTo: end, withVelocity: velocity, thenHoldForDuration: mode.holdDuration)
         }
         let interactive = element.exists && element.isEnabled && element.isHittable
         if cameraActions, !interactive {
@@ -1530,6 +1580,9 @@ final class OpenEOSControlUITests: XCTestCase {
                 "last-target-frame=\(lastTargetFrame) final-target-frame=\(finalFrame)",
                 "exists=\(exists) enabled=\(exists && element.isEnabled) hittable=\(exists && element.isHittable)",
             ]
+            if let lastDragMode {
+                lines.append("search-flicks=\(searchFlickCount) last-drag-mode=\(lastDragMode.rawValue) terminal-hold=\(lastDragMode.holdDuration)")
+            }
             // Resolve coordinates only after failure, so diagnostics do not add
             // AX round trips to every drag. These are current resolved points,
             // not a claim about the earlier synthesized event's touch samples.
@@ -1650,6 +1703,22 @@ final class OpenEOSControlUITests: XCTestCase {
         let viewport = surface.intersection(window).intersection(aboveFooter)
         guard viewport.width >= 44, viewport.height >= 44 else { return nil }
         return viewport
+    }
+
+    private enum ScrollDragMode: String {
+        case searchFlick = "search-flick"
+        case targetCorrection = "target-correction"
+        case cameraActions = "camera-actions"
+
+        var holdDuration: TimeInterval { self == .searchFlick ? 0 : 0.1 }
+    }
+
+    private static func scrollDragMode(target: CGRect, cameraActions: Bool) -> ScrollDragMode {
+        if cameraActions { return .cameraActions }
+        guard !target.isNull, !target.isInfinite, !target.isEmpty,
+              [target.minX, target.minY, target.maxX, target.maxY].allSatisfy({ $0.isFinite })
+        else { return .searchFlick }
+        return .targetCorrection
     }
 
     private static func scrollDragOffset(target: CGRect, viewport: CGRect) -> CGFloat? {

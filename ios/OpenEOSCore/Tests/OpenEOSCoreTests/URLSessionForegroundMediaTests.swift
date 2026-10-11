@@ -64,32 +64,43 @@ final class URLSessionForegroundMediaTests: XCTestCase {
         let peer = try ForegroundMediaWirePeer()
         try await peer.start()
         defer { peer.stop() }
-        let transport = URLSessionCameraHTTPTransport()
-        let prefixWritten = expectation(description: "unique decoded prefix reaches the production temporary file")
-        let limit = Int64(peer.marker.count)
-        let task = Task {
-            try await transport.downloadForeground(peer.request("/chunked-overflow"), maximumBytes: limit) { progress in
-                if progress.bytesTransferred == limit { prefixWritten.fulfill() }
-            }
-        }
-        defer { task.cancel() }
-        await fulfillment(of: [prefixWritten], timeout: 2)
-        // The marker identifies this transfer, not every temporary file that
-        // another test may concurrently create. Read only this bounded namespace.
-        let ownedFiles = try foregroundTemporaryFiles(containing: peer.marker)
-        XCTAssertEqual(ownedFiles.count, 1)
-        let ownedFile = try XCTUnwrap(ownedFiles.first)
-        XCTAssertTrue(peer.completeChunkedOverflow())
-        switch await task.result {
-        case .success(let response):
-            try? FileManager.default.removeItem(at: response.temporaryFileURL)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("open-eos-foreground-fixture-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+        // Positive control proves the internal directory selects the real task's
+        // output, and decoded bytes fit even when chunk framing is larger.
+        let exactTask = CameraForegroundHTTPTask(
+            configuration: .ephemeral, maximumBytes: 4,
+            temporaryDirectory: directory, progress: { _ in }
+        )
+        let exact = try await exactTask.run(peer.request("/chunked-original"))
+        XCTAssertEqual(exact.temporaryFileURL.deletingLastPathComponent().path, directory.path)
+        XCTAssertEqual(try Data(contentsOf: exact.temporaryFileURL), peer.original)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [exact.temporaryFileURL.lastPathComponent])
+        try FileManager.default.removeItem(at: exact.temporaryFileURL)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+        // Exercise the exact production task with isolated file ownership. The
+        // peer finishes all chunk framing, so no particular progress callback or
+        // URLSession buffering threshold is required before overflow can arrive.
+        let task = CameraForegroundHTTPTask(
+            configuration: .ephemeral, maximumBytes: Int64(peer.marker.count),
+            temporaryDirectory: directory, progress: { _ in }
+        )
+        do {
+            _ = try await task.run(peer.request("/chunked-overflow"))
             XCTFail("Oversized decoded chunk was retained")
-        case .failure(let error):
-            XCTAssertFalse(error is CancellationError)
-            XCTAssertTrue(error.localizedDescription.contains("byte limit"), "\(error)")
+        } catch {
+            guard case CCAPIError.invalidResponse(let message) = error else {
+                return XCTFail("Expected the strict decoded byte-limit error, got \(error)")
+            }
+            XCTAssertEqual(message, "Strict foreground response exceeded its byte limit.")
         }
-        XCTAssertFalse(FileManager.default.fileExists(atPath: ownedFile.path))
-        XCTAssertEqual(peer.paths(), ["/chunked-overflow"])
+        // This directory belongs only to this production transfer; even a file
+        // rejected before its first body write must have been removed.
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+        XCTAssertEqual(peer.paths(), ["/chunked-original", "/chunked-overflow"])
     }
 
     func testCancellationBeforeInstallationSendsNoJSONOrOriginalRequest() async throws {
@@ -225,7 +236,6 @@ private final class ForegroundMediaWirePeer: @unchecked Sendable {
     private var connections: [NWConnection] = []
     private var recorded: [String] = []
     private var stallAction: (@Sendable () -> Void)?
-    private var overflowConnection: NWConnection?
 
     init() throws {
         let parameters = NWParameters.tcp
@@ -286,19 +296,6 @@ private final class ForegroundMediaWirePeer: @unchecked Sendable {
         lock.unlock()
     }
 
-    func completeChunkedOverflow() -> Bool {
-        lock.lock()
-        let connection = overflowConnection
-        overflowConnection = nil
-        lock.unlock()
-        guard let connection else { return false }
-        // One extra decoded byte crosses the limit, followed by a valid terminator.
-        connection.send(content: Data("1\r\nX\r\n0\r\n\r\n".utf8), completion: .contentProcessed { _ in
-            connection.cancel()
-        })
-        return true
-    }
-
     private func read(_ connection: NWConnection, bytes: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 4_096) { [weak self] data, _, complete, error in
             guard let self else { connection.cancel(); return }
@@ -320,7 +317,6 @@ private final class ForegroundMediaWirePeer: @unchecked Sendable {
     private func respond(to path: String, connection: NWConnection) {
         lock.lock()
         recorded.append(path)
-        if path == "/chunked-overflow" { overflowConnection = connection }
         let stallAction = stallAction
         lock.unlock()
         let response: Data
@@ -335,7 +331,7 @@ private final class ForegroundMediaWirePeer: @unchecked Sendable {
                 original.prefix(2) + Data("\r\n2\r\n".utf8) + original.suffix(2) + Data("\r\n0\r\n\r\n".utf8)
         case "/chunked-overflow":
             response = Data("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n\(String(marker.count, radix: 16))\r\n".utf8) +
-                marker + Data("\r\n".utf8)
+                marker + Data("\r\n1\r\nX\r\n0\r\n\r\n".utf8)
         case "/oversize":
             response = Data("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".utf8) + original + Data([0x00])
         case "/short":
@@ -349,7 +345,6 @@ private final class ForegroundMediaWirePeer: @unchecked Sendable {
         }
         connection.send(content: response, completion: .contentProcessed { error in
             if path == "/stall", error == nil { stallAction?() }
-            else if path == "/chunked-overflow", error == nil { /* The test owns the completion barrier. */ }
             else { connection.cancel() }
         })
     }
