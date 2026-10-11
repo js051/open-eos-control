@@ -9,6 +9,7 @@ struct MediaView: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
     let controlRotation: Double
+    @State private var exportPayload: MediaBatchExportPayload?
     @State private var pendingDeletion: CameraMediaItem?
     @State private var metadataItemID: String?
     @State private var pendingPreviewMetadataItemID: String?
@@ -107,6 +108,9 @@ struct MediaView: View {
             ratingFilterOwner = nil
             isFolderFilterPresented = false
             folderFilterOwner = nil
+        }
+        .sheet(item: $exportPayload) { payload in
+            MediaBatchActivityView(payload: payload)
         }
         .sheet(isPresented: $isDateFilterPresented) { dateFilterSheet }
         .sheet(isPresented: $isRatingFilterPresented) { ratingFilterSheet }
@@ -581,8 +585,10 @@ struct MediaView: View {
     @ViewBuilder
     private func downloadAction(_ item: CameraMediaItem) -> some View {
         Group {
-            if let url = camera.downloadedFile(for: item) {
-                ShareLink(item: url) {
+            if camera.downloadedFile(for: item) != nil {
+                Button {
+                    exportPayload = camera.makeMediaDownloadExportPayload(for: item)
+                } label: {
                     Image(systemName: "square.and.arrow.up")
                         .frame(width: 48, height: 48)
                         .accessibilityLabel(Text("save_media"))
@@ -1145,6 +1151,7 @@ private struct MediaPreviewView: View {
     let items: [CameraMediaItem]
     let controlRotation: Double
     let onActions: (CameraMediaItem) -> Void
+    @State private var exportPayload: MediaBatchExportPayload?
 
     var body: some View {
         ZStack {
@@ -1255,6 +1262,9 @@ private struct MediaPreviewView: View {
                 Spacer()
             }
         }
+        .sheet(item: $exportPayload) { payload in
+            MediaBatchActivityView(payload: payload)
+        }
         .alert(
             Text("operation_failed"),
             isPresented: Binding(
@@ -1321,8 +1331,10 @@ private struct MediaPreviewView: View {
 
     @ViewBuilder
     private func previewDownloadAction(_ item: CameraMediaItem) -> some View {
-        if let url = camera.downloadedFile(for: item) {
-            ShareLink(item: url) {
+        if camera.downloadedFile(for: item) != nil {
+            Button {
+                exportPayload = camera.makeMediaDownloadExportPayload(for: item)
+            } label: {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "square.and.arrow.up")
                         .frame(width: 48, height: 48)

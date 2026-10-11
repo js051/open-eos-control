@@ -46,6 +46,12 @@ struct MediaBatchExportPayload: Identifiable {
         fileURLs = files.map(\.fileURL)
     }
 
+    init(ownedFile: MediaBatchOwnedFile) {
+        ownedFiles = [ownedFile]
+        storedFiles = []
+        fileURLs = [ownedFile.fileURL]
+    }
+
     init?(storedFiles: [MediaDeliveryFileLease]) {
         guard !storedFiles.isEmpty else { return nil }
         ownedFiles = []

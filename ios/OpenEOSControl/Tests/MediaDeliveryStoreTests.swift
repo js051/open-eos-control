@@ -275,6 +275,25 @@ final class MediaDeliveryStoreTests: XCTestCase {
         }
     }
 
+    func testDynamicSingleDisplayNamesUseTheSameSanitizerAsPlannedRows() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let ticket = try await store.beginBatch()
+        for filename in ["https://synthetic-authority.invalid/SAME.JPG?token=synthetic-query#synthetic-fragment",
+                         "../SAME.JPG#synthetic-fragment", "https://synthetic-authority.invalid?token=synthetic-query"] {
+            _ = try await store.beginItem(ticket, filename: filename, expectedBytes: nil)
+        }
+        let snapshot = await fixture.store().snapshot()
+        XCTAssertEqual(snapshot.records.map(\.filename), ["SAME.JPG", "SAME.JPG", "original-media"])
+        XCTAssertEqual(Set(snapshot.records.map(\.id)).count, 3)
+        XCTAssertTrue(snapshot.plannedBatches.isEmpty)
+        let persisted = String(decoding: try Data(contentsOf: fixture.manifestURL), as: UTF8.self)
+        for forbidden in ["synthetic-authority", "synthetic-query", "synthetic-fragment", "token=", "https:", "?", "#"] {
+            XCTAssertFalse(persisted.contains(forbidden), forbidden)
+        }
+    }
+
     func testClearRemovesPlanAndReceiptsTogetherRejectsLateCallbacksAndKeepsExportLease() async throws {
         let fixture = try DeliveryFixture()
         defer { fixture.remove() }

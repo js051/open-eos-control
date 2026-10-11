@@ -2,7 +2,7 @@ import Foundation
 import OpenEOSCore
 
 /// Narrow reply-publication seam for controlled cancellation/retirement tests.
-enum MediaDeliveryReplyStage: Sendable, Equatable { case batchPlanned, itemStarted, originalRetained, snapshot, shareAcquired }
+enum MediaDeliveryReplyStage: Sendable, Equatable { case batchStarted, batchPlanned, itemStarted, originalRetained, snapshot, shareAcquired }
 
 /// Prepared text retains its admitting connection through the final UI publish.
 struct CameraSessionExport {
@@ -160,6 +160,7 @@ final class CameraAppState: ObservableObject {
     private var foregroundMediaTicket: MediaDeliveryTicket?
     private var mediaDeliveryRecordingWarning = false
     private var mediaDeliveryHistoryOwner = UUID()
+    private var mediaDeliveryClearGeneration = UUID()
     private let mediaDeliveryStore: MediaDeliveryStore?
     private let mediaDeliveryReplyDelay: (@Sendable (MediaDeliveryReplyStage) async -> Void)?
     @Published private(set) var activeMediaUploadName: String?
@@ -213,6 +214,7 @@ final class CameraAppState: ObservableObject {
     private var operationRevision: UInt64 = 0
     private(set) var mediaDownloadTask: Task<Void, Never>?
     private var mediaDownloadToken: UUID?
+    private var mediaDownloadCancellationRequested = false
     private(set) var mediaBatchTask: Task<Void, Never>?
     private var mediaBatchToken: UUID?
     private var mediaBatchItemToken: UUID?
@@ -228,6 +230,7 @@ final class CameraAppState: ObservableObject {
     private var mediaPreviewImageTask: Task<CameraMediaPreview, Error>?
     private var rateTracker = LiveViewRateTracker()
     private var downloadedMediaID: String?
+    private var downloadedOwnedFile: MediaBatchOwnedFile?
     private var unavailableMediaThumbnailIDs = Set<String>()
     private var mediaThumbnailGeneration = 0
     private var mediaThumbnailCache = MediaThumbnailCache()
@@ -251,10 +254,17 @@ final class CameraAppState: ObservableObject {
             && !isPreview && !mediaPreviewLoading && !isBusy(.media) && !shutterReleaseRequired
     }
 
-    func isMediaDownloaded(_ item: CameraMediaItem) -> Bool { downloadedMediaID == item.id }
+    func isMediaDownloaded(_ item: CameraMediaItem) -> Bool {
+        downloadedMediaID.map { Data($0.utf8) } == mediaItemIdentity(item)
+    }
 
     func downloadedFile(for item: CameraMediaItem) -> URL? {
         isMediaDownloaded(item) ? downloadedFileURL : nil
+    }
+
+    func makeMediaDownloadExportPayload(for item: CameraMediaItem) -> MediaBatchExportPayload? {
+        guard isMediaDownloaded(item), let downloadedOwnedFile else { return nil }
+        return MediaBatchExportPayload(ownedFile: downloadedOwnedFile)
     }
 
     var recording: Bool { snapshot?.status.recording == true }
@@ -1844,6 +1854,9 @@ final class CameraAppState: ObservableObject {
         guard supports(.mediaDownload), begin(.media) else { return }
         let token = UUID()
         mediaDownloadToken = token
+        mediaDownloadCancellationRequested = false
+        let generation = sessionGeneration
+        let historyGeneration = mediaDeliveryClearGeneration
         activeMediaDownloadID = item.id
         mediaDownloadProgress = CameraMediaTransferProgress(
             bytesTransferred: 0,
@@ -1851,12 +1864,16 @@ final class CameraAppState: ObservableObject {
         )
         deletedMediaName = nil
         mediaDownloadTask = Task { [weak self] in
-            await self?.performMediaDownload(item, token: token)
+            await self?.performMediaDownload(item, token: token, generation: generation,
+                                             historyGeneration: historyGeneration)
         }
     }
 
     func cancelMediaDownload() {
+        guard mediaDownloadToken != nil else { return }
+        mediaDownloadCancellationRequested = true
         mediaDownloadTask?.cancel()
+        // Keep MEDIA owned until an uncooperative request or store reply settles.
     }
 
     func isMediaSelected(_ item: CameraMediaItem) -> Bool {
@@ -2121,6 +2138,7 @@ final class CameraAppState: ObservableObject {
     func clearMediaDeliveryHistory() async {
         guard !mediaDeliveryHistoryLoading, let mediaDeliveryStore else { return }
         foregroundMedia.stop()
+        mediaDeliveryClearGeneration = UUID()
         let owner = UUID()
         mediaDeliveryHistoryOwner = owner
         mediaDeliveryHistoryLoading = true
@@ -2475,17 +2493,25 @@ final class CameraAppState: ObservableObject {
         }
     }
 
-    private func performMediaDownload(_ item: CameraMediaItem, token: UUID) async {
-        guard mediaDownloadToken == token else { return }
+    private func ownsMediaDownload(token: UUID, generation: UUID) -> Bool {
+        mediaDownloadToken == token && sessionGeneration == generation
+    }
+
+    private func performMediaDownload(
+        _ item: CameraMediaItem, token: UUID, generation: UUID, historyGeneration: UUID
+    ) async {
+        guard ownsMediaDownload(token: token, generation: generation) else { return }
         defer {
-            if mediaDownloadToken == token {
+            if ownsMediaDownload(token: token, generation: generation) {
                 mediaDownloadTask = nil
                 mediaDownloadToken = nil
+                mediaDownloadCancellationRequested = false
                 activeMediaDownloadID = nil
                 mediaDownloadProgress = nil
                 end(.media)
             }
         }
+        guard !Task.isCancelled else { return }
         if isPreview {
             downloadedMediaID = item.id
             downloadedFileName = item.name
@@ -2493,44 +2519,84 @@ final class CameraAppState: ObservableObject {
             return
         }
         guard let session else { return }
-        var downloadDirectory: URL?
-        var completed = false
-        defer {
-            if !completed, let downloadDirectory {
-                try? FileManager.default.removeItem(at: downloadDirectory)
-            }
+        var ticket: MediaDeliveryTicket?
+        var receiptID: UUID?
+        func warnAboutHistory() {
+            guard ownsMediaDownload(token: token, generation: generation),
+                  mediaDeliveryClearGeneration == historyGeneration else { return }
+            mediaDeliveryRecordingWarning = true
+            mediaDeliveryHistoryWarning = true
         }
         do {
             removeDownloadedFile()
-            let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("OpenEOSControl", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true)
-            downloadDirectory = directory
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let destination = directory.appendingPathComponent(item.name)
-            let result = try await session.downloadMedia(
-                item,
-                to: destination,
-                progress: { [weak self] progress in
-                    Task { @MainActor in
-                        guard self?.mediaDownloadToken == token else { return }
-                        self?.mediaDownloadProgress = progress
+            // Single-item history is optional. Listing size is only a progress
+            // hint: admit an unknown size and account for validated real bytes.
+            if let mediaDeliveryStore, mediaDeliveryClearGeneration == historyGeneration {
+                do {
+                    let admitted = try await mediaDeliveryStore.beginBatch()
+                    ticket = admitted
+                    await mediaDeliveryReplyDelay?(.batchStarted)
+                    try Task.checkCancellation()
+                    guard ownsMediaDownload(token: token, generation: generation) else { throw CancellationError() }
+                    if mediaDeliveryClearGeneration == historyGeneration {
+                        receiptID = try await mediaDeliveryStore.beginItem(admitted, filename: item.name, expectedBytes: nil)
+                        await mediaDeliveryReplyDelay?(.itemStarted)
                     }
+                } catch {
+                    if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
+                        || (error as? MediaDeliveryStoreError) == .cancelled { throw CancellationError() }
+                    warnAboutHistory()
                 }
-            )
+            } else if mediaDeliveryStore == nil { warnAboutHistory() }
             try Task.checkCancellation()
-            guard mediaDownloadToken == token else { throw CancellationError() }
-            downloadedFileURL = result.fileURL
+            guard ownsMediaDownload(token: token, generation: generation) else { throw CancellationError() }
+            // The request and any presented exporter hold independent references
+            // to this lease. Replacement releases only the App's reference.
+            let ownedFile = try MediaBatchOwnedFile.create(filename: item.name)
+            let result = try await session.downloadMedia(item, to: ownedFile.fileURL) { [weak self] progress in
+                Task { @MainActor in
+                    guard let self, self.ownsMediaDownload(token: token, generation: generation),
+                          !self.mediaDownloadCancellationRequested, self.mediaDownloadTask?.isCancelled != true else { return }
+                    self.mediaDownloadProgress = progress
+                }
+            }
+            try Task.checkCancellation()
+            guard ownsMediaDownload(token: token, generation: generation) else { throw CancellationError() }
+            let values = try ownedFile.fileURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+            guard result.fileURL == ownedFile.fileURL, mediaItemIdentity(result.item) == mediaItemIdentity(item),
+                  values.isRegularFile == true, values.isSymbolicLink != true,
+                  result.bytesTransferred > 0, values.fileSize.map(Int64.init) == result.bytesTransferred else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            downloadedOwnedFile = ownedFile
+            downloadedFileURL = ownedFile.fileURL
             downloadedMediaID = result.item.id
             downloadedFileName = result.item.name
             lastError = nil
-            completed = true
-        } catch is CancellationError {
-            // User cancellation is an expected control action, not a camera error.
-        } catch let error as URLError where error.code == .cancelled {
-            // URLSession reports an explicitly cancelled download as URLError.cancelled.
+            // Once published, cancellation or a failed optional copy must never
+            // turn the valid temporary original into a failed download.
+            if let mediaDeliveryStore, let ticket, let receiptID {
+                do {
+                    try await mediaDeliveryStore.finishPrepared(ticket, receiptID: receiptID,
+                        source: ownedFile, actualBytes: result.bytesTransferred)
+                    await mediaDeliveryReplyDelay?(.originalRetained)
+                } catch { warnAboutHistory() }
+                if ownsMediaDownload(token: token, generation: generation),
+                   mediaDeliveryClearGeneration == historyGeneration {
+                    await refreshMediaDeliveryHistory()
+                }
+            }
         } catch {
-            if mediaDownloadToken == token, !Task.isCancelled { record(error) }
+            let cancelled = Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
+            if let mediaDeliveryStore, let ticket, let receiptID {
+                do { try await mediaDeliveryStore.finishFailure(ticket, receiptID: receiptID, cancelled: cancelled) }
+                catch { warnAboutHistory() }
+            }
+            guard ownsMediaDownload(token: token, generation: generation) else { return }
+            if !cancelled, !Task.isCancelled { record(error) }
+            if receiptID != nil, mediaDeliveryClearGeneration == historyGeneration {
+                await refreshMediaDeliveryHistory()
+            }
         }
     }
 
@@ -3059,12 +3125,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func removeDownloadedFile() {
-        guard let file = downloadedFileURL else {
-            downloadedMediaID = nil
-            downloadedFileName = nil
-            return
-        }
-        try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
+        downloadedOwnedFile = nil
         downloadedFileURL = nil
         downloadedMediaID = nil
         downloadedFileName = nil
@@ -3074,6 +3135,7 @@ final class CameraAppState: ObservableObject {
         mediaDownloadTask?.cancel()
         mediaDownloadTask = nil
         mediaDownloadToken = nil
+        mediaDownloadCancellationRequested = false
         activeMediaDownloadID = nil
         mediaDownloadProgress = nil
         busyOperations.remove(.media)

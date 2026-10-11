@@ -224,7 +224,7 @@ actor MediaDeliveryStore {
         }
         _ = try diskUsage()
         let ticket = MediaDeliveryTicket(batchID: UUID(), epoch: manifest!.epoch)
-        let rows = filenames.map { PlannedRow(id: UUID(), filename: plannedFilename($0)) }
+        let rows = filenames.map { PlannedRow(id: UUID(), filename: deliveryFilename($0)) }
         var next = manifest!
         next.plannedBatches.append(PlannedBatch(id: ticket.batchID, createdAt: Date(), rows: rows))
         try commit(next)
@@ -257,7 +257,7 @@ actor MediaDeliveryStore {
         guard reservedRecordCount(manifest!) < limits.maximumRecords else { throw MediaDeliveryStoreError.recordLimit }
         try validateExpectedBytes(expectedBytes)
         let receipt = Receipt(id: UUID(), batchID: ticket.batchID,
-            filename: MediaBatchOwnedFile.safeFilename(filename), startedAt: Date(), status: .started)
+            filename: deliveryFilename(filename), startedAt: Date(), status: .started)
         var next = manifest!
         next.receipts.append(receipt)
         try commit(next)
@@ -501,7 +501,7 @@ actor MediaDeliveryStore {
         for batch in batches {
             guard validDate(batch.createdAt), !batch.rows.isEmpty else { throw MediaDeliveryStoreError.invalidManifest }
             for row in batch.rows {
-                guard safeName(row.filename), row.filename == plannedFilename(row.filename) else {
+                guard safeName(row.filename), row.filename == deliveryFilename(row.filename) else {
                     throw MediaDeliveryStoreError.invalidManifest
                 }
                 if let receipt = value.receipts.first(where: { $0.id == row.id }) {
@@ -943,7 +943,7 @@ actor MediaDeliveryStore {
         date.timeIntervalSince1970.isFinite && date >= .distantPast && date <= .distantFuture
     }
     private func safeName(_ name: String) -> Bool { !name.isEmpty && name == MediaBatchOwnedFile.safeFilename(name) }
-    private func plannedFilename(_ value: String) -> String {
+    private func deliveryFilename(_ value: String) -> String {
         // A hostile display label must not persist URL query/fragment secrets.
         // Drop the authority too if a caller accidentally supplies a full URL.
         let label = String(value.prefix { $0 != "?" && $0 != "#" })
@@ -963,7 +963,7 @@ actor MediaDeliveryStore {
         root.appendingPathComponent(file.id.uuidString, isDirectory: true).appendingPathComponent(file.filename)
     }
     private func fixedError(_ error: Error) -> MediaDeliveryStoreError {
-        if error is CancellationError { return .cancelled }
+        if error is CancellationError || (error as? URLError)?.code == .cancelled { return .cancelled }
         return error as? MediaDeliveryStoreError ?? .storageUnavailable
     }
 
