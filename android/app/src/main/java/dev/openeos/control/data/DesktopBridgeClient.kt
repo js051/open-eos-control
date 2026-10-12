@@ -44,7 +44,24 @@ internal class DesktopBridgeException(
     val engine: String? = null,
     message: String,
     override val statusCode: Int? = null,
-) : IllegalStateException(message), ConnectionHttpFailure
+    connectionReason: ConnectionFailureReason? = null,
+) : IllegalStateException(message), ConnectionHttpFailure {
+    // Optional camera evidence is valid only for this exact Bridge discovery contract.
+    // Keep the original exception, code and actual HTTP status for every caller.
+    val connectionReason: ConnectionFailureReason? = connectionReason?.takeIf {
+        statusCode == 502 && code == "CCAPI_DISCOVERY_FAILED" && engine == "ccapi" &&
+            it in setOf(
+                ConnectionFailureReason.AUTHENTICATION_REJECTED,
+                ConnectionFailureReason.TLS_ERROR,
+                ConnectionFailureReason.HOST_NOT_FOUND,
+                ConnectionFailureReason.TIMEOUT,
+                ConnectionFailureReason.UNREACHABLE,
+                ConnectionFailureReason.HTTP_ERROR,
+                ConnectionFailureReason.DISCOVERY_FAILED,
+                ConnectionFailureReason.ENDPOINT_NOT_FOUND,
+            )
+    }
+}
 
 class DesktopBridgeClient(
     baseUrl: String,
@@ -102,7 +119,7 @@ class DesktopBridgeClient(
 
     suspend fun discoverCameras(): List<DesktopBridgeCamera> {
         validateService()
-        return parseCameras(getJson(endpoint("v1", "cameras")))
+        return parseCameras(getJson(endpoint("v1", "cameras"), cameraDiscovery = true))
     }
 
     suspend fun initialize() {
@@ -117,7 +134,7 @@ class DesktopBridgeClient(
         val payload = JSONObject().put("engine", cameraEngine ?: "auto")
         cameraId?.takeIf(String::isNotBlank)?.let { payload.put("cameraId", it) }
         profileHint?.takeIf(String::isNotBlank)?.let { payload.put("profileHint", it) }
-        val created = postJson(endpoint("v1", "session"), payload)
+        val created = postJson(endpoint("v1", "session"), payload, cameraDiscovery = true)
         sessionId = created.requireString("id", "Desktop bridge did not return a session ID.")
         shutterSession = BridgeShutterReleaseSession(requireNotNull(sessionId))
         sessionCameraModel = created.optJSONObject("camera")
@@ -1108,16 +1125,18 @@ class DesktopBridgeClient(
             .get().build(), observeStatus = false, recoveryRead = recoveryRead),
     )
 
-    private suspend fun getJson(url: HttpUrl): JSONObject = requestJson(
-        Request.Builder().url(url).get().build()
+    private suspend fun getJson(url: HttpUrl, cameraDiscovery: Boolean = false): JSONObject = requestJson(
+        Request.Builder().url(url).get().build(), cameraDiscovery = cameraDiscovery,
     )
 
-    private suspend fun postJson(url: HttpUrl, payload: JSONObject, shutterStart: Boolean = false): JSONObject = requestJson(
+    private suspend fun postJson(
+        url: HttpUrl, payload: JSONObject, shutterStart: Boolean = false, cameraDiscovery: Boolean = false,
+    ): JSONObject = requestJson(
         Request.Builder()
             .url(url)
             .tag(BridgeShutterStart::class.java, if (shutterStart) BridgeShutterStart else null)
             .post(payload.toString().toRequestBody(jsonMediaType))
-            .build()
+            .build(), cameraDiscovery = cameraDiscovery,
     )
 
     private suspend fun postEmptyJson(url: HttpUrl): JSONObject = requestJson(
@@ -1138,6 +1157,7 @@ class DesktopBridgeClient(
         request: Request,
         observeStatus: Boolean = true,
         recoveryRead: Boolean = false,
+        cameraDiscovery: Boolean = false,
     ): JSONObject = withContext(Dispatchers.IO) {
         val session = sessionForRequest(request)
         val revision = session?.revision
@@ -1157,7 +1177,10 @@ class DesktopBridgeClient(
             call.execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 session?.let(::requireCurrentSession)
-                if (!response.isSuccessful) throw bridgeError(response.code, body, request.url.encodedPath, session, revision)
+                if (!response.isSuccessful) throw bridgeError(
+                    response.code, body, request.url.encodedPath, session, revision,
+                    cameraDiscovery = cameraDiscovery,
+                )
                 val parsed = runCatching { JSONObject(body) }
                     .getOrElse { throw IllegalStateException("Desktop Bridge returned invalid JSON for ${request.url.encodedPath}.", it) }
                 if (observeStatus && session != null && revision != null) session.observe(parseStatus(parsed), revision)
@@ -1246,6 +1269,7 @@ class DesktopBridgeClient(
         statusCode: Int, body: String, operation: String,
         session: BridgeShutterReleaseSession?,
         expectedRevision: Long? = null,
+        cameraDiscovery: Boolean = false,
     ): IllegalStateException {
         val error = runCatching { JSONObject(body).optJSONObject("error") }.getOrNull()
         val code = error?.optString("code")?.takeIf(String::isNotBlank) ?: "HTTP_$statusCode"
@@ -1257,6 +1281,14 @@ class DesktopBridgeClient(
             engine = error?.optNullableString("engine"),
             message = "Desktop Bridge $operation failed [$code]: $message",
             statusCode = statusCode,
+            // JSONObject.optString coerces non-strings. The additive evidence must
+            // use exact JSON types and values, independently of legacy diagnostics.
+            connectionReason = if (cameraDiscovery && error != null && statusCode == 502 &&
+                error.opt("code") == "CCAPI_DISCOVERY_FAILED" && error.opt("engine") == "ccapi") {
+                (error.opt("connectionReason") as? String)?.let { raw ->
+                    ConnectionFailureReason.entries.firstOrNull { it.name == raw }
+                }
+            } else null,
         )
         if (code == "SHUTTER_RELEASE_UNCONFIRMED" &&
             (expectedRevision == null || session?.revision == expectedRevision)) {

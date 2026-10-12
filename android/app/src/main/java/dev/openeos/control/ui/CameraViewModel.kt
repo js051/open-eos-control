@@ -73,8 +73,6 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import dev.openeos.control.data.ConnectionFailureReason
-import dev.openeos.control.data.connectionFailureReason
 import java.io.IOException
 import java.net.URLConnection
 import java.util.UUID
@@ -3245,9 +3243,7 @@ class CameraViewModel(
                 val safetyFailure = exception is ShutterReleaseException || exception is AutofocusReleaseException ||
                     exception is dev.openeos.control.data.CcapiLiveViewReleaseException
                 val recovery = if (connectionAttempt != null && !safetyFailure) {
-                    ConnectionRecovery(connectionAttempt, if (exception is InvalidConnectionAddressException) {
-                        ConnectionFailureReason.INVALID_ADDRESS
-                    } else connectionFailureReason(exception))
+                    connectionRecoveryFor(connectionAttempt, exception)
                 } else null
                 // Connection diagnostics can contain entered addresses or server bodies. The
                 // recovery flow only needs typed evidence, never these values in UI or logs.

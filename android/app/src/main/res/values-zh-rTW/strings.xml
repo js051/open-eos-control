@@ -62,6 +62,14 @@
     <string name="connection_recovery_invalid_address">請輸入相機或桌面橋接顯示的完整 http:// 或 https:// 位址，包含連接埠，再試一次。</string>
     <string name="connection_recovery_camera_auth">相機拒絕存取。請確認相機的 Camera Control API 使用者名稱、密碼與允許存取的設定。更新下方欄位，再點選連線。</string>
     <string name="connection_recovery_bridge_auth">橋接服務拒絕存取。請確認 Bearer token 與電腦上 Open EOS Bridge 的設定相同，且設定允許這支手機存取，再重新掃描或連線。</string>
+    <string name="connection_recovery_camera_via_bridge_auth">相機拒絕 Open EOS Bridge 存取。請在橋接電腦上檢查設定的相機 URL 與 Camera Control API 使用者名稱和密碼，並確認相機的存取設定，再重新掃描或連線。</string>
+    <string name="connection_recovery_camera_via_bridge_tls">Open EOS Bridge 無法驗證與相機的安全連線。請檢查相機 HTTPS URL、相機憑證，以及相機與橋接電腦的日期和時間，再重新掃描或連線。</string>
+    <string name="connection_recovery_camera_via_bridge_host_not_found">Open EOS Bridge 找不到相機主機名稱。請在橋接電腦上檢查設定的相機 URL，並確認該電腦能在相機網路解析此主機名稱，再重新掃描或連線。</string>
+    <string name="connection_recovery_camera_via_bridge_timeout">Open EOS Bridge 等候相機回應逾時。請保持相機喚醒，在橋接電腦上檢查設定的相機 URL，並確認該電腦能連到相機網路，再重新掃描或連線。</string>
+    <string name="connection_recovery_camera_via_bridge_unreachable">Open EOS Bridge 無法連到相機。請在橋接電腦上檢查設定的相機 URL 與連接埠、保持相機喚醒，並確認該電腦能連到相機網路，再重新掃描或連線。</string>
+    <string name="connection_recovery_camera_via_bridge_http">相機向 Open EOS Bridge 回傳錯誤。請在橋接電腦上檢查設定的相機 CCAPI URL 與連接埠，再確認相機狀態後重新掃描或連線。</string>
+    <string name="connection_recovery_camera_via_bridge_endpoint">Open EOS Bridge 找不到可用的相機 CCAPI 端點。請在支援的相機上啟用 Camera Control API，並在橋接電腦上設定相機顯示的 URL，再重新掃描或連線。</string>
+    <string name="connection_recovery_camera_via_bridge_discovery">Open EOS Bridge 無法完成相機探索。請檢查相機 CCAPI 設定與橋接電腦上設定的相機 URL，並確認該電腦能連到相機網路，再重新掃描或連線。</string>
     <string name="connection_recovery_tls">無法驗證安全連線。請確認 HTTPS 位址、相機或橋接服務的憑證，以及各裝置的日期與時間，再試一次。</string>
     <string name="connection_recovery_host_not_found">找不到主機名稱。請確認位址沒有輸入錯誤，且手機與相機或橋接電腦位於同一網路，再試一次。</string>
     <string name="connection_recovery_timeout">等候回應逾時。請保持相機喚醒或橋接服務執行中，確認手機位於同一網路，再試一次。</string>
