@@ -56,6 +56,14 @@ Android 只有在明確執行相機掃描 `GET /v1/cameras` 或建立工作階�
 
 本次僅完成原始碼檢視與 `git diff --check`，不得將其列為 Kotlin、JVM、instrumentation 或 App 驗收通過。後續需對整批最終 tree 執行必要編譯、JVM、Android UI 及 exact-head CI；真機仍需另外記錄實際相機、transport、app build 與操作。
 
+## 首輪 JVM 結果與安全控制修正
+
+原 head `c1ee2fa8abb8ea69584fa54c748973085088d1d2`、CI `38187413732` 的正式 Kotlin 與測試編譯成功，JVM 1111項中1項失敗。新增 `bridgeReleaseSafetyRemainsOutsideConnectionRecovery` 原本等待 `shutterReleaseUnconfirmed && !busy`，但 `CameraUiState.busy` 明確包含 `shutterReleaseUnconfirmed`，此條件在來源上互相矛盾。不能據此判定產品遺失停止責任，也不能將原失敗記成通過。
+
+同一 head 的 API34 與 API36 job 均成功，原始 Gradle log 各記錄完成359項，分別於2026-10-12 00:53:09與00:54:10 UTC BUILD SUCCESSFUL。這包含新增的雙語／200%字級原因提示 fixture，不代表真相機或真手機驗收；aggregate仍因上述JVM失敗而未通過。上段 NOT_RUN 是交付前狀態，當前應以本節 exact-head 結果為準。
+
+最小修正只調整該測試：保持原4秒期限，等待 warning 且 pendingOperations 為空，然後確認 busy、CAPTURE 與 CONNECT 互斥仍然為真，clearError後也不得解除。原 connectionRecovery 必須為 null、warning 保留及 `/health`、`/v1/session` 精確請求斷言不變。獨立來源審查無阻擋項；不修改 production、安全策略、gate 或重試政策。修正本身仍需新 exact-head 正常 CI，不能沿用前一輪其他通過項。
+
 ## Release Assessment
 
 - 原始碼版本：`0.13.0`；最近已發布基線由整批交付另行核實。

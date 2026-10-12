@@ -393,12 +393,23 @@ class CameraConnectionConfigurationRecoveryTest {
         viewModel.setConnectionTarget(ConnectionTarget.DESKTOP_BRIDGE)
         viewModel.setBridgeBaseUrl(oldPeer.baseUrl)
         viewModel.connectBridge()
-        assertTrue(pumpUntil { viewModel.uiState.value.shutterReleaseUnconfirmed && !viewModel.uiState.value.busy })
+        assertTrue(pumpUntil {
+            viewModel.uiState.value.shutterReleaseUnconfirmed &&
+                viewModel.uiState.value.pendingOperations.isEmpty()
+        })
 
         assertNull(viewModel.uiState.value.connectionRecovery)
         assertTrue(viewModel.uiState.value.shutterReleaseUnconfirmed)
+        // The request has settled, but the release obligation intentionally keeps
+        // the camera busy and blocks a fresh press or connection attempt.
+        assertTrue(viewModel.uiState.value.busy)
+        assertTrue(viewModel.uiState.value.isBusy(CameraOperation.CAPTURE))
+        assertTrue(viewModel.uiState.value.isBusy(CameraOperation.CONNECT))
         viewModel.clearError()
         assertTrue(viewModel.uiState.value.shutterReleaseUnconfirmed)
+        assertTrue(viewModel.uiState.value.busy)
+        assertTrue(viewModel.uiState.value.isBusy(CameraOperation.CAPTURE))
+        assertTrue(viewModel.uiState.value.isBusy(CameraOperation.CONNECT))
         assertEquals(listOf("/health", "/v1/session"), oldPeer.requests.map { it.path })
     }
 
