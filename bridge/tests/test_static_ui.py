@@ -268,7 +268,7 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'EVENT_POLLING: "EVENT_POLLING"' in script
     assert "function startEventLoop()" in script
     assert "function cancelEventLoop()" in script
-    assert "await refreshSession({ quiet: true })" in script
+    assert "await refreshSession({ quiet: true, eventGeneration: generation })" in script
     assert 'String(key).toLowerCase().includes("content")' in script
     assert "contentsChanged && state.mediaLoaded" in script
     assert "await refreshMedia({ preservePreview: true })" in script
