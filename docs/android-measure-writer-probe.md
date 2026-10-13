@@ -170,10 +170,13 @@ at 2026-10-08 11:41:49–11:41:54 UTC (exit 0). The exact receipt is under
 The later buildSrc scope change does not alter those Java/fixture sources. Real Gradle configuration,
 opt-in APK packaging and actual transformed-class checks have since passed as recorded below.
 V1 results remain separately archived.
-To repeat the bounded source/JVM checks only in an approved window, run:
+Set `EOS_ANDROID_TOOLCHAIN_DIR` to the existing, owner-approved external Android toolchain
+directory containing `env.sh` and `run-gradle.sh`. This is machine-local setup, not a directory
+shipped in this repository. To repeat the bounded source/JVM checks only in an approved window,
+run from the repository root:
 
 ```bash
-source /workspace/scratch/2e9db061c9e9/open-eos-control/.codex/toolchain/android-20261008/env.sh
+source "${EOS_ANDROID_TOOLCHAIN_DIR:?Set EOS_ANDROID_TOOLCHAIN_DIR to the approved external toolchain directory}/env.sh"
 timeout 90s bash scripts/diagnostics/measure-writer-probe/run-local-checks.sh \
   /tmp/eos-layout-readonly/ui-android-1.9.3-classes.jar
 ```
@@ -252,7 +255,7 @@ reuse assumptions. No dependency upgrades/installations are part of this experim
 Representative repeat of the completed opt-in package stage, from `android/` (no emulator/test execution):
 
 ```bash
-timeout 720s /workspace/scratch/2e9db061c9e9/open-eos-control/.codex/toolchain/android-20261008/run-gradle.sh \
+timeout 720s "${EOS_ANDROID_TOOLCHAIN_DIR:?Set EOS_ANDROID_TOOLCHAIN_DIR to the approved external toolchain directory}/run-gradle.sh" \
   --offline --no-daemon --max-workers=1 \
   '-Dorg.gradle.jvmargs=-Xmx2048m -XX:ActiveProcessorCount=2' \
   -Pkotlin.compiler.execution.strategy=in-process \
@@ -287,11 +290,14 @@ asserting equality from source inspection. The completed isolation results are r
 Remote API34 and API36 execution is later owner-controlled. Keep the complete normal 356-case
 matrix and gates, no retries/sleeps/autoAdvance changes or narrowed test lists. Capture
 the committed probe output files plus original crash/handler output, connected XML, process continuity, APK hashes and
-transform proof. Run the evidence verifier on each collected ZIP and its independently recorded artifacts:
+transform proof. Set `EOS_ORIGINAL_API36_ZIP` to the local download of the original API36
+evidence archive used as the pinned baseline. This archive is external validation evidence,
+not a repository file; the verifier still checks its required SHA-256. Run the evidence verifier
+on each collected ZIP and its independently recorded artifacts:
 
 ```bash
 python3 scripts/diagnostics/measure-writer-probe/verify-run.py \
-  --original-zip /workspace/scratch/2e9db061c9e9/eos219-api36.zip \
+  --original-zip "${EOS_ORIGINAL_API36_ZIP:?Set EOS_ORIGINAL_API36_ZIP to the pinned original API36 artifact}" \
   --result-zip RESULT.zip --run-manifest RUN-MANIFEST.json \
   --pre-run-manifest PRE-RUN-MANIFEST.json \
   --expected-pre-run-sha256 CURRENT_JOB_PRE_LAUNCH_SHA256 \
