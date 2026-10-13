@@ -292,6 +292,11 @@ internal fun CameraUiState.canStartHeldAutofocus(): Boolean = connected && !prev
     activeSettingPicker == null && autofocusHoldState == AutofocusHoldState.IDLE &&
     !isBusy(CameraOperation.LIVE_VIEW) && HELD_AF_INTERLOCK_OPERATIONS.none { isBusy(it) }
 
+internal fun CameraUiState.needsShutterDisconnectWarning(): Boolean =
+    shutterDisconnectWarning || shutterReleaseUnconfirmed || bulbExposureActive ||
+        autofocusHoldState != AutofocusHoldState.IDLE ||
+        pendingOperations.any { it in setOf(CameraOperation.CAPTURE, CameraOperation.SHUTTER_RELEASE, CameraOperation.FOCUS) }
+
 internal val LIVE_VIEW_INTERLOCK_OPERATIONS = setOf(
     CameraOperation.FOCUS, CameraOperation.CAPTURE, CameraOperation.RECORDING, CameraOperation.MAINTENANCE,
     CameraOperation.SHUTTER_RELEASE,

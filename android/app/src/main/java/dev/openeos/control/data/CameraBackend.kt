@@ -365,6 +365,8 @@ class DesktopBridgeCameraBackend(
 
     override suspend fun stopLiveView() = client.stopLiveView()
 
+    override suspend fun liveViewFocusInfo(): CameraFocusInfo? = client.liveViewFocusInfo()
+
     override suspend fun setExposure(iso: String?, shutter: String?, aperture: String?): CameraStatus =
         client.setExposure(iso = iso, shutter = shutter, aperture = aperture)
 
@@ -403,6 +405,10 @@ class DesktopBridgeCameraBackend(
     override suspend fun retryShutterRelease() = client.retryShutterRelease()
 
     override suspend fun autofocus(): CameraStatus = client.autofocus()
+
+    override suspend fun holdAutofocus(whileHeld: suspend () -> Unit) = client.holdAutofocus(whileHeld)
+
+    override suspend fun retryAutofocusStop() = client.retryAutofocusStop()
 
     override suspend fun halfPressShutter(): CameraStatus = client.halfPressShutter()
 

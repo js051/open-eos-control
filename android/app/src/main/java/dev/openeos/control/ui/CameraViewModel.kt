@@ -312,6 +312,7 @@ class CameraViewModel(
     private var heldAutofocusJob: Job? = null
     private var heldAutofocusRelease: CompletableDeferred<Unit>? = null
     private var focusInfoJob: Job? = null
+    private val focusInfoReadGate = CameraFocusReadGate()
     private var focusInfoGeneration = 0L
     private var eventPollingJob: Job? = null
     private var eventPollingGeneration = 0L
@@ -1019,9 +1020,7 @@ class CameraViewModel(
         val previousState = _uiState.value
         val recordingWarning = retireRecordingAttempt(previousState)
         val liveViewWarning = previousState.liveViewDisconnectWarning || previousState.needsLiveViewStopRecovery
-        val shutterWarning = previousState.shutterDisconnectWarning || previousState.shutterReleaseUnconfirmed ||
-            previousState.bulbExposureActive || CameraOperation.CAPTURE in previousState.pendingOperations ||
-            CameraOperation.SHUTTER_RELEASE in previousState.pendingOperations
+        val shutterWarning = previousState.needsShutterDisconnectWarning()
         cameraSessionGeneration += 1
         val operationJobs = cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)
         cameraOperationJobs.clear()
@@ -3610,7 +3609,13 @@ class CameraViewModel(
                 var retryDelay = 250L
                 if (canReadCameraFocusInfo(_uiState.value)) {
                     try {
-                        val info = repository.fetchLiveViewFocusInfo()
+                        val info = focusInfoReadGate.readIfCurrent(
+                            isCurrent = {
+                                generation == focusInfoGeneration && canReadCameraFocusInfo(_uiState.value) &&
+                                    _uiState.value.info === connection
+                            },
+                            read = { repository.fetchLiveViewFocusInfo() },
+                        )
                         if (info == null) retryDelay = 2_000L
                         if (generation == focusInfoGeneration && canReadCameraFocusInfo(_uiState.value) && _uiState.value.info === connection) {
                             _uiState.update {

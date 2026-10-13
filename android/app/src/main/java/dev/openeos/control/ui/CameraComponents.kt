@@ -1208,10 +1208,10 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 (bitmap != null || (state.liveViewFrameUrl != null && loadedFrameBitmap != null) ||
                     (state.nativeLiveViewSession != null && state.liveViewDiagnostics.lastFrameAtMillis != null))
             if (hasFocusImage) {
-                CameraReportedFocusOverlay(state.cameraFocusInfo, state.cameraFocusInfoAtMillis, displayAspectRatio)
+                CameraReportedFocusOverlay(state.cameraFocusInfo, state.cameraFocusInfoAtMillis, sourceAspectRatio, displayAspectRatio)
             }
             if (!hasFocusImage || state.cameraFocusInfo?.frames.isNullOrEmpty() ||
-                state.cameraFocusInfo?.let { !focusInfoMatchesImage(it, displayAspectRatio) } == true ||
+                state.cameraFocusInfo?.let { !focusInfoMatchesImage(it, sourceAspectRatio) } == true ||
                 state.focusFeedback != FocusFeedback.ACCEPTED
             ) {
                 FocusIndicator(state.focusPoint, state.focusFeedback, displayAspectRatio)
