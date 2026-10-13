@@ -729,3 +729,16 @@
 "media_worklist_source_folder" = "資料夾：%@";
 "media_worklist_source_captured" = "拍攝時間：%@";
 "media_worklist_source_size" = "大小：%@";
+
+"held_autofocus" = "按住 AF-ON";
+"held_autofocus_active" = "正在按住 AF-ON";
+"held_autofocus_released" = "已放開";
+"held_autofocus_hint" = "按住以對焦；放開或移出按鈕即停止，30 秒後自動嘗試放開。使用 VoiceOver 時，啟用以開始，再啟用一次以停止。";
+"focus_command_accepted" = "對焦指令已接受；尚未確認合焦";
+"focus_command_failed" = "對焦指令失敗";
+"camera_focus_standby" = "相機對焦：待命";
+"camera_focus_focused" = "相機確認合焦";
+"camera_focus_unfocused" = "相機回報未合焦";
+"camera_focus_servo_off" = "相機對焦：伺服關閉";
+"camera_focus_focusing" = "相機回報正在對焦";
+"camera_focus_unknown" = "相機對焦：未知";

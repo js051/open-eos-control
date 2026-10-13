@@ -909,11 +909,13 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 currentSize: activeLiveViewSource == nil ? nil : activeLiveViewSize,
                 magnifications: liveViewMagnifications,
                 currentMagnification: currentLiveViewMagnification,
-                maximumFPS: 30
+                maximumFPS: 30,
+                focusInfoSupported: !ccapiLiveViewSources().isEmpty() && detailedLiveViewOperation() != nil
             ),
             profile: CameraProfile.from(modelName: cachedModel),
             evidence: capabilityEvidence(),
-            shutterAutofocusSupported: directShutterOperation() != nil || manualShutterOperation() != nil
+            shutterAutofocusSupported: directShutterOperation() != nil || manualShutterOperation() != nil,
+            heldAutofocusSupported: autofocusOperation() != nil
         )
     }
 
@@ -1539,6 +1541,81 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         let response = try await transport.send(request)
         try validate(response, request: request)
         if release.simulator { _ = try decodeJSONObject(response.body) }
+    }
+
+    /// The caller creates one owner for one physical press, then releases that exact owner.
+    /// Unlike bounded autofocus, this requires Canon's advertised AF start/stop operation.
+    public func startHeldAutofocus(owner: UUID) async throws {
+        try Task.checkCancellation()
+        guard !closing, shortControlTask == nil, bulbStartTask == nil,
+              shutterReleaseTask == nil, pendingShutterRelease == nil, cameraMutationCount == 0 else {
+            throw CCAPIError.invalidResponse("Release the shutter before another camera operation.")
+        }
+        shortControlID = owner
+        let task = Task { try await self.performHeldAutofocusStart(owner: owner) }
+        shortControlTask = task
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: { task.cancel() }
+    }
+
+    private func performHeldAutofocusStart(owner: UUID) async throws {
+        defer {
+            if shortControlID == owner { shortControlID = nil; shortControlTask = nil }
+        }
+        try await ensureInitialized()
+        try Task.checkCancellation()
+        guard !closing, shortControlID == owner else { throw CancellationError() }
+        guard resolvedMode == .camera, let operation = autofocusOperation() else {
+            throw CCAPIError.unsupported(.autofocus)
+        }
+        guard let url = URL(string: baseURLString + operation.path) else {
+            throw CCAPIError.invalidResponse("Invalid advertised autofocus endpoint.")
+        }
+        var press = request(url: url, method: operation.method)
+        press.httpBody = try encodeJSONObject(["action": "start"])
+        press.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        pendingShutterRelease = ShutterRelease(id: owner, operation: operation, simulator: false,
+            payload: try encodeJSONObject(["action": "stop"]))
+        shutterReleaseUnconfirmed = true
+        do {
+            let response = try await transport.send(press)
+            try validate(response, request: press)
+            try Task.checkCancellation()
+            guard !closing, pendingShutterRelease?.id == owner else { throw CancellationError() }
+            shutterReleaseUnconfirmed = false
+            observedFeatures.insert(.autofocus)
+        } catch {
+            let primary = error
+            do { try await releasePendingShutter() }
+            catch { throw CCAPIError.operationAndReleaseFailed(operation: primary.localizedDescription, release: error.localizedDescription) }
+            throw primary
+        }
+    }
+
+    public func stopHeldAutofocus(owner: UUID) async throws {
+        // Bind before every suspension: a late release event cannot affect a newer press.
+        guard pendingShutterRelease?.id == owner || shortControlID == owner else { return }
+        if let start = shortControlTask, shortControlID == owner {
+            start.cancel()
+            let result = await start.result
+            if case let .failure(error) = result, pendingShutterRelease?.id == owner { throw error }
+        }
+        guard pendingShutterRelease?.id == owner else { return }
+        try await releasePendingShutter()
+    }
+
+    public func liveViewFocusInfo() async throws -> CameraFocusInfo? {
+        try Task.checkCancellation()
+        guard !closing, resolvedMode == .camera, activeLiveViewSource != nil,
+              let operation = detailedLiveViewOperation() else { return nil }
+        let liveViewOwner = pendingLiveViewStop?.id
+        var read = try request(path: operation.path + "?kind=info", method: .get, timeoutInterval: 2)
+        read.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+        read.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let data = try await CameraFocusMetadata.boundedRead(read, transport: transport)
+        guard !closing, activeLiveViewSource != nil, pendingLiveViewStop?.id == liveViewOwner else { return nil }
+        return try CameraFocusMetadata.canonPacket(data)
     }
 
     public func autofocus() async throws -> CameraStatus {

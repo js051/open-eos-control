@@ -8,6 +8,82 @@ import FoundationNetworking
 /// Counterexamples use the production client and the existing explicit response gates.
 /// These sources require a Swift host; source inspection is not runtime red/green evidence.
 final class CCAPIShortControlRecoveryTests: XCTestCase {
+    func testHeldAFKeepsPressUntilExactReleaseAndNeverRepresses() async throws {
+        let peer = ShortControlPeer(.af)
+        let client = try peer.client()
+        let owner = UUID()
+        try await client.startHeldAutofocus(owner: owner)
+        let held = await peer.requests().filter(\.isMutation)
+        XCTAssertEqual(held.map(\.action), ["start"])
+        let heldState = await client.shutterReleaseState()
+        XCTAssertTrue(heldState.releaseRequired)
+        await fails { try await client.autofocus() }
+        await fails { try await client.captureStill() }
+        await fails { try await client.startHeldAutofocus(owner: UUID()) }
+        try await client.stopHeldAutofocus(owner: UUID())
+        let ignored = await peer.requests().filter(\.isMutation)
+        XCTAssertEqual(ignored, held)
+        try await client.stopHeldAutofocus(owner: owner)
+        await idle(client)
+        let next = UUID()
+        try await client.startHeldAutofocus(owner: next)
+        try await client.stopHeldAutofocus(owner: owner)
+        let newer = await peer.requests().filter(\.isMutation)
+        XCTAssertEqual(newer.map(\.action), ["start", "stop", "start"])
+        try await client.stopHeldAutofocus(owner: next)
+        await idle(client)
+    }
+
+    func testHeldAFRequiresActualAFEndpointAndNeverFallsBackToHalfPress() async throws {
+        let peer = ShortControlPeer(.half)
+        let client = try peer.client()
+        await fails { try await client.startHeldAutofocus(owner: UUID()) }
+        let writes = await peer.requests().filter(\.isMutation)
+        XCTAssertTrue(writes.isEmpty)
+        _ = try await client.halfPressShutter()
+        await idle(client)
+    }
+
+    func testHeldAFCancelledLateStartOwnsStopAndRetainsFailureForExplicitRetry() async throws {
+        let gate = ShutterRecoveryGate("held autofocus late start")
+        let peer = ShortControlPeer(.af, stops: [.lost, .ack], startGate: gate)
+        let client = try peer.client()
+        let owner = UUID()
+        let start = Task { try await client.startHeldAutofocus(owner: owner) }
+        await fulfillment(of: [gate.entered], timeout: 3)
+        start.cancel()
+        gate.open()
+        await fails { try await start.value }
+        await unknown(client)
+        let writes = await peer.requests().filter(\.isMutation)
+        XCTAssertEqual(writes.map(\.action), ["start", "stop"])
+        XCTAssertFalse(try XCTUnwrap(writes.last).taskWasCancelled)
+        try await client.stopHeldAutofocus(owner: owner)
+        await idle(client)
+        let after = await peer.requests().filter(\.isMutation)
+        XCTAssertEqual(after.map(\.action), ["start", "stop", "stop"])
+    }
+
+    func testHeldAFStopWaitsForInFlightStartAndCloseReleasesExactOwner() async throws {
+        let gate = ShutterRecoveryGate("held autofocus still starting")
+        let peer = ShortControlPeer(.af, startGate: gate)
+        let client = try peer.client()
+        let owner = UUID()
+        let start = Task { try await client.startHeldAutofocus(owner: owner) }
+        await fulfillment(of: [gate.entered], timeout: 3)
+        let stop = Task { try await client.stopHeldAutofocus(owner: owner) }
+        gate.open()
+        _ = await start.result
+        try await stop.value
+        await idle(client)
+        let another = UUID()
+        try await client.startHeldAutofocus(owner: another)
+        let close = await client.closeWithShutterReleaseState()
+        XCTAssertEqual(close, .idle)
+        let writes = await peer.requests().filter(\.isMutation)
+        XCTAssertEqual(writes.map(\.action), ["start", "stop", "start", "stop"])
+    }
+
     func testEveryShortControlRetainsExactStopThroughRepeatedFailures() async throws {
         for control in ShortControl.allCases {
             for method in control.methods {
