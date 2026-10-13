@@ -1208,7 +1208,7 @@ function installProductionApi(s) {
   const end = source.indexOf("  function resolvedLanguage", start);
   vm.runInContext(source.slice(start, end) + productionFunction('api'), s);
 }
-for (const bodyFailure of ['interrupted', 'malformed', 'missing-envelope']) {
+for (const bodyFailure of ['interrupted', 'malformed', 'missing-envelope', 'code-only', 'wrong-message', 'empty-message', 'wrong-code', 'empty-code']) {
   test(`Bridge 502 ${bodyFailure} body preserves uncertain REC through the production API`, async () => {
     const s = recordingSubject(); installProductionApi(s); installRecordingRefresh(s);
     s.state.status.recording = false; let peerRecording = false;
@@ -1218,6 +1218,11 @@ for (const bodyFailure of ['interrupted', 'malformed', 'missing-envelope']) {
         peerRecording = true;
         return {ok:false, status:502, statusText:'Bad Gateway', json:async () => {
           if (bodyFailure === 'missing-envelope') return {};
+          if (bodyFailure === 'code-only') return {error:{code:'CCAPI_HTTP_ERROR'}};
+          if (bodyFailure === 'wrong-message') return {error:{code:'CCAPI_HTTP_ERROR',message:7}};
+          if (bodyFailure === 'empty-message') return {error:{code:'CCAPI_HTTP_ERROR',message:'  '}};
+          if (bodyFailure === 'wrong-code') return {error:{code:7,message:'Rejected'}};
+          if (bodyFailure === 'empty-code') return {error:{code:'  ',message:'Rejected'}};
           throw bodyFailure === 'interrupted' ? new TypeError('stream interrupted') : new SyntaxError('incomplete JSON');
         }};
       }
@@ -1246,7 +1251,7 @@ for (const fields of [
     s.fetch = async (url, options) => {
       s.requests.push({url,method:options.method});
       // This Bridge error is returned before forwarding any camera mutation.
-      return Response.json({error:fields}, {status:fields.status});
+      return Response.json({error:{message:'Complete synthetic preflight/rejection',...fields}}, {status:fields.status});
     };
     await s.operateShutter();
     assert.equal(s.state.recordingRecovery, undefined);
@@ -1271,7 +1276,7 @@ test('complete Bridge camera HTTP rejection retains known rejection through prod
   const s = recordingSubject(); installProductionApi(s); s.state.status.recording = false;
   s.fetch = async (url, options) => {
     s.requests.push({url,method:options.method});
-    return Response.json({error:{code:'CCAPI_HTTP_ERROR',engine:'ccapi'}},{status:502});
+    return Response.json({error:{code:'CCAPI_HTTP_ERROR',message:'Camera explicitly rejected REC',engine:'ccapi'}},{status:502});
   };
   await s.operateShutter();
   assert.equal(s.state.recordingRecovery, undefined);

@@ -16,14 +16,20 @@ PC 原 PR237 的 `df8080a3d59e7a969939496b425cadfcdfe372ad` tree，在真 produc
 
 ## 受控驗證
 
-- 獨立來源審查找出 preflight 過度分類與 Bridge 502 body 遺失低估責任。加入真 production `api` 邊界控制後，修正前 99 例中 9 例失敗；精確 tuple／502 envelope 修正及補入缺失 envelope 控制後，104/104 通過。此為受控 fetch／production handler，不是 browser 網路證據。原始兩例 red 使用較粗略的相機傳輸錯誤模型；最終正例已換成新 Bridge 精確契約，另明確驗舊 raw error 不自行變成 UNKNOWN。
+- 獨立來源審查找出 preflight 過度分類與 Bridge 502 body 遺失低估責任。加入真 production `api` 邊界控制後，修正前 99 例中 9 例失敗；精確 tuple／502 envelope 修正及補入缺失 envelope 控制後，109/109 通過。此為受控 fetch／production handler，不是 browser 網路證據。原始兩例 red 使用較粗略的相機傳輸錯誤模型；最終正例已換成新 Bridge 精確契約，另明確驗舊 raw error 不自行變成 UNKNOWN。
 
 - 最初兩例 red 已保存；相同 production-handler 斷言在修正後 green。
-- 完整 capture/review handler 群目前 104/104 pass，包含明確拒絕、舊 cache、Stop 拒絕、原 baseline、退休 owner／同 ID 新連線與不發自動命令。
-- 完整既有27個 Node modules 通過；最後補入的 retirement／late-result 控制再由上述104例執行。正式交付前仍跑最終整批。
+- 完整 capture/review handler 群目前 109/109 pass，包含明確拒絕、舊 cache、Stop 拒絕、原 baseline、退休 owner／同 ID 新連線與不發自動命令。
+- 完整既有27個 Node modules 通過；最後補入的 retirement／late-result 控制再由上述109例執行。正式交付前仍跑最終整批。
 - 真 urllib／FastAPI ASGI 與獨立 TCP peer 的42個 REC/Bulb測試通過。Peer 明確先變更自己的 recording 再丟回應；舊 false cache 不等於 peer false，只有明確 Stop 令 peer 停止。最初新 fixture 對既有503錯誤碼猜成 CCAPI_REQUEST_FAILED，實際為 CCAPI_HTTP_ERROR；已按實際契約修正，保留該失敗紀錄。
 - Bridge 審查補充：已收到非 2xx status 時，最多讀取 2,000 bytes 診斷內容，body 損壞不抹掉已知拒絕。403／503 × Start／Stop × 三種 body fault 的12個控制先全部 red，再全部 green；六個損壞成功回應仍為 UNKNOWN，溫度 preflight 失敗則證明一個 GET／零 REC。Ruff 本地未安裝，未執行，交由原必要 CI。
 - 最終27個 Node modules 重跑通過。另嘗試廣泛 unittest discovery，終態 exit1／99個測試項目、13個 import errors（現環境缺 pytest／av）；不列完整 backend pass，不新增安裝或跳過原 CI。
 - 新 browser 英／繁中四個 lost-hop 分支已加入原完整旅程：camera hop 在 peer 生效後斷 socket；Bridge hop 在後端成功回覆後以 browser route 丟棄該回應。各自檢查獨立 peer true、cache差異、零重播、明確Stop及最後peer false。尚未執行此新版 browser CI，不以 Node／backend 結果代替。
 
 這些證據不保證物理相機的錄影狀態、跨相機韌體行為或外部檔案 provider。三端來源與 exact-head 結果分開記錄，不將相同字串或無檔案衝突當作 combined runtime 通過。
+
+## 最後的 envelope 相容性核對
+
+公開 `ErrorDetail` 的必要欄位是 code 與 message，正常 Bridge handler 兩者皆有。code-only、錯誤型別或空白 message 的 502 不能當作完整拒絕證據。PC 與 Android 對齊 iOS 的完整-envelope 檢查；PC 三個新增不完整 message 控制先 red，修正後全部109個 handler 控制通過。完整既知拒絕與 near-match tuple 控制加入合法 message，仍必須維持原分類，沒有以缺欄位 fixture 偷換測試目的。
+
+`a7f6eed55f3a4ebb964543a0bd673e0193c376cf`／CI `38368772954` 已於08:24:23～26 UTC通過真 browser 的英／繁中 camera-hop／Bridge-hop 四個遺失回應旅程，desktop backend、打包與Windows gate也已成功；該版本尚未包含上述最後message檢查，其成功不能替代下一版 exact-head 驗證。原已知失敗與本地缺依賴紀錄保留。
