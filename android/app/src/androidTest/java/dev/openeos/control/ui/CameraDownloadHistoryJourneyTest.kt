@@ -393,7 +393,9 @@ class CameraDownloadHistoryJourneyTest {
         compose.onNodeWithTag("download-continuation-gallery").assertIsNotEnabled()
         compose.onNodeWithTag("download-continuation-map-${original.rows[5].rowId}").performClick()
         compose.onNodeWithTag("download-continuation-source-two").performClick()
-        compose.onNodeWithTag("download-continuation-map-${original.rows[7].rowId}").performScrollTo().performClick()
+        compose.onNodeWithTag("download-continuation-list").performScrollToNode(
+            androidx.compose.ui.test.hasTestTag("download-continuation-map-${original.rows[7].rowId}"))
+        compose.onNodeWithTag("download-continuation-map-${original.rows[7].rowId}").performClick()
         compose.onNodeWithTag("download-continuation-source-one").performClick()
         assertEquals(0, camera.originalReads.size)
         compose.onNodeWithTag("download-continuation-gallery").assertIsNotEnabled()

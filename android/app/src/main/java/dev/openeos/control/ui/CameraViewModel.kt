@@ -3526,7 +3526,9 @@ class CameraViewModel(
                 onError(exception)
                 _uiState.update {
                     it.copy(
-                        error = recovery?.let { failure -> "Connection failed: ${failure.reason.name}" } ?: formatException(exception),
+                        error = recovery?.let { failure -> "Connection failed: ${failure.reason.name}" }
+                            ?: if (exception is MediaWorklistAdmissionException) exception.message ?: formatException(exception)
+                            else formatException(exception),
                         connectionRecovery = recovery,
                         errorOperation = operation,
                         autofocusHoldState = if (operation == CameraOperation.FOCUS && exception is AutofocusReleaseException) {
