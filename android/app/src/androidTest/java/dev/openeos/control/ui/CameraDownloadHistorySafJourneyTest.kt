@@ -28,6 +28,7 @@ import dev.openeos.control.data.DownloadHistoryOutcome
 import dev.openeos.control.data.DownloadHistoryStore
 import dev.openeos.control.data.DownloadHistoryWarning
 import dev.openeos.control.data.DownloadHistoryWritePhase
+import dev.openeos.control.data.DownloadWorklistAdmission
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -258,6 +259,117 @@ class CameraDownloadHistorySafJourneyTest {
         assertEquals(listOf("/ccapi/media/${item.id}"), camera.originalReads.toList())
     }
 
+    @Test fun explicitlyMappedContinuationCreatesSafFileOnlyAfterLinkedRosterAndRowAreDurable() {
+        val directory = File(root, "continued-folder-history")
+        history = newHistory(directory)
+        val original = runBlocking {
+            val token = (history.admitWorklist(history.captureRequest(), listOf("OLD-LABEL.JPG"),
+                DownloadHistoryDestination.FOLDER) as DownloadWorklistAdmission.Admitted).token
+            history.releaseWorklist(token)
+            history.awaitIdle()
+            history.state.value.worklists.single()
+        }
+        connectAndChooseOriginal()
+        compose.runOnIdle {
+            model.initializeDownloadHistory(documentContext)
+            model.setUiMode(UiMode.MEDIA)
+        }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            model.uiState.value.mediaItems.isNotEmpty() && !model.uiState.value.mediaLibraryLoading && !model.uiState.value.busy
+        }
+        val item = model.uiState.value.mediaItems.first()
+        check(provider.destination.delete())
+        provider.beforeCreate = {
+            val installed = DownloadHistoryFileStorage(directory).readSnapshot()
+            assertEquals(original, installed.worklists.last())
+            val row = installed.worklists.first().rows.single()
+            assertEquals(original.worklistId, row.origin?.worklistId)
+            assertEquals(original.rows.single().rowId, row.origin?.rowId)
+            assertEquals(DownloadHistoryOutcome.IN_PROGRESS, row.receipt?.outcome)
+            assertFalse(provider.destination.exists())
+            assertTrue(camera.originalReads.isEmpty())
+        }
+        var picker = ""
+        compose.runOnIdle {
+            assertTrue(model.beginDownloadContinuation(original.worklistId))
+            val id = requireNotNull(model.downloadContinuation.value).id
+            assertTrue(model.mapDownloadContinuation(id, original.rows.single().rowId, item.id))
+            picker = requireNotNull(model.beginContinuationFolderPicker(id))
+        }
+        assertFalse(provider.destination.exists())
+        assertTrue(camera.originalReads.isEmpty())
+        assertEquals(listOf(original), history.state.value.worklists)
+        compose.runOnIdle {
+            model.completeMediaPicker(documentContext, CameraMediaPickerKind.DOWNLOAD_FOLDER, picker, provider.treeUri)
+        }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            model.uiState.value.lastMediaBatchResult?.succeededItems == 1 && !model.uiState.value.busy
+        }
+        awaitHistoryIdle()
+        assertEquals(listOf(item.name), provider.createdNames.toList())
+        assertEquals(listOf("w"), provider.openModes.toList())
+        assertTrue(provider.deletedUris.isEmpty())
+        assertArrayEquals(camera.imageBytes, provider.destination.readBytes())
+        assertArrayEquals(unrelatedBytes, unrelated.readBytes())
+        assertEquals(listOf("/ccapi/media/${item.id}"), camera.originalReads.toList())
+        assertEquals(original, history.state.value.worklists.last())
+        assertEquals(DownloadHistoryOutcome.COMPLETED, history.state.value.worklists.first().rows.single().receipt?.outcome)
+        assertEquals(DownloadHistoryDestination.FOLDER, history.state.value.worklists.first().destination)
+    }
+
+    @Test fun clearDuringContinuationRetainsRefusedCleanupWarningAfterHistoryIsEmpty() {
+        history = newHistory(File(root, "continued-folder-clear"))
+        val original = runBlocking {
+            val token = (history.admitWorklist(history.captureRequest(), listOf("OLD-LABEL.JPG"),
+                DownloadHistoryDestination.FOLDER) as DownloadWorklistAdmission.Admitted).token
+            history.releaseWorklist(token)
+            history.awaitIdle()
+            history.state.value.worklists.single()
+        }
+        connectAndChooseOriginal()
+        compose.runOnIdle {
+            model.initializeDownloadHistory(documentContext)
+            model.setUiMode(UiMode.MEDIA)
+        }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            model.uiState.value.mediaItems.isNotEmpty() && !model.uiState.value.mediaLibraryLoading && !model.uiState.value.busy
+        }
+        val item = model.uiState.value.mediaItems.first()
+        check(provider.destination.delete())
+        provider.refuseDelete = true
+        val gate = camera.gate()
+        camera.intercept = { request ->
+            val url = requireNotNull(request.requestUrl)
+            if (url.encodedPath == "/ccapi/media/${item.id}" && url.query == null) {
+                gate.blockResponse()
+                camera.imageResponse()
+            } else null
+        }
+        compose.runOnIdle {
+            assertTrue(model.beginDownloadContinuation(original.worklistId))
+            val id = requireNotNull(model.downloadContinuation.value).id
+            assertTrue(model.mapDownloadContinuation(id, original.rows.single().rowId, item.id))
+            val picker = requireNotNull(model.beginContinuationFolderPicker(id))
+            model.completeMediaPicker(documentContext, CameraMediaPickerKind.DOWNLOAD_FOLDER, picker, provider.treeUri)
+        }
+        assertTrue(gate.entered.await(SESSION_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        compose.runOnIdle { model.clearDownloadHistory() }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            history.state.value.worklists.isEmpty() && !model.uiState.value.busy
+        }
+        assertEquals(MediaSaveFeedback.IncompleteFile(true), model.uiState.value.mediaSaveFeedback[item.id])
+        assertTrue(model.uiState.value.mediaSaveFeedback.values.none { it.isPending })
+        assertNull(model.uiState.value.mediaBatchProgress)
+        assertNull(model.uiState.value.activeMediaDownloadName)
+        assertTrue(provider.destination.exists())
+        assertEquals(listOf(provider.destinationUri), provider.deletedUris.toList())
+        assertArrayEquals(unrelatedBytes, unrelated.readBytes())
+        gate.release()
+        awaitHistoryIdle()
+        assertTrue(history.state.value.worklists.isEmpty())
+        assertEquals(MediaSaveFeedback.IncompleteFile(true), model.uiState.value.mediaSaveFeedback[item.id])
+    }
+
     private fun connectAndChooseOriginal(): CameraMediaItem {
         compose.runOnIdle {
             model = CameraViewModel(repository, downloadHistoryFactory = { history })
@@ -301,8 +413,23 @@ class CameraDownloadHistorySafJourneyTest {
     /** Genuine framework dispatch: inherited final delete() rejects the old resolver.delete route. */
     private class PrivateDocumentProvider(val destination: File) : DocumentsProvider() {
         val destinationUri: Uri = Uri.parse("content://dev.openeos.synthetic.history/document/owned")
+        val treeUri: Uri = DocumentsContract.buildTreeDocumentUri("dev.openeos.synthetic.history", "root")
         val openModes = CopyOnWriteArrayList<String>()
         val deletedUris = CopyOnWriteArrayList<Uri>()
+        val createdNames = CopyOnWriteArrayList<String>()
+        var beforeCreate: () -> Unit = {}
+        var refuseDelete = false
+
+        override fun createDocument(parentDocumentId: String, mimeType: String, displayName: String): String {
+            check(parentDocumentId == "root")
+            beforeCreate()
+            check(destination.createNewFile())
+            createdNames += displayName
+            return "owned"
+        }
+
+        override fun isChildDocument(parentDocumentId: String, documentId: String): Boolean =
+            parentDocumentId == "root" && documentId == "owned"
 
         override fun onCreate(): Boolean = true
         override fun openDocument(documentId: String, mode: String, signal: CancellationSignal?): ParcelFileDescriptor {
@@ -315,6 +442,7 @@ class CameraDownloadHistorySafJourneyTest {
         override fun deleteDocument(documentId: String) {
             check(documentId == "owned")
             deletedUris += destinationUri
+            if (refuseDelete) throw IOException("Synthetic cleanup refusal")
             check(destination.delete()) { "Could not remove synthetic incomplete document" }
         }
 

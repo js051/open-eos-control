@@ -77,15 +77,16 @@ internal class DownloadHistoryFileStorage private constructor(
         val root = tokener.nextValue() as? JSONObject ?: throw IOException("Invalid history snapshot")
         require(tokener.nextClean() == '\u0000')
         val schema = root.exactLong("schema")
-        require(schema in 1L..3L)
-        require(root.keySetCompat() == setOf("schema", "records") + if (schema == 3L) setOf("worklists") else emptySet())
+        require(schema in 1L..4L)
+        require(root.keySetCompat() == setOf("schema", "records") + if (schema >= 3L) setOf("worklists") else emptySet())
         val records = root.get("records") as? JSONArray ?: throw IOException("Invalid history records")
         require(records.length() <= MAX_DOWNLOAD_HISTORY_ENTRIES)
         val ids = HashSet<String>()
-        fun id(value: String): String {
-            require(UUID.fromString(value).toString() == value && ids.add(value))
+        fun localId(value: String): String {
+            require(UUID.fromString(value).toString() == value)
             return value
         }
+        fun id(value: String): String = localId(value).also { require(ids.add(it)) }
         fun entry(record: JSONObject): DownloadHistoryEntry {
             val fields = setOf("receiptId", "filename", "destination", "startedAtMillis", "finishedAtMillis", "outcome") +
                 if (schema >= 2L) setOf("cleanupUnconfirmed") else emptySet()
@@ -122,14 +123,33 @@ internal class DownloadHistoryFileStorage private constructor(
             require(rowCount <= MAX_DOWNLOAD_HISTORY_ENTRIES)
             DownloadWorklist(worklistId, destination, created, List(rows.length()) { rowIndex ->
                 val row = rows.get(rowIndex) as? JSONObject ?: throw IOException("Invalid history row")
-                require(row.keySetCompat() == setOf("rowId", "filename", "receipt"))
+                val fields = setOf("rowId", "filename", "receipt")
+                require(row.keySetCompat() == fields ||
+                    (schema == 4L && row.keySetCompat() == fields + "origin"))
                 val rowId = id(row.exactString("rowId"))
                 val filename = row.exactString("filename").also { require(it == sanitizeDownloadHistoryFilename(it)) }
                 val receipt = if (row.get("receipt") === JSONObject.NULL) null else
                     entry(row.get("receipt") as? JSONObject ?: throw IOException("Invalid row receipt"))
                 require(receipt == null || (receipt.filename == filename && receipt.destination == destination))
-                DownloadWorklistRow(rowId, filename, receipt)
+                val origin = if (!row.has("origin")) null else {
+                    val link = row.get("origin") as? JSONObject ?: throw IOException("Invalid row origin")
+                    require(link.keySetCompat() == setOf("worklistId", "rowId"))
+                    DownloadWorklistOrigin(localId(link.exactString("worklistId")), localId(link.exactString("rowId")))
+                }
+                DownloadWorklistRow(rowId, filename, receipt, origin)
             })
+        }
+        // A continuation can reference only an existing row in an earlier-admitted roster.
+        // This preserves associations across restarts without accepting cycles or dangling IDs.
+        val worklistIndices = worklists.mapIndexed { index, plan -> plan.worklistId to index }.toMap()
+        worklists.forEachIndexed { index, plan ->
+            val origins = plan.rows.mapNotNull { it.origin }
+            require(origins.distinct().size == origins.size)
+            for (origin in origins) {
+                val originIndex = worklistIndices[origin.worklistId]
+                require(originIndex != null && originIndex > index)
+                require(worklists[originIndex].rows.any { it.rowId == origin.rowId })
+            }
         }
         return DownloadHistorySnapshot(entries, worklists)
     }
@@ -137,7 +157,7 @@ internal class DownloadHistoryFileStorage private constructor(
     /** Legacy fixture/caller support; the process store uses writeSnapshot for atomic migration. */
     fun write(entries: List<DownloadHistoryEntry>) = writeProtected(DownloadHistorySnapshot(entries), schema = 2)
 
-    fun writeSnapshot(value: DownloadHistorySnapshot) = writeProtected(value, schema = 3)
+    fun writeSnapshot(value: DownloadHistorySnapshot) = writeProtected(value, schema = 4)
 
     private fun writeProtected(value: DownloadHistorySnapshot, schema: Int) {
         try { writeJson(value, schema) }
@@ -160,7 +180,7 @@ internal class DownloadHistoryFileStorage private constructor(
         val records = JSONArray()
         value.entries.forEach { records.put(entryJson(it)) }
         val root = JSONObject().put("schema", schema).put("records", records)
-        if (schema == 3) {
+        if (schema >= 3) {
             val worklists = JSONArray()
             for (worklist in value.worklists) {
                 val rows = JSONArray()
@@ -168,6 +188,9 @@ internal class DownloadHistoryFileStorage private constructor(
                     put("rowId", row.rowId)
                     put("filename", row.filename)
                     put("receipt", row.receipt?.let(::entryJson) ?: JSONObject.NULL)
+                    row.origin?.let { origin ->
+                        put("origin", JSONObject().put("worklistId", origin.worklistId).put("rowId", origin.rowId))
+                    }
                 })
                 worklists.put(JSONObject().put("worklistId", worklist.worklistId)
                     .put("destination", worklist.destination.name).put("createdAtMillis", worklist.createdAtMillis)

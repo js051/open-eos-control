@@ -9,6 +9,7 @@ import dev.openeos.control.data.DownloadWorklistAdmission
 import dev.openeos.control.data.DownloadWorklistFailure
 import dev.openeos.control.data.DownloadWorklistRowStart
 import dev.openeos.control.data.DownloadWorklistToken
+import dev.openeos.control.data.DownloadWorklistContinuationSelection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
@@ -102,17 +103,31 @@ internal class PlannedMediaDownloadBatch(
     private val isCurrent: () -> Boolean,
     private val admissionFailedMessage: String,
     private val admissionUnknownMessage: String,
+    private val continuation: List<DownloadWorklistContinuationSelection>? = null,
 ) {
     private var prepared = false
+    private var released = false
     private var token: DownloadWorklistToken? = null
 
     /** False means a complete plan is certainly absent; manual saving remains available. */
     suspend fun prepare(): Boolean {
         checkCurrent()
         check(!prepared) { "A worklist must be admitted only once." }
+        check(!released) { "A released worklist cannot be reused." }
         prepared = true
-        if (store == null || request == null) return false
-        val admission = withContext(NonCancellable) { store.admitWorklist(request, filenames, destination) }
+        if (store == null || request == null) {
+            if (continuation != null) throw MediaWorklistAdmissionException(admissionFailedMessage)
+            return false
+        }
+        val admission = withContext(NonCancellable) {
+            (if (continuation == null) store.admitWorklist(request, filenames, destination)
+            else store.admitContinuation(request, continuation, destination)).also {
+                // Own the capability even if cancellation wins while returning to the caller.
+                if (it is DownloadWorklistAdmission.Admitted) token = it.token
+            }
+        }
+        // Own an admitted capability before checking cancellation, so finally can release it.
+        if (admission is DownloadWorklistAdmission.Admitted) token = admission.token
         checkCurrent()
         return when (admission) {
             is DownloadWorklistAdmission.Admitted -> {
@@ -121,6 +136,7 @@ internal class PlannedMediaDownloadBatch(
             }
             is DownloadWorklistAdmission.Rejected -> {
                 if (!admission.planAbsent) throw MediaWorklistAdmissionException(admissionUnknownMessage)
+                if (continuation != null) throw MediaWorklistAdmissionException(admissionFailedMessage)
                 false
             }
         }
@@ -128,14 +144,16 @@ internal class PlannedMediaDownloadBatch(
 
     suspend fun <T> transfer(index: Int, transfer: suspend (onFinalized: () -> Unit) -> T): T {
         check(prepared) { "The whole worklist must be admitted before an item." }
+        check(!released) { "A released worklist cannot start another item." }
         require(index in filenames.indices)
         checkCurrent()
+        if (continuation != null && token == null) throw MediaWorklistAdmissionException(admissionFailedMessage)
         return withDownloadHistoryAdmission(store, admit = {
             val current = token
             if (current == null || store == null) null else when (val start = store.beginWorklistRow(current, index)) {
                 is DownloadWorklistRowStart.Started -> start.receipt
                 is DownloadWorklistRowStart.Rejected -> {
-                    if (start.reason == DownloadWorklistFailure.RETIRED_REQUEST) {
+                    if (start.reason == DownloadWorklistFailure.RETIRED_REQUEST && continuation == null) {
                         // Clear removes the plan without cancelling actual saves. Never
                         // recreate its later rows or request a ticket in the new epoch.
                         token = null
@@ -147,6 +165,13 @@ internal class PlannedMediaDownloadBatch(
             checkCurrent()
             transfer(completed)
         }
+    }
+
+    /** Retire row-start capabilities, while existing receipts keep their genuine completion. */
+    fun release() {
+        released = true
+        token?.let { store?.releaseWorklist(it) }
+        token = null
     }
 
     private suspend fun checkCurrent() {

@@ -10,6 +10,9 @@ import dev.openeos.control.data.DownloadHistoryStore
 import dev.openeos.control.data.DownloadHistoryWarning
 import dev.openeos.control.data.DownloadHistoryWritePhase
 import dev.openeos.control.data.MAX_DOWNLOAD_HISTORY_ENTRIES
+import dev.openeos.control.data.DownloadWorklistAdmission
+import dev.openeos.control.data.DownloadWorklistContinuationSelection
+import dev.openeos.control.data.DownloadWorklistOrigin
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -560,6 +563,76 @@ class PlannedMediaDownloadBatchTest {
             assertEquals(listOf(items.first().name), result.failedItemNames)
             assertEquals(operation, result.operation)
         }
+    }
+
+    @Test fun continuationCannotFallBackAfterCapacityOrStorageAdmissionFailure() = runTest {
+        for (full in listOf(false, true)) {
+            var fail = false
+            val store = history(temporary.newFolder()) { phase ->
+                if (fail && phase == DownloadHistoryWritePhase.BEFORE_MOVE) throw IOException("Synthetic failure")
+            }
+            val token = (store.admitWorklist(store.captureRequest(), List(if (full) 100 else 1) { "OLD.JPG" },
+                DownloadHistoryDestination.FOLDER) as DownloadWorklistAdmission.Admitted).token
+            store.releaseWorklist(token)
+            store.awaitIdle()
+            val original = store.state.value.worklists.single()
+            val continuation = PlannedMediaDownloadBatch(store, store.captureRequest(), listOf("NEW.JPG"),
+                DownloadHistoryDestination.FOLDER, { true }, ADMISSION_FAILED, ADMISSION_UNKNOWN,
+                listOf(DownloadWorklistContinuationSelection(DownloadWorklistOrigin(original.worklistId,
+                    original.rows.first().rowId), "NEW.JPG")))
+            fail = !full
+            assertTrue(runCatching { continuation.prepare() }.exceptionOrNull() is MediaWorklistAdmissionException)
+            var opened = false
+            assertTrue(runCatching { continuation.transfer(0) { opened = true } }.exceptionOrNull() is MediaWorklistAdmissionException)
+            assertFalse(opened)
+            assertEquals(listOf(original), store.state.value.worklists)
+            continuation.release()
+        }
+    }
+
+    @Test fun clearBetweenContinuationRowsStopsWithoutUntrackedTransfer() = runTest {
+        val store = history(temporary.newFolder())
+        val token = (store.admitWorklist(store.captureRequest(), listOf("OLD.JPG"),
+            DownloadHistoryDestination.FOLDER) as DownloadWorklistAdmission.Admitted).token
+        store.releaseWorklist(token)
+        store.awaitIdle()
+        val original = store.state.value.worklists.single()
+        val continuation = PlannedMediaDownloadBatch(store, store.captureRequest(), listOf("NEW.JPG"),
+            DownloadHistoryDestination.FOLDER, { true }, ADMISSION_FAILED, ADMISSION_UNKNOWN,
+            listOf(DownloadWorklistContinuationSelection(DownloadWorklistOrigin(original.worklistId,
+                original.rows.single().rowId), "NEW.JPG")))
+        assertTrue(continuation.prepare())
+        assertTrue(store.clear())
+        var opened = false
+        assertTrue(runCatching { continuation.transfer(0) { opened = true } }.exceptionOrNull() is MediaWorklistAdmissionException)
+        assertFalse(opened)
+        assertTrue(store.state.value.worklists.isEmpty())
+        continuation.release()
+    }
+
+    @Test fun retiredOwnerAndReleasedContinuationCannotStartAnOriginal() = runTest {
+        val store = history(temporary.newFolder())
+        val token = (store.admitWorklist(store.captureRequest(), listOf("OLD.JPG"),
+            DownloadHistoryDestination.FOLDER) as DownloadWorklistAdmission.Admitted).token
+        store.releaseWorklist(token)
+        store.awaitIdle()
+        val original = store.state.value.worklists.single()
+        var current = true
+        val continuation = PlannedMediaDownloadBatch(store, store.captureRequest(), listOf("NEW.JPG"),
+            DownloadHistoryDestination.FOLDER, { current }, ADMISSION_FAILED, ADMISSION_UNKNOWN,
+            listOf(DownloadWorklistContinuationSelection(DownloadWorklistOrigin(original.worklistId,
+                original.rows.single().rowId), "NEW.JPG")))
+        assertTrue(continuation.prepare())
+        current = false
+        var opened = false
+        assertTrue(runCatching { continuation.transfer(0) { opened = true } }.exceptionOrNull() is CancellationException)
+        continuation.release()
+        current = true
+        assertTrue(runCatching { continuation.transfer(0) { opened = true } }.exceptionOrNull() is IllegalStateException)
+        store.awaitIdle()
+        assertFalse(opened)
+        assertTrue(store.state.value.activeWorklistIds.isEmpty())
+        assertEquals(original, store.state.value.worklists.last())
     }
 
     private fun TestScope.history(directory: File, beforeWrite: (DownloadHistoryWritePhase) -> Unit = {}) = DownloadHistoryStore(

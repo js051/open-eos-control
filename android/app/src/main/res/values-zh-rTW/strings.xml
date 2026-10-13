@@ -566,7 +566,7 @@
     <string name="download_history_clear">清除紀錄</string>
     <string name="download_history_close">關閉</string>
     <string name="download_history_clear_title">清除下載紀錄？</string>
-    <string name="download_history_clear_confirmation">只清除工作清單與紀錄，不會刪檔或取消下載。舊批次不能重新建立已清除的紀錄。</string>
+    <string name="download_history_clear_confirmation">清除工作清單與紀錄，取消手動繼續工作的草稿與傳輸，並嘗試移除其未完成輸出。一般下載會繼續；不會刪除已存好的檔案，清理失敗仍會提示。舊批次不能重新建立已清除的紀錄。</string>
     <string name="download_history_destination_gallery">目的地：相簿</string>
     <string name="download_history_destination_document">目的地：所選檔案</string>
     <string name="download_history_destination_folder">目的地：所選資料夾</string>
@@ -708,4 +708,20 @@
     <string name="recording_disconnect_warning">上一台相機可能仍在錄影，尚未確認已停止，請在機身確認。</string>
     <string name="live_view_stop_unconfirmed">尚未確認即時預覽已停止。請關閉遠端即時預覽，或在診斷頁按停止遠端即時預覽，只重試停止。舊版 Bridge 可能需要更新。</string>
     <string name="live_view_disconnect_warning">上一台相機的即時預覽在斷線前尚未確認停止，請在機身確認。</string>
+    <string name="media_continuation_start">繼續未完成項目…</string>
+    <string name="media_continuation_title">為新嘗試選擇原檔</string>
+    <string name="media_continuation_load_first">請先連線並在相簿載入相機原檔，再繼續未完成項目。</string>
+    <string name="media_continuation_explanation">只選擇要再次嘗試的未完成列，並逐一手動指定這次連線已載入的原檔。名稱、大小與日期不能證明是相同來源。已完成列不列入，舊結果保持不變。</string>
+    <string name="media_continuation_choose_source">選擇已載入的原檔</string>
+    <string name="media_continuation_mapping">新嘗試使用：%1$s</string>
+    <string name="media_continuation_remove">移除此對應</string>
+    <string name="media_continuation_unknown_warning">先前嘗試可能已儲存檔案，或留下未完成檔案。請先檢查原目的地；再次嘗試可能產生重複檔案。</string>
+    <string name="media_continuation_unknown_confirmation">我已檢查原目的地，確認要為這些結果不明的項目開始新嘗試。</string>
+    <string name="media_continuation_destination_hint">請確認手動對應，並重新選擇目的地。只有新連結工作清單儲存成功後，才會請求已對應的原檔。紀錄達 100 列時，須先檢視紀錄再決定是否清除。</string>
+    <string name="media_continuation_gallery">確認並將 %1$d 項存入相簿</string>
+    <string name="media_continuation_folder">確認 %1$d 項並選擇資料夾…</string>
+    <string name="media_continuation_source_label">已載入第 %1$d 項：%2$s（%3$s）</string>
+    <string name="media_continuation_link_hint">依您的手動選擇連結的新嘗試；未驗證來源是否相同。</string>
+    <string name="media_continuation_expired">此次繼續工作已取消或連線已變更。請重新開啟紀錄並手動指定原檔。</string>
+    <string name="media_continuation_linked_from">手動連結自 %3$s 工作清單第 %2$d 項：%1$s</string>
 </resources>

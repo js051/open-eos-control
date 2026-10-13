@@ -55,6 +55,7 @@ fun OpenEosControlApp(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val downloadHistory by viewModel.downloadHistoryState.collectAsStateWithLifecycle()
+    val downloadContinuation by viewModel.downloadContinuation.collectAsStateWithLifecycle()
     var showDownloadHistory by rememberSaveable { mutableStateOf(false) }
     var showSavedJpegs by rememberSaveable { mutableStateOf(false) }
     val savedJpegs by viewModel.savedJpegState.collectAsStateWithLifecycle()
@@ -284,6 +285,22 @@ fun OpenEosControlApp(
                     state = downloadHistory,
                     onClear = viewModel::clearDownloadHistory,
                     onDismiss = { showDownloadHistory = false },
+                    continuationAvailable = state.connected && !state.previewMode && state.mediaItems.isNotEmpty() &&
+                        state.supports(CameraFeature.MEDIA_DOWNLOAD) && !state.isBusy(CameraOperation.MEDIA) &&
+                        !state.foregroundImportOwnerActive,
+                    onContinue = { worklistId ->
+                        if (viewModel.beginDownloadContinuation(worklistId)) showDownloadHistory = false
+                    },
+                )
+            }
+            downloadContinuation?.let { draft ->
+                DownloadContinuationDialog(
+                    draft = draft,
+                    onMap = { rowId, sourceId -> viewModel.mapDownloadContinuation(draft.id, rowId, sourceId) },
+                    onConfirmUnknown = { viewModel.confirmDownloadContinuationUnknown(draft.id, it) },
+                    onGallery = { viewModel.continueDownloadToGallery(context, draft.id) },
+                    onFolder = { mediaPickers.continueFolder(draft.id) },
+                    onDismiss = viewModel::cancelDownloadContinuation,
                 )
             }
         }

@@ -36,6 +36,9 @@ import dev.openeos.control.data.DownloadHistoryEntry
 import dev.openeos.control.data.DownloadHistoryOutcome
 import dev.openeos.control.data.DownloadHistoryState
 import dev.openeos.control.data.DownloadHistoryWarning
+import dev.openeos.control.data.DownloadWorklistOrigin
+import dev.openeos.control.data.DownloadContinuationStatus
+import dev.openeos.control.data.continuationStatus
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.launch
@@ -47,6 +50,8 @@ internal fun DownloadHistoryDialog(
     onClear: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    continuationAvailable: Boolean = false,
+    onContinue: (String) -> Unit = {},
 ) {
     var confirmClear by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
@@ -102,12 +107,32 @@ internal fun DownloadHistoryDialog(
                                 style = MaterialTheme.typography.titleMedium,
                                 modifier = Modifier.testTag("download-worklist-${worklist.worklistId}"),
                             )
+                            if (worklist.rows.any {
+                                state.continuationStatus(DownloadWorklistOrigin(worklist.worklistId, it.rowId)) != DownloadContinuationStatus.UNAVAILABLE
+                            }) {
+                                TextButton(
+                                    enabled = continuationAvailable && state.writable &&
+                                        worklist.worklistId !in state.continuationBlockedWorklistIds,
+                                    onClick = { onContinue(worklist.worklistId) },
+                                    modifier = Modifier.testTag("download-worklist-continue-${worklist.worklistId}"),
+                                ) { Text(stringResource(R.string.media_continuation_start)) }
+                                if (!continuationAvailable) Text(stringResource(R.string.media_continuation_load_first),
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                         items(worklist.rows, key = { "worklist-row-${it.rowId}" }) { row ->
                             Column(Modifier.fillMaxWidth().testTag("download-worklist-row-${row.rowId}"),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(stringResource(R.string.download_history_worklist_position,
                                     worklist.rows.indexOf(row) + 1, worklist.rows.size), style = MaterialTheme.typography.bodySmall)
+                                row.origin?.let { origin ->
+                                    val earlier = state.worklists.find { it.worklistId == origin.worklistId }
+                                    val earlierRow = earlier?.rows?.find { it.rowId == origin.rowId }
+                                    if (earlier != null && earlierRow != null) Text(stringResource(R.string.media_continuation_linked_from,
+                                        earlierRow.filename, earlier.rows.indexOf(earlierRow) + 1,
+                                        dateFormat.format(Date(earlier.createdAtMillis))), style = MaterialTheme.typography.bodySmall)
+                                    Text(stringResource(R.string.media_continuation_link_hint), style = MaterialTheme.typography.bodySmall)
+                                }
                                 row.receipt?.let { DownloadHistoryRow(it) } ?: run {
                                     HorizontalDivider()
                                     Text(row.filename, style = MaterialTheme.typography.titleSmall)
