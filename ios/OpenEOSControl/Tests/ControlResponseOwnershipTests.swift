@@ -259,7 +259,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
         }
     }
 
-    func testRetiredCancelledAutofocusAndHalfPressStillReleaseOnlyOriginalCamera() async throws {
+    func testDisconnectWaitsForCancelledAutofocusAndHalfPressToReleaseOnlyOriginalCamera() async throws {
         for action in [ControlOwnerAction.autofocus, .halfPress] {
             let oldPeer = ControlOwnerPeer(owner: "A")
             let newPeer = ControlOwnerPeer(owner: "B")
@@ -270,11 +270,24 @@ final class ControlResponseOwnershipTests: XCTestCase {
             let old = Task { await perform(action, state: state) }
             try await waitForGate("press", peer: oldPeer)
             old.cancel()
-            await state.disconnect()
-            try await connectAndPrepare(state)
+            state.requestDisconnect()
+            var reconnectEntered = false
+            let reconnect = Task {
+                reconnectEntered = true
+                try await connectAndPrepare(state)
+            }
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: .seconds(5))
+            while !reconnectEntered, clock.now < deadline { await Task.yield() }
+            XCTAssertTrue(reconnectEntered)
+            let prematureReads = await newPeer.count(.info)
+            let prematureReleases = await oldPeer.count(.shutterRelease)
+            XCTAssertEqual(prematureReads, 0, "Reconnect must wait for the original in-flight short press")
+            XCTAssertEqual(prematureReleases, 0, "Stop must not overtake the held press")
+            await oldPeer.release("press")
+            try await reconnect.value
             state.reportCubeLutRenderFailure()
             let saved = PreservedControl(state)
-            await oldPeer.release("press")
             await old.value
 
             assertPreserved(saved, state: state)
@@ -293,13 +306,16 @@ final class ControlResponseOwnershipTests: XCTestCase {
         let state = makeState([oldPeer, newPeer], bridge: bridge)
         defer { state.requestDisconnect(); Task { await oldPeer.releaseAll(); await newPeer.releaseAll() } }
         try await connectAndPrepare(state)
+        let shortControl = !bridge && (action == .autofocus || action == .halfPress)
         await oldPeer.enqueue(action.wire(bridge: bridge), gate: "old-command",
-                              error: readback == nil && fails ? .networkConnectionLost : nil)
+                              error: readback == nil && !shortControl && fails ? .networkConnectionLost : nil)
         let old = Task { await perform(action, state: state) }
         try await waitForGate("old-command", peer: oldPeer)
-        if let readback {
+        if let readback = readback ?? (shortControl ? .status : nil) {
             // File naming performs its own capability preflight. Arm only after
             // the mutation has entered so this is the app's later readback.
+            // Short presses now settle their exact release before Close returns;
+            // gate their later status read to exercise a genuinely retired reply.
             await oldPeer.enqueue(readback, gate: "old-readback", error: fails ? .networkConnectionLost : nil)
             await oldPeer.release("old-command")
             try await waitForGate("old-readback", peer: oldPeer)
@@ -315,7 +331,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
         let saved = PreservedControl(state)
         XCTAssertTrue(state.isBusy(action.category))
 
-        await oldPeer.release(readback == nil ? "old-command" : "old-readback")
+        await oldPeer.release(readback == nil && !shortControl ? "old-command" : "old-readback")
         await old.value
 
         assertPreserved(saved, state: state)

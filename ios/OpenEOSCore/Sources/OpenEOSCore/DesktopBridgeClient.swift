@@ -596,7 +596,7 @@ public actor DesktopBridgeClient {
         do {
             body = try await postJSON(sessionEndpoint(["capture", "still"]), payload: ["af": autofocus])
         } catch let error as DesktopBridgeError {
-            if case .http(_, _, _, "CAPTURE_STATUS_READBACK_FAILED", _, _, _) = error {
+            if case .http(502, _, _, "CAPTURE_STATUS_READBACK_FAILED", _, _, _) = error {
                 throw DesktopBridgeError.captureStatusReadbackFailed
             }
             throw error

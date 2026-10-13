@@ -15,6 +15,7 @@ public enum CCAPIError: Error, Equatable, Sendable {
     case outsideCameraOrigin(String)
     case destinationExists(String)
     case operationAndReleaseFailed(operation: String, release: String)
+    case captureStatusReadbackFailed
     case recordingStatusReadbackFailed(starting: Bool)
     case recordingCommandUnconfirmed(starting: Bool)
 }
@@ -46,6 +47,8 @@ extension CCAPIError: LocalizedError {
             "The media destination already exists: \(value)"
         case .recordingCommandUnconfirmed:
             "The recording command result is unknown. Check the camera and explicitly stop recording; refreshing cached status cannot confirm it stopped."
+        case .captureStatusReadbackFailed:
+            "The shutter command was acknowledged, but camera status could not be read. Check recent media without taking another photo."
         case .recordingStatusReadbackFailed:
             "The recording command was acknowledged, but its status could not be read. Refresh status or explicitly stop recording."
         case let .operationAndReleaseFailed(operation, release):
