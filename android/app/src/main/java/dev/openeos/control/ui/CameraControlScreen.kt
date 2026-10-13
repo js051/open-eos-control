@@ -918,7 +918,8 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
     val settings = state.monitorSettings
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val pixelAnalysisAvailable = !state.previewMode &&
+    val pixelAnalysisAvailable = !state.previewMode
+    val lutAvailable = pixelAnalysisAvailable &&
         state.liveViewSource != LiveViewSource.CCAPI_RTP &&
         state.nativeLiveViewSession == null
     val lutLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -935,6 +936,8 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
     }
     if (!pixelAnalysisAvailable) {
         Text(stringResource(R.string.monitoring_assists_rtp_unavailable), color = AppWarning)
+    } else if (!lutAvailable) {
+        Text(stringResource(R.string.native_monitor_lut_unavailable), color = AppWarning)
     }
     MonitorSwitchRow(
         label = stringResource(R.string.histogram),
@@ -952,7 +955,7 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
         Modifier.fillMaxWidth().testTag("monitor-lut-options"),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(stringResource(R.string.lut_preview), color = if (pixelAnalysisAvailable) AppText else AppMutedText)
+        Text(stringResource(R.string.lut_preview), color = if (lutAvailable) AppText else AppMutedText)
         Text(
             settings.cubeLut?.let { stringResource(R.string.cube_lut_summary, it.name, it.size) }
                 ?: stringResource(R.string.no_cube_lut),
@@ -966,7 +969,7 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
                 onClick = {
                     lutLauncher.launch(arrayOf("text/plain", "application/octet-stream", "application/x-cube"))
                 },
-                enabled = pixelAnalysisAvailable,
+                enabled = lutAvailable,
                 modifier = Modifier.height(48.dp),
             ) {
                 Icon(
@@ -982,7 +985,7 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
                     icon = LucideR.drawable.lucide_ic_trash_2,
                     description = stringResource(R.string.remove_cube_lut),
                     onClick = actions.clearCubeLut,
-                    enabled = pixelAnalysisAvailable,
+                    enabled = lutAvailable,
                     modifier = Modifier.size(48.dp),
                 )
             }
