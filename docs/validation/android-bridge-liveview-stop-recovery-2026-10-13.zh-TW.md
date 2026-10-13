@@ -21,3 +21,9 @@ UI 會持續保留本連線的停止警告，後續 false／缺欄位狀態不�
 ## 首輪完整 CI 的單元失敗
 
 原 cd1afe／run38412149915 的 JVM gate 執行1162個case、1個失敗。`DesktopBridgeShutterRecoveryTest.statusWarningBlocksMutationsAndRetainsStopEndpoints` 的模擬peer把 liveview/stop落到generic bulb-status回覆，缺少停止確認欄位。新版production依契約拒絕該回覆；修正僅為該fixture的liveview/stop明確回active=false、liveViewStopUnconfirmed=false，原命令封鎖、Stop可達、次數斷言均保留。此修正目前僅source review通過，不能沿用原run或其他平台結果稱新候選已通過。
+
+同run的API34／36 raw XML均為360案、6失敗、0略過；12個failure stack都在`CameraBridgeShutterRecoverySessionTest.setUp:91`等待LiveView影格。該共享peer原Start／Stop都回`{}`，無法滿足新Start確認契約。修復將兩條正向回覆分開為active=true與active=false/stopUnconfirmed=false，保留原15秒期限、6個bulb負例及命令次數斷言。這是來源與實際setup失敗一致的修復候選，新候選runtime仍待完整CI，不把舊354個通過當修復後全綠。
+
+## 配對版本界線
+
+新的explicit Stop確認fixture對應PC草稿#237的Bridge修正（776a239）：LiveViewState新增可選停止證明，Stop route在確認清理後回傳該欄位。Android草稿自己的Bridge目錄仍是原基底版本，不能據其Android mock通過聲稱該整樹已驗跨端互通。舊Bridge只在已確認Start的legacy安全條件下可完成Stop；模糊Start或Stop-only責任需更新Bridge。三候選尚需正式整合與集中runtime驗證。
