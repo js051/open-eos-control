@@ -803,7 +803,7 @@
     <string name="download_history_clear">Clear records</string>
     <string name="download_history_close">Close</string>
     <string name="download_history_clear_title">Clear download records?</string>
-    <string name="download_history_clear_confirmation">This only clears worklists and records. It does not delete files or cancel downloads. Old batches cannot recreate cleared records.</string>
+    <string name="download_history_clear_confirmation">This clears worklists and records, cancels manual continuation drafts and transfers, and attempts to remove their unfinished output. Ordinary downloads continue. Saved files are not deleted; cleanup failures remain visible. Old batches cannot recreate cleared records.</string>
     <string name="download_history_destination_gallery">Destination: Gallery</string>
     <string name="download_history_destination_document">Destination: Selected file</string>
     <string name="download_history_destination_folder">Destination: Selected folder</string>
@@ -945,4 +945,20 @@
     <string name="recording_disconnect_warning">Check the previous camera: recording may still be active and was not confirmed stopped.</string>
     <string name="live_view_stop_unconfirmed">Live View stop is unconfirmed. Turn Remote Live View off or use Stop remote Live View in Debug to retry only Stop. An older Bridge may need an update.</string>
     <string name="live_view_disconnect_warning">Check the previous camera: Live View was not confirmed stopped before disconnecting.</string>
+    <string name="media_continuation_start">Continue unfinished items…</string>
+    <string name="media_continuation_title">Choose originals for a new attempt</string>
+    <string name="media_continuation_load_first">Connect and load camera originals in the album before continuing.</string>
+    <string name="media_continuation_explanation">Choose only the unfinished rows you want to attempt again. Map each one yourself to an already loaded original in this connection. Names, sizes and dates do not prove it is the same source. Completed rows are excluded. Old results stay unchanged.</string>
+    <string name="media_continuation_choose_source">Choose a loaded original</string>
+    <string name="media_continuation_mapping">New attempt uses: %1$s</string>
+    <string name="media_continuation_remove">Remove this mapping</string>
+    <string name="media_continuation_unknown_warning">A previous attempt may already have saved a file or left an incomplete file. Check the previous destination before continuing; another attempt can create a duplicate.</string>
+    <string name="media_continuation_unknown_confirmation">I checked the previous destination and want a new attempt for these uncertain items.</string>
+    <string name="media_continuation_destination_hint">Confirm your mappings and choose a destination now. Only mapped originals are requested, after the new linked worklist is saved. A full 100-row history must be reviewed before space is cleared.</string>
+    <string name="media_continuation_gallery">Confirm and save %1$d to Gallery</string>
+    <string name="media_continuation_folder">Confirm %1$d and choose a folder…</string>
+    <string name="media_continuation_source_label">Loaded item %1$d: %2$s (%3$s)</string>
+    <string name="media_continuation_link_hint">New attempt linked by your manual choice; source identity is not verified.</string>
+    <string name="media_continuation_expired">This continuation was cancelled or its connection changed. Open history and map the originals again.</string>
+    <string name="media_continuation_linked_from">Manually linked from %1$s, item %2$d in worklist %3$s</string>
 </resources>

@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -43,9 +44,11 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import dev.openeos.control.data.DownloadWorklist
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -370,6 +373,238 @@ class CameraDownloadHistoryJourneyTest {
         assertNotEquals(previousReceipt, entries.first().receiptId)
         assertEquals(listOf("/ccapi/media/one", "/ccapi/media/one"), camera.originalReads.toList())
         assertSavedOriginals(1)
+    }
+
+    @Test fun coldFiftyRowWorklistRequiresManualMappingAndUnknownCheckBeforeOnlyTwoNewOriginals() {
+        val original = seedColdWorklist()
+        installApp()
+        connectAndOpenAlbum()
+        assertEquals(0, camera.originalReads.size)
+        assertEquals(5, original.rows.count { it.receipt?.outcome == DownloadHistoryOutcome.COMPLETED })
+        assertEquals(1, original.rows.count { it.receipt?.outcome == DownloadHistoryOutcome.UNCONFIRMED })
+        assertEquals(44, original.rows.count { it.receipt == null })
+        openHistory()
+        compose.onNodeWithTag("download-history-list").performScrollToNode(
+            androidx.compose.ui.test.hasTestTag("download-worklist-continue-${original.worklistId}"))
+        compose.onNodeWithTag("download-worklist-continue-${original.worklistId}").performClick()
+        val draft = requireNotNull(model.downloadContinuation.value)
+        assertEquals(45, draft.rows.size)
+        assertTrue(draft.mappings.isEmpty())
+        compose.onNodeWithTag("download-continuation-gallery").assertIsNotEnabled()
+        compose.onNodeWithTag("download-continuation-map-${original.rows[5].rowId}").performClick()
+        compose.onNodeWithTag("download-continuation-source-two").performClick()
+        compose.onNodeWithTag("download-continuation-map-${original.rows[7].rowId}").performScrollTo().performClick()
+        compose.onNodeWithTag("download-continuation-source-one").performClick()
+        assertEquals(0, camera.originalReads.size)
+        compose.onNodeWithTag("download-continuation-gallery").assertIsNotEnabled()
+        compose.onNodeWithTag("download-continuation-list").performScrollToNode(
+            androidx.compose.ui.test.hasTestTag("download-continuation-confirm-unknown"))
+        compose.onNodeWithTag("download-continuation-confirm-unknown").performClick()
+        compose.onNodeWithTag("download-continuation-gallery").performClick()
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            model.uiState.value.lastMediaBatchResult?.succeededItems == 2 && !model.uiState.value.busy
+        }
+        runBlocking { history.awaitIdle() }
+        assertNull(model.downloadContinuation.value)
+        val plans = history.state.value.worklists
+        assertEquals(original, plans.last())
+        assertEquals(2, plans.first().rows.size)
+        assertEquals(listOf(original.rows[5].rowId, original.rows[7].rowId), plans.first().rows.map { it.origin?.rowId })
+        assertTrue(plans.first().rows.all { it.origin?.worklistId == original.worklistId &&
+            it.receipt?.outcome == DownloadHistoryOutcome.COMPLETED })
+        assertEquals(listOf("/ccapi/media/two", "/ccapi/media/one"), camera.originalReads.toList())
+        assertSavedOriginals(2)
+    }
+
+    @Test fun duplicateMappingAndCancelledDraftOrFolderPickerNeverReadOriginals() {
+        val original = seedColdWorklist()
+        installApp()
+        connectAndOpenAlbum()
+        compose.runOnIdle {
+            assertTrue(model.beginDownloadContinuation(original.worklistId))
+            val id = requireNotNull(model.downloadContinuation.value).id
+            assertTrue(model.mapDownloadContinuation(id, original.rows[6].rowId, "one"))
+            assertFalse(model.mapDownloadContinuation(id, original.rows[7].rowId, "one"))
+            assertFalse(model.mapDownloadContinuation(id, original.rows[0].rowId, "two"))
+            model.cancelDownloadContinuation()
+            assertFalse(model.continueDownloadToGallery(compose.activity, id))
+            assertTrue(model.beginDownloadContinuation(original.worklistId))
+            val retry = requireNotNull(model.downloadContinuation.value).id
+            assertTrue(model.mapDownloadContinuation(retry, original.rows[6].rowId, "one"))
+            val picker = requireNotNull(model.beginContinuationFolderPicker(retry))
+            model.completeMediaPicker(compose.activity, CameraMediaPickerKind.DOWNLOAD_FOLDER, picker, null)
+        }
+        runBlocking { history.awaitIdle() }
+        assertNull(model.downloadContinuation.value)
+        assertEquals(listOf(original), history.state.value.worklists)
+        assertEquals(0, camera.originalReads.size)
+        assertSavedOriginals(0)
+    }
+
+    @Test fun clearRetiresContinuationPickerAndItsReturnedUriCannotStartOrdinarySave() {
+        val original = seedColdWorklist()
+        installApp()
+        connectAndOpenAlbum()
+        var picker = ""
+        compose.runOnIdle {
+            assertTrue(model.beginDownloadContinuation(original.worklistId))
+            val id = requireNotNull(model.downloadContinuation.value).id
+            assertTrue(model.mapDownloadContinuation(id, original.rows[6].rowId, "one"))
+            picker = requireNotNull(model.beginContinuationFolderPicker(id))
+            model.clearDownloadHistory()
+        }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { history.state.value.worklists.isEmpty() }
+        compose.runOnIdle {
+            model.completeMediaPicker(compose.activity, CameraMediaPickerKind.DOWNLOAD_FOLDER, picker,
+                Uri.parse("content://synthetic.unreachable.provider/tree/never-open"))
+        }
+        assertEquals(text(R.string.media_continuation_expired), model.uiState.value.error)
+        assertEquals(0, camera.originalReads.size)
+        assertTrue(history.state.value.worklists.isEmpty())
+        assertSavedOriginals(0)
+    }
+
+    @Test fun failedContinuationAdmissionNeverFallsBackToUnrecordedGalleryDownload() {
+        val fail = AtomicBoolean(false)
+        val original = seedColdWorklist(beforeWrite = { phase ->
+            if (fail.get() && phase == DownloadHistoryWritePhase.BEFORE_MOVE) throw IOException("Synthetic continuation admission failure")
+        })
+        installApp()
+        connectAndOpenAlbum()
+        fail.set(true)
+        startMappedContinuation(original, original.rows[6].rowId)
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            model.uiState.value.error != null && !model.uiState.value.busy
+        }
+        assertEquals(text(R.string.media_worklist_admission_failed), model.uiState.value.error)
+        assertEquals(MediaSaveFeedback.NotStarted, model.uiState.value.mediaSaveFeedback["one"])
+        assertEquals(listOf(original), history.state.value.worklists)
+        assertEquals(0, camera.originalReads.size)
+        assertSavedOriginals(0)
+    }
+
+    @Test fun fullHistoryRefusesContinuationWithoutEvictingOldRowsOrCreatingOutput() {
+        val original = seedColdWorklist(size = 100)
+        installApp()
+        connectAndOpenAlbum()
+        startMappedContinuation(original, original.rows[6].rowId)
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { model.uiState.value.error != null && !model.uiState.value.busy }
+        assertEquals(listOf(original), history.state.value.worklists)
+        assertEquals(0, camera.originalReads.size)
+        assertSavedOriginals(0)
+    }
+
+    @Test fun clearDuringActiveContinuationSettlesBusyFeedbackAndLateResponseCannotRestoreIt() {
+        val original = seedColdWorklist()
+        installApp()
+        connectAndOpenAlbum()
+        val gate = camera.gate()
+        val ordinary = camera.intercept
+        camera.intercept = { request ->
+            val url = requireNotNull(request.requestUrl)
+            if (url.encodedPath == "/ccapi/media/one" && url.query == null) {
+                gate.blockResponse()
+                camera.imageResponse()
+            } else ordinary(request)
+        }
+        startMappedContinuation(original, original.rows[6].rowId)
+        assertTrue(gate.entered.await(SESSION_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        compose.runOnIdle { model.clearDownloadHistory() }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            history.state.value.worklists.isEmpty() && !model.uiState.value.busy
+        }
+        assertTrue(model.uiState.value.mediaSaveFeedback.values.none { it.isPending })
+        assertNull(model.uiState.value.mediaBatchProgress)
+        assertNull(model.uiState.value.mediaDownloadProgress)
+        assertNull(model.uiState.value.activeMediaDownloadName)
+        gate.release()
+        runBlocking { history.awaitIdle() }
+        assertTrue(history.state.value.worklists.isEmpty())
+        assertEquals(MediaSaveFeedback.Cancelled, model.uiState.value.mediaSaveFeedback["one"])
+        assertSavedOriginals(0)
+    }
+
+    @Test fun cancelledOldContinuationPickerCannotOverwriteNewerSuccessfulSaveUi() {
+        val original = seedColdWorklist()
+        installApp()
+        connectAndOpenAlbum()
+        var picker = ""
+        compose.runOnIdle {
+            assertTrue(model.beginDownloadContinuation(original.worklistId))
+            val id = requireNotNull(model.downloadContinuation.value).id
+            assertTrue(model.mapDownloadContinuation(id, original.rows[6].rowId, "one"))
+            picker = requireNotNull(model.beginContinuationFolderPicker(id))
+            model.cancelDownloadContinuation()
+            assertTrue(model.uiState.value.mediaSaveFeedback.values.none { it.isPending })
+            model.downloadMediaBatch(compose.activity, listOf(model.uiState.value.mediaItems.first { it.id == "two" }))
+        }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            model.uiState.value.lastMediaBatchResult?.succeededItems == 1 && !model.uiState.value.busy
+        }
+        val feedback = model.uiState.value.mediaSaveFeedback
+        compose.runOnIdle {
+            model.completeMediaPicker(compose.activity, CameraMediaPickerKind.DOWNLOAD_FOLDER, picker,
+                Uri.parse("content://synthetic.unreachable.provider/tree/retired"))
+        }
+        assertNull(model.uiState.value.error)
+        assertEquals(feedback, model.uiState.value.mediaSaveFeedback)
+        assertEquals(listOf("/ccapi/media/two"), camera.originalReads.toList())
+        assertSavedOriginals(1)
+    }
+
+    @Test fun sameCameraAndReusedIdsAfterReconnectCannotConsumeOldContinuationPicker() {
+        val original = seedColdWorklist()
+        installApp()
+        connectAndOpenAlbum()
+        var picker = ""
+        var draftId = ""
+        compose.runOnIdle {
+            assertTrue(model.beginDownloadContinuation(original.worklistId))
+            draftId = requireNotNull(model.downloadContinuation.value).id
+            assertTrue(model.mapDownloadContinuation(draftId, original.rows[6].rowId, "one"))
+            picker = requireNotNull(model.beginContinuationFolderPicker(draftId))
+            model.disconnect()
+        }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { !model.uiState.value.connected && !model.uiState.value.busy }
+        connectAndOpenAlbum()
+        compose.runOnIdle {
+            assertFalse(model.continueDownloadToGallery(compose.activity, draftId))
+            model.completeMediaPicker(compose.activity, CameraMediaPickerKind.DOWNLOAD_FOLDER, picker,
+                Uri.parse("content://synthetic.unreachable.provider/tree/old-session"))
+        }
+        assertEquals(text(R.string.media_picker_session_expired), model.uiState.value.error)
+        assertEquals(listOf(original), history.state.value.worklists)
+        assertEquals(0, camera.originalReads.size)
+        assertSavedOriginals(0)
+    }
+
+    private fun startMappedContinuation(original: DownloadWorklist, rowId: String) {
+        compose.runOnIdle {
+            assertTrue(model.beginDownloadContinuation(original.worklistId))
+            val id = requireNotNull(model.downloadContinuation.value).id
+            assertTrue(model.mapDownloadContinuation(id, rowId, "one"))
+            assertTrue(model.continueDownloadToGallery(compose.activity, id))
+        }
+    }
+
+    /** Read-only cold reconstruction of durable state; not evidence of an OS process kill. */
+    private fun seedColdWorklist(size: Int = 50, beforeWrite: (DownloadHistoryWritePhase) -> Unit = {}): DownloadWorklist {
+        val directory = File(root, "continuation")
+        val previous = newHistory(directory)
+        runBlocking {
+            val token = (previous.admitWorklist(previous.captureRequest(),
+                List(size) { "SYNTHETIC-OLD-$it.JPG" }, DownloadHistoryDestination.GALLERY) as DownloadWorklistAdmission.Admitted).token
+            repeat(6) { index ->
+                val receipt = (previous.beginWorklistRow(token, index) as DownloadWorklistRowStart.Started).receipt
+                if (index < 5) previous.recordFinished(receipt, DownloadHistoryOutcome.COMPLETED)
+            }
+            previous.awaitIdle()
+            historyScopes.last().cancel()
+            historyScopes.last().coroutineContext[Job]?.join()
+        }
+        history = newHistory(directory, beforeWrite)
+        runBlocking { history.awaitIdle() }
+        return history.state.value.worklists.single()
     }
 
     private fun newHistory(

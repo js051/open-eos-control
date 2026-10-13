@@ -44,7 +44,7 @@ class DownloadHistoryStoreTest {
         val receipt = store.begin(store.captureRequest(), "SYNTHETIC-CANCELLED.JPG", DownloadHistoryDestination.FOLDER)
         store.recordFinished(receipt, DownloadHistoryOutcome.CANCELLED, cleanupUnconfirmed = true)
         store.awaitIdle()
-        assertEquals(3, JSONObject(snapshot(directory).readText()).getInt("schema"))
+        assertEquals(4, JSONObject(snapshot(directory).readText()).getInt("schema"))
         assertEquals(fixtureEntry(), store.state.value.entries.last())
         val reopened = newStore(directory)
         reopened.awaitIdle()
@@ -925,11 +925,11 @@ class DownloadHistoryStoreTest {
             store.awaitIdle()
             assertArrayEquals(before, snapshot(directory).readBytes())
             store.admittedWorklist(listOf("QUEUED.JPG"))
-            assertEquals(3, JSONObject(snapshot(directory).readText()).getInt("schema"))
+            assertEquals(4, JSONObject(snapshot(directory).readText()).getInt("schema"))
             assertEquals(listOf(fixtureEntry()), DownloadHistoryFileStorage(directory).readSnapshot().entries)
             val reopened = newStore(directory)
             reopened.awaitIdle()
-            assertEquals(store.state.value, reopened.state.value)
+            assertEquals(store.state.value.copy(activeWorklistIds = emptySet(), continuationBlockedWorklistIds = emptySet()), reopened.state.value)
         }
     }
 
@@ -940,7 +940,7 @@ class DownloadHistoryStoreTest {
         store.startedRow(token, 0)
         val valid = snapshot(seed).readText()
         val variants = listOf<(JSONObject) -> Unit>(
-            { it.put("schema", 4) },
+            { it.put("schema", 5) },
             { it.put("camera", "synthetic") },
             { it.plan().put("cameraId", "synthetic") },
             { it.plan().put("createdAtMillis", "1000") },

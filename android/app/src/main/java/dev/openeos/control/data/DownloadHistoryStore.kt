@@ -34,7 +34,21 @@ data class DownloadWorklistRow(
     val rowId: String,
     val filename: String,
     val receipt: DownloadHistoryEntry? = null,
+    /** Association to an earlier local row; never a source identity or retry capability. */
+    val origin: DownloadWorklistOrigin? = null,
 )
+
+data class DownloadWorklistOrigin(val worklistId: String, val rowId: String)
+
+/** The caller explicitly maps an old local row to a newly selected item's display label. */
+data class DownloadWorklistContinuationSelection(
+    val origin: DownloadWorklistOrigin,
+    val filename: String,
+    /** Fresh user acknowledgement for this mapping only; never serialized into a roster. */
+    val uncertaintyAcknowledged: Boolean = false,
+)
+
+enum class DownloadContinuationStatus { AVAILABLE, UNCERTAIN, UNAVAILABLE }
 
 /** Display-only local roster. It deliberately cannot locate a camera, source or destination. */
 data class DownloadWorklist(
@@ -52,7 +66,55 @@ data class DownloadHistoryState(
     val warning: DownloadHistoryWarning? = null,
     /** Whole rosters, newest first; rows keep the user's selected order. */
     val worklists: List<DownloadWorklist> = emptyList(),
+    /** Process ownership only. Neither these IDs nor live tokens are restored from disk. */
+    val activeWorklistIds: Set<String> = emptySet(),
+    /** Active rosters and their origin rosters, unavailable for another concurrent mapping. */
+    val continuationBlockedWorklistIds: Set<String> = emptySet(),
 )
+
+/**
+ * A local association cannot establish media equality. It can, however, prevent reusing an old
+ * queued row to evade a later linked attempt's completion, active ownership, or uncertain output.
+ * Follow the selected row to its oldest origin, then inspect that entire local association family,
+ * including siblings. These user associations prevent duplicate attempts without proving media
+ * equality. Filenames play no part in this decision.
+ */
+fun DownloadHistoryState.continuationStatus(origin: DownloadWorklistOrigin): DownloadContinuationStatus {
+    val rows = continuationRows()
+    if (rows.size > MAX_DOWNLOAD_HISTORY_ENTRIES) return DownloadContinuationStatus.UNAVAILABLE
+    val root = rows.continuationRoot(origin) ?: return DownloadContinuationStatus.UNAVAILABLE
+    val children = rows.entries.filter { it.value.origin != null }.groupBy { it.value.origin }
+    val pending = ArrayDeque<DownloadWorklistOrigin>()
+    val visited = mutableSetOf<DownloadWorklistOrigin>()
+    pending.addLast(root)
+    var uncertain = false
+    while (pending.isNotEmpty()) {
+        val current = pending.removeFirst()
+        if (!visited.add(current) || visited.size > MAX_DOWNLOAD_HISTORY_ENTRIES) return DownloadContinuationStatus.UNAVAILABLE
+        val row = rows[current] ?: return DownloadContinuationStatus.UNAVAILABLE
+        if (current.worklistId in activeWorklistIds || current.worklistId in continuationBlockedWorklistIds ||
+            row.receipt?.outcome == DownloadHistoryOutcome.COMPLETED ||
+            row.receipt?.outcome == DownloadHistoryOutcome.IN_PROGRESS) return DownloadContinuationStatus.UNAVAILABLE
+        if (row.receipt?.outcome == DownloadHistoryOutcome.UNCONFIRMED || row.receipt?.cleanupUnconfirmed == true) uncertain = true
+        children[current]?.forEach { pending.addLast(it.key) }
+    }
+    return if (uncertain) DownloadContinuationStatus.UNCERTAIN else DownloadContinuationStatus.AVAILABLE
+}
+
+private fun DownloadHistoryState.continuationRows(): Map<DownloadWorklistOrigin, DownloadWorklistRow> =
+    worklists.flatMap { plan ->
+        plan.rows.map { row -> DownloadWorklistOrigin(plan.worklistId, row.rowId) to row }
+    }.toMap()
+
+private fun Map<DownloadWorklistOrigin, DownloadWorklistRow>.continuationRoot(origin: DownloadWorklistOrigin): DownloadWorklistOrigin? {
+    val visited = mutableSetOf<DownloadWorklistOrigin>()
+    var current = origin
+    while (visited.add(current) && visited.size <= MAX_DOWNLOAD_HISTORY_ENTRIES) {
+        val row = this[current] ?: return null
+        current = row.origin ?: return current
+    }
+    return null
+}
 
 /** Capture once when a save request is admitted, including every item of a batch. */
 class DownloadHistoryRequest internal constructor(internal val owner: Any, internal val epoch: Any)
@@ -72,6 +134,7 @@ class DownloadWorklistToken internal constructor(
 enum class DownloadWorklistFailure {
     RETIRED_REQUEST, INVALID_REQUEST, STORAGE_UNAVAILABLE, WRITE_FAILED, CAPACITY,
     INVALID_SELECTION, ROW_NOT_QUEUED, STOPPED,
+    ORIGIN_NOT_ELIGIBLE, DUPLICATE_ORIGIN, RELEASED_WORKLIST, UNCERTAINTY_NOT_ACKNOWLEDGED,
 }
 
 sealed interface DownloadWorklistAdmission {
@@ -115,6 +178,7 @@ class DownloadHistoryStore internal constructor(
     private var stopped = false
     private var durableSnapshot: DownloadHistorySnapshot? = null
     private var lastWriteInstallation = DownloadHistoryInstallation.NOT_INSTALLED
+    private val activeWorklists = mutableMapOf<String, DownloadWorklistToken>()
     private val commands = Channel<Command>(Channel.UNLIMITED)
     private val mutableState = MutableStateFlow(DownloadHistoryState())
     val state: StateFlow<DownloadHistoryState> = mutableState.asStateFlow()
@@ -127,6 +191,7 @@ class DownloadHistoryStore internal constructor(
                     is Command.Start -> start(command)
                     is Command.AdmitWorklist -> admit(command)
                     is Command.StartWorklistRow -> startRow(command)
+                    is Command.ReleaseWorklist -> release(command.token)
                     is Command.Finish -> finish(command)
                     is Command.Clear -> clearSnapshot(command.result)
                     is Command.Barrier -> command.result.complete(Unit)
@@ -137,12 +202,15 @@ class DownloadHistoryStore internal constructor(
             synchronized(admissionLock) {
                 stopped = true
                 commands.close()
+                activeWorklists.clear()
                 mutableState.value = mutableState.value.copy(
                     entries = mutableState.value.entries.map(DownloadHistoryEntry::unconfirmPending),
                     worklists = mutableState.value.worklists.map(DownloadWorklist::unconfirmPending),
                     loading = false,
                     writable = false,
                     warning = DownloadHistoryWarning.STOPPED,
+                    activeWorklistIds = emptySet(),
+                    continuationBlockedWorklistIds = emptySet(),
                 )
                 while (true) {
                     when (val pending = commands.tryReceive().getOrNull() ?: break) {
@@ -193,6 +261,29 @@ class DownloadHistoryStore internal constructor(
         request: DownloadHistoryRequest,
         filenames: List<String>,
         destination: DownloadHistoryDestination,
+    ): DownloadWorklistAdmission = admitSelection(request, filenames, destination, origins = null)
+
+    /**
+     * Remapping creates a new durable roster. The old rows keep their own receipts and outcomes;
+     * these local links do not establish media equality, completed output, or permission to retry.
+     * Eligibility is checked by the same actor that installs the complete selection before I/O.
+     */
+    suspend fun admitContinuation(
+        request: DownloadHistoryRequest,
+        selections: List<DownloadWorklistContinuationSelection>,
+        destination: DownloadHistoryDestination,
+    ): DownloadWorklistAdmission {
+        val selected = selections.toList()
+        return admitSelection(request, selected.map { it.filename }, destination, selected.map { it.origin },
+            selected.filter { it.uncertaintyAcknowledged }.map { it.origin }.toSet())
+    }
+
+    private suspend fun admitSelection(
+        request: DownloadHistoryRequest,
+        filenames: List<String>,
+        destination: DownloadHistoryDestination,
+        origins: List<DownloadWorklistOrigin>?,
+        uncertaintyAcknowledged: Set<DownloadWorklistOrigin> = emptySet(),
     ): DownloadWorklistAdmission {
         val result = CompletableDeferred<DownloadWorklistAdmission>()
         synchronized(admissionLock) {
@@ -204,16 +295,25 @@ class DownloadHistoryStore internal constructor(
                 else -> {
                     val worklist = DownloadWorklist(
                         UUID.randomUUID().toString(), destination, nowMillis().coerceAtLeast(0L),
-                        filenames.map { DownloadWorklistRow(UUID.randomUUID().toString(), sanitizeDownloadHistoryFilename(it)) },
+                        filenames.mapIndexed { index, filename -> DownloadWorklistRow(
+                            UUID.randomUUID().toString(), sanitizeDownloadHistoryFilename(filename),
+                            origin = origins?.get(index)) },
                     )
                     val token = DownloadWorklistToken(worklist.worklistId, request)
-                    if (commands.trySend(Command.AdmitWorklist(token, worklist, result)).isFailure) {
+                    if (commands.trySend(Command.AdmitWorklist(token, worklist, result, uncertaintyAcknowledged)).isFailure) {
                         result.complete(DownloadWorklistAdmission.Rejected(DownloadWorklistFailure.STOPPED, true))
                     }
                 }
             }
         }
         return result.await()
+    }
+
+    /** Retire batch ownership without retiring already-started receipts or mutating the roster. */
+    fun releaseWorklist(token: DownloadWorklistToken) {
+        synchronized(admissionLock) {
+            if (requestFailure(token.request) == null) commands.trySend(Command.ReleaseWorklist(token))
+        }
     }
 
     /**
@@ -316,12 +416,32 @@ class DownloadHistoryStore internal constructor(
             command.result.complete(DownloadWorklistAdmission.Rejected(failure, true))
             return
         }
+        val origins = command.worklist.rows.mapNotNull { it.origin }
+        val rows = current.continuationRows()
+        val roots = origins.mapNotNull { rows.continuationRoot(it) }
+        if (origins.distinct().size != origins.size || roots.distinct().size != roots.size) {
+            command.result.complete(DownloadWorklistAdmission.Rejected(DownloadWorklistFailure.DUPLICATE_ORIGIN, true))
+            return
+        }
+        val statuses = origins.associateWith { current.continuationStatus(it) }
+        if (statuses.values.any { it == DownloadContinuationStatus.UNAVAILABLE }) {
+            command.result.complete(DownloadWorklistAdmission.Rejected(DownloadWorklistFailure.ORIGIN_NOT_ELIGIBLE, true))
+            return
+        }
+        if (statuses.any { (origin, status) ->
+                status == DownloadContinuationStatus.UNCERTAIN && origin !in command.uncertaintyAcknowledged
+            }) {
+            command.result.complete(DownloadWorklistAdmission.Rejected(DownloadWorklistFailure.UNCERTAINTY_NOT_ACKNOWLEDGED, true))
+            return
+        }
         if (current.rowCount() + command.worklist.rows.size > MAX_DOWNLOAD_HISTORY_ENTRIES) {
+            mutableState.value = current.copy(warning = DownloadHistoryWarning.CAPACITY_REACHED)
             command.result.complete(DownloadWorklistAdmission.Rejected(DownloadWorklistFailure.CAPACITY, true))
             return
         }
         val candidate = DownloadHistorySnapshot(current.entries, listOf(command.worklist) + current.worklists)
         if (write(candidate)) {
+            activeWorklists[command.token.worklistId] = command.token
             publish(candidate)
             command.result.complete(DownloadWorklistAdmission.Admitted(command.token))
         } else {
@@ -339,6 +459,10 @@ class DownloadHistoryStore internal constructor(
             ?: if (!current.writable) DownloadWorklistFailure.STORAGE_UNAVAILABLE else null
         if (failure != null) {
             command.result.complete(DownloadWorklistRowStart.Rejected(failure))
+            return
+        }
+        if (activeWorklists[command.token.worklistId] !== command.token) {
+            command.result.complete(DownloadWorklistRowStart.Rejected(DownloadWorklistFailure.RELEASED_WORKLIST))
             return
         }
         val planIndex = current.worklists.indexOfFirst { it.worklistId == command.token.worklistId }
@@ -455,7 +579,29 @@ class DownloadHistoryStore internal constructor(
 
     private fun publish(snapshot: DownloadHistorySnapshot, warning: DownloadHistoryWarning? = null, writable: Boolean = true) {
         mutableState.value = DownloadHistoryState(snapshot.entries, loading = false, writable = writable,
-            warning = warning, worklists = snapshot.worklists)
+            warning = warning, worklists = snapshot.worklists, activeWorklistIds = activeWorklists.keys.toSet(),
+            continuationBlockedWorklistIds = blockedWorklists(snapshot.worklists))
+    }
+
+    private fun blockedWorklists(worklists: List<DownloadWorklist>): Set<String> {
+        val blocked = activeWorklists.keys.toMutableSet()
+        // Following earlier local associations also excludes ancestors of active continuations.
+        val pending = ArrayDeque(blocked)
+        val plans = worklists.associateBy { it.worklistId }
+        while (pending.isNotEmpty()) {
+            plans[pending.removeFirst()]?.rows?.forEach { row ->
+                row.origin?.worklistId?.let { if (blocked.add(it)) pending.addLast(it) }
+            }
+        }
+        return blocked
+    }
+
+    private fun release(token: DownloadWorklistToken) {
+        if (activeWorklists[token.worklistId] !== token) return
+        activeWorklists.remove(token.worklistId)
+        val current = mutableState.value
+        mutableState.value = current.copy(activeWorklistIds = activeWorklists.keys.toSet(),
+            continuationBlockedWorklistIds = blockedWorklists(current.worklists))
     }
 
     private fun clearSnapshot(result: CompletableDeferred<Boolean>) {
@@ -463,6 +609,7 @@ class DownloadHistoryStore internal constructor(
         if (write(empty)) {
             synchronized(admissionLock) {
                 epoch = Any()
+                activeWorklists.clear()
                 publish(empty)
             }
             result.complete(true)
@@ -481,6 +628,7 @@ class DownloadHistoryStore internal constructor(
                     // Retiring the epoch prevents any old batch from rebuilding cleared rows.
                     durableSnapshot = empty
                     epoch = Any()
+                    activeWorklists.clear()
                     publish(empty, DownloadHistoryWarning.CLEAR_FAILED)
                 }
                 else -> mutableState.value = mutableState.value.copy(writable = false, warning = DownloadHistoryWarning.CLEAR_FAILED)
@@ -493,9 +641,11 @@ class DownloadHistoryStore internal constructor(
         data class Start(val receipt: DownloadHistoryReceipt, val entry: DownloadHistoryEntry,
             val result: CompletableDeferred<DownloadHistoryReceipt?>) : Command
         data class AdmitWorklist(val token: DownloadWorklistToken, val worklist: DownloadWorklist,
-            val result: CompletableDeferred<DownloadWorklistAdmission>) : Command
+            val result: CompletableDeferred<DownloadWorklistAdmission>,
+            val uncertaintyAcknowledged: Set<DownloadWorklistOrigin>) : Command
         data class StartWorklistRow(val token: DownloadWorklistToken, val index: Int,
             val result: CompletableDeferred<DownloadWorklistRowStart>) : Command
+        data class ReleaseWorklist(val token: DownloadWorklistToken) : Command
         data class Finish(val receipt: DownloadHistoryReceipt, val outcome: DownloadHistoryOutcome,
             val finishedAtMillis: Long, val cleanupUnconfirmed: Boolean) : Command
         data class Clear(val result: CompletableDeferred<Boolean>) : Command
