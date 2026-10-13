@@ -112,6 +112,37 @@ final class URLSessionShutterWireTests: XCTestCase {
         }
     }
 
+    func testOrdinaryManualStillLostPressAndFailedReleaseKeepExactStopOnlyOnWire() async throws {
+        for endpoint in ShutterRecoveryEndpoint.variants {
+            for fault in LoopbackShutterPeer.PressFault.allCases {
+                let peer = try LoopbackShutterPeer(endpoint: endpoint, pressFault: fault,
+                    failedReleases: 1, manualOnly: true)
+                defer { XCTAssertTrue(peer.stop()) }
+                let client = try CCAPIClient(baseURL: peer.baseURL, mode: .camera)
+                try await client.initialize()
+                do { _ = try await client.captureStill(autofocus: false); XCTFail("Lost release must fail") }
+                catch {}
+                let state = await client.shutterReleaseState()
+                XCTAssertTrue(state.releaseRequired)
+                XCTAssertTrue(state.releaseUnconfirmed)
+                let before = peer.requests()
+                XCTAssertEqual(before.shutterActions, ["full_press", "release"])
+                try await client.retryShutterRelease()
+                let after = peer.requests()
+                let retry = Array(after.dropFirst(before.count))
+                XCTAssertEqual(retry.count, 1, "Real URLSession retry must contain only the saved release")
+                XCTAssertEqual(retry.first?.path, endpoint.manualPath)
+                XCTAssertEqual(retry.first?.method, endpoint.method)
+                XCTAssertEqual(retry.first?.body, before.last(where: \.isMutation)?.body)
+                let stopped = await client.shutterReleaseState()
+                XCTAssertEqual(stopped, .idle)
+                await client.close()
+                XCTAssertEqual(peer.requests().filter(\.isMutation), after.filter(\.isMutation))
+                XCTAssertTrue(peer.errors().isEmpty)
+            }
+        }
+    }
+
     func testLostPressResponsePreservesReleaseWithoutReplayingTheFullPressOnTheWire() async throws {
         for endpoint in ShutterRecoveryEndpoint.variants {
             for fault in LoopbackShutterPeer.PressFault.allCases {

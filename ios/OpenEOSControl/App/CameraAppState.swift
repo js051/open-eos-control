@@ -155,7 +155,9 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var shutterAutofocus = true
     @Published private(set) var shutterFlash = false
     @Published private(set) var bulbStartedAt: Date?
-    @Published private(set) var shutterReleaseState = CameraShutterReleaseState.idle
+    @Published private(set) var shutterReleaseState = CameraShutterReleaseState.idle {
+        didSet { shutterReleaseObservationRevision &+= 1 }
+    }
     @Published private(set) var previousShutterReleaseWarnings = Set<UUID>()
     @Published private(set) var previousRecordingWarnings = Set<UUID>()
     private var acknowledgedPreviousRecordingWarnings = Set<UUID>()
@@ -248,6 +250,7 @@ final class CameraAppState: ObservableObject {
     private var focusMarkerOwner = UUID()
     private(set) var focusMarkerExpiryTask: Task<Void, Never>?
     private var sessionGeneration = UUID()
+    private var shutterReleaseObservationRevision: UInt64 = 0
     private var disconnectTask: Task<Void, Never>?
     private var pendingBulbStartID: UUID?
     private var pendingBulbStartTask: Task<CameraStatus, Error>?
@@ -447,7 +450,13 @@ final class CameraAppState: ObservableObject {
     }
 
     func isBusy(_ operation: CameraOperation) -> Bool {
-        foregroundMediaIOOwner != nil || busyOperations.contains(operation) || (shutterReleaseRequired && operation != .refresh)
+        foregroundMediaIOOwner != nil || busyOperations.contains(operation) || shutterControlIsBusy(operation)
+            || (shutterReleaseRequired && operation != .refresh)
+    }
+
+    private func shutterControlIsBusy(_ operation: CameraOperation) -> Bool {
+        (operation == .capture || operation == .focus)
+            && (busyOperations.contains(.capture) || busyOperations.contains(.focus))
     }
 
     func setBaseURL(_ value: String) {
@@ -1039,13 +1048,19 @@ final class CameraAppState: ObservableObject {
         do {
             let captured = try await session.captureStill(autofocus: autofocus)
             guard generation == sessionGeneration else { return }
-            updateStatus(captured)
+            let observation = shutterReleaseObservationRevision
+            let release = await session.shutterReleaseState()
+            guard generation == sessionGeneration else { return }
+            if observation == shutterReleaseObservationRevision, !busyOperations.contains(.focus) {
+                applyShortControlReleaseState(release, session: session, generation: generation)
+                updateStatus(captured.withShutterReleaseState(release))
+                lastError = nil
+            }
             showShutterFlash()
-            lastError = nil
             if let review = pendingCaptureReview {
                 startLatestMediaRefresh(session: session, review: review)
             }
-        } catch DesktopBridgeError.captureStatusReadbackFailed {
+        } catch DesktopBridgeError.captureStatusReadbackFailed, CCAPIError.captureStatusReadbackFailed {
             guard generation == sessionGeneration else { return }
             // The command was acknowledged; keep this capture's existing read-only owner.
             // A status-read failure does not establish an exposure or justify replaying the shutter command.
@@ -1055,9 +1070,15 @@ final class CameraAppState: ObservableObject {
             }
         } catch {
             guard generation == sessionGeneration else { return }
+            let observation = shutterReleaseObservationRevision
+            let release = await session.shutterReleaseState()
+            guard generation == sessionGeneration else { return }
+            if observation == shutterReleaseObservationRevision, !busyOperations.contains(.focus) {
+                applyShortControlReleaseState(release, session: session, generation: generation)
+                record(error)
+            }
             pendingCaptureReview = nil
             captureReviewState = .idle
-            record(error)
         }
     }
 
@@ -1323,12 +1344,24 @@ final class CameraAppState: ObservableObject {
         do {
             let status = try await session.autofocus()
             guard generation == sessionGeneration else { return }
-            updateStatus(status)
+            let observation = shutterReleaseObservationRevision
+            let release = await session.shutterReleaseState()
+            guard generation == sessionGeneration else { return }
+            if observation == shutterReleaseObservationRevision, !busyOperations.contains(.capture) {
+                applyShortControlReleaseState(release, session: session, generation: generation)
+                updateStatus(status.withShutterReleaseState(release))
+                lastError = nil
+            }
             showFocusMarker(x: 0.5, y: 0.5, accepted: true)
-            lastError = nil
         } catch {
             guard generation == sessionGeneration else { return }
-            record(error)
+            let observation = shutterReleaseObservationRevision
+            let release = await session.shutterReleaseState()
+            guard generation == sessionGeneration else { return }
+            if observation == shutterReleaseObservationRevision, !busyOperations.contains(.capture) {
+                applyShortControlReleaseState(release, session: session, generation: generation)
+                record(error)
+            }
             showFocusMarker(x: 0.5, y: 0.5, accepted: false)
         }
     }
@@ -1345,12 +1378,24 @@ final class CameraAppState: ObservableObject {
         do {
             let status = try await session.halfPressShutter()
             guard generation == sessionGeneration else { return }
-            updateStatus(status)
+            let observation = shutterReleaseObservationRevision
+            let release = await session.shutterReleaseState()
+            guard generation == sessionGeneration else { return }
+            if observation == shutterReleaseObservationRevision, !busyOperations.contains(.capture) {
+                applyShortControlReleaseState(release, session: session, generation: generation)
+                updateStatus(status.withShutterReleaseState(release))
+                lastError = nil
+            }
             showFocusMarker(x: 0.5, y: 0.5, accepted: true)
-            lastError = nil
         } catch {
             guard generation == sessionGeneration else { return }
-            record(error)
+            let observation = shutterReleaseObservationRevision
+            let release = await session.shutterReleaseState()
+            guard generation == sessionGeneration else { return }
+            if observation == shutterReleaseObservationRevision, !busyOperations.contains(.capture) {
+                applyShortControlReleaseState(release, session: session, generation: generation)
+                record(error)
+            }
             showFocusMarker(x: 0.5, y: 0.5, accepted: false)
         }
     }
@@ -3012,6 +3057,7 @@ final class CameraAppState: ObservableObject {
 
     private func begin(_ operation: CameraOperation) -> Bool {
         if foregroundMediaIOOwner != nil { return false }
+        if shutterControlIsBusy(operation) { return false }
         if recordingRecovery != nil, operation == .capture { return false }
         if shutterReleaseRequired && operation != .refresh { return false }
         let inserted = busyOperations.insert(operation).inserted
@@ -3026,6 +3072,17 @@ final class CameraAppState: ObservableObject {
     private func end(_ operation: CameraOperation, generation: UUID) {
         guard generation == sessionGeneration else { return }
         end(operation)
+    }
+
+    private func applyShortControlReleaseState(_ state: CameraShutterReleaseState, session: CameraSession, generation: UUID) {
+        // A concurrent status/event read may already have surfaced this owner's
+        // pending stop. Only current Core state, not an ordinary status flag,
+        // can clear that warning after the original short control settles.
+        let wasReleaseRequired = shutterReleaseRequired
+        applyShutterReleaseState(state)
+        if wasReleaseRequired, !state.releaseRequired {
+            resumeLiveViewAfterBulb(session: session, generation: generation)
+        }
     }
 
     private func applyShutterReleaseState(_ state: CameraShutterReleaseState, pauseLiveView: Bool = true) {
