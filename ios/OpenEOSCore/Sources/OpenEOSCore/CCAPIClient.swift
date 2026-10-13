@@ -364,6 +364,9 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     private var settingPaths: [String: String] = [:]
     private var cameraSleepPath: String?
     private var cachedSettings: JSONDictionary?
+    private var shootingSettingsGeneration = UUID()
+    private var shootingSettingsReadRevision: UInt64 = 0
+    private var committedShootingSettingsRevision: UInt64 = 0
     private var cachedFileNaming: CameraFileNaming?
     private var fileNamingLoaded = false
     private var enforceAdvertisedOperations = false
@@ -780,9 +783,11 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         if resolvedMode == .simulator {
             return try await simulatorCapabilities()
         }
-        let settings = try await cachedOrLoadShootingSettings()
+        _ = try await cachedOrLoadShootingSettings()
         let fileNaming = try await loadFileNaming()
-        let controls = cameraSettings(settings)
+        // File-naming reads can suspend; pair values with the committed routes
+        // available now, not a settings dictionary captured before that await.
+        let controls = cameraSettings(cachedSettings)
         var supported = observedFeatures
         if controls.contains(where: { ["iso", "shutter", "aperture"].contains($0.key) }) {
             supported.insert(.exposureControl)
@@ -948,6 +953,9 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     public func setSetting(key: String, value: String) async throws -> CameraStatus {
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
+        // A refresh that predates this command cannot later publish stale
+        // setting values or routes over the command's readback owner.
+        retireShootingSettingsReads()
         try await ensureInitialized()
         if resolvedMode == .simulator {
             switch key {
@@ -1043,7 +1051,6 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             return try await status()
         }
 
-        let settings: JSONDictionary?
         if Self.cardSelectionSettingKeys.contains(key.lowercased()) ||
             Self.deviceFunctionSettingKeys.contains(key.lowercased()) ||
             Self.soundRecordingSettingKeys.contains(key.lowercased()) ||
@@ -1051,10 +1058,13 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             Self.focusBracketingSettingKeys.contains(key.lowercased()) ||
             Self.movieSettingKeys.contains(key.lowercased()) ||
             key.lowercased() == Self.directorySelectionSettingKey {
-            settings = try await loadShootingSettings()
+            _ = try await loadShootingSettings()
         } else {
-            settings = try await cachedOrLoadShootingSettings()
+            _ = try await cachedOrLoadShootingSettings()
         }
+        // Use one committed value/route view after all required reads. A
+        // concurrent invalidation remains a closed gate, never a stale fallback.
+        let settings = cachedSettings
         guard let control = cameraSettings(settings).first(where: { $0.key == key }),
               control.values.contains(value) else {
             throw CCAPIError.invalidSetting(key: key, value: value)
@@ -1064,28 +1074,28 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
             try await requestOK(path: path, method: .post, json: ["action": value])
-            cachedSettings = nil
+            invalidateShootingSettingsCache()
         } else if key == Self.zoomSettingKey {
             guard let path = settingPaths[Self.zoomSettingKey],
                   let zoom = Int(value), String(zoom) == value else {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
             _ = try await requestJSON(path: path, method: .post, json: ["value": zoom])
-            cachedSettings = nil
+            invalidateShootingSettingsCache()
         } else if Self.soundRecordingLevelSettingKeys.contains(key) {
             guard let path = settingPaths[key],
                   let level = Int(value), String(level) == value else {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
             _ = try await requestJSON(path: path, method: .put, json: ["value": level])
-            cachedSettings = nil
+            invalidateShootingSettingsCache()
         } else if Self.focusBracketingIntegerSettingKeys.contains(key) {
             guard let path = settingPaths[key],
                   let integer = Int(value), String(integer) == value else {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
             _ = try await requestJSON(path: path, method: .put, json: ["value": integer])
-            cachedSettings = nil
+            invalidateShootingSettingsCache()
         } else if let structured = structuredSettingParts(key) {
             try await putStructuredSettingValue(
                 settings: settings,
@@ -1129,7 +1139,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             throw CCAPIError.invalidResponse("Canon directory creation returned an invalid directory name.")
         }
         observedFeatures.insert(.directoryControl)
-        cachedSettings = nil
+        invalidateShootingSettingsCache()
         if resolvedMode != .simulator { _ = try await loadShootingSettings() }
         return created
     }
@@ -1230,7 +1240,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         await stopEventPolling()
         try await retryLiveViewStop()
         try Task.checkCancellation()
-        cachedSettings = nil
+        invalidateShootingSettingsCache()
         _ = try await loadShootingSettings()
         guard let cameraSleepPath else { throw CCAPIError.unsupported(.cameraSleep) }
         try await requestOK(
@@ -1239,7 +1249,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             json: ["value": Self.autoPowerOffImmediately],
             expectedStatusCode: 202
         )
-        cachedSettings = nil
+        invalidateShootingSettingsCache()
         observedFeatures.insert(.cameraSleep)
     }
 
@@ -3588,18 +3598,16 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     }
 
     private func loadShootingSettings() async throws -> JSONDictionary? {
-        settingPaths.removeAll()
-        liveViewMagnifications.removeAll()
-        currentLiveViewMagnification = nil
-        observedFeatures.remove(.liveViewMagnification)
-        cameraSleepPath = nil
-        observedFeatures.remove(.cardSelectionControl)
-        observedFeatures.remove(.soundRecordingControl)
-        observedFeatures.remove(.soundRecordingLevelControl)
-        observedFeatures.remove(.focusBracketingControl)
-        observedFeatures.remove(.movieSettingsControl)
-        observedFeatures.remove(.directoryControl)
-        settingsLoaded = false
+        let generation = shootingSettingsGeneration
+        shootingSettingsReadRevision &+= 1
+        let revision = shootingSettingsReadRevision
+        // Actor methods can reenter at every request. Keep the last complete
+        // values/routes/capabilities together until this entire refresh is ready.
+        var settingPaths: [String: String] = [:]
+        var liveViewMagnifications: [LiveViewMagnification] = []
+        var currentLiveViewMagnification: LiveViewMagnification?
+        var cameraSleepPath: String?
+        var refreshedFeatures = Set<CameraFeature>()
         var merged: JSONDictionary = [:]
         let paths = enforceAdvertisedOperations
             ? advertisedPaths(.get, suffix: "/shooting/settings")
@@ -3627,7 +3635,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             settingPaths[Self.liveViewMagnificationSettingKey] = operations.write.path
             liveViewMagnifications = setting.magnifications
             currentLiveViewMagnification = setting.current
-            observedFeatures.insert(.liveViewMagnification)
+            refreshedFeatures.insert(.liveViewMagnification)
         }
         if let operations = zoomOperations(),
            let raw = try await firstJSON(paths: [operations.read.path], required: false),
@@ -3647,7 +3655,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                   let cardSelection = Self.validatedCardSelectionSetting(raw) else { continue }
             settingPaths[key] = operations.write.path
             merged[key] = cardSelection
-            observedFeatures.insert(.cardSelectionControl)
+            refreshedFeatures.insert(.cardSelectionControl)
         }
         for endpoint in Self.deviceFunctionSettingEndpoints {
             guard let operations = readWriteSettingOperations(suffix: endpoint.suffix),
@@ -3677,7 +3685,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             }
             settingPaths[endpoint.key] = operations.write.path
             merged[endpoint.key] = setting
-            observedFeatures.insert(.soundRecordingControl)
+            refreshedFeatures.insert(.soundRecordingControl)
         }
         for endpoint in Self.soundRecordingLevelEndpoints {
             if let operations = soundRecordingLevelOperations(suffix: endpoint.suffix),
@@ -3685,7 +3693,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                let soundRecordingLevel = Self.validatedIntegerRangeSetting(raw) {
                 settingPaths[endpoint.key] = operations.write.path
                 merged[endpoint.key] = soundRecordingLevel
-                observedFeatures.insert(.soundRecordingLevelControl)
+                refreshedFeatures.insert(.soundRecordingLevelControl)
             }
         }
         var focusBracketingAvailable = false
@@ -3700,7 +3708,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             merged[endpoint.key] = setting
             if endpoint.key == Self.focusBracketingSettingKey {
                 focusBracketingAvailable = true
-                observedFeatures.insert(.focusBracketingControl)
+                refreshedFeatures.insert(.focusBracketingControl)
             }
         }
         if focusBracketingAvailable {
@@ -3723,17 +3731,35 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             }
             settingPaths[endpoint.key] = operations.write.path
             merged[endpoint.key] = setting
-            observedFeatures.insert(.movieSettingsControl)
+            refreshedFeatures.insert(.movieSettingsControl)
         }
         if let operations = directoryOperations(),
            let raw = try await firstJSON(paths: [operations.read.path], required: false),
            let selection = Self.validatedDirectorySelectionSetting(raw) {
             settingPaths[Self.directorySelectionSettingKey] = operations.write.path
             merged[Self.directorySelectionSettingKey] = selection
-            observedFeatures.insert(.directoryControl)
+            refreshedFeatures.insert(.directoryControl)
         }
+        try Task.checkCancellation()
+        // A newer completed read is fresh enough for this caller; a merely
+        // pending read is not. Never turn forced validation into an old-cache
+        // fallback or let an older read overwrite a newer committed snapshot.
+        if committedShootingSettingsRevision > revision { return cachedSettings }
+        guard shootingSettingsGeneration == generation, !closing else {
+            throw CCAPIError.invalidResponse("Camera settings changed while refreshing. Refresh settings before retrying.")
+        }
+        self.settingPaths = settingPaths
+        self.liveViewMagnifications = liveViewMagnifications
+        self.currentLiveViewMagnification = currentLiveViewMagnification
+        self.cameraSleepPath = cameraSleepPath
+        observedFeatures.subtract([
+            .liveViewMagnification, .cardSelectionControl, .soundRecordingControl,
+            .soundRecordingLevelControl, .focusBracketingControl, .movieSettingsControl, .directoryControl,
+        ])
+        observedFeatures.formUnion(refreshedFeatures)
         settingsLoaded = true
         cachedSettings = merged.isEmpty ? nil : merged
+        committedShootingSettingsRevision = revision
         return cachedSettings
     }
 
@@ -3760,6 +3786,16 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         fileNamingLoaded = true
         if state != nil { observedFeatures.insert(.fileNamingControl) }
         return state
+    }
+
+    private func retireShootingSettingsReads() {
+        shootingSettingsGeneration = UUID()
+        committedShootingSettingsRevision = 0
+    }
+
+    private func invalidateShootingSettingsCache() {
+        retireShootingSettingsReads()
+        cachedSettings = nil
     }
 
     private func cachedOrLoadShootingSettings() async throws -> JSONDictionary? {
