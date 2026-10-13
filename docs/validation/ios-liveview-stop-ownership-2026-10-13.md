@@ -32,3 +32,13 @@ The additive CameraLiveViewStopState API preserves nonthrowing stopLiveView comp
 - Physical iPhone/Canon camera verification: NOT_RUN.
 
 No runtime red/green evidence is claimed. Before delivery, run the full existing Swift Core and iOS App suites on the final combined source, including the new ownership tests and existing JPEG size, RTP, multipart, foreground-media, and shutter recovery suites. No framework, installation, commit, push, CI invocation, main merge or release is part of this local change.
+
+## First integrated CI and bounded recovery
+
+Run 38405544208 at 70a180d passed all 383 Core tests. App compilation passed, but the App test log recorded one real failure: `testRecordingReviewOpensExistingVideoPlaybackAndKeepsOriginalDownloadSeparate` observed two original requests where one was required. Later `testSensorRecoveryLiveViewCompletionCannotClearReplacementWarning` began without completing. The run was cancelled after the App/UI step exceeded twice the preceding successful duration; it is CANCELLED, not a passing or completed App/UI run. The existing always-upload step retained its result bundle (artifact 11821514886).
+
+Source inspection found the held-Start fixture awaited disconnect before releasing the Start that disconnect must drain. The fixture now runs disconnect concurrently, verifies the held operation prevents completion, releases it, and observes both disconnect and the outer maintenance completion with bounded guards. It retains replacement-state assertions. Workflow test-step and job limits of 45/55 minutes leave time for the existing always-upload result collection; they do not remove tests or change business assertions.
+
+The video fixture previously returned 503 for every playback read, which could legitimately invoke local fallback while open. It now serves the bundled video with valid byte ranges and matching size; the successful playback journey still requires zero original downloads before the explicit manual action and exactly one afterward. Separately, queued fallback code lacked a cancellation/closed check before its first filesystem/download work. An entry guard now prevents that retired request, and controlled tests cover close-before-start, current-owner fallback deduplication, and late success/error cleanup. Source inspection supports both issues; the old aggregate count alone does not establish which ordering occurred in that run.
+
+These follow-up source changes passed independent review and whitespace checks. Swift/XCTest for the revised candidate are NOT_RUN locally and require a new exact-head normal CI run. No prior green result is inherited.
