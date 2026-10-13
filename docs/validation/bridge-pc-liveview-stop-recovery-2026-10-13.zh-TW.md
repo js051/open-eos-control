@@ -35,3 +35,7 @@ caller 本身的舊回覆規則保留：production `beginCameraInteraction` 會�
 ## Release Assessment
 
 現有公開baseline仍為 v0.12.0 Development Preview；本群屬向後相容的停止責任修正，proposed impact為patch，不調版本。未解條件為本批exact-head必要CI、同樹整合與實機範圍；現有release HOLD維持。本文件不授權main合併或發布。
+
+## 首次正常 CI 與測試來源修正
+
+原 head `67e33772a55275758032071bcca023ec131b6a00` 的 CI38407027603，desktop job 在 Ruff 階段失敗：新增測試檔的 import 空行及迴圈 lambda 未固定變數（I001/B023），後續 browser／完整後端測試尚未到達。保留此失敗；修正僅以 `functools.partial` 固定原呼叫參數並整理 import，不改 production 或移除 assertions。22 個集中 unittest 方法重跑全部通過（0.206 秒），不是 pytest 全套；Ruff 本地不可用，修後 exact-head 正常 CI 仍待驗證。

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from functools import partial
 from io import BytesIO
 from urllib.parse import urlsplit
 
@@ -13,7 +14,6 @@ from open_eos_bridge.ccapi import CcapiEngine, CcapiResponse, CcapiStreamRespons
 from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.models import LiveViewStartRequest
 from open_eos_bridge.rtp import RtpError
-
 
 PREFIX = "/ccapi/ver100/shooting/liveview"
 JPEG = b"\xff\xd8synthetic-live-view\xff\xd9"
@@ -186,10 +186,10 @@ class LiveViewStopRecoveryTests(unittest.TestCase):
                 session, transport, _receiver = self.create_session()
                 transport.start_error = BridgeError("CCAPI_UNREACHABLE", "Synthetic lost start acknowledgement")
                 transport.failed_stops.add(self.stop_path(source))
-                self.assert_stop_error(lambda: session.start_live_view(LiveViewStartRequest(source=source)))
+                self.assert_stop_error(partial(session.start_live_view, LiveViewStartRequest(source=source)))
                 self.assertEqual(len([path for _, path, _ in transport.commands if path == self.stop_path(source)]), 2)
                 before = list(transport.commands)
-                self.assert_stop_error(lambda: session.start_live_view(LiveViewStartRequest(source="AUTO")))
+                self.assert_stop_error(partial(session.start_live_view, LiveViewStartRequest(source="AUTO")))
                 self.assertEqual(transport.commands, before)
                 transport.failed_stops.clear()
                 session.stop_live_view()
@@ -236,7 +236,7 @@ class LiveViewStopRecoveryTests(unittest.TestCase):
                 session, transport, _receiver = self.create_session()
                 transport.start_error = BridgeError("CCAPI_UNREACHABLE", "Synthetic lost start acknowledgement")
                 transport.failed_stops.add(self.stop_path(source))
-                self.assert_stop_error(lambda: session.start_live_view(LiveViewStartRequest(source=source)))
+                self.assert_stop_error(partial(session.start_live_view, LiveViewStartRequest(source=source)))
                 before = len(transport.commands)
                 self.assert_stop_error(session.close)
                 self.assertTrue(transport.closed)
@@ -304,9 +304,9 @@ class LiveViewStopRecoveryTests(unittest.TestCase):
                 self.assertEqual(frame_error.exception.code, "LIVE_VIEW_NOT_STARTED")
                 before = list(transport.commands)
                 for requested in (*SOURCES, "AUTO"):
-                    self.assert_stop_error(lambda: session.start_live_view(LiveViewStartRequest(source=requested)))
+                    self.assert_stop_error(partial(session.start_live_view, LiveViewStartRequest(source=requested)))
                 self.assert_stop_error(session.sleep_camera)
-                self.assert_stop_error(lambda: session.clean_sensor(False))
+                self.assert_stop_error(partial(session.clean_sensor, False))
                 self.assertEqual(transport.commands, before)
                 transport.failed_stops.clear()
                 session.stop_live_view()
@@ -357,7 +357,7 @@ class LiveViewStopRecoveryTests(unittest.TestCase):
                 self.assertEqual(session.live_view_source, source)
                 self.assertFalse(session.live_view_active)
                 before = list(transport.commands)
-                self.assert_stop_error(lambda: session.start_live_view(LiveViewStartRequest(source="AUTO")))
+                self.assert_stop_error(partial(session.start_live_view, LiveViewStartRequest(source="AUTO")))
                 self.assertEqual(transport.commands, before)
                 if source == "CCAPI_RTP":
                     self.assertTrue(receiver.closed)
