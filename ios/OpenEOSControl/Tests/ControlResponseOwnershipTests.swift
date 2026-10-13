@@ -495,7 +495,7 @@ private enum ControlOwnerAction: CaseIterable {
 }
 
 private enum ControlOwnerWire: Hashable, Sendable {
-    case health, open, close, info, status, capabilities, events, stopEvents, media, liveViewStart
+    case health, open, close, info, status, capabilities, events, stopEvents, media, liveViewStart, liveViewStop
     case clock, directory, naming, sleep, clean, autofocus, halfPress, shutterRelease
     case recordingStart, recordingStop, tap, whiteBalance, drive, magnification, setting
 }
@@ -594,7 +594,11 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case .magnification:
             magnification = 5
             object = ["accepted": true, "value": magnification]
-        case .close, .stopEvents, .liveViewStart, .sleep, .shutterRelease:
+        case .liveViewStart:
+            object = ["active": true]
+        case .liveViewStop:
+            object = ["active": false, "liveViewStopUnconfirmed": false]
+        case .close, .stopEvents, .sleep, .shutterRelease:
             break
         }
         if let gate = plan.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
@@ -621,6 +625,7 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case ("DELETE", "/events"): return .stopEvents
         case ("GET", "/media"): return .media
         case ("POST", "/liveview/start"): return .liveViewStart
+        case ("POST", "/liveview/stop"): return .liveViewStop
         case ("POST", "/clock/sync"): return .clock
         case ("POST", "/directory"), ("POST", "/directories"): return .directory
         case ("PUT", "/file-naming/still-user-setting-1"): return .naming

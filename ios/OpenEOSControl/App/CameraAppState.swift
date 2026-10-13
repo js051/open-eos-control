@@ -160,6 +160,10 @@ final class CameraAppState: ObservableObject {
     }
     @Published private(set) var previousShutterReleaseWarnings = Set<UUID>()
     @Published private(set) var previousRecordingWarnings = Set<UUID>()
+    @Published private(set) var liveViewStopState = CameraLiveViewStopState.idle
+    @Published private(set) var previousLiveViewWarnings = Set<UUID>()
+    private var acknowledgedPreviousLiveViewWarnings = Set<UUID>()
+    var canRetryLiveViewStop: Bool { session != nil && liveViewStopState.stopUnconfirmed && !isBusy(.liveView) && foregroundLiveViewRestartOwner == nil && foregroundMediaIOOwner == nil }
     private var acknowledgedPreviousRecordingWarnings = Set<UUID>()
     @Published private(set) var focusMarker: FocusMarker?
     @Published private(set) var mediaItems: [CameraMediaItem] = []
@@ -257,6 +261,8 @@ final class CameraAppState: ObservableObject {
     private var applicationActive = true
     private var acknowledgedPreviousReleaseWarnings = Set<UUID>()
     private var liveViewTask: Task<Void, Never>?
+    private var pendingLiveViewStartTask: Task<Void, Never>?
+    private var pendingLiveViewStartID: UUID?
     private var liveViewFPSUpdateTask: Task<Void, Never>?
     private var liveViewFPSUpdateRevision: UInt64 = 0
     private var eventTask: Task<Void, Never>?
@@ -626,6 +632,7 @@ final class CameraAppState: ObservableObject {
                 throw error
             }
             let release = await newSession.shutterReleaseState()
+            let liveViewStop = await newSession.liveViewStopState()
             guard generation == sessionGeneration else { return }
             if Task.isCancelled || configurationOwner != connectionConfigurationOwner {
                 let release = await newSession.closeWithShutterReleaseState()
@@ -635,6 +642,7 @@ final class CameraAppState: ObservableObject {
                 return
             }
             snapshot = newSnapshot
+            liveViewStopState = liveViewStop
             applyShutterReleaseState(release)
             isPreview = false
             screen = .control
@@ -743,6 +751,8 @@ final class CameraAppState: ObservableObject {
             }
             // This is a warning about the old connection, never state for its replacement.
             self?.preservePreviousReleaseWarning(result, generation: generation)
+            let liveView = await closingSession.liveViewStopState()
+            if liveView.stopUnconfirmed { self?.preservePreviousLiveViewWarning(generation: generation) }
         }
     }
 
@@ -760,6 +770,16 @@ final class CameraAppState: ObservableObject {
     func confirmPreviousRecordingStopped() {
         acknowledgedPreviousRecordingWarnings.formUnion(previousRecordingWarnings)
         previousRecordingWarnings.removeAll()
+    }
+
+    func confirmPreviousLiveViewStopped() {
+        acknowledgedPreviousLiveViewWarnings.formUnion(previousLiveViewWarnings)
+        previousLiveViewWarnings.removeAll()
+    }
+
+    private func preservePreviousLiveViewWarning(generation: UUID) {
+        guard !acknowledgedPreviousLiveViewWarnings.contains(generation) else { return }
+        previousLiveViewWarnings.insert(generation)
     }
 
     private func preservePreviousRecordingWarning(generation: UUID) {
@@ -790,11 +810,15 @@ final class CameraAppState: ObservableObject {
         sessionGeneration = UUID()
         recordingReadbackRecovery = nil
         recordingCommandRecovery = nil
+        pendingLiveViewStartTask?.cancel()
+        pendingLiveViewStartTask = nil
+        pendingLiveViewStartID = nil
         pendingBulbStartTask?.cancel()
         pendingBulbStartTask = nil
         pendingBulbStartID = nil
         operationRevision &+= 1
         shutterReleaseState = .idle
+        liveViewStopState = .idle
         stopLiveViewLoop()
         cancelLiveViewFPSUpdate()
         stopEventLoop()
@@ -861,8 +885,11 @@ final class CameraAppState: ObservableObject {
             }
             let refreshed = try await session.connectSnapshot()
             let release = await session.shutterReleaseState()
+            let liveViewStop = await session.liveViewStopState()
             guard generation == sessionGeneration, revision == operationRevision else { return }
             snapshot = refreshed
+            liveViewStopState = liveViewStop
+            if liveViewStop.stopUnconfirmed { activeLiveViewSource = nil; stopLiveViewLoop() }
             applyShutterReleaseState(release)
             if wasReleaseRequired, !shutterReleaseRequired {
                 resumeLiveViewAfterBulb(session: session, generation: generation)
@@ -975,9 +1002,25 @@ final class CameraAppState: ObservableObject {
 
     func startLiveView() async {
         guard applicationActive, let session, supports(.liveView), liveViewTemperatureAllowed,
-              begin(.liveView) else { return }
+              !liveViewStopState.stopUnconfirmed, begin(.liveView) else { return }
         let generation = sessionGeneration
-        defer { end(.liveView, generation: generation) }
+        let id = UUID()
+        pendingLiveViewStartID = id
+        let task = Task { await self.performLiveViewStart(session: session, generation: generation, id: id) }
+        pendingLiveViewStartTask = task
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: { task.cancel() }
+    }
+
+    private func performLiveViewStart(session: CameraSession, generation: UUID, id: UUID) async {
+        defer {
+            end(.liveView, generation: generation)
+            if pendingLiveViewStartID == id {
+                pendingLiveViewStartID = nil
+                pendingLiveViewStartTask = nil
+            }
+        }
         do {
             try await session.startLiveView(
                 LiveViewRequest(fps: requestedFPS, size: liveViewSize, source: effectiveRequestedLiveViewSource())
@@ -985,8 +1028,19 @@ final class CameraAppState: ObservableObject {
             let source = await session.currentLiveViewSource()
             let activeSize = await session.currentLiveViewSize()
             let nativeURL = await session.currentNativeLiveViewSourceURL()
-            guard generation == sessionGeneration, !shutterReleaseRequired else { return }
+            let stopState = await session.liveViewStopState()
+            guard generation == sessionGeneration else { return }
+            if Task.isCancelled {
+                await session.stopLiveView()
+                let cancelledState = await session.liveViewStopState()
+                guard generation == sessionGeneration else { return }
+                liveViewStopState = cancelledState
+                activeLiveViewSource = nil
+                return
+            }
+            guard !shutterReleaseRequired else { return }
             activeLiveViewSource = source
+            liveViewStopState = stopState
             if let activeSize {
                 liveViewSize = activeSize
                 defaults.set(activeSize.rawValue, forKey: DefaultsKey.liveViewSize)
@@ -1006,12 +1060,16 @@ final class CameraAppState: ObservableObject {
                 if autoRefresh { beginLiveViewLoop(session: session) }
             }
         } catch {
+            let stopState = await session.liveViewStopState()
             guard generation == sessionGeneration else { return }
+            liveViewStopState = stopState
+            if stopState.stopUnconfirmed { activeLiveViewSource = nil; stopLiveViewLoop() }
             record(error)
         }
     }
 
     func restartLiveView() async {
+        if liveViewStopState.stopUnconfirmed { await retryLiveViewStop(); return }
         guard !shutterReleaseRequired, foregroundMediaIOOwner == nil,
               foregroundLiveViewRestartOwner == nil else { return }
         let restartOwner = UUID()
@@ -1020,12 +1078,53 @@ final class CameraAppState: ObservableObject {
             if foregroundLiveViewRestartOwner == restartOwner { foregroundLiveViewRestartOwner = nil }
         }
         let generation = sessionGeneration
+        let pendingStart = pendingLiveViewStartTask
+        // Own the interval before this App task reaches the Core client, too.
+        pendingStart?.cancel()
         stopLiveViewLoop()
-        if let session { await session.stopLiveView() }
+        if let session {
+            do {
+                try await session.retryLiveViewStop()
+                await pendingStart?.value
+            } catch {
+                await pendingStart?.value
+                let stopState = await session.liveViewStopState()
+                guard generation == sessionGeneration else { return }
+                liveViewStopState = stopState
+                activeLiveViewSource = nil
+                record(error)
+                return
+            }
+        }
         guard generation == sessionGeneration, !shutterReleaseRequired else { return }
         activeLiveViewSource = nil
+        liveViewStopState = .idle
         nativeLiveViewSize = nil
         await startLiveView()
+    }
+
+    /// Recovery is deliberately Stop-only; the user starts a new view separately.
+    func retryLiveViewStop() async {
+        guard let session, canRetryLiveViewStop, busyOperations.insert(.liveView).inserted else { return }
+        // Cleanup remains available even while another shutter recovery blocks new commands.
+        operationRevision &+= 1
+        let generation = sessionGeneration
+        defer { end(.liveView, generation: generation) }
+        stopLiveViewLoop()
+        do {
+            try await session.retryLiveViewStop()
+            let stopState = await session.liveViewStopState()
+            guard generation == sessionGeneration else { return }
+            liveViewStopState = stopState
+            activeLiveViewSource = nil
+            nativeLiveViewSize = nil
+            lastError = nil
+        } catch {
+            let stopState = await session.liveViewStopState()
+            guard generation == sessionGeneration else { return }
+            liveViewStopState = stopState
+            record(error)
+        }
     }
 
     func captureStill() async {
@@ -1187,10 +1286,13 @@ final class CameraAppState: ObservableObject {
             guard generation == sessionGeneration else { return }
             await disconnect()
         } catch {
+            let stopState = await session.liveViewStopState()
             guard generation == sessionGeneration else { return }
+            liveViewStopState = stopState
+            if stopState.stopUnconfirmed { activeLiveViewSource = nil }
             record(error)
             beginEventLoop(session: session)
-            if wasLiveViewActive { await startLiveView() }
+            if wasLiveViewActive, !liveViewStopState.stopUnconfirmed { await startLiveView() }
         }
     }
 
@@ -1212,7 +1314,9 @@ final class CameraAppState: ObservableObject {
         stopEventLoop()
         do {
             try await session.cleanSensor(autoPowerOff: autoPowerOff)
+            let stopState = await session.liveViewStopState()
             guard generation == sessionGeneration else { return }
+            liveViewStopState = stopState
             if autoPowerOff {
                 await disconnect()
             } else {
@@ -1222,16 +1326,19 @@ final class CameraAppState: ObservableObject {
                 clampLiveViewRequest()
                 beginEventLoop(session: session)
                 activeLiveViewSource = nil
-                if wasLiveViewActive { await startLiveView() }
+                if wasLiveViewActive, !liveViewStopState.stopUnconfirmed { await startLiveView() }
                 guard generation == sessionGeneration else { return }
                 lastError = nil
             }
         } catch {
+            let stopState = await session.liveViewStopState()
             guard generation == sessionGeneration else { return }
+            liveViewStopState = stopState
+            if stopState.stopUnconfirmed { activeLiveViewSource = nil }
             record(error)
             beginEventLoop(session: session)
             activeLiveViewSource = nil
-            if wasLiveViewActive { await startLiveView() }
+            if wasLiveViewActive, !liveViewStopState.stopUnconfirmed { await startLiveView() }
         }
     }
 
@@ -3166,7 +3273,11 @@ final class CameraAppState: ObservableObject {
                     if lastError?.contains("Live View") == true { lastError = nil }
                 } catch {
                     if Task.isCancelled || generation != sessionGeneration { break }
+                    let stopState = await session.liveViewStopState()
+                    guard generation == sessionGeneration else { break }
+                    liveViewStopState = stopState
                     record(error)
+                    if stopState.stopUnconfirmed { activeLiveViewSource = nil; break }
                 }
 
                 let elapsed = Date().timeIntervalSinceReferenceDate - started

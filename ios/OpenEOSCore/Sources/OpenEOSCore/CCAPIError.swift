@@ -2,6 +2,7 @@ import Foundation
 
 public enum CCAPIError: Error, Equatable, Sendable {
     case invalidBaseURL(String)
+    case liveViewStopUnconfirmed
     case notInitialized
     case discoveryFailed([String])
     // The legacy case remains available to existing callers and fixtures.
@@ -25,6 +26,8 @@ extension CCAPIError: LocalizedError {
         switch self {
         case let .invalidBaseURL(value):
             "Invalid camera URL: \(value)"
+        case .liveViewStopUnconfirmed:
+            "Live View stop is not confirmed. Retry Stop before starting Live View again."
         case .notInitialized:
             "The CCAPI client has not finished discovery."
         case let .discoveryFailed(errors), let .discoveryFailedWithReasons(errors, _):
