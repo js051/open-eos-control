@@ -40,13 +40,14 @@ function fixture(t, { ignorePollAbort = false } = {}) {
     requestedFps: 15, media: [OLD], mediaLoaded: true, mediaLoadStatus: "COMPLETE",
     mediaRefreshPromise: null, mediaScope: "recent", mediaHasMore: false,
   };
-  const ui = { mediaRefreshButton: {}, mediaPreviewDialog: { open: true }, focusReticle: {} };
-  const requests = [], polls = [], snapshots = [], listings = [], timers = [], errors = [], renders = [];
+  const ui = { mediaRefreshButton: {}, mediaPreviewDialog: { open: true }, focusReticle: {},
+    operationState: { textContent: "initial feedback", classList: { toggle() {} } } };
+  const requests = [], polls = [], snapshots = [], listings = [], timers = [], errors = [], renders = [], toasts = [];
   const context = vm.createContext({
     state, ui, mediaTransfer, AbortController,
     FEATURES: { EVENT_POLLING: "EVENT_POLLING", MEDIA_BROWSER: "MEDIA_BROWSER" },
     clampFps: value => value, syncLiveMagnificationFromCapabilities() {},
-    t: key => key, setOperationState() {}, showToast() {}, renderAvailability() {},
+    t: key => key, showToast: message => toasts.push(message), renderAvailability() {},
     renderSession: () => renders.push({ status: state.status, info: state.info, capabilities: state.capabilities }),
     renderMediaSummary() {}, renderMedia() {}, renderMediaPreviewNavigation() {}, clearMediaThumbnails() {},
     closeMediaPreview: () => { ui.mediaPreviewDialog.open = false; },
@@ -72,7 +73,7 @@ function fixture(t, { ignorePollAbort = false } = {}) {
   });
   vm.runInContext(["startEventLoop", "cancelEventLoop", "refreshSession", "featureSupported",
     "refreshMedia", "refreshMediaWhenCurrent", "mediaTransferActive", "cameraInteractionBusy",
-    "beginCameraInteraction"].map(productionFunction).join("\n"), context, { timeout: 1000 });
+    "beginCameraInteraction", "setOperationState"].map(productionFunction).join("\n"), context, { timeout: 1000 });
   t.after(() => {
     context.cancelEventLoop();
     state.session = null;
@@ -81,8 +82,194 @@ function fixture(t, { ignorePollAbort = false } = {}) {
       read.reject(mediaTransfer.cancellationError());
     }
   });
-  return Object.assign(context, { requests, polls, snapshots, listings, timers, errors, renders });
+  return Object.assign(context, { requests, polls, snapshots, listings, timers, errors, renders, toasts });
 }
+
+for (const outcome of ["success", "failure"]) {
+  test(`manual refresh keeps its ${outcome} feedback when a later quiet refresh arrives`, async t => {
+    const s = fixture(t);
+    const manual = s.refreshSession();
+    assert.equal(s.ui.operationState.textContent, "refreshing");
+    const quiet = s.refreshSession({ quiet: true });
+    // Baseline admits and completes the competing read; the repaired admission
+    // rule may defer it. This assertion checks actual terminal UI feedback.
+    if (s.snapshots[1]) resolveSnapshot(s, 1);
+    await settle();
+    resolveSnapshot(s, 0, outcome === "failure" ? { failed: "status" } : {});
+    await manual;
+    await quiet;
+    assert.equal(s.ui.operationState.textContent, outcome === "success" ? "ready" : "synthetic status read failure");
+    assert.deepEqual(s.toasts, outcome === "success" ? [] : ["synthetic status read failure"]);
+    assertReadsOnly(s);
+  });
+}
+
+for (const outcome of ["success", "failure"]) {
+  test(`manual refresh ${outcome} feedback completes while a contents event retains read-only recovery`, async t => {
+    const s = fixture(t);
+    const manual = s.refreshSession();
+    await beginHint(s);
+    if (s.snapshots[1]) {
+      resolveSnapshot(s, 1);
+      await settle();
+      if (s.listings[0]) s.listings[0].resolve({ items: [NEW] });
+    }
+    resolveSnapshot(s, 0, { failed: outcome === "failure" ? "status" : undefined,
+      caps: { ...capabilities(), shutterAutofocusSupported: false } });
+    await manual;
+    await settle();
+    const expectedFeedback = outcome === "success" ? "ready" : "synthetic status read failure";
+    assert.equal(s.ui.operationState.textContent, expectedFeedback, "The explicit refresh must settle its own feedback");
+    if (outcome === "success") assert.equal(s.state.capabilities.shutterAutofocusSupported, false);
+    assert.equal(s.timers[0]?.delay, 1000, "The deferred event uses existing bounded retry");
+    s.timers[0].resolve();
+    await settle();
+    resolveSnapshot(s, 1, { caps: { ...capabilities(), shutterAutofocusSupported: false } });
+    await settle();
+    s.listings[0].resolve({ items: [NEW] });
+    await settle();
+    assert.deepEqual(Array.from(s.state.media), [NEW]);
+    assert.equal(s.polls.length, 2);
+    assert.equal(s.ui.operationState.textContent, expectedFeedback);
+    assert.equal(s.state.capabilities.shutterAutofocusSupported, false);
+    assertReadsOnly(s);
+  });
+}
+
+for (const firstToSettle of ["quiet", "manual"]) {
+  for (const quietOutcome of ["success", "failure"]) {
+    for (const manualOutcome of ["success", "failure"]) {
+      test(`quiet then manual refresh keeps newest explicit ${manualOutcome} (${quietOutcome} quiet, ${firstToSettle} settles first)`, async t => {
+        const s = fixture(t);
+        const quiet = s.refreshSession({ quiet: true });
+        const manual = s.refreshSession();
+        const completeQuiet = async () => {
+          resolveSnapshot(s, 0, quietOutcome === "failure" ? { failed: "status" } : { model: "old quiet" });
+          assert.equal(await quiet, false);
+        };
+        const completeManual = async () => {
+          resolveSnapshot(s, 1, manualOutcome === "failure" ? { failed: "status" } : { model: "new manual" });
+          assert.equal(await manual, manualOutcome === "success");
+        };
+        if (firstToSettle === "quiet") { await completeQuiet(); await completeManual(); }
+        else { await completeManual(); await completeQuiet(); }
+        assert.equal(s.ui.operationState.textContent, manualOutcome === "success" ? "ready" : "synthetic status read failure");
+        assert.equal(s.state.info.model, manualOutcome === "success" ? "new manual" : "old");
+        assert.deepEqual(s.errors, manualOutcome === "failure" ? ["synthetic status read failure"] : []);
+        assert.deepEqual(s.toasts, manualOutcome === "failure" ? ["synthetic status read failure"] : []);
+        assertReadsOnly(s);
+      });
+    }
+  }
+}
+
+for (const outcome of ["success", "failure"]) {
+  test(`standalone quiet ${outcome} retains existing explicit operation feedback`, async t => {
+    const s = fixture(t);
+    const quiet = s.refreshSession({ quiet: true });
+    resolveSnapshot(s, 0, outcome === "failure" ? { failed: "status" } : {});
+    assert.equal(await quiet, outcome === "success");
+    assert.equal(s.ui.operationState.textContent, "initial feedback");
+    assert.deepEqual(s.toasts, []);
+    assert.deepEqual(s.errors, outcome === "failure" ? ["synthetic status read failure"] : []);
+    const later = s.refreshSession({ quiet: true });
+    resolveSnapshot(s, 1);
+    assert.equal(await later, true, "A completed owner does not block later quiet refresh");
+    assert.equal(s.ui.operationState.textContent, "initial feedback");
+    assertReadsOnly(s);
+  });
+}
+
+for (const oldOutcome of ["success", "failure"]) {
+  test(`a second manual refresh owns feedback after older manual ${oldOutcome}`, async t => {
+    const s = fixture(t);
+    const old = s.refreshSession();
+    const current = s.refreshSession();
+    resolveSnapshot(s, 0, oldOutcome === "failure" ? { failed: "status" } : { model: "old manual" });
+    assert.equal(await old, false);
+    const deferredQuiet = s.refreshSession({ quiet: true });
+    if (s.snapshots[2]) resolveSnapshot(s, 2);
+    await deferredQuiet;
+    resolveSnapshot(s, 1, { model: "current manual" });
+    assert.equal(await current, true, "The older finalizer must not release the newest explicit owner");
+    assert.equal(s.state.info.model, "current manual");
+    assert.equal(s.ui.operationState.textContent, "ready");
+    assert.deepEqual(s.errors, []);
+    assert.deepEqual(s.toasts, []);
+    assertReadsOnly(s);
+  });
+}
+
+for (const retirement of ["different-ID", "same-ID", "interaction", "recording owner"]) {
+  test(`quiet refresh may follow ${retirement} retirement without inheriting an old manual owner`, async t => {
+    const s = fixture(t);
+    const old = s.refreshSession();
+    if (retirement === "interaction") {
+      s.beginCameraInteraction();
+      s.state.busy = false;
+    } else if (retirement === "recording owner") {
+      s.state.recordingRecovery = { session: s.state.session, direction: "stop", acknowledged: false };
+    } else s.state.session = { id: retirement === "same-ID" ? "synthetic-session" : "synthetic-replacement" };
+    s.setOperationState("new operation feedback");
+    const quiet = s.refreshSession({ quiet: true });
+    assert.equal(s.snapshots.length, 2, "Retired explicit work cannot block a current read");
+    resolveSnapshot(s, 1, { model: "current session or interaction" });
+    assert.equal(await quiet, true);
+    resolveSnapshot(s, 0, { model: "retired manual" });
+    assert.equal(await old, false);
+    assert.equal(s.state.info.model, "current session or interaction");
+    assert.equal(s.ui.operationState.textContent, "new operation feedback");
+    assertReadsOnly(s);
+  });
+}
+
+for (const manualOutcome of ["success", "failure"]) {
+  test(`a completed manual ${manualOutcome} admits later quiet reads without changing its explicit feedback`, async t => {
+    const s = fixture(t);
+    const manual = s.refreshSession();
+    resolveSnapshot(s, 0, manualOutcome === "failure" ? { failed: "status" } : {});
+    assert.equal(await manual, manualOutcome === "success");
+    const feedback = s.ui.operationState.textContent;
+    const quiet = s.refreshSession({ quiet: true });
+    assert.equal(s.snapshots.length, 2, "Completed manual ownership must not block the quiet read");
+    resolveSnapshot(s, 1, { model: "later quiet" });
+    assert.equal(await quiet, true);
+    assert.equal(s.state.info.model, "later quiet");
+    assert.equal(s.ui.operationState.textContent, feedback);
+    assert.deepEqual(s.toasts, manualOutcome === "failure" ? ["synthetic status read failure"] : []);
+    assertReadsOnly(s);
+  });
+}
+
+for (const recovery of [
+  { direction: "start", acknowledged: false, recording: false, feedback: "recordingCommandUnconfirmed" },
+  { direction: "start", acknowledged: true, recording: false, feedback: "recordingStartUnconfirmed" },
+  { direction: "stop", acknowledged: true, recording: null, feedback: "recordingStatusUnconfirmed" },
+]) {
+  test(`manual recovery retains ${recovery.feedback} against a later quiet refresh`, async t => {
+    const s = fixture(t);
+    const owner = { ...recovery, session: s.state.session };
+    s.state.recordingRecovery = owner;
+    const manual = s.refreshSession();
+    const quiet = s.refreshSession({ quiet: true });
+    if (s.snapshots[1]) resolveSnapshot(s, 1);
+    await quiet;
+    resolveSnapshot(s, 0, { recording: recovery.recording });
+    await manual;
+    assert.equal(s.ui.operationState.textContent, recovery.feedback);
+    assert.equal(s.state.recordingRecovery, recovery.feedback === "recordingStartUnconfirmed" ? null : owner);
+    assertReadsOnly(s);
+  });
+}
+
+test("an active recording command still rejects manual and quiet snapshot admission", async t => {
+  const s = fixture(t);
+  s.state.recordingCommandOwner = { session: s.state.session };
+  assert.equal(await s.refreshSession(), false);
+  assert.equal(await s.refreshSession({ quiet: true }), false);
+  assert.equal(s.snapshots.length, 0);
+  assert.equal(s.ui.operationState.textContent, "initial feedback");
+});
 
 function resolveSnapshot(s, index, { failed, recording = true, model = "new", iso = "800", caps = capabilities() } = {}) {
   const snapshot = s.snapshots[index];
@@ -377,6 +564,7 @@ for (const mediaState of ["not loaded", "unsupported", "status-only", "empty"]) 
     assert.equal(s.listings.length, 0);
     assert.equal(s.timers.length, 0);
     assert.equal(s.polls.length, 2);
+    assert.equal(s.ui.operationState.textContent, "initial feedback");
     assertReadsOnly(s);
   });
 }
