@@ -4,7 +4,7 @@ Base: PR #240, `705205c2fc9b3160a8e46c9a244069148da0f497`.
 
 ## Contract
 
-- Desktop Bridge maps only the exact `RECORDING_STATUS_READBACK_FAILED` code to typed acknowledgement/readback recovery. Separately, the exact HTTP 502 / `RECORDING_COMMAND_UNCONFIRMED` / `VIDEO_RECORDING` / `ccapi` tuple means the command result is unknown. Bridge-hop I/O failure or invalid successful response at the actual REC request also means unknown. Known HTTP rejection and similar-looking codes remain ordinary failures. No command is automatically replayed.
+- Desktop Bridge maps only the exact `RECORDING_STATUS_READBACK_FAILED` code to typed acknowledgement/readback recovery. Separately, the exact HTTP 502 / `RECORDING_COMMAND_UNCONFIRMED` / `VIDEO_RECORDING` / `ccapi` tuple means the command result is unknown. Bridge-hop I/O failure, invalid successful response, or missing/malformed HTTP 502 error envelope at the actual REC request also means unknown. Known HTTP rejection and similar-looking codes remain ordinary failures. No command is automatically replayed.
 - Direct CCAPI keeps the separate acknowledged-status-read failure type. I/O failure or invalid simulator JSON at the actual REC request instead produces command-result-unknown responsibility. Discovery, temperature preflight and known HTTP rejection cannot manufacture either ACK or unknown evidence. Cancellation is rethrown. Native optional status reads retain their established cached recording semantics; that cache is not independent REC evidence.
 - An accepted command with a failed reconciliation read or nullable recording status creates a local pending owner. Its direction, connection identity, session generation and prior visible media IDs are separate from the camera status. A read failure retains the previous snapshot; no recovery branch invents `recording=true` or `false`.
 - Pending state presents a persistent direction-specific warning and an explicit read-only “Refresh recording status” action. The confirmed REC indicator is hidden. The capture control offers deliberate Stop, including the existing capability, temperature and foreground-import Stop exemptions; still capture and photo-mode switching stay blocked.
@@ -56,3 +56,14 @@ Validation for this extension:
 - All new test cases above are authored source coverage, not runtime pass claims. No physical camera validation, push, merge or release was performed.
 
 Release impact remains patch; readiness remains local source implementation only pending independent review and executable validation.
+
+
+## Independent-review corrections: admission retirement and incomplete Bridge 502
+
+The first uncertainty candidate (`9ffba1016389c50aad7a3fde018a847d2d4e892c`) had a source-review race: disconnect/reconnect could snapshot `attempted=false`, then an I/O worker that had already passed its cancellation check could admit REC before the generation changed/cancellation arrived. Request admission and owner retirement now share the same per-attempt monitor. Retirement either sees admitted responsibility and preserves the old-camera warning, or prevents any subsequent admission with cancellation. No canceled-job callback is needed to modify a replacement session, and no command is sent by retirement.
+
+`RecordingRequestAdmissionTest` exercises the exact production boundary for simulator JSON, native command-OK and Bridge JSON. It holds the evidence monitor until the HTTP worker is blocked at `beginRequest` after its cancellation check, retires the owner while holding that monitor, then requires cancellation and zero added HTTP requests. A second case covers admission-before-retirement retaining responsibility. These are authored tests, NOT_RUN locally.
+
+The second correction treats a missing, malformed, empty, non-object or non-string-code Bridge HTTP 502 error envelope on REC as unknown. Such a body may have lost the server's acknowledgement/readback or unconfirmed-command evidence. Complete explicit rejection and legacy preflight envelopes retain ordinary failure classification; HTTP 503 remains an explicit rejection control. A complete rejection is recorded before session/cancellation checks, so cancellation does not itself convert that evidence to unknown. Additional peer tests apply Start/Stop before returning malformed 502 bodies, and verify the distinct known-rejection/preflight controls without automatic replay.
+
+Validation status is unchanged: source diff/XML and normal secret hook are checked; Kotlin/JVM/Compose/CI/device execution remains NOT_RUN. No new toolchain, push, CI trigger or release is part of this correction.

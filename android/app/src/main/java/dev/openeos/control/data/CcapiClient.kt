@@ -4055,7 +4055,7 @@ class CcapiClient(
         try {
             recordingEvidence?.let {
                 currentCoroutineContext().ensureActive()
-                it.attempted = true
+                it.beginRequest()
             }
             call.execute().use { response ->
                 recordingEvidence?.rejected = !response.isSuccessful
@@ -4117,7 +4117,7 @@ class CcapiClient(
     ): Unit = withContext(Dispatchers.IO) {
         recordingEvidence?.let {
             currentCoroutineContext().ensureActive()
-            it.attempted = true
+            it.beginRequest()
         }
         newCameraCall(request).execute().use { response ->
             recordingEvidence?.rejected = !response.isSuccessful

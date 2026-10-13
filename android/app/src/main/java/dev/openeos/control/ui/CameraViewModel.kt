@@ -363,9 +363,14 @@ class CameraViewModel(
             recordingStartNotConfirmed = false, captureMode = CaptureMode.VIDEO) }
     }
 
-    private fun recordingDisconnectWarning(state: CameraUiState): Boolean =
-        state.recordingDisconnectWarning || state.recordingStopAvailable ||
-            (recordingAttempt?.let { it.connection === state.info && it.inFlight && it.requestEvidence.unresolved } == true)
+    private fun retireRecordingAttempt(state: CameraUiState): Boolean {
+        val attempt = recordingAttempt?.takeIf { it.connection === state.info }
+        // Retire even when a warning is already visible. This shares admission's lock,
+        // closing snapshot(false) -> send -> generation change/cancel without a warning.
+        val admitted = attempt?.requestEvidence?.retire() == true
+        return state.recordingDisconnectWarning || state.recordingStopAvailable ||
+            (attempt?.inFlight == true && admitted)
+    }
 
     private fun adoptRecordingStatus(attempt: RecordingAttempt, status: CameraStatus) {
         if (!ownsRecordingAttempt(attempt)) return
@@ -924,7 +929,7 @@ class CameraViewModel(
         handoffOwner.cancelUnlaunched(CameraImportHandoffOrigin.CAMERA)
         val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
         val previousState = _uiState.value
-        val recordingWarning = recordingDisconnectWarning(previousState)
+        val recordingWarning = retireRecordingAttempt(previousState)
         val shutterWarning = previousState.shutterDisconnectWarning || previousState.shutterReleaseUnconfirmed ||
             previousState.bulbExposureActive || CameraOperation.CAPTURE in previousState.pendingOperations ||
             CameraOperation.SHUTTER_RELEASE in previousState.pendingOperations
@@ -3306,7 +3311,7 @@ class CameraViewModel(
         val previousJobs = if (operation == CameraOperation.CONNECT) {
             handoffOwner.cancelUnlaunched(CameraImportHandoffOrigin.CAMERA)
             val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
-            val recordingWarning = recordingDisconnectWarning(_uiState.value)
+            val recordingWarning = retireRecordingAttempt(_uiState.value)
             _uiState.update { it.copy(recordingDisconnectWarning = recordingWarning) }
             cameraSessionGeneration += 1
             (cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)).also { jobs ->
