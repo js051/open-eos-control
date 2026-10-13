@@ -29,7 +29,7 @@
 
 真正 App/ViewModel 旅程測試涵蓋對應與未知確認後只保存兩個所選 Gallery 原檔、取消／重複、容量已滿、admission 故障、傳輸中 clear、舊 picker 晚回及同相機重用 ID 後重連。SAF 旅程使用真正 DocumentsProvider dispatch，並在 create 前讀取磁碟斷言新連結清單與 pending 列已落盤；另驗 clear 清除紀錄後，拒絕刪除的清理風險仍可見。本機包裝 provider 不等於 OS picker、跨 UID grant、第三方 provider 或實機驗收。
 
-## 本次結果與待驗界線
+## 首次本地來源準備結果（歷史快照）
 
 - PASS：`git diff --check`；兩份文字資源 XML 可解析、名稱唯一，新增翻譯 keys／placeholder 一致。
 - NOT_RUN：Kotlin 編譯、定向／完整 JVM、Lint／APK、Android instrumentation／OS picker。現有 JDK 不足以建置，未找到本任務可用的既有 Gradle distribution、Android SDK 或 Kotlin 相依套件工具鏈；沒有安裝、下載或觸發新 CI。
@@ -38,3 +38,12 @@
 PR ready 前仍須受影響的 JVM、Android runtime、一般聚合 gate 與 exact-head CI，保留失敗與平台界線。本次來源批次沒有 commit、push、main merge、版本變更或發布。
 
 Release Assessment：可見的手動恢復能力在接受交付時屬 **minor**。程式版本未改，本次離線來源任務未重新查詢目前發布基準；編譯／runtime 與正常交付 gate 仍待完成，不宣稱實體相容性。
+
+
+## 首次正常 CI 與取消責任修正（2026-10-13 UTC）
+
+原來源 `b11bf4b1132919898351f7a0181d49c519527a6e` 已正常推送原 PR #240。[CI 38432632605](https://github.com/js051/open-eos-control/actions/runs/38432632605) 的 Kotlin production／unit test 編譯完成；JVM 1198 例中 1 例失敗：`stoppedStoreReleasesQueuedContinuationAndClearsProcessOwnership` 在等待取消後回覆時產生 `UncompletedCoroutinesError`。API 34／36 在記錄時仍執行，不能先報整體通過。
+
+來源核對確認 Channel 的 prompt cancellation 邊界：已交付給暫停 receiver、尚未進入 actor body 的 command 可以在取消時離開 queue，既有 completion drain 因而無法完成其獨立 deferred。最小修正加入 `onUndeliveredElement`，與原 buffered command drain 共用純同步 STOPPED 拒絕；尚未執行的 admission 回覆 planAbsent，已開始／已保存操作不走此 callback。保留 stopped state、active ownership 清除和原持久化／clear 語意。
+
+原受控負例現在於 scheduler drain 後先斷言 pending 已完成，再讀原 STOPPED 結果；失敗時取消自有 pending 防止測試本身再等完整一分鐘。未增加 timeout、刪除斷言或修改必要 CI。此修正目前僅來源審查／diff check，新 head runtime 尚待同群正常 CI；原失敗完整保留。

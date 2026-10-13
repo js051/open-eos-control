@@ -179,7 +179,9 @@ class DownloadHistoryStore internal constructor(
     private var durableSnapshot: DownloadHistorySnapshot? = null
     private var lastWriteInstallation = DownloadHistoryInstallation.NOT_INSTALLED
     private val activeWorklists = mutableMapOf<String, DownloadWorklistToken>()
-    private val commands = Channel<Command>(Channel.UNLIMITED)
+    // A cancelled suspended receiver can lose an already-delivered command before its body
+    // resumes. Settle that command as well as commands still buffered at worker shutdown.
+    private val commands = Channel<Command>(Channel.UNLIMITED, onUndeliveredElement = ::rejectStoppedCommand)
     private val mutableState = MutableStateFlow(DownloadHistoryState())
     val state: StateFlow<DownloadHistoryState> = mutableState.asStateFlow()
 
@@ -213,18 +215,23 @@ class DownloadHistoryStore internal constructor(
                     continuationBlockedWorklistIds = emptySet(),
                 )
                 while (true) {
-                    when (val pending = commands.tryReceive().getOrNull() ?: break) {
-                        is Command.Clear -> pending.result.complete(false)
-                        is Command.Start -> pending.result.complete(null)
-                        is Command.AdmitWorklist -> pending.result.complete(
-                            DownloadWorklistAdmission.Rejected(DownloadWorklistFailure.STOPPED, true))
-                        is Command.StartWorklistRow -> pending.result.complete(
-                            DownloadWorklistRowStart.Rejected(DownloadWorklistFailure.STOPPED))
-                        is Command.Barrier -> pending.result.complete(Unit)
-                        else -> Unit
-                    }
+                    rejectStoppedCommand(commands.tryReceive().getOrNull() ?: break)
                 }
             }
+        }
+    }
+
+    /** No I/O or state mutation: this may be invoked synchronously by channel cancellation. */
+    private fun rejectStoppedCommand(command: Command) {
+        when (command) {
+            is Command.Clear -> command.result.complete(false)
+            is Command.Start -> command.result.complete(null)
+            is Command.AdmitWorklist -> command.result.complete(
+                DownloadWorklistAdmission.Rejected(DownloadWorklistFailure.STOPPED, true))
+            is Command.StartWorklistRow -> command.result.complete(
+                DownloadWorklistRowStart.Rejected(DownloadWorklistFailure.STOPPED))
+            is Command.Barrier -> command.result.complete(Unit)
+            is Command.ReleaseWorklist, is Command.Finish -> Unit
         }
     }
 
