@@ -4094,11 +4094,13 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     }
 
     private func setRecording(_ enabled: Bool) async throws -> CameraStatus {
+        try Task.checkCancellation()
         try await ensureInitialized()
         if enabled {
             try await refreshTemperatureStatusForRestrictedCommand()
             try requireTemperatureAllowsMovieRecording()
         }
+        try Task.checkCancellation()
         if resolvedMode == .simulator {
             _ = try await requestJSON(path: "/ccapi/record/\(enabled ? "start" : "stop")", method: .post, json: [:])
         } else {
@@ -4109,7 +4111,16 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         }
         recording = enabled
         observedFeatures.insert(.videoRecording)
-        return try await status()
+        do {
+            return try await status()
+        } catch {
+            // Cancellation retains its existing propagation contract. In camera
+            // mode ordinary optional status-read failures are absorbed by status().
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
+            // Only this read follows a received command ACK. A command rejection
+            // or lost command response must retain its original error instead.
+            throw CCAPIError.recordingStatusReadbackFailed(starting: enabled)
+        }
     }
 
     private func commandOK(operation: CCAPIOperation, json: JSONDictionary) async throws {

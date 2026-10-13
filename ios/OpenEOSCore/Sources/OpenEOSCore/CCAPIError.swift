@@ -15,6 +15,7 @@ public enum CCAPIError: Error, Equatable, Sendable {
     case outsideCameraOrigin(String)
     case destinationExists(String)
     case operationAndReleaseFailed(operation: String, release: String)
+    case recordingStatusReadbackFailed(starting: Bool)
 }
 
 extension CCAPIError: LocalizedError {
@@ -42,6 +43,8 @@ extension CCAPIError: LocalizedError {
             "The camera returned a resource outside the active camera origin: \(value)"
         case let .destinationExists(value):
             "The media destination already exists: \(value)"
+        case .recordingStatusReadbackFailed:
+            "The recording command was acknowledged, but its status could not be read. Refresh status or explicitly stop recording."
         case let .operationAndReleaseFailed(operation, release):
             "The camera operation failed (\(operation)); releasing the shutter also failed (\(release))."
         }

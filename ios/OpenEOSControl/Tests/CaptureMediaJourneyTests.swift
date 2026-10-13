@@ -7,6 +7,70 @@ import XCTest
 /// Gates record cancellation but ignore it deliberately: late completions must not own newer UI state.
 @MainActor
 final class CaptureMediaJourneyTests: XCTestCase {
+    #if DEBUG
+    func testDownloadStageTraceRequiresExactOptInAndRetainsOnlySixteenAllowlistedStages() {
+        let allowed = ["request", "rejected-unsupported", "rejected-busy", "started", "history",
+                       "request-original", "reply-original", "validated", "published", "cancelled", "failed"]
+        XCTAssertEqual(Set(MediaDownloadStageTrace.Stage.allCases.map(\.rawValue)), Set(allowed))
+        for environment in [[:], ["OEC_MEDIA_DOWNLOAD_TRACE": "0"], ["OEC_MEDIA_DOWNLOAD_TRACE": "true"]] {
+            var disabled = MediaDownloadStageTrace(environment: environment)
+            disabled.record(.request)
+            XCTAssertFalse(disabled.enabled)
+            XCTAssertTrue(disabled.entries.isEmpty)
+            XCTAssertNil(disabled.accessibilityValue)
+        }
+        var trace = MediaDownloadStageTrace(environment: ["OEC_MEDIA_DOWNLOAD_TRACE": "1"])
+        let stages = (0..<40).map { MediaDownloadStageTrace.Stage.allCases[$0 % allowed.count] }
+        for stage in stages { trace.record(stage) }
+        XCTAssertEqual(trace.entries.count, 16)
+        XCTAssertEqual(trace.entries, Array(stages.suffix(16)))
+        XCTAssertEqual(trace.accessibilityValue, stages.suffix(16).map(\.rawValue).joined(separator: "|"))
+        XCTAssertTrue(trace.entries.allSatisfy { allowed.contains($0.rawValue) })
+    }
+    #endif
+
+    func testManualRecordingOriginalPublishesMatchingIDBytesAndExportPayload() async throws {
+        let peer = CaptureMediaPeer(recording: true)
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        await peer.queueListings([.items([.newVideo])])
+        await state.toggleRecording()
+        await state.latestMediaTask?.value
+        let video = try XCTUnwrap(state.latestMediaItem)
+        XCTAssertEqual(video.id, "NEW-VIDEO")
+        XCTAssertTrue(mediaIsVideo(video))
+        // Exercise the manual original through the real DesktopBridgeClient,
+        // without an AVPlayer fallback being able to stand in for that request.
+        await peer.holdNext("original")
+        state.startMediaDownload(video)
+        let download = try XCTUnwrap(state.mediaDownloadTask)
+        try await waitForGate(peer, "original")
+        XCTAssertEqual(state.activeMediaDownloadID, video.id)
+        XCTAssertTrue(state.isBusy(.media))
+        XCTAssertNil(state.downloadedFile(for: video))
+        XCTAssertNil(state.makeMediaDownloadExportPayload(for: video))
+        await peer.release("original")
+        await download.value
+        let original = try XCTUnwrap(state.downloadedFile(for: video))
+        XCTAssertTrue(state.isMediaDownloaded(video))
+        XCTAssertEqual(try Data(contentsOf: original), try CaptureMediaPeer.videoOriginalBytes())
+        XCTAssertEqual(state.downloadedFileName, video.name)
+        XCTAssertNil(state.activeMediaDownloadID)
+        XCTAssertFalse(state.isBusy(.media))
+        XCTAssertNil(state.lastError)
+        let export = try XCTUnwrap(state.makeMediaDownloadExportPayload(for: video))
+        XCTAssertEqual(export.fileURLs, [original])
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(export.fileURLs.first)), try CaptureMediaPeer.videoOriginalBytes())
+        let originals = await peer.count("original")
+        let stops = await peer.count("recording-stop")
+        let starts = await peer.count("recording-start")
+        XCTAssertEqual(originals, 1)
+        XCTAssertEqual(stops, 1)
+        XCTAssertEqual(starts, 0)
+    }
+
     func testConfirmedRecordingStopFindsDelayedVideoWithoutSelectingOldPhotosOrKnownVideo() async throws {
         let peer = CaptureMediaPeer(recording: true)
         await peer.queueListings([.items([.a, .b, .oldVideo])])
@@ -398,7 +462,14 @@ final class CaptureMediaJourneyTests: XCTestCase {
                 XCTAssertEqual(CaptureReviewKind.photo.localizationKey(for: status), status.localizationKey)
             }
             XCTAssertTrue(try line("recording_review_limited_list").contains(older))
-            for suffix in ["capturing", "retry", "previous_badge"] { _ = try line("recording_review_\(suffix)") }
+            for suffix in ["capturing", "limited_list", "retry", "previous_badge"] {
+                let videoKey = CaptureReviewKind.video.localizationKey(suffix: suffix)
+                let photoKey = CaptureReviewKind.photo.localizationKey(suffix: suffix)
+                XCTAssertEqual(videoKey, "recording_review_\(suffix)")
+                XCTAssertEqual(photoKey, "capture_review_\(suffix)")
+                _ = try line(videoKey)
+                _ = try line(photoKey)
+            }
             for key in ["open_previous_video_named", "open_visible_video_named"] {
                 XCTAssertTrue(try line(key).contains(video))
             }

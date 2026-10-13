@@ -686,3 +686,7 @@
 "connection_bridge_unscanned" = "尚未掃描。點選「掃描相機」以尋找電腦上的相機。";
 "connection_bridge_scan_failed" = "掃描失敗。請先查看連線提示，再重新掃描。";
 "connection_bridge_empty" = "掃描完成，但未找到相機。請確認相機電源、USB 線材，以及電腦上的 Desktop Bridge 是否能偵測相機，再重新掃描。";
+
+"recording_start_status_unknown" = "相機已接受開始指令，但錄影狀態不明。請重新整理狀態，或明確停止錄影。";
+"recording_stop_status_unknown" = "相機已接受停止指令，但尚未確認停止狀態。請重新整理狀態，或明確停止錄影。";
+"recording_start_not_confirmed" = "相機回報目前未錄影，尚未確認開始錄影。";

@@ -1475,11 +1475,13 @@ final class OpenEOSControlUITests: XCTestCase {
             throw XCTSkip("Start the synthetic camera for the recording review UI journey")
             #endif
         }
-        for (language, apple, locale, videoMode, stopLabel, notReady, available, previousVideo, visibleVideo) in [
+        for (language, apple, locale, videoMode, stopLabel, notReady, available, previousVideo, visibleVideo, retryLabel, limitedLabel) in [
             ("english", "en", "en_US", "Video", "Stop recording", "No newly visible video", "video is ready",
-             "previous video", "newly visible video"),
+             "previous video", "newly visible video", "Check again · no new recording",
+             "Only 8 recent items are checked. A newly visible video may be an older file."),
             ("traditionalChinese", "zh-Hant", "zh_TW", "錄影", "停止錄影", "尚未找到新出現的影片", "影片，可開啟檢視",
-             "先前影片", "新出現的影片"),
+             "先前影片", "新出現的影片", "重新查找 · 不會重新錄影",
+             "僅檢查最近 8 個項目，新出現的影片仍可能是舊檔。"),
         ] {
             _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
             _ = try await simulatorRequest(path: "/ccapi/ver100/shooting/settings/shootingmode", method: "PUT",
@@ -1489,7 +1491,8 @@ final class OpenEOSControlUITests: XCTestCase {
             // as synthetic old/new media without changing simulator behavior.
             try await uploadSimulatorVideoFixture(filename: "EARLIER_RECORDING.MP4")
             let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
-                             environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString])
+                             environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString,
+                                           "OEC_MEDIA_DOWNLOAD_TRACE": "1"])
             defer { app.terminate() }
             try tapForAsyncTest(app.buttons["preset-http-button"])
             _ = try XCTUnwrap(scrollConnectionButtonIntoView(in: app, timeout: 8) ? true : nil)
@@ -1518,6 +1521,9 @@ final class OpenEOSControlUITests: XCTestCase {
             _ = try XCTUnwrap(latest.label.contains("EARLIER_RECORDING.MP4") && latest.label.contains(previousVideo) ? true : nil)
             let retry = app.buttons["capture-review-retry"]
             _ = try XCTUnwrap(waitForInteraction(retry, timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(retry.label == retryLabel ? true : nil)
+            let limit = app.staticTexts["capture-review-limit"]
+            _ = try XCTUnwrap(limit.label == limitedLabel ? true : nil)
             _ = try XCTUnwrap(retry.frame.height + 0.000_001 >= 44 && retry.frame.width + 0.000_001 >= 44 ? true : nil)
             let stopped = try await simulatorRequest(path: "/ccapi/test/state")
             _ = try XCTUnwrap((stopped["capture_count"] as? NSNumber)?.intValue == 0 ? true : nil)
@@ -1544,7 +1550,17 @@ final class OpenEOSControlUITests: XCTestCase {
             _ = try XCTUnwrap(waitForInteraction(download, timeout: 10) ? true : nil)
             try tapForAsyncTest(download)
             let share = app.buttons["media-preview-share-\(mediaID)"]
-            _ = try XCTUnwrap(waitForInteraction(share, timeout: 15) ? true : nil)
+            let shareReady = waitForInteraction(share, timeout: 15)
+            if !shareReady {
+                let closePreview = app.buttons["close-media-preview"]
+                let trace = closePreview.exists ? closePreview.value as? String ?? "unavailable" : "unavailable"
+                let attachment = XCTAttachment(string: trace)
+                attachment.name = "recording-original-download-stages"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                addScreenshot(name: "recording-original-share-missing")
+            }
+            _ = try XCTUnwrap(shareReady ? true : nil)
             let delivered = try await simulatorRequest(path: "/ccapi/test/state")
             _ = try XCTUnwrap((delivered["record_start_count"] as? NSNumber)?.intValue == 1 ? true : nil)
             _ = try XCTUnwrap((delivered["record_stop_count"] as? NSNumber)?.intValue == 1 ? true : nil)

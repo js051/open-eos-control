@@ -43,7 +43,11 @@ enum CaptureReviewKind: Equatable {
     var localizationPrefix: String { self == .photo ? "capture_review" : "recording_review" }
 
     func localizationKey(for state: CaptureReviewState) -> String {
-        "\(localizationPrefix)_\(state.rawValue)"
+        localizationKey(suffix: state.rawValue)
+    }
+
+    func localizationKey(suffix: String) -> String {
+        "\(localizationPrefix)_\(suffix)"
     }
 }
 

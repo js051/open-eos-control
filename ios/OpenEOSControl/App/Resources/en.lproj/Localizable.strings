@@ -686,3 +686,7 @@
 "connection_bridge_unscanned" = "No scan yet. Tap Scan cameras to look for cameras on the computer.";
 "connection_bridge_scan_failed" = "The scan failed. Review the connection guidance before trying again.";
 "connection_bridge_empty" = "Scan completed with no cameras. Check the camera’s power, USB cable, and availability in Desktop Bridge on the computer, then scan again.";
+
+"recording_start_status_unknown" = "Start was acknowledged, but recording status is unknown. Refresh status or explicitly stop recording.";
+"recording_stop_status_unknown" = "Stop was acknowledged, but stopped status is not confirmed. Refresh status or explicitly stop recording.";
+"recording_start_not_confirmed" = "The camera reports that recording is stopped. Start was not confirmed.";
