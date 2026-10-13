@@ -429,6 +429,8 @@ data class CameraStatus(
     val liveViewStopUnconfirmed: Boolean? = null,
     val lens: LensStatus? = null,
     val temperature: CameraTemperatureStatus? = null,
+    // Only explicit Bridge evidence establishes this state; absent legacy fields stay unknown.
+    val heldAutofocusActive: Boolean? = null,
 )
 
 data class CameraEvent(

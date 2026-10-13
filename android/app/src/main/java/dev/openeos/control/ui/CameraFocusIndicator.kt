@@ -57,7 +57,10 @@ internal fun FocusIndicator(point: FocusPoint?, feedback: FocusFeedback?, source
 }
 
 @Composable
-internal fun CameraReportedFocusOverlay(info: CameraFocusInfo?, sampledAtMillis: Long?, sourceAspectRatio: Float) {
+internal fun CameraReportedFocusOverlay(
+    info: CameraFocusInfo?, sampledAtMillis: Long?, sourceAspectRatio: Float,
+    displayAspectRatio: Float = sourceAspectRatio,
+) {
     if (info == null || sampledAtMillis == null || info.frames.isEmpty() || !focusInfoMatchesImage(info, sourceAspectRatio)) return
     var fresh by remember(sampledAtMillis) { mutableStateOf(System.currentTimeMillis() - sampledAtMillis in 0..999) }
     LaunchedEffect(sampledAtMillis) {
@@ -67,7 +70,7 @@ internal fun CameraReportedFocusOverlay(info: CameraFocusInfo?, sampledAtMillis:
     if (!fresh) return
     val description = info.frames.map { stringResource(cameraFocusStatusResource(it.status)) }.distinct().joinToString(", ")
     Canvas(Modifier.fillMaxSize().testTag("camera-focus-frames").semantics { contentDescription = description }) {
-        val content = fittedLiveViewRect(size.width, size.height, sourceAspectRatio)
+        val content = fittedLiveViewRect(size.width, size.height, displayAspectRatio)
         clipRect(content.left, content.top, content.left + content.width, content.top + content.height) {
             info.frames.forEach { frame ->
                 val bounds = LiveViewRect(
@@ -90,7 +93,8 @@ internal fun CameraReportedFocusOverlay(info: CameraFocusInfo?, sampledAtMillis:
 }
 
 internal fun focusInfoMatchesImage(info: CameraFocusInfo, sourceAspectRatio: Float): Boolean =
-    sourceAspectRatio > 0f && kotlin.math.abs(info.imageAspectRatio / sourceAspectRatio - 1f) <= 0.02f
+    info.magnification == 1 && sourceAspectRatio.isFinite() && sourceAspectRatio > 0f &&
+        kotlin.math.abs(info.imageAspectRatio / sourceAspectRatio - 1f) <= 0.02f
 
 internal fun cameraFocusStatusResource(status: CameraFocusStatus): Int = when (status) {
     CameraFocusStatus.FOCUSED -> R.string.camera_focus_confirmed
