@@ -22,6 +22,7 @@ from urllib.parse import SplitResult, unquote, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from .errors import BridgeError, ConnectionFailureReason, unsupported
+from .focus_info import MAX_FOCUS_INFO_BYTES, parse_ccapi_focus_info_packet
 from .media_folders import camera_folder_fields
 from .models import (
     BatteryStatus,
@@ -29,6 +30,7 @@ from .models import (
     CameraDescriptor,
     CameraEvent,
     CameraFeature,
+    CameraFocusInfo,
     CameraInfo,
     CameraSetting,
     CameraStatus,
@@ -39,6 +41,7 @@ from .models import (
     FileNamingField,
     FileNamingState,
     FocusResult,
+    HeldAutofocusState,
     IntegerRange,
     LensStatus,
     LiveViewCapabilities,
@@ -92,6 +95,7 @@ MAX_EVENT_KEYS = 64
 MAX_EVENT_KEY_CHARS = 128
 TRANSFER_CHUNK_BYTES = 64 * 1024
 HALF_PRESS_SECONDS = 0.35
+MAX_HELD_AUTOFOCUS_SECONDS = 30.0
 HTTP_METHODS = ("GET", "PUT", "POST", "DELETE")
 COMMAND_METHODS = {"PUT", "POST"}
 PRIMARY_SETTING_KEYS = {"iso", "shutter", "aperture", "whitebalance"}
@@ -902,6 +906,10 @@ class CcapiSession:
         self._bulb_release_operation: CcapiOperation | None = None
         self._bulb_start_confirmed = False
         self._short_control_release: tuple[CcapiOperation, dict[str, object], CameraFeature] | None = None
+        self._held_autofocus_owner: str | None = None
+        self._held_autofocus_active: bool | None = False
+        self._held_autofocus_timer: threading.Timer | None = None
+        self._completed_autofocus_owners: deque[str] = deque(maxlen=64)
         self._shutter_release_unconfirmed = False
         self._temperature_status: CameraTemperatureStatus | None = None
         self._live_view_active = False
@@ -1157,6 +1165,10 @@ class CcapiSession:
                 recording=self._recording,
                 bulb_exposure_active=self._bulb_exposure_active,
                 shutter_release_unconfirmed=self._shutter_release_unconfirmed,
+                held_autofocus_active=(
+                    self._held_autofocus_active
+                    if self.held_autofocus_supported or self._held_autofocus_owner is not None else None
+                ),
                 live_view_stop_unconfirmed=self._live_view_stop_unconfirmed,
                 mode=_setting_value(settings, "shootingmode") or "unknown",
                 media=storage_status,
@@ -1309,6 +1321,11 @@ class CcapiSession:
             live_view_available = CameraFeature.LIVE_VIEW in supported or live_view_magnification is not None
             return CameraCapabilities(
                 shutter_autofocus_supported=self.shutter_autofocus_supported,
+                held_autofocus_supported=self.held_autofocus_supported,
+                focus_info_supported=(
+                    self._operation("GET", "/shooting/liveview/flipdetail") is not None
+                    and CameraFeature.LIVE_VIEW in supported
+                ),
                 profile=camera_profile(model),
                 supported=sorted(supported, key=str),
                 planned=sorted(candidates - supported, key=str),
@@ -1939,6 +1956,91 @@ class CcapiSession:
         self._require_open()
         if self._shutter_release_unconfirmed:
             raise self._shutter_release_error(blocked=True)
+        if self._held_autofocus_owner is not None:
+            raise BridgeError(
+                "AUTOFOCUS_ACTIVE", "Stop the held autofocus control before starting another camera control.",
+                status_code=409, feature=CameraFeature.AUTOFOCUS.value, engine=self.engine_name,
+            )
+
+    @property
+    def held_autofocus_supported(self) -> bool:
+        # A manual shutter half-press is a different operation and never a held AF substitute.
+        return self._operation("POST", "/shooting/control/af") is not None
+
+    def start_autofocus(self, owner_id: str) -> HeldAutofocusState:
+        with self._lock:
+            self._require_open()
+            if self._held_autofocus_owner == owner_id:
+                if self._shutter_release_unconfirmed:
+                    raise self._shutter_release_error(blocked=True)
+                return HeldAutofocusState(owner_id=owner_id, active=True, stop_unconfirmed=False)
+            self._require_shutter_release_confirmed()
+            if owner_id in self._completed_autofocus_owners:
+                raise self._focus_owner_error()
+            operation = self._operation("POST", "/shooting/control/af")
+            if operation is None:
+                raise unsupported(CameraFeature.AUTOFOCUS.value, self.engine_name,
+                                  "The camera does not advertise a dedicated held AF start/stop operation.")
+            if self._bulb_release_operation is not None:
+                raise BridgeError(
+                    "BULB_EXPOSURE_ACTIVE", "Stop the exposure before starting held autofocus.",
+                    status_code=409, feature=CameraFeature.AUTOFOCUS.value, engine=self.engine_name,
+                )
+            self._held_autofocus_owner = owner_id
+            self._held_autofocus_active = None
+            self._short_control_release = (operation, {"action": "stop"}, CameraFeature.AUTOFOCUS)
+            self._shutter_release_unconfirmed = True
+            try:
+                self._schedule_autofocus_stop_locked(owner_id)
+                self._command_ok(operation, {"action": "start"})
+            except Exception as error:
+                try:
+                    self._release_short_control_locked()
+                except BridgeError as release_error:
+                    raise release_error from error
+                raise
+            self._held_autofocus_active = True
+            self._shutter_release_unconfirmed = False
+            self._observed.add(CameraFeature.AUTOFOCUS)
+            # An unrelated status read must never turn an acknowledged start into a replay.
+            return HeldAutofocusState(owner_id=owner_id, active=True, stop_unconfirmed=False)
+
+    def stop_autofocus(self, owner_id: str) -> HeldAutofocusState:
+        with self._lock:
+            self._require_open()
+            if self._held_autofocus_owner != owner_id:
+                if owner_id in self._completed_autofocus_owners:
+                    return HeldAutofocusState(owner_id=owner_id, active=False, stop_unconfirmed=False)
+                # A stop that overtakes its start must prevent that late request
+                # from pressing the camera after the user has already released.
+                self._completed_autofocus_owners.append(owner_id)
+                raise self._focus_owner_error()
+            self._release_short_control_locked()
+            return HeldAutofocusState(owner_id=owner_id, active=False, stop_unconfirmed=False)
+
+    def _focus_owner_error(self) -> BridgeError:
+        return BridgeError(
+            "FOCUS_OWNER_MISMATCH", "This autofocus request does not own the held control in this session.",
+            status_code=409, feature=CameraFeature.AUTOFOCUS.value, engine=self.engine_name,
+        )
+
+    def _schedule_autofocus_stop_locked(self, owner_id: str) -> None:
+        def expire() -> None:
+            with self._lock:
+                if (
+                    self._closed or self._held_autofocus_owner != owner_id
+                    or self._held_autofocus_timer is not timer
+                ):
+                    return
+                self._held_autofocus_timer = None
+                # One bounded stop, never an automatic start or repeated stop loop.
+                with suppress(BridgeError):
+                    self._release_short_control_locked()
+
+        timer = threading.Timer(MAX_HELD_AUTOFOCUS_SECONDS, expire)
+        timer.daemon = True
+        self._held_autofocus_timer = timer
+        timer.start()
 
     def autofocus(self) -> CameraStatus:
         with self._lock:
@@ -2329,8 +2431,41 @@ class CcapiSession:
     def stop_live_view(self) -> None:
         with self._lock:
             self._require_open()
+            release_error = None
+            if self._held_autofocus_owner is not None:
+                try:
+                    self._release_short_control_locked()
+                except BridgeError as error:
+                    release_error = error
             self._latest_live_view_geometry = None
             self._stop_live_view_locked()
+            if release_error is not None:
+                raise release_error
+
+    def live_view_focus_info(self) -> CameraFocusInfo | None:
+        with self._lock:
+            self._require_open()
+            if not self._live_view_active:
+                raise BridgeError(
+                    "LIVE_VIEW_NOT_ACTIVE", "Start camera Live View before reading focus information.",
+                    status_code=409, feature=CameraFeature.LIVE_VIEW.value, engine=self.engine_name,
+                )
+            operation = self._operation("GET", "/shooting/liveview/flipdetail")
+            if operation is None:
+                raise unsupported("FOCUS_INFO", self.engine_name)
+            try:
+                response = self._request(
+                    "GET", f"{operation.path}?kind=info",
+                    headers={"Accept": "application/octet-stream", "Cache-Control": "no-cache"},
+                    timeout=2.0, max_bytes=MAX_FOCUS_INFO_BYTES,
+                )
+                return parse_ccapi_focus_info_packet(response.body)
+            except (BridgeError, ValueError, UnicodeDecodeError, RecursionError) as error:
+                # Never return camera payloads, credentials, URLs, or arbitrary diagnostic strings.
+                raise BridgeError(
+                    "FOCUS_INFO_UNAVAILABLE", "Camera focus information could not be read or decoded.",
+                    status_code=502, feature="FOCUS_INFO", engine=self.engine_name,
+                ) from error
 
     def _stop_live_view_locked(self) -> None:
         stop = self._pending_live_view_stop
@@ -3147,17 +3282,26 @@ class CcapiSession:
         pending = self._short_control_release
         if pending is None:
             return
+        timer, self._held_autofocus_timer = self._held_autofocus_timer, None
+        if timer is not None:
+            timer.cancel()
         operation, release, _ = pending
         try:
             self._command_ok(operation, release)
         except Exception as error:
             self._shutter_release_unconfirmed = True
+            if self._held_autofocus_owner is not None:
+                self._held_autofocus_active = None
             failure = self._shutter_release_error()
             self._last_error = failure.message
             raise failure from error
         # Status readback is independent of a received stop ACK.
         self._short_control_release = None
         self._shutter_release_unconfirmed = False
+        if self._held_autofocus_owner is not None:
+            self._completed_autofocus_owners.append(self._held_autofocus_owner)
+            self._held_autofocus_owner = None
+            self._held_autofocus_active = False
         self._last_error = None
 
     def _command_ok(self, operation: CcapiOperation, payload: dict[str, object]) -> None:

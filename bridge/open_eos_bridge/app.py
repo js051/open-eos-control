@@ -40,6 +40,7 @@ from .models import (
     CameraCapabilities,
     CameraEvent,
     CameraFeature,
+    CameraFocusInfo,
     CameraInfo,
     CameraList,
     CameraStatus,
@@ -54,6 +55,8 @@ from .models import (
     FocusDriveRequest,
     FocusResult,
     HealthResponse,
+    HeldAutofocusRequest,
+    HeldAutofocusState,
     LiveViewMagnificationRequest,
     LiveViewMagnificationResult,
     LiveViewStartRequest,
@@ -606,6 +609,22 @@ def create_app(
     def autofocus(session_id: str) -> CameraStatus:
         return manager.get(session_id).autofocus()
 
+    @router.post("/session/{session_id}/focus/auto/start", response_model=HeldAutofocusState)
+    def start_autofocus(session_id: str, payload: HeldAutofocusRequest) -> HeldAutofocusState:
+        session = manager.get(session_id)
+        if not isinstance(session, CcapiSession):
+            raise unsupported(CameraFeature.AUTOFOCUS.value, session.engine_name,
+                              "This engine does not support held autofocus.")
+        return session.start_autofocus(payload.owner_id)
+
+    @router.post("/session/{session_id}/focus/auto/stop", response_model=HeldAutofocusState)
+    def stop_autofocus(session_id: str, payload: HeldAutofocusRequest) -> HeldAutofocusState:
+        session = manager.get(session_id)
+        if not isinstance(session, CcapiSession):
+            raise unsupported(CameraFeature.AUTOFOCUS.value, session.engine_name,
+                              "This engine does not support held autofocus.")
+        return session.stop_autofocus(payload.owner_id)
+
     @router.post("/session/{session_id}/recording/start", response_model=CameraStatus)
     def start_recording(session_id: str) -> CameraStatus:
         return manager.get(session_id).start_recording()
@@ -664,6 +683,14 @@ def create_app(
             media_type="image/jpeg",
             headers={"Cache-Control": "no-store, max-age=0"},
         )
+
+    @router.get("/session/{session_id}/liveview/focus-info", response_model=CameraFocusInfo | None)
+    def live_view_focus_info(session_id: str, response: Response) -> CameraFocusInfo | None:
+        session = manager.get(session_id)
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        if not isinstance(session, CcapiSession):
+            raise unsupported("FOCUS_INFO", session.engine_name)
+        return session.live_view_focus_info()
 
     @router.get("/session/{session_id}/liveview/audio")
     def live_view_audio(

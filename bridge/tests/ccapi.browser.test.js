@@ -1097,6 +1097,126 @@ async function verifyConnectionRecoveryJourneys(browser, origin, simulatorOrigin
   }
 }
 
+async function verifyHeldAutofocusAndFocusFrames(browser, origin) {
+  // Real production DOM and application handlers; the camera contract alone is
+  // supplied by loopback route fixtures. This is not physical-camera evidence.
+  for (const advertised of [false, true]) {
+    const context = await browser.newContext({ locale: "en-US", viewport: { width: 1280, height: 900 } });
+    const page = await context.newPage();
+    const errors = [], commands = [];
+    let stopAttempts = 0, focusReads = 0, focusAspectRatio = 1;
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+    page.on("pageerror", error => errors.push(error.message));
+    await page.route(/\/capabilities$/, async route => {
+      const response = await route.fetch();
+      const capabilities = await response.json();
+      capabilities.supported = ["AUTOFOCUS", "LIVE_VIEW", "MEDIA_BROWSER"];
+      capabilities.settings = [];
+      if (advertised) {
+        capabilities.heldAutofocusSupported = true;
+        capabilities.focusInfoSupported = true;
+      } else {
+        delete capabilities.heldAutofocusSupported;
+        delete capabilities.focusInfoSupported;
+      }
+      await route.fulfill({ response, json: capabilities });
+    });
+    await page.route(/\/focus\/auto\/(start|stop)$/, async route => {
+      const owner = route.request().postDataJSON();
+      const command = new URL(route.request().url()).pathname.endsWith("/start") ? "start" : "stop";
+      commands.push({ command, ownerId: owner.ownerId });
+      assert.match(owner.ownerId, /^[A-Za-z0-9._:-]{1,128}$/);
+      if (command === "stop" && ++stopAttempts <= 2) {
+        await route.fulfill({ status: 502, json: { error: { code: "SHUTTER_RELEASE_UNCONFIRMED", message: "Synthetic release is unconfirmed" } } });
+      } else await route.fulfill({ json: { ownerId: owner.ownerId, active: command === "start", stopUnconfirmed: false } });
+    });
+    await page.route(/\/liveview\/(start|stop)$/, route => route.fulfill({ json: {
+      active: route.request().url().endsWith("/start"), liveViewStopUnconfirmed: false,
+      requestedFps: 4, source: "DESKTOP_BRIDGE_STREAM",
+    } }));
+    await page.route(/\/liveview\/frame$/, route => route.fulfill({ contentType: "image/png", body: png }));
+    await page.route(/\/liveview\/focus-info$/, route => {
+      focusReads++;
+      return route.fulfill({ json: { magnification: 1, imageAspectRatio: focusAspectRatio,
+        frames: [{ left: 0.25, top: 0.25, right: 0.75, bottom: 0.75, status: "FOCUSED", kind: "FACE" }],
+      } });
+    });
+    try {
+      await page.goto(origin, { waitUntil: "networkidle" });
+      await page.waitForSelector("#connect-button:not([disabled])");
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      assert.equal(await page.locator("#held-autofocus-section").isVisible(), advertised);
+      if (advertised) {
+        await page.locator("#held-autofocus-start").focus();
+        await page.keyboard.press("Enter");
+        await page.waitForFunction(() => document.querySelector("#held-autofocus-status").textContent.includes("AF is held"));
+        assert.equal(await page.locator("#held-autofocus-start").isDisabled(), true);
+        assert.equal(await page.locator("#held-autofocus-stop").isEnabled(), true);
+        await page.locator("#held-autofocus-stop").focus();
+        await page.keyboard.press("Space");
+        await page.waitForFunction(() => document.querySelector("#held-autofocus-status").textContent.includes("release is unconfirmed"));
+        // Leaving the live panel makes one bounded automatic recovery attempt.
+        // Stop remains globally visible and keyboard accessible while it settles.
+        await page.click('.tab[data-view="diagnostics"]');
+        await page.waitForFunction(() => document.querySelector("#held-autofocus-status").textContent.includes("release is unconfirmed"));
+        assert.equal(await page.locator("#held-autofocus-stop").isVisible(), true);
+        assert.equal(await page.locator("#held-autofocus-stop").isEnabled(), true);
+        await page.locator("#held-autofocus-stop").focus();
+        await page.keyboard.press("Enter");
+        await page.waitForFunction(() => document.querySelector("#held-autofocus-stop").disabled);
+        assert.equal(commands.length, 4);
+        assert.deepEqual(commands.map(command => command.command), ["start", "stop", "stop", "stop"]);
+        assert.equal(new Set(commands.map(command => command.ownerId)).size, 1);
+        await page.click('.tab[data-view="live"]');
+        // A new held command can be explicitly started and stopped after recovery.
+        await page.click("#held-autofocus-start");
+        await page.waitForFunction(() => document.querySelector("#held-autofocus-status").textContent.includes("AF is held"));
+        await page.click("#held-autofocus-stop");
+        await page.waitForFunction(() => document.querySelector("#held-autofocus-stop").disabled);
+        assert.notEqual(commands[4].ownerId, commands[0].ownerId);
+      }
+      await page.click("#rail-live-button");
+      await page.waitForSelector("#live-image:not([hidden])");
+      if (advertised) {
+        await page.waitForSelector("#camera-focus-overlay:not([hidden]) .status-focused.kind-face");
+        const geometry = await page.evaluate(() => {
+          const image = document.querySelector("#live-image").getBoundingClientRect();
+          const overlay = document.querySelector("#camera-focus-overlay").getBoundingClientRect();
+          const frame = document.querySelector(".camera-focus-frame").getBoundingClientRect();
+          return { difference: Math.max(Math.abs(image.left - overlay.left), Math.abs(image.top - overlay.top),
+            Math.abs(image.width - overlay.width), Math.abs(image.height - overlay.height)),
+          widthRatio: frame.width / image.width, heightRatio: frame.height / image.height };
+        });
+        assert.ok(geometry.difference < 1, JSON.stringify(geometry));
+        assert.ok(Math.abs(geometry.widthRatio - 0.5) < 0.01);
+        assert.ok(Math.abs(geometry.heightRatio - 0.5) < 0.01);
+        fs.mkdirSync(RESULTS_DIR, { recursive: true });
+        await page.screenshot({ path: path.join(RESULTS_DIR, "desktop-camera-focus-frames.png"), fullPage: true });
+        focusAspectRatio = 1.5;
+        await page.waitForSelector("#camera-focus-overlay[hidden]");
+        // Resize clears immediately, and invalid metadata must not reappear.
+        await page.setViewportSize({ width: 390, height: 844 });
+        assert.equal(await page.locator("#camera-focus-overlay").isVisible(), false);
+        await page.click("#rail-live-button");
+        await page.waitForSelector("#live-image[hidden]");
+        assert.equal(await page.locator("#camera-focus-overlay").isVisible(), false);
+        assert.equal(await page.locator("#camera-focus-legend").isVisible(), false);
+      } else {
+        await page.waitForFunction(() => parseFloat(document.querySelector("#frame-indicator").textContent) > 0);
+        assert.equal(focusReads, 0, "Older Bridge without optional capability receives no telemetry request");
+        assert.equal(commands.length, 0);
+        assert.equal(await page.locator("#camera-focus-overlay").isVisible(), false);
+      }
+      assert.deepEqual(errors, []);
+      await page.click("#disconnect-button");
+      await page.waitForSelector("#connection-view:not([hidden])");
+    } finally {
+      await context.close();
+    }
+  }
+}
+
 async function run() {
   const [simulatorPort, bridgePort] = await Promise.all([freePort(), freePort()]);
   const simulatorOrigin = `http://127.0.0.1:${simulatorPort}`;
@@ -1932,6 +2052,7 @@ async function run() {
     await verifyMediaDeleteResponseOwnership(browser, bridgeOrigin);
     await verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin);
     await verifyRecordingReviewJourneys(browser, bridgeOrigin, simulatorOrigin);
+    await verifyHeldAutofocusAndFocusFrames(browser, bridgeOrigin);
   } finally {
     if (browser) await browser.close();
     await stopProcess(bridge?.process);

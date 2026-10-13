@@ -43,6 +43,7 @@ class BulbPeer:
         self.media_ready = False
         self.capture_count = 0
         self.reads: list[str] = []
+        self.focus_info_body: bytes | None = None
         image = io.BytesIO()
         Image.new("RGB", (32, 24), "navy").save(image, format="JPEG")
         self.jpeg = image.getvalue()
@@ -125,7 +126,27 @@ class BulbPeer:
                         operations.append({"path": "/contents", "get": True})
                     if peer.temperature_enabled:
                         operations.append({"path": "/devicestatus/temperature", "get": True})
+                    if peer.focus_info_body is not None:
+                        operations.extend([
+                            {"path": "/shooting/liveview", "post": True},
+                            {"path": "/shooting/liveview/flip", "get": True},
+                            {"path": "/shooting/liveview/flipdetail", "get": True},
+                        ])
                     self.respond(200, {"ver100": operations})
+                elif peer.focus_info_body is not None and path.endswith("/shooting/liveview/flipdetail"):
+                    payload = peer.focus_info_body
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    with suppress(BrokenPipeError, ConnectionResetError):
+                        self.wfile.write(payload)
+                elif peer.focus_info_body is not None and path.endswith("/shooting/liveview/flip"):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(peer.jpeg)))
+                    self.end_headers()
+                    self.wfile.write(peer.jpeg)
                 elif self.path.endswith("/deviceinformation"):
                     self.respond(200, {"productname": "Synthetic Bulb Peer"})
                 elif self.path.endswith("/shooting/settings"):

@@ -142,7 +142,7 @@ function fixture(options = {}) {
       return response;
     },
   });
-  for (const name of ["stopLiveLoop", "stopLocalVideo", "cancelEventLoop", "cancelMediaDownload", "cancelMediaUpload",
+  for (const name of ["releaseHeldAutofocusForLifecycle", "cancelCameraFocusInfo", "stopLiveLoop", "stopLocalVideo", "cancelEventLoop", "cancelMediaDownload", "cancelMediaUpload",
     "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh", "closeMediaPreview",
     "closeMediaDetails", "releaseObjectUrl", "clearBulbTimer", "renderHealth"]) context[name] = () => {};
   const names = ["recordingRecoveryActive", "mediaTransferActive", "cameraInteractionBusy", "mediaAutoImportEligible", "ownsMediaAutoImport",

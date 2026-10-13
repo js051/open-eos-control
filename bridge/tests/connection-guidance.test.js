@@ -52,6 +52,7 @@ function context() {
     featureSupported: () => false, isBulbMode: () => false, temperatureAllows: () => true,
     shutterAFSupported: () => false, canChangeShutterAF: () => false, localPreviewSelected: () => false,
     shutterReleaseUnconfirmed: () => false, effectiveTapAction: () => null,
+    renderHeldAutofocus() {}, cameraFocusInfoEligible: () => false, cancelCameraFocusInfo() {},
     renderLiveMagnification() {}, renderMediaTransfer() {}, renderLatestMedia() {}, renderMediaDetails() {},
     clampFps: value => value, captureModeFromCamera: () => "photo", syncLiveMagnificationFromCapabilities() {},
     setOperationState() {}, writeCameraPreference() {}, renderSession() {}, startEventLoop() {},
