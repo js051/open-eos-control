@@ -54,7 +54,8 @@ class RecordingResponseShapeTest {
                 val result = runCatching {
                     if (command == RecordingCommand.START) client.startRecording() else client.stopRecording()
                 }
-                val detail = "$command ${case.body}"
+                val detail = "$command ${case.body}; failure=" + generateSequence(result.exceptionOrNull()) { it.cause }
+                    .take(8).joinToString(" -> ") { "${it.javaClass.name}: ${it.message}" }
                 assertEquals(detail, case.valid, result.isSuccess)
                 if (case.valid) assertEquals(detail, case.recording, result.getOrThrow().recording)
                 else {

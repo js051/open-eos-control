@@ -554,8 +554,7 @@ class DesktopBridgeClient(
                 else -> throw exception
             }
         } catch (exception: Exception) {
-            if (evidence.unresolved && (exception is IOException || exception is org.json.JSONException ||
-                    exception.cause is org.json.JSONException)) {
+            if (evidence.unresolved && (exception is IOException || exception is org.json.JSONException)) {
                 throw RecordingCommandUnconfirmedException(command, exception)
             }
             throw exception
@@ -1233,8 +1232,14 @@ class DesktopBridgeClient(
                     throw failure
                 }
                 session?.let(::requireCurrentSession)
-                val parsed = runCatching { JSONObject(body) }
-                    .getOrElse { throw IllegalStateException("Desktop Bridge returned invalid JSON for ${request.url.encodedPath}.", it) }
+                val parsed = runCatching { JSONObject(body) }.getOrElse {
+                    // Classify at the REC response boundary: coroutine stack recovery can
+                    // wrap an IllegalStateException and change the immediate cause later.
+                    if (recordingEvidence != null && it is org.json.JSONException) {
+                        throw RecordingCommandUnconfirmedException(recordingEvidence.command, it)
+                    }
+                    throw IllegalStateException("Desktop Bridge returned invalid JSON for ${request.url.encodedPath}.", it)
+                }
                 if (observeStatus && session != null && revision != null) session.observe(parseStatus(parsed), revision)
                 parsed
             }
