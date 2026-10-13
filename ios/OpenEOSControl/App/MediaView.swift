@@ -1206,6 +1206,7 @@ private struct MediaPreviewView: View {
                         RotatingControl(degrees: controlRotation) {
                             Image(systemName: "xmark")
                                 .frame(width: 48, height: 48)
+                                .contentShape(Rectangle())
                                 .accessibilityLabel(Text("close_media_preview"))
                         }
                     }
@@ -1243,6 +1244,7 @@ private struct MediaPreviewView: View {
                                 RotatingControl(degrees: controlRotation) {
                                     Image(systemName: "ellipsis")
                                         .frame(width: 48, height: 48)
+                                        .contentShape(Rectangle())
                                         .accessibilityLabel(Text(language.format("media_actions", item.name)))
                                 }
                             }

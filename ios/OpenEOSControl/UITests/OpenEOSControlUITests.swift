@@ -1571,8 +1571,14 @@ final class OpenEOSControlUITests: XCTestCase {
             // The production app has prepared the original for handoff. This does
             // not assert decoded playback or saving into an external Files/Photos app.
             addScreenshot(name: "recording-review-original-share-\(language)")
-            try tapForAsyncTest(app.buttons["close-media-preview"])
-            try tapForAsyncTest(app.buttons["media-back-button"])
+            let closePreview = app.buttons["close-media-preview"]
+            _ = try XCTUnwrap(waitForInteraction(closePreview, timeout: 5) ? true : nil)
+            XCTAssertGreaterThanOrEqual(closePreview.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(closePreview.frame.height, 44)
+            try tapForAsyncTest(closePreview)
+            let mediaBack = app.buttons["media-back-button"]
+            _ = try XCTUnwrap(waitForInteraction(mediaBack, timeout: 5) ? true : nil)
+            try tapForAsyncTest(mediaBack)
             try openMoreActionsForAsyncTest(in: app, context: "\(language): after recording video review")
             guard try tapCameraActionForAsyncTest(app.buttons["disconnect-menu-button"], in: app) else { return }
             _ = try XCTUnwrap(waitForConnectionScreen(in: app, timeout: 15) ? true : nil)

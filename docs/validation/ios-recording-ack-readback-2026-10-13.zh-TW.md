@@ -63,3 +63,11 @@
 事件／AX 紀錄的 Download frame 為 17×17 pt，與原 label 的 48×48 layout 不同。點擊 (314.2, 90.2) 位於圖示青色箭桿，因此「點到空心中心」不符合畫面證據。最小候選為同位置 Download／Cancel／Share 三個按鈕 label 的既有 48×48 frame 明確設定矩形 content shape；不攔截整個播放器、不改按鍵座標、不增加重試或時間。REC journey 同時要求 Download 暴露至少 44×44 pt 觸控框，再沿用原單次 tap、Share 等待、原檔與相機命令斷言。
 
 此觸控區域修正尚未執行 Swift／UI runtime。AX frame 狹小是實際觀察，尚不足以證明它是手勢未呼叫 action 的唯一原因；後續必須由同旅程結果與 stage trace 判定，不以 source review 宣告已修復。
+
+## 後續 header 旅程結果與同群修正
+
+`d4ba7965a6d4254f00d1f38f56c39723b0b66d11`／CI `38361569576` 的 App 401 項通過；原 REC journey 已於 07:27:23 UTC 通過 Download ≥44 pt、單次下載、Share 與原相機命令斷言。這證明該次 action 可達，不證明原 17 pt AX frame 是唯一根因。
+
+同一次旅程接著在 Close→Back 失敗：07:27:23.698 Close tap 後，07:27:24.257 的 Back 被 XCTest 算出 (-1,-1) hit point，無法完成 scroll-to-visible，最終原 recorded-failure 檢查失敗。UI 38 項中同一 case 記錄兩項 failures，原 run 維持失敗。日誌不充分證明 Close 的唯一失效機制。
+
+本輪完整群將同 header 的 Close／More 既有 48 pt label 加上矩形 content shape；REC journey 在原單次 Close 前要求互動可用與 ≥44 pt frame，Close 後要求 Back 互動可用再執原 tap。使用既有5秒互動 helper，不改 Share15秒、內容、命令或重拍斷言，不新增重試。frame 大小與中心 tap 不是邊緣 hit coverage，More 與實際整個 journey 仍需新 head UI 執行。此 source candidate 與 REC UNKNOWN 群整批驗證，不繼承上述 App 成功。

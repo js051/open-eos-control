@@ -690,3 +690,9 @@
 "recording_start_status_unknown" = "相機已接受開始指令，但錄影狀態不明。請重新整理狀態，或明確停止錄影。";
 "recording_stop_status_unknown" = "相機已接受停止指令，但尚未確認停止狀態。請重新整理狀態，或明確停止錄影。";
 "recording_start_not_confirmed" = "相機回報目前未錄影，尚未確認開始錄影。";
+
+"recording_command_unconfirmed" = "錄影指令結果未知，相機可能仍在錄影。重新整理可能只讀到快取，無法確認已停止；請檢查相機並按下停止。";
+"previous_recording_warning" = "尚未確認上一台相機已停止錄影，請直接檢查該相機。連接其他相機不會停止上一台相機。";
+"confirm_previous_recording_stopped" = "我已檢查上一台相機";
+"previous_recording_physically_verified" = "上一台相機已停止錄影";
+"previous_recording_confirmation_help" = "請直接檢查上一台相機後再確認。此操作只關閉警示，不會發送指令。";

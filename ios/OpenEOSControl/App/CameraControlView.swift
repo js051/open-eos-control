@@ -417,9 +417,11 @@ private struct CaptureBar: View {
                 .padding(.bottom, 6)
             }
 
-            if let recovery = camera.recordingReadbackRecovery {
+            if let recovery = camera.recordingRecovery {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(LocalizedStringKey(recovery.starting ? "recording_start_status_unknown" : "recording_stop_status_unknown"))
+                    Text(LocalizedStringKey(camera.recordingCommandRecovery != nil
+                        ? "recording_command_unconfirmed"
+                        : recovery.starting ? "recording_start_status_unknown" : "recording_stop_status_unknown"))
                         .font(.caption)
                         .foregroundStyle(Color.cameraWarning)
                         .fixedSize(horizontal: false, vertical: true)
@@ -594,7 +596,7 @@ private struct CaptureBar: View {
                             .frame(width: 40, height: 40)
                     } else if camera.captureMode == .video {
                         RoundedRectangle(cornerRadius: camera.recordingStopRequired ? 5 : 25)
-                            .fill(camera.recordingReadbackRecovery != nil ? Color.cameraWarning : Color.cameraRecording)
+                            .fill(camera.recordingRecovery != nil ? Color.cameraWarning : Color.cameraRecording)
                             .frame(width: camera.recordingStopRequired ? 28 : 54, height: camera.recordingStopRequired ? 28 : 54)
                     } else {
                         Group {
