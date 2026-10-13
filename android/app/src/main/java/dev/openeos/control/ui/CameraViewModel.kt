@@ -882,6 +882,7 @@ class CameraViewModel(
                 info = session.info,
                 status = session.status,
                 shutterReleaseUnconfirmed = session.status.shutterReleaseUnconfirmed == true,
+                liveViewStopUnconfirmed = session.liveViewStartError != null && repository.isLiveViewStopRequired(),
                 capabilities = session.capabilities,
                 networkDiagnostics = session.networkDiagnostics,
                 liveViewFrameUrl = session.liveViewFrameUrl,
@@ -930,6 +931,7 @@ class CameraViewModel(
         val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
         val previousState = _uiState.value
         val recordingWarning = retireRecordingAttempt(previousState)
+        val liveViewWarning = previousState.liveViewDisconnectWarning || previousState.needsLiveViewStopRecovery
         val shutterWarning = previousState.shutterDisconnectWarning || previousState.shutterReleaseUnconfirmed ||
             previousState.bulbExposureActive || CameraOperation.CAPTURE in previousState.pendingOperations ||
             CameraOperation.SHUTTER_RELEASE in previousState.pendingOperations
@@ -964,6 +966,7 @@ class CameraViewModel(
                 it.withClearedSession(baseUrl = it.baseUrl, error = null).copy(
                     pendingOperations = emptySet(), shutterDisconnectWarning = shutterWarning,
                     recordingDisconnectWarning = recordingWarning,
+                    liveViewDisconnectWarning = liveViewWarning,
                 )
             }
             return
@@ -974,7 +977,8 @@ class CameraViewModel(
             uploadJob?.join()
             uploadCleanupJob?.join()
             focusJob?.join()
-            repository.disconnect()
+            val unconfirmed = repository.disconnect()
+            if (unconfirmed) _uiState.update { it.copy(liveViewDisconnectWarning = true) }
         }
         disconnectJob = job
         job.invokeOnCompletion { if (disconnectJob === job) disconnectJob = null }
@@ -983,6 +987,7 @@ class CameraViewModel(
             it.withClearedSession(baseUrl = it.baseUrl, error = null).copy(
                 pendingOperations = emptySet(), shutterDisconnectWarning = shutterWarning,
                 recordingDisconnectWarning = recordingWarning,
+                liveViewDisconnectWarning = liveViewWarning,
             )
         }
     }
@@ -1137,12 +1142,15 @@ class CameraViewModel(
         if (generation != cameraSessionGeneration) return@withLock
         val state = _uiState.value
         if (
-            !state.connected || state.previewMode || !state.supports(CameraFeature.LIVE_VIEW)
+            !state.connected || state.previewMode ||
+                (!state.supports(CameraFeature.LIVE_VIEW) && !repository.isLiveViewStopRequired())
         ) return@withLock
         // Do not change the camera's remote-view session in the middle of a bulb exposure.
         if (state.bulbExposureActive || state.shutterReleaseUnconfirmed) return@withLock
         if (state.pendingOperations.any { it in LIVE_VIEW_INTERLOCK_OPERATIONS }) return@withLock
-        val enabled = appInForeground && state.liveViewAutoRefresh && state.liveViewTemperatureAllowed
+        val stopOnly = state.needsLiveViewStopRecovery ||
+            (!state.supports(CameraFeature.LIVE_VIEW) && repository.isLiveViewStopRequired())
+        val enabled = !stopOnly && appInForeground && state.liveViewAutoRefresh && state.liveViewTemperatureAllowed
         val hasPresentation = state.nativeLiveViewSession != null || state.liveViewBitmap != null || state.liveViewFrameUrl != null
         if (enabled == repository.isLiveViewRunning() && !restart && (!enabled || hasPresentation) &&
             (enabled || !repository.isLiveViewStopRequired())) return@withLock
@@ -1162,6 +1170,9 @@ class CameraViewModel(
             if (generation != cameraSessionGeneration || _uiState.value.info !== state.info) return@withLock
             _uiState.update {
                 it.copy(
+                    liveViewStopUnconfirmed = false,
+                    status = if (stopOnly) it.status?.copy(liveViewStopUnconfirmed = false) else it.status,
+                    liveViewAutoRefresh = if (stopOnly) false else it.liveViewAutoRefresh,
                     error = if (it.errorOperation == CameraOperation.LIVE_VIEW) null else it.error,
                     errorOperation = it.errorOperation.takeUnless { operation -> operation == CameraOperation.LIVE_VIEW },
                 )
@@ -1195,11 +1206,18 @@ class CameraViewModel(
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
-            if (generation == cameraSessionGeneration && _uiState.value.info === state.info) throw exception
+            if (generation == cameraSessionGeneration && _uiState.value.info === state.info) {
+                _uiState.update { it.copy(liveViewStopUnconfirmed = repository.isLiveViewStopRequired()) }
+                throw exception
+            }
         } finally {
             if (generation == cameraSessionGeneration && _uiState.value.info === state.info) {
                 cameraStateRevision += 1
-                _uiState.update { it.copy(pendingOperations = it.pendingOperations - CameraOperation.LIVE_VIEW) }
+                _uiState.update { it.copy(
+                    pendingOperations = it.pendingOperations - CameraOperation.LIVE_VIEW,
+                    liveViewStopUnconfirmed = it.liveViewStopUnconfirmed ||
+                        (repository.isLiveViewStopRequired() && !repository.isLiveViewRunning()),
+                ) }
             }
         }
     }
@@ -1608,6 +1626,7 @@ class CameraViewModel(
     }
 
     private fun adoptShutterReleaseStatus(status: CameraStatus) {
+        _uiState.update { it.adoptLiveViewStopWarning(status) }
         if (status.shutterReleaseUnconfirmed == true) markShutterReleaseUnconfirmed()
     }
 
@@ -3865,6 +3884,7 @@ class CameraViewModel(
         autofocusHoldState = AutofocusHoldState.IDLE,
         shutterAutofocus = true,
         shutterReleaseUnconfirmed = false,
+        liveViewStopUnconfirmed = false,
         pendingOperations = pendingOperations - CameraOperation.FOCUS,
         baseUrl = baseUrl,
         previewMode = false,

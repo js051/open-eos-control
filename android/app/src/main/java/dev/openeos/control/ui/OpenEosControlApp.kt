@@ -310,14 +310,16 @@ internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit
                 if (state.transport == CameraTransport.DESKTOP_BRIDGE) R.string.bridge_shutter_release_unconfirmed
                 else R.string.shutter_release_unconfirmed,
             )
+            state.needsLiveViewStopRecovery -> stringResource(R.string.live_view_stop_unconfirmed)
             state.error != null && (state.connected || state.connectionRecovery == null) -> state.error
             state.recordingStartNotConfirmed -> stringResource(R.string.recording_start_not_confirmed)
             state.recordingDisconnectWarning -> stringResource(R.string.recording_disconnect_warning)
             state.shutterDisconnectWarning -> stringResource(R.string.shutter_disconnect_warning)
+            state.liveViewDisconnectWarning -> stringResource(R.string.live_view_disconnect_warning)
             else -> null
         },
         onDismiss,
-        dismissible = !state.shutterReleaseUnconfirmed,
+        dismissible = !state.shutterReleaseUnconfirmed && !state.needsLiveViewStopRecovery,
     )
 }
 

@@ -1,0 +1,17 @@
+# Android Bridge Live View 停止責任候選
+
+原 Android direct CCAPI 已有 pending stop；Bridge client 尚未將開始回應遺失／停止失敗接入相同 repository 的停止恢復機制。本批只對齊此原 P1 路徑，沒有改 direct CCAPI 或新增相機命令。
+
+Start dispatch 前保留原 Bridge session object 與固定 Stop URL。新 Start 在責任存在時拒絕；Stop 成功前不清除，取消不代表相機沒有收到命令。Backend 的 `liveViewStopRequired` 接既有 repository/UI，既有關閉預覽動作可重試相同 Stop。Close 退休舊 session，重用 wire ID 的新 session 不繼承舊責任。
+
+新增 optional `CameraStatus.liveViewStopUnconfirmed`；只有 true 會建立未確認責任，false／缺欄位不解除已有責任。狀態讀取以 session 與本地 lifecycle revision 隔離，停止跨過舊讀取時必須重讀，不能將舊 true 寫回停止後的新狀態。
+
+Stop 需收到 `active=false` 及明確 `liveViewStopUnconfirmed=false`。已確認合法 Start 的第一次 Stop 可相容舊版只有 active=false；一旦 Start 或 Stop 不確定，舊版 bare false 不再證明停止成功。錯誤或不合法型別保留責任，不自動重試 Start。
+
+Start 接納時同時記錄 lifecycle revision；若 HTTP 回應等待期間收到新的停止警告，延遲抵達的 `active=true` 不得恢復舊版 Stop 相容資格，原停止責任仍保留。`DesktopBridgeLiveViewRecoveryTest.lateStartAcknowledgementCannotRestoreRevokedLegacyStopProof` 以受控延遲涵蓋 Start → 狀態 true → 延遲 Start ACK → bare false 拒絕 → 明確 false 恢復；此測試與 Kotlin 編譯目前均為 `NOT_RUN`。
+
+新增 MockWebServer 單元來源涵蓋：Start ACK 遺失、Stop 失敗及重試、legacy 正反控制、不合法 Stop 證據、狀態 true/false、延遲狀態跨 Stop、取消及同 ID 新 session。當地 Kotlin 編譯與 runtime 尚未執行，不能將這些來源稱紅綠已證；exact-head 必要 CI 待本完整批次批准的 runner 範圍與正常交付。
+
+這是合成 Bridge 通訊測試候選，不是實體相機停止或 Android 背景生命週期證據。公開欄位向後相容，沒有憑證、來源路徑或其他產品內部資訊。
+
+UI 會持續保留本連線的停止警告，後續 false／缺欄位狀態不能清掉。即使 Live View capability 消失，仍提供既有 Stop 重試；確認停止只清理原責任，不隱式再 Start。斷線時 repository 仍嘗試原停止與關閉，若結果未確認，UI 保留「前一台相機」警告而不將責任轉給新連線。新增 14 個 HTTP／repository 測試方法及 3 個 UI-state 測試方法；全部 Kotlin 執行與編譯仍為 NOT_RUN。

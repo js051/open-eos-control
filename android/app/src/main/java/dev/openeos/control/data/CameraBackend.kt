@@ -339,6 +339,9 @@ class DesktopBridgeCameraBackend(
 
     override val prefersBitmapLiveViewFrames: Boolean = true
 
+    override val liveViewStopRequired: Boolean
+        get() = client.liveViewStopRequired
+
     override val networkDiagnostics: CameraNetworkDiagnostics
         get() = httpTransport.diagnosticsProvider()
 

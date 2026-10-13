@@ -68,10 +68,9 @@ fun DebugScreen(
             ToolIconButton(LucideR.drawable.lucide_ic_refresh_cw, stringResource(R.string.refresh), actions.refresh, enabled = !state.isBusy(CameraOperation.STATUS))
             ToolIconButton(
                 LucideR.drawable.lucide_ic_rotate_ccw,
-                stringResource(if (state.liveViewAutoRefresh) R.string.restart_live_view else R.string.stop_remote_live_view),
+                stringResource(if (state.liveViewAutoRefresh && !state.needsLiveViewStopRecovery) R.string.restart_live_view else R.string.stop_remote_live_view),
                 actions.restartLiveView,
-                enabled = state.supports(CameraFeature.LIVE_VIEW) && !state.isBusy(CameraOperation.LIVE_VIEW) &&
-                    (state.liveViewAutoRefresh || state.errorOperation == CameraOperation.LIVE_VIEW),
+                enabled = state.liveViewRecoveryActionEnabled(),
             )
             ToolIconButton(LucideR.drawable.lucide_ic_usb, stringResource(R.string.usb_scan), actions.refreshUsb, enabled = !state.isBusy(CameraOperation.USB))
         }

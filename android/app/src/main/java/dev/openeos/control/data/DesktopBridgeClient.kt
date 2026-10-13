@@ -2,6 +2,7 @@ package dev.openeos.control.data
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.currentCoroutineContext
@@ -113,6 +114,16 @@ class DesktopBridgeClient(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private var sessionId: String? = null
     @Volatile private var shutterSession: BridgeShutterReleaseSession? = null
+    private class LiveViewStopOwner(
+        val session: BridgeShutterReleaseSession,
+        val stopUrl: HttpUrl,
+        var confirmedStart: Boolean = false,
+    )
+    @Volatile private var liveViewStopOwner: LiveViewStopOwner? = null
+    @Volatile private var liveViewRevision = 0L
+    private val liveViewStateLock = Any()
+    val liveViewStopRequired: Boolean
+        get() = liveViewStopOwner?.let { it.session === shutterSession && !it.session.closed } == true
     private var sessionCameraModel: String? = null
     private var eventPollingSupported = false
     private var shutterAutofocusSupported = false
@@ -157,6 +168,7 @@ class DesktopBridgeClient(
             } finally {
                 session.close()
                 if (shutterSession === session) {
+                    if (liveViewStopOwner?.session === session) liveViewStopOwner = null
                     shutterSession = null
                     sessionId = null
                     sessionCameraModel = null
@@ -189,9 +201,23 @@ class DesktopBridgeClient(
         while (true) {
             requireCurrentSession(session)
             val revision = session.revision
+            val liveRevision = liveViewRevision
             val status = readBridgeStatus(session)
             requireCurrentSession(session)
-            if (session.observe(status, revision)) return session.decorate(status)
+            val observed = synchronized(liveViewStateLock) {
+                requireCurrentSession(session)
+                if (liveRevision != liveViewRevision) return@synchronized false
+                if (status.liveViewStopUnconfirmed == true) {
+                    // Fresh uncertainty also revokes a known Start's legacy-stop exemption.
+                    val owner = liveViewStopOwner?.takeIf { it.session === session }
+                        ?: LiveViewStopOwner(session, endpoint("v1", "session", session.id, "liveview", "stop"))
+                    owner.confirmedStart = false
+                    liveViewStopOwner = owner
+                    liveViewRevision += 1
+                }
+                session.observe(status, revision)
+            }
+            if (observed) return session.decorate(status)
             // A stop crossed this read. Re-read status, never a command. Observing this read's
             // own warning must not trigger another request that could hide valid safety data.
         }
@@ -612,18 +638,62 @@ class DesktopBridgeClient(
     }
 
     suspend fun startLiveView(request: LiveViewRequest) {
-        postJson(
-            sessionEndpoint("liveview", "start"),
-            JSONObject()
-                .put("fps", request.fps)
-                .put("size", request.size.name)
-                .put("source", request.source.name),
-        )
-        observedFeatures.add(CameraFeature.LIVE_VIEW)
+        val session = requireShutterSession()
+        session.mutex.withLock {
+            requireCurrentSession(session)
+            currentCoroutineContext().ensureActive()
+            val owner = LiveViewStopOwner(session, endpoint("v1", "session", session.id, "liveview", "stop"))
+            // Record the original endpoint before the Start request can reach Bridge.
+            val startRevision = synchronized(liveViewStateLock) {
+                check(!liveViewStopRequired) { "Retry stopping Live View before starting again." }
+                liveViewStopOwner = owner
+                liveViewRevision += 1
+                liveViewRevision
+            }
+            val response = postJson(
+                endpoint("v1", "session", session.id, "liveview", "start"),
+                JSONObject().put("fps", request.fps).put("size", request.size.name).put("source", request.source.name),
+            )
+            requireCurrentSession(session)
+            check(response.opt("active") == true) { "Desktop Bridge did not confirm Live View start." }
+            synchronized(liveViewStateLock) {
+                // A delayed Start acknowledgement cannot undo a newer Stop warning.
+                if (liveViewStopOwner === owner && liveViewRevision == startRevision) owner.confirmedStart = true
+                liveViewRevision += 1
+            }
+            observedFeatures.add(CameraFeature.LIVE_VIEW)
+        }
     }
 
-    suspend fun stopLiveView() {
-        postJson(sessionEndpoint("liveview", "stop"), JSONObject())
+    suspend fun stopLiveView() = withContext(NonCancellable) {
+        val session = requireShutterSession()
+        session.mutex.withLock {
+            requireCurrentSession(session)
+            val (owner, legacyStopAllowed, stopRevision) = synchronized(liveViewStateLock) {
+                val current = liveViewStopOwner?.takeIf { it.session === session }
+                    ?: LiveViewStopOwner(session, endpoint("v1", "session", session.id, "liveview", "stop"))
+                val legacy = current.confirmedStart
+                current.confirmedStart = false
+                liveViewStopOwner = current
+                liveViewRevision += 1
+                Triple(current, legacy, liveViewRevision)
+            }
+            val response = postJson(owner.stopUrl, JSONObject())
+            requireCurrentSession(session)
+            synchronized(liveViewStateLock) {
+                requireCurrentSession(session)
+                val explicit = response.opt("liveViewStopUnconfirmed")
+                val legacyStillValid = legacyStopAllowed && liveViewRevision == stopRevision
+                check(response.opt("active") == false && (explicit == false ||
+                    (legacyStillValid && (!response.has("liveViewStopUnconfirmed") || response.isNull("liveViewStopUnconfirmed"))))) {
+                    "Live View stop was not confirmed. Retry Stop; update an older Bridge if it cannot confirm the stop."
+                }
+                if (liveViewStopOwner === owner) {
+                    liveViewStopOwner = null
+                    liveViewRevision += 1
+                }
+            }
+        }
     }
 
     fun liveViewFrameUrl(cacheKey: Long): String = frameUrl(cacheKey).toString()
@@ -1115,6 +1185,7 @@ class DesktopBridgeClient(
             rawTransportJson = raw.toString(),
             bulbExposureActive = body.opt("bulbExposureActive") as? Boolean,
             shutterReleaseUnconfirmed = body.opt("shutterReleaseUnconfirmed") as? Boolean,
+            liveViewStopUnconfirmed = body.opt("liveViewStopUnconfirmed") as? Boolean,
             lens = body.optJSONObject("lens")?.let { lens ->
                 val mounted = lens.opt("mounted") as? Boolean
                 val name = lens.opt("name") as? String
