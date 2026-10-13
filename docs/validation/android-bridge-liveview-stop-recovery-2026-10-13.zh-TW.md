@@ -10,8 +10,10 @@ Stop 需收到 `active=false` 及明確 `liveViewStopUnconfirmed=false`。已確
 
 Start 接納時同時記錄 lifecycle revision；若 HTTP 回應等待期間收到新的停止警告，延遲抵達的 `active=true` 不得恢復舊版 Stop 相容資格，原停止責任仍保留。`DesktopBridgeLiveViewRecoveryTest.lateStartAcknowledgementCannotRestoreRevokedLegacyStopProof` 以受控延遲涵蓋 Start → 狀態 true → 延遲 Start ACK → bare false 拒絕 → 明確 false 恢復；此測試與 Kotlin 編譯目前均為 `NOT_RUN`。
 
+Start 回應即使包含 `active=true`，若同時傳回明確 Boolean `liveViewStopUnconfirmed=true`，仍拒絕開始成功、保留原停止責任且不給予舊版 Stop 相容資格。此 optional 欄位維持既有相容處理，不強制轉型；缺欄位或 null 的合法 Start 仍可相容舊版第一次 Stop。`startStopWarningCannotGrantLegacyStopProof` 涵蓋明確 true 拒絕及明確 Stop false 恢復；既有 `knownSuccessfulLegacyStartStopRemainsCompatible` 增加 null 正向控制，執行狀態均為 `NOT_RUN`。
+
 新增 MockWebServer 單元來源涵蓋：Start ACK 遺失、Stop 失敗及重試、legacy 正反控制、不合法 Stop 證據、狀態 true/false、延遲狀態跨 Stop、取消及同 ID 新 session。當地 Kotlin 編譯與 runtime 尚未執行，不能將這些來源稱紅綠已證；exact-head 必要 CI 待本完整批次批准的 runner 範圍與正常交付。
 
 這是合成 Bridge 通訊測試候選，不是實體相機停止或 Android 背景生命週期證據。公開欄位向後相容，沒有憑證、來源路徑或其他產品內部資訊。
 
-UI 會持續保留本連線的停止警告，後續 false／缺欄位狀態不能清掉。即使 Live View capability 消失，仍提供既有 Stop 重試；確認停止只清理原責任，不隱式再 Start。斷線時 repository 仍嘗試原停止與關閉，若結果未確認，UI 保留「前一台相機」警告而不將責任轉給新連線。新增 14 個 HTTP／repository 測試方法及 3 個 UI-state 測試方法；全部 Kotlin 執行與編譯仍為 NOT_RUN。
+UI 會持續保留本連線的停止警告，後續 false／缺欄位狀態不能清掉。即使 Live View capability 消失，仍提供既有 Stop 重試；確認停止只清理原責任，不隱式再 Start。斷線時 repository 仍嘗試原停止與關閉，若結果未確認，UI 保留「前一台相機」警告而不將責任轉給新連線。新增 15 個 HTTP／repository 測試方法及 3 個 UI-state 測試方法；全部 Kotlin 執行與編譯仍為 NOT_RUN。
