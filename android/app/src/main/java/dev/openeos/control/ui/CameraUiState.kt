@@ -87,6 +87,8 @@ data class CameraUiState(
     val shutterAutofocus: Boolean = true,
     val shutterReleaseUnconfirmed: Boolean = false,
     val shutterDisconnectWarning: Boolean = false,
+    val liveViewStopUnconfirmed: Boolean = false,
+    val liveViewDisconnectWarning: Boolean = false,
     val connectionTarget: ConnectionTarget = ConnectionTarget.CCAPI,
     val baseUrl: String = CameraRepository.DEFAULT_CAMERA_BASE_URL,
     val ccapiSimulatorMode: Boolean? = null,
@@ -191,6 +193,13 @@ data class CameraUiState(
     val busy: Boolean
         get() = pendingOperations.isNotEmpty() || bulbExposureActive || shutterReleaseUnconfirmed
 
+    val needsLiveViewStopRecovery: Boolean
+        get() = liveViewStopUnconfirmed || status?.liveViewStopUnconfirmed == true
+
+    fun liveViewRecoveryActionEnabled(): Boolean =
+        (supports(CameraFeature.LIVE_VIEW) || needsLiveViewStopRecovery) && !isBusy(CameraOperation.LIVE_VIEW) &&
+            (liveViewAutoRefresh || needsLiveViewStopRecovery || errorOperation == CameraOperation.LIVE_VIEW)
+
     val recordingStopAvailable: Boolean
         get() = pendingRecordingCommand != null || status?.recording == true
 
@@ -253,11 +262,15 @@ internal fun CameraUiState.canEnableForegroundJpegImport(platformSupported: Bool
         foregroundJpegImport.phase in setOf(ForegroundImportPhase.OFF, ForegroundImportPhase.STOPPED) &&
         foregroundImportCameraIdle()
 
+internal fun CameraUiState.adoptLiveViewStopWarning(status: CameraStatus): CameraUiState =
+    if (status.liveViewStopUnconfirmed == true) copy(liveViewStopUnconfirmed = true) else this
+
 internal fun CameraUiState.dismissVisibleCameraMessage(): CameraUiState = when {
-    shutterReleaseUnconfirmed || pendingRecordingCommand != null -> this
+    shutterReleaseUnconfirmed || needsLiveViewStopRecovery || pendingRecordingCommand != null -> this
     error != null || connectionRecovery != null -> copy(error = null, errorOperation = null, connectionRecovery = null)
     recordingStartNotConfirmed -> copy(recordingStartNotConfirmed = false)
     recordingDisconnectWarning -> copy(recordingDisconnectWarning = false)
+    liveViewDisconnectWarning -> copy(liveViewDisconnectWarning = false)
     else -> copy(errorOperation = null, shutterDisconnectWarning = false)
 }
 

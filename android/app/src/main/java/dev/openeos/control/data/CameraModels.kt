@@ -426,6 +426,7 @@ data class CameraStatus(
     val bulbExposureActive: Boolean? = null,
     // null preserves the distinction between an older Bridge and explicit release evidence.
     val shutterReleaseUnconfirmed: Boolean? = null,
+    val liveViewStopUnconfirmed: Boolean? = null,
     val lens: LensStatus? = null,
     val temperature: CameraTemperatureStatus? = null,
 )
