@@ -30,3 +30,11 @@ Impact: patch, a backward-compatible recovery fix for existing REC control. No v
 ## Complete UI recovery journey
 
 The existing real Compose → ViewModel → synthetic HTTP → Media3/MediaStore journey now also covers Start ACK/status failure → visible Stop-only controls → failed read-only Refresh with no replay → explicit Stop ACK/status failure → successful read-only Refresh → newly visible video preview and exact saved original. This additional instrumentation test is NOT_RUN locally; original assertions and timeouts remain. The native canonical recording boolean remains the established ACK-derived cache, not independent physical REC observation.
+
+## First exact-head CI result and lost-ACK fixture isolation
+
+At head `e13e381d432cc0f5c50475bbb0bb759916170501`, run `38360643375` executed 1,124 JVM tests with one failure. The new lost-acknowledgement fixture expected dispatched paths `[start, stop]` but observed `[start]`. Its two commands shared the transport deliberately broken by the first response loss. Both returned untyped failures, but the fixture did not retain either exception or the incoming request queue. This evidence does not establish which connection boundary failed or prove a product Stop defect. The original failure remains unresolved transport-sequence evidence.
+
+The revised fixture independently injects `DISCONNECT_AFTER_REQUEST` for each direction with a fresh peer and client. Each case requires one complete queued POST with the exact path and no request-read failure, exactly one dispatched action and total request, no status GET, and a non-null failure that is neither acknowledged-readback recovery nor cancellation. Aggregate direction coverage remains `[start, stop]`. The injected client permits ordinary connection retries so the production mutation client and one-shot request enforce no replay. No sleeps, manual retries, pool eviction, or production changes are introduced.
+
+This is independent lost-ACK typing/no-replay coverage, not a same-client reconnection guarantee. The revised Kotlin fixture is source-reviewed only until its own exact-head CI executes; previous successful cases do not validate the modified source.

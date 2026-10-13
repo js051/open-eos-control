@@ -117,32 +117,47 @@ class RecordingStatusReadbackTest {
     }
 
     @Test fun lostCommandAcknowledgementNeverBecomesTypedRecoveryOrGetsReplayed() = runBlocking {
-        val server = MockWebServer()
-        val actions = CopyOnWriteArrayList<String>()
-        val reads = CopyOnWriteArrayList<String>()
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = when {
-                request.path.orEmpty().startsWith("/ccapi/record/") -> {
-                    actions += request.path!!
-                    MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
+        val allActions = mutableListOf<String>()
+        // Each direction gets an independent transport: the contract here is
+        // loss after a complete command, not recovery of a prior broken socket.
+        for (command in RecordingCommand.entries) {
+            val server = MockWebServer()
+            val actions = CopyOnWriteArrayList<String>()
+            val reads = CopyOnWriteArrayList<String>()
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse = when {
+                    request.path.orEmpty().startsWith("/ccapi/record/") -> {
+                        actions += request.path!!
+                        MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
+                    }
+                    else -> { reads += request.path.orEmpty(); json() }
                 }
-                else -> { reads += request.path.orEmpty(); json() }
             }
-        }
-        server.start()
-        val client = CcapiClient(server.url("/").toString(), treatAsSimulator = true, httpClient = http())
-        try {
-            client.initialize()
-            for (command in RecordingCommand.entries) {
+            server.start()
+            val client = CcapiClient(server.url("/").toString(), treatAsSimulator = true, httpClient = http().newBuilder().retryOnConnectionFailure(true).build())
+            try {
+                client.initialize()
                 val failure = runCatching {
                     if (command == RecordingCommand.START) client.startRecording() else client.stopRecording()
                 }.exceptionOrNull()
-                assertNotNull(failure)
-                assertFalse(failure is RecordingStatusReadbackException)
-            }
-            assertEquals(listOf("/ccapi/record/start", "/ccapi/record/stop"), actions.toList())
-            assertTrue(reads.isEmpty())
-        } finally { client.close(); server.shutdown() }
+                val detail = "$command: ${failure?.javaClass?.name}: ${failure?.message}"
+                assertNotNull(detail, failure)
+                assertFalse(detail, failure is RecordingStatusReadbackException)
+                assertFalse(detail, failure is CancellationException)
+                val request = server.takeRequest(2, TimeUnit.SECONDS)
+                assertNotNull(detail, request)
+                val received = requireNotNull(request)
+                assertNull("$detail; incomplete request: ${received.failure}", received.failure)
+                assertEquals(detail, "POST", received.method)
+                val expectedPath = if (command == RecordingCommand.START) "/ccapi/record/start" else "/ccapi/record/stop"
+                assertEquals(detail, expectedPath, received.path)
+                assertEquals(detail, listOf(expectedPath), actions.toList())
+                assertEquals(detail, 1, server.requestCount)
+                assertTrue(detail, reads.isEmpty())
+                allActions += actions
+            } finally { client.close(); server.shutdown() }
+        }
+        assertEquals(listOf("/ccapi/record/start", "/ccapi/record/stop"), allActions)
     }
 
     @Test fun cancelledRequiredReadbackRemainsCancellation() = runBlocking {
