@@ -13,9 +13,10 @@ import org.junit.Test
 
 class CameraUiStateTest {
     @Test fun pendingRecordingBlocksPhotoAndPreservesStopDuringForegroundImport() {
-        for (command in dev.openeos.control.data.RecordingCommand.entries) {
+        for (command in dev.openeos.control.data.RecordingCommand.entries) for (unconfirmed in listOf(false, true)) {
             val state = CameraUiState().withOfflinePreview().copy(
                 pendingRecordingCommand = command,
+                recordingCommandUnconfirmed = unconfirmed,
                 pendingOperations = setOf(CameraOperation.MEDIA),
                 foregroundJpegImport = ForegroundJpegImportStatus(phase = ForegroundImportPhase.SAVING),
             )
@@ -28,6 +29,14 @@ class CameraUiStateTest {
             assertFalse(state.foregroundImportCameraIdle())
             assertEquals(state, state.dismissVisibleCameraMessage())
         }
+    }
+
+    @Test fun previousCameraRecordingWarningDoesNotCreateStopResponsibilityInNewSession() {
+        val state = CameraUiState().withOfflinePreview().copy(recordingDisconnectWarning = true)
+        assertFalse(state.recordingStopAvailable)
+        assertFalse(state.recordingCommandUnconfirmed)
+        assertNull(state.pendingRecordingCommand)
+        assertFalse(state.dismissVisibleCameraMessage().recordingDisconnectWarning)
     }
 
     @Test fun boundedFocusBlocksConflictingCommandsButNotReadOnlyStatus() {

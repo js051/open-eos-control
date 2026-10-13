@@ -116,7 +116,7 @@ class RecordingStatusReadbackTest {
         } finally { client.close(); server.shutdown() }
     }
 
-    @Test fun lostCommandAcknowledgementNeverBecomesTypedRecoveryOrGetsReplayed() = runBlocking {
+    @Test fun lostCommandAcknowledgementRetainsUnknownWithoutAckTypingOrReplay() = runBlocking {
         val allActions = mutableListOf<String>()
         // Each direction gets an independent transport: the contract here is
         // loss after a complete command, not recovery of a prior broken socket.
@@ -143,6 +143,8 @@ class RecordingStatusReadbackTest {
                 val detail = "$command: ${failure?.javaClass?.name}: ${failure?.message}"
                 assertNotNull(detail, failure)
                 assertFalse(detail, failure is RecordingStatusReadbackException)
+                assertTrue(detail, failure is RecordingCommandUnconfirmedException)
+                assertEquals(command, (failure as RecordingCommandUnconfirmedException).command)
                 assertFalse(detail, failure is CancellationException)
                 val request = server.takeRequest(2, TimeUnit.SECONDS)
                 assertNotNull(detail, request)
@@ -158,6 +160,139 @@ class RecordingStatusReadbackTest {
             } finally { client.close(); server.shutdown() }
         }
         assertEquals(listOf("/ccapi/record/start", "/ccapi/record/stop"), allActions)
+    }
+
+    @Test fun temperatureRestrictionBeforeTheRecRequestDoesNotCreateUncertainty() = runBlocking {
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
+                "/ccapi" -> json("""{"ver110":[{"path":"/devicestatus/temperature","get":true},{"path":"/shooting/control/recbutton","post":true}]}""")
+                "/ccapi/ver110/devicestatus/temperature" -> json("""{"status":"restrictionmovierecording"}""")
+                else -> json()
+            }
+        }
+        server.start()
+        val client = CcapiClient(server.url("/").toString(), treatAsSimulator = false, httpClient = http())
+        val evidence = RecordingRequestEvidence(RecordingCommand.START)
+        try {
+            client.initialize()
+            val failure = runCatching { withContext(evidence) { client.startRecording() } }.exceptionOrNull()
+            assertNotNull(failure)
+            assertFalse(failure is RecordingCommandUnconfirmedException)
+            assertFalse(failure is RecordingStatusReadbackException)
+            assertFalse(evidence.attempted)
+            assertEquals(2, server.requestCount)
+            repeat(2) { assertEquals("GET", server.takeRequest(2, TimeUnit.SECONDS)?.method) }
+        } finally { client.close(); server.shutdown() }
+    }
+
+    @Test fun bridgeCommandUnconfirmedRequiresExactCodeStatusFeatureAndEngine() = runBlocking {
+        data class Case(val code: String = "RECORDING_COMMAND_UNCONFIRMED", val status: Int = 502,
+            val feature: String = "VIDEO_RECORDING", val engine: String = "ccapi", val unknown: Boolean = false)
+        val server = MockWebServer()
+        val current = AtomicReference(Case(unknown = true))
+        val actions = CopyOnWriteArrayList<String>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.path == "/health" -> json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                request.path == "/v1/session" -> json("""{"id":"synthetic-recording","engine":"ccapi"}""")
+                request.path.orEmpty().contains("/recording/") -> {
+                    actions += request.path!!.substringAfterLast('/')
+                    val c = current.get()
+                    json("""{"error":{"code":"${c.code}","feature":"${c.feature}","engine":"${c.engine}"}}""").setResponseCode(c.status)
+                }
+                else -> json()
+            }
+        }
+        server.start()
+        val client = DesktopBridgeClient(server.url("/").toString())
+        try {
+            client.initialize()
+            for (case in listOf(Case(unknown = true), Case(code = "CCAPI_UNREACHABLE"), Case(code = "CCAPI_HTTP_ERROR"),
+                Case(code = "RECORDING_COMMAND_UNCONFIRMED_extra"), Case(code = "recording_command_unconfirmed"),
+                Case(status = 503), Case(feature = "STILL_CAPTURE"), Case(engine = "ptp"))) {
+                current.set(case)
+                for (command in RecordingCommand.entries) {
+                    val before = actions.size
+                    val failure = runCatching {
+                        if (command == RecordingCommand.START) client.startRecording() else client.stopRecording()
+                    }.exceptionOrNull()
+                    assertEquals(case.toString(), case.unknown, failure is RecordingCommandUnconfirmedException)
+                    assertFalse(failure is RecordingStatusReadbackException)
+                    if (failure is RecordingCommandUnconfirmedException) assertEquals(command, failure.command)
+                    assertEquals(before + 1, actions.size)
+                }
+            }
+        } finally { client.close(); server.shutdown() }
+    }
+
+    @Test fun invalidSuccessBodyIsUnknownButExplicitHttpRejectionIsNot() = runBlocking {
+        for (bridge in listOf(false, true)) {
+            val server = MockWebServer()
+            val reject = AtomicBoolean(false)
+            val actions = CopyOnWriteArrayList<String>()
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse = when {
+                    request.path == "/health" -> json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                    request.path == "/v1/session" -> json("""{"id":"synthetic-recording","engine":"ccapi"}""")
+                    request.path.orEmpty().contains("/recording/") || request.path.orEmpty().startsWith("/ccapi/record/") -> {
+                        actions += request.path!!
+                        MockResponse().setResponseCode(if (reject.get()) 503 else 200).setBody("invalid response")
+                    }
+                    else -> json()
+                }
+            }
+            server.start()
+            val direct = CcapiClient(server.url("/").toString(), treatAsSimulator = true, httpClient = http())
+            val bridgeClient = DesktopBridgeClient(server.url("/").toString(), httpClient = http())
+            try {
+                if (bridge) bridgeClient.initialize() else direct.initialize()
+                for (rejected in listOf(false, true)) {
+                    reject.set(rejected)
+                    val failure = runCatching { if (bridge) bridgeClient.startRecording() else direct.startRecording() }.exceptionOrNull()
+                    assertEquals(!rejected, failure is RecordingCommandUnconfirmedException)
+                    assertFalse(failure is RecordingStatusReadbackException)
+                }
+                assertEquals(2, actions.size)
+            } finally { direct.close(); bridgeClient.close(); server.shutdown() }
+        }
+    }
+
+    @Test fun bridgeHopLossIsUnknownAfterOneCompleteRequestWithNoReplay() = runBlocking {
+        for (command in RecordingCommand.entries) {
+            val server = MockWebServer()
+            val received = AtomicReference<RecordedRequest?>()
+            val appliedRecording = AtomicBoolean(command == RecordingCommand.STOP)
+            val actions = CopyOnWriteArrayList<String>()
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse = when {
+                    request.path == "/health" -> json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                    request.path == "/v1/session" -> json("""{"id":"synthetic-recording","engine":"ccapi"}""")
+                    request.path.orEmpty().contains("/recording/") -> {
+                        received.set(request)
+                        actions += request.path!!.substringAfterLast('/')
+                        appliedRecording.set(command == RecordingCommand.START)
+                        MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
+                    }
+                    else -> json()
+                }
+            }
+            server.start()
+            val client = DesktopBridgeClient(server.url("/").toString(), httpClient = http())
+            try {
+                client.initialize()
+                val failure = runCatching {
+                    if (command == RecordingCommand.START) client.startRecording() else client.stopRecording()
+                }.exceptionOrNull()
+                assertTrue(failure.toString(), failure is RecordingCommandUnconfirmedException)
+                assertFalse(failure is RecordingStatusReadbackException)
+                assertEquals(command == RecordingCommand.START, appliedRecording.get())
+                val request = requireNotNull(received.get())
+                assertNull(request.failure)
+                assertEquals("POST", request.method)
+                assertEquals(listOf(if (command == RecordingCommand.START) "start" else "stop"), actions.toList())
+            } finally { client.close(); server.shutdown() }
+        }
     }
 
     @Test fun cancelledRequiredReadbackRemainsCancellation() = runBlocking {

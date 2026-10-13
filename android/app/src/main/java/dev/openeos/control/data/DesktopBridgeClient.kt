@@ -46,6 +46,10 @@ internal class DesktopBridgeException(
     override val statusCode: Int? = null,
     connectionReason: ConnectionFailureReason? = null,
 ) : IllegalStateException(message), ConnectionHttpFailure {
+    val isRecordingCommandUnconfirmed: Boolean
+        get() = statusCode == 502 && code == "RECORDING_COMMAND_UNCONFIRMED" &&
+            feature == "VIDEO_RECORDING" && engine == "ccapi"
+
     // Optional camera evidence is valid only for this exact Bridge discovery contract.
     // Keep the original exception, code and actual HTTP status for every caller.
     val connectionReason: ConnectionFailureReason? = connectionReason?.takeIf {
@@ -533,13 +537,27 @@ class DesktopBridgeClient(
 
     suspend fun stopRecording(): CameraStatus = recordingCommand(RecordingCommand.STOP)
 
-    private suspend fun recordingCommand(command: RecordingCommand): CameraStatus = try {
-        parseStatus(postJson(sessionEndpoint("recording", if (command == RecordingCommand.START) "start" else "stop"), JSONObject()))
-            .also { observedFeatures.add(CameraFeature.VIDEO_RECORDING) }
-    } catch (exception: DesktopBridgeException) {
-        // Generic transport/rejection errors cannot establish whether REC was accepted.
-        if (exception.code != "RECORDING_STATUS_READBACK_FAILED") throw exception
-        throw RecordingStatusReadbackException(command, exception)
+    private suspend fun recordingCommand(command: RecordingCommand): CameraStatus {
+        // Resolve the current session before entering the actual REC request boundary.
+        val url = sessionEndpoint("recording", if (command == RecordingCommand.START) "start" else "stop")
+        val evidence = currentCoroutineContext()[RecordingRequestEvidence] ?: RecordingRequestEvidence(command)
+        return try {
+            parseStatus(postJson(url, JSONObject(), recordingEvidence = evidence))
+                .also { observedFeatures.add(CameraFeature.VIDEO_RECORDING) }
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: DesktopBridgeException) {
+            when {
+                exception.code == "RECORDING_STATUS_READBACK_FAILED" -> throw RecordingStatusReadbackException(command, exception)
+                exception.isRecordingCommandUnconfirmed -> throw RecordingCommandUnconfirmedException(command, exception)
+                else -> throw exception
+            }
+        } catch (exception: Exception) {
+            if (evidence.unresolved && (exception is IOException || exception.cause is org.json.JSONException)) {
+                throw RecordingCommandUnconfirmedException(command, exception)
+            }
+            throw exception
+        }
     }
 
     suspend fun tapFocus(x: Double, y: Double): FocusResult {
@@ -1136,12 +1154,13 @@ class DesktopBridgeClient(
 
     private suspend fun postJson(
         url: HttpUrl, payload: JSONObject, shutterStart: Boolean = false, cameraDiscovery: Boolean = false,
+        recordingEvidence: RecordingRequestEvidence? = null,
     ): JSONObject = requestJson(
         Request.Builder()
             .url(url)
             .tag(BridgeShutterStart::class.java, if (shutterStart) BridgeShutterStart else null)
             .post(payload.toString().toRequestBody(jsonMediaType))
-            .build(), cameraDiscovery = cameraDiscovery,
+            .build(), cameraDiscovery = cameraDiscovery, recordingEvidence = recordingEvidence,
     )
 
     private suspend fun postEmptyJson(url: HttpUrl): JSONObject = requestJson(
@@ -1163,6 +1182,7 @@ class DesktopBridgeClient(
         observeStatus: Boolean = true,
         recoveryRead: Boolean = false,
         cameraDiscovery: Boolean = false,
+        recordingEvidence: RecordingRequestEvidence? = null,
     ): JSONObject = withContext(Dispatchers.IO) {
         val session = sessionForRequest(request)
         val revision = session?.revision
@@ -1179,13 +1199,22 @@ class DesktopBridgeClient(
             try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
         }
         try {
+            recordingEvidence?.let {
+                currentCoroutineContext().ensureActive()
+                it.attempted = true
+            }
             call.execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 session?.let(::requireCurrentSession)
-                if (!response.isSuccessful) throw bridgeError(
-                    response.code, body, request.url.encodedPath, session, revision,
-                    cameraDiscovery = cameraDiscovery,
-                )
+                if (!response.isSuccessful) {
+                    val failure = bridgeError(response.code, body, request.url.encodedPath, session, revision,
+                        cameraDiscovery = cameraDiscovery)
+                    // A Bridge error header alone cannot prove camera rejection: its body
+                    // may carry acknowledged-readback or command-unconfirmed evidence.
+                    recordingEvidence?.rejected = !(failure is DesktopBridgeException &&
+                        (failure.code == "RECORDING_STATUS_READBACK_FAILED" || failure.isRecordingCommandUnconfirmed))
+                    throw failure
+                }
                 val parsed = runCatching { JSONObject(body) }
                     .getOrElse { throw IllegalStateException("Desktop Bridge returned invalid JSON for ${request.url.encodedPath}.", it) }
                 if (observeStatus && session != null && revision != null) session.observe(parseStatus(parsed), revision)

@@ -294,8 +294,11 @@ fun OpenEosControlApp(
 internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit, onRefresh: () -> Unit = {}) {
     if (state.pendingRecordingCommand != null && !state.shutterReleaseUnconfirmed) {
         PersistentCameraWarning(
-            stringResource(if (state.pendingRecordingCommand == dev.openeos.control.data.RecordingCommand.START)
-                R.string.recording_start_pending else R.string.recording_stop_pending),
+            stringResource(when {
+                state.recordingCommandUnconfirmed -> R.string.recording_command_unconfirmed
+                state.pendingRecordingCommand == dev.openeos.control.data.RecordingCommand.START -> R.string.recording_start_pending
+                else -> R.string.recording_stop_pending
+            }),
             onRefresh = onRefresh,
             refreshEnabled = state.connected && !state.isBusy(CameraOperation.STATUS) && !state.isBusy(CameraOperation.RECORDING),
         )
@@ -309,6 +312,7 @@ internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit
             )
             state.error != null && (state.connected || state.connectionRecovery == null) -> state.error
             state.recordingStartNotConfirmed -> stringResource(R.string.recording_start_not_confirmed)
+            state.recordingDisconnectWarning -> stringResource(R.string.recording_disconnect_warning)
             state.shutterDisconnectWarning -> stringResource(R.string.shutter_disconnect_warning)
             else -> null
         },

@@ -20,6 +20,8 @@ import dev.openeos.control.data.AutofocusReleaseException
 import dev.openeos.control.data.ShutterReleaseException
 import dev.openeos.control.data.CaptureStatusReadbackException
 import dev.openeos.control.data.RecordingStatusReadbackException
+import dev.openeos.control.data.RecordingCommandUnconfirmedException
+import dev.openeos.control.data.RecordingRequestEvidence
 import dev.openeos.control.data.RecordingCommand
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraFileNamingField
@@ -341,7 +343,11 @@ class CameraViewModel(
         val generation: Long,
         val connection: CameraInfo?,
         val previousIds: Set<String>,
-    )
+    ) {
+        val requestEvidence = RecordingRequestEvidence(command)
+        var commandUnconfirmed = false
+        var inFlight = true
+    }
     // Identity remains after resolution so an older Refresh cannot overwrite a newer REC.
     private var recordingAttempt: RecordingAttempt? = null
 
@@ -349,15 +355,28 @@ class CameraViewModel(
         recordingAttempt === attempt && attempt.generation == cameraSessionGeneration &&
             _uiState.value.info === attempt.connection && _uiState.value.connected
 
-    private fun markRecordingPending(attempt: RecordingAttempt) {
+    private fun markRecordingPending(attempt: RecordingAttempt, unconfirmed: Boolean = false) {
         if (!ownsRecordingAttempt(attempt)) return
+        attempt.commandUnconfirmed = unconfirmed
         _uiState.update { it.copy(pendingRecordingCommand = attempt.command,
+            recordingCommandUnconfirmed = unconfirmed,
             recordingStartNotConfirmed = false, captureMode = CaptureMode.VIDEO) }
     }
 
+    private fun recordingDisconnectWarning(state: CameraUiState): Boolean =
+        state.recordingDisconnectWarning || state.recordingStopAvailable ||
+            (recordingAttempt?.let { it.connection === state.info && it.inFlight && it.requestEvidence.unresolved } == true)
+
     private fun adoptRecordingStatus(attempt: RecordingAttempt, status: CameraStatus) {
         if (!ownsRecordingAttempt(attempt)) return
+        // Native status/event booleans may still be the cache from before a lost ACK.
+        // Only an explicit later REC acknowledgement can replace this uncertain owner.
+        if (attempt.commandUnconfirmed) {
+            _uiState.update { it.copy(status = status) }
+            return
+        }
         _uiState.update { it.copy(status = status,
+            recordingCommandUnconfirmed = false,
             pendingRecordingCommand = attempt.command.takeIf { status.recording == null },
             recordingStartNotConfirmed = attempt.command == RecordingCommand.START && status.recording == false,
             captureMode = if (status.recording == null) CaptureMode.VIDEO else it.captureMode) }
@@ -905,6 +924,7 @@ class CameraViewModel(
         handoffOwner.cancelUnlaunched(CameraImportHandoffOrigin.CAMERA)
         val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
         val previousState = _uiState.value
+        val recordingWarning = recordingDisconnectWarning(previousState)
         val shutterWarning = previousState.shutterDisconnectWarning || previousState.shutterReleaseUnconfirmed ||
             previousState.bulbExposureActive || CameraOperation.CAPTURE in previousState.pendingOperations ||
             CameraOperation.SHUTTER_RELEASE in previousState.pendingOperations
@@ -938,6 +958,7 @@ class CameraViewModel(
             _uiState.update {
                 it.withClearedSession(baseUrl = it.baseUrl, error = null).copy(
                     pendingOperations = emptySet(), shutterDisconnectWarning = shutterWarning,
+                    recordingDisconnectWarning = recordingWarning,
                 )
             }
             return
@@ -956,6 +977,7 @@ class CameraViewModel(
         _uiState.update {
             it.withClearedSession(baseUrl = it.baseUrl, error = null).copy(
                 pendingOperations = emptySet(), shutterDisconnectWarning = shutterWarning,
+                recordingDisconnectWarning = recordingWarning,
             )
         }
     }
@@ -1366,7 +1388,7 @@ class CameraViewModel(
     }
 
     fun toggleRecording() {
-        // Once an ACK has unresolved readback, only a deliberate Stop is safe to offer.
+        // An unresolved result keeps deliberate Stop available even if capability/temperature changes.
         val state = _uiState.value
         val stop = state.recordingStopAvailable
         if (!state.connected || (!stop && (!state.supports(CameraFeature.VIDEO_RECORDING) ||
@@ -1385,34 +1407,52 @@ class CameraViewModel(
             recordingAttempt = attempt
             _uiState.update { it.copy(recordingStartNotConfirmed = false) }
             val revision = cameraStateRevision
-            val response = try {
-                if (_uiState.value.previewMode) requireNotNull(_uiState.value.status).copy(recording = !stop)
-                else repository.toggleRecording(stop)
-            } catch (exception: RecordingStatusReadbackException) {
+            try {
+                val response = try {
+                    if (_uiState.value.previewMode) requireNotNull(_uiState.value.status).copy(recording = !stop)
+                    else withContext(attempt.requestEvidence) { repository.toggleRecording(stop) }
+                } catch (exception: RecordingStatusReadbackException) {
+                    coroutineContext.ensureActive()
+                    if (exception.command != attempt.command) throw exception
+                    markRecordingPending(attempt)
+                    return@runCamera
+                } catch (exception: RecordingCommandUnconfirmedException) {
+                    coroutineContext.ensureActive()
+                    if (exception.command != attempt.command) throw exception
+                    markRecordingPending(attempt, unconfirmed = true)
+                    return@runCamera
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (exception: Exception) {
+                    // A definite rejection does not replace an earlier unresolved owner.
+                    if (ownsRecordingAttempt(attempt)) recordingAttempt = previous
+                    throw exception
+                }
                 coroutineContext.ensureActive()
-                if (exception.command != attempt.command) throw exception
-                markRecordingPending(attempt)
-                return@runCamera
-            } catch (exception: Exception) {
-                // A rejection/lost ACK must not replace the owner of an earlier accepted command.
-                if (ownsRecordingAttempt(attempt)) recordingAttempt = previous
-                throw exception
-            }
-            coroutineContext.ensureActive()
-            if (!ownsRecordingAttempt(attempt)) return@runCamera
-            val status = try {
-                if (_uiState.value.previewMode) response else latestCameraStatus(response, revision)
+                if (!ownsRecordingAttempt(attempt)) return@runCamera
+                val status = try {
+                    if (_uiState.value.previewMode) response else latestCameraStatus(response, revision)
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (_: Exception) {
+                    coroutineContext.ensureActive()
+                    markRecordingPending(attempt)
+                    return@runCamera
+                }
+                coroutineContext.ensureActive()
+                if (!ownsRecordingAttempt(attempt)) return@runCamera
+                adoptRecordingStatus(attempt, status)
+                attempt.inFlight = false
+                if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
             } catch (exception: CancellationException) {
+                if (attempt.inFlight) {
+                    if (attempt.requestEvidence.unresolved) markRecordingPending(attempt, unconfirmed = true)
+                    else if (ownsRecordingAttempt(attempt)) recordingAttempt = previous
+                }
                 throw exception
-            } catch (_: Exception) {
-                coroutineContext.ensureActive()
-                markRecordingPending(attempt)
-                return@runCamera
+            } finally {
+                attempt.inFlight = false
             }
-            coroutineContext.ensureActive()
-            if (!ownsRecordingAttempt(attempt)) return@runCamera
-            adoptRecordingStatus(attempt, status)
-            if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
         }
     }
 
@@ -3266,6 +3306,8 @@ class CameraViewModel(
         val previousJobs = if (operation == CameraOperation.CONNECT) {
             handoffOwner.cancelUnlaunched(CameraImportHandoffOrigin.CAMERA)
             val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
+            val recordingWarning = recordingDisconnectWarning(_uiState.value)
+            _uiState.update { it.copy(recordingDisconnectWarning = recordingWarning) }
             cameraSessionGeneration += 1
             (cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)).also { jobs ->
                 cameraOperationJobs.clear()
@@ -3848,6 +3890,7 @@ class CameraViewModel(
         captureReviewStatus = CaptureReviewStatus.IDLE,
         captureStatusReadbackFailed = false,
         pendingRecordingCommand = null,
+        recordingCommandUnconfirmed = false,
         recordingStartNotConfirmed = false,
         activeMediaDownloadName = null,
         mediaDownloadProgress = null,
