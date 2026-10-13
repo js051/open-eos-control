@@ -26,3 +26,5 @@ Snapshot v3 可讀 v1/v2，在成功寫入的同一 IndexedDB transaction 遷移
 本地 Node 控制以合成 IndexedDB／目的地／HTTP回覆驗證程式行為，不能代替原生瀏覽器權限提示、真相機及實際儲存裝置驗收。完整瀏覽器及跨平台整合 runtime 尚待本批正常 CI／集中驗收，未宣稱產品全部完成。
 
 本地完整 29 個 Node 模組於本候選通過，含 743 個 node:test case 及既有直接 assertion scripts。新增雙語 browser 旅程走真 DOM／Bridge／原檔 bytes，但目的地 writer 為既有合成介面；此兩旅程僅完成語法檢查，runtime 尚未執行。
+
+補充本地 browser 嘗試：既有 Playwright 1.62.1（repo 鎖定1.62.0）配現有 Chromium、保留 sandbox，於瀏覽器啟動的 process-singleton socket 權限錯誤停止。英文 case 尚未開始、中文未啟動，結果為環境受阻，不是產品 assertion pass 或 fail；沒有放寬 sandbox 或重試。仍需原鎖定版本的正常 CI。
