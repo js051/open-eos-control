@@ -107,6 +107,7 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
   // observable missing NOT_READY result on the unchanged baseline, not an import error.
   if (/^  function visibleMediaIds\(/m.test(source)) functionNames.push("visibleMediaIds");
   if (/^  function retryLatestMedia\(/m.test(source)) functionNames.push("retryLatestMedia");
+  if (/^  function recordingRecoveryActive\(/m.test(source)) functionNames.push("recordingRecoveryActive");
   vm.runInContext(functionNames.map(productionFunction).join("\n"), sandbox);
   return sandbox;
 }
@@ -922,3 +923,164 @@ test("video review uses video-specific retry and result messages", async () => {
   s.listing=[NEW_VIDEO];await s.retryLatestMedia();
   assert.equal(s.ui.latestMediaReviewStatus.textContent,"latestVideoFound");
 });
+
+for (const status of [{recording:false}, {recording:null}, {}]) {
+  test(`Start does not claim recording when returned status is not true: ${JSON.stringify(status)}`, async () => {
+    const s=recordingSubject();s.state.status.recording=false;
+    s.api=async url=>{s.requests.push({url,method:'POST'});return status;};
+    await s.operateShutter();
+    assert.equal(s.feedback.includes('recordingStarted'),false);
+  });
+}
+for (const wasRecording of [false,true]) {
+  test(`acknowledged ${wasRecording?'Stop':'Start'} with failed status keeps only deliberate Stop available`, async () => {
+    const s=recordingSubject();s.state.status.recording=wasRecording;
+    const error=new Error('status unavailable after ACK');error.code='RECORDING_STATUS_READBACK_FAILED';
+    let first=true;s.api=async url=>{s.requests.push({url,method:'POST'});if(first){first=false;throw error;}return {recording:false};};
+    await s.operateShutter();
+    assert.equal(s.state.status.recording,wasRecording,'ACK evidence must not rewrite camera status');
+    assert.equal(writes(s).length,1,'No automatic replay');
+    await s.operateShutter();
+    assert.match(writes(s)[1].url,/recording\/stop$/);
+    assert.equal(s.state.recordingRecovery,null);
+  });
+}
+
+function installRecordingRefresh(s) {
+  s.clampFps=value=>value;s.syncLiveMagnificationFromCapabilities=()=>{};
+  vm.runInContext(productionFunction('refreshSession'),s);
+}
+for (const direction of ['start','stop']) {
+  test(`read-only current status resolves acknowledged ${direction} without replay`,async()=>{
+    const s=recordingSubject();installRecordingRefresh(s);s.state.status.recording=direction==='stop';
+    const error=new Error('status after ACK');error.code='RECORDING_STATUS_READBACK_FAILED';
+    const original=s.api;
+    s.api=async(url,options={})=>{
+      if(url.includes('/recording/')){s.requests.push({url,method:'POST'});throw error;}
+      if(url.endsWith('/status')){s.requests.push({url,method:'GET'});return {recording:direction==='start'};}
+      if(url.endsWith('/info')||url.endsWith('/capabilities')){s.requests.push({url,method:'GET'});return {};}
+      return original(url,options);
+    };
+    await s.operateShutter();assert.ok(s.state.recordingRecovery);
+    s.listing=[NEW_VIDEO];await s.refreshSession();if(s.state.latestMediaRefreshPromise)await s.state.latestMediaRefreshPromise;
+    assert.equal(s.state.recordingRecovery,null);assert.equal(writes(s).length,1);
+    assert.equal(s.state.status.recording,direction==='start');
+    if(direction==='stop')assert.equal(s.state.latestMediaItem.id,NEW_VIDEO.id);
+  });
+}
+test('unknown read-only recording status retains recovery and warning',async()=>{
+  const s=recordingSubject();installRecordingRefresh(s);
+  const owner={session:s.state.session,direction:'start'};s.state.recordingRecovery=owner;
+  s.api=async url=>{s.requests.push({url,method:'GET'});return {recording:null};};
+  await s.refreshSession();assert.equal(s.state.recordingRecovery,owner);assert.equal(writes(s).length,0);
+  assert.equal(s.feedback.at(-1),'recordingStatusUnconfirmed');
+});
+for(const replacement of [false,true]){
+  test(`old refresh cannot clear newer recovery (${replacement?'new session':'same session new command'})`,async()=>{
+    const s=recordingSubject();installRecordingRefresh(s);const held=deferred();
+    s.state.recordingRecovery={session:s.state.session,direction:'start'};
+    s.api=async url=>url.endsWith('/status')?held.promise:{};
+    const pending=s.refreshSession();
+    if(replacement)s.state.session={id:s.state.session.id};else s.state.refreshGeneration++;
+    const newer={session:s.state.session,direction:'stop'};s.state.recordingRecovery=newer;s.state.status={owner:'new'};
+    held.resolve({recording:false});await pending;
+    assert.equal(s.state.recordingRecovery,newer);assert.equal(s.state.status.owner,'new');
+  });
+}
+for(const code of ['CCAPI_UNREACHABLE','CCAPI_REQUEST_FAILED']){
+ test(`unacknowledged REC error is not classified as ACK: ${code}`,async()=>{
+  const s=recordingSubject();s.state.status.recording=false;const e=new Error('command failed');e.code=code;
+  s.api=async url=>{s.requests.push({url,method:'POST'});throw e;};await s.operateShutter();
+  assert.equal(s.state.recordingRecovery,undefined);assert.equal(s.state.status.recording,false);assert.equal(writes(s).length,1);
+ });
+}
+
+test('pending acknowledged recording keeps Stop admitted after capability disappears',async()=>{
+ const s=recordingSubject();s.state.status.recording=false;s.state.recordingRecovery={session:s.state.session,direction:'start'};
+ s.featureSupported=()=>false;
+ await s.operateShutter();assert.equal(writes(s).length,1);assert.match(writes(s)[0].url,/recording\/stop$/);
+});
+test('a previous-session recovery token never changes a new session Start direction',async()=>{
+ const s=recordingSubject();s.state.status.recording=false;s.state.recordingRecovery={session:{id:s.state.session.id},direction:'start'};
+ s.api=async url=>{s.requests.push({url,method:'POST'});return {recording:true};};
+ await s.operateShutter();assert.match(writes(s)[0].url,/recording\/start$/);assert.equal(s.state.recordingRecovery,null);
+});
+test('failed read-only refresh retains the exact pending recording owner',async()=>{
+ const s=recordingSubject();installRecordingRefresh(s);const pending={session:s.state.session,direction:'stop'};s.state.recordingRecovery=pending;
+ s.api=async()=>{throw new Error('still unavailable');};await s.refreshSession();assert.equal(s.state.recordingRecovery,pending);
+});
+
+for (const wasRecording of [false, true]) {
+  for (const outcome of ['success', 'ack-readback-failure']) {
+    test(`Refresh during ${wasRecording ? 'Stop' : 'Start'} ${outcome} sends no premature status read`, async () => {
+      const s = recordingSubject(); installRecordingRefresh(s);
+      s.state.status.recording = wasRecording;
+      const held = deferred();
+      s.api = async (url, options = {}) => {
+        s.requests.push({url, method: options.method || 'GET'});
+        if (url.includes('/recording/')) return held.promise;
+        if (url.endsWith('/status')) return {recording: wasRecording};
+        return {};
+      };
+      const command = s.operateShutter();
+      assert.equal(s.state.busy, true);
+      assert.equal(await s.refreshSession(), false);
+      assert.equal(s.requests.length, 1, 'Refresh must not observe a command in flight');
+      if (outcome === 'success') held.resolve({recording: !wasRecording});
+      else {
+        const error = new Error('ACK readback failed'); error.code = 'RECORDING_STATUS_READBACK_FAILED';
+        held.reject(error);
+      }
+      await command;
+      if (outcome === 'success') assert.equal(s.state.status.recording, !wasRecording);
+      else assert.equal(s.state.recordingRecovery.direction, wasRecording ? 'stop' : 'start');
+      assert.equal(writes(s).length, 1);
+    });
+  }
+}
+
+test('repeated pending Stop retains its original seen-ID boundary after gallery changes', async () => {
+  const s = recordingSubject(); installRecordingRefresh(s);
+  const original = s.api;
+  const error = new Error('ACK readback failed'); error.code = 'RECORDING_STATUS_READBACK_FAILED';
+  s.api = async (url, options = {}) => {
+    if (url.includes('/recording/')) { s.requests.push({url, method:'POST'}); throw error; }
+    if (url.endsWith('/status')) return {recording:false};
+    if (url.endsWith('/info') || url.endsWith('/capabilities')) return {};
+    return original(url, options);
+  };
+  await s.operateShutter();
+  const attempt = s.state.recordingRecovery.reviewAttempt;
+  s.state.media = [NEW_VIDEO]; s.listing = [NEW_VIDEO];
+  await s.operateShutter();
+  assert.equal(s.state.recordingRecovery.reviewAttempt, attempt);
+  await s.refreshSession();
+  if (s.state.latestMediaRefreshPromise) await s.state.latestMediaRefreshPromise;
+  assert.equal(s.state.latestMediaItem.id, NEW_VIDEO.id);
+  assert.equal(writes(s).length, 2);
+});
+
+test('Start recovery returning false reports not-confirmed instead of Ready', async () => {
+  const s = recordingSubject(); installRecordingRefresh(s);
+  s.state.recordingRecovery = {session:s.state.session, direction:'start'};
+  s.api = async () => ({recording:false});
+  await s.refreshSession();
+  assert.equal(s.state.recordingRecovery, null);
+  assert.equal(s.feedback.at(-1), 'recordingStartUnconfirmed');
+});
+
+for (const newerRecording of [true, false, null]) {
+  test(`latest concurrent Refresh owns ${newerRecording} even without a new command`, async () => {
+    const s = recordingSubject(); installRecordingRefresh(s);
+    s.state.recordingRecovery = {session:s.state.session, direction:'start'};
+    const held = deferred(); let statusReads = 0;
+    s.api = async url => url.endsWith('/status')
+      ? (++statusReads === 1 ? held.promise : {recording:newerRecording, owner:'new'}) : {};
+    const old = s.refreshSession();
+    await s.refreshSession();
+    const recovery = s.state.recordingRecovery;
+    held.resolve({recording:!newerRecording, owner:'old'}); await old;
+    assert.equal(s.state.status.owner, 'new');
+    assert.equal(s.state.recordingRecovery, recovery);
+  });
+}

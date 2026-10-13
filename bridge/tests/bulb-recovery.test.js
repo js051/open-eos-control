@@ -54,7 +54,7 @@ function context(status = {}) {
     },
   });
   vm.runInContext([
-    "shutterReleaseUnconfirmed", "bulbControlLocked", "renderCaptureMode", "operateShutter",
+    "recordingRecoveryActive", "shutterReleaseUnconfirmed", "bulbControlLocked", "renderCaptureMode", "operateShutter",
   ].map(productionFunction).join("\n"), sandbox);
   return sandbox;
 }
@@ -198,6 +198,16 @@ async function run() {
     test.state.status.bulbExposureActive = false;
     test.showToast("Shutter release confirmed");
     assert.equal(test.ui.toast.hidden, false);
+  }
+  for (const recording of [false, true, null]) {
+    const test = context({mode:"Manual", recording});
+    test.state.recordingRecovery={session:test.state.session,direction:"stop"};
+    test.featureSupported=()=>false;
+    test.renderCaptureMode();
+    assert.equal(test.state.captureMode,"video");
+    assert.equal(test.ui.shutterLabel.textContent,"stopUnconfirmedRecording");
+    assert.equal(test.ui.recordIndicator.hidden,true,"Unknown current recording must not display a confirmed REC indicator");
+    assert.equal(test.state.status.recording,recording,"The old snapshot is not replaced with guessed ACK state");
   }
   console.log("PASS: production PC Bulb state contracts (mode/capability change, sticky failure, fresh Stop readback, legacy omission, session isolation)");
 }

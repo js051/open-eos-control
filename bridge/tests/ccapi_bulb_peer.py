@@ -20,6 +20,9 @@ class BulbPeer:
         self.commands: list[tuple[str, str, dict]] = []
         self.partial_press_response = False
         self.drop_status = False
+        self.malformed_status = False
+        self.drop_recording_response = False
+        self.reject_recording = False
         self.drop_release = False
         self.status_failure_after_release = False
         self.status_failures = 0
@@ -63,6 +66,12 @@ class BulbPeer:
                 if (peer.drop_status or peer.status_failures) and self.path.endswith("/devicestatus/batterylist"):
                     peer.status_failures = max(0, peer.status_failures - 1)
                     self.disconnect()
+                elif peer.malformed_status and self.path.endswith("/devicestatus/batterylist"):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", "1")
+                    self.end_headers()
+                    self.wfile.write(b"{")
                 elif self.path == "/__test/state":
                     self.respond(200, {"commands": peer.commands, "active": peer.active,
                                        "captureCount": peer.capture_count, "reads": peer.reads})
@@ -114,6 +123,13 @@ class BulbPeer:
                     self.respond(200, {})
                     return
                 peer.commands.append((self.command, self.path, body))
+                if self.path.endswith("/shooting/control/recbutton"):
+                    if peer.reject_recording:
+                        self.respond(503, {"message": "Synthetic REC rejected"})
+                        return
+                    if peer.drop_recording_response:
+                        self.disconnect()
+                        return
                 if self.path in (MANUAL_PATH, AF_PATH, DIRECT_PATH):
                     if body.get("action") in ("full_press", "half_press", "start") or self.path == DIRECT_PATH:
                         peer.active = True

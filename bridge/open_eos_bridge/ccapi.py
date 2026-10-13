@@ -3052,7 +3052,19 @@ class CcapiSession:
             self._command_ok(operation, {"action": "start" if recording else "stop"})
             self._recording = recording
             self._observed.add(CameraFeature.VIDEO_RECORDING)
-            return self.status()
+            try:
+                return self.status()
+            except BridgeError as error:
+                # REC was acknowledged. The caller must not mistake a later
+                # status failure for a rejected command and replay that action.
+                raise BridgeError(
+                    "RECORDING_STATUS_READBACK_FAILED",
+                    "The recording command was acknowledged, but camera status could not be read. "
+                    "Read status again before starting another recording; stopping remains available.",
+                    status_code=502,
+                    feature=CameraFeature.VIDEO_RECORDING.value,
+                    engine=self.engine_name,
+                ) from error
 
     def _guaranteed_release(
         self,
