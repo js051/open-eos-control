@@ -335,7 +335,7 @@ internal fun MediaGalleryGrid(
             }
             items(group.items, key = CameraMediaItem::id) { item ->
                 val thumbnailSupported = state.supports(CameraFeature.MEDIA_THUMBNAIL) &&
-                    !state.isBusy(CameraOperation.MEDIA) && state.mediaPreviewItem == null
+                    !state.mediaListingDefersThumbnails && !state.isBusy(CameraOperation.MEDIA) && state.mediaPreviewItem == null
                 DisposableEffect(item.id, thumbnailSupported, state.mediaLibraryLoading) {
                     if (thumbnailSupported) actions.loadMediaThumbnail(item)
                     onDispose { actions.cancelMediaThumbnail(item) }
