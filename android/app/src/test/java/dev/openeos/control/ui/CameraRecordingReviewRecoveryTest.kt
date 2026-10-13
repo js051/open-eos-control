@@ -5,6 +5,7 @@ import dev.openeos.control.data.CameraBackendFactory
 import dev.openeos.control.data.CameraHttpTransport
 import dev.openeos.control.data.CameraHttpTransportFactory
 import dev.openeos.control.data.CameraNetworkDiagnostics
+import dev.openeos.control.data.RecordingCommand
 import dev.openeos.control.data.CameraRepository
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
@@ -289,6 +290,8 @@ class CameraRecordingReviewRecoveryTest {
         assertEquals(reads, peer.listingReads.get())
         assertEquals(CaptureReviewStatus.IDLE, model.uiState.value.captureReviewStatus)
         assertEquals(listOf("start"), peer.recordingActions.toList())
+        assertNull(model.uiState.value.pendingRecordingCommand)
+        assertTrue(model.uiState.value.recordingStartNotConfirmed)
     }
 
     @Test fun rejectedStopDoesNotReviewOrReplayTheCommand() = runBlocking {
@@ -347,17 +350,18 @@ class CameraRecordingReviewRecoveryTest {
         assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
     }
 
-    @Test fun untypedStopStatusFailureKeepsExistingErrorAndDoesNotInventAcknowledgement() = runBlocking {
+    @Test fun acknowledgedStopReadbackFailureKeepsStatusAndWaitsForReadOnlyRefresh() = runBlocking {
         connect(native = false)
         startRecording()
         peer.failStatus.set(true)
         val reads = peer.listingReads.get()
         model.toggleRecording()
-        assertTrue(pumpUntil { model.uiState.value.errorOperation == CameraOperation.RECORDING })
+        assertTrue(pumpUntil { model.uiState.value.pendingRecordingCommand == RecordingCommand.STOP && !model.uiState.value.busy })
         advanceAndSettle()
         assertEquals(reads, peer.listingReads.get())
         assertEquals(CaptureReviewStatus.IDLE, model.uiState.value.captureReviewStatus)
         assertEquals(true, model.uiState.value.status?.recording)
+        assertNull(model.uiState.value.error)
         assertFalse(model.uiState.value.captureStatusReadbackFailed)
         assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
     }
@@ -463,6 +467,156 @@ class CameraRecordingReviewRecoveryTest {
         assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
     }
 
+    @Test fun acknowledgedStartFailureKeepsOldStatusAndRefreshNeverReplaysRecording() = runBlocking {
+        connect(native = false)
+        peer.failStatus.set(true)
+        model.toggleRecording()
+        awaitRecordingPending(RecordingCommand.START)
+        assertEquals(false, model.uiState.value.status?.recording)
+        assertNull(model.uiState.value.error)
+        model.setCaptureMode(CaptureMode.PHOTO)
+        assertEquals(CaptureMode.VIDEO, model.uiState.value.captureMode)
+        model.captureStill()
+        advanceAndSettle()
+        assertEquals(0, peer.captureWrites.get())
+        val writes = peer.writes.toList()
+        model.refresh()
+        assertTrue(pumpUntil { !model.uiState.value.busy })
+        assertEquals(RecordingCommand.START, model.uiState.value.pendingRecordingCommand)
+        peer.failStatus.set(false)
+        peer.unknownRecording.set(true)
+        model.refresh()
+        assertTrue(pumpUntil { !model.uiState.value.busy })
+        assertEquals(RecordingCommand.START, model.uiState.value.pendingRecordingCommand)
+        peer.unknownRecording.set(false)
+        model.refresh()
+        assertTrue(pumpUntil { !model.uiState.value.busy && model.uiState.value.pendingRecordingCommand == null })
+        assertEquals(true, model.uiState.value.status?.recording)
+        assertEquals(writes, peer.writes.toList())
+        assertEquals(listOf("start"), peer.recordingActions.toList())
+    }
+
+    @Test fun unknownStartUsesStopOnlyAndConfirmedStopRefreshResumesOriginalVideoReview() = runBlocking {
+        connect(native = false)
+        peer.unknownRecording.set(true)
+        model.toggleRecording()
+        awaitRecordingPending(RecordingCommand.START)
+        assertNull(model.uiState.value.status?.recording)
+        model.toggleRecording()
+        awaitRecordingPending(RecordingCommand.STOP)
+        assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
+        val reads = peer.listingReads.get()
+        advanceAndSettle()
+        assertEquals(reads, peer.listingReads.get())
+        peer.unknownRecording.set(false)
+        model.refresh()
+        awaitNotReady()
+        assertEquals("OLD.JPG", model.uiState.value.captureReviewItem?.name)
+        peer.publishAfterStopRead.set(0)
+        model.retryCaptureReview()
+        assertTrue(pumpUntil(advanceTime = true) { model.uiState.value.captureReviewItem?.name == "NEW.MP4" })
+        assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
+    }
+
+    @Test fun repeatedPendingStopRetainsPreStopIdsAfterAnInterveningGalleryRead() = runBlocking {
+        connect(native = false)
+        startRecording()
+        peer.unknownRecording.set(true)
+        model.toggleRecording()
+        awaitRecordingPending(RecordingCommand.STOP)
+        peer.publishAfterStopRead.set(0)
+        model.refreshMedia()
+        assertTrue(pumpUntil { !model.uiState.value.mediaLibraryLoading &&
+            model.uiState.value.mediaItems.any { it.name == "NEW.MP4" } })
+        model.toggleRecording()
+        awaitRecordingPending(RecordingCommand.STOP)
+        peer.unknownRecording.set(false)
+        model.refresh()
+        assertTrue(pumpUntil(advanceTime = true) {
+            model.uiState.value.pendingRecordingCommand == null &&
+                model.uiState.value.captureReviewStatus == CaptureReviewStatus.IDLE &&
+                model.uiState.value.captureReviewItem?.name == "NEW.MP4"
+        })
+        assertEquals(listOf("start", "stop", "stop"), peer.recordingActions.toList())
+    }
+
+    @Test fun rejectedSafetyStopRetainsStartOwnerAndCannotCreateStopReview() = runBlocking {
+        connect(native = false)
+        peer.unknownRecording.set(true)
+        model.toggleRecording()
+        awaitRecordingPending(RecordingCommand.START)
+        peer.rejectStop.set(true)
+        model.toggleRecording()
+        assertTrue(pumpUntil { !model.uiState.value.busy && model.uiState.value.errorOperation == CameraOperation.RECORDING })
+        assertEquals(RecordingCommand.START, model.uiState.value.pendingRecordingCommand)
+        val reads = peer.listingReads.get()
+        peer.unknownRecording.set(false)
+        peer.reportedRecording.set(false)
+        model.refresh()
+        assertTrue(pumpUntil { !model.uiState.value.busy && model.uiState.value.pendingRecordingCommand == null })
+        assertTrue(model.uiState.value.recordingStartNotConfirmed)
+        advanceAndSettle()
+        assertEquals(reads, peer.listingReads.get())
+        assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
+    }
+
+    @Test fun lateRefreshCannotClearNewerPendingStopOrPublishItsOldBoolean() = runBlocking {
+        connect(native = false)
+        peer.unknownRecording.set(true)
+        model.toggleRecording()
+        awaitRecordingPending(RecordingCommand.START)
+        peer.unknownRecording.set(false)
+        peer.reportedRecording.set(false)
+        val gate = peer.gateNextStatus()
+        model.refresh()
+        assertTrue(pumpUntil { gate.entered.count == 0L })
+        peer.unknownRecording.set(true)
+        model.toggleRecording()
+        assertTrue(pumpUntil { model.uiState.value.pendingRecordingCommand == RecordingCommand.STOP &&
+            CameraOperation.RECORDING !in model.uiState.value.pendingOperations })
+        gate.release.countDown()
+        assertTrue(pumpUntil { !model.uiState.value.busy })
+        assertEquals(RecordingCommand.STOP, model.uiState.value.pendingRecordingCommand)
+        assertNull(model.uiState.value.status?.recording)
+        assertEquals(CaptureReviewStatus.IDLE, model.uiState.value.captureReviewStatus)
+        assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
+    }
+
+    @Test fun acceptedResponseFollowedByFailedRevisionReadBecomesPendingWithoutReplay() = runBlocking {
+        connect(native = false)
+        val gate = peer.gateNextStatus()
+        model.toggleRecording()
+        assertTrue(pumpUntil { gate.entered.count == 0L })
+        peer.failStatus.set(true)
+        model.refresh()
+        assertTrue(pumpUntil { CameraOperation.STATUS !in model.uiState.value.pendingOperations })
+        gate.release.countDown()
+        awaitRecordingPending(RecordingCommand.START)
+        assertEquals(false, model.uiState.value.status?.recording)
+        assertEquals(listOf("start"), peer.recordingActions.toList())
+    }
+
+    @Test fun disconnectCancelsAcceptedReadbackAndLateResponseCannotRestorePending() = runBlocking {
+        connect(native = false)
+        val gate = peer.gateNextStatus()
+        model.toggleRecording()
+        assertTrue(pumpUntil { gate.entered.count == 0L })
+        model.disconnect()
+        gate.release.countDown()
+        assertTrue(pumpUntil { !model.uiState.value.connected && !model.uiState.value.busy })
+        advanceAndSettle()
+        assertNull(model.uiState.value.pendingRecordingCommand)
+        assertNull(model.uiState.value.error)
+        connect(native = false)
+        assertNull(model.uiState.value.pendingRecordingCommand)
+        assertEquals(listOf("start"), peer.recordingActions.toList())
+    }
+
+    private suspend fun awaitRecordingPending(command: RecordingCommand) {
+        assertTrue("Pending ${model.uiState.value.pendingRecordingCommand}; error=${model.uiState.value.error}",
+            pumpUntil { model.uiState.value.pendingRecordingCommand == command && !model.uiState.value.busy })
+    }
+
     private suspend fun connect(native: Boolean = true) {
         if (native) model.useDirectCameraPreset() else model.useDevSimulatorPreset()
         model.setBaseUrl(peer.baseUrl)
@@ -531,10 +685,12 @@ private class RecordingReviewPeer {
     private val stopped = AtomicBoolean(false)
     class Gate(val entered: CountDownLatch = CountDownLatch(1), val release: CountDownLatch = CountDownLatch(1))
     private val gates = CopyOnWriteArrayList<Gate>()
+    private val nextStatus = AtomicReference<Gate?>()
     private val nextStop = AtomicReference<Gate?>()
     private val nextListing = AtomicReference<Gate?>()
     private val nextInfo = AtomicReference<Gate?>()
     private val nextEventDelete = AtomicReference<Gate?>()
+    fun gateNextStatus() = Gate().also { gates += it; nextStatus.set(it) }
     fun gateNextStop() = Gate().also { gates += it; nextStop.set(it) }
     fun gateNextListing() = Gate().also { gates += it; nextListing.set(it) }
     fun gateNextInfo() = Gate().also { gates += it; nextInfo.set(it) }
@@ -572,8 +728,12 @@ private class RecordingReviewPeer {
                     path.endsWith("/devicestatus/battery") -> json("""{"level":"90"}""")
                     path.endsWith("/shooting/settings") -> json("{}")
                     path == "/ccapi/info" -> json("""{"connected":true,"model":"Synthetic recording review","serial":"TEST-REC-REVIEW","api":"simulator"}""")
-                    path == "/ccapi/status" -> if (failStatus.get()) MockResponse().setResponseCode(503)
-                        else json("""{"connected":true,"recording":${if (unknownRecording.get()) "null" else reportedRecording.get() ?: recording.get()},"mode":"video","battery":{},"media":{},"exposure":{}}""")
+                    path == "/ccapi/status" -> {
+                        val response = if (failStatus.get()) MockResponse().setResponseCode(503)
+                            else json("""{"connected":true,"recording":${if (unknownRecording.get()) "null" else reportedRecording.get() ?: recording.get()},"mode":"video","battery":{},"media":{},"exposure":{}}""")
+                        hold(nextStatus)
+                        response
+                    }
                     path == "/ccapi/capabilities" -> json("""{"iso":["100"],"shutter":["1/125"],"aperture":["4.0"],"white_balance":["auto"]}""")
                     path.endsWith("/event/polling") && request.method == "DELETE" -> { hold(nextEventDelete); json("{}") }
                     path.endsWith("/event/polling") || path == "/ccapi/events" -> {

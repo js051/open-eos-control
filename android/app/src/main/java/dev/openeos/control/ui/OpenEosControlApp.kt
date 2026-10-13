@@ -260,7 +260,7 @@ fun OpenEosControlApp(
                                 ) FOREGROUND_IMPORT_BAR_HEIGHT else 0.dp,
                             ),
                     ) {
-                        CameraErrorPresentation(state, actions.clearError)
+                        CameraErrorPresentation(state, actions.clearError, actions.refresh)
                     }
                 }
             }
@@ -291,7 +291,16 @@ fun OpenEosControlApp(
 }
 
 @Composable
-internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit) {
+internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit, onRefresh: () -> Unit = {}) {
+    if (state.pendingRecordingCommand != null && !state.shutterReleaseUnconfirmed) {
+        PersistentCameraWarning(
+            stringResource(if (state.pendingRecordingCommand == dev.openeos.control.data.RecordingCommand.START)
+                R.string.recording_start_pending else R.string.recording_stop_pending),
+            onRefresh = onRefresh,
+            refreshEnabled = state.connected && !state.isBusy(CameraOperation.STATUS) && !state.isBusy(CameraOperation.RECORDING),
+        )
+        return
+    }
     ErrorBanner(
         when {
             state.shutterReleaseUnconfirmed -> stringResource(
@@ -299,6 +308,7 @@ internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit
                 else R.string.shutter_release_unconfirmed,
             )
             state.error != null && (state.connected || state.connectionRecovery == null) -> state.error
+            state.recordingStartNotConfirmed -> stringResource(R.string.recording_start_not_confirmed)
             state.shutterDisconnectWarning -> stringResource(R.string.shutter_disconnect_warning)
             else -> null
         },

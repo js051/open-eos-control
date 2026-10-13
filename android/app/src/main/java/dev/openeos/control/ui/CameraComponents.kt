@@ -1189,7 +1189,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                     }
             )
 
-            if (state.status?.recording == true) {
+            if (state.status?.recording == true && state.pendingRecordingCommand == null) {
                 RecordingIndicator(Modifier.align(Alignment.CenterStart).padding(12.dp))
             }
             if (state.bulbExposureActive) {
@@ -1812,11 +1812,11 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
 
 @Composable
 fun CaptureButton(state: CameraUiState, actions: CameraActions) {
-    val photo = state.captureMode == CaptureMode.PHOTO
+    val photo = state.captureMode == CaptureMode.PHOTO && state.pendingRecordingCommand == null
     val bulb = photo && state.bulbMode
     val bulbActive = state.bulbExposureActive
     val releaseOnly = state.shutterReleaseUnconfirmed
-    val recordingActive = !photo && state.status?.recording == true
+    val recordingActive = !photo && state.recordingStopAvailable
     val supported = releaseOnly || bulbActive || recordingActive || state.supports(
         when {
             bulb -> CameraFeature.BULB_EXPOSURE
@@ -1933,7 +1933,11 @@ fun ErrorBanner(error: String?, onDismiss: () -> Unit, dismissible: Boolean = tr
 }
 
 @Composable
-private fun PersistentCameraWarning(message: String) {
+internal fun PersistentCameraWarning(
+    message: String,
+    onRefresh: (() -> Unit)? = null,
+    refreshEnabled: Boolean = true,
+) {
     val density = LocalDensity.current
     val textStyle = LocalTextStyle.current.copy(color = AppText)
     val textMeasurer = rememberTextMeasurer()
@@ -1953,16 +1957,20 @@ private fun PersistentCameraWarning(message: String) {
         )
         CameraReadableSlot(
             width = readingWidth,
-            height = with(density) { (textLayout.size.height + 2 * 8.dp.roundToPx()).toDp() },
+            height = with(density) { (textLayout.size.height + 2 * 8.dp.roundToPx()).toDp() } + if (onRefresh != null) 48.dp else 0.dp,
             animateRotation = false,
         ) {
-            Text(
-                message,
-                style = textStyle,
-                modifier = Modifier.fillMaxSize()
-                    .background(Color(0xFF512326), RoundedCornerShape(6.dp))
-                    .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
-            )
+            Column(Modifier.fillMaxSize().background(Color(0xFF512326), RoundedCornerShape(6.dp))) {
+                Text(message, style = textStyle,
+                    modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp))
+                if (onRefresh != null) {
+                    androidx.compose.material3.TextButton(
+                        onClick = onRefresh,
+                        enabled = refreshEnabled,
+                        modifier = Modifier.height(48.dp).testTag("recording-status-refresh"),
+                    ) { Text(stringResource(R.string.refresh_recording_status)) }
+                }
+            }
         }
     }
 }

@@ -529,13 +529,18 @@ class DesktopBridgeClient(
         postJson(sessionEndpoint("shutter", "half-press"), JSONObject())
     ).also { observedFeatures.add(CameraFeature.SHUTTER_HALF_PRESS) }
 
-    suspend fun startRecording(): CameraStatus = parseStatus(
-        postJson(sessionEndpoint("recording", "start"), JSONObject())
-    ).also { observedFeatures.add(CameraFeature.VIDEO_RECORDING) }
+    suspend fun startRecording(): CameraStatus = recordingCommand(RecordingCommand.START)
 
-    suspend fun stopRecording(): CameraStatus = parseStatus(
-        postJson(sessionEndpoint("recording", "stop"), JSONObject())
-    ).also { observedFeatures.add(CameraFeature.VIDEO_RECORDING) }
+    suspend fun stopRecording(): CameraStatus = recordingCommand(RecordingCommand.STOP)
+
+    private suspend fun recordingCommand(command: RecordingCommand): CameraStatus = try {
+        parseStatus(postJson(sessionEndpoint("recording", if (command == RecordingCommand.START) "start" else "stop"), JSONObject()))
+            .also { observedFeatures.add(CameraFeature.VIDEO_RECORDING) }
+    } catch (exception: DesktopBridgeException) {
+        // Generic transport/rejection errors cannot establish whether REC was accepted.
+        if (exception.code != "RECORDING_STATUS_READBACK_FAILED") throw exception
+        throw RecordingStatusReadbackException(command, exception)
+    }
 
     suspend fun tapFocus(x: Double, y: Double): FocusResult {
         val body = postJson(
