@@ -3449,6 +3449,12 @@
           { method: "POST" },
         );
         if (state.session !== session) return;
+        // A complete success body still has to satisfy the REC status contract.
+        // Never coerce malformed recording values into a confirmed stopped state.
+        if (!status || typeof status !== "object" || Array.isArray(status)
+          || (status.recording != null && typeof status.recording !== "boolean")) {
+          throw new ApiError(t("recordingCommandUnconfirmed"));
+        }
         state.status = status;
         const stopped = status.recording === false;
         state.recordingRecovery = typeof status.recording === "boolean" ? null : { session, direction: wasRecording ? "stop" : "start", reviewAttempt };
@@ -3477,7 +3483,7 @@
         showToast(t("recordingCommandUnconfirmed"), true);
         return;
       }
-      if (!isPhoto && normalized.code === "RECORDING_STATUS_READBACK_FAILED") {
+      if (recordingCommandOwner && normalized.status === 502 && normalized.code === "RECORDING_STATUS_READBACK_FAILED") {
         state.recordingRecovery = { session, direction: recordingWasActive ? "stop" : "start", reviewAttempt };
         state.captureMode = "video";
         setOperationState(t("recordingStatusUnconfirmed"), true);

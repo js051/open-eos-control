@@ -33,3 +33,24 @@ PC 原 PR237 的 `df8080a3d59e7a969939496b425cadfcdfe372ad` tree，在真 produc
 公開 `ErrorDetail` 的必要欄位是 code 與 message，正常 Bridge handler 兩者皆有。code-only、錯誤型別或空白 message 的 502 不能當作完整拒絕證據。PC 與 Android 對齊 iOS 的完整-envelope 檢查；PC 三個新增不完整 message 控制先 red，修正後全部109個 handler 控制通過。完整既知拒絕與 near-match tuple 控制加入合法 message，仍必須維持原分類，沒有以缺欄位 fixture 偷換測試目的。
 
 `a7f6eed55f3a4ebb964543a0bd673e0193c376cf`／CI `38368772954` 已於08:24:23～26 UTC通過真 browser 的英／繁中 camera-hop／Bridge-hop 四個遺失回應旅程，desktop backend、打包與Windows gate也已成功；該版本尚未包含上述最後message檢查，其成功不能替代下一版 exact-head 驗證。原已知失敗與本地缺依賴紀錄保留。
+
+## 完整 REC 分類表收斂
+
+前述 message 檢查版 `8e87e6cca99b1cde6d19cb78e7cb3d94c753f56b`／CI `38370509364` 的全部適用 gate 與 ci-complete 通過；四條真 browser lost-hop 旅程於08:39:43～45 UTC通過。該結果不涵蓋下列後續分類修正。為避免逐條小改反覆CI，本輪一次檢查跨端 status／error envelope／成功本文／取消／退休路徑，收齊以下公開契約。
+
+| 邊界 | 結果 |
+|---|---|
+| 401／403／503，包括 ACK-like code | 已知拒絕，不建立新 ACK 或 UNKNOWN |
+| 完整502 envelope＋精確 ACK code | 已接受，後續狀態讀取未確認 |
+| 完整502 envelope＋精確 UNKNOWN 四欄位 | UNKNOWN，只保留明確 Stop |
+| 完整502已知拒絕／preflight error | 一般錯誤，保留原本已有的責任 |
+| 502 body遺失／JSON或必要欄位不完整 | UNKNOWN，不猜已拒絕 |
+| 完整Bridge 2xx物件，recording為Boolean | ACK與回傳狀態 |
+| 完整Bridge 2xx物件，recording缺失／null | ACK但狀態待確認 |
+| Bridge 2xx非物件或recording非Boolean且非null | UNKNOWN，保留原snapshot |
+| 本次REC之前取消／退休 | 不發新REC、不把舊Stop轉移到新連線 |
+| 本次REC已送且結果仍不明 | 同owner保留UNKNOWN；退休只留上一台相機警告 |
+
+PC的ACK錯誤分支同樣綁定實際REC owner；Bulb stop不能因相似code取得錄影責任。code／feature／engine精確比對，不裁掉前後空白來擴大接受。status Refresh遇非Boolean recording不得解除已有ACK或UNKNOWN恢復。有效null／缺欄位保持原相容行為，不以嚴格化刪除該契約。
+
+受控production handler/API新增三組反例分別實跑6個非502 ACK誤分類、12個成功本文shape問題、1個非REC owner問題，修正前皆失敗。修正後連同兩方向shape、padded tuple、nullable正向與status-refresh負例共160項通過。這仍不是物理相機或手機 runtime 證據；iOS／Android各自的實際編譯與測試結果必須由各自新head取得。
