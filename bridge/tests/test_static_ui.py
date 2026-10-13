@@ -271,10 +271,19 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "await refreshSession({ quiet: true, eventGeneration: generation })" in script
     assert 'String(key).toLowerCase().includes("content")' in script
     assert "contentsChanged && state.mediaLoaded" in script
-    assert "await refreshMedia({ preservePreview: true })" in script
+    event_loop = script.split("  function startEventLoop() {", 1)[1].split(
+        "  function cancelEventLoop() {", 1,
+    )[0]
+    assert re.search(
+        r"const listing = refreshMedia\(\{ preservePreview: true \}\);\s*"
+        r"refreshed = await listing;\s*(?://[^\n]*\n\s*)*"
+        r'if \(\["cancelled", "failed", "retired"\]\.includes\(listing\.mediaOutcome\)\) \{\s*'
+        r"pending = null;\s*failures = 0;\s*continue;\s*\}",
+        event_loop,
+    )
     assert "mediaRefreshPromise: null" in script
     assert 'mediaLoadStatus: "NOT_LOADED"' in script
-    assert "function refreshMediaWhenCurrent({ preservePreview = false } = {})" in script
+    assert "function refreshMediaWhenCurrent({ preservePreview = false, owner } = {})" in script
     assert "const LATEST_MEDIA_LIMIT = 8" in script
     assert "?limit=${LATEST_MEDIA_LIMIT}" in script
     assert "function refreshLatestMedia()" in script
@@ -285,7 +294,9 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'ui.latestMediaRetry.addEventListener("click", retryLatestMedia)' in script
     assert 'mediaScope: "recent"' in script
     assert 'mediaHasMore: false' in script
-    assert 'const limitQuery = mediaScope === "recent" ? "?limit=61" : ""' in script
+    assert 'const limit = scope === "recent" ? 61 : null' in script
+    assert '/media${limit === null ? "" : "?limit=61"}' in script
+    assert 'listing: { sessionId: session.id, limit, onSnapshot: publish }' in script
     assert 'querySelectorAll("[data-media-scope]")' in script
     assert 'id="media-scope-control"' in html
     assert 'state.mediaLoadStatus = "LOADING"' in script
@@ -311,7 +322,15 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     }:
         declarations = re.findall(rf"^\s+{key}:\s+\"", script, flags=re.MULTILINE)
         assert len(declarations) == 2, f"{key} must be declared in both supported languages"
-    assert "state.refreshGeneration !== interactionGeneration" in script
+    listing_owner = script.split("  async function refreshMediaWhenCurrent(", 1)[1].split(
+        "  function renderMedia() {", 1,
+    )[0]
+    assert re.search(
+        r"const current = \(\) => state\.mediaListingOwner === owner && state\.session === session &&\s*"
+        r"state\.mediaScope === scope && state\.refreshGeneration === owner\.interactionGeneration &&\s*"
+        r"!controller\.signal\.aborted;",
+        listing_owner,
+    )
     assert 'MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL"' in script
     assert 'MEDIA_PREVIEW: "MEDIA_PREVIEW"' in script
     assert "MAX_MEDIA_PREVIEW_BYTES" in script

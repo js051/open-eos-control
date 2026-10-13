@@ -17,6 +17,8 @@
   if (!rtpAudio) throw new Error("Open EOS RTP audio module is unavailable.");
   const mediaTransfer = globalThis.OpenEOSMediaTransfer;
   if (!mediaTransfer) throw new Error("Open EOS media transfer module is unavailable.");
+  const mediaListing = globalThis.OpenEOSMediaListing;
+  if (!mediaListing) throw new Error("Open EOS media listing module is unavailable.");
   const mediaLibrary = globalThis.OpenEOSMediaLibrary;
   if (!mediaLibrary) throw new Error("Open EOS media library module is unavailable.");
   const mediaBatch = globalThis.OpenEOSMediaBatch;
@@ -452,8 +454,10 @@
       mediaRecentMoreCount: "Latest {count} media item(s) - more on card",
       mediaEmpty: "No media was reported by the camera",
       mediaFilteredCount: "{visible} of {total} media items",
-      mediaLoadingCount: "Loading camera media - {count} item(s) currently shown",
-      mediaFailedCount: "Media refresh failed - showing {count} previous item(s)",
+      mediaLoadingCount: "Loading camera media - {count} item(s) received this time",
+      mediaCancelLoading: "Cancel loading",
+      mediaCancelledCount: "Loading cancelled - {count} item(s) kept. Camera reads may still continue.",
+      mediaFailedCount: "Media refresh failed - keeping {count} item(s)",
       mediaNotLoadedCount: "Media not loaded",
       mediaScope: "Media range",
       mediaRecent: "Recent",
@@ -1047,8 +1051,10 @@
       mediaRecentMoreCount: "最新 {count} 個媒體檔案 - 卡內尚有更多",
       mediaEmpty: "相機未回報任何媒體檔案",
       mediaFilteredCount: "顯示 {visible}／{total} 個媒體檔案",
-      mediaLoadingCount: "正在載入相機媒體 - 目前顯示 {count} 個",
-      mediaFailedCount: "媒體重新整理失敗 - 顯示先前的 {count} 個",
+      mediaLoadingCount: "正在載入相機媒體 - 本次已收到 {count} 個",
+      mediaCancelLoading: "取消載入",
+      mediaCancelledCount: "已取消載入 - 保留 {count} 個。相機端讀取仍可能繼續。",
+      mediaFailedCount: "媒體重新整理失敗 - 保留 {count} 個",
       mediaNotLoadedCount: "尚未載入媒體",
       mediaScope: "媒體範圍",
       mediaRecent: "最近",
@@ -1523,6 +1529,8 @@
     mediaLoaded: false,
     mediaLoadStatus: "NOT_LOADED",
     mediaRefreshPromise: null,
+    mediaListingOwner: null,
+    mediaListingReceived: 0,
     mediaRefreshSession: null,
     mediaScope: "recent",
     mediaHasMore: false,
@@ -1691,6 +1699,7 @@
     monitorDesqueezeSelect: byId("monitor-desqueeze-select"),
     advancedSettings: byId("advanced-settings"),
     mediaRefreshButton: byId("media-refresh-button"),
+    mediaListingCancel: byId("media-listing-cancel"),
     mediaUploadButton: byId("media-upload-button"),
     mediaUploadInput: byId("media-upload-input"),
     mediaSummary: byId("media-summary"),
@@ -1888,11 +1897,12 @@
 
   async function api(
     path,
-    { method = "GET", json, responseType = "json", keepalive = false, signal = null, redirect = "follow", authToken = state.token } = {},
+    { method = "GET", json, responseType = "json", listing = null, keepalive = false, signal = null, redirect = "follow", authToken = state.token } = {},
   ) {
     const headers = new Headers();
     if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
     if (json !== undefined) headers.set("Content-Type", "application/json");
+    if (responseType === "mediaListing") headers.set("Accept", mediaListing.MEDIA_TYPE);
     let response;
     try {
       response = await fetch(path, {
@@ -1912,6 +1922,14 @@
       const value = await cameraFocus.readResponse(response);
       if (!response.ok) throw new ApiError("Camera focus information is unavailable.", { status: response.status });
       return value;
+    }
+    if (responseType === "mediaListing") {
+      if (response.ok) return mediaListing.readResponse(response, { ...listing, signal });
+      const detail = await mediaListing.readError(response, { signal });
+      const error = detail.error || {};
+      throw new ApiError(typeof error.message === "string" ? error.message : `${response.status} ${response.statusText}`, {
+        code: typeof error.code === "string" ? error.code : "HTTP_ERROR", status: response.status,
+      });
     }
     if (!response.ok) {
       let detail = null;
@@ -2271,6 +2289,10 @@
     // A status read admitted inside a command can predate its ACK. Existing
     // event refresh already waits for this boundary; diagnostics must too.
     if (!state.session || state.recordingCommandOwner?.session === state.session || state.heldAutofocusOwner) return false;
+    if (state.mediaListingOwner) {
+      if (quiet) return false;
+      state.mediaListingOwner.cancel({ silent: true });
+    }
     const previousOwner = state.refreshRequestOwner;
     // An in-flight explicit refresh owns its completion feedback. Quiet reads
     // can retry later, but cannot leave that request permanently "Refreshing".
@@ -2393,6 +2415,7 @@
   }
 
   function resetSession() {
+    state.mediaListingOwner?.cancel({ silent: true });
     if (state.heldAutofocusOwner) {
       state.shutterDisconnectWarning = true;
       void stopHeldAutofocus({ owner: state.heldAutofocusOwner, automatic: true, keepalive: true });
@@ -2516,14 +2539,26 @@
               String(key).toLowerCase().includes("content"),
             ) };
           }
-          while (current() && (cameraInteractionBusy() || state.recordingCommandOwner?.session === session)) {
-            await sleep(25);
+          while (current() && (cameraInteractionBusy() || state.mediaListingOwner || state.recordingCommandOwner?.session === session)) {
+            if (state.mediaListingOwner) {
+              const listing = state.mediaListingOwner.promise;
+              await listing;
+              if (["cancelled", "failed", "retired"].includes(listing.mediaOutcome)) pending.contentsChanged = false;
+            } else await sleep(25);
           }
           if (!current()) break;
           let refreshed = await refreshSession({ quiet: true, eventGeneration: generation });
           if (!current()) break;
           if (refreshed && pending.contentsChanged && state.mediaLoaded && featureSupported(FEATURES.MEDIA_BROWSER)) {
-            refreshed = await refreshMedia({ preservePreview: true });
+            const listing = refreshMedia({ preservePreview: true });
+            refreshed = await listing;
+            // A consumed contents hint must not restart cancelled or failed
+            // traversal. A later event or explicit Refresh can request new work.
+            if (["cancelled", "failed", "retired"].includes(listing.mediaOutcome)) {
+              pending = null;
+              failures = 0;
+              continue;
+            }
           }
           if (!current()) break;
           if (refreshed) {
@@ -2573,6 +2608,7 @@
   }
 
   function beginCameraInteraction() {
+    state.mediaListingOwner?.cancel({ silent: true });
     if (state.focusInfoSnapshot || state.focusInfoRequest) cancelCameraFocusInfo();
     if (ui.focusReticle) ui.focusReticle.hidden = true;
     state.refreshGeneration += 1;
@@ -3934,6 +3970,7 @@
   }
 
   function refreshLatestMedia() {
+    state.mediaListingOwner?.cancel({ silent: true });
     if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER)) return Promise.resolve(false);
     const reviewAttempt = state.latestMediaReviewAttempt?.sessionId === state.session.id
       ? state.latestMediaReviewAttempt : null;
@@ -4027,6 +4064,7 @@
     try {
       if (session?.id !== rawSessionId || generation !== state.latestMediaGeneration ||
           state.latestMediaItem?.id !== item.id || signal?.aborted) return;
+      if (state.mediaListingOwner) return;
       // Capture review normally owns a busy promise already. If it reaches this
       // stage during an older import read, wait for that reservation, not a timer.
       while (state.mediaAutoImportReading) {
@@ -4036,7 +4074,7 @@
         if (state.session !== session || generation !== state.latestMediaGeneration || signal?.aborted) return;
       }
       if (state.session !== session || generation !== state.latestMediaGeneration ||
-          state.latestMediaItem?.id !== item.id || signal?.aborted) return;
+          state.latestMediaItem?.id !== item.id || signal?.aborted || state.mediaListingOwner) return;
       const blob = await api(
         `/v1/session/${encodeURIComponent(rawSessionId)}/media/${encodeURIComponent(item.id)}/thumbnail`,
         { responseType: "blob", signal },
@@ -5711,7 +5749,7 @@
     mediaTab.hidden = !featureSupported(FEATURES.MEDIA_BROWSER);
     ui.mediaUploadButton.hidden = !featureSupported(FEATURES.MEDIA_UPLOAD);
     ui.mediaUploadButton.disabled = !connected || interactionBusy || !featureSupported(FEATURES.MEDIA_UPLOAD);
-    ui.mediaRefreshButton.disabled = !connected || interactionBusy;
+    ui.mediaRefreshButton.disabled = !connected || interactionBusy || Boolean(state.mediaListingOwner);
     renderMediaTransfer();
     renderLatestMedia();
     renderMediaDetails();
@@ -5747,71 +5785,101 @@
 
   function refreshMedia({ preservePreview = false } = {}) {
     const session = state.session;
-    if (state.mediaRefreshPromise && state.mediaRefreshSession === session) {
-      // An explicit refresh still dismisses review when joining a background read.
+    const previous = state.mediaListingOwner;
+    if (previous && previous.session === session && previous.scope === state.mediaScope) {
       if (!preservePreview) closeMediaPreview();
-      return state.mediaRefreshPromise;
+      return previous.promise;
     }
-    const promise = refreshMediaWhenCurrent({ preservePreview });
-    state.mediaRefreshPromise = promise;
-    state.mediaRefreshSession = session;
-    return promise.finally(() => {
-      if (state.mediaRefreshPromise === promise) {
-        state.mediaRefreshPromise = null;
-        state.mediaRefreshSession = null;
+    previous?.cancel({ silent: true });
+    if (!session || !featureSupported(FEATURES.MEDIA_BROWSER)) return Promise.resolve(false);
+    const owner = { session, scope: state.mediaScope, controller: new AbortController(),
+      interactionGeneration: state.refreshGeneration, outcome: null };
+    let finishCancelled;
+    owner.cancelled = new Promise((resolve) => { finishCancelled = resolve; });
+    owner.cancel = ({ silent = false } = {}) => {
+      if (state.mediaListingOwner !== owner) return;
+      owner.outcome = "cancelled";
+      state.mediaListingOwner = null;
+      state.mediaRefreshPromise = null;
+      state.mediaRefreshSession = null;
+      owner.controller.abort();
+      finishCancelled(false);
+      if (state.session === session) {
+        state.mediaLoaded = true;
+        state.mediaLoadStatus = "CANCELLED";
+        renderMediaSummary();
+        if (!silent) renderAvailability();
       }
+    };
+    state.mediaListingOwner = owner;
+    const work = refreshMediaWhenCurrent({ preservePreview, owner });
+    const promise = Promise.race([work, owner.cancelled]).finally(() => {
+      promise.mediaOutcome = owner.outcome || "retired";
+      if (state.mediaListingOwner !== owner) return;
+      state.mediaListingOwner = null;
+      state.mediaRefreshPromise = null;
+      state.mediaRefreshSession = null;
+      renderMediaSummary();
       renderAvailability();
     });
+    owner.promise = promise;
+    state.mediaRefreshPromise = promise;
+    state.mediaRefreshSession = session;
+    return promise;
   }
 
-  async function refreshMediaWhenCurrent({ preservePreview = false } = {}) {
-    const session = state.session;
-    while (session && state.session === session && featureSupported(FEATURES.MEDIA_BROWSER)) {
-      while (cameraInteractionBusy() && state.session === session) await sleep(25);
-      if (state.session !== session || !featureSupported(FEATURES.MEDIA_BROWSER)) return false;
-      const rawSessionId = session.id;
-      const interactionGeneration = state.refreshGeneration;
-      const mediaScope = state.mediaScope;
-      ui.mediaRefreshButton.disabled = true;
-      state.mediaLoadStatus = "LOADING";
+  function cancelMediaListing() {
+    state.mediaListingOwner?.cancel();
+  }
+
+  async function refreshMediaWhenCurrent({ preservePreview = false, owner } = {}) {
+    const { session, scope, controller } = owner;
+    const current = () => state.mediaListingOwner === owner && state.session === session &&
+      state.mediaScope === scope && state.refreshGeneration === owner.interactionGeneration &&
+      !controller.signal.aborted;
+    while (current() && cameraInteractionBusy()) await Promise.race([sleep(25), owner.cancelled]);
+    if (!current() || !featureSupported(FEATURES.MEDIA_BROWSER)) return false;
+    state.mediaLoadStatus = "LOADING";
+    state.mediaListingReceived = 0;
+    renderMediaSummary();
+    if (!preservePreview) closeMediaPreview();
+    const publish = (items) => {
+      if (!current()) return;
+      if (!owner.receivedSnapshot) clearMediaThumbnails();
+      owner.receivedSnapshot = true;
+      state.mediaHasMore = scope === "recent" && items.length > 60;
+      state.media = scope === "recent" ? items.slice(0, 60) : items;
+      state.mediaListingReceived = state.media.length;
+      state.mediaLoaded = true;
+      renderMedia();
+      if (preservePreview && ui.mediaPreviewDialog.open) renderMediaPreviewNavigation();
+    };
+    try {
+      const limit = scope === "recent" ? 61 : null;
+      const response = await api(`/v1/session/${encodeURIComponent(session.id)}/media${limit === null ? "" : "?limit=61"}`,
+        { responseType: "mediaListing", signal: controller.signal, redirect: "error",
+          listing: { sessionId: session.id, limit, onSnapshot: publish } });
+      if (!current()) return false;
+      if (!owner.receivedSnapshot) publish(response.items);
+      owner.outcome = "complete";
+      state.mediaLoadStatus = "COMPLETE";
+      // Release thumbnail demand only after the terminal and EOF validated.
+      state.mediaListingOwner = null;
+      state.mediaRefreshPromise = null;
+      state.mediaRefreshSession = null;
+      renderMedia();
+      renderAvailability();
+      return true;
+    } catch (error) {
+      if (!current()) return false;
+      const normalized = captureError(error);
+      owner.outcome = "failed";
+      state.mediaLoaded = true;
+      state.mediaLoadStatus = "FAILED";
       renderMediaSummary();
-      // A contents event owns the listing, not the independently opened review.
-      if (!preservePreview) closeMediaPreview();
-      try {
-        const limitQuery = mediaScope === "recent" ? "?limit=61" : "";
-        const response = await api(
-          `/v1/session/${encodeURIComponent(rawSessionId)}/media${limitQuery}`,
-        );
-        // A retired listing cannot publish or start a retry on a replacement
-        // connection, including one whose backend reuses the same session ID.
-        if (state.session !== session) return false;
-        if (
-          state.refreshGeneration !== interactionGeneration ||
-          state.mediaScope !== mediaScope
-        ) continue;
-        clearMediaThumbnails();
-        const items = response.items || [];
-        state.mediaHasMore = mediaScope === "recent" && items.length > 60;
-        state.media = mediaScope === "recent" ? items.slice(0, 60) : items;
-        state.mediaLoaded = true;
-        state.mediaLoadStatus = "COMPLETE";
-        renderMedia();
-        if (preservePreview && ui.mediaPreviewDialog.open) renderMediaPreviewNavigation();
-        return true;
-      } catch (error) {
-        if (state.session !== session) return false;
-        if (
-          state.refreshGeneration !== interactionGeneration ||
-          state.mediaScope !== mediaScope
-        ) continue;
-        const normalized = captureError(error);
-        state.mediaLoadStatus = "FAILED";
-        renderMediaSummary();
-        showToast(normalized.message, true);
-        return false;
-      }
+      showToast(normalized.message, true);
+      return false;
     }
-    return false;
   }
 
   function renderMedia() {
@@ -6301,6 +6369,7 @@
     const items = continuation ? options.items : state.mediaSelection.snapshot().map((entry) => entry.item);
     if (!items?.length || (continuation && (options.session !== state.session
       || items.some((item) => !state.media.includes(item))))) return;
+    state.mediaListingOwner?.cancel({ silent: true });
     const owner = { session: state.session, controller: new AbortController(), cancelled: false, silent: false,
       strictHistory: !!continuation };
     state.mediaBatchOwner = owner;
@@ -6760,9 +6829,18 @@
     renderMediaRatingFilter(visibleItems);
     renderMediaFolderFilter(visibleItems);
     if (!ui.mediaSummary) return;
+    if (ui.mediaListingCancel) {
+      ui.mediaListingCancel.hidden = !state.mediaListingOwner;
+      ui.mediaListingCancel.disabled = !state.mediaListingOwner;
+    }
+    ui.mediaRefreshButton.disabled = !state.session || cameraInteractionBusy() || Boolean(state.mediaListingOwner);
     ui.mediaSummary.dataset.loadStatus = state.mediaLoadStatus;
     if (state.mediaLoadStatus === "LOADING") {
-      ui.mediaSummary.textContent = t("mediaLoadingCount", { count: state.media.length });
+      ui.mediaSummary.textContent = t("mediaLoadingCount", { count: state.mediaListingReceived || 0 });
+      return;
+    }
+    if (state.mediaLoadStatus === "CANCELLED") {
+      ui.mediaSummary.textContent = t("mediaCancelledCount", { count: state.media.length });
       return;
     }
     if (state.mediaLoadStatus === "FAILED") {
@@ -7040,6 +7118,7 @@
       state.mediaThumbnailLoads.has(item.id) ||
       state.mediaThumbnailFailures.has(item.id)
     ) return;
+    if (state.mediaListingOwner || state.mediaLoadStatus === "CANCELLED" || state.mediaLoadStatus === "FAILED") return;
     if (state.mediaAutoImportReading) {
       // The observer may already have unobserved this intersecting element.
       // One flag retains demand without storing an unbounded list of media IDs.
@@ -7088,6 +7167,7 @@
   }
 
   function observeMediaThumbnail(container) {
+    if (state.mediaListingOwner || state.mediaLoadStatus === "CANCELLED" || state.mediaLoadStatus === "FAILED") return;
     if (!("IntersectionObserver" in window)) {
       const item = state.media.find((candidate) => candidate.id === container.dataset.mediaId);
       if (item) loadMediaThumbnail(item);
@@ -7110,7 +7190,7 @@
   }
 
   function retryMediaAutoImportThumbnails() {
-    if (!state.mediaAutoImportThumbnailsDeferred || !state.session || cameraInteractionBusy()) return;
+    if (!state.mediaAutoImportThumbnailsDeferred || !state.session || cameraInteractionBusy() || state.mediaListingOwner) return;
     state.mediaAutoImportThumbnailsDeferred = false;
     // Re-observe only the currently rendered bounded page. IntersectionObserver
     // decides what is visible; off-page demand never becomes a new request queue.
@@ -7330,6 +7410,7 @@
 
   async function openMediaDetails(item) {
     if (!state.session || cameraInteractionBusy()) return;
+    state.mediaListingOwner?.cancel({ silent: true });
     clearMediaDetails();
     const generation = state.mediaDetailsGeneration;
     state.mediaDetailsItem = item;
@@ -7361,6 +7442,7 @@
   async function updateMediaMetadata(feature, suffix, json) {
     const item = state.mediaDetailsItem;
     if (!state.session || !item || !featureSupported(feature) || state.mediaDetailsBusy || cameraInteractionBusy()) return;
+    state.mediaListingOwner?.cancel({ silent: true });
     const generation = state.mediaDetailsGeneration;
     state.mediaDetailsBusy = true;
     renderMediaDetails();
@@ -7400,6 +7482,7 @@
       (video && !featureSupported(FEATURES.MEDIA_DOWNLOAD)) ||
       (!video && (item.previewAvailable !== true || !featureSupported(FEATURES.MEDIA_PREVIEW)))
     ) return;
+    state.mediaListingOwner?.cancel({ silent: true });
     clearMediaPreview();
     const generation = state.mediaPreviewGeneration;
     // Playback allocation must return its ticket so stale responses can revoke it.
@@ -7520,7 +7603,7 @@
     const transfer = state.mediaUpload || state.mediaDownload;
     const uploading = Boolean(state.mediaUpload);
     ui.mediaTransfer.hidden = !transfer;
-    ui.mediaRefreshButton.disabled = !state.session || cameraInteractionBusy();
+    ui.mediaRefreshButton.disabled = !state.session || cameraInteractionBusy() || Boolean(state.mediaListingOwner);
     if (!transfer) return;
     ui.mediaTransferName.textContent = transfer.name;
     if (transfer.cancelling) {
@@ -7574,6 +7657,7 @@
 
   async function downloadMedia(item) {
     if (!state.session || !featureSupported(FEATURES.MEDIA_DOWNLOAD) || cameraInteractionBusy()) return;
+    state.mediaListingOwner?.cancel({ silent: true });
     const session = state.session;
     const sessionId = session.id;
     const owner = { cancelled: false, silent: false };
@@ -7791,6 +7875,7 @@
     const session = state.session;
     if (!session || !featureSupported(FEATURES.MEDIA_DELETE) || cameraInteractionBusy()) return;
     if (!window.confirm(t("deleteConfirm", { name: item.name }))) return;
+    state.mediaListingOwner?.cancel({ silent: true });
     button.disabled = true;
     try {
       await api(
@@ -8277,6 +8362,7 @@
       applyMediaDateFilter();
     });
     ui.mediaRefreshButton.addEventListener("click", refreshMedia);
+    ui.mediaListingCancel.addEventListener("click", cancelMediaListing);
     ui.mediaSelectFiltered.addEventListener("click", () => {
       if (cameraInteractionBusy()) return;
       state.mediaSelection.replaceLoaded(state.media);
@@ -8334,6 +8420,7 @@
       const button = event.target.closest?.("[data-media-scope]");
       if (!button || button.dataset.mediaScope === state.mediaScope) return;
       const scope = button.dataset.mediaScope;
+      state.mediaListingOwner?.cancel({ silent: true });
       state.mediaScope = scope;
       state.mediaPage = 0;
       closeMediaPreview();
@@ -8494,6 +8581,7 @@
       if (previewActive()) applyLiveViewLayout();
     });
     window.addEventListener("beforeunload", () => {
+      state.mediaListingOwner?.cancel({ silent: true });
       releaseHeldAutofocusForLifecycle();
       cancelCameraFocusInfo();
       cancelCameraScan();

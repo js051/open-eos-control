@@ -27,6 +27,7 @@ from .engine import CameraEngine, NetworkCameraEngine
 from .engine_registry import LocalEngineRegistry
 from .errors import BridgeError, unsupported
 from .gphoto2 import GPhoto2Engine
+from .media_listing import MediaListingStreams, accepts_media_stream
 from .media_streaming import (
     InvalidMediaRange,
     MediaPlaybackCache,
@@ -253,10 +254,12 @@ def create_app(
     manager = SessionManager(local_engines, network_engine)
     playback_tickets = MediaPlaybackTickets()
     playback_cache = MediaPlaybackCache(max_entries=4)
+    media_listings = MediaListingStreams()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         yield
+        media_listings.close()
         playback_cache.clear()
         manager.close_all()
 
@@ -266,6 +269,7 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.session_manager = manager
+    application.state.media_listings = media_listings
 
     @application.get("/", include_in_schema=False, response_class=FileResponse)
     def desktop_control() -> FileResponse:
@@ -728,6 +732,7 @@ def create_app(
     @router.get("/session/{session_id}/media", response_model=MediaList)
     def media(
         session_id: str,
+        request: Request,
         response: Response,
         limit: int | None = Query(default=None, ge=1, le=1000),
         inventory: Literal["strict"] | None = Query(default=None),
@@ -740,6 +745,12 @@ def create_app(
             response.headers["X-Open-EOS-Inventory"] = "complete-v1"
             response.headers["Cache-Control"] = "private, no-store, max-age=0"
             return MediaList(items=items)
+        progressive = getattr(session, "list_media_progressive", None)
+        if callable(progressive) and accepts_media_stream(request.headers.get("accept", "")):
+            return media_listings.response(
+                request, session_id, session, limit, progressive,
+                lambda: manager.is_current(session_id, session),
+            )
         return MediaList(items=session.list_media(limit))
 
     @router.post("/session/{session_id}/media", response_model=MediaItem, status_code=201)
