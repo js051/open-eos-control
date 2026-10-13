@@ -419,12 +419,12 @@ private struct CaptureBar: View {
 
             if camera.captureReviewState != .idle {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(LocalizedStringKey(camera.captureReviewState.localizationKey))
+                    Text(LocalizedStringKey(camera.captureReviewKind.localizationKey(for: camera.captureReviewState)))
                         .font(.caption)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("capture-review-status")
                     if camera.captureReviewState != .capturing {
-                        Text("capture_review_limited_list")
+                        Text(LocalizedStringKey("\(camera.captureReviewKind.localizationPrefix)_limited_list"))
                             .font(.caption2)
                             .foregroundStyle(Color.cameraSecondaryText)
                             .fixedSize(horizontal: false, vertical: true)
@@ -433,7 +433,7 @@ private struct CaptureBar: View {
                         Button {
                             camera.retryCaptureMediaReview()
                         } label: {
-                            Label("capture_review_retry", systemImage: "arrow.clockwise")
+                            Label(LocalizedStringKey("\(camera.captureReviewKind.localizationPrefix)_retry"), systemImage: "arrow.clockwise")
                                 .font(.caption.weight(.semibold))
                                 .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
                                 .contentShape(Rectangle())
@@ -492,7 +492,7 @@ private struct CaptureBar: View {
                     }
                     .overlay(alignment: .bottom) {
                         if camera.latestMediaIsPrevious {
-                            Text("capture_review_previous_badge")
+                            Text(LocalizedStringKey("\(camera.captureReviewKind.localizationPrefix)_previous_badge"))
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity)
@@ -517,8 +517,14 @@ private struct CaptureBar: View {
         guard let item = camera.latestMediaItem else {
             return language.string("open_latest_media")
         }
-        let key = camera.latestMediaIsPrevious ? "open_previous_media_named"
-            : camera.captureReviewState == .available ? "open_visible_media_named" : "open_latest_media_named"
+        let key: String
+        if camera.latestMediaIsPrevious {
+            key = mediaIsVideo(item) ? "open_previous_video_named" : "open_previous_media_named"
+        } else if camera.captureReviewState == .available {
+            key = mediaIsVideo(item) ? "open_visible_video_named" : "open_visible_media_named"
+        } else {
+            key = "open_latest_media_named"
+        }
         return language.format(key, item.name)
     }
 

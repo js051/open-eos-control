@@ -69,6 +69,31 @@ final class MediaLibraryTests: XCTestCase {
         XCTAssertTrue(batch.hasMore)
     }
 
+    func testRecordingReviewExcludesKnownVideoAndEveryPhotoBeforeComparingDates() {
+        let photo = media("photo", "OLD.JPG", "2040-01-01T00:00:00Z")
+        let old = CameraMediaItem(id: "old", name: "OLD.MP4", kind: "video", captureTime: "2030-01-01T00:00:00Z")
+        let new = CameraMediaItem(id: "new", name: "NEW.MP4", kind: "video", captureTime: "2020-01-01T00:00:00Z")
+        XCTAssertNil(selectLatestMediaItem(afterCaptureFrom: [photo, old], previousIDs: ["old"], kind: .video))
+        XCTAssertEqual(
+            selectLatestMediaItem(afterCaptureFrom: [photo, old, new], previousIDs: ["old"], kind: .video)?.id,
+            "new"
+        )
+        XCTAssertEqual(selectLatestMediaItem(afterCaptureFrom: [new, photo], previousIDs: [])?.id, "photo")
+    }
+
+    func testRecordingReviewRecognizesVideoExtensionAndRetainsUnknownDateCameraOrder() {
+        let first = CameraMediaItem(id: "first", name: "FIRST.mP4", kind: "unknown")
+        let second = CameraMediaItem(id: "second", name: "SECOND.MOV", kind: "video")
+        XCTAssertEqual(
+            selectLatestMediaItem(afterCaptureFrom: [first, second], previousIDs: [], kind: .video)?.id,
+            "first"
+        )
+        XCTAssertEqual(
+            selectLatestMediaItem(afterCaptureFrom: [first, second], previousIDs: ["first"], kind: .video)?.id,
+            "second"
+        )
+    }
+
     func testFullCardMediaBatchDoesNotTruncate() {
         let items = (1...61).map { media("\($0)", "IMG_\($0).JPG", nil) }
 

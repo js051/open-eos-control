@@ -49,6 +49,8 @@ targets:
     platform: iOS
     sources:
       - path: UITests
+      - path: Tests/Fixtures/valid-h264-baseline.mp4
+        buildPhase: resources
     dependencies:
       - target: OpenEOSControl
     settings:

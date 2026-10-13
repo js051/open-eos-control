@@ -128,6 +128,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var latestMediaThumbnail: Data?
     @Published private(set) var latestMediaThumbnailLoading = false
     @Published private(set) var captureReviewState = CaptureReviewState.idle
+    @Published private(set) var captureReviewKind = CaptureReviewKind.photo
     @Published private(set) var mediaLibraryLoading = false
     @Published private(set) var mediaLibraryLoadCancellable = false
     @Published private(set) var mediaLibraryLoadStatus = MediaLibraryLoadStatus.notLoaded
@@ -225,7 +226,7 @@ final class CameraAppState: ObservableObject {
     private(set) var latestMediaTask: Task<Void, Never>?
     private var latestMediaGeneration = UUID()
     private var observedMediaIDs = Set<String>()
-    private var pendingCaptureReviewIDs: Set<String>?
+    private var pendingCaptureReview: CaptureReviewAttempt?
     private var mediaPreviewToken: UUID?
     private var mediaPreviewImageTask: Task<CameraMediaPreview, Error>?
     private var rateTracker = LiveViewRateTracker()
@@ -242,10 +243,10 @@ final class CameraAppState: ObservableObject {
         if mediaIsVideo(item) { return supports(.mediaDownload) }
         return item.previewAvailable && supports(.mediaPreview)
     }
-    var latestMediaIsPrevious: Bool { latestMediaItem != nil && pendingCaptureReviewIDs != nil }
+    var latestMediaIsPrevious: Bool { latestMediaItem != nil && pendingCaptureReview != nil }
     var canRetryCaptureMediaReview: Bool {
         (captureReviewState == .notReady || captureReviewState == .readFailed)
-            && pendingCaptureReviewIDs != nil && session != nil
+            && pendingCaptureReview != nil && session != nil
             && !isPreview && connected && supports(.mediaBrowser) && busyOperations.isEmpty && !shutterReleaseRequired
     }
     var canRetryMediaPreview: Bool {
@@ -954,41 +955,35 @@ final class CameraAppState: ObservableObject {
             return
         }
         guard let session else { return }
-        // Retire the previous review before the first shutter await, not after ACK.
-        // Use only already loaded observations; never scan the card before a shot.
-        var previousIDs = observedMediaIDs.union(mediaItems.map(\.id))
-        if let item = latestMediaItem { previousIDs.insert(item.id) }
-        invalidateLatestMedia(clearItem: false)
-        pendingCaptureReviewIDs = supports(.mediaBrowser) ? previousIDs : nil
-        captureReviewState = pendingCaptureReviewIDs == nil ? .idle : .capturing
+        prepareCaptureMediaReview(kind: .photo)
         do {
             let captured = try await session.captureStill(autofocus: autofocus)
             guard generation == sessionGeneration else { return }
             updateStatus(captured)
             showShutterFlash()
             lastError = nil
-            if let previousIDs = pendingCaptureReviewIDs {
-                startLatestMediaRefresh(session: session, previousIDs: previousIDs)
+            if let review = pendingCaptureReview {
+                startLatestMediaRefresh(session: session, review: review)
             }
         } catch DesktopBridgeError.captureStatusReadbackFailed {
             guard generation == sessionGeneration else { return }
             // The command was acknowledged; keep this capture's existing read-only owner.
             // A status-read failure does not establish an exposure or justify replaying the shutter command.
             lastError = NSLocalizedString("capture_status_readback_failed", comment: "")
-            if let previousIDs = pendingCaptureReviewIDs {
-                startLatestMediaRefresh(session: session, previousIDs: previousIDs)
+            if let review = pendingCaptureReview {
+                startLatestMediaRefresh(session: session, review: review)
             }
         } catch {
             guard generation == sessionGeneration else { return }
-            pendingCaptureReviewIDs = nil
+            pendingCaptureReview = nil
             captureReviewState = .idle
             record(error)
         }
     }
 
     func retryCaptureMediaReview() {
-        guard canRetryCaptureMediaReview, let session, let previousIDs = pendingCaptureReviewIDs else { return }
-        startLatestMediaRefresh(session: session, previousIDs: previousIDs)
+        guard canRetryCaptureMediaReview, let session, let review = pendingCaptureReview else { return }
+        startLatestMediaRefresh(session: session, review: review)
     }
 
     func openLatestMedia() async {
@@ -1292,13 +1287,28 @@ final class CameraAppState: ObservableObject {
             return
         }
         guard let session else { return }
+        if wasRecording { prepareCaptureMediaReview(kind: .video) }
         do {
             let newStatus = wasRecording ? try await session.stopRecording() : try await session.startRecording()
             guard generation == sessionGeneration else { return }
             updateStatus(newStatus)
             lastError = nil
+            if wasRecording {
+                // A returned status must explicitly confirm stop. An unknown/active
+                // recording status cannot authorize review or replay the REC command.
+                if newStatus.recording == false, let review = pendingCaptureReview {
+                    startLatestMediaRefresh(session: session, review: review)
+                } else {
+                    pendingCaptureReview = nil
+                    captureReviewState = .idle
+                }
+            }
         } catch {
             guard generation == sessionGeneration else { return }
+            if wasRecording {
+                pendingCaptureReview = nil
+                captureReviewState = .idle
+            }
             record(error)
         }
     }
@@ -1459,19 +1469,31 @@ final class CameraAppState: ObservableObject {
         }
     }
 
+    private func prepareCaptureMediaReview(kind: CaptureReviewKind) {
+        // Retire any old list/thumbnail before awaiting the command. Snapshot only
+        // loaded observations: neither a shot nor recording stop waits for a card scan.
+        var previousIDs = observedMediaIDs.union(mediaItems.map(\.id))
+        if let item = latestMediaItem { previousIDs.insert(item.id) }
+        invalidateLatestMedia(clearItem: false)
+        pendingCaptureReview = supports(.mediaBrowser)
+            ? CaptureReviewAttempt(previousIDs: previousIDs, kind: kind) : nil
+        captureReviewKind = kind
+        captureReviewState = pendingCaptureReview == nil ? .idle : .capturing
+    }
+
     private func startLatestMediaRefresh(
         session: CameraSession,
-        previousIDs: Set<String>? = nil
+        review: CaptureReviewAttempt? = nil
     ) {
         guard !isPreview, supports(.mediaBrowser),
-              previousIDs != nil || (pendingCaptureReviewIDs == nil && captureReviewState == .idle) else { return }
+              review != nil || (pendingCaptureReview == nil && captureReviewState == .idle) else { return }
         invalidateLatestMedia(clearItem: false)
         let generation = latestMediaGeneration
         let previousReadFailed = captureReviewState == .readFailed
-        captureReviewState = previousIDs == nil ? .idle : .searching
+        captureReviewState = review == nil ? .idle : .searching
         latestMediaTask = Task { [weak self] in
             await self?.loadLatestMedia(
-                session: session, previousIDs: previousIDs,
+                session: session, review: review,
                 previousReadFailed: previousReadFailed, generation: generation
             )
         }
@@ -1479,7 +1501,7 @@ final class CameraAppState: ObservableObject {
 
     private func loadLatestMedia(
         session: CameraSession,
-        previousIDs: Set<String>?,
+        review: CaptureReviewAttempt?,
         previousReadFailed: Bool,
         generation: UUID
     ) async {
@@ -1488,12 +1510,12 @@ final class CameraAppState: ObservableObject {
             if generation == latestMediaGeneration {
                 latestMediaTask = nil
                 latestMediaThumbnailLoading = false
-                if previousIDs != nil, captureReviewState == .searching {
+                if review != nil, captureReviewState == .searching {
                     captureReviewState = lastReadFailed ? .readFailed : .notReady
                 }
             }
         }
-        let attempts = previousIDs == nil ? 1 : Self.latestMediaRetryDelays.count + 1
+        let attempts = review == nil ? 1 : Self.latestMediaRetryDelays.count + 1
         for attempt in 0..<attempts {
             guard generation == latestMediaGeneration, !Task.isCancelled else { return }
             // A later media operation can own the camera while this read is backing off.
@@ -1504,14 +1526,16 @@ final class CameraAppState: ObservableObject {
                 lastReadFailed = false
                 observedMediaIDs.formUnion(items.map(\.id))
                 let selected: CameraMediaItem?
-                if let previousIDs {
-                    selected = selectLatestMediaItem(afterCaptureFrom: items, previousIDs: previousIDs)
+                if let review {
+                    selected = selectLatestMediaItem(
+                        afterCaptureFrom: items, previousIDs: review.previousIDs, kind: review.kind
+                    )
                 } else {
                     selected = selectLatestMediaItem(items)
                 }
                 if let item = selected {
-                    if previousIDs != nil {
-                        pendingCaptureReviewIDs = nil
+                    if review != nil {
+                        pendingCaptureReview = nil
                         captureReviewState = .available
                     }
                     await publishLatestMedia(item, session: session, generation: generation)
@@ -1567,8 +1591,9 @@ final class CameraAppState: ObservableObject {
             latestMediaItem = nil
             latestMediaThumbnail = nil
             observedMediaIDs.removeAll()
-            pendingCaptureReviewIDs = nil
+            pendingCaptureReview = nil
             captureReviewState = .idle
+            captureReviewKind = .photo
         }
     }
 
@@ -2942,7 +2967,7 @@ final class CameraAppState: ObservableObject {
                         let normalized = key.lowercased()
                         return normalized.contains("content") || normalized.contains("media")
                     }
-                    if contentChanged, latestMediaTask == nil, pendingCaptureReviewIDs == nil, captureReviewState == .idle {
+                    if contentChanged, latestMediaTask == nil, pendingCaptureReview == nil, captureReviewState == .idle {
                         startLatestMediaRefresh(session: session)
                     }
                     if screen == .media, contentChanged {

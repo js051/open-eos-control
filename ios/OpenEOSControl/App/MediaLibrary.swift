@@ -37,10 +37,31 @@ enum CaptureReviewState: String {
     var localizationKey: String { "capture_review_\(rawValue)" }
 }
 
-func selectLatestMediaItem(afterCaptureFrom items: [CameraMediaItem], previousIDs: Set<String>) -> CameraMediaItem? {
+enum CaptureReviewKind: Equatable {
+    case photo, video
+
+    var localizationPrefix: String { self == .photo ? "capture_review" : "recording_review" }
+
+    func localizationKey(for state: CaptureReviewState) -> String {
+        "\(localizationPrefix)_\(state.rawValue)"
+    }
+}
+
+struct CaptureReviewAttempt {
+    let previousIDs: Set<String>
+    let kind: CaptureReviewKind
+}
+
+func selectLatestMediaItem(
+    afterCaptureFrom items: [CameraMediaItem],
+    previousIDs: Set<String>,
+    kind: CaptureReviewKind = .photo
+) -> CameraMediaItem? {
     // Visibility is not exposure provenance. Keep the existing date/camera order,
-    // but exclude everything already observed before choosing a still candidate.
-    selectLatestMediaItem(items.filter { !previousIDs.contains($0.id) && !mediaIsVideo($0) })
+    // but exclude every known item and require the requested media type.
+    selectLatestMediaItem(items.filter {
+        !previousIDs.contains($0.id) && mediaIsVideo($0) == (kind == .video)
+    })
 }
 
 enum MediaFilter: String, CaseIterable, Identifiable {

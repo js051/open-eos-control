@@ -491,6 +491,16 @@
 "retry_media_preview" = "Load preview again";
 "media_viewer_outside_list" = "Not in the current list";
 "capture_review_readFailed" = "Shot accepted, but the photo list could not be read. Check again when the camera is ready.";
+"recording_review_capturing" = "Waiting for the recording stop response…";
+"recording_review_searching" = "Recording stopped. Looking for a newly visible video…";
+"recording_review_notReady" = "Recording stopped. No newly visible video found yet.";
+"recording_review_available" = "A newly visible video is ready to review.";
+"recording_review_readFailed" = "Recording stopped, but the video list could not be read. Check again when the camera is ready.";
+"recording_review_limited_list" = "Only 8 recent items are checked. A newly visible video may be an older file.";
+"recording_review_retry" = "Check again · no new recording";
+"recording_review_previous_badge" = "Earlier";
+"open_previous_video_named" = "Open previous video %@";
+"open_visible_video_named" = "Open newly visible video %@";
 "capture_status_readback_failed" = "The shutter command was acknowledged, but camera status could not be read. Check recent media without taking another photo.";
 
 // Loaded-media calendar-day filtering.

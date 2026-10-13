@@ -1465,6 +1465,103 @@ final class OpenEOSControlUITests: XCTestCase {
     }
 
     @MainActor
+    func testCanonicalRecordingStopReviewsNewlyVisibleVideoAndPreparesOriginalInBothLanguages() async throws {
+        continueAfterFailure = true
+        guard try await waitForSimulatorHealth() else {
+            #if OEC_REQUIRE_SIMULATOR_E2E
+            XCTFail("The required synthetic camera is not reachable")
+            return
+            #else
+            throw XCTSkip("Start the synthetic camera for the recording review UI journey")
+            #endif
+        }
+        for (language, apple, locale, videoMode, stopLabel, notReady, available, previousVideo, visibleVideo) in [
+            ("english", "en", "en_US", "Video", "Stop recording", "No newly visible video", "video is ready",
+             "previous video", "newly visible video"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "錄影", "停止錄影", "尚未找到新出現的影片", "影片，可開啟檢視",
+             "先前影片", "新出現的影片"),
+        ] {
+            _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
+            _ = try await simulatorRequest(path: "/ccapi/ver100/shooting/settings/shootingmode", method: "PUT",
+                                           jsonBody: ["value": "Manual"])
+            // The existing simulator's REC/STOP changes status only; it does not
+            // produce a clip. Its existing upload API exposes authentic MP4 bytes
+            // as synthetic old/new media without changing simulator behavior.
+            try await uploadSimulatorVideoFixture(filename: "EARLIER_RECORDING.MP4")
+            let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
+                             environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString])
+            defer { app.terminate() }
+            try tapForAsyncTest(app.buttons["preset-http-button"])
+            _ = try XCTUnwrap(scrollConnectionButtonIntoView(in: app, timeout: 8) ? true : nil)
+            try tapForAsyncTest(app.buttons["connect-button"])
+            let latest = app.buttons["latest-media-button"]
+            _ = try XCTUnwrap(waitForLabel(latest, containing: "EARLIER_RECORDING.MP4", timeout: 30) ? true : nil)
+            let mode = app.segmentedControls["capture-mode-picker"]
+            _ = try XCTUnwrap(waitForInteraction(mode.buttons[videoMode], timeout: 8) ? true : nil)
+            try tapForAsyncTest(mode.buttons[videoMode])
+            try await waitForSimulatorState { state in state["movie_mode"] as? String == "on" }
+            let record = app.buttons["record-button"]
+            _ = try XCTUnwrap(waitForInteraction(record, timeout: 8) ? true : nil)
+            try tapForAsyncTest(record)
+            try await waitForSimulatorState { state in
+                state["recording"] as? Bool == true &&
+                    (state["record_start_count"] as? NSNumber)?.intValue == 1
+            }
+            _ = try XCTUnwrap(waitForLabel(record, containing: stopLabel, timeout: 15) ? true : nil)
+            try tapForAsyncTest(record)
+            try await waitForSimulatorState { state in
+                state["recording"] as? Bool == false &&
+                    (state["record_stop_count"] as? NSNumber)?.intValue == 1
+            }
+            let status = app.staticTexts["capture-review-status"]
+            _ = try XCTUnwrap(waitForLabel(status, containing: notReady, timeout: 15) ? true : nil)
+            _ = try XCTUnwrap(latest.label.contains("EARLIER_RECORDING.MP4") && latest.label.contains(previousVideo) ? true : nil)
+            let retry = app.buttons["capture-review-retry"]
+            _ = try XCTUnwrap(waitForInteraction(retry, timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(retry.frame.height + 0.000_001 >= 44 && retry.frame.width + 0.000_001 >= 44 ? true : nil)
+            let stopped = try await simulatorRequest(path: "/ccapi/test/state")
+            _ = try XCTUnwrap((stopped["capture_count"] as? NSNumber)?.intValue == 0 ? true : nil)
+            _ = try XCTUnwrap(!(stopped["media_ids"] as? [String] ?? []).contains("NEWLY_VISIBLE_RECORDING.MP4") ? true : nil)
+            addScreenshot(name: "recording-review-not-ready-\(language)")
+
+            // Publish a newly visible file after STOP has settled. This verifies
+            // read-only recovery, not that this file was created by that recording.
+            try await uploadSimulatorVideoFixture(filename: "NEWLY_VISIBLE_RECORDING.MP4")
+            _ = try XCTUnwrap(waitForInteraction(retry, timeout: 5) ? true : nil)
+            try tapForAsyncTest(retry)
+            _ = try XCTUnwrap(waitForLabel(status, containing: available, timeout: 15) ? true : nil)
+            _ = try XCTUnwrap(waitForLabel(latest, containing: "NEWLY_VISIBLE_RECORDING.MP4", timeout: 10) ? true : nil)
+            _ = try XCTUnwrap(latest.label.contains(visibleVideo) ? true : nil)
+            addScreenshot(name: "recording-review-available-\(language)")
+            _ = try XCTUnwrap(waitForInteraction(latest, timeout: 5) ? true : nil)
+            try tapForAsyncTest(latest)
+            _ = try XCTUnwrap(app.buttons["close-media-preview"].waitForExistence(timeout: 15) ? true : nil)
+            let videoName = app.staticTexts.matching(NSPredicate(format: "label == %@", "NEWLY_VISIBLE_RECORDING.MP4")).firstMatch
+            _ = try XCTUnwrap(videoName.waitForExistence(timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(!app.images["media-preview-image"].exists ? true : nil)
+            let mediaID = "/ccapi/ver100/contents/card1/100CANON/NEWLY_VISIBLE_RECORDING.MP4"
+            let download = app.buttons["media-preview-download-\(mediaID)"]
+            _ = try XCTUnwrap(waitForInteraction(download, timeout: 10) ? true : nil)
+            try tapForAsyncTest(download)
+            let share = app.buttons["media-preview-share-\(mediaID)"]
+            _ = try XCTUnwrap(waitForInteraction(share, timeout: 15) ? true : nil)
+            let delivered = try await simulatorRequest(path: "/ccapi/test/state")
+            _ = try XCTUnwrap((delivered["record_start_count"] as? NSNumber)?.intValue == 1 ? true : nil)
+            _ = try XCTUnwrap((delivered["record_stop_count"] as? NSNumber)?.intValue == 1 ? true : nil)
+            _ = try XCTUnwrap((delivered["capture_count"] as? NSNumber)?.intValue == 0 ? true : nil)
+            _ = try XCTUnwrap((delivered["canonical"] as? [String: Any])?["shutter_af_requests"] as? [Bool] == [] ? true : nil)
+            // The production app has prepared the original for handoff. This does
+            // not assert decoded playback or saving into an external Files/Photos app.
+            addScreenshot(name: "recording-review-original-share-\(language)")
+            try tapForAsyncTest(app.buttons["close-media-preview"])
+            try tapForAsyncTest(app.buttons["media-back-button"])
+            try openMoreActionsForAsyncTest(in: app, context: "\(language): after recording video review")
+            guard try tapCameraActionForAsyncTest(app.buttons["disconnect-menu-button"], in: app) else { return }
+            _ = try XCTUnwrap(waitForConnectionScreen(in: app, timeout: 15) ? true : nil)
+        }
+    }
+
+    @MainActor
     func testCanonicalCCAPIEventsRefreshTheProductionUI() async throws {
         // Swift errors unwind this async test before XCTest begins the next case.
         continueAfterFailure = true
@@ -2550,6 +2647,41 @@ final class OpenEOSControlUITests: XCTestCase {
             try await Task.sleep(nanoseconds: 250_000_000)
         } while Date() < deadline
         return false
+    }
+
+    private func uploadSimulatorVideoFixture(filename: String) async throws {
+        try Task.checkCancellation()
+        let fixtureURL = try XCTUnwrap(Bundle(for: OpenEOSControlUITests.self)
+            .url(forResource: "valid-h264-baseline", withExtension: "mp4"))
+        let payload = try Data(contentsOf: fixtureURL)
+        var components = try XCTUnwrap(URLComponents(
+            url: simulatorURL.appendingPathComponent("ccapi/media"), resolvingAgainstBaseURL: false
+        ))
+        components.queryItems = [URLQueryItem(name: "filename", value: filename)]
+        var upload = URLRequest(url: try XCTUnwrap(components.url))
+        upload.httpMethod = "POST"
+        upload.httpBody = payload
+        upload.setValue("video/mp4", forHTTPHeaderField: "Content-Type")
+        upload.setValue(String(payload.count), forHTTPHeaderField: "Content-Length")
+        upload.timeoutInterval = 5
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let (result, response) = try await session.data(for: upload)
+        try Task.checkCancellation()
+        _ = try XCTUnwrap((response as? HTTPURLResponse)?.statusCode == 201 ? true : nil)
+        let item = try XCTUnwrap(try JSONSerialization.jsonObject(with: result) as? [String: Any])
+        _ = try XCTUnwrap(item["id"] as? String == filename && item["kind"] as? String == "video" ? true : nil)
+        _ = try XCTUnwrap((item["size_bytes"] as? NSNumber)?.intValue == payload.count ? true : nil)
+        var original = URLRequest(url: simulatorURL
+            .appendingPathComponent("ccapi/ver100/contents/card1/100CANON")
+            .appendingPathComponent(filename))
+        original.timeoutInterval = 5
+        let (bytes, originalResponse) = try await session.data(for: original)
+        try Task.checkCancellation()
+        let http = try XCTUnwrap(originalResponse as? HTTPURLResponse)
+        _ = try XCTUnwrap(http.statusCode == 200 && http.mimeType == "video/mp4" ? true : nil)
+        _ = try XCTUnwrap(bytes == payload ? true : nil,
+                         "The Canon-shaped contents route must return the authentic MP4 fixture unchanged")
     }
 
     private func simulatorRequest(
