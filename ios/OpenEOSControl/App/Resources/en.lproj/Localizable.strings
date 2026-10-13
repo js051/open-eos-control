@@ -753,3 +753,13 @@
 "media_files_export_unconfirmed" = "Files export outcome is unknown. Check the destination before starting another export.";
 "media_files_export_mismatch" = "iOS reported %d destinations for %d originals. Individual results are unknown. Check Files before trying again.";
 "media_files_export_source_unavailable" = "The prepared source is unavailable. Refresh history or explicitly prepare the original again before exporting.";
+
+"native_monitor_off" = "Sampled scopes paused";
+"native_monitor_requires_ios174" = "Native RTP scopes require iOS 17.4 or later.";
+"native_monitor_waiting" = "Sampled scopes · waiting for pixels";
+"native_monitor_no_pixels" = "Sampled scopes · image unavailable";
+"native_monitor_failed" = "Sampled scopes · unsupported image or conversion failed";
+"native_monitor_sampled" = "Sampled scopes · up to 4 updates/sec · no LUT";
+"native_monitor_stale" = "Sampled scopes · expired";
+"native_monitor_lut_inactive" = "Saved LUT inactive on native RTP";
+"native_monitor_scope_notice" = "Native RTP uses sampled SDR preview scopes, up to 4 updates/sec. A sample expires after 1 second. LUT preview is unavailable; any saved LUT stays inactive.";

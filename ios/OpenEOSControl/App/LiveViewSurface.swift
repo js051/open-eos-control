@@ -6,13 +6,24 @@ import UIKit
 
 struct LiveViewSurface: View {
     @EnvironmentObject private var camera: CameraAppState
+
+    var body: some View {
+        LiveViewSurfaceContent(nativeMonitor: camera.rtpController.pixelMonitor)
+    }
+}
+
+private struct LiveViewSurfaceContent: View {
+    @EnvironmentObject private var camera: CameraAppState
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject var nativeMonitor: IOSRTPPixelMonitor
+    @State private var monitorOwner = UUID()
     @State private var monitorAnalysis: LiveViewMonitorAnalysis?
     @State private var lutPreviewFrame: LiveViewLutPreviewFrame?
     @State private var lutPreviewWorker = LiveViewLutPreviewWorker()
 
     var body: some View {
         GeometryReader { proxy in
-            let sourceImage = camera.liveViewData.flatMap(UIImage.init(data:))
+            let sourceImage = camera.activeLiveViewSource == .ccapiRTP ? nil : camera.liveViewData.flatMap(UIImage.init(data:))
             let image = activeLutPreviewFrame?.image ?? sourceImage
             let sourceSize = sourceImage?.size ?? (camera.activeLiveViewSource == .ccapiRTP ? camera.nativeLiveViewSize : nil)
             let contentSize = sourceSize.map {
@@ -23,6 +34,7 @@ struct LiveViewSurface: View {
             }
             let imageRect = contentSize.map { aspectFitRect(contentSize: $0, containerSize: proxy.size) }
                 ?? CGRect(origin: .zero, size: proxy.size)
+            let monitorAnalysis = displayedAnalysis
             let overlayImage = monitorAnalysis?.overlayImage()
 
             ZStack {
@@ -40,6 +52,25 @@ struct LiveViewSurface: View {
                         .accessibilityIdentifier("live-view-decoded-frame")
                 } else {
                     offlineSurface
+                }
+
+                if camera.activeLiveViewSource == .ccapiRTP,
+                   camera.monitorSettings.needsPixelAnalysis || camera.monitorSettings.cubeLut != nil {
+                    VStack(spacing: 3) {
+                        if camera.monitorSettings.needsPixelAnalysis {
+                            Text(LocalizedStringKey(nativeMonitor.status.rawValue))
+                        }
+                        if camera.monitorSettings.cubeLut != nil {
+                            Text("native_monitor_lut_inactive")
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(Color.cameraSecondaryText)
+                    .padding(6)
+                    .background(Color.black.opacity(0.72))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("native-monitor-status")
                 }
 
                 Color.clear
@@ -203,6 +234,12 @@ struct LiveViewSurface: View {
                 }
             }
         }
+        .task(id: nativeMonitorTaskID) {
+            nativeMonitor.configure(settings: nativeMonitorTaskID.enabled ? camera.monitorSettings : nil, owner: monitorOwner)
+        }
+        .onDisappear {
+            nativeMonitor.deactivate(owner: monitorOwner)
+        }
         .task(id: lutPreviewTaskID) {
             guard pixelMonitoringAvailable,
                   let data = camera.liveViewData,
@@ -280,6 +317,20 @@ struct LiveViewSurface: View {
             && camera.activeLiveViewSource != .ccapiRTP
     }
 
+    private var displayedAnalysis: LiveViewMonitorAnalysis? {
+        if camera.activeLiveViewSource == .ccapiRTP {
+            guard nativeMonitorTaskID.enabled else { return nil }
+            return nativeMonitor.currentAnalysis(settings: camera.monitorSettings)
+        }
+        return monitorAnalysis
+    }
+
+    private var nativeMonitorTaskID: NativeMonitorTaskID {
+        NativeMonitorTaskID(settings: camera.monitorSettings,
+                            enabled: !camera.isPreview && camera.activeLiveViewSource == .ccapiRTP
+                                && camera.autoRefresh && camera.liveViewTemperatureAllowed && scenePhase == .active)
+    }
+
     private var monitorAnalysisTaskID: LiveViewMonitorTaskID {
         LiveViewMonitorTaskID(
             frameTimestamp: camera.lastFrameAt,
@@ -322,6 +373,13 @@ struct LiveViewSurface: View {
 private struct IOSCcapiRTPVideoSurface: UIViewRepresentable {
     let controller: IOSCcapiRTPController
 
+    final class Coordinator {
+        weak var controller: IOSCcapiRTPController?
+        init(controller: IOSCcapiRTPController) { self.controller = controller }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(controller: controller) }
+
     func makeUIView(context: Context) -> IOSCcapiRTPVideoView {
         let view = IOSCcapiRTPVideoView()
         view.displayLayer.videoGravity = .resize
@@ -330,13 +388,21 @@ private struct IOSCcapiRTPVideoSurface: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: IOSCcapiRTPVideoView, context: Context) {
+        if context.coordinator.controller !== controller {
+            context.coordinator.controller?.detach(uiView.displayLayer)
+            context.coordinator.controller = controller
+        }
         controller.attach(uiView.displayLayer)
     }
 
-    static func dismantleUIView(_ uiView: IOSCcapiRTPVideoView, coordinator: Void) {
-        // The controller is retained by CameraAppState; detaching is handled when another layer attaches.
-        uiView.displayLayer.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
+    static func dismantleUIView(_ uiView: IOSCcapiRTPVideoView, coordinator: Coordinator) {
+        coordinator.controller?.detach(uiView.displayLayer)
     }
+}
+
+private struct NativeMonitorTaskID: Hashable {
+    let settings: LiveViewMonitorSettings
+    let enabled: Bool
 }
 
 private struct LiveViewMonitorTaskID: Hashable {
