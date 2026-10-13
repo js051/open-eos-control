@@ -14,6 +14,7 @@ struct MediaDeliveryHistoryView: View {
     @State private var shareUnavailable = false
     @State private var presentationID = UUID()
     @State private var isVisible = false
+    @State private var selectedOrigins = Set<MediaDeliveryOrigin>()
 
     private var records: [MediaDeliveryRecord] {
         camera.mediaDeliverySnapshot.records.sorted {
@@ -65,6 +66,21 @@ struct MediaDeliveryHistoryView: View {
 
                 if camera.connected {
                     Section {
+                        Text(language.string("media_worklist_continue_help"))
+                            .font(.caption)
+                        Button(language.format("media_worklist_continue_selected", selectedOrigins.count)) {
+                            let origins = worklists.flatMap { batch in
+                                batch.rows.compactMap { row -> MediaDeliveryOrigin? in
+                                    let origin = MediaDeliveryOrigin(batchID: batch.id, rowID: row.id)
+                                    return selectedOrigins.contains(origin) ? origin : nil
+                                }
+                            }
+                            if camera.beginMediaWorklistContinuation(origins: origins) { selectedOrigins = [] }
+                        }
+                        .disabled(actionsDisabled || selectedOrigins.isEmpty || !camera.canBeginMediaWorklistContinuation)
+                        .accessibilityIdentifier("media-worklist-continue-selected")
+                    }
+                    Section {
                         Button {
                             camera.activeSheet = .foregroundImport
                         } label: {
@@ -87,6 +103,18 @@ struct MediaDeliveryHistoryView: View {
                     Section {
                         Text(language.string("media_worklist_recording_warning"))
                             .accessibilityIdentifier("media-delivery-worklist-warning")
+                    }
+                }
+
+                if camera.mediaWorklistContinuationUnavailable {
+                    Section {
+                        Text(language.string("media_worklist_continue_unavailable"))
+                            .accessibilityIdentifier("media-worklist-continue-unavailable")
+                    }
+                }
+                if camera.mediaBatchState == .running || !camera.mediaBatchResults.isEmpty {
+                    Section {
+                        MediaBatchPanel(displayedItems: [], showsSelectionControls: false)
                     }
                 }
 
@@ -135,6 +163,25 @@ struct MediaDeliveryHistoryView: View {
                                 Text(language.format("media_worklist_position", index + 1, worklist.rows.count))
                                     .font(.caption.monospacedDigit())
                                     .foregroundStyle(Color.cameraSecondaryText)
+                                if let origin = row.origin, let label = originLabel(origin) {
+                                    Text(label)
+                                        .font(.caption)
+                                        .foregroundStyle(Color.cameraSecondaryText)
+                                }
+                                if row.canContinue && camera.connected {
+                                    let origin = MediaDeliveryOrigin(batchID: worklist.id, rowID: row.id)
+                                    Toggle(language.string("media_worklist_select_row"), isOn: Binding(
+                                        get: { selectedOrigins.contains(origin) },
+                                        set: { selected in
+                                            if selected {
+                                                selectedOrigins = Set(selectedOrigins.filter { $0.batchID == origin.batchID })
+                                                selectedOrigins.insert(origin)
+                                            } else { selectedOrigins.remove(origin) }
+                                        }
+                                    ))
+                                    .disabled(actionsDisabled || !camera.canBeginMediaWorklistContinuation)
+                                    .accessibilityIdentifier("media-worklist-select-\(row.id.uuidString)")
+                                }
                                 if let receipt = row.receipt {
                                     historyRow(receipt)
                                 } else {
@@ -234,8 +281,17 @@ struct MediaDeliveryHistoryView: View {
             presentationID = UUID()
             preparingExport = false
             clearing = false
+            selectedOrigins = []
         }
+        .onChange(of: camera.mediaLibrarySessionID) { _ in selectedOrigins = [] }
+        .onChange(of: camera.mediaDeliverySnapshot.epoch) { _ in selectedOrigins = [] }
         .task { await camera.refreshMediaDeliveryHistory() }
+        .sheet(isPresented: Binding(
+            get: { camera.mediaWorklistContinuation != nil },
+            set: { if !$0 { camera.cancelMediaWorklistContinuation() } }
+        )) {
+            MediaWorklistContinuationView()
+        }
         .sheet(item: $exportPayload, onDismiss: {
             Task { await camera.refreshMediaDeliveryHistory() }
         }) { payload in
@@ -317,6 +373,12 @@ struct MediaDeliveryHistoryView: View {
                 shareUnavailable = true
             }
         }
+    }
+
+    private func originLabel(_ origin: MediaDeliveryOrigin) -> String? {
+        guard let batch = worklists.first(where: { $0.id == origin.batchID }),
+              let index = batch.rows.firstIndex(where: { $0.id == origin.rowID }) else { return nil }
+        return language.format("media_worklist_origin", dateLabel(batch.createdAt), index + 1, batch.rows[index].filename)
     }
 
     private func dateLabel(_ date: Date) -> String {

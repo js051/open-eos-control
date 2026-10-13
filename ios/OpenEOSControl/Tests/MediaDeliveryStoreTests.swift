@@ -6,6 +6,522 @@ import XCTest
 
 @MainActor
 final class MediaDeliveryStoreTests: XCTestCase {
+    // Continuation execution status: NOT_RUN; Swift/Xcode on macOS is required.
+    // Fixture reconstruction is not physical-camera evidence.
+    func testColdReopenContinuesChosenSubsetOfFiftyRowsWithoutChangingOriginalFacts() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let names = (0..<50).map { "ORIGINAL-\($0).JPG" }
+        let originalBatch = try await store.beginPlannedBatch(filenames: names)
+        for id in originalBatch.rowIDs.prefix(5) {
+            _ = try await store.beginPlannedItem(originalBatch.ticket, rowID: id)
+            let source = try original(Data([1, 2]))
+            try await store.finishPrepared(originalBatch.ticket, receiptID: id, source: source, actualBytes: 2)
+        }
+        for offset in [5, 6, 7] {
+            let id = originalBatch.rowIDs[offset]
+            _ = try await store.beginPlannedItem(originalBatch.ticket, rowID: id)
+            if offset != 5 { try await store.finishFailure(originalBatch.ticket, receiptID: id, cancelled: offset == 7) }
+        }
+        let saved = try fixture.manifestObject()
+        let bytesBeforeReopen = try Data(contentsOf: fixture.manifestURL)
+        let reopened = fixture.store()
+        let before = await reopened.snapshot()
+        let epoch = try XCTUnwrap(before.epoch)
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), bytesBeforeReopen)
+        let originalRows = try XCTUnwrap(before.plannedBatches.first?.rows)
+        XCTAssertEqual(originalRows.map(\.canContinue), Array(repeating: false, count: 5) + Array(repeating: true, count: 45))
+        XCTAssertEqual(originalRows[5].receipt?.status, .unknown)
+        let offsets = [49, 5, 7, 6, 23]
+        let origins = offsets.map { MediaDeliveryOrigin(batchID: originalBatch.ticket.batchID, rowID: originalBatch.rowIDs[$0]) }
+        let continuation = try await reopened.beginContinuationBatch(origins: origins,
+            filenames: offsets.map { "CURRENT-\($0).JPG" }, expectedEpoch: epoch, acknowledgedUnknown: true)
+        XCTAssertNotEqual(continuation.ticket.batchID, originalBatch.ticket.batchID)
+        XCTAssertTrue(Set(continuation.rowIDs).isDisjoint(with: originalBatch.rowIDs))
+        let first = continuation.rowIDs[0]
+        _ = try await reopened.beginPlannedItem(continuation.ticket, rowID: first)
+        try await reopened.validatePlannedDownload(continuation.ticket, rowID: first)
+        let source = try original(Data([3, 4, 5]))
+        try await reopened.finishPrepared(continuation.ticket, receiptID: first, source: source, actualBytes: 3)
+        let restored = await fixture.store().snapshot()
+        XCTAssertNil(restored.warning)
+        XCTAssertEqual(restored.epoch, epoch)
+        XCTAssertEqual(restored.plannedBatches.map(\.id), [originalBatch.ticket.batchID, continuation.ticket.batchID])
+        let kept = restored.plannedBatches[0].rows
+        XCTAssertEqual(kept.count, 50)
+        XCTAssertEqual(kept.map(\.id), originalRows.map(\.id))
+        XCTAssertEqual(kept.map(\.filename), names)
+        XCTAssertEqual(kept.map { $0.receipt?.status }, originalRows.map { $0.receipt?.status })
+        XCTAssertEqual(kept.map { $0.receipt?.startedAt }, originalRows.map { $0.receipt?.startedAt })
+        XCTAssertEqual(kept.map { $0.receipt?.completedAt }, originalRows.map { $0.receipt?.completedAt })
+        XCTAssertTrue(kept.allSatisfy { $0.origin == nil })
+        let linked = restored.plannedBatches[1].rows
+        XCTAssertEqual(linked.map(\.id), continuation.rowIDs)
+        XCTAssertEqual(linked.compactMap(\.origin), origins)
+        XCTAssertEqual(linked.map(\.filename), offsets.map { "CURRENT-\($0).JPG" })
+        XCTAssertEqual(linked.first?.receipt?.status, .prepared)
+        XCTAssertTrue(linked.dropFirst().allSatisfy { $0.receipt == nil })
+        XCTAssertEqual(restored.retainedBytes, 13)
+        let after = try fixture.manifestObject()
+        XCTAssertEqual(after["version"] as? Int, 3)
+        let originalSavedBatch = try XCTUnwrap((saved["plannedBatches"] as? [[String: Any]])?.first)
+        let originalAfterBatch = try XCTUnwrap((after["plannedBatches"] as? [[String: Any]])?.first)
+        XCTAssertEqual(originalAfterBatch as NSDictionary, originalSavedBatch as NSDictionary)
+        let savedLinked = try XCTUnwrap((after["plannedBatches"] as? [[String: Any]])?.last?["rows"] as? [[String: Any]])
+        XCTAssertTrue(savedLinked.allSatisfy { Set($0.keys) == Set(["id", "filename", "origin"]) })
+        XCTAssertTrue(savedLinked.allSatisfy { ($0["origin"] as? [String: Any]).map { Set($0.keys) == Set(["batchID", "rowID"]) } == true })
+    }
+
+    func testContinuationRequiresUnknownAcknowledgementAndPreservesFailedAdmissionBytes() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let batch = try await store.beginPlannedBatch(filenames: ["UNKNOWN.JPG"])
+        _ = try await store.beginPlannedItem(batch.ticket, rowID: batch.rowIDs[0])
+        let reopened = fixture.store()
+        let snapshot = await reopened.snapshot()
+        let epoch = try XCTUnwrap(snapshot.epoch)
+        let origin = MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: batch.rowIDs[0])
+        let previous = try Data(contentsOf: fixture.manifestURL)
+        await expect(.invalidReceipt) {
+            _ = try await reopened.beginContinuationBatch(origins: [origin], filenames: ["CHOSEN.JPG"], expectedEpoch: epoch, acknowledgedUnknown: false)
+        }
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), previous)
+        let retry = try await reopened.beginContinuationBatch(origins: [origin], filenames: ["CHOSEN.JPG"], expectedEpoch: epoch, acknowledgedUnknown: true)
+        let after = await fixture.store().snapshot()
+        XCTAssertEqual(after.plannedBatches[0].rows[0].receipt?.status, .unknown)
+        XCTAssertEqual(after.plannedBatches[1].rows[0].origin, origin)
+        XCTAssertEqual(after.plannedBatches[1].rows[0].id, retry.rowIDs[0])
+        XCTAssertNil(after.plannedBatches[1].rows[0].receipt)
+    }
+
+    func testContinuationRejectsInvalidDuplicateStartedAndPreparedOriginsIncludingMissingCopies() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let batch = try await store.beginPlannedBatch(filenames: ["QUEUED.JPG", "STARTED.JPG", "PREPARED.JPG"])
+        _ = try await store.beginPlannedItem(batch.ticket, rowID: batch.rowIDs[1])
+        _ = try await store.beginPlannedItem(batch.ticket, rowID: batch.rowIDs[2])
+        let source = try original(Data([1]))
+        try await store.finishPrepared(batch.ticket, receiptID: batch.rowIDs[2], source: source, actualBytes: 1)
+        try FileManager.default.removeItem(at: fixture.file(batch.rowIDs[2], "PREPARED.JPG"))
+        let snapshot = await store.snapshot()
+        let epoch = try XCTUnwrap(snapshot.epoch)
+        XCTAssertEqual(snapshot.plannedBatches[0].rows.map(\.canContinue), [true, false, false])
+        XCTAssertEqual(snapshot.plannedBatches[0].rows[2].receipt?.availability, .missing)
+        let queued = MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: batch.rowIDs[0])
+        let invalid = [
+            MediaDeliveryOrigin(batchID: UUID(), rowID: queued.rowID),
+            MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: UUID()),
+            MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: batch.rowIDs[1]),
+            MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: batch.rowIDs[2])
+        ]
+        let previous = try Data(contentsOf: fixture.manifestURL)
+        for origin in invalid {
+            await expect(.invalidReceipt) {
+                _ = try await store.beginContinuationBatch(origins: [origin], filenames: ["CURRENT.JPG"], expectedEpoch: epoch, acknowledgedUnknown: true)
+            }
+        }
+        for (origins, filenames) in [([queued, queued], ["A.JPG", "B.JPG"]), ([], []), ([queued], [])] {
+            await expect(.invalidReceipt) {
+                _ = try await store.beginContinuationBatch(origins: origins, filenames: filenames, expectedEpoch: epoch, acknowledgedUnknown: true)
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), previous)
+    }
+
+    func testUnknownLinkedAttemptRequiresAcknowledgementWhenSelectingFailedAncestorOrQueuedSibling() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let batch = try await store.beginPlannedBatch(filenames: ["FAILED.JPG"])
+        _ = try await store.beginPlannedItem(batch.ticket, rowID: batch.rowIDs[0])
+        try await store.finishFailure(batch.ticket, receiptID: batch.rowIDs[0], cancelled: false)
+        let initial = await store.snapshot()
+        let epoch = try XCTUnwrap(initial.epoch)
+        let origin = MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: batch.rowIDs[0])
+        let interrupted = try await store.beginContinuationBatch(origins: [origin], filenames: ["INTERRUPTED.JPG"],
+            expectedEpoch: epoch, acknowledgedUnknown: false)
+        let sibling = try await store.beginContinuationBatch(origins: [origin], filenames: ["QUEUED.JPG"],
+            expectedEpoch: epoch, acknowledgedUnknown: false)
+        _ = try await store.beginPlannedItem(interrupted.ticket, rowID: interrupted.rowIDs[0])
+        let reopened = fixture.store()
+        let projected = await reopened.snapshot()
+        XCTAssertEqual(projected.plannedBatches.map { $0.rows[0].receipt?.status }, [.failed, .unknown, nil])
+        XCTAssertTrue(projected.plannedBatches.flatMap(\.rows).allSatisfy(\.canContinue))
+        XCTAssertTrue(projected.plannedBatches.flatMap(\.rows).allSatisfy(\.requiresUnknownAcknowledgement))
+        let previous = try Data(contentsOf: fixture.manifestURL)
+        let siblingOrigin = MediaDeliveryOrigin(batchID: sibling.ticket.batchID, rowID: sibling.rowIDs[0])
+        for selected in [origin, siblingOrigin] {
+            await expect(.invalidReceipt) {
+                _ = try await reopened.beginContinuationBatch(origins: [selected], filenames: ["BLOCKED.JPG"],
+                    expectedEpoch: epoch, acknowledgedUnknown: false)
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), previous)
+        _ = try await reopened.beginContinuationBatch(origins: [origin], filenames: ["CONFIRMED.JPG"],
+            expectedEpoch: epoch, acknowledgedUnknown: true)
+        let confirmed = await reopened.snapshot()
+        XCTAssertEqual(confirmed.plannedBatches[0].rows[0].receipt?.status, .failed)
+        XCTAssertEqual(confirmed.plannedBatches[1].rows[0].receipt?.status, .unknown)
+        XCTAssertTrue(confirmed.plannedBatches[3].rows[0].requiresUnknownAcknowledgement)
+    }
+
+    func testActiveContinuationBlocksAncestorSiblingAndDescendantAdmissionUntilTerminal() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let originalBatch = try await store.beginPlannedBatch(filenames: ["ORIGINAL.JPG"])
+        let initial = await store.snapshot()
+        let epoch = try XCTUnwrap(initial.epoch)
+        let origin = MediaDeliveryOrigin(batchID: originalBatch.ticket.batchID, rowID: originalBatch.rowIDs[0])
+        let first = try await store.beginContinuationBatch(origins: [origin], filenames: ["FIRST.JPG"], expectedEpoch: epoch, acknowledgedUnknown: false)
+        let sibling = try await store.beginContinuationBatch(origins: [origin], filenames: ["SIBLING.JPG"], expectedEpoch: epoch, acknowledgedUnknown: false)
+        let firstOrigin = MediaDeliveryOrigin(batchID: first.ticket.batchID, rowID: first.rowIDs[0])
+        let child = try await store.beginContinuationBatch(origins: [firstOrigin], filenames: ["CHILD.JPG"], expectedEpoch: epoch, acknowledgedUnknown: false)
+        _ = try await store.beginPlannedItem(first.ticket, rowID: first.rowIDs[0])
+        let before = try Data(contentsOf: fixture.manifestURL)
+        for reference in [origin, firstOrigin, MediaDeliveryOrigin(batchID: sibling.ticket.batchID, rowID: sibling.rowIDs[0])] {
+            await expect(.invalidReceipt) {
+                _ = try await store.beginContinuationBatch(origins: [reference], filenames: ["BLOCKED.JPG"], expectedEpoch: epoch, acknowledgedUnknown: true)
+            }
+        }
+        for candidate in [originalBatch, sibling, child] {
+            await expect(.invalidReceipt) { _ = try await store.beginPlannedItem(candidate.ticket, rowID: candidate.rowIDs[0]) }
+        }
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), before)
+        try await store.finishFailure(first.ticket, receiptID: first.rowIDs[0], cancelled: true)
+        _ = try await store.beginPlannedItem(child.ticket, rowID: child.rowIDs[0])
+        await expect(.invalidReceipt) { _ = try await store.beginPlannedItem(sibling.ticket, rowID: sibling.rowIDs[0]) }
+        try await store.finishFailure(child.ticket, receiptID: child.rowIDs[0], cancelled: false)
+        _ = try await store.beginPlannedItem(sibling.ticket, rowID: sibling.rowIDs[0])
+    }
+
+    func testOneContinuationCannotAdmitAncestorAndDescendantOrSiblingOriginsTogether() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let original = try await store.beginPlannedBatch(filenames: ["ORIGINAL.JPG"])
+        let snapshot = await store.snapshot()
+        let epoch = try XCTUnwrap(snapshot.epoch)
+        let origin = MediaDeliveryOrigin(batchID: original.ticket.batchID, rowID: original.rowIDs[0])
+        let child = try await store.beginContinuationBatch(origins: [origin], filenames: ["CHILD.JPG"], expectedEpoch: epoch, acknowledgedUnknown: false)
+        let sibling = try await store.beginContinuationBatch(origins: [origin], filenames: ["SIBLING.JPG"], expectedEpoch: epoch, acknowledgedUnknown: false)
+        let childOrigin = MediaDeliveryOrigin(batchID: child.ticket.batchID, rowID: child.rowIDs[0])
+        let siblingOrigin = MediaDeliveryOrigin(batchID: sibling.ticket.batchID, rowID: sibling.rowIDs[0])
+        let before = try Data(contentsOf: fixture.manifestURL)
+        for selected in [[origin, childOrigin], [childOrigin, siblingOrigin]] {
+            await expect(.invalidReceipt) {
+                _ = try await store.beginContinuationBatch(origins: selected, filenames: ["A.JPG", "B.JPG"],
+                    expectedEpoch: epoch, acknowledgedUnknown: false)
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), before)
+        let after = await store.snapshot()
+        XCTAssertEqual(after.plannedBatches.count, 3)
+        XCTAssertTrue(after.records.isEmpty)
+    }
+
+    func testContinuationCapacityCountsOriginalAndEveryNewRowWithoutEviction() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let batch = try await store.beginPlannedBatch(filenames: (0..<50).map { "ORIGINAL-\($0).JPG" })
+        let snapshot = await store.snapshot()
+        let epoch = try XCTUnwrap(snapshot.epoch)
+        let origins = batch.rowIDs.map { MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: $0) }
+        let continuation = try await store.beginContinuationBatch(origins: origins,
+            filenames: Array(repeating: "CHOSEN.JPG", count: 50), expectedEpoch: epoch, acknowledgedUnknown: false)
+        let full = try Data(contentsOf: fixture.manifestURL)
+        await expect(.recordLimit) {
+            _ = try await store.beginContinuationBatch(origins: [origins[0]], filenames: ["EXCESS.JPG"], expectedEpoch: epoch, acknowledgedUnknown: false)
+        }
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), full)
+        _ = try await store.beginPlannedItem(continuation.ticket, rowID: continuation.rowIDs[0])
+        let reopened = await fixture.store().snapshot()
+        XCTAssertEqual(reopened.plannedBatches.flatMap(\.rows).count, 100)
+        XCTAssertEqual(reopened.plannedBatches[0].rows.map(\.id), batch.rowIDs)
+        XCTAssertEqual(reopened.plannedBatches[1].rows.map(\.id), continuation.rowIDs)
+    }
+
+    func testPreparedLinkedAttemptBlocksHistoricalAndQueuedFamilyWithoutChangingTheirStatuses() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let batch = try await store.beginPlannedBatch(filenames: ["ORIGINAL.JPG"])
+        let before = await store.snapshot()
+        let epoch = try XCTUnwrap(before.epoch)
+        let origin = MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: batch.rowIDs[0])
+        let completed = try await store.beginContinuationBatch(origins: [origin], filenames: ["COMPLETED.JPG"],
+            expectedEpoch: epoch, acknowledgedUnknown: false)
+        let sibling = try await store.beginContinuationBatch(origins: [origin], filenames: ["SIBLING.JPG"],
+            expectedEpoch: epoch, acknowledgedUnknown: false)
+        _ = try await store.beginPlannedItem(completed.ticket, rowID: completed.rowIDs[0])
+        let active = await store.snapshot()
+        XCTAssertTrue(active.plannedBatches.flatMap(\.rows).allSatisfy { !$0.canContinue })
+        let source = try original(Data([1, 2]))
+        try await store.finishPrepared(completed.ticket, receiptID: completed.rowIDs[0], source: source, actualBytes: 2)
+        let prepared = await store.snapshot()
+        XCTAssertTrue(prepared.plannedBatches.flatMap(\.rows).allSatisfy { !$0.canContinue })
+        XCTAssertNil(prepared.plannedBatches[0].rows[0].receipt)
+        XCTAssertNil(prepared.plannedBatches[2].rows[0].receipt)
+        let lease = try await store.acquireShare(receiptIDs: [completed.rowIDs[0]])
+        XCTAssertEqual(try Data(contentsOf: lease[0].fileURL), Data([1, 2]))
+        await expect(.invalidReceipt) { _ = try await store.beginPlannedItem(sibling.ticket, rowID: sibling.rowIDs[0]) }
+        await expect(.invalidReceipt) {
+            _ = try await store.beginContinuationBatch(origins: [origin], filenames: ["DUPLICATE.JPG"], expectedEpoch: epoch, acknowledgedUnknown: true)
+        }
+        try FileManager.default.removeItem(at: fixture.file(completed.rowIDs[0], "COMPLETED.JPG"))
+        let reopened = fixture.store()
+        let missing = await reopened.snapshot()
+        XCTAssertEqual(missing.plannedBatches[1].rows[0].receipt?.status, .prepared)
+        XCTAssertEqual(missing.plannedBatches[1].rows[0].receipt?.availability, .missing)
+        XCTAssertTrue(missing.plannedBatches.flatMap(\.rows).allSatisfy { !$0.canContinue })
+        await expect(.invalidReceipt) {
+            _ = try await reopened.beginContinuationBatch(origins: [origin], filenames: ["DUPLICATE.JPG"], expectedEpoch: epoch, acknowledgedUnknown: true)
+        }
+        withExtendedLifetime(lease) {}
+    }
+
+    func testContinuationRejectsExhaustedByteBudgetBeforeRosterAndAgainBeforeGET() async throws {
+        for maximumBytes in [Int64(0), 2] {
+            let fixture = try DeliveryFixture()
+            defer { fixture.remove() }
+            let store = fixture.store(bytes: maximumBytes)
+            let batch = try await store.beginPlannedBatch(filenames: ["ORIGINAL.JPG"])
+            let snapshot = await store.snapshot()
+            let epoch = try XCTUnwrap(snapshot.epoch)
+            let origin = MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: batch.rowIDs[0])
+            var continuation: MediaDeliveryPlannedBatch?
+            if maximumBytes > 0 {
+                continuation = try await store.beginContinuationBatch(origins: [origin], filenames: ["CHOSEN.JPG"],
+                    expectedEpoch: epoch, acknowledgedUnknown: false)
+                let other = try await store.beginBatch()
+                _ = try await prepare(store, other, name: "RETAINED.JPG", bytes: Data([1, 2]))
+            }
+            let full = try Data(contentsOf: fixture.manifestURL)
+            await expect(.byteLimit) {
+                _ = try await store.beginContinuationBatch(origins: [origin], filenames: ["EXCESS.JPG"],
+                    expectedEpoch: epoch, acknowledgedUnknown: false)
+            }
+            XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), full)
+            if let continuation {
+                _ = try await store.beginPlannedItem(continuation.ticket, rowID: continuation.rowIDs[0])
+                let started = try Data(contentsOf: fixture.manifestURL)
+                await expect(.byteLimit) {
+                    try await store.validatePlannedDownload(continuation.ticket, rowID: continuation.rowIDs[0])
+                }
+                XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), started)
+            }
+            let after = await store.snapshot()
+            XCTAssertEqual(after.plannedBatches.count, maximumBytes > 0 ? 2 : 1)
+            XCTAssertEqual(after.retainedBytes, maximumBytes)
+        }
+    }
+
+    func testContinuationFaultAndCancellationPreserveOriginalManifestWithoutInertPartialBatch() async throws {
+        for cancelAtCommit in [false, true] {
+            let fixture = try DeliveryFixture()
+            defer { fixture.remove() }
+            let faults = DeliveryFaults()
+            let store = fixture.store(faults: faults)
+            let batch = try await store.beginPlannedBatch(filenames: ["ORIGINAL.JPG"])
+            let snapshot = await store.snapshot()
+            let epoch = try XCTUnwrap(snapshot.epoch)
+            let origin = MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: batch.rowIDs[0])
+            let before = try Data(contentsOf: fixture.manifestURL)
+            if cancelAtCommit {
+                faults.arm(.beforeManifestReplace, action: { withUnsafeCurrentTask { $0?.cancel() } })
+            } else { faults.arm(.beforeManifestReplace) }
+            let admission = Task {
+                try await store.beginContinuationBatch(origins: [origin], filenames: ["NEW.JPG"], expectedEpoch: epoch, acknowledgedUnknown: false)
+            }
+            do {
+                _ = try await admission.value
+                XCTFail("Expected admission to fail before the atomic replacement")
+            } catch {
+                if cancelAtCommit { XCTAssertTrue(error is CancellationError) }
+                else { XCTAssertEqual(error as? MediaDeliveryStoreError, .storageUnavailable) }
+            }
+            XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), before)
+            let reopened = await fixture.store().snapshot()
+            XCTAssertEqual(reopened.plannedBatches.map(\.id), [batch.ticket.batchID])
+            XCTAssertTrue(reopened.records.isEmpty)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: fixture.root.path), ["manifest.json"])
+        }
+    }
+
+    func testAlreadyCancelledContinuationDoesNotAdmitAnyNewRows() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let batch = try await store.beginPlannedBatch(filenames: ["ORIGINAL.JPG"])
+        let snapshot = await store.snapshot()
+        let epoch = try XCTUnwrap(snapshot.epoch)
+        let before = try Data(contentsOf: fixture.manifestURL)
+        let origin = MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: batch.rowIDs[0])
+        let admission = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await store.beginContinuationBatch(origins: [origin], filenames: ["NEW.JPG"], expectedEpoch: epoch, acknowledgedUnknown: false)
+        }
+        do { _ = try await admission.value; XCTFail("Cancelled admission must fail") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), before)
+    }
+
+    func testClearInvalidatesContinuationSelectionAndLateDownloadCallbacks() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let batch = try await store.beginPlannedBatch(filenames: ["ORIGINAL.JPG"])
+        let before = await store.snapshot()
+        let epoch = try XCTUnwrap(before.epoch)
+        let origin = MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: batch.rowIDs[0])
+        let next = try await store.beginContinuationBatch(origins: [origin], filenames: ["NEW.JPG"], expectedEpoch: epoch, acknowledgedUnknown: false)
+        await expect(.invalidReceipt) { try await store.validatePlannedDownload(next.ticket, rowID: next.rowIDs[0]) }
+        _ = try await store.beginPlannedItem(next.ticket, rowID: next.rowIDs[0])
+        try await store.validatePlannedDownload(next.ticket, rowID: next.rowIDs[0])
+        try await store.clear()
+        let cleared = await store.snapshot()
+        XCTAssertNotEqual(cleared.epoch, epoch)
+        await expect(.invalidTicket) {
+            _ = try await store.beginContinuationBatch(origins: [origin], filenames: ["STALE.JPG"], expectedEpoch: epoch, acknowledgedUnknown: false)
+        }
+        await expect(.invalidTicket) { try await store.validatePlannedDownload(next.ticket, rowID: next.rowIDs[0]) }
+        await expect(.invalidTicket) { try await store.finishFailure(next.ticket, receiptID: next.rowIDs[0], cancelled: true) }
+        let source = try original(Data([1]))
+        await expect(.invalidTicket) { try await store.finishPrepared(next.ticket, receiptID: next.rowIDs[0], source: source, actualBytes: 1) }
+        XCTAssertTrue(cleared.plannedBatches.isEmpty)
+        XCTAssertTrue(cleared.records.isEmpty)
+    }
+
+    func testDownloadRevalidationRequiresExactStartedPlannedRowAndDoesNotMutate() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let dynamic = try await store.beginBatch()
+        let dynamicReceipt = try await store.beginItem(dynamic, filename: "DYNAMIC.JPG")
+        let batch = try await store.beginPlannedBatch(filenames: ["CURRENT.JPG"])
+        _ = try await store.beginPlannedItem(batch.ticket, rowID: batch.rowIDs[0])
+        let before = try Data(contentsOf: fixture.manifestURL)
+        try await store.validatePlannedDownload(batch.ticket, rowID: batch.rowIDs[0])
+        await expect(.invalidReceipt) { try await store.validatePlannedDownload(dynamic, rowID: dynamicReceipt) }
+        await expect(.invalidReceipt) { try await store.validatePlannedDownload(dynamic, rowID: batch.rowIDs[0]) }
+        await expect(.invalidReceipt) { try await store.validatePlannedDownload(batch.ticket, rowID: UUID()) }
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), before)
+        try await store.finishFailure(batch.ticket, receiptID: batch.rowIDs[0], cancelled: false)
+        await expect(.invalidReceipt) { try await store.validatePlannedDownload(batch.ticket, rowID: batch.rowIDs[0]) }
+    }
+
+    func testV2ReadIsNonmutatingAndContinuationMigratesToV3WithOriginalRosterIntact() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let batch = try await store.beginPlannedBatch(filenames: ["QUEUED.JPG", "FAILED.JPG"])
+        _ = try await store.beginPlannedItem(batch.ticket, rowID: batch.rowIDs[1])
+        try await store.finishFailure(batch.ticket, receiptID: batch.rowIDs[1], cancelled: false)
+        var legacy = try fixture.manifestObject()
+        legacy["version"] = 2
+        let bytes = try JSONSerialization.data(withJSONObject: legacy)
+        try bytes.write(to: fixture.manifestURL)
+        let reopened = fixture.store()
+        let snapshot = await reopened.snapshot()
+        XCTAssertNil(snapshot.warning)
+        XCTAssertEqual(snapshot.plannedBatches[0].rows.map(\.id), batch.rowIDs)
+        XCTAssertTrue(snapshot.plannedBatches[0].rows.allSatisfy { $0.origin == nil && $0.canContinue })
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), bytes)
+        let origins = batch.rowIDs.map { MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: $0) }
+        _ = try await reopened.beginContinuationBatch(origins: origins, filenames: ["CURRENT-A.JPG", "CURRENT-B.JPG"],
+            expectedEpoch: try XCTUnwrap(snapshot.epoch), acknowledgedUnknown: false)
+        let migrated = try fixture.manifestObject()
+        XCTAssertEqual(migrated["version"] as? Int, 3, "V1/V2 clients must reject this manifest rather than drop origin links")
+        XCTAssertEqual(migrated["receipts"] as? NSArray, legacy["receipts"] as? NSArray)
+        XCTAssertEqual(migrated["tombstones"] as? NSArray, legacy["tombstones"] as? NSArray)
+        let beforeBatch = try XCTUnwrap((legacy["plannedBatches"] as? [[String: Any]])?.first)
+        let afterBatch = try XCTUnwrap((migrated["plannedBatches"] as? [[String: Any]])?.first)
+        XCTAssertEqual(afterBatch as NSDictionary, beforeBatch as NSDictionary)
+        let after = await fixture.store().snapshot()
+        XCTAssertNil(after.warning)
+        XCTAssertEqual(after.plannedBatches[1].rows.compactMap(\.origin), origins)
+    }
+
+    func testPersistedOriginRemainsValidWhenOriginalLaterCompletes() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let batch = try await store.beginPlannedBatch(filenames: ["ORIGINAL.JPG"])
+        let snapshot = await store.snapshot()
+        let origin = MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: batch.rowIDs[0])
+        let continuation = try await store.beginContinuationBatch(origins: [origin], filenames: ["CHOSEN.JPG"],
+            expectedEpoch: try XCTUnwrap(snapshot.epoch), acknowledgedUnknown: false)
+        // A valid historical link is not retroactively corrupt when a previous
+        // attempt records a completed fact after the linked roster was created.
+        _ = try await store.beginPlannedItem(batch.ticket, rowID: batch.rowIDs[0])
+        let source = try original(Data([1]))
+        try await store.finishPrepared(batch.ticket, receiptID: batch.rowIDs[0], source: source, actualBytes: 1)
+        let after = await fixture.store().snapshot()
+        XCTAssertNil(after.warning)
+        XCTAssertEqual(after.plannedBatches[0].rows[0].receipt?.status, .prepared)
+        XCTAssertFalse(after.plannedBatches[0].rows[0].canContinue)
+        XCTAssertEqual(after.plannedBatches[1].rows[0].id, continuation.rowIDs[0])
+        XCTAssertEqual(after.plannedBatches[1].rows[0].origin, origin)
+        XCTAssertFalse(after.plannedBatches[1].rows[0].canContinue)
+    }
+
+    func testHostileOriginMetadataDanglingForwardCyclicAndDuplicateLinksFailClosed() async throws {
+        let corruptions = ["null", "missing-key", "extra-private-key", "invalid-uuid", "missing-batch", "missing-row",
+            "crossed-pair", "self", "same-batch", "forward-cycle", "duplicate", "v2-origin"]
+        for corruption in corruptions {
+            let fixture = try DeliveryFixture()
+            defer { fixture.remove() }
+            let store = fixture.store()
+            let batch = try await store.beginPlannedBatch(filenames: ["A.JPG", "B.JPG"])
+            let snapshot = await store.snapshot()
+            let origins = batch.rowIDs.map { MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: $0) }
+            let continuation = try await store.beginContinuationBatch(origins: origins, filenames: ["C.JPG", "D.JPG"],
+                expectedEpoch: try XCTUnwrap(snapshot.epoch), acknowledgedUnknown: false)
+            var json = try fixture.manifestObject()
+            var batches = try XCTUnwrap(json["plannedBatches"] as? [[String: Any]])
+            var rows = try XCTUnwrap(batches[1]["rows"] as? [[String: Any]])
+            var reference = try XCTUnwrap(rows[0]["origin"] as? [String: Any])
+            switch corruption {
+            case "null": rows[0]["origin"] = NSNull()
+            case "missing-key": reference.removeValue(forKey: "rowID")
+            case "extra-private-key": reference["cameraID"] = "synthetic-private-metadata"
+            case "invalid-uuid": reference["rowID"] = "synthetic-camera-media-id"
+            case "missing-batch": reference["batchID"] = UUID().uuidString
+            case "missing-row": reference["rowID"] = UUID().uuidString
+            case "crossed-pair": reference["rowID"] = continuation.rowIDs[0].uuidString
+            case "self":
+                reference["batchID"] = continuation.ticket.batchID.uuidString
+                reference["rowID"] = continuation.rowIDs[0].uuidString
+            case "same-batch":
+                reference["batchID"] = continuation.ticket.batchID.uuidString
+                reference["rowID"] = continuation.rowIDs[1].uuidString
+            case "forward-cycle":
+                var originals = try XCTUnwrap(batches[0]["rows"] as? [[String: Any]])
+                originals[0]["origin"] = ["batchID": continuation.ticket.batchID.uuidString, "rowID": continuation.rowIDs[0].uuidString]
+                batches[0]["rows"] = originals
+            case "duplicate": rows[1]["origin"] = rows[0]["origin"]
+            case "v2-origin": json["version"] = 2
+            default: XCTFail("Unhandled corruption")
+            }
+            if corruption != "null" { rows[0]["origin"] = reference }
+            batches[1]["rows"] = rows
+            json["plannedBatches"] = batches
+            let bytes = try JSONSerialization.data(withJSONObject: json)
+            try bytes.write(to: fixture.manifestURL)
+            let reopened = fixture.store()
+            let after = await reopened.snapshot()
+            XCTAssertEqual(after.warning, .invalidManifest, corruption)
+            XCTAssertNil(after.epoch, corruption)
+            XCTAssertTrue(after.plannedBatches.isEmpty, corruption)
+            await expect(.invalidManifest) { try await reopened.clear() }
+            XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), bytes, corruption)
+        }
+    }
+
     func testFreshStoreReconstructsAllFiftyPlannedRowsIncludingFortyFourQueued() async throws {
         let fixture = try DeliveryFixture()
         defer { fixture.remove() }
@@ -201,6 +717,8 @@ final class MediaDeliveryStoreTests: XCTestCase {
         XCTAssertEqual(rows[0].receipt?.availability, .available)
         XCTAssertEqual(rows[1].receipt?.status, .prepared)
         XCTAssertEqual(rows[1].receipt?.availability, .notRetained)
+        XCTAssertFalse(rows[0].canContinue)
+        XCTAssertFalse(rows[1].canContinue, "Prepared originals stay terminal even when retention failed")
         XCTAssertNil(rows[2].receipt)
         XCTAssertNil(rows[3].receipt)
         XCTAssertEqual(snapshot.retainedBytes, 3)
@@ -238,7 +756,7 @@ final class MediaDeliveryStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), bytes)
         let batch = try await restarted.beginPlannedBatch(filenames: ["NEW-QUEUED.JPG"])
         let migrated = try fixture.manifestObject()
-        XCTAssertEqual(migrated["version"] as? Int, 2)
+        XCTAssertEqual(migrated["version"] as? Int, 3)
         var expectedReceipts = try XCTUnwrap(legacy["receipts"] as? [[String: Any]])
         expectedReceipts[1]["status"] = "unknown"
         expectedReceipts[1]["reason"] = "interrupted"

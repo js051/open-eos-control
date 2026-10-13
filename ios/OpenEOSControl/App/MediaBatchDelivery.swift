@@ -28,6 +28,29 @@ struct MediaBatchResult: Identifiable {
     var completedFileURL: URL? { status == .ready ? ownedFile?.fileURL : nil }
 }
 
+/// Explicit, memory-only bindings. None of these session or camera values is
+/// serialized; the store receives only local origin UUIDs and display names.
+struct MediaWorklistContinuationDraft: Identifiable {
+    let id = UUID()
+    let epoch: UUID
+    let sessionGeneration: UUID
+    let librarySessionID: UUID
+    let libraryGeneration: UUID
+    let historyGeneration: UUID
+    var rows: [MediaWorklistContinuationRow]
+
+    var requiresUnknownAcknowledgement: Bool { rows.contains { $0.requiresUnknownAcknowledgement } }
+}
+
+struct MediaWorklistContinuationRow: Identifiable {
+    var id: MediaDeliveryOrigin { origin }
+    let origin: MediaDeliveryOrigin
+    let filename: String
+    let status: MediaDeliveryStatus?
+    let requiresUnknownAcknowledgement: Bool
+    var item: CameraMediaItem?
+}
+
 /// A presentation keeps this immutable snapshot until the system exporter ends.
 /// Resetting the camera or preparing another batch cannot delete its source files.
 struct MediaBatchExportPayload: Identifiable {

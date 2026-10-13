@@ -7,6 +7,7 @@ struct MediaBatchPanel: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
     let displayedItems: [CameraMediaItem]
+    var showsSelectionControls = true
     @State private var exportPayload: MediaBatchExportPayload?
 
     private var hiddenCount: Int {
@@ -25,16 +26,18 @@ struct MediaBatchPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(language.format("media_batch_selection_count", camera.selectedMediaItems.count, hiddenCount, unloadedCount))
-                .font(.caption)
-                .accessibilityIdentifier("media-batch-selection-count")
-            ViewThatFits(in: .horizontal) {
-                HStack { selectionActions }
-                VStack(alignment: .leading) { selectionActions }
-            }
-            if camera.isPreview {
-                Text(language.string("media_batch_offline_notice"))
-                    .font(.caption).foregroundStyle(Color.cameraSecondaryText)
+            if showsSelectionControls {
+                Text(language.format("media_batch_selection_count", camera.selectedMediaItems.count, hiddenCount, unloadedCount))
+                    .font(.caption)
+                    .accessibilityIdentifier("media-batch-selection-count")
+                ViewThatFits(in: .horizontal) {
+                    HStack { selectionActions }
+                    VStack(alignment: .leading) { selectionActions }
+                }
+                if camera.isPreview {
+                    Text(language.string("media_batch_offline_notice"))
+                        .font(.caption).foregroundStyle(Color.cameraSecondaryText)
+                }
             }
             if camera.mediaBatchState == .running {
                 ProgressView().tint(Color.cameraAccent)
@@ -47,7 +50,7 @@ struct MediaBatchPanel: View {
                 }
                 .disabled(camera.mediaBatchCancellationRequested)
                 .accessibilityIdentifier("media-batch-cancel")
-            } else {
+            } else if showsSelectionControls {
                 Button(language.string("media_batch_prepare")) {
                     _ = camera.startMediaBatchDownload()
                 }
@@ -88,13 +91,15 @@ struct MediaBatchPanel: View {
                     .foregroundStyle(Color.cameraSecondaryText)
                     .accessibilityIdentifier("media-batch-worklist-warning")
             }
-            Button {
-                camera.activeSheet = .deliveryHistory
-            } label: {
-                Label(language.string("media_delivery_history_title"), systemImage: "clock.arrow.circlepath")
-                    .frame(minHeight: 44, alignment: .leading)
+            if showsSelectionControls {
+                Button {
+                    camera.activeSheet = .deliveryHistory
+                } label: {
+                    Label(language.string("media_delivery_history_title"), systemImage: "clock.arrow.circlepath")
+                        .frame(minHeight: 44, alignment: .leading)
+                }
+                .accessibilityIdentifier("media-batch-delivery-history-button")
             }
-            .accessibilityIdentifier("media-batch-delivery-history-button")
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
