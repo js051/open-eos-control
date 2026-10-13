@@ -1254,6 +1254,70 @@ final class OpenEOSControlUITests: XCTestCase {
     }
 
     @MainActor
+    func testCanonicalHeldAFPhysicalPressAndDragReleaseInBothLanguages() async throws {
+        continueAfterFailure = true
+        guard try await waitForSimulatorHealth() else {
+            #if OEC_REQUIRE_SIMULATOR_E2E
+            XCTFail("The required synthetic camera is not reachable")
+            return
+            #else
+            throw XCTSkip("Start the synthetic camera for the held AF UI journey")
+            #endif
+        }
+        for (language, apple, locale, released) in [
+            ("english", "en", "en_US", "Released"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "已放開"),
+        ] {
+            _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
+            let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
+                environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString])
+            defer { app.terminate() }
+            try tapForAsyncTest(app.buttons["preset-http-button"])
+            _ = try XCTUnwrap(scrollConnectionButtonIntoView(in: app, timeout: 8) ? true : nil)
+            try tapForAsyncTest(app.buttons["connect-button"])
+            let button = app.buttons["held-autofocus-button"]
+            _ = try XCTUnwrap(waitForInteraction(button, timeout: 30) ? true : nil)
+            XCTAssertGreaterThanOrEqual(button.frame.width + 0.000_001, 44)
+            XCTAssertGreaterThanOrEqual(button.frame.height + 0.000_001, 44)
+            let stateURL = simulatorURL.appendingPathComponent("ccapi/test/state")
+            // The HTTP observation runs independently while XCTest is physically
+            // holding the control. A bounded AF tap would already have stopped.
+            let whileHeld = Task.detached { () throws -> [Int] in
+                try await Task.sleep(for: .milliseconds(900))
+                var request = URLRequest(url: stateURL)
+                request.timeoutInterval = 5
+                request.cachePolicy = .reloadIgnoringLocalCacheData
+                let (data, _) = try await URLSession.shared.data(for: request)
+                let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                let canonical = root?["canonical"] as? [String: Any]
+                return [(canonical?["af_start_count"] as? NSNumber)?.intValue ?? -1,
+                    (canonical?["af_stop_count"] as? NSNumber)?.intValue ?? -1]
+            }
+            button.press(forDuration: 2)
+            let observed = try await whileHeld.value
+            XCTAssertEqual(observed, [1, 0], "Actual touch remains held beyond the bounded AF duration")
+            try await waitForSimulatorState { state in
+                let canonical = state["canonical"] as? [String: Any]
+                return (canonical?["af_start_count"] as? NSNumber)?.intValue == 1
+                    && (canonical?["af_stop_count"] as? NSNumber)?.intValue == 1
+            }
+            _ = try XCTUnwrap(waitForInteraction(button, timeout: 8) ? true : nil)
+            XCTAssertEqual(button.value as? String, released)
+            let center = button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            let outside = center.withOffset(CGVector(dx: 0, dy: 80))
+            center.press(forDuration: 0.5, thenDragTo: outside)
+            try await waitForSimulatorState { state in
+                let canonical = state["canonical"] as? [String: Any]
+                return (canonical?["af_start_count"] as? NSNumber)?.intValue == 2
+                    && (canonical?["af_stop_count"] as? NSNumber)?.intValue == 2
+            }
+            XCTAssertEqual(button.value as? String, released)
+            addScreenshot(name: "held-af-physical-release-\(language)")
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testCanonicalShutterAFChoiceReachesCameraAndNewJpegPreviewInBothLanguages() async throws {
         // Swift errors unwind this async test before XCTest begins the next case.
         continueAfterFailure = true

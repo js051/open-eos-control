@@ -16,6 +16,198 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
     private let stopPath = "/v1/session/session-a/bulb/stop"
     private let statusPath = "/v1/session/session-a/status"
 
+    func testBridgeFocusInfoReadsOptionalPublicSchemaAndNullWithoutCommandSideEffects() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        try await enableFocus(client, peer)
+        await peer.enqueueJSON(method: "POST", path: "/v1/session/session-a/liveview/start", body: "{}")
+        try await client.startLiveView()
+        let path = "/v1/session/session-a/liveview/focus-info"
+        await peer.enqueueJSON(path: path, body: focusInfoJSON)
+        let info = try await client.liveViewFocusInfo()
+        XCTAssertEqual(info?.frames.first?.status, .focused)
+        await peer.enqueueJSON(path: path, body: "null")
+        let unavailable = try await client.liveViewFocusInfo()
+        XCTAssertNil(unavailable)
+        await peer.enqueueJSON(path: path, body: #"{"frames":[],"magnification":true,"imageAspectRatio":2}"#)
+        await assertThrows { _ = try await client.liveViewFocusInfo() }
+        let reads = await peer.requests().filter { $0.path == path }
+        XCTAssertEqual(reads.count, 3)
+        XCTAssertTrue(reads.allSatisfy { $0.method == "GET" && $0.timeoutInterval == 2 })
+        let focusCommands = await peer.requests().filter { $0.path.contains("/focus/auto") }
+        XCTAssertTrue(focusCommands.isEmpty)
+    }
+
+    func testBridgeFocusInfoLateReplyCannotCrossRecycledSessionID() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        try await enableFocus(client, peer)
+        await peer.enqueueJSON(method: "POST", path: "/v1/session/session-a/liveview/start", body: "{}")
+        try await client.startLiveView()
+        await peer.enqueueHold(path: "/v1/session/session-a/liveview/focus-info", key: "old-focus-info")
+        let old = Task { try await client.liveViewFocusInfo() }
+        try await waitForHold("old-focus-info", on: peer)
+        await peer.enqueueJSON(method: "POST", path: "/v1/session/session-a/liveview/stop", body: #"{"liveViewActive":false,"liveViewStopUnconfirmed":false}"#)
+        await peer.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 204, body: "")
+        _ = await client.closeWithShutterReleaseState()
+        await enqueueInitialization(peer, id: "session-a")
+        try await client.initialize()
+        try await enableFocus(client, peer)
+        await peer.enqueueJSON(method: "POST", path: "/v1/session/session-a/liveview/start", body: "{}")
+        try await client.startLiveView()
+        await peer.resume("old-focus-info", body: focusInfoJSON)
+        let stale = try await old.value
+        XCTAssertNil(stale)
+        await peer.enqueueJSON(path: "/v1/session/session-a/liveview/focus-info", body: focusInfoJSON)
+        let current = try await client.liveViewFocusInfo()
+        XCTAssertEqual(current?.frames.first?.status, .focused)
+    }
+
+    private var focusInfoJSON: String {
+        #"{"frames":[{"left":0.1,"top":0.2,"right":0.3,"bottom":0.4,"status":"FOCUSED","kind":"NORMAL"}],"magnification":1,"imageAspectRatio":2}"#
+    }
+
+    func testHeldAFOptionalCapabilitiesFailClosedBeforeAnyRequest() async throws {
+        for raw in ["{}", #"{"heldAutofocusSupported":"true","focusInfoSupported":1,"supported":["AUTOFOCUS","LIVE_VIEW"]}"#] {
+            let peer = BridgeShutterTransport()
+            let client = try await initializedClient(peer)
+            await peer.enqueueJSON(path: "/v1/session/session-a/capabilities", body: raw)
+            let capabilities = try await client.capabilities()
+            XCTAssertFalse(capabilities.heldAutofocusSupported)
+            XCTAssertFalse(capabilities.liveView.focusInfoSupported)
+            let before = await peer.requests().count
+            await assertThrows { try await client.startHeldAutofocus(owner: UUID()) }
+            let info = try await client.liveViewFocusInfo()
+            XCTAssertNil(info)
+            let after = await peer.requests().count
+            XCTAssertEqual(after, before)
+        }
+    }
+
+    func testHeldAFExactOwnerStopOnlyAndNoStatusReadback() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        try await enableFocus(client, peer)
+        let owner = UUID()
+        let next = UUID()
+        await peer.enqueueJSON(method: "POST", path: focusStartPath, body: focusAck(owner, active: true))
+        try await client.startHeldAutofocus(owner: owner)
+        let holding = await client.shutterReleaseState()
+        XCTAssertTrue(holding.releaseRequired)
+        XCTAssertFalse(holding.releaseUnconfirmed)
+        await assertThrows { _ = try await client.autofocus() }
+        await assertThrows { _ = try await client.startBulbExposure() }
+        await assertThrows { try await client.startHeldAutofocus(owner: next) }
+        try await client.stopHeldAutofocus(owner: UUID())
+        await peer.enqueueJSON(method: "POST", path: focusStopPath, body: focusAck(owner, active: false))
+        try await client.stopHeldAutofocus(owner: owner)
+        await assertIdle(client)
+        await peer.enqueueJSON(method: "POST", path: focusStartPath, body: focusAck(next, active: true))
+        try await client.startHeldAutofocus(owner: next)
+        try await client.stopHeldAutofocus(owner: owner)
+        let writes = await peer.requests().filter { $0.path.contains("/focus/") }
+        XCTAssertEqual(writes.map(\.path), [focusStartPath, focusStopPath, focusStartPath])
+        let first = try XCTUnwrap(writes.first?.body)
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: first) as? [String: String])?["ownerId"], owner.uuidString)
+        await peer.enqueueJSON(method: "POST", path: focusStopPath, body: focusAck(next, active: false))
+        try await client.stopHeldAutofocus(owner: next)
+        await assertIdle(client)
+    }
+
+    func testHeldAFMalformedStopAndFailedStopKeepOnlyOriginalRetry() async throws {
+        for outcome in ["lost", "{}", #"{"ownerId":"wrong","active":false,"stopUnconfirmed":false}"#] {
+            let peer = BridgeShutterTransport()
+            let client = try await initializedClient(peer)
+            try await enableFocus(client, peer)
+            let owner = UUID()
+            await peer.enqueueJSON(method: "POST", path: focusStartPath, body: focusAck(owner, active: true))
+            try await client.startHeldAutofocus(owner: owner)
+            if outcome == "lost" { await peer.enqueueFailure(method: "POST", path: focusStopPath) }
+            else { await peer.enqueueJSON(method: "POST", path: focusStopPath, body: outcome) }
+            await assertThrows { try await client.stopHeldAutofocus(owner: owner) }
+            let pending = await client.shutterReleaseState()
+            XCTAssertTrue(pending.releaseRequired)
+            XCTAssertTrue(pending.releaseUnconfirmed)
+            await assertThrows { try await client.startHeldAutofocus(owner: UUID()) }
+            // A shared server warning must never invent a bulb stop for the AF owner.
+            await peer.enqueueJSON(path: statusPath, body: unknown)
+            _ = try await client.status()
+            await peer.enqueueJSON(method: "POST", path: focusStopPath, body: focusAck(owner, active: false))
+            try await client.retryShutterRelease()
+            await assertIdle(client)
+            let writes = await peer.requests().filter { $0.method == "POST" && $0.path != "/v1/session" }
+            XCTAssertEqual(writes.map(\.path), [focusStartPath, focusStopPath, focusStopPath])
+        }
+    }
+
+    func testHeldAFLateUnknownStatusCannotRecreateBulbReleaseAfterStopACK() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        try await enableFocus(client, peer)
+        let owner = UUID()
+        await peer.enqueueJSON(method: "POST", path: focusStartPath, body: focusAck(owner, active: true))
+        try await client.startHeldAutofocus(owner: owner)
+        await peer.enqueueHold(path: statusPath, key: "old-af-status")
+        let status = Task { try await client.status() }
+        try await waitForHold("old-af-status", on: peer)
+        await peer.enqueueJSON(method: "POST", path: focusStopPath, body: focusAck(owner, active: false))
+        try await client.stopHeldAutofocus(owner: owner)
+        await peer.resume("old-af-status", body: unknown)
+        let lateStatus = try await status.value
+        XCTAssertEqual(lateStatus.shutterReleaseUnconfirmed, false)
+        await assertIdle(client)
+        let before = await peer.requests().count
+        try await client.retryShutterRelease()
+        let after = await peer.requests().count
+        XCTAssertEqual(after, before, "Old AF status must not invent a bulb stop")
+    }
+
+    func testHeldAFLateCancelledStartCompensatesBeforeCloseAndReusedSession() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        try await enableFocus(client, peer)
+        let old = UUID()
+        await peer.enqueueHold(method: "POST", path: focusStartPath, key: "focus-start")
+        let start = Task { try await client.startHeldAutofocus(owner: old) }
+        try await waitForHold("focus-start", on: peer)
+        await peer.enqueueJSON(method: "POST", path: focusStopPath, body: focusAck(old, active: false))
+        await peer.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 204, body: "")
+        let close = Task { await client.closeWithShutterReleaseState() }
+        try await waitForHoldCancellation("focus-start", on: peer)
+        await peer.resume("focus-start", body: focusAck(old, active: true))
+        await assertThrows { try await start.value }
+        let closed = await close.value
+        XCTAssertEqual(closed, .idle)
+        // The server may recycle a session ID: local generation still owns every response.
+        await enqueueInitialization(peer, id: "session-a")
+        try await client.initialize()
+        try await enableFocus(client, peer)
+        let current = UUID()
+        await peer.enqueueJSON(method: "POST", path: focusStartPath, body: focusAck(current, active: true))
+        try await client.startHeldAutofocus(owner: current)
+        try await client.stopHeldAutofocus(owner: old)
+        let held = await client.shutterReleaseState()
+        XCTAssertTrue(held.releaseRequired)
+        await peer.enqueueJSON(method: "POST", path: focusStopPath, body: focusAck(current, active: false))
+        try await client.stopHeldAutofocus(owner: current)
+        await assertIdle(client)
+        let cancelled = await peer.cancelledSendCount()
+        XCTAssertEqual(cancelled, 0, "Compensating stop does not inherit caller cancellation")
+    }
+
+    private var focusStartPath: String { "/v1/session/session-a/focus/auto/start" }
+    private var focusStopPath: String { "/v1/session/session-a/focus/auto/stop" }
+    private func focusAck(_ owner: UUID, active: Bool) -> String {
+        "{\"ownerId\":\"\(owner.uuidString)\",\"active\":\(active),\"stopUnconfirmed\":false}"
+    }
+    private func enableFocus(_ client: DesktopBridgeClient, _ peer: BridgeShutterTransport) async throws {
+        await peer.enqueueJSON(path: "/v1/session/session-a/capabilities", body:
+            #"{"heldAutofocusSupported":true,"focusInfoSupported":true,"supported":["AUTOFOCUS","LIVE_VIEW"]}"#)
+        let capabilities = try await client.capabilities()
+        XCTAssertTrue(capabilities.heldAutofocusSupported)
+        XCTAssertTrue(capabilities.liveView.focusInfoSupported)
+    }
+
     func testUntouchedLegacyStatusPreservesMissingShutterFields() async throws {
         let transport = BridgeShutterTransport()
         let client = try await initializedClient(transport)

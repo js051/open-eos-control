@@ -7,6 +7,180 @@ import XCTest
 /// Production CCAPI clients over a controlled wire peer, with no real camera or socket.
 @MainActor
 final class ShortShutterRecoveryStateTests: XCTestCase {
+    func testFocusTelemetryLateReplyCannotReviveAfterBackgroundOrOverlapReplacementRead() async throws {
+        let peer = ShortShutterPeer(control: .autofocus, telemetry: true)
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connect(state)
+        await peer.plan("focus-info", .normal, gate: "old-focus")
+        await state.setAutoRefresh(true)
+        try await waitForGate("old-focus", peer: peer)
+        state.setApplicationActive(false)
+        XCTAssertNil(state.cameraFocusInfo)
+        await peer.release("old-focus")
+        try await waitUntil { state.cameraFocusInfo == nil }
+        state.setApplicationActive(true)
+        try await waitUntil { state.cameraFocusInfo?.frames.first?.status == .focused }
+        XCTAssertNil(state.focusMarker, "Optical telemetry must not synthesize a command-acceptance marker")
+
+        await peer.plan("focus-info", .normal, gate: "retired-focus")
+        try await waitForGate("retired-focus", peer: peer)
+        let before = await peer.focusReadCount()
+        await state.restartLiveView()
+        // The replacement loop can run while this peer ignores cancellation, but
+        // it cannot reserve another metadata request until the old one settles.
+        try await Task.sleep(for: .milliseconds(600))
+        let during = await peer.focusReadCount()
+        XCTAssertEqual(during, before)
+        XCTAssertNil(state.cameraFocusInfo)
+        await peer.release("retired-focus")
+        try await waitUntil { state.cameraFocusInfo?.frames.first?.status == .focused }
+        XCTAssertNotNil(state.cameraFocusInfoAt)
+        state.screen = .media
+        XCTAssertNil(state.cameraFocusInfo)
+    }
+
+    func testFocusTelemetryErrorClearsFramesAndRecoversOnNextRead() async throws {
+        let peer = ShortShutterPeer(control: .autofocus, telemetry: true)
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connect(state)
+        await state.setAutoRefresh(true)
+        try await waitUntil { state.cameraFocusInfo != nil }
+        await peer.plan("focus-info", .lost)
+        try await waitUntil { state.cameraFocusInfoError }
+        XCTAssertNil(state.cameraFocusInfo)
+        XCTAssertNil(state.cameraFocusInfoAt)
+        try await waitUntil { state.cameraFocusInfo != nil && !state.cameraFocusInfoError }
+        await state.setAutoRefresh(false)
+        XCTAssertNil(state.cameraFocusInfo)
+    }
+
+    func testHeldAFWatchdogOnlyReleasesItsAcknowledgedOwnerAndNeverRepresses() async throws {
+        let peer = ShortShutterPeer(control: .autofocus)
+        let timer = FocusWatchdogGate()
+        let state = makeState([peer], heldAutofocusDelay: { await timer.wait() })
+        defer { state.requestDisconnect(); Task { await peer.releaseAll(); await timer.releaseAll() } }
+        try await connect(state)
+        let first = try XCTUnwrap(state.beginHeldAutofocus())
+        try await waitUntil { state.shutterReleaseRequired && !state.shutterReleaseUnconfirmed }
+        try await waitForWatchdog(1, timer: timer)
+        state.releaseHeldAutofocus(owner: first)
+        try await waitUntil { !state.busyOperations.contains(.focus) }
+        let second = try XCTUnwrap(state.beginHeldAutofocus())
+        try await waitUntil { state.shutterReleaseRequired && !state.shutterReleaseUnconfirmed }
+        try await waitForWatchdog(2, timer: timer)
+        await timer.release(0) // Deliberately ignores cancellation of the old timer.
+        await Task.yield()
+        XCTAssertTrue(state.heldAutofocusPressed)
+        let before = await peer.commands()
+        XCTAssertEqual(before.map(\.action), ["start", "stop", "start"])
+        await timer.release(1)
+        try await waitUntil { !state.busyOperations.contains(.focus) }
+        XCTAssertFalse(state.heldAutofocusPressed)
+        XCTAssertFalse(state.shutterReleaseRequired)
+        let after = await peer.commands()
+        XCTAssertEqual(after.map(\.action), ["start", "stop", "start", "stop"])
+        state.releaseHeldAutofocus(owner: second)
+        XCTAssertTrue(state.canStartHeldAutofocus)
+    }
+
+    func testHeldAFModeAndNavigationRetireWithoutAutomaticRestart() async throws {
+        let peer = ShortShutterPeer(control: .autofocus)
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connect(state)
+        _ = try XCTUnwrap(state.beginHeldAutofocus())
+        try await waitUntil { state.shutterReleaseRequired && !state.shutterReleaseUnconfirmed }
+        state.captureMode = .video
+        try await waitUntil { !state.busyOperations.contains(.focus) }
+        _ = try XCTUnwrap(state.beginHeldAutofocus())
+        try await waitUntil { state.shutterReleaseRequired && !state.shutterReleaseUnconfirmed }
+        state.screen = .media
+        try await waitUntil { !state.busyOperations.contains(.focus) }
+        state.screen = .control
+        let writes = await peer.commands()
+        XCTAssertEqual(writes.map(\.action), ["start", "stop", "start", "stop"])
+    }
+
+    func testHeldAFRequiresCapabilityAndReleasesOnBackgroundWithoutRepress() async throws {
+        let peer = ShortShutterPeer(control: .autofocus)
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connect(state)
+        XCTAssertTrue(state.canStartHeldAutofocus)
+        let owner = try XCTUnwrap(state.beginHeldAutofocus())
+        try await waitUntil { state.shutterReleaseRequired && !state.shutterReleaseUnconfirmed }
+        XCTAssertTrue(state.heldAutofocusPressed)
+        XCTAssertTrue(state.isBusy(.capture))
+        await state.autofocus()
+        await state.captureStill()
+        let held = await peer.commands()
+        XCTAssertEqual(held.map(\.action), ["start"])
+        state.setApplicationActive(false)
+        try await waitUntil { !state.isBusy(.focus) }
+        XCTAssertFalse(state.heldAutofocusPressed)
+        XCTAssertFalse(state.shutterReleaseRequired)
+        state.setApplicationActive(true)
+        let released = await peer.commands()
+        XCTAssertEqual(released.map(\.action), ["start", "stop"])
+        let next = try XCTUnwrap(state.beginHeldAutofocus())
+        try await waitUntil { state.shutterReleaseRequired }
+        state.releaseHeldAutofocus(owner: owner)
+        XCTAssertTrue(state.heldAutofocusPressed, "Old gesture release cannot stop a newer press")
+        state.releaseHeldAutofocus(owner: next)
+        try await waitUntil { !state.isBusy(.focus) }
+        await state.disconnect()
+    }
+
+    func testHeldAFMissingCapabilityAndFailedStopStaySafe() async throws {
+        let manual = ShortShutterPeer(control: .manualHalfPress)
+        let unsupported = makeState([manual])
+        try await connect(unsupported)
+        XCTAssertFalse(unsupported.canStartHeldAutofocus)
+        XCTAssertNil(unsupported.beginHeldAutofocus())
+        await unsupported.disconnect()
+
+        let peer = ShortShutterPeer(control: .autofocus)
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connect(state)
+        let owner = try XCTUnwrap(state.beginHeldAutofocus())
+        try await waitUntil { state.shutterReleaseRequired && !state.shutterReleaseUnconfirmed }
+        await peer.plan("stop", .lost)
+        state.releaseHeldAutofocus(owner: owner)
+        try await waitUntil { !state.busyOperations.contains(.focus) }
+        XCTAssertTrue(state.shutterReleaseUnconfirmed)
+        XCTAssertFalse(state.canStartHeldAutofocus)
+        XCTAssertTrue(state.canRetryShutterRelease)
+        await state.retryShutterRelease()
+        XCTAssertFalse(state.shutterReleaseRequired)
+        let commands = await peer.commands()
+        XCTAssertEqual(commands.map(\.action), ["start", "stop", "stop"])
+    }
+
+    func testHeldAFDisconnectDuringPendingStartCannotTouchReplacement() async throws {
+        let old = ShortShutterPeer(control: .autofocus, owner: "old")
+        let next = ShortShutterPeer(control: .autofocus, owner: "new")
+        let state = makeState([old, next])
+        defer { state.requestDisconnect(); Task { await old.releaseAll(); await next.releaseAll() } }
+        try await connect(state)
+        await old.plan("press", .normal, gate: "old-start")
+        let oldOwner = try XCTUnwrap(state.beginHeldAutofocus())
+        try await waitForGate("old-start", peer: old)
+        state.requestDisconnect()
+        await old.release("old-start")
+        try await connect(state)
+        let owner = try XCTUnwrap(state.beginHeldAutofocus())
+        try await waitUntil { state.shutterReleaseRequired && !state.shutterReleaseUnconfirmed }
+        state.releaseHeldAutofocus(owner: oldOwner)
+        let writes = await next.commands()
+        XCTAssertEqual(writes.map(\.action), ["start"])
+        XCTAssertTrue(state.heldAutofocusPressed)
+        state.releaseHeldAutofocus(owner: owner)
+        try await waitUntil { !state.busyOperations.contains(.focus) }
+    }
+
     func testCaptureAndFocusStayMutuallyBusyUntilTheOwnedShortControlSettles() async throws {
         for control in [ShortShutterControl.manualStill, .manualHalfPress, .manualAutofocus,
                         .simulatorHalfPress, .simulatorAutofocus] {
@@ -279,7 +453,18 @@ final class ShortShutterRecoveryStateTests: XCTestCase {
         }
     }
 
-    private func makeState(_ peers: [ShortShutterPeer]) -> CameraAppState {
+    private func waitForWatchdog(_ count: Int, timer: FocusWatchdogGate) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(5))
+        repeat {
+            if await timer.count() >= count { return }
+            await Task.yield()
+        } while clock.now < deadline
+        XCTFail("Expected acknowledged AF watchdog to start")
+        throw URLError(.timedOut)
+    }
+
+    private func makeState(_ peers: [ShortShutterPeer], heldAutofocusDelay: (@Sendable () async throws -> Void)? = nil) -> CameraAppState {
         let defaults = UserDefaults(suiteName: "ShortShutterRecoveryStateTests.\(UUID().uuidString)")!
         var index = 0
         let state = CameraAppState(defaults: defaults, sessionFactory: {
@@ -287,7 +472,7 @@ final class ShortShutterRecoveryStateTests: XCTestCase {
             index += 1
             return .ccapi(try CCAPIClient(baseURL: "http://127.0.0.1:18080",
                 mode: peer.control.simulator ? .simulator : .camera, transport: peer))
-        })
+        }, heldAutofocusDelay: heldAutofocusDelay)
         state.autoRefresh = false
         return state
     }
@@ -345,6 +530,8 @@ private actor ShortShutterPeer: CameraHTTPTransport {
     nonisolated let stopPath: String
     private let method: String
     private let owner: String
+    private let telemetry: Bool
+    private var focusReads = 0
     private let version = "ver130"
     private var plans: [String: [Plan]] = [:]
     private var gates: [String: CheckedContinuation<Void, Never>] = [:]
@@ -352,10 +539,11 @@ private actor ShortShutterPeer: CameraHTTPTransport {
     private var writes: [String] = []
     private var drained = false
 
-    init(control: ShortShutterControl, method: String = "PUT", owner: String = "current") {
+    init(control: ShortShutterControl, method: String = "PUT", owner: String = "current", telemetry: Bool = false) {
         self.control = control
         self.method = control == .autofocus ? "POST" : method
         self.owner = owner
+        self.telemetry = telemetry
         stopPath = control.simulator ? "/ccapi/shutter/release"
             : "/ccapi/ver130/shooting/control/\(control == .autofocus ? "af" : "shutterbutton/manual")"
     }
@@ -364,6 +552,7 @@ private actor ShortShutterPeer: CameraHTTPTransport {
     }
     func commands() -> [ShortShutterCommand] { recorded }
     func mutations() -> [String] { writes }
+    func focusReadCount() -> Int { focusReads }
     func waiting(_ gate: String) -> Bool { gates[gate] != nil }
     func release(_ gate: String) { gates.removeValue(forKey: gate)?.resume() }
     func releaseAll() {
@@ -381,7 +570,10 @@ private actor ShortShutterPeer: CameraHTTPTransport {
         let action = payload?["action"] as? String
             ?? (path.hasSuffix("/half-press") ? "half_press" : path.hasSuffix("/shutter/release") ? "release" : nil)
         let route: String
-        if let action, method != "GET" {
+        if path.hasSuffix("/flipdetail"), request.url?.query == "kind=info" {
+            route = "focus-info"
+            focusReads += 1
+        } else if let action, method != "GET" {
             recorded.append(ShortShutterCommand(path: path, method: method, action: action,
                 autofocus: payload?["af"] as? Bool, cancelled: Task.isCancelled))
             route = action == "release" || action == "stop" ? "stop" : "press"
@@ -390,6 +582,18 @@ private actor ShortShutterPeer: CameraHTTPTransport {
         let plan = plans[route]?.isEmpty == false ? plans[route]!.removeFirst() : Plan(outcome: .normal, gate: nil)
         if let gate = plan.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
         if case .lost = plan.outcome { throw URLError(.networkConnectionLost) }
+        if route == "focus-info" {
+            let json = Data(#"{"liveviewdata":{"image":{"positionx":0,"positiony":0,"positionwidth":1000,"positionheight":500},"zoom":{"magnification":1},"afframe":[{"select":1,"status":17,"x":100,"y":100,"width":200,"height":100}]}}"#.utf8)
+            let count = UInt32(json.count)
+            let packet = Data([0xff, 0, 1, UInt8((count >> 24) & 255), UInt8((count >> 16) & 255), UInt8((count >> 8) & 255), UInt8(count & 255)]) + json + Data([0xff, 0xff])
+            return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "application/octet-stream"], body: packet)
+        }
+        if telemetry, path.hasSuffix("/shooting/liveview") {
+            return CameraHTTPResponse(statusCode: 200, body: Data("{}".utf8))
+        }
+        if telemetry, path.hasSuffix("/flip") {
+            return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: Data([0xff, 0xd8, 0x21, 0xff, 0xd9]))
+        }
         if path == "/ccapi/events" { throw CancellationError() }
         if route == "press" || route == "stop" {
             return CameraHTTPResponse(statusCode: control.simulator ? 200 : 204, body: Data("{}".utf8))
@@ -405,6 +609,7 @@ private actor ShortShutterPeer: CameraHTTPTransport {
               {"path":"/devicestatus/storage","get":true},
               {"path":"/shooting/settings","get":true},
               {"path":"/shooting/settings/iso","put":true}
+              \(telemetry ? #",{"path":"/shooting/liveview","post":true,"delete":true},{"path":"/shooting/liveview/flip","get":true},{"path":"/shooting/liveview/flipdetail","get":true}"# : "")
             ]}
             """
         case "/ccapi/\(version)/deviceinformation":
@@ -427,4 +632,19 @@ private actor ShortShutterPeer: CameraHTTPTransport {
         return CameraHTTPResponse(statusCode: 200, body: Data(body.utf8))
     }
     func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse { throw URLError(.unsupportedURL) }
+}
+
+private actor FocusWatchdogGate {
+    private var continuations: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var next = 0
+    func count() -> Int { next }
+    func wait() async {
+        let index = next; next += 1
+        await withCheckedContinuation { continuations[index] = $0 }
+    }
+    func release(_ index: Int) { continuations.removeValue(forKey: index)?.resume() }
+    func releaseAll() {
+        let pending = continuations; continuations.removeAll()
+        for continuation in pending.values { continuation.resume() }
+    }
 }

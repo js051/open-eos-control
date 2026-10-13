@@ -488,6 +488,7 @@ public struct LiveViewCapabilities: Equatable, Sendable {
     public let currentMagnification: LiveViewMagnification?
     public let minimumFPS: Int
     public let maximumFPS: Int
+    public let focusInfoSupported: Bool
 
     public init(
         sources: [LiveViewSource] = [],
@@ -498,7 +499,8 @@ public struct LiveViewCapabilities: Equatable, Sendable {
         magnifications: [LiveViewMagnification] = [],
         currentMagnification: LiveViewMagnification? = nil,
         minimumFPS: Int = 1,
-        maximumFPS: Int = 30
+        maximumFPS: Int = 30,
+        focusInfoSupported: Bool = false
     ) {
         self.sources = sources
         self.defaultSource = defaultSource
@@ -509,6 +511,7 @@ public struct LiveViewCapabilities: Equatable, Sendable {
         self.currentMagnification = currentMagnification
         self.minimumFPS = minimumFPS
         self.maximumFPS = maximumFPS
+        self.focusInfoSupported = focusInfoSupported
     }
 }
 
@@ -570,6 +573,7 @@ public struct CameraCapabilityEvidence: Equatable, Sendable {
 
 public struct CameraCapabilities: Equatable, Sendable {
     public let shutterAutofocusSupported: Bool
+    public let heldAutofocusSupported: Bool
     public let settings: [CameraSetting]
     public let fileNaming: CameraFileNaming?
     public let matrix: CapabilityMatrix
@@ -584,7 +588,8 @@ public struct CameraCapabilities: Equatable, Sendable {
         liveView: LiveViewCapabilities,
         profile: CameraProfile,
         evidence: CameraCapabilityEvidence = CameraCapabilityEvidence(),
-        shutterAutofocusSupported: Bool = false
+        shutterAutofocusSupported: Bool = false,
+        heldAutofocusSupported: Bool = false
     ) {
         self.settings = settings
         self.fileNaming = fileNaming
@@ -593,6 +598,7 @@ public struct CameraCapabilities: Equatable, Sendable {
         self.profile = profile
         self.evidence = evidence
         self.shutterAutofocusSupported = shutterAutofocusSupported
+        self.heldAutofocusSupported = heldAutofocusSupported
     }
 
     public func setting(_ key: String) -> CameraSetting? {
@@ -617,7 +623,8 @@ public struct CameraCapabilities: Equatable, Sendable {
                 discoveryTrace: evidence.discoveryTrace,
                 truncated: evidence.truncated
             ),
-            shutterAutofocusSupported: shutterAutofocusSupported
+            shutterAutofocusSupported: shutterAutofocusSupported,
+            heldAutofocusSupported: heldAutofocusSupported
         )
     }
 }

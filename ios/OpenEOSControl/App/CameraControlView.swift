@@ -124,6 +124,19 @@ private struct CameraOverlayHeader: View {
     let controlRotation: Double
 
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            header(showDetails: true).fixedSize(horizontal: true, vertical: false)
+            header(showDetails: false)
+        }
+        .padding(.leading, 11)
+        .padding(.trailing, 4)
+        .frame(height: 54)
+        .foregroundStyle(Color.cameraText)
+        .background(Color.black.opacity(0.66))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func header(showDetails: Bool) -> some View {
         HStack(spacing: 7) {
             RotatingControl(degrees: controlRotation) {
                 HStack(spacing: 7) {
@@ -137,21 +150,27 @@ private struct CameraOverlayHeader: View {
             }
             .accessibilityIdentifier("camera-model-status")
             Spacer(minLength: 4)
-            RotatingControl(degrees: controlRotation) {
-                HStack(spacing: 4) {
-                    Image(systemName: "battery.75percent")
-                    Text(camera.status?.batteryLevel.map { "\($0)%" } ?? "--")
-                }
-                .font(.caption.weight(.semibold))
-            }
-            if let storageText {
+            if showDetails {
                 RotatingControl(degrees: controlRotation) {
                     HStack(spacing: 4) {
-                        Image(systemName: "sdcard")
-                        Text(storageText)
+                        Image(systemName: "battery.75percent")
+                        Text(camera.status?.batteryLevel.map { "\($0)%" } ?? "--")
                     }
                     .font(.caption.weight(.semibold))
                 }
+                if let storageText {
+                    RotatingControl(degrees: controlRotation) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "sdcard")
+                            Text(storageText)
+                        }
+                        .font(.caption.weight(.semibold))
+                    }
+                }
+            }
+            if camera.capabilities?.heldAutofocusSupported == true {
+                HeldAutofocusButton(camera: camera)
+                    .frame(width: 50, height: 44)
             }
             if camera.supports(.autofocus) {
                 Button {
@@ -177,12 +196,7 @@ private struct CameraOverlayHeader: View {
             .buttonStyle(CameraIconButtonStyle())
             .accessibilityIdentifier("more-actions-button")
         }
-        .padding(.leading, 11)
-        .padding(.trailing, 4)
-        .frame(height: 54)
-        .foregroundStyle(Color.cameraText)
-        .background(Color.black.opacity(0.66))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+
     }
 
     private var storageText: String? {

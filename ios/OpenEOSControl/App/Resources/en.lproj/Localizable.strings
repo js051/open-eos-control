@@ -729,3 +729,16 @@
 "media_worklist_source_folder" = "Folder: %@";
 "media_worklist_source_captured" = "Captured: %@";
 "media_worklist_source_size" = "Size: %@";
+
+"held_autofocus" = "Hold AF-ON";
+"held_autofocus_active" = "AF-ON held";
+"held_autofocus_released" = "Released";
+"held_autofocus_hint" = "Hold to focus; release or move outside to stop. Attempts to release after 30 seconds. With VoiceOver, activate to start and activate again to stop.";
+"focus_command_accepted" = "Focus command accepted; focus is not confirmed";
+"focus_command_failed" = "Focus command failed";
+"camera_focus_standby" = "Camera focus: standby";
+"camera_focus_focused" = "Camera confirms focus";
+"camera_focus_unfocused" = "Camera reports focus failed";
+"camera_focus_servo_off" = "Camera focus: servo off";
+"camera_focus_focusing" = "Camera reports focusing";
+"camera_focus_unknown" = "Camera focus: unknown";

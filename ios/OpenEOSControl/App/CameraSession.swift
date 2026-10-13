@@ -175,6 +175,27 @@ enum CameraSession: Sendable {
         }
     }
 
+    func startHeldAutofocus(owner: UUID) async throws {
+        switch self {
+        case let .ccapi(client): try await client.startHeldAutofocus(owner: owner)
+        case let .desktopBridge(client): try await client.startHeldAutofocus(owner: owner)
+        }
+    }
+
+    func stopHeldAutofocus(owner: UUID) async throws {
+        switch self {
+        case let .ccapi(client): try await client.stopHeldAutofocus(owner: owner)
+        case let .desktopBridge(client): try await client.stopHeldAutofocus(owner: owner)
+        }
+    }
+
+    func liveViewFocusInfo() async throws -> CameraFocusInfo? {
+        switch self {
+        case let .ccapi(client): return try await client.liveViewFocusInfo()
+        case let .desktopBridge(client): return try await client.liveViewFocusInfo()
+        }
+    }
+
     func autofocus() async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.autofocus()

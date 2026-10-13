@@ -120,8 +120,19 @@ final class CameraAppState: ObservableObject {
         }
     }
     @Published private(set) var isPreview = false
-    @Published var screen = AppScreen.control
-    @Published var captureMode = AppCaptureMode.photo
+    @Published var screen = AppScreen.control {
+        didSet {
+            if screen != oldValue {
+                invalidateCameraFocusInfo()
+                if screen != .control { releaseHeldAutofocus() }
+            }
+        }
+    }
+    @Published var captureMode = AppCaptureMode.photo {
+        didSet {
+            if captureMode != oldValue { releaseHeldAutofocus(); invalidateCameraFocusInfo() }
+        }
+    }
     struct RecordingReadbackRecovery: Equatable {
         let sessionGeneration: UUID
         let commandID: UUID
@@ -131,7 +142,9 @@ final class CameraAppState: ObservableObject {
     // A missing command response is not an ACK. Cached status cannot settle it.
     @Published private(set) var recordingCommandRecovery: RecordingReadbackRecovery?
     var recordingRecovery: RecordingReadbackRecovery? { recordingCommandRecovery ?? recordingReadbackRecovery }
-    @Published var activeSheet: CameraSheet?
+    @Published var activeSheet: CameraSheet? {
+        didSet { if activeSheet != nil { releaseHeldAutofocus(); invalidateCameraFocusInfo() } }
+    }
     @Published var hudVisible = true
     @Published var showGrid = false
     @Published var monitorSettings = LiveViewMonitorSettings()
@@ -166,6 +179,10 @@ final class CameraAppState: ObservableObject {
     var canRetryLiveViewStop: Bool { session != nil && liveViewStopState.stopUnconfirmed && !isBusy(.liveView) && foregroundLiveViewRestartOwner == nil && foregroundMediaIOOwner == nil }
     private var acknowledgedPreviousRecordingWarnings = Set<UUID>()
     @Published private(set) var focusMarker: FocusMarker?
+    @Published private(set) var heldAutofocusPressed = false
+    @Published private(set) var cameraFocusInfo: CameraFocusInfo?
+    @Published private(set) var cameraFocusInfoAt: Date?
+    @Published private(set) var cameraFocusInfoError = false
     @Published private(set) var mediaItems: [CameraMediaItem] = []
     @Published private(set) var latestMediaItem: CameraMediaItem?
     @Published private(set) var latestMediaThumbnail: Data?
@@ -251,10 +268,18 @@ final class CameraAppState: ObservableObject {
     private let bridgeCameraDiscovery: (@Sendable (String, String) async throws -> [DesktopBridgeCamera])?
     private let cubeLutLoader: (@Sendable (URL) async throws -> CubeLut)?
     private let focusMarkerDelay: (@Sendable () async throws -> Void)?
+    private let heldAutofocusDelay: (@Sendable () async throws -> Void)?
     private var bridgeScanOwner = UUID()
     private var connectionConfigurationOwner = UUID()
     private var cubeLutOwner = UUID()
     private var focusMarkerOwner = UUID()
+    private var heldAutofocusOwner: UUID?
+    private var heldAutofocusTask: Task<Void, Error>?
+    private var heldAutofocusWatchdog: Task<Void, Never>?
+    private var focusInfoOwner = UUID()
+    private var focusInfoTask: Task<Void, Never>?
+    private var focusInfoReadTask: Task<CameraFocusInfo?, Error>?
+    private var focusInfoReadOwner: UUID?
     private(set) var focusMarkerExpiryTask: Task<Void, Never>?
     private var sessionGeneration = UUID()
     private var shutterReleaseObservationRevision: UInt64 = 0
@@ -353,7 +378,7 @@ final class CameraAppState: ObservableObject {
     var shutterReleaseUnconfirmed: Bool { shutterReleaseState.releaseUnconfirmed }
     var previousShutterReleaseUnconfirmed: Bool { !previousShutterReleaseWarnings.isEmpty }
     var canRetryShutterRelease: Bool {
-        (session != nil || isPreview) && shutterReleaseRequired
+        (session != nil || isPreview) && shutterReleaseRequired && heldAutofocusOwner == nil
             && (!busyOperations.contains(.capture) || pendingBulbStartID != nil)
     }
     var bulbMode: Bool {
@@ -411,6 +436,7 @@ final class CameraAppState: ObservableObject {
         bridgeCameraDiscovery: (@Sendable (String, String) async throws -> [DesktopBridgeCamera])? = nil,
         cubeLutLoader: (@Sendable (URL) async throws -> CubeLut)? = nil,
         focusMarkerDelay: (@Sendable () async throws -> Void)? = nil,
+        heldAutofocusDelay: (@Sendable () async throws -> Void)? = nil,
         rtpEventDispatcher: (@Sendable (@escaping @MainActor @Sendable () -> Void) -> Void)? = nil,
         mediaDeliveryStore: MediaDeliveryStore? = nil,
         mediaDeliveryReplyDelay: (@Sendable (MediaDeliveryReplyStage) async -> Void)? = nil,
@@ -424,6 +450,7 @@ final class CameraAppState: ObservableObject {
         self.bridgeCameraDiscovery = bridgeCameraDiscovery
         self.cubeLutLoader = cubeLutLoader
         self.focusMarkerDelay = focusMarkerDelay
+        self.heldAutofocusDelay = heldAutofocusDelay
         if CommandLine.arguments.contains("-resetState") {
             [
                 DefaultsKey.baseURL,
@@ -816,6 +843,11 @@ final class CameraAppState: ObservableObject {
         rtpController.retireDelivery()
         invalidateBridgeScan()
         retireFocusMarker()
+        stopCameraFocusInfoLoop()
+        releaseHeldAutofocus()
+        heldAutofocusOwner = nil
+        heldAutofocusTask = nil
+        heldAutofocusPressed = false
         sessionGeneration = UUID()
         recordingReadbackRecovery = nil
         recordingCommandRecovery = nil
@@ -975,6 +1007,7 @@ final class CameraAppState: ObservableObject {
 
     func setAutoRefresh(_ enabled: Bool) async {
         autoRefresh = enabled
+        if !enabled { invalidateCameraFocusInfo() }
         let mayRender = enabled && applicationActive && !shutterReleaseRequired
         rtpController.setRenderingEnabled(mayRender)
         if mayRender {
@@ -1002,6 +1035,8 @@ final class CameraAppState: ObservableObject {
         applicationActive = active
         rtpController.setApplicationActive(active)
         if !active {
+            releaseHeldAutofocus()
+            invalidateCameraFocusInfo()
             cancelMediaWorklistContinuation()
             if mediaBatchContinuationActive { cancelMediaBatchDownload() }
             foregroundMedia.stop(reason: .background)
@@ -1051,6 +1086,7 @@ final class CameraAppState: ObservableObject {
             }
             guard !shutterReleaseRequired else { return }
             activeLiveViewSource = source
+            startCameraFocusInfoLoop(session: session)
             liveViewStopState = stopState
             if let activeSize {
                 liveViewSize = activeSize
@@ -1447,6 +1483,151 @@ final class CameraAppState: ObservableObject {
             guard generation == sessionGeneration else { return }
             applyShutterReleaseState(release)
             record(error)
+        }
+    }
+
+    var canStartHeldAutofocus: Bool {
+        applicationActive && screen == .control && activeSheet == nil && !isPreview && session != nil
+            && capabilities?.heldAutofocusSupported == true && heldAutofocusOwner == nil
+            && busyOperations.isEmpty && !shutterReleaseRequired && !recordingStopRequired
+            && foregroundMediaIOOwner == nil
+    }
+
+    func ownsHeldAutofocus(_ owner: UUID) -> Bool { heldAutofocusOwner == owner }
+
+    @discardableResult
+    func beginHeldAutofocus() -> UUID? {
+        guard canStartHeldAutofocus, let session, begin(.focus) else { return nil }
+        let owner = UUID()
+        let generation = sessionGeneration
+        heldAutofocusOwner = owner
+        heldAutofocusPressed = true
+        let task = Task { try await session.startHeldAutofocus(owner: owner) }
+        heldAutofocusTask = task
+        Task { [weak self] in
+            let result = await task.result
+            guard let self, generation == self.sessionGeneration, self.heldAutofocusOwner == owner else { return }
+            let release = await session.shutterReleaseState()
+            guard generation == self.sessionGeneration, self.heldAutofocusOwner == owner else { return }
+            self.applyShutterReleaseState(release, pauseLiveView: false)
+            if case .success = result, self.heldAutofocusPressed {
+                let delay = self.heldAutofocusDelay
+                self.heldAutofocusWatchdog = Task { [weak self] in
+                    do {
+                        if let delay { try await delay() }
+                        else { try await Task.sleep(nanoseconds: 30_000_000_000) }
+                    } catch { return }
+                    guard !Task.isCancelled, let self, self.sessionGeneration == generation,
+                          self.heldAutofocusOwner == owner, self.heldAutofocusPressed else { return }
+                    self.releaseHeldAutofocus(owner: owner)
+                }
+            }
+            if case let .failure(error) = result, self.heldAutofocusPressed {
+                self.heldAutofocusPressed = false
+                self.heldAutofocusOwner = nil
+                self.heldAutofocusTask = nil
+                self.end(.focus, generation: generation)
+                if !CameraConnectionFailureReason.isCancellation(error) { self.record(error) }
+            }
+        }
+        return owner
+    }
+
+    /// Synchronous retirement captures the original session before Disconnect replaces it.
+    func releaseHeldAutofocus(owner requestedOwner: UUID? = nil) {
+        guard let owner = heldAutofocusOwner, requestedOwner == nil || requestedOwner == owner,
+              let session else { return }
+        let generation = sessionGeneration
+        let start = heldAutofocusTask
+        heldAutofocusWatchdog?.cancel()
+        heldAutofocusWatchdog = nil
+        heldAutofocusPressed = false
+        invalidateCameraFocusInfo()
+        start?.cancel()
+        Task { [weak self] in
+            var failure: Error?
+            if let start, case let .failure(error) = await start.result {
+                if await session.shutterReleaseState().releaseRequired { failure = error }
+            }
+            if failure == nil {
+                do { try await session.stopHeldAutofocus(owner: owner) } catch { failure = error }
+            }
+            let release = await session.shutterReleaseState()
+            guard let self, generation == self.sessionGeneration, self.heldAutofocusOwner == owner else { return }
+            self.heldAutofocusOwner = nil
+            self.heldAutofocusTask = nil
+            self.end(.focus, generation: generation)
+            self.applyShortControlReleaseState(release, session: session, generation: generation)
+            if let failure { self.record(failure) }
+        }
+    }
+
+    private var canReadCameraFocusInfo: Bool {
+        connected && !isPreview && applicationActive && screen == .control && activeSheet == nil && autoRefresh
+            && activeLiveViewSource != nil && liveViewTemperatureAllowed && !liveViewStopState.stopUnconfirmed
+            && !busyOperations.contains(.capture) && !busyOperations.contains(.liveView)
+            && capabilities?.liveView.focusInfoSupported == true
+            && (!shutterReleaseRequired || heldAutofocusPressed)
+    }
+
+    private func invalidateCameraFocusInfo() {
+        focusInfoOwner = UUID()
+        cameraFocusInfo = nil
+        cameraFocusInfoAt = nil
+        cameraFocusInfoError = false
+    }
+
+    private func stopCameraFocusInfoLoop() {
+        focusInfoTask?.cancel()
+        focusInfoReadTask?.cancel()
+        focusInfoTask = nil
+        invalidateCameraFocusInfo()
+    }
+
+    private func readCameraFocusInfo(session: CameraSession) async throws -> CameraFocusInfo? {
+        let owner = UUID()
+        let read = Task { try await session.liveViewFocusInfo() }
+        focusInfoReadOwner = owner
+        focusInfoReadTask = read
+        defer {
+            if focusInfoReadOwner == owner { focusInfoReadOwner = nil; focusInfoReadTask = nil }
+        }
+        // Keep the global reservation until settlement, even across a replacement
+        // loop/session whose retired transport ignores cancellation.
+        return try await withTaskCancellationHandler { try await read.value } onCancel: { read.cancel() }
+    }
+
+    private func startCameraFocusInfoLoop(session: CameraSession) {
+        stopCameraFocusInfoLoop()
+        guard capabilities?.liveView.focusInfoSupported == true else { return }
+        let generation = sessionGeneration
+        focusInfoTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled, generation == sessionGeneration {
+                let owner = focusInfoOwner
+                var delay: UInt64 = 250_000_000
+                if canReadCameraFocusInfo, focusInfoReadTask == nil {
+                    do {
+                        let info = try await readCameraFocusInfo(session: session)
+                        guard !Task.isCancelled, generation == sessionGeneration else { return }
+                        if info == nil { delay = 2_000_000_000 }
+                        if owner == focusInfoOwner, canReadCameraFocusInfo {
+                            cameraFocusInfo = info
+                            cameraFocusInfoAt = info == nil ? nil : Date()
+                            cameraFocusInfoError = false
+                        }
+                    } catch {
+                        if Task.isCancelled || generation != sessionGeneration { return }
+                        delay = 1_000_000_000
+                        if owner == focusInfoOwner {
+                            cameraFocusInfo = nil
+                            cameraFocusInfoAt = nil
+                            cameraFocusInfoError = true
+                        }
+                    }
+                } else if cameraFocusInfo != nil { invalidateCameraFocusInfo() }
+                do { try await Task.sleep(nanoseconds: delay) } catch { return }
+            }
         }
     }
 
@@ -3332,11 +3513,17 @@ final class CameraAppState: ObservableObject {
 
     private func begin(_ operation: CameraOperation) -> Bool {
         if foregroundMediaIOOwner != nil { return false }
+        if heldAutofocusOwner != nil, operation != .refresh { return false }
         if shutterControlIsBusy(operation) { return false }
         if recordingRecovery != nil, operation == .capture { return false }
         if shutterReleaseRequired && operation != .refresh { return false }
         let inserted = busyOperations.insert(operation).inserted
-        if inserted { operationRevision &+= 1 }
+        if inserted {
+            operationRevision &+= 1
+            if operation == .focus || operation == .capture || operation == .liveView || operation == .setting {
+                invalidateCameraFocusInfo()
+            }
+        }
         return inserted
     }
 
@@ -3364,7 +3551,7 @@ final class CameraAppState: ObservableObject {
         shutterReleaseState = state
         if let snapshot { self.snapshot = snapshot.replacing(status: snapshot.status.withShutterReleaseState(state)) }
         bulbStartedAt = state.bulbExposureActive == true ? bulbStartedAt ?? Date() : nil
-        if state.releaseRequired, pauseLiveView { pauseLiveViewForBulb() }
+        if state.releaseRequired, pauseLiveView, !heldAutofocusPressed { pauseLiveViewForBulb() }
     }
 
     private func adoptReportedShutterState(_ status: CameraStatus) {
@@ -3378,7 +3565,7 @@ final class CameraAppState: ObservableObject {
                 releaseRequired: true, releaseUnconfirmed: false, bulbExposureActive: true
             )
         }
-        if shutterReleaseRequired { pauseLiveViewForBulb() }
+        if shutterReleaseRequired, !heldAutofocusPressed { pauseLiveViewForBulb() }
         bulbStartedAt = bulbExposureActive ? bulbStartedAt ?? Date() : nil
     }
 
@@ -3411,7 +3598,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func beginLiveViewLoop(session: CameraSession) {
-        guard applicationActive, !shutterReleaseRequired else { return }
+        guard applicationActive, !shutterReleaseRequired || heldAutofocusPressed else { return }
         let generation = sessionGeneration
         stopLiveViewLoop()
         resetLiveViewMetrics()
@@ -3423,7 +3610,7 @@ final class CameraAppState: ObservableObject {
                 do {
                     let frame = try await session.liveViewFrame(cacheKey: cacheKey)
                     guard generation == sessionGeneration, !Task.isCancelled,
-                          applicationActive, !shutterReleaseRequired else { break }
+                          applicationActive, !shutterReleaseRequired || heldAutofocusPressed else { break }
                     cacheKey &+= 1
                     liveViewData = frame.data
                     frameBytes = frame.data.count
@@ -3461,6 +3648,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func stopLiveViewLoop() {
+        invalidateCameraFocusInfo()
         liveViewTask?.cancel()
         liveViewTask = nil
     }

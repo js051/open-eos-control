@@ -114,6 +114,15 @@ struct LiveViewSurface: View {
                         .accessibilityIdentifier("live-view-waveform")
                 }
 
+                if let info = camera.cameraFocusInfo, let sampledAt = camera.cameraFocusInfoAt,
+                   let sourceSize, sourceSize.height > 0,
+                   info.matchesImage(aspectRatio: sourceSize.width / sourceSize.height) {
+                    CameraReportedFocusOverlay(info: info, sampledAt: sampledAt)
+                        .frame(width: imageRect.width, height: imageRect.height)
+                        .position(x: imageRect.midX, y: imageRect.midY)
+                        .allowsHitTesting(false)
+                }
+
                 if let marker = camera.focusMarker {
                     FocusMarkerView(accepted: marker.accepted)
                         .position(
@@ -558,5 +567,54 @@ private struct FocusMarkerView: View {
             .stroke(accepted ? Color.cameraAccent : Color.cameraWarning, lineWidth: 2)
             .frame(width: 52, height: 52)
             .shadow(color: .black.opacity(0.65), radius: 1)
+            .accessibilityLabel(Text(accepted ? "focus_command_accepted" : "focus_command_failed"))
+            .accessibilityIdentifier("focus-command-marker")
+    }
+}
+
+private struct CameraReportedFocusOverlay: View {
+    let info: CameraFocusInfo
+    let sampledAt: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: sampledAt, by: 0.1)) { context in
+            if CameraFocusInfo.isFresh(sampledAt: sampledAt, now: context.date), !info.frames.isEmpty {
+                Canvas { context, size in
+                    context.clip(to: Path(CGRect(origin: .zero, size: size)))
+                    for frame in info.frames {
+                        let rect = CGRect(x: frame.left * size.width, y: frame.top * size.height,
+                            width: (frame.right - frame.left) * size.width, height: (frame.bottom - frame.top) * size.height)
+                        let arm = min(12, min(rect.width, rect.height) * 0.22)
+                        var path = Path()
+                        for right in [false, true] {
+                            for bottom in [false, true] {
+                                let x = right ? rect.maxX : rect.minX
+                                let y = bottom ? rect.maxY : rect.minY
+                                path.move(to: CGPoint(x: x + (right ? -arm : arm), y: y))
+                                path.addLine(to: CGPoint(x: x, y: y))
+                                path.addLine(to: CGPoint(x: x, y: y + (bottom ? -arm : arm)))
+                            }
+                        }
+                        context.stroke(path, with: .color(.black.opacity(0.65)), lineWidth: 3)
+                        context.stroke(path, with: .color(color(frame.status)), lineWidth: 1.5)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(info.frames.map { NSLocalizedString("camera_focus_" + $0.status.rawValue.lowercased(), comment: "") }.reduce(into: [String]()) { values, value in
+                    if !values.contains(value) { values.append(value) }
+                }.joined(separator: ", "))
+                .accessibilityIdentifier("camera-reported-focus-frames")
+            }
+        }
+    }
+
+    private func color(_ status: CameraFocusStatus) -> Color {
+        switch status {
+        case .focused: .green
+        case .unfocused: .cameraRecording
+        case .focusing: .cameraAccent
+        case .standby: .white
+        case .servoOff, .unknown: .cameraSecondaryText
+        }
     }
 }

@@ -172,6 +172,18 @@ public actor DesktopBridgeClient {
     private var ownsShutterStatus = false
     private var releaseRevision = UUID()
     private var shutterAutofocusSupported = false
+    private var heldAutofocusSupported = false
+    private var focusInfoSupported = false
+    private struct FocusHold: Sendable {
+        let owner: UUID
+        let generation: UUID
+        let stopURL: URL
+        var unconfirmed = true
+    }
+    private var focusHold: FocusHold?
+    private var focusStartTask: Task<Void, Error>?
+    private var focusStopTask: Task<Void, Error>?
+    private var ordinaryMutationCount = 0
     private var sessionID: String?
     private var sessionEngine: String?
     private var bridgeVersion: String?
@@ -265,6 +277,8 @@ public actor DesktopBridgeClient {
             if initializationToken == token { initializationToken = nil }
         }
         shutterAutofocusSupported = false
+        heldAutofocusSupported = false
+        focusInfoSupported = false
         liveViewMagnifications = []
         try await validateService()
         guard initializationToken == token, !initializationCancelled, !isClosing else { throw DesktopBridgeError.sessionChanged }
@@ -298,6 +312,10 @@ public actor DesktopBridgeClient {
     }
 
     public func shutterReleaseState() -> CameraShutterReleaseState {
+        if let focusHold {
+            return CameraShutterReleaseState(releaseRequired: true, releaseUnconfirmed: focusHold.unconfirmed,
+                bulbExposureActive: false)
+        }
         guard let shutterRelease else { return .idle }
         return CameraShutterReleaseState(
             releaseRequired: true,
@@ -317,6 +335,9 @@ public actor DesktopBridgeClient {
         initializationCancelled = true
         guard let id = sessionID else { return completedCloseState }
         isClosing = true
+        focusStartTask?.cancel()
+        if let start = focusStartTask { _ = await start.result }
+        if let hold = focusHold { try? await releaseFocusHold(hold) }
         // Cancel only our pending Start. A transport may ignore cancellation,
         // so settlement must still precede the original session's DELETE.
         // Stop can be reserved while it awaits Start, before it sets the wire
@@ -333,7 +354,7 @@ public actor DesktopBridgeClient {
         if let stop = liveViewStopTask { _ = await stop.result }
         try? await releasePendingLiveView()
         await stopEventPolling()
-        var result = CameraShutterReleaseState.idle
+        var result = CameraShutterReleaseState(releaseUnconfirmed: focusHold != nil, bulbExposureActive: focusHold == nil ? false : nil)
         do {
             // Unstructured cleanup does not inherit the caller's cancellation.
             // Still await its result before retiring the session or close waiters.
@@ -343,7 +364,7 @@ public actor DesktopBridgeClient {
             try await deletion.value
         } catch {
             if liveViewStop != nil || Self.isLiveViewStopError(error) { liveViewStopUnconfirmed = true }
-            if shutterRelease != nil || Self.isShutterReleaseError(error) {
+            if shutterRelease != nil || focusHold != nil || Self.isShutterReleaseError(error) {
                 // DELETE can remove the server session even when cleanup fails.
                 // The caller presents this as a previous-connection warning only.
                 result = CameraShutterReleaseState(
@@ -362,6 +383,11 @@ public actor DesktopBridgeClient {
         eventPollingSupported = false
         shutterAutofocusSupported = false
         liveViewMagnifications = []
+        focusHold = nil
+        focusStartTask = nil
+        focusStopTask = nil
+        heldAutofocusSupported = false
+        focusInfoSupported = false
         completedCloseState = result
         isClosing = false
         let waiters = closeWaiters
@@ -438,6 +464,10 @@ public actor DesktopBridgeClient {
         eventPollingSupported = supported.contains(.eventPolling)
         shutterAutofocusSupported = Self.strictBool(body["shutterAutofocusSupported"]) == true
             && supported.contains(.stillCapture)
+        heldAutofocusSupported = Self.strictBool(body["heldAutofocusSupported"]) == true
+            && supported.contains(.autofocus)
+        focusInfoSupported = Self.strictBool(body["focusInfoSupported"]) == true
+            && supported.contains(.liveView)
         let reasons = body.dictionary("reasons").reduce(into: [CameraFeature: String]()) { result, entry in
             guard let feature = CameraFeature(rawValue: entry.key), let reason = entry.value as? String else { return }
             result[feature] = reason
@@ -550,11 +580,13 @@ public actor DesktopBridgeClient {
                 magnifications: liveViewMagnifications,
                 currentMagnification: currentMagnification,
                 minimumFPS: minimumFPS,
-                maximumFPS: maximumFPS
+                maximumFPS: maximumFPS,
+                focusInfoSupported: focusInfoSupported
             ),
             profile: profile,
             evidence: evidence,
-            shutterAutofocusSupported: shutterAutofocusSupported
+            shutterAutofocusSupported: shutterAutofocusSupported,
+            heldAutofocusSupported: heldAutofocusSupported
         )
     }
 
@@ -647,7 +679,7 @@ public actor DesktopBridgeClient {
     public func startBulbExposure() async throws -> CameraStatus {
         try Task.checkCancellation()
         guard !isClosing else { throw DesktopBridgeError.sessionChanged }
-        guard shutterRelease == nil, !bulbOperationInFlight, bulbStopTask == nil else {
+        guard shutterRelease == nil, focusHold == nil, !bulbOperationInFlight, bulbStopTask == nil else {
             throw DesktopBridgeError.shutterReleaseUnconfirmed
         }
         let startURL = try sessionEndpoint(["bulb", "start"])
@@ -785,6 +817,7 @@ public actor DesktopBridgeClient {
     }
 
     public func retryShutterRelease() async throws {
+        if let hold = focusHold { try await stopHeldAutofocus(owner: hold.owner); return }
         guard shutterRelease != nil else { return }
         let generation = sessionGeneration
         do {
@@ -807,6 +840,101 @@ public actor DesktopBridgeClient {
                 throw stopError
             }
         }
+    }
+
+    public func startHeldAutofocus(owner: UUID) async throws {
+        try Task.checkCancellation()
+        guard heldAutofocusSupported, !isClosing, focusHold == nil, focusStartTask == nil, focusStopTask == nil,
+              shutterRelease == nil, !bulbOperationInFlight, bulbStopTask == nil,
+              ordinaryMutationCount == 0, liveViewStartTask == nil, liveViewMaintenanceID == nil else {
+            throw DesktopBridgeError.invalidResponse("Held autofocus is unavailable or another release is pending.")
+        }
+        let hold = FocusHold(owner: owner, generation: sessionGeneration,
+            stopURL: try sessionEndpoint(["focus", "auto", "stop"]))
+        let startURL = try sessionEndpoint(["focus", "auto", "start"])
+        focusHold = hold
+        ownsShutterStatus = true
+        releaseRevision = UUID()
+        let task = Task { try await self.performFocusStart(hold, url: startURL) }
+        focusStartTask = task
+        try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+    }
+
+    private func performFocusStart(_ hold: FocusHold, url: URL) async throws {
+        defer { if focusHold?.owner == hold.owner || sessionGeneration == hold.generation { focusStartTask = nil } }
+        var dispatched = false
+        do {
+            try Task.checkCancellation()
+            guard !isClosing, sessionGeneration == hold.generation, focusHold?.owner == hold.owner else {
+                throw DesktopBridgeError.sessionChanged
+            }
+            dispatched = true
+            let body = try await requestJSON(url: url, method: "POST", payload: ["ownerId": hold.owner.uuidString], shutterOperation: true)
+            try Task.checkCancellation()
+            guard !isClosing, sessionGeneration == hold.generation, focusHold?.owner == hold.owner else {
+                throw DesktopBridgeError.sessionChanged
+            }
+            guard body["ownerId"] as? String == hold.owner.uuidString,
+                  Self.strictBool(body["active"]) == true, Self.strictBool(body["stopUnconfirmed"]) == false else {
+                throw DesktopBridgeError.shutterReleaseUnconfirmed
+            }
+            focusHold?.unconfirmed = false
+            releaseRevision = UUID()
+        } catch {
+            let primary = error
+            if dispatched { try await releaseFocusHold(hold) }
+            else if focusHold?.owner == hold.owner, sessionGeneration == hold.generation {
+                focusHold = nil
+                releaseRevision = UUID()
+            }
+            throw primary
+        }
+    }
+
+    public func stopHeldAutofocus(owner: UUID) async throws {
+        guard let hold = focusHold, hold.owner == owner else { return }
+        if let start = focusStartTask {
+            start.cancel()
+            let result = await start.result
+            if case let .failure(error) = result, focusHold?.owner == owner { throw error }
+        }
+        guard focusHold?.owner == owner, sessionGeneration == hold.generation else { return }
+        try await releaseFocusHold(hold)
+    }
+
+    private func releaseFocusHold(_ hold: FocusHold) async throws {
+        guard focusHold?.owner == hold.owner, sessionGeneration == hold.generation else { return }
+        if let task = focusStopTask { try await task.value; return }
+        let task = Task.detached(priority: .userInitiated) { try await self.performFocusStop(hold) }
+        focusStopTask = task
+        defer { if sessionGeneration == hold.generation { focusStopTask = nil } }
+        try await task.value
+    }
+
+    private func performFocusStop(_ hold: FocusHold) async throws {
+        guard focusHold?.owner == hold.owner, sessionGeneration == hold.generation else { return }
+        focusHold?.unconfirmed = true
+        releaseRevision = UUID()
+        let body = try await requestJSON(url: hold.stopURL, method: "POST", payload: ["ownerId": hold.owner.uuidString], shutterOperation: true)
+        guard focusHold?.owner == hold.owner, sessionGeneration == hold.generation else { return }
+        guard body["ownerId"] as? String == hold.owner.uuidString,
+              Self.strictBool(body["active"]) == false, Self.strictBool(body["stopUnconfirmed"]) == false else {
+            throw DesktopBridgeError.shutterReleaseUnconfirmed
+        }
+        focusHold = nil
+        releaseRevision = UUID()
+    }
+
+    public func liveViewFocusInfo() async throws -> CameraFocusInfo? {
+        guard focusInfoSupported, !isClosing, liveViewStop != nil, !liveViewStopUnconfirmed else { return nil }
+        let generation = sessionGeneration
+        let revision = liveViewRevision
+        var request = makeRequest(url: try sessionEndpoint(["liveview", "focus-info"]), method: "GET",
+            accept: "application/json", timeoutInterval: 2)
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let data = try await CameraFocusMetadata.boundedRead(request, transport: transport)
+        guard !isClosing, generation == sessionGeneration, revision == liveViewRevision else { return nil }
+        return try CameraFocusMetadata.bridgePacket(data)
     }
 
     public func autofocus() async throws -> CameraStatus {
@@ -1465,7 +1593,7 @@ public actor DesktopBridgeClient {
             lens: lens,
             temperature: body.string("temperature").flatMap(CameraTemperatureStatus.init(rawValue:))
         )
-        return ownsShutterStatus ? status.withShutterReleaseState(shutterReleaseState()) : status
+        return ownsShutterStatus || focusHold != nil ? status.withShutterReleaseState(shutterReleaseState()) : status
     }
 
     private func finishBulbOperation() {
@@ -1482,6 +1610,13 @@ public actor DesktopBridgeClient {
     }
 
     private func adoptShutterRelease(unconfirmed: Bool, acceptsLegacyStop: Bool) throws {
+        if focusHold != nil {
+            // The Bridge shares its unresolved-release flag. Preserve the known AF
+            // owner rather than fabricating a bulb stop for that same warning.
+            focusHold?.unconfirmed = true
+            releaseRevision = UUID()
+            return
+        }
         ownsShutterStatus = true
         if shutterRelease == nil {
             shutterRelease = ShutterReleaseObligation(stopURL: try sessionEndpoint(["bulb", "stop"]))
@@ -1553,7 +1688,7 @@ public actor DesktopBridgeClient {
         guard sessionID != nil else { return false }
         if method == "DELETE", url == (try sessionEndpoint(["events"])) { return true }
         guard method == "POST" else { return false }
-        for path in [["bulb", "stop"], ["recording", "stop"], ["liveview", "stop"]] {
+        for path in [["bulb", "stop"], ["recording", "stop"], ["liveview", "stop"], ["focus", "auto", "stop"]] {
             if url == (try sessionEndpoint(path)) { return true }
         }
         return false
@@ -1563,7 +1698,7 @@ public actor DesktopBridgeClient {
         guard !["GET", "HEAD", "OPTIONS"].contains(method) else { return }
         let recovery = try isRecoveryMutation(url: url, method: method)
         guard !isClosing || recovery else { throw DesktopBridgeError.sessionChanged }
-        guard shutterRelease == nil || shutterOperation || recovery else {
+        guard (shutterRelease == nil && focusHold == nil) || shutterOperation || recovery else {
             throw DesktopBridgeError.shutterReleaseUnconfirmed
         }
     }
@@ -1608,6 +1743,9 @@ public actor DesktopBridgeClient {
         recordingCommand: Bool? = nil
     ) async throws -> BridgeJSON {
         try validateMutation(url: url, method: method, shutterOperation: shutterOperation)
+        let ordinaryMutation = !["GET", "HEAD", "OPTIONS"].contains(method) && !shutterOperation
+        if ordinaryMutation { ordinaryMutationCount += 1 }
+        defer { if ordinaryMutation { ordinaryMutationCount -= 1 } }
         let generation = sessionGeneration
         let revision = releaseRevision
         let liveViewStatusRevision = liveViewRevision
@@ -1727,6 +1865,9 @@ public actor DesktopBridgeClient {
         timeoutInterval: TimeInterval = 10
     ) async throws {
         try validateMutation(url: url, method: method)
+        let ordinaryMutation = !["GET", "HEAD", "OPTIONS"].contains(method)
+        if ordinaryMutation { ordinaryMutationCount += 1 }
+        defer { if ordinaryMutation { ordinaryMutationCount -= 1 } }
         let generation = sessionGeneration
         let revision = releaseRevision
         let scopedToSession = try isCurrentSessionURL(url)
