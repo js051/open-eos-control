@@ -251,8 +251,10 @@ class RecordingStatusReadbackTest {
                 for (rejected in listOf(false, true)) {
                     reject.set(rejected)
                     val failure = runCatching { if (bridge) bridgeClient.startRecording() else direct.startRecording() }.exceptionOrNull()
-                    assertEquals(!rejected, failure is RecordingCommandUnconfirmedException)
-                    assertFalse(failure is RecordingStatusReadbackException)
+                    val detail = "bridge=$bridge rejected=$rejected; failure=" + generateSequence(failure) { it.cause }
+                        .take(8).joinToString(" -> ") { "${it.javaClass.name}: ${it.message}" }
+                    assertEquals(detail, !rejected, failure is RecordingCommandUnconfirmedException)
+                    assertFalse(detail, failure is RecordingStatusReadbackException)
                 }
                 assertEquals(2, actions.size)
             } finally { direct.close(); bridgeClient.close(); server.shutdown() }
