@@ -2104,6 +2104,8 @@ button.media-thumbnail:focus-visible {
 
 .media-history-dialog { max-height: 85dvh; overflow-y: auto; width: min(42rem, calc(100vw - 2rem)); }
 .media-history-dialog .media-batch-list { max-height: none; }
+.media-history-dialog .media-batch-list label { display: grid; min-width: 0; gap: 4px; }
+.media-history-dialog .media-batch-list select { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
 .media-auto-panel { min-width: 0; margin: 0 0 16px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; }
 .media-auto-panel p { margin: 0 0 10px; overflow-wrap: anywhere; }
 .media-auto-panel details { margin: 0 0 10px; }
