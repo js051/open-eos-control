@@ -664,6 +664,14 @@ class UrllibCcapiTransport:
     ) -> CcapiResponse:
         response = self._open(method, url, body=body, headers=headers, timeout=timeout)
         try:
+            if not 200 <= response.status < 300:
+                # The received status already proves rejection. An optional
+                # diagnostic body must not turn that evidence into an unknown
+                # command result when it is oversized, truncated, or unreadable.
+                payload = b""
+                with suppress(OSError, HTTPException):
+                    payload = response.body.read(min(max_bytes, MAX_ERROR_BYTES))
+                return CcapiResponse(response.status, response.headers, payload)
             try:
                 payload = response.body.read(max_bytes + 1)
             except (OSError, HTTPException) as error:
@@ -3049,7 +3057,21 @@ class CcapiSession:
             )
             if operation is None:
                 raise unsupported(CameraFeature.VIDEO_RECORDING.value, self.engine_name)
-            self._command_ok(operation, {"action": "start" if recording else "stop"})
+            try:
+                self._command_ok(operation, {"action": "start" if recording else "stop"})
+            except BridgeError as error:
+                if error.code not in {"CCAPI_UNREACHABLE", "CCAPI_RESPONSE_TOO_LARGE"}:
+                    raise
+                # The request may have taken effect. A prior ACK cache is not
+                # evidence that this command was rejected or recording stopped.
+                raise BridgeError(
+                    "RECORDING_COMMAND_UNCONFIRMED",
+                    "The recording command result is unknown. Use Stop explicitly; "
+                    "cached status cannot confirm that the camera stopped.",
+                    status_code=502,
+                    feature=CameraFeature.VIDEO_RECORDING.value,
+                    engine=self.engine_name,
+                ) from error
             self._recording = recording
             self._observed.add(CameraFeature.VIDEO_RECORDING)
             try:

@@ -86,7 +86,7 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
     resumeLivePolling: () => feedback.push("resume"),
     setOperationState: (message) => feedback.push(message),
     showToast: (message) => feedback.push(message),
-    captureError: (error) => ({ code: error.code, message: error.message }),
+    captureError: (error) => ({ code: error.code, message: error.message, status: error.status, feature: error.feature, engine: error.engine }),
     window: {},
     saveMediaBlob: (blob, name) => saved.push({ blob, name }),
     api: async (url, options = {}) => {
@@ -991,7 +991,8 @@ for(const code of ['CCAPI_UNREACHABLE','CCAPI_REQUEST_FAILED']){
  test(`unacknowledged REC error is not classified as ACK: ${code}`,async()=>{
   const s=recordingSubject();s.state.status.recording=false;const e=new Error('command failed');e.code=code;
   s.api=async url=>{s.requests.push({url,method:'POST'});throw e;};await s.operateShutter();
-  assert.equal(s.state.recordingRecovery,undefined);assert.equal(s.state.status.recording,false);assert.equal(writes(s).length,1);
+  assert.equal(s.state.recordingRecovery, undefined);
+  assert.equal(s.state.status.recording,false);assert.equal(writes(s).length,1);
  });
 }
 
@@ -1084,3 +1085,196 @@ for (const newerRecording of [true, false, null]) {
     assert.equal(s.state.recordingRecovery, recovery);
   });
 }
+
+for (const code of ['RECORDING_COMMAND_UNCONFIRMED', 'NETWORK_ERROR']) {
+  test(`applied REC Start with lost response retains deliberate Stop after stale refresh: ${code}`, async () => {
+    const s = recordingSubject(); installRecordingRefresh(s);
+    s.state.status.recording = false;
+    // This control state is deliberately separate from the App/Bridge's last ACK cache.
+    let peerRecording = false;
+    s.api = async (url, options = {}) => {
+      s.requests.push({ url, method: options.method || 'GET' });
+      if (url.endsWith('/recording/start')) {
+        peerRecording = true;
+        const error = new Error('Synthetic response lost after application'); error.code = code; error.status = code === 'NETWORK_ERROR' ? 0 : 502;
+        error.feature = 'VIDEO_RECORDING'; error.engine = 'ccapi';
+        throw error;
+      }
+      if (url.endsWith('/recording/stop')) { peerRecording = false; return { recording: false }; }
+      if (url.endsWith('/status')) return { recording: false };
+      return {};
+    };
+    await s.operateShutter();
+    assert.equal(peerRecording, true, 'The independent synthetic peer applied Start before response loss');
+    assert.equal(writes(s).length, 1, 'No automatic command replay');
+    await s.refreshSession();
+    assert.equal(peerRecording, true, 'A stale ACK cache cannot prove the peer stopped');
+    assert.equal(writes(s).length, 1, 'Refresh remains read-only');
+    await s.operateShutter();
+    assert.deepEqual(writes(s).map(request => request.url.split('/').at(-1)), ['start', 'stop']);
+    assert.equal(peerRecording, false, 'The next deliberate operation must Stop, never repeat Start');
+  });
+}
+
+for (const status of [401, 403, 503]) {
+  test(`explicit REC HTTP rejection ${status} does not create unknown-command evidence`, async () => {
+    const s = recordingSubject(); s.state.status.recording = false;
+    const error = new Error('Synthetic explicit rejection'); error.code = 'HTTP_ERROR'; error.status = status;
+    s.api = async url => { s.requests.push({url, method:'POST'}); throw error; };
+    await s.operateShutter();
+    assert.equal(s.state.recordingRecovery, undefined);
+    assert.equal(s.state.status.recording, false);
+    assert.equal(writes(s).length, 1);
+  });
+}
+for (const recording of [false, true, null]) {
+  test(`unknown REC result survives cached status ${recording} until explicit Stop ACK`, async () => {
+    const s = recordingSubject(); installRecordingRefresh(s);
+    const recovery = {session:s.state.session, direction:'start', acknowledged:false};
+    s.state.recordingRecovery = recovery;
+    s.api = async (url, options = {}) => {
+      s.requests.push({url, method:options.method || 'GET'});
+      if (url.endsWith('/recording/stop')) return {recording:false};
+      if (url.endsWith('/status')) return {recording};
+      return {};
+    };
+    await s.refreshSession();
+    assert.equal(s.state.recordingRecovery, recovery);
+    assert.equal(writes(s).length, 0);
+    await s.operateShutter();
+    assert.equal(s.state.recordingRecovery, null);
+    assert.equal(writes(s).length, 1);
+    assert.match(writes(s)[0].url, /recording\/stop$/);
+  });
+}
+
+for (const reason of ['unknown', 'in-flight', 'confirmed-active', 'idle', 'retired-owner']) {
+  test(`connection retirement preserves only previous-camera warning: ${reason}`, () => {
+    const s = recordingSubject(); s.state.status.recording = reason === 'confirmed-active';
+    if (reason === 'unknown') s.state.recordingRecovery = {session:s.state.session, acknowledged:false};
+    if (reason === 'in-flight') s.state.recordingCommandOwner = {session:s.state.session};
+    if (reason === 'retired-owner') s.state.recordingRecovery = {session:{id:s.state.session.id}, acknowledged:false};
+    s.state.operatorConfirmedFeatures = new Set();
+    for (const name of ['stopLiveLoop','stopLocalVideo','cancelEventLoop','cancelMediaDownload','cancelMediaUpload',
+      'clearScheduledMediaTransferRender','clearMediaThumbnails','cancelLatestMediaRefresh','closeMediaPreview',
+      'closeMediaDetails','releaseObjectUrl','clearBulbTimer','renderAvailability','renderHealth']) s[name] = () => {};
+    for (const name of ['connectionView','controlView','tokenInput','ccapiPasswordInput']) s.ui[name] = {};
+    vm.runInContext(productionFunction('resetSession'), s);
+    s.resetSession();
+    assert.equal(Boolean(s.state.shutterDisconnectWarning), ['unknown','in-flight','confirmed-active'].includes(reason));
+    assert.equal(s.state.recordingRecovery, null);
+    assert.equal(s.state.recordingCommandOwner, null);
+    assert.equal(s.state.session, null);
+    assert.equal(writes(s).length, 0, 'Retirement never emits an automatic Stop');
+    s.state.session = {id:'replacement'}; s.state.status = {recording:false};
+    assert.equal(s.recordingRecoveryActive(), false, 'Old Stop responsibility cannot target the replacement camera');
+  });
+}
+
+test('rejected explicit Stop retains the prior unknown-command owner and original review baseline', async () => {
+  const s = recordingSubject();
+  const attempt = {session:s.state.session, sessionId:s.state.session.id, kind:'video', knownIds:new Set(['original'])};
+  const recovery = {session:s.state.session, direction:'stop', acknowledged:false, reviewAttempt:attempt};
+  s.state.recordingRecovery = recovery;
+  const error = new Error('Synthetic Stop rejection'); error.code = 'CCAPI_HTTP_ERROR'; error.status = 502;
+  s.api = async url => {s.requests.push({url, method:'POST'}); throw error;};
+  await s.operateShutter();
+  assert.equal(s.state.recordingRecovery, recovery);
+  assert.equal(s.state.recordingRecovery.reviewAttempt, attempt);
+  assert.deepEqual(writes(s).map(request => request.url.split('/').at(-1)), ['stop']);
+});
+for (const response of ['lost', 'acknowledged']) {
+  test(`old Start ${response} cannot publish uncertainty into reused-ID replacement session`, async () => {
+    const s = recordingSubject(); s.state.status.recording = false;
+    const held = deferred(); s.api = async url => {s.requests.push({url, method:'POST'}); return held.promise;};
+    const pending = s.operateShutter();
+    const replacement = {id:s.state.session.id};
+    s.state.session = replacement;
+    const current = {session:replacement, direction:'stop', acknowledged:false};
+    s.state.recordingRecovery = current; s.state.status = {owner:'replacement'}; s.state.busy = true;
+    if (response === 'lost') {const error = new Error('old response lost'); error.code = 'NETWORK_ERROR'; held.reject(error);}
+    else held.resolve({recording:true});
+    await pending;
+    assert.equal(s.state.recordingRecovery, current);
+    assert.equal(s.state.status.owner, 'replacement');
+    assert.equal(s.state.busy, true);
+    assert.equal(writes(s).length, 1);
+  });
+}
+
+function installProductionApi(s) {
+  s.Headers = Headers;
+  const start = source.indexOf("  class ApiError extends Error {");
+  const end = source.indexOf("  function resolvedLanguage", start);
+  vm.runInContext(source.slice(start, end) + productionFunction('api'), s);
+}
+for (const bodyFailure of ['interrupted', 'malformed', 'missing-envelope']) {
+  test(`Bridge 502 ${bodyFailure} body preserves uncertain REC through the production API`, async () => {
+    const s = recordingSubject(); installProductionApi(s); installRecordingRefresh(s);
+    s.state.status.recording = false; let peerRecording = false;
+    s.fetch = async (url, options) => {
+      s.requests.push({url, method:options.method});
+      if (url.endsWith('/recording/start')) {
+        peerRecording = true;
+        return {ok:false, status:502, statusText:'Bad Gateway', json:async () => {
+          if (bodyFailure === 'missing-envelope') return {};
+          throw bodyFailure === 'interrupted' ? new TypeError('stream interrupted') : new SyntaxError('incomplete JSON');
+        }};
+      }
+      if (url.endsWith('/recording/stop')) {peerRecording = false; return Response.json({recording:false});}
+      if (url.endsWith('/status')) return Response.json({recording:false});
+      return Response.json({});
+    };
+    await s.operateShutter();
+    assert.equal(peerRecording, true);
+    assert.equal(s.state.recordingRecovery?.acknowledged, false);
+    await s.refreshSession(); await s.operateShutter();
+    assert.deepEqual(writes(s).map(r => r.url.split('/').at(-1)), ['start','stop']);
+    assert.equal(peerRecording, false);
+  });
+}
+for (const fields of [
+  {code:'CCAPI_UNREACHABLE',status:502,feature:'VIDEO_RECORDING',engine:'ccapi'},
+  {code:'CCAPI_RESPONSE_TOO_LARGE',status:502,feature:'VIDEO_RECORDING',engine:'ccapi'},
+  {code:'RECORDING_COMMAND_UNCONFIRMED',status:400,feature:'VIDEO_RECORDING',engine:'ccapi'},
+  {code:'RECORDING_COMMAND_UNCONFIRMED',status:502,feature:'STILL_CAPTURE',engine:'ccapi'},
+  {code:'RECORDING_COMMAND_UNCONFIRMED',status:502,feature:'VIDEO_RECORDING',engine:'simulator'},
+  {code:'RECORDING_COMMAND_UNCONFIRMED',status:502},
+]) {
+  test(`preflight or near-match error does not claim an attempted REC: ${JSON.stringify(fields)}`, async () => {
+    const s = recordingSubject(); installProductionApi(s); s.state.status.recording = false;
+    s.fetch = async (url, options) => {
+      s.requests.push({url,method:options.method});
+      // This Bridge error is returned before forwarding any camera mutation.
+      return Response.json({error:fields}, {status:fields.status});
+    };
+    await s.operateShutter();
+    assert.equal(s.state.recordingRecovery, undefined);
+    assert.equal(s.state.status.recording, false);
+  });
+}
+
+for (const status of [401, 403, 503]) {
+  test(`received HTTP ${status} rejection survives its unreadable body`, async () => {
+    const s = recordingSubject(); installProductionApi(s); s.state.status.recording = false;
+    s.fetch = async (url, options) => {
+      s.requests.push({url,method:options.method});
+      return {ok:false,status,statusText:'Rejected',json:async () => {throw new TypeError('body interrupted');}};
+    };
+    await s.operateShutter();
+    assert.equal(s.state.recordingRecovery, undefined);
+    assert.equal(s.state.status.recording, false);
+    assert.equal(writes(s).length, 1);
+  });
+}
+test('complete Bridge camera HTTP rejection retains known rejection through production API', async () => {
+  const s = recordingSubject(); installProductionApi(s); s.state.status.recording = false;
+  s.fetch = async (url, options) => {
+    s.requests.push({url,method:options.method});
+    return Response.json({error:{code:'CCAPI_HTTP_ERROR',engine:'ccapi'}},{status:502});
+  };
+  await s.operateShutter();
+  assert.equal(s.state.recordingRecovery, undefined);
+  assert.equal(s.state.status.recording, false);
+  assert.equal(writes(s).length, 1);
+});
