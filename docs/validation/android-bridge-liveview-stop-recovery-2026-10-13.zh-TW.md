@@ -17,3 +17,7 @@ Start 回應即使包含 `active=true`，若同時傳回明確 Boolean `liveView
 這是合成 Bridge 通訊測試候選，不是實體相機停止或 Android 背景生命週期證據。公開欄位向後相容，沒有憑證、來源路徑或其他產品內部資訊。
 
 UI 會持續保留本連線的停止警告，後續 false／缺欄位狀態不能清掉。即使 Live View capability 消失，仍提供既有 Stop 重試；確認停止只清理原責任，不隱式再 Start。斷線時 repository 仍嘗試原停止與關閉，若結果未確認，UI 保留「前一台相機」警告而不將責任轉給新連線。新增 15 個 HTTP／repository 測試方法及 3 個 UI-state 測試方法；全部 Kotlin 執行與編譯仍為 NOT_RUN。
+
+## 首輪完整 CI 的單元失敗
+
+原 cd1afe／run38412149915 的 JVM gate 執行1162個case、1個失敗。`DesktopBridgeShutterRecoveryTest.statusWarningBlocksMutationsAndRetainsStopEndpoints` 的模擬peer把 liveview/stop落到generic bulb-status回覆，缺少停止確認欄位。新版production依契約拒絕該回覆；修正僅為該fixture的liveview/stop明確回active=false、liveViewStopUnconfirmed=false，原命令封鎖、Stop可達、次數斷言均保留。此修正目前僅source review通過，不能沿用原run或其他平台結果稱新候選已通過。
