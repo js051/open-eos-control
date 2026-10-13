@@ -935,7 +935,7 @@ for (const status of [{recording:false}, {recording:null}, {}]) {
 for (const wasRecording of [false,true]) {
   test(`acknowledged ${wasRecording?'Stop':'Start'} with failed status keeps only deliberate Stop available`, async () => {
     const s=recordingSubject();s.state.status.recording=wasRecording;
-    const error=new Error('status unavailable after ACK');error.code='RECORDING_STATUS_READBACK_FAILED';
+    const error=new Error('status unavailable after ACK');error.code='RECORDING_STATUS_READBACK_FAILED';error.status=502;
     let first=true;s.api=async url=>{s.requests.push({url,method:'POST'});if(first){first=false;throw error;}return {recording:false};};
     await s.operateShutter();
     assert.equal(s.state.status.recording,wasRecording,'ACK evidence must not rewrite camera status');
@@ -953,7 +953,7 @@ function installRecordingRefresh(s) {
 for (const direction of ['start','stop']) {
   test(`read-only current status resolves acknowledged ${direction} without replay`,async()=>{
     const s=recordingSubject();installRecordingRefresh(s);s.state.status.recording=direction==='stop';
-    const error=new Error('status after ACK');error.code='RECORDING_STATUS_READBACK_FAILED';
+    const error=new Error('status after ACK');error.code='RECORDING_STATUS_READBACK_FAILED';error.status=502;
     const original=s.api;
     s.api=async(url,options={})=>{
       if(url.includes('/recording/')){s.requests.push({url,method:'POST'});throw error;}
@@ -1029,7 +1029,7 @@ for (const wasRecording of [false, true]) {
       assert.equal(s.requests.length, 1, 'Refresh must not observe a command in flight');
       if (outcome === 'success') held.resolve({recording: !wasRecording});
       else {
-        const error = new Error('ACK readback failed'); error.code = 'RECORDING_STATUS_READBACK_FAILED';
+        const error = new Error('ACK readback failed'); error.code = 'RECORDING_STATUS_READBACK_FAILED'; error.status = 502;
         held.reject(error);
       }
       await command;
@@ -1043,7 +1043,7 @@ for (const wasRecording of [false, true]) {
 test('repeated pending Stop retains its original seen-ID boundary after gallery changes', async () => {
   const s = recordingSubject(); installRecordingRefresh(s);
   const original = s.api;
-  const error = new Error('ACK readback failed'); error.code = 'RECORDING_STATUS_READBACK_FAILED';
+  const error = new Error('ACK readback failed'); error.code = 'RECORDING_STATUS_READBACK_FAILED'; error.status = 502;
   s.api = async (url, options = {}) => {
     if (url.includes('/recording/')) { s.requests.push({url, method:'POST'}); throw error; }
     if (url.endsWith('/status')) return {recording:false};
@@ -1206,7 +1206,8 @@ function installProductionApi(s) {
   s.Headers = Headers;
   const start = source.indexOf("  class ApiError extends Error {");
   const end = source.indexOf("  function resolvedLanguage", start);
-  vm.runInContext(source.slice(start, end) + productionFunction('api'), s);
+  s.renderDiagnostics = () => {};
+  vm.runInContext(source.slice(start, end) + productionFunction('api') + productionFunction('captureError'), s);
 }
 for (const bodyFailure of ['interrupted', 'malformed', 'missing-envelope', 'code-only', 'wrong-message', 'empty-message', 'wrong-code', 'empty-code']) {
   test(`Bridge 502 ${bodyFailure} body preserves uncertain REC through the production API`, async () => {
@@ -1245,6 +1246,10 @@ for (const fields of [
   {code:'RECORDING_COMMAND_UNCONFIRMED',status:502,feature:'STILL_CAPTURE',engine:'ccapi'},
   {code:'RECORDING_COMMAND_UNCONFIRMED',status:502,feature:'VIDEO_RECORDING',engine:'simulator'},
   {code:'RECORDING_COMMAND_UNCONFIRMED',status:502},
+  {code:' RECORDING_COMMAND_UNCONFIRMED ',status:502,feature:'VIDEO_RECORDING',engine:'ccapi'},
+  {code:'RECORDING_COMMAND_UNCONFIRMED',status:502,feature:' VIDEO_RECORDING ',engine:'ccapi'},
+  {code:'RECORDING_COMMAND_UNCONFIRMED',status:502,feature:'VIDEO_RECORDING',engine:' ccapi '},
+  {code:' RECORDING_STATUS_READBACK_FAILED ',status:502},
 ]) {
   test(`preflight or near-match error does not claim an attempted REC: ${JSON.stringify(fields)}`, async () => {
     const s = recordingSubject(); installProductionApi(s); s.state.status.recording = false;
@@ -1283,3 +1288,106 @@ test('complete Bridge camera HTTP rejection retains known rejection through prod
   assert.equal(s.state.status.recording, false);
   assert.equal(writes(s).length, 1);
 });
+
+for (const status of [401, 403, 503]) {
+  for (const recording of [false, true]) {
+    test(`non-502 ACK-like error stays rejected: HTTP ${status}, recording=${recording}`, async () => {
+      const s = recordingSubject(); installProductionApi(s); s.state.status.recording = recording;
+      s.fetch = async (url, options) => {
+        s.requests.push({url,method:options.method});
+        return Response.json({error:{code:'RECORDING_STATUS_READBACK_FAILED',message:'Explicit rejection'}},{status});
+      };
+      await s.operateShutter();
+      assert.equal(s.state.recordingRecovery, undefined);
+      assert.equal(s.state.status.recording, recording);
+      assert.equal(writes(s).length, 1);
+      assert.equal(listingRequests(s).length, 0);
+      assert.equal(s.feedback.includes('recordingStatusUnconfirmed'), false);
+    });
+  }
+}
+
+for (const body of [[], true, false, 42, 'invalid', null,
+  {recording:0}, {recording:1}, {recording:2}, {recording:'false'}, {recording:'true'},
+  {recording:[]}, {recording:{}}]) {
+  for (const recording of [false,true]) {
+  test(`malformed successful REC shape preserves explicit Stop (prior=${recording}): ${JSON.stringify(body)}`, async () => {
+    const s = recordingSubject(); installProductionApi(s); installRecordingRefresh(s);
+    s.state.status.recording = recording; let peerRecording = recording; let commands = 0;
+    s.fetch = async (url, options) => {
+      s.requests.push({url,method:options.method});
+      if (url.includes('/recording/')) {
+        commands++; peerRecording=url.endsWith('/start');
+        return Response.json(commands === 1 ? body : {recording:false});
+      }
+      if (url.endsWith('/status')) return Response.json({recording:false});
+      return Response.json({});
+    };
+    await s.operateShutter();
+    assert.equal(peerRecording,!recording);
+    assert.equal(s.state.recordingRecovery?.acknowledged,false);
+    await s.refreshSession();
+    assert.equal(s.state.recordingRecovery?.acknowledged,false);
+    assert.equal(writes(s).length,1);
+    await s.operateShutter();
+    assert.deepEqual(writes(s).map(r=>r.url.split('/').at(-1)),[recording?'stop':'start','stop']);
+    assert.equal(peerRecording,false);
+  });
+}
+}
+
+test('ACK-like REC error during an active Bulb stop cannot acquire a recording owner', async () => {
+  const s = recordingSubject(); installProductionApi(s);
+  s.bulbControlLocked = () => true;
+  s.fetch = async (url, options) => {
+    s.requests.push({url,method:options.method});
+    if (url.endsWith('/bulb/stop')) return Response.json({error:{
+      code:'RECORDING_STATUS_READBACK_FAILED',message:'Unrelated ACK-like error',
+    }},{status:502});
+    return Response.json({shutterReleaseUnconfirmed:true,bulbExposureActive:true});
+  };
+  await s.operateShutter();
+  assert.equal(s.state.recordingRecovery, undefined);
+  assert.equal(s.state.shutterReleaseUnconfirmed, true);
+  assert.equal(writes(s).length, 1);
+  assert.match(writes(s)[0].url, /bulb\/stop$/);
+});
+
+for (const body of [{}, {recording:null}, {recording:true}, {recording:false}]) {
+  test(`valid nullable REC object keeps the existing ACK contract: ${JSON.stringify(body)}`, async () => {
+    const s = recordingSubject(); installProductionApi(s); s.state.status.recording = false;
+    s.fetch = async (url, options) => {s.requests.push({url,method:options.method}); return Response.json(body);};
+    await s.operateShutter();
+    if (typeof body.recording === 'boolean') assert.equal(s.state.recordingRecovery,null);
+    else {
+      assert.ok(s.state.recordingRecovery, 'Nullable success still retains ACK/readback recovery');
+      assert.equal(s.state.recordingRecovery.session,s.state.session);
+      assert.equal(s.state.recordingRecovery.direction,'start');
+      assert.notEqual(s.state.recordingRecovery.acknowledged,false);
+    }
+    assert.equal(writes(s).length,1);
+    assert.equal(listingRequests(s).length,0);
+  });
+}
+
+for (const recording of [0,1,'false',[],{}]) {
+  for (const acknowledged of [false,true]) {
+    test(`invalid status recording cannot retire recovery (${acknowledged}): ${JSON.stringify(recording)}`, async () => {
+      const s=recordingSubject(); installRecordingRefresh(s);
+      const recovery={session:s.state.session,direction:'start',...(acknowledged?{}:{acknowledged:false})};
+      s.state.recordingRecovery=recovery;
+      s.api=async(url,options={})=>{
+        s.requests.push({url,method:options.method||'GET'});
+        if(url.endsWith('/recording/stop'))return {recording:false};
+        if(url.endsWith('/status'))return {recording};
+        return {};
+      };
+      await s.refreshSession();
+      assert.equal(s.state.recordingRecovery,recovery);
+      assert.equal(writes(s).length,0);
+      await s.operateShutter();
+      assert.deepEqual(writes(s).map(r=>r.url.split('/').at(-1)),['stop']);
+      assert.equal(s.state.recordingRecovery,null);
+    });
+  }
+}
