@@ -142,7 +142,7 @@ func analyzeLiveViewImage(_ image: UIImage, settings: LiveViewMonitorSettings) -
     return analyzeLiveViewCGImage(source, settings: settings)
 }
 
-private func analyzeLiveViewCGImage(
+func analyzeLiveViewCGImage(
     _ source: CGImage,
     settings: LiveViewMonitorSettings
 ) -> LiveViewMonitorAnalysis? {

@@ -753,3 +753,13 @@
 "media_files_export_unconfirmed" = "「檔案」匯出結果不明。請先檢查目的地，再開始另一次匯出。";
 "media_files_export_mismatch" = "iOS 為 %2$d 份原檔回報了 %1$d 個目的地；各檔案結果不明。請先檢查「檔案」再重試。";
 "media_files_export_source_unavailable" = "已準備的來源目前無法使用。請重新整理歷史紀錄，或明確重新準備原檔後再匯出。";
+
+"native_monitor_off" = "取樣監看已暫停";
+"native_monitor_requires_ios174" = "原生 RTP 像素監看需要 iOS 17.4 或更新版本。";
+"native_monitor_waiting" = "取樣監看 · 等待影像";
+"native_monitor_no_pixels" = "取樣監看 · 暫無可取樣影像";
+"native_monitor_failed" = "取樣監看 · 不支援的影像或轉換失敗";
+"native_monitor_sampled" = "取樣監看 · 每秒最多 4 次 · 未套用 LUT";
+"native_monitor_stale" = "取樣監看 · 影像已過期";
+"native_monitor_lut_inactive" = "原生 RTP 未套用已載入的 LUT";
+"native_monitor_scope_notice" = "原生 RTP 使用 SDR 預覽取樣監看，每秒最多 4 次，取樣於 1 秒後失效。不支援 LUT 預覽；已載入的 LUT 會保留但不套用。";
