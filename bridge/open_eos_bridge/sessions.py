@@ -108,6 +108,11 @@ class SessionManager:
             raise BridgeError("SESSION_NOT_FOUND", "Camera session was not found.", status_code=404)
         return session
 
+    def is_current(self, session_id: str, session: CameraEngineSession) -> bool:
+        """Bind asynchronous work to the exact registered object, even if an ID is reused."""
+        with self._lock:
+            return self._sessions.get(session_id) is session
+
     def delete(self, session_id: str) -> None:
         with self._lock:
             session = self._sessions.pop(session_id, None)

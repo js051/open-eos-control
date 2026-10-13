@@ -24,6 +24,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from .errors import BridgeError, ConnectionFailureReason, unsupported
 from .focus_info import MAX_FOCUS_INFO_BYTES, parse_ccapi_focus_info_packet
 from .media_folders import camera_folder_fields
+from .media_listing import MAX_LIST_SNAPSHOT_ITEMS
 from .models import (
     BatteryStatus,
     CameraCapabilities,
@@ -82,6 +83,8 @@ MAX_MEDIA_INVENTORY_CONTAINERS = 512
 MAX_MEDIA_INVENTORY_SECONDS = 30.0
 MEDIA_INVENTORY_READ_TIMEOUT = 2.0
 MAX_MEDIA_INVENTORY_PATH_CHARS = 2048
+MAX_MEDIA_LIST_REQUESTS = 10_000
+MAX_MEDIA_LIST_CONTAINERS = 4_096
 MULTIPART_START_RETRY_DELAYS = (0.1, 0.2, 0.4, 0.8)
 JPEG_FRAME_BUSY_RETRY_DELAYS = (0.05, 0.1)
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
@@ -2718,6 +2721,102 @@ class CcapiSession:
             self._observed.add(CameraFeature.MEDIA_BROWSER)
             return items
 
+    def list_media_progressive(
+        self,
+        maximum_items: int | None = None,
+        *,
+        on_progress: Callable[[list[MediaItem]], None],
+        cancelled: Callable[[], bool],
+    ) -> list[MediaItem]:
+        """Browse with the existing page ordering; cancellation stops subsequent requests.
+
+        The active HTTP read retains its existing transport timeout. This does not
+        close shared camera I/O, interrupt a camera command, or certify an inventory.
+        """
+        if maximum_items is not None and maximum_items <= 0:
+            raise ValueError("maximum_items must be positive when provided")
+
+        def check() -> None:
+            if cancelled():
+                raise BridgeError("MEDIA_LIST_CANCELLED", "Media listing was cancelled.", status_code=409)
+            self._require_open()
+
+        requests = 0
+
+        def request(path: str) -> object:
+            nonlocal requests
+            check()
+            if requests >= MAX_MEDIA_LIST_REQUESTS:
+                raise self._listing_incomplete("camera request resource bound exceeded")
+            requests += 1
+            value = self._request_json("GET", path)
+            check()
+            return value
+
+        check()
+        while not self._lock.acquire(timeout=0.05):
+            check()
+        try:
+            check()
+            self._ensure_initialized()
+            check()
+            if not self._supports("GET", "/contents"):
+                raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
+            pending = deque([self._api_path("GET", "/contents")])
+            discovered: set[str] = set(pending)
+            visited: set[str] = set()
+            identities: set[str] = set()
+            groups: list[list[str]] = []
+
+            def items() -> list[MediaItem]:
+                paths = _merge_media_path_groups(groups)
+                if maximum_items is not None:
+                    paths = paths[:maximum_items]
+                return [
+                    MediaItem(
+                        id=_media_id(path), name=path.rsplit("/", 1)[-1], kind=_media_kind(path),
+                        content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
+                        preview_available=_supports_ccapi_display_preview(path), **_media_folder_fields(path),
+                    )
+                    for path in paths
+                ]
+
+            while pending:
+                check()
+                container = pending.popleft()
+                if container in visited:
+                    continue
+                visited.add(container)
+                group: list[str] = []
+                groups.append(group)
+
+                def progress(paths: list[str]) -> None:
+                    check()
+                    group[:] = [path for path in paths if _is_media_path(path)]
+                    identities.update(group)
+                    if len(identities) > MAX_LIST_SNAPSHOT_ITEMS:
+                        raise self._listing_incomplete("media identity resource bound exceeded")
+                    on_progress(items())
+                    check()
+
+                paths = self._content_paths(container, maximum_items, on_progress=progress, request=request)
+                for path in paths:
+                    if not _is_media_path(path) and path not in discovered:
+                        if len(discovered) >= MAX_MEDIA_LIST_CONTAINERS:
+                            raise self._listing_incomplete("container resource bound exceeded")
+                        discovered.add(path)
+                        pending.append(path)
+            check()
+            result = items()
+            if maximum_items is None:
+                self._media_cache = {item.id: item for item in result}
+            else:
+                self._media_cache.update({item.id: item for item in result})
+            self._observed.add(CameraFeature.MEDIA_BROWSER)
+            return result
+        finally:
+            self._lock.release()
+
     def list_media_strict(self, maximum_items: int = MAX_MEDIA_INVENTORY_ITEMS) -> list[MediaItem]:
         """Exhaust the camera's reachable topology, or fail without publishing partial evidence.
 
@@ -3464,8 +3563,60 @@ class CcapiSession:
                     value = request(plain)
             yield self._inventory_paths(value)
 
-    def _content_paths(self, container: str, maximum_media_paths: int | None = None) -> list[str]:
-        page_info = self._first_json([f"{container}?kind=number", f"{container}?type=all,kind=number"])
+    def _listing_incomplete(self, reason: str) -> BridgeError:
+        return BridgeError("MEDIA_LIST_INCOMPLETE", f"Media listing did not finish: {reason}.", status_code=502)
+
+    def _listing_paths(self, value: object) -> list[str]:
+        if not isinstance(value, dict) or not isinstance(value.get("path"), list):
+            raise self._listing_incomplete("invalid media path listing")
+        paths = []
+        for raw in value["path"]:
+            if (
+                not isinstance(raw, str) or not raw.strip() or len(raw) > 4096
+                or any(ord(character) < 32 or ord(character) == 127 for character in raw)
+            ):
+                raise self._listing_incomplete("invalid media path")
+            try:
+                path = self._normalize_resource(raw).split("?", 1)[0]
+            except (ValueError, BridgeError) as error:
+                raise self._listing_incomplete("invalid media path") from error
+            if not re.fullmatch(r"/ccapi/ver[0-9]+/contents(?:/[^/]+)*", path):
+                raise self._listing_incomplete("media path is outside contents")
+            paths.append(path)
+        return paths
+
+    def _content_paths(
+        self,
+        container: str,
+        maximum_media_paths: int | None = None,
+        *,
+        on_progress: Callable[[list[str]], None] | None = None,
+        request: Callable[[str], object] | None = None,
+    ) -> list[str]:
+        count_paths = [f"{container}?kind=number", f"{container}?type=all,kind=number"]
+        if request is None:
+            page_info = self._first_json(count_paths)
+        else:
+            unsupported_count = object()
+            page_info = unsupported_count
+            for count_path in count_paths:
+                try:
+                    page_info = request(count_path)
+                    break
+                except _CcapiHTTPError as error:
+                    if error.camera_status not in {400, 404, 405}:
+                        raise
+            if page_info is not unsupported_count:
+                if not isinstance(page_info, dict):
+                    raise self._listing_incomplete("invalid media page count response")
+                if "pagenumber" in page_info:
+                    count = page_info["pagenumber"]
+                    if type(count) is not int or not 0 <= count <= MAX_MEDIA_LIST_REQUESTS:
+                        raise self._listing_incomplete("invalid or excessive media page count")
+                else:
+                    self._listing_paths(page_info)
+            else:
+                page_info = None
         page_count = _integer_value(page_info, "pagenumber") or 0
         if page_count < 0:
             raise BridgeError(
@@ -3476,65 +3627,59 @@ class CcapiSession:
                 engine=self.engine_name,
             )
         paths: dict[str, None] = {}
+
+        def add(value: object, *, reverse: bool) -> None:
+            if request is not None:
+                value = {"path": self._listing_paths(value)}
+            self._add_content_paths(paths, value, reverse=reverse, max_media_paths=maximum_media_paths)
+            if request is not None and len(paths) > MAX_LIST_SNAPSHOT_ITEMS + MAX_MEDIA_LIST_CONTAINERS:
+                raise self._listing_incomplete("path resource bound exceeded")
+            if on_progress is not None:
+                on_progress(list(paths))
+
         if page_count <= 0:
-            value = self._first_json([container], required=True)
-            if isinstance(value, dict):
-                self._add_content_paths(
-                    paths,
-                    value,
-                    reverse=False,
-                    max_media_paths=maximum_media_paths,
-                )
+            value = self._first_json([container], required=True) if request is None else request(container)
+            add(value, reverse=False)
             return list(paths)
 
-        first_value = self._content_page(container, 1)
+        first_value = self._content_page(container, 1, request=request)
+        if request is not None:
+            self._listing_paths(first_value)
         if self._media_descending_order_supported is False:
             pages = range(page_count, 0, -1)
             for page in pages:
-                value = first_value if page == 1 else self._content_page(container, page)
-                self._add_content_paths(
-                    paths,
-                    value,
-                    reverse=True,
-                    max_media_paths=maximum_media_paths,
-                )
+                value = first_value if page == 1 else self._content_page(container, page, request=request)
+                add(value, reverse=True)
                 if (
                     maximum_media_paths is not None
                     and self._media_path_count(paths) >= maximum_media_paths
                 ):
                     break
         else:
-            self._add_content_paths(
-                paths,
-                first_value,
-                reverse=False,
-                max_media_paths=maximum_media_paths,
-            )
+            add(first_value, reverse=False)
             for page in range(2, page_count + 1):
                 if (
                     maximum_media_paths is not None
                     and self._media_path_count(paths) >= maximum_media_paths
                 ):
                     break
-                self._add_content_paths(
-                    paths,
-                    self._content_page(container, page),
-                    reverse=False,
-                    max_media_paths=maximum_media_paths,
-                )
+                add(self._content_page(container, page, request=request), reverse=False)
         return list(paths)
 
-    def _content_page(self, container: str, page: int) -> object:
+    def _content_page(
+        self, container: str, page: int, *, request: Callable[[str], object] | None = None
+    ) -> object:
+        read = request if request is not None else lambda path: self._request_json("GET", path)
         plain_path = f"{container}?page={page}"
         if self._media_descending_order_supported is False:
-            return self._request_json("GET", plain_path)
+            return read(plain_path)
         try:
-            value = self._request_json("GET", f"{plain_path}&order=desc")
+            value = read(f"{plain_path}&order=desc")
         except _CcapiHTTPError as error:
             if error.camera_status != 400:
                 raise
             self._media_descending_order_supported = False
-            return self._request_json("GET", plain_path)
+            return read(plain_path)
         self._media_descending_order_supported = True
         return value
 

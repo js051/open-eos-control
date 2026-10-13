@@ -325,25 +325,25 @@ for (const failed of ["info", "status", "capabilities"]) {
   });
 }
 
-test("status success followed by media failure retains the content recovery", async t => {
+test("status success followed by media failure consumes the old content hint without replay", async t => {
   const s = fixture(t);
   await beginHint(s);
   resolveSnapshot(s, 0);
   await settle();
-  assert.equal(s.state.status.recording, true, "Control state publishes before media completes");
+  assert.equal(s.state.status.recording, true);
   s.listings[0].reject(new Error("synthetic media failure"));
   await settle();
-  if (s.polls[1]) { s.polls[1].resolve({ changedKeys: [] }); await settle(); }
-  assert.equal(s.timers[0]?.delay, 1000, "Media failure must retain the consumed hint");
-  s.timers[0].resolve();
+  assert.equal(s.timers.length, 0);
+  assert.equal(s.polls.length, 2);
+  s.polls[1].resolve({ changedKeys: [] });
   await settle();
-  // A retry may renew the authoritative snapshot before retrying its media list.
-  if (s.snapshots[1]) { resolveSnapshot(s, 1); await settle(); }
-  assert.equal(s.listings.length, 2);
+  assert.equal(s.listings.length, 1);
+  assert.equal(s.state.mediaLoadStatus, "FAILED");
+  assert.deepEqual(Array.from(s.state.media), [OLD]);
+  const retry = s.refreshMedia({ preservePreview: true });
   s.listings[1].resolve({ items: [NEW] });
-  await settle();
+  assert.equal(await retry, true);
   assert.deepEqual(Array.from(s.state.media), [NEW]);
-  assert.equal(s.state.mediaLoadStatus, "COMPLETE");
   assert.equal(s.ui.mediaPreviewDialog.open, true);
   assertReadsOnly(s);
 });
@@ -374,7 +374,7 @@ for (const reuseId of [false, true]) {
   }
 }
 
-for (const failureKind of ["snapshot", "media", "poll"]) {
+for (const failureKind of ["snapshot", "poll"]) {
   test(`${failureKind} failures use capped backoff and success resets the next recovery`, async t => {
     const s = fixture(t);
     if (failureKind === "poll") s.startEventLoop();
@@ -597,19 +597,23 @@ test("same-ID replacement during a media busy wait cannot inherit the old listin
 });
 
 for (const changed of ["interaction", "scope"]) {
-  test(`same-session media ${changed} change retains the existing listing retry contract`, async t => {
+  test(`same-session media ${changed} retires the old traversal; an explicit refresh gets a new owner`, async t => {
     const s = fixture(t);
     const listing = s.refreshMedia({ preservePreview: true });
     if (changed === "interaction") {
       s.beginCameraInteraction();
       s.state.busy = false;
-    } else s.state.mediaScope = "all";
+    } else {
+      s.state.mediaListingOwner.cancel({ silent: true });
+      s.state.mediaScope = "all";
+    }
     s.listings[0].resolve({ items: [OLD] });
-    await settle();
+    assert.equal(await listing, false);
+    assert.equal(s.listings.length, 1);
+    const current = s.refreshMedia({ preservePreview: true });
     assert.equal(s.listings.length, 2);
-    assert.equal(s.state.mediaLoadStatus, "LOADING");
     s.listings[1].resolve({ items: [NEW] });
-    assert.equal(await listing, true);
+    assert.equal(await current, true);
     assert.deepEqual(Array.from(s.state.media), [NEW]);
     assert.equal(s.ui.mediaPreviewDialog.open, true);
     assertReadsOnly(s);
