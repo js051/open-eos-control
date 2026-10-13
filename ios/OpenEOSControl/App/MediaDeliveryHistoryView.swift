@@ -8,6 +8,7 @@ struct MediaDeliveryHistoryView: View {
     @EnvironmentObject private var language: AppLanguageStore
     @Environment(\.dismiss) private var dismiss
     @State private var exportPayload: MediaBatchExportPayload?
+    @StateObject private var filesExporter = MediaFilesExportController()
     @State private var preparingExport = false
     @State private var clearing = false
     @State private var showClearConfirmation = false
@@ -41,7 +42,7 @@ struct MediaDeliveryHistoryView: View {
     private var hasWarning: Bool {
         camera.mediaDeliveryHistoryWarning || camera.mediaDeliverySnapshot.warning != nil
     }
-    private var working: Bool { preparingExport || clearing }
+    private var working: Bool { preparingExport || clearing || filesExporter.isActive }
     private var actionsDisabled: Bool { working || camera.mediaDeliveryHistoryLoading }
 
     var body: some View {
@@ -62,6 +63,7 @@ struct MediaDeliveryHistoryView: View {
                         .font(.caption)
                         .foregroundStyle(Color.cameraSecondaryText)
                     retainedSize
+                    MediaFilesExportStatusView(controller: filesExporter)
                 }
 
                 if camera.connected {
@@ -145,6 +147,16 @@ struct MediaDeliveryHistoryView: View {
                     }
                     .disabled(actionsDisabled || availableIDs.isEmpty)
                     .accessibilityIdentifier("media-delivery-history-share-all")
+
+                    Button {
+                        share(ids: availableIDs, toFiles: true)
+                    } label: {
+                        Label(language.string("media_files_export_all"), systemImage: "folder")
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(minHeight: 44, alignment: .leading)
+                    }
+                    .disabled(actionsDisabled || availableIDs.isEmpty)
+                    .accessibilityIdentifier("media-delivery-history-export-files-all")
 
                     Button {
                         Task { await camera.refreshMediaDeliveryHistory() }
@@ -297,6 +309,7 @@ struct MediaDeliveryHistoryView: View {
         }) { payload in
             MediaBatchActivityView(payload: payload)
         }
+        .mediaFilesExport(filesExporter)
     }
 
     @ViewBuilder private var retainedSize: some View {
@@ -351,6 +364,17 @@ struct MediaDeliveryHistoryView: View {
                 .disabled(actionsDisabled)
                 .accessibilityLabel(language.format("media_delivery_history_share_named", record.filename))
                 .accessibilityIdentifier("media-delivery-history-share-\(record.id.uuidString)")
+                Button {
+                    share(ids: [record.id], toFiles: true)
+                } label: {
+                    Label(language.string("media_files_export_one"), systemImage: "folder")
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(minHeight: 44, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
+                .disabled(actionsDisabled)
+                .accessibilityLabel(language.format("media_files_export_named", record.filename))
+                .accessibilityIdentifier("media-delivery-history-export-files-\(record.id.uuidString)")
             }
         }
         .padding(.vertical, 6)
@@ -358,7 +382,7 @@ struct MediaDeliveryHistoryView: View {
         .accessibilityIdentifier("media-delivery-history-record-\(record.id.uuidString)")
     }
 
-    private func share(ids: [UUID]) {
+    private func share(ids: [UUID], toFiles: Bool = false) {
         guard isVisible, !actionsDisabled, !ids.isEmpty else { return }
         let owner = presentationID
         preparingExport = true
@@ -367,7 +391,9 @@ struct MediaDeliveryHistoryView: View {
             let payload = await camera.makeStoredMediaExportPayload(ids: ids)
             guard isVisible, presentationID == owner else { return }
             preparingExport = false
-            if let payload {
+            if toFiles {
+                filesExporter.begin(payload)
+            } else if let payload {
                 exportPayload = payload
             } else {
                 shareUnavailable = true

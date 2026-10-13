@@ -16,6 +16,7 @@ private struct ForegroundMediaContents: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var controller: ForegroundMediaController
     @State private var exportPayload: MediaBatchExportPayload?
+    @StateObject private var filesExporter = MediaFilesExportController()
     @State private var shareUnavailable = false
 
     var body: some View {
@@ -87,7 +88,20 @@ private struct ForegroundMediaContents: View {
                             }
                             .disabled(controller.isRunning)
                             .accessibilityIdentifier("foreground-media-share-temporary")
+                            Button {
+                                filesExporter.begin(camera.makeForegroundMediaExportPayload())
+                            } label: {
+                                Label(language.string("media_files_export_ready"), systemImage: "folder")
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(minHeight: 44, alignment: .leading)
+                            }
+                            .disabled(controller.isRunning || filesExporter.isActive)
+                            .accessibilityIdentifier("foreground-media-export-files")
                         }
+                    }
+
+                    if camera.foregroundTemporaryCount > 0 || filesExporter.result != nil {
+                        Section { MediaFilesExportStatusView(controller: filesExporter) }
                     }
 
                     if shareUnavailable {
@@ -132,6 +146,7 @@ private struct ForegroundMediaContents: View {
         .sheet(item: $exportPayload) { payload in
             MediaBatchActivityView(payload: payload)
         }
+        .mediaFilesExport(filesExporter)
     }
 
     @ViewBuilder private var runAction: some View {

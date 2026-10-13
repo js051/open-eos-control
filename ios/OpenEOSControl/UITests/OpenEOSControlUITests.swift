@@ -479,6 +479,10 @@ final class OpenEOSControlUITests: XCTestCase {
         try tapForAsyncTest(prepare)
         let share = app.buttons["media-batch-share-ready"]
         _ = try XCTUnwrap(scrollToInteraction(share, in: app, timeout: 20) ? true : nil)
+        let filesExport = app.buttons["media-batch-export-files"]
+        _ = try XCTUnwrap(scrollToInteraction(filesExport, in: app, timeout: 8) ? true : nil)
+        XCTAssertTrue(filesExport.isEnabled)
+        XCTAssertGreaterThanOrEqual(filesExport.frame.height, 44)
         for name in ["SIM_0001.PNG", "SIM_0002.PNG"] {
             let result = app.descendants(matching: .any)["media-batch-result-/ccapi/ver100/contents/card1/100CANON/" + name].firstMatch
             _ = try XCTUnwrap(waitForLabel(result, containing: "Original ready in app", timeout: 5) ? true : nil)
@@ -504,6 +508,13 @@ final class OpenEOSControlUITests: XCTestCase {
             _ = try XCTUnwrap(waitForLabel(counts, containing: expectedCounts, timeout: 8) ? true : nil)
             XCTAssertFalse(app.buttons["shutter-button"].exists, "History does not reconnect the camera")
             XCTAssertFalse(app.descendants(matching: .any)["media-delivery-history-warning"].firstMatch.exists)
+            let exportAll = app.buttons["media-delivery-history-export-files-all"]
+            _ = try XCTUnwrap(scrollToInteraction(exportAll, in: app, timeout: 8) ? true : nil)
+            XCTAssertTrue(exportAll.isEnabled, "Offline retained copies have an explicit Files action")
+            XCTAssertGreaterThanOrEqual(exportAll.frame.height, 44)
+            XCTAssertTrue(app.buttons["media-delivery-history-share-all"].exists, "The separate share action remains available")
+            XCTAssertFalse(app.staticTexts["media-files-export-result"].exists,
+                           "Relaunch does not invent a prior Files result from preparation history")
             addScreenshot(name: "media-delivery-offline-relaunch-\(language)")
         }
         let afterHistory = try await simulatorRequest(path: "/ccapi/test/state")

@@ -569,7 +569,7 @@
 "media_delivery_history_warning" = "部分歷史紀錄或 App 副本無法檢查或保留。請重新檢查 App 副本；目前批次中已備妥的原檔仍可能可用。";
 "media_delivery_history_batch_warning" = "此批次已備妥的原檔仍可儲存或分享，但可能無法保留歷史紀錄或供日後使用的副本。";
 "media_delivery_history_loading" = "正在檢查歷史紀錄與 App 副本…";
-"media_delivery_history_checking_share" = "正在檢查可分享的原檔…";
+"media_delivery_history_checking_share" = "正在檢查已準備的原檔…";
 "media_delivery_history_share_all" = "儲存或分享全部可用副本";
 "media_delivery_history_share_one" = "儲存或分享此副本";
 "media_delivery_history_share_named" = "儲存或分享 %@ 的 App 副本";
@@ -607,9 +607,9 @@
 "foreground_media_stop" = "停止準備";
 "foreground_media_stopping" = "正在停止…";
 "foreground_media_start_unavailable" = "請直接連線至 CCAPI，並先完成其他相機操作。";
-"foreground_media_destination_help" = "副本保留在此 App。若要另存，請開啟「最近準備的原檔」並選擇儲存或分享。分享不代表已確認「檔案」、「照片」或其他目的地保存了原檔。";
+"foreground_media_destination_help" = "副本保留在此 App。請開啟「最近準備的原檔」，選擇匯出至「檔案」或儲存及分享。分享不代表已確認「檔案」、「照片」或其他目的地保存了原檔。";
 "foreground_media_temporary_count" = "%d 份暫存原檔可用";
-"foreground_media_temporary_help" = "停止後可分享目前的暫存原檔。可供日後使用的 App 副本請查看「最近準備的原檔」；即使無法保留副本，此處仍可能有可分享的原檔。請先分享再重新開始或斷線，這兩項操作會清除目前的暫存結果。";
+"foreground_media_temporary_help" = "停止後可將目前的暫存原檔匯出至「檔案」或分享。可供日後使用的 App 副本請查看「最近準備的原檔」；即使無法保留副本，此處仍可能有可用的原檔。請先匯出或分享再重新開始或斷線，這兩項操作會清除目前的暫存結果。";
 "foreground_media_share_temporary" = "分享目前的暫存原檔";
 "foreground_media_share_unavailable" = "暫存原檔已無法分享。請查看「最近準備的原檔」是否有保留的 App 副本。";
 "foreground_media_limits_title" = "適用範圍與上限";
@@ -742,3 +742,14 @@
 "camera_focus_servo_off" = "相機對焦：伺服關閉";
 "camera_focus_focusing" = "相機回報正在對焦";
 "camera_focus_unknown" = "相機對焦：未知";
+
+"media_files_export_one" = "將原檔匯出至「檔案」…";
+"media_files_export_ready" = "將已準備原檔匯出至「檔案」…";
+"media_files_export_all" = "將所有可用副本匯出至「檔案」…";
+"media_files_export_named" = "將 %@ 匯出至「檔案」";
+"media_files_export_help" = "在「檔案」中為已準備副本選擇目的地。關閉此畫面或重新啟動 App 後，先前匯出結果將不再保留、無法確認；歷史紀錄僅記錄準備狀態。再次匯出前請先檢查「檔案」，以免產生重複副本。雲端同步由所選服務處理。";
+"media_files_export_reported" = "iOS 已回報 %d 份原檔的匯出目的地；尚未驗證外部檔案內容或雲端同步。";
+"media_files_export_cancelled" = "已取消「檔案」匯出。先前產生的副本可能仍存在，請先檢查目的地再重試。";
+"media_files_export_unconfirmed" = "「檔案」匯出結果不明。請先檢查目的地，再開始另一次匯出。";
+"media_files_export_mismatch" = "iOS 為 %2$d 份原檔回報了 %1$d 個目的地；各檔案結果不明。請先檢查「檔案」再重試。";
+"media_files_export_source_unavailable" = "已準備的來源目前無法使用。請重新整理歷史紀錄，或明確重新準備原檔後再匯出。";

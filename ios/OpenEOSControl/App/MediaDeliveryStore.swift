@@ -110,11 +110,14 @@ struct MediaDeliverySnapshot: Sendable {
 final class MediaDeliveryFileLease: @unchecked Sendable {
     let receiptID: UUID
     let fileURL: URL
+    let filesExportSourceIdentity: MediaFilesExportSourceIdentity
     private let onRelease: @Sendable () -> Void
 
-    fileprivate init(receiptID: UUID, fileURL: URL, onRelease: @escaping @Sendable () -> Void) {
+    fileprivate init(receiptID: UUID, fileURL: URL, filesExportSourceIdentity: MediaFilesExportSourceIdentity,
+                     onRelease: @escaping @Sendable () -> Void) {
         self.receiptID = receiptID
         self.fileURL = fileURL
+        self.filesExportSourceIdentity = filesExportSourceIdentity
         self.onRelease = onRelease
     }
 
@@ -468,7 +471,15 @@ actor MediaDeliveryStore {
         // Validate the whole request before pinning any part of it.
         return files.map { file in
             pins[file.id, default: 0] += 1
-            return MediaDeliveryFileLease(receiptID: file.id, fileURL: fileURL(file)) { [self] in
+            // Carry the already-validated receipt identity across actor/UI
+            // awaits. A later payload must not adopt a replacement as baseline.
+            let identity = file.identity.file
+            let sourceIdentity = MediaFilesExportSourceIdentity(device: identity.device, inode: identity.inode,
+                byteCount: file.actualBytes, modifiedSeconds: identity.modifiedSeconds,
+                modifiedNanoseconds: identity.modifiedNanoseconds, changedSeconds: identity.changedSeconds,
+                changedNanoseconds: identity.changedNanoseconds)
+            return MediaDeliveryFileLease(receiptID: file.id, fileURL: fileURL(file),
+                                          filesExportSourceIdentity: sourceIdentity) { [self] in
                 Task { await self.release(file.id) }
             }
         }

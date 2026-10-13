@@ -9,6 +9,7 @@ struct MediaBatchPanel: View {
     let displayedItems: [CameraMediaItem]
     var showsSelectionControls = true
     @State private var exportPayload: MediaBatchExportPayload?
+    @StateObject private var filesExporter = MediaFilesExportController()
 
     private var hiddenCount: Int {
         let visible = Set(displayedItems.map { Data($0.id.utf8) })
@@ -78,6 +79,18 @@ struct MediaBatchPanel: View {
                 }
                 .disabled(camera.mediaBatchState == .running || !camera.mediaBatchResults.contains { $0.completedFileURL != nil })
                 .accessibilityIdentifier("media-batch-share-ready")
+                Button {
+                    filesExporter.begin(camera.makeMediaBatchExportPayload())
+                } label: {
+                    Label(language.string("media_files_export_ready"), systemImage: "folder")
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(minHeight: 44, alignment: .leading)
+                }
+                .disabled(filesExporter.isActive || camera.mediaBatchState == .running || !camera.mediaBatchResults.contains { $0.completedFileURL != nil })
+                .accessibilityIdentifier("media-batch-export-files")
+            }
+            if camera.mediaBatchResults.contains(where: { $0.completedFileURL != nil }) || filesExporter.result != nil {
+                MediaFilesExportStatusView(controller: filesExporter)
             }
             if camera.mediaDeliveryHistoryWarning {
                 Text(language.string("media_delivery_history_batch_warning"))
@@ -106,6 +119,7 @@ struct MediaBatchPanel: View {
         .sheet(item: $exportPayload) { payload in
             MediaBatchActivityView(payload: payload)
         }
+        .mediaFilesExport(filesExporter)
     }
 
     @ViewBuilder private var selectionActions: some View {

@@ -7,6 +7,203 @@ import XCTest
 
 @MainActor
 final class MediaBatchDeliveryTests: XCTestCase {
+    func testSinglePreparedOriginalFilesAttemptPinsFactorySourceThroughDisconnectAndClear() async throws {
+        for bridge in [false, true] {
+            let root = singleDeliveryRoot()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let peer = BatchMediaPeer(items: [item("FILES-SINGLE")])
+            let state = makeState([peer], bridge: bridge, deliveryStore: MediaDeliveryStore(root: root))
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            let original = try XCTUnwrap(state.mediaItems.first)
+            state.startMediaDownload(original)
+            await state.mediaDownloadTask?.value
+            XCTAssertTrue(state.isMediaDownloaded(original))
+            XCTAssertEqual(state.mediaDeliverySnapshot.records.map(\.status), [.prepared])
+            XCTAssertEqual(state.mediaDeliverySnapshot.records.map(\.availability), [.available])
+            let manifest = root.appendingPathComponent("manifest.json")
+            let preparedFacts = try Data(contentsOf: manifest)
+            let requests = await peer.requests()
+
+            let exporter = MediaFilesExportController()
+            XCTAssertTrue(exporter.begin(state.makeMediaDownloadExportPayload(for: original)))
+            var coordinator: MediaFilesExportCoordinator? = MediaFilesExportCoordinator(
+                attempt: try XCTUnwrap(exporter.presentation), owner: exporter)
+            let source = try XCTUnwrap(coordinator?.attempt.payload.fileURLs.first)
+            let identities = try XCTUnwrap(coordinator?.attempt.payload.filesExportSourceIdentities)
+            XCTAssertNil(coordinator?.presentationFailure())
+            coordinator?.finish(.cancelled)
+            XCTAssertEqual(exporter.result?.status, .cancelled)
+            XCTAssertEqual(exporter.result?.expectedCount, 1)
+            XCTAssertTrue(state.isMediaDownloaded(original), "A Files cancellation cannot undo preparation")
+            XCTAssertEqual(try Data(contentsOf: manifest), preparedFacts)
+            let afterResult = await peer.requests()
+            XCTAssertEqual(afterResult, requests, "A Files attempt cannot fetch or change camera media")
+
+            await state.disconnect()
+            XCTAssertNil(state.makeMediaDownloadExportPayload(for: original))
+            let disconnectedRequests = await peer.requests()
+            await state.clearMediaDeliveryHistory()
+            XCTAssertTrue(state.mediaDeliverySnapshot.records.isEmpty)
+            XCTAssertEqual(coordinator?.attempt.payload.fileURLs, [source])
+            XCTAssertEqual(coordinator?.attempt.payload.filesExportSourceIdentities, identities)
+            XCTAssertEqual(try Data(contentsOf: source), BatchMediaPeer.original)
+            coordinator?.dismantle()
+            XCTAssertFalse(exporter.isActive)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: source.path), "The coordinator still owns its source after dismantle")
+            coordinator = nil
+            try await waitUntil { !FileManager.default.fileExists(atPath: source.path) }
+            let afterClear = await peer.requests()
+            XCTAssertEqual(afterClear, disconnectedRequests)
+        }
+    }
+
+    func testPartialBatchFilesAttemptExportsOnlyReadyFactorySubsetWithoutChangingWorklist() async throws {
+        for bridge in [false, true] {
+            let root = singleDeliveryRoot()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let originals = [item("FILES-READY"), item("FILES-FAILED"), item("FILES-QUEUED")]
+            let peer = BatchMediaPeer(items: originals)
+            let state = makeState([peer], bridge: bridge, deliveryStore: MediaDeliveryStore(root: root))
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            state.selectMediaItems(originals)
+            await peer.enqueueDownload()
+            await peer.enqueueDownload(error: .networkConnectionLost)
+            XCTAssertTrue(state.startMediaBatchDownload())
+            await state.mediaBatchTask?.value
+            XCTAssertEqual(state.mediaBatchState, .failed)
+            XCTAssertEqual(state.mediaBatchResults.map(\.status), [.ready, .failed, .notStarted])
+            let readySource = try XCTUnwrap(state.mediaBatchResults.first?.completedFileURL)
+            let manifest = root.appendingPathComponent("manifest.json")
+            let preparedFacts = try Data(contentsOf: manifest)
+            let requests = await peer.requests()
+
+            let exporter = MediaFilesExportController()
+            XCTAssertTrue(exporter.begin(state.makeMediaBatchExportPayload()))
+            var coordinator: MediaFilesExportCoordinator? = MediaFilesExportCoordinator(
+                attempt: try XCTUnwrap(exporter.presentation), owner: exporter)
+            XCTAssertEqual(coordinator?.attempt.payload.fileURLs, [readySource])
+            XCTAssertNil(coordinator?.presentationFailure())
+            coordinator?.finish(.reported(count: 1))
+            XCTAssertEqual(exporter.result?.status, .providerReported)
+            XCTAssertEqual(exporter.result?.expectedCount, 1)
+            XCTAssertEqual(state.mediaBatchState, .failed)
+            XCTAssertEqual(state.mediaBatchResults.map(\.status), [.ready, .failed, .notStarted])
+            XCTAssertEqual(try Data(contentsOf: manifest), preparedFacts, "Files reporting cannot rewrite the prepared, failed or queued worklist")
+            let afterResult = await peer.requests()
+            XCTAssertEqual(afterResult, requests)
+            let downloads = await peer.downloadIDs()
+            XCTAssertEqual(downloads, originals.prefix(2).map(mediaItemIdentity))
+
+            await state.disconnect()
+            XCTAssertNil(state.makeMediaBatchExportPayload())
+            let disconnectedRequests = await peer.requests()
+            await state.clearMediaDeliveryHistory()
+            XCTAssertEqual(coordinator?.attempt.payload.fileURLs, [readySource])
+            XCTAssertEqual(try Data(contentsOf: readySource), BatchMediaPeer.original)
+            coordinator?.dismantle()
+            XCTAssertTrue(FileManager.default.fileExists(atPath: readySource.path))
+            coordinator = nil
+            try await waitUntil { !FileManager.default.fileExists(atPath: readySource.path) }
+            let afterClear = await peer.requests()
+            XCTAssertEqual(afterClear, disconnectedRequests)
+        }
+    }
+
+    func testOfflineHistoryFilesAttemptPinsColdFactoryCopiesThroughClearWithoutRequests() async throws {
+        let root = singleDeliveryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let peer = BatchMediaPeer(items: [item("FILES-A", name: "SAME.JPG"), item("FILES-B", name: "SAME.JPG")])
+        let state = makeState([peer], deliveryStore: MediaDeliveryStore(root: root))
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectAndLoad(state)
+        state.selectMediaItems(state.mediaItems)
+        XCTAssertTrue(state.startMediaBatchDownload())
+        await state.mediaBatchTask?.value
+        await state.disconnect()
+        let requests = await peer.requests()
+
+        let offline = makeState([], deliveryStore: MediaDeliveryStore(root: root))
+        await offline.refreshMediaDeliveryHistory()
+        XCTAssertFalse(offline.connected)
+        XCTAssertEqual(offline.mediaDeliverySnapshot.records.map(\.status), [.prepared, .prepared])
+        XCTAssertEqual(offline.mediaDeliverySnapshot.records.map(\.availability), [.available, .available])
+        let manifest = root.appendingPathComponent("manifest.json")
+        let preparedFacts = try Data(contentsOf: manifest)
+        var payload = await offline.makeStoredMediaExportPayload(ids: offline.mediaDeliverySnapshot.records.map(\.id))
+        let exporter = MediaFilesExportController()
+        XCTAssertTrue(exporter.begin(payload))
+        var coordinator: MediaFilesExportCoordinator? = MediaFilesExportCoordinator(
+            attempt: try XCTUnwrap(exporter.presentation), owner: exporter)
+        payload = nil
+        let sources = try XCTUnwrap(coordinator?.attempt.payload.fileURLs)
+        let identities = try XCTUnwrap(coordinator?.attempt.payload.filesExportSourceIdentities)
+        XCTAssertEqual(sources.count, 2)
+        XCTAssertEqual(Set(sources).count, 2, "Equal display names retain distinct owned copies")
+        XCTAssertEqual(sources.map(\.lastPathComponent), ["SAME.JPG", "SAME.JPG"])
+        XCTAssertNil(coordinator?.presentationFailure())
+        coordinator?.finish(.reported(count: 1))
+        XCTAssertEqual(exporter.result?.status, .unconfirmed)
+        XCTAssertEqual(exporter.result?.expectedCount, 2)
+        XCTAssertEqual(exporter.result?.reportedCount, 1)
+        XCTAssertEqual(try Data(contentsOf: manifest), preparedFacts, "A partial provider report cannot alter any preparation receipt")
+
+        await offline.clearMediaDeliveryHistory()
+        XCTAssertTrue(offline.mediaDeliverySnapshot.records.isEmpty)
+        XCTAssertEqual(coordinator?.attempt.payload.fileURLs, sources)
+        XCTAssertEqual(coordinator?.attempt.payload.filesExportSourceIdentities, identities)
+        for source in sources { XCTAssertEqual(try Data(contentsOf: source), BatchMediaPeer.original) }
+        coordinator?.dismantle()
+        XCTAssertTrue(sources.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+        coordinator = nil
+        try await waitUntil { sources.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) } }
+        XCTAssertFalse(offline.connected)
+        let after = await peer.requests()
+        XCTAssertEqual(after, requests, "Cold history export and clear must remain entirely local")
+    }
+
+    func testStoredFilesFactoryPreservesAcquiredIdentityAcrossAwaitAndRejectsMutatedSource() async throws {
+        let root = singleDeliveryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gate = DeliveryReplyGate(stage: .shareAcquired)
+        let peer = BatchMediaPeer(items: [item("FILES-REPLACED")])
+        let state = makeState([peer], deliveryStore: MediaDeliveryStore(root: root), deliveryDelay: { await gate.enter($0) })
+        defer { state.requestDisconnect(); Task { await gate.release(); await peer.releaseAll() } }
+        try await connectAndLoad(state)
+        state.startMediaDownload(try XCTUnwrap(state.mediaItems.first))
+        await state.mediaDownloadTask?.value
+        let record = try XCTUnwrap(state.mediaDeliverySnapshot.records.first)
+        let source = root.appendingPathComponent(record.id.uuidString).appendingPathComponent(record.filename)
+        let acquiredIdentity = try XCTUnwrap(MediaFilesExportSourceIdentity.read(source))
+        let manifest = root.appendingPathComponent("manifest.json")
+        let preparedFacts = try Data(contentsOf: manifest)
+        await state.disconnect()
+        let requests = await peer.requests()
+
+        let share = Task { await state.makeStoredMediaExportPayload(ids: [record.id]) }
+        try await waitUntil { await gate.waiting }
+        // The store has validated and pinned the original. Replacing it during
+        // the real factory's await must not be blessed by a new payload snapshot.
+        try Data(repeating: 0x6D, count: BatchMediaPeer.original.count).write(to: source, options: .atomic)
+        let replacementIdentity = try XCTUnwrap(MediaFilesExportSourceIdentity.read(source))
+        XCTAssertNotEqual(replacementIdentity, acquiredIdentity)
+        await gate.release()
+        let acquiredPayload = await share.value
+        let payload = try XCTUnwrap(acquiredPayload)
+        XCTAssertEqual(payload.filesExportSourceIdentities, [Optional(acquiredIdentity)])
+        XCTAssertFalse(MediaFilesExportController.sourcesAvailable(payload))
+        let exporter = MediaFilesExportController()
+        XCTAssertFalse(exporter.begin(payload))
+        XCTAssertNil(exporter.presentation)
+        XCTAssertFalse(exporter.isActive)
+        XCTAssertEqual(exporter.result?.status, .sourceUnavailable)
+        XCTAssertEqual(exporter.result?.expectedCount, 1)
+        XCTAssertEqual(try Data(contentsOf: manifest), preparedFacts)
+        let after = await peer.requests()
+        XCTAssertEqual(after, requests, "Unavailable local bytes cannot trigger an implicit camera download")
+    }
+
     func testSelectionUsesExactWireIDsAndDisplayedLoadedOrderWithoutRequests() async throws {
         for bridge in [false, true] {
             let composed = item("caf\u{00E9}", name: "SAME.JPG")

@@ -10,6 +10,7 @@ struct MediaView: View {
     @EnvironmentObject private var language: AppLanguageStore
     let controlRotation: Double
     @State private var exportPayload: MediaBatchExportPayload?
+    @StateObject private var filesExporter = MediaFilesExportController()
     @State private var pendingDeletion: CameraMediaItem?
     @State private var metadataItemID: String?
     @State private var pendingPreviewMetadataItemID: String?
@@ -48,6 +49,9 @@ struct MediaView: View {
                 VStack(spacing: 0) {
                     mediaToolbar
                     MediaBatchPanel(displayedItems: displayedMedia)
+                    if camera.downloadedFileURL != nil || filesExporter.result != nil {
+                        MediaFilesExportStatusView(controller: filesExporter).padding(12)
+                    }
                     if camera.mediaLibraryLoading, camera.mediaItems.isEmpty {
                         ProgressView("loading_media").tint(Color.cameraAccent)
                             .accessibilityIdentifier("media-library-loading-empty")
@@ -119,6 +123,7 @@ struct MediaView: View {
         .sheet(item: $exportPayload) { payload in
             MediaBatchActivityView(payload: payload)
         }
+        .mediaFilesExport(filesExporter)
         .sheet(isPresented: $isDateFilterPresented) { dateFilterSheet }
         .sheet(isPresented: $isRatingFilterPresented) { ratingFilterSheet }
         .sheet(isPresented: $isFolderFilterPresented) { folderFilterSheet }
@@ -504,6 +509,20 @@ struct MediaView: View {
                     .accessibilityIdentifier("media-select-\(item.id)")
                     Spacer(minLength: 0)
                     mediaActions(item)
+                }
+                if camera.downloadedFile(for: item) != nil {
+                    Button {
+                        filesExporter.begin(camera.makeMediaDownloadExportPayload(for: item))
+                    } label: {
+                        Label(language.string("media_files_export_one"), systemImage: "folder")
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .foregroundStyle(Color.cameraStatus)
+                    .disabled(filesExporter.isActive)
+                    .accessibilityLabel(language.format("media_files_export_named", item.name))
+                    .accessibilityIdentifier("media-export-files-\(item.id)")
                 }
             }
             .padding(8)
@@ -1159,6 +1178,7 @@ private struct MediaPreviewView: View {
     let controlRotation: Double
     let onActions: (CameraMediaItem) -> Void
     @State private var exportPayload: MediaBatchExportPayload?
+    @StateObject private var filesExporter = MediaFilesExportController()
 
     var body: some View {
         ZStack {
@@ -1276,6 +1296,27 @@ private struct MediaPreviewView: View {
         }
         .sheet(item: $exportPayload) { payload in
             MediaBatchActivityView(payload: payload)
+        }
+        .mediaFilesExport(filesExporter)
+        .safeAreaInset(edge: .bottom) {
+            if let item = camera.mediaPreviewItem, camera.downloadedFile(for: item) != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        filesExporter.begin(camera.makeMediaDownloadExportPayload(for: item))
+                    } label: {
+                        Label(language.string("media_files_export_one"), systemImage: "folder")
+                            .frame(minHeight: 44)
+                    }
+                    .disabled(filesExporter.isActive)
+                    .accessibilityIdentifier("media-preview-export-files-\(item.id)")
+                    MediaFilesExportStatusView(controller: filesExporter)
+                }
+                .padding(12)
+                .background(Color.cameraSurface)
+            } else if filesExporter.result != nil {
+                MediaFilesExportStatusView(controller: filesExporter)
+                    .padding(12).background(Color.cameraSurface)
+            }
         }
         .alert(
             Text("operation_failed"),

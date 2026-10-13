@@ -56,6 +56,9 @@ struct MediaWorklistContinuationRow: Identifiable {
 struct MediaBatchExportPayload: Identifiable {
     let id = UUID()
     let fileURLs: [URL]
+    // Capture at payload creation, before a deferred presentation can observe a
+    // replacement. Share behavior stays unchanged; Files export revalidates it.
+    let filesExportSourceIdentities: [MediaFilesExportSourceIdentity?]
     private let ownedFiles: [MediaBatchOwnedFile]
     private let storedFiles: [MediaDeliveryFileLease]
 
@@ -67,12 +70,14 @@ struct MediaBatchExportPayload: Identifiable {
         ownedFiles = files
         storedFiles = []
         fileURLs = files.map(\.fileURL)
+        filesExportSourceIdentities = fileURLs.map(MediaFilesExportSourceIdentity.read)
     }
 
     init(ownedFile: MediaBatchOwnedFile) {
         ownedFiles = [ownedFile]
         storedFiles = []
         fileURLs = [ownedFile.fileURL]
+        filesExportSourceIdentities = fileURLs.map(MediaFilesExportSourceIdentity.read)
     }
 
     init?(storedFiles: [MediaDeliveryFileLease]) {
@@ -80,6 +85,7 @@ struct MediaBatchExportPayload: Identifiable {
         ownedFiles = []
         self.storedFiles = storedFiles
         fileURLs = storedFiles.map(\.fileURL)
+        filesExportSourceIdentities = storedFiles.map { Optional($0.filesExportSourceIdentity) }
     }
 }
 
