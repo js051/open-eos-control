@@ -285,7 +285,7 @@
       bulbReleaseConfirmed: "Camera stop confirmed",
       bulbReleaseUnconfirmed: "Camera stop unconfirmed. The shutter or autofocus may still be active. Retry stop or check the camera.",
       bulbDisconnectWarning: "Connection closed locally; the camera stop is unconfirmed. Check the camera before reconnecting.",
-      autofocusComplete: "Autofocus complete",
+      autofocusComplete: "Focus command accepted; focus is not confirmed",
       halfPressComplete: "Shutter half-press complete",
       recordingStarted: "Recording started",
       recordingStopped: "Recording stopped",
@@ -858,7 +858,7 @@
       bulbReleaseConfirmed: "已確認相機操作停止",
       bulbReleaseUnconfirmed: "尚未確認相機操作停止；快門或自動對焦可能仍在作用。請重試停止，或檢查相機。",
       bulbDisconnectWarning: "本機連線已關閉，但尚未確認相機操作停止。重新連線前請先檢查相機。",
-      autofocusComplete: "自動對焦完成",
+      autofocusComplete: "對焦命令已接受；尚未確認實際合焦",
       halfPressComplete: "快門半按完成",
       recordingStarted: "已開始錄影",
       recordingStopped: "已停止錄影",
@@ -2405,6 +2405,7 @@
   }
 
   function beginCameraInteraction() {
+    if (ui.focusReticle) ui.focusReticle.hidden = true;
     state.refreshGeneration += 1;
     state.busy = true;
   }
@@ -3428,20 +3429,23 @@
 
   async function autofocus() {
     if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.AUTOFOCUS)) return;
-    const sessionId = state.session.id;
+    const session = state.session;
+    const sessionId = session.id;
     beginCameraInteraction();
+    const generation = state.refreshGeneration;
+    const isCurrent = () => state.session === session && state.refreshGeneration === generation;
     setOperationState(t("busy"));
     renderAvailability();
     try {
       const status = await api(`/v1/session/${encodeURIComponent(sessionId)}/focus/auto`, {
         method: "POST",
       });
-      if (state.session?.id !== sessionId) return;
+      if (!isCurrent()) return;
       state.status = status;
       setOperationState(t("autofocusComplete"));
       showToast(t("autofocusComplete"));
     } catch (error) {
-      if (state.session?.id !== sessionId) return;
+      if (!isCurrent()) return;
       const normalized = captureError(error);
       if (normalized.code === "SHUTTER_RELEASE_UNCONFIRMED") {
         state.shutterReleaseUnconfirmed = true;
@@ -3450,7 +3454,7 @@
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
     } finally {
-      if (state.session?.id === sessionId) {
+      if (isCurrent()) {
         state.busy = false;
         renderSession();
       }
@@ -3459,20 +3463,23 @@
 
   async function halfPressShutter() {
     if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.SHUTTER_HALF_PRESS)) return;
-    const sessionId = state.session.id;
+    const session = state.session;
+    const sessionId = session.id;
     beginCameraInteraction();
+    const generation = state.refreshGeneration;
+    const isCurrent = () => state.session === session && state.refreshGeneration === generation;
     setOperationState(t("busy"));
     renderAvailability();
     try {
       const status = await api(`/v1/session/${encodeURIComponent(sessionId)}/shutter/half-press`, {
         method: "POST",
       });
-      if (state.session?.id !== sessionId) return;
+      if (!isCurrent()) return;
       state.status = status;
       setOperationState(t("halfPressComplete"));
       showToast(t("halfPressComplete"));
     } catch (error) {
-      if (state.session?.id !== sessionId) return;
+      if (!isCurrent()) return;
       const normalized = captureError(error);
       if (normalized.code === "SHUTTER_RELEASE_UNCONFIRMED") {
         state.shutterReleaseUnconfirmed = true;
@@ -3481,7 +3488,7 @@
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
     } finally {
-      if (state.session?.id === sessionId) {
+      if (isCurrent()) {
         state.busy = false;
         renderSession();
       }
@@ -4955,7 +4962,10 @@
       !point || !state.session || cameraInteractionBusy() || !state.liveActive ||
       localPreviewSelected() || !action
     ) return;
+    const session = state.session;
     beginCameraInteraction();
+    const generation = state.refreshGeneration;
+    const isCurrent = () => state.session === session && state.refreshGeneration === generation;
     ui.focusReticle.style.left = `${point.displayX}px`;
     ui.focusReticle.style.top = `${point.displayY}px`;
     ui.focusReticle.className = "focus-reticle focusing";
@@ -4964,28 +4974,34 @@
     renderAvailability();
     try {
       if (action === "whiteBalance") {
-        state.status = await api(`/v1/session/${encodeURIComponent(state.session.id)}/whitebalance/click`, {
+        const status = await api(`/v1/session/${encodeURIComponent(session.id)}/whitebalance/click`, {
           method: "POST",
           json: { x: point.x, y: point.y },
         });
+        if (!isCurrent()) return;
+        state.status = status;
       } else {
-        await api(`/v1/session/${encodeURIComponent(state.session.id)}/focus/tap`, {
+        await api(`/v1/session/${encodeURIComponent(session.id)}/focus/tap`, {
           method: "POST",
           json: { x: point.x, y: point.y },
         });
       }
-      ui.focusReticle.className = "focus-reticle success";
+      if (!isCurrent()) return;
+      ui.focusReticle.className = action === "whiteBalance" ? "focus-reticle success" : "focus-reticle accepted";
       setOperationState(t(action === "whiteBalance" ? "clickWhiteBalanceAccepted" : "focusAccepted"));
-      window.setTimeout(() => { ui.focusReticle.hidden = true; }, 900);
+      window.setTimeout(() => { if (isCurrent()) ui.focusReticle.hidden = true; }, 900);
     } catch (error) {
+      if (!isCurrent()) return;
       const normalized = captureError(error);
       ui.focusReticle.className = "focus-reticle failure";
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
-      window.setTimeout(() => { ui.focusReticle.hidden = true; }, 1300);
+      window.setTimeout(() => { if (isCurrent()) ui.focusReticle.hidden = true; }, 1300);
     } finally {
-      state.busy = false;
-      renderSession();
+      if (isCurrent()) {
+        state.busy = false;
+        renderSession();
+      }
     }
   }
 

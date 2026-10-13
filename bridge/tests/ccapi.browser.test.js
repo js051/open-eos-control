@@ -1071,6 +1071,8 @@ async function run() {
       (state) => state.canonical.af_start_count === 1 && state.canonical.af_stop_count === 1,
       "balanced Canon AF start and stop",
     );
+    await page.waitForFunction(() => document.querySelector("#operation-state")?.textContent ===
+      "Focus command accepted; focus is not confirmed");
     await page.click("#half-press-button");
     await waitForSimulatorState(
       simulatorOrigin,
@@ -1184,6 +1186,8 @@ async function run() {
         state.canonical.focus_position?.y >= 1500 && state.canonical.focus_position?.y <= 1700,
       "geometry-backed Canon Tap AF",
     );
+    await page.waitForFunction(() => document.querySelector("#operation-state")?.textContent === "Focus point accepted");
+    assert.equal(await page.locator("#focus-reticle").getAttribute("class"), "focus-reticle accepted");
 
     await page.selectOption("#tap-action-select", "whiteBalance");
     await page.mouse.click(

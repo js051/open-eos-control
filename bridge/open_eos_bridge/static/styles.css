@@ -856,6 +856,11 @@ input:disabled {
   animation: focus-pulse 700ms ease-in-out infinite alternate;
 }
 
+.focus-reticle.accepted {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .focus-reticle.success {
   color: var(--success);
   border-color: var(--success);

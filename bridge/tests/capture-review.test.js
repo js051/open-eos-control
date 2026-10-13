@@ -60,6 +60,7 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
   const saved = [];
   const sandbox = vm.createContext({
     state, requests, feedback, delays, saved, AbortController, Blob, Response,
+    ui: { focusReticle: { hidden: true } },
     URL, Set, Map, mediaLibrary, mediaTransfer,
     mediaIsVideo: mediaLibrary.isVideo,
     FEATURES: {
