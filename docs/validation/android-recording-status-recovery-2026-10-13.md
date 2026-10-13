@@ -79,3 +79,12 @@ Additional authored fixtures use fresh peers/connections for both directions at 
 ## Complete error-envelope schema alignment
 
 A complete Bridge HTTP 502 error envelope now requires both `code` and `message` to be nonblank strings, matching the Bridge `ErrorDetail` schema. Code-only, blank-message, null-message, wrong-type message and code-only ACK-looking bodies stay UNKNOWN rather than establishing rejection or acknowledgement. This is defensive contract alignment; the normal Bridge handler already emits both fields. Complete known-rejection/preflight controls and exact error-code/feature/engine negative fixtures retain their original purpose and now include the required message field. Added source coverage remains NOT_RUN locally.
+
+
+## Strict recording-state shape
+
+Recording status now accepts only a JSON Boolean, explicit null, or a missing field. Numbers (including 0/1/2), strings (including `"true"`/`"false"`), arrays and objects cannot become an invented `false` through `optBoolean` coercion. Only the recording field uses the shared strict parser; other field parsers retain their behavior.
+
+Bridge REC responses still require an object root. A malformed root or present recording value becomes command-result UNKNOWN and the ViewModel retains its prior snapshot. Read-only status failures retain their owner and prior snapshot instead of clearing recovery. A simulator command ACK followed by an invalid required status remains acknowledged-readback failure, distinct from UNKNOWN. Null/missing fields retain the existing nullable/pending contract. Native command-OK/204 handling and its established ACK-derived recording cache are unchanged.
+
+`RecordingResponseShapeTest` adds both-direction command/read shape matrices with true/false/null/missing controls, simulator ACK/readback controls and a native 204 regression. ViewModel tests exercise malformed Refresh while acknowledged-pending and while UNKNOWN, preserve prior booleans, and require a valid read or deliberate Stop according to the owner's existing contract. No malformed observation causes an automatic REC. All added Kotlin/JVM coverage remains NOT_RUN locally.

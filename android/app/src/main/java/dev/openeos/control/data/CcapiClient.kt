@@ -4493,7 +4493,7 @@ private fun JSONObject.toCameraStatus(): CameraStatus {
         connected = optBoolean("connected"),
         batteryLevel = battery.optNullableInt("level"),
         batteryStatus = battery.optString("status"),
-        recording = optNullableBoolean("recording"),
+        recording = strictRecordingStatus(),
         mode = optString("mode"),
         mediaAvailable = media.optNullableBoolean("available"),
         remainingMinutes = media.optNullableInt("remaining_minutes"),
