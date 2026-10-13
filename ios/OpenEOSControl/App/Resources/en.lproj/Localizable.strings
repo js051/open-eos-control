@@ -569,7 +569,7 @@
 "media_delivery_history_warning" = "Some history records or app copies could not be checked or kept. Check the app copies again. Ready originals may still be available from their current batch.";
 "media_delivery_history_batch_warning" = "Ready originals can still be shared from this batch, but their history or copies for later may be unavailable.";
 "media_delivery_history_loading" = "Checking history and app copies…";
-"media_delivery_history_checking_share" = "Checking originals for sharing…";
+"media_delivery_history_checking_share" = "Checking prepared originals…";
 "media_delivery_history_share_all" = "Save or share all available copies";
 "media_delivery_history_share_one" = "Save or share this copy";
 "media_delivery_history_share_named" = "Save or share app copy of %@";
@@ -607,9 +607,9 @@
 "foreground_media_stop" = "Stop preparing";
 "foreground_media_stopping" = "Stopping…";
 "foreground_media_start_unavailable" = "Connect directly with CCAPI and finish other camera work before starting.";
-"foreground_media_destination_help" = "Copies are kept in this app. To save elsewhere, open Recent originals and choose Save or share. Sharing does not confirm that Files, Photos, or another destination saved them.";
+"foreground_media_destination_help" = "Copies are kept in this app. Open Recent originals to export to Files or use Save or share. Sharing does not confirm that Files, Photos, or another destination saved them.";
 "foreground_media_temporary_count" = "%d temporary originals available";
-"foreground_media_temporary_help" = "After stopping, you can share the current temporary originals. Check Recent originals for copies kept for later; an original may be available here even if the app could not retain it. Share it before starting again or disconnecting, which clears this temporary result.";
+"foreground_media_temporary_help" = "After stopping, you can export the current temporary originals to Files or share them. Check Recent originals for copies kept for later; an original may be available here even if the app could not retain it. Export or share it before starting again or disconnecting, which clears this temporary result.";
 "foreground_media_share_temporary" = "Share current temporary originals";
 "foreground_media_share_unavailable" = "The temporary originals are no longer available for sharing. Check Recent originals for retained app copies.";
 "foreground_media_limits_title" = "Scope and limits";
@@ -742,3 +742,14 @@
 "camera_focus_servo_off" = "Camera focus: servo off";
 "camera_focus_focusing" = "Camera reports focusing";
 "camera_focus_unknown" = "Camera focus: unknown";
+
+"media_files_export_one" = "Export original to Files…";
+"media_files_export_ready" = "Export prepared originals to Files…";
+"media_files_export_all" = "Export all available copies to Files…";
+"media_files_export_named" = "Export %@ to Files";
+"media_files_export_help" = "Choose a destination in Files for these prepared copies. Closing this screen or restarting the app loses the export result; earlier exports are then unknown. History records preparation only. Check Files before exporting again to avoid duplicates. Your chosen provider manages cloud sync.";
+"media_files_export_reported" = "iOS reported export destinations for %d originals. External bytes and cloud sync have not been verified.";
+"media_files_export_cancelled" = "Files export was cancelled. Check the destination before trying again; copies already made may remain.";
+"media_files_export_unconfirmed" = "Files export outcome is unknown. Check the destination before starting another export.";
+"media_files_export_mismatch" = "iOS reported %d destinations for %d originals. Individual results are unknown. Check Files before trying again.";
+"media_files_export_source_unavailable" = "The prepared source is unavailable. Refresh history or explicitly prepare the original again before exporting.";

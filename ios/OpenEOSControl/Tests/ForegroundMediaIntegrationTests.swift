@@ -201,6 +201,63 @@ final class ForegroundMediaIntegrationTests: XCTestCase {
         }
     }
 
+    func testForegroundTemporaryFilesAttemptUsesFactoryLeaseAfterRetentionFailureAndClear() async throws {
+        try await withFixture(faultInjector: { point in
+            if point == .copyChunk { throw MediaDeliveryStoreError.storageUnavailable }
+        }) { fixture in
+            let task = try await fixture.startAndEstablishBaseline()
+            try await fixture.discover("FILES-FALLBACK.JPG")
+            try await fixture.tick(seconds: 1)
+            try await fixture.drain(task)
+            XCTAssertEqual(fixture.state.foregroundMedia.state, .failed)
+            XCTAssertEqual(fixture.state.foregroundMedia.reason, .storage)
+            XCTAssertEqual(fixture.state.foregroundMedia.preparedCount, 0)
+            XCTAssertEqual(fixture.state.foregroundTemporaryCount, 1)
+            let manifest = fixture.root.appendingPathComponent("manifest.json")
+            let preparedFacts = try Data(contentsOf: manifest)
+            let requests = await fixture.peer.requests()
+
+            let exporter = MediaFilesExportController()
+            XCTAssertTrue(exporter.begin(fixture.state.makeForegroundMediaExportPayload()))
+            var coordinator: MediaFilesExportCoordinator? = MediaFilesExportCoordinator(
+                attempt: try XCTUnwrap(exporter.presentation), owner: exporter)
+            let source = try XCTUnwrap(coordinator?.attempt.payload.fileURLs.first)
+            let identities = try XCTUnwrap(coordinator?.attempt.payload.filesExportSourceIdentities)
+            XCTAssertNil(coordinator?.presentationFailure())
+            coordinator?.finish(.unconfirmed)
+            XCTAssertEqual(exporter.result?.status, .unconfirmed)
+            XCTAssertEqual(exporter.result?.expectedCount, 1)
+            XCTAssertEqual(fixture.state.foregroundMedia.state, .failed)
+            XCTAssertEqual(fixture.state.foregroundMedia.reason, .storage)
+            XCTAssertEqual(fixture.state.foregroundMedia.preparedCount, 0)
+            XCTAssertEqual(fixture.state.foregroundTemporaryCount, 1)
+            XCTAssertEqual(try Data(contentsOf: manifest), preparedFacts)
+            let history = await fixture.store.snapshot()
+            XCTAssertEqual(history.records.map(\.status), [.prepared])
+            XCTAssertEqual(history.records.map(\.reason), [.retentionUnavailable])
+            XCTAssertEqual(history.records.map(\.availability), [.notRetained])
+            let afterResult = await fixture.peer.requests()
+            XCTAssertEqual(afterResult, requests, "Files export cannot restart foreground polling or download another original")
+
+            await fixture.state.disconnect()
+            XCTAssertNil(fixture.state.makeForegroundMediaExportPayload())
+            XCTAssertEqual(fixture.state.foregroundTemporaryCount, 0)
+            let disconnectedRequests = await fixture.peer.requests()
+            await fixture.state.clearMediaDeliveryHistory()
+            XCTAssertTrue(fixture.state.mediaDeliverySnapshot.records.isEmpty)
+            XCTAssertEqual(coordinator?.attempt.payload.fileURLs, [source])
+            XCTAssertEqual(coordinator?.attempt.payload.filesExportSourceIdentities, identities)
+            XCTAssertEqual(try Data(contentsOf: source), ForegroundIntegrationPeer.original)
+            coordinator?.dismantle()
+            XCTAssertFalse(exporter.isActive)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+            coordinator = nil
+            try await integrationWait { !FileManager.default.fileExists(atPath: source.path) }
+            let afterClear = await fixture.peer.requests()
+            XCTAssertEqual(afterClear, disconnectedRequests)
+        }
+    }
+
     func testManualDownloadIsAdmittedBetweenPollsAndForegroundWaitsForIt() async throws {
         try await withFixture(initialNames: ["MANUAL.JPG"]) { fixture in
             let task = try await fixture.startAndEstablishBaseline()
