@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import OpenEOSCore
 import XCTest
@@ -430,12 +431,18 @@ final class CaptureMediaJourneyTests: XCTestCase {
         XCTAssertNil(state.mediaPreviewData)
         XCTAssertEqual(state.captureReviewState, .idle)
         XCTAssertFalse(state.canRetryMediaPreview, "Video uses the existing playback flow, not JPEG retry")
+        let playback = try XCTUnwrap(state.mediaVideoPlayback)
+        try await waitUntil { playback.player.currentItem?.status == .readyToPlay }
         let allocations = await peer.count("playback")
+        let streamReads = await peer.count("playback-GET")
         let photoPreviews = await peer.count("preview")
         let originalsBefore = await peer.count("original")
         XCTAssertEqual(allocations, 1)
+        XCTAssertGreaterThan(streamReads, 0)
         XCTAssertEqual(photoPreviews, 0)
         XCTAssertEqual(originalsBefore, 0)
+        XCTAssertNil(playback.failure)
+        XCTAssertFalse(playback.isPreparingFallback)
         state.closeMediaPreview()
         state.startMediaDownload(video)
         await state.mediaDownloadTask?.value
@@ -446,6 +453,100 @@ final class CaptureMediaJourneyTests: XCTestCase {
         let stops = await peer.count("recording-stop")
         XCTAssertEqual(originalsAfter, 1)
         XCTAssertEqual(stops, 1)
+    }
+
+    func testClosingVideoBeforeScheduledFallbackRunsDoesNotRequestOriginal() async throws {
+        let peer = CaptureMediaPeer()
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        let playback = try await openFixtureVideo(state, peer: peer)
+
+        // There is no suspension between scheduling and closing on MainActor, so
+        // this exercises a cancelled task that has not entered prepareFallback yet.
+        playback.handlePlaybackFailure(URLError(.networkConnectionLost))
+        let fallback = try XCTUnwrap(playback.fallbackTask)
+        XCTAssertTrue(playback.isPreparingFallback)
+        state.closeMediaPreview()
+        try await waitForPlaybackFallback(fallback)
+
+        let originals = await peer.count("original")
+        XCTAssertEqual(originals, 0, "A closed playback must not start a queued original download")
+        XCTAssertNil(playback.player.currentItem)
+        XCTAssertNil(playback.failure)
+        XCTAssertFalse(playback.isPreparingFallback)
+        XCTAssertNil(playback.fallbackTask)
+        XCTAssertTrue(try playbackTemporaryDirectories().isEmpty)
+    }
+
+    func testCurrentVideoFallbackPublishesOnceAndCloseRemovesItsPrivateFile() async throws {
+        let peer = CaptureMediaPeer()
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        let playback = try await openFixtureVideo(state, peer: peer)
+        let video = try XCTUnwrap(state.mediaPreviewItem)
+        await peer.holdNext("original")
+        playback.handlePlaybackFailure(URLError(.networkConnectionLost))
+        let fallback = try XCTUnwrap(playback.fallbackTask)
+        try await waitForGate(peer, "original")
+        XCTAssertTrue(playback.isPreparingFallback)
+        playback.handlePlaybackFailure(URLError(.networkConnectionLost))
+        await peer.release("original")
+        try await waitForPlaybackFallback(fallback)
+
+        let asset = try XCTUnwrap(playback.player.currentItem?.asset as? AVURLAsset)
+        XCTAssertTrue(asset.url.isFileURL)
+        XCTAssertEqual(try Data(contentsOf: asset.url), try CaptureMediaPeer.videoOriginalBytes())
+        XCTAssertNil(playback.failure)
+        XCTAssertFalse(playback.isPreparingFallback)
+        XCTAssertNil(playback.fallbackTask)
+        XCTAssertNil(state.downloadedFile(for: video), "Playback fallback is not a manual original download")
+        let originals = await peer.count("original")
+        XCTAssertEqual(originals, 1, "Repeated failure callbacks must share one fallback")
+
+        state.closeMediaPreview()
+        XCTAssertNil(playback.player.currentItem)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: asset.url.deletingLastPathComponent().path))
+        playback.handlePlaybackFailure(URLError(.networkConnectionLost))
+        XCTAssertNil(playback.fallbackTask, "A late failure callback must not reopen closed playback")
+    }
+
+    func testClosingVideoDuringFallbackDiscardsLateDownloadAndTemporaryFiles() async throws {
+        for failOriginal in [false, true] {
+            let peer = CaptureMediaPeer()
+            let state = makeState(peer)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            let playback = try await openFixtureVideo(state, peer: peer)
+            let video = try XCTUnwrap(state.mediaPreviewItem)
+            await peer.holdNext("original")
+            if failOriginal { await peer.failNext("original") }
+            playback.handlePlaybackFailure(URLError(.networkConnectionLost))
+            let fallback = try XCTUnwrap(playback.fallbackTask)
+            try await waitForGate(peer, "original")
+            let directories = try playbackTemporaryDirectories()
+            XCTAssertEqual(directories.count, 1)
+
+            state.closeMediaPreview()
+            try await waitForCancellation(peer, "original")
+            let stillHeld = await peer.waiting("original")
+            XCTAssertTrue(stillHeld, "Close must cancel without waiting for an uncooperative download")
+            XCTAssertNil(playback.player.currentItem)
+            XCTAssertFalse(playback.isPreparingFallback)
+            await peer.release("original")
+            try await waitForPlaybackFallback(fallback)
+
+            let originals = await peer.count("original")
+            let temporaryFiles = await peer.originalTemporaryFiles()
+            XCTAssertEqual(originals, 1)
+            XCTAssertEqual(temporaryFiles.count, 1, "The cancelled transport still returns its late result")
+            XCTAssertTrue((directories + temporaryFiles).allSatisfy {
+                !FileManager.default.fileExists(atPath: $0.path)
+            })
+            XCTAssertNil(playback.player.currentItem, "A late result must not replace the closed player")
+            XCTAssertNil(playback.failure, "A retired fallback must not publish a late failure")
+            XCTAssertNil(playback.fallbackTask)
+            XCTAssertNil(state.mediaVideoPlayback)
+            XCTAssertNil(state.downloadedFile(for: video))
+        }
     }
 
     func testRecordingReviewResourcesDescribeVideosWithoutClaimingCaptureProvenance() throws {
@@ -1486,6 +1587,38 @@ final class CaptureMediaJourneyTests: XCTestCase {
         throw URLError(.timedOut)
     }
 
+    private func openFixtureVideo(_ state: CameraAppState, peer: CaptureMediaPeer) async throws -> CameraMediaPlayback {
+        await peer.queueListings([.items([.newVideo])])
+        await state.connect()
+        await state.latestMediaTask?.value
+        let video = try XCTUnwrap(state.latestMediaItem)
+        XCTAssertEqual(video.id, "NEW-VIDEO")
+        await state.openMediaPreview(video)
+        let playback = try XCTUnwrap(state.mediaVideoPlayback)
+        try await waitUntil { playback.player.currentItem?.status == .readyToPlay }
+        return playback
+    }
+
+    private func waitForPlaybackFallback(_ fallback: Task<Void, Never>) async throws {
+        var finished = false
+        let observer = Task {
+            await fallback.value
+            finished = true
+        }
+        defer { observer.cancel() }
+        // Do not await an uncooperative task directly from the test. A failure
+        // remains bounded and teardown releases every fixture continuation.
+        try await waitUntil { finished }
+    }
+
+    private func playbackTemporaryDirectories() throws -> [URL] {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OpenEOSControl", isDirectory: true)
+            .appendingPathComponent("VideoPlayback", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+    }
+
     private func waitForEventPoll(_ peer: CaptureMediaPeer, count: Int) async throws {
         for _ in 0..<500 {
             if await peer.count("event") == count { return }
@@ -1572,6 +1705,7 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
     private var requests: [String] = []
     private var choices: [Bool] = []
     private var counts: [String: Int] = [:]
+    private var downloadTemporaryFiles: [URL] = []
     private var listings: [CaptureFixtureListing] = []
     private var listingLimits: [String?] = []
     private var holds: [String: String] = [:]
@@ -1596,6 +1730,7 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
     func listLimits() -> [String?] { listingLimits }
     func requestCount() -> Int { requests.count }
     func count(_ operation: String) -> Int { counts[operation, default: 0] }
+    func originalTemporaryFiles() -> [URL] { downloadTemporaryFiles }
     func cancellationCount(_ gate: String) -> Int { cancellations.count(gate) }
     func captureChoices() -> [Bool] { choices }
     func requestsSinceCapture() -> [String] { Array(requests.dropFirst(captureRequestEnd)) }
@@ -1605,7 +1740,12 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
     func holdNext(_ operation: String, gate: String? = nil) { holds[operation] = gate ?? operation }
     func waiting(_ gate: String) -> Bool { gates[gate] != nil }
     func release(_ gate: String) { gates.removeValue(forKey: gate)?.resume() }
-    func releaseAll() { let pending = gates; gates.removeAll(); for continuation in pending.values { continuation.resume() } }
+    func releaseAll() {
+        holds.removeAll()
+        let pending = gates
+        gates.removeAll()
+        for continuation in pending.values { continuation.resume() }
+    }
 
     private func waitIfHeld(_ operation: String) async {
         if let gate = holds.removeValue(forKey: operation) {
@@ -1633,6 +1773,7 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
         }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try bytes.write(to: url)
+        downloadTemporaryFiles.append(url)
         return CameraHTTPDownloadResponse(statusCode: failure ? 503 : 200,
             headers: ["content-type": video ? "video/mp4" : "image/jpeg", "content-length": "\(bytes.count)"], temporaryFileURL: url)
     }
@@ -1645,6 +1786,10 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
             object = ["ok": true, "service": "open-eos-control-bridge", "version": "0.13.0"]
         } else if path == "/v1/session" {
             object = ["id": "capture-review", "engine": "ccapi"]
+        } else if path.hasSuffix("/media/NEW-VIDEO/info") {
+            var info = CaptureFixtureItem.newVideo.json
+            info["sizeBytes"] = try Self.videoOriginalBytes().count
+            object = info
         } else if path.hasSuffix("/info") {
             object = ["connected": true, "model": "Synthetic capture review", "serial": "TEST-CAPTURE-REVIEW", "api": "desktop-bridge/v1"]
         } else if path.hasSuffix("/capabilities") {
@@ -1711,7 +1856,9 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
             object = ["url": "/v1/media-playback/capture_review_ticket", "expiresInSeconds": 900]
         } else if path == "/v1/media-playback/capture_review_ticket" {
             counts["playback-\(request.httpMethod ?? "GET")", default: 0] += 1
-            return CameraHTTPResponse(statusCode: request.httpMethod == "DELETE" ? 204 : 503, body: Data())
+            if request.httpMethod == "DELETE" { return CameraHTTPResponse(statusCode: 204) }
+            if failures.remove("playback-GET") != nil { return CameraHTTPResponse(statusCode: 503) }
+            return try playbackResponse(request)
         } else if path.hasSuffix("/thumbnail") || path.hasSuffix("/preview") {
             let operation = path.hasSuffix("/thumbnail") ? "thumbnail" : "preview"
             counts[operation, default: 0] += 1
@@ -1723,6 +1870,27 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
             object = statusJSON()
         }
         return CameraHTTPResponse(statusCode: 200, body: try JSONSerialization.data(withJSONObject: object))
+    }
+
+    private func playbackResponse(_ request: URLRequest) throws -> CameraHTTPResponse {
+        let bytes = try Self.videoOriginalBytes()
+        let headers = ["content-type": "video/mp4", "accept-ranges": "bytes"]
+        guard let range = request.value(forHTTPHeaderField: "Range"), range.hasPrefix("bytes=") else {
+            return CameraHTTPResponse(statusCode: 200,
+                headers: headers.merging(["content-length": "\(bytes.count)"]) { _, new in new }, body: bytes)
+        }
+        let bounds = range.dropFirst(6).split(separator: "-", omittingEmptySubsequences: false)
+        guard bounds.count == 2, let start = Int(bounds[0]), start >= 0, start < bytes.count,
+              bounds[1].isEmpty || Int(bounds[1]) != nil else {
+            return CameraHTTPResponse(statusCode: 416, headers: ["content-range": "bytes */\(bytes.count)"])
+        }
+        let end = min(Int(bounds[1]) ?? bytes.count - 1, bytes.count - 1)
+        guard end >= start else { return CameraHTTPResponse(statusCode: 416) }
+        let payload = Data(bytes[start...end])
+        return CameraHTTPResponse(statusCode: 206,
+            headers: headers.merging([
+                "content-length": "\(payload.count)", "content-range": "bytes \(start)-\(end)/\(bytes.count)",
+            ]) { _, new in new }, body: payload)
     }
 
     private func statusJSON() -> [String: Any] {
