@@ -554,7 +554,8 @@ class DesktopBridgeClient(
                 else -> throw exception
             }
         } catch (exception: Exception) {
-            if (evidence.unresolved && (exception is IOException || exception.cause is org.json.JSONException)) {
+            if (evidence.unresolved && (exception is IOException || exception is org.json.JSONException ||
+                    exception.cause is org.json.JSONException)) {
                 throw RecordingCommandUnconfirmedException(command, exception)
             }
             throw exception
@@ -1093,7 +1094,7 @@ class DesktopBridgeClient(
             connected = body.optBoolean("connected", true),
             batteryLevel = battery.optNullableInt("level"),
             batteryStatus = battery.optString("status", "unknown"),
-            recording = body.optNullableBoolean("recording"),
+            recording = body.strictRecordingStatus(),
             mode = body.optString("mode", "unknown"),
             mediaAvailable = media.optNullableBoolean("available"),
             remainingMinutes = null,

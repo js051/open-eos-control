@@ -614,6 +614,61 @@ class CameraRecordingReviewRecoveryTest {
         assertEquals(listOf("start"), peer.recordingActions.toList())
     }
 
+    @Test fun malformedRecordingObservationsNeverClearAcknowledgedPendingOrReplacePriorSnapshot() = runBlocking {
+        connect(native = false)
+        for (command in RecordingCommand.entries) {
+            val previousRecording = model.uiState.value.status?.recording
+            peer.recordingJson.set("0")
+            model.toggleRecording()
+            awaitRecordingPending(command)
+            assertFalse(model.uiState.value.recordingCommandUnconfirmed)
+            assertEquals(previousRecording, model.uiState.value.status?.recording)
+            assertEquals(command == RecordingCommand.START, peer.recording.get())
+            val actions = peer.recordingActions.toList()
+            for (invalid in listOf("0", "1", "2", "\"true\"", "\"false\"", "\"unknown\"", "[]", "{}")) {
+                peer.recordingJson.set(invalid)
+                model.refresh()
+                assertTrue(pumpUntil { !model.uiState.value.busy })
+                assertEquals(invalid, command, model.uiState.value.pendingRecordingCommand)
+                assertFalse(invalid, model.uiState.value.recordingCommandUnconfirmed)
+                assertEquals(invalid, previousRecording, model.uiState.value.status?.recording)
+                assertEquals(actions, peer.recordingActions.toList())
+                assertEquals(CaptureReviewStatus.IDLE, model.uiState.value.captureReviewStatus)
+            }
+            peer.recordingJson.set(if (command == RecordingCommand.START) "true" else "false")
+            model.refresh()
+            assertTrue(pumpUntil { !model.uiState.value.busy && model.uiState.value.pendingRecordingCommand == null })
+            assertEquals(command == RecordingCommand.START, model.uiState.value.status?.recording)
+            assertEquals(actions, peer.recordingActions.toList())
+            peer.recordingJson.set(null)
+        }
+        assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
+    }
+
+    @Test fun malformedRefreshRetainsUnknownOwnerAndSnapshotUntilExplicitStop() = runBlocking {
+        connect(native = false)
+        peer.dropNextRecordingResponse.set(true)
+        model.toggleRecording()
+        awaitRecordingPending(RecordingCommand.START)
+        assertTrue(model.uiState.value.recordingCommandUnconfirmed)
+        assertEquals(false, model.uiState.value.status?.recording)
+        for (invalid in listOf("0", "1", "2", "\"false\"", "[]", "{}")) {
+            peer.recordingJson.set(invalid)
+            model.refresh()
+            assertTrue(pumpUntil { !model.uiState.value.busy })
+            assertTrue(invalid, model.uiState.value.recordingCommandUnconfirmed)
+            assertEquals(RecordingCommand.START, model.uiState.value.pendingRecordingCommand)
+            assertEquals(false, model.uiState.value.status?.recording)
+            assertEquals(listOf("start"), peer.recordingActions.toList())
+        }
+        peer.recordingJson.set(null)
+        model.toggleRecording()
+        assertTrue(pumpUntil { !model.uiState.value.busy && model.uiState.value.pendingRecordingCommand == null })
+        assertFalse(model.uiState.value.recordingCommandUnconfirmed)
+        assertFalse(peer.recording.get())
+        assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
+    }
+
     @Test fun appliedStartWithLostResponseCannotBeClearedByCachedFalseOrOldEventsAndNextTapStops() = runBlocking {
         connect()
         peer.enqueueRecordingEvent("stop")
@@ -846,6 +901,7 @@ private class RecordingReviewPeer {
     val writes = CopyOnWriteArrayList<String>()
     val recording = AtomicBoolean(false)
     val reportedRecording = AtomicReference<Boolean?>()
+    val recordingJson = AtomicReference<String?>()
     val unknownRecording = AtomicBoolean(false)
     val rejectStop = AtomicBoolean(false)
     val rejectStart = AtomicBoolean(false)
@@ -920,7 +976,7 @@ private class RecordingReviewPeer {
                     path == "/ccapi/info" -> json("""{"connected":true,"model":"Synthetic recording review","serial":"TEST-REC-REVIEW","api":"simulator"}""")
                     path == "/ccapi/status" -> {
                         val response = if (failStatus.get()) MockResponse().setResponseCode(503)
-                            else json("""{"connected":true,"recording":${if (unknownRecording.get()) "null" else reportedRecording.get() ?: recording.get()},"mode":"video","battery":{},"media":{},"exposure":{}}""")
+                            else json("""{"connected":true,"recording":${recordingJson.get() ?: if (unknownRecording.get()) "null" else reportedRecording.get() ?: recording.get()},"mode":"video","battery":{},"media":{},"exposure":{}}""")
                         hold(nextStatus)
                         response
                     }
