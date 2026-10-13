@@ -832,6 +832,8 @@ for (const language of ["en", "zh-TW"]) {
     batch: { pauseFirstWrite: true },
     run: async ({ page, simulatorOrigin, originalRequests, infoRequests, listingRequests }) => {
       await page.locator("#control-view .language-select").selectOption(language);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
       await page.click('.tab[data-view="media"]');
       await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 2);
       await page.click("#media-select-filtered");
@@ -846,6 +848,10 @@ for (const language of ["en", "zh-TW"]) {
         const store = OpenEOSMediaTransferHistory.createHistoryStore();
         const result = await store.list(); store.close(); return result;
       });
+      const geometry = await page.locator("#media-history-dialog").evaluate(dialog => ({ width: dialog.clientWidth, content: dialog.scrollWidth }));
+      assert.ok(geometry.content <= geometry.width + 1, "Source context must fit the narrow large-font dialog");
+      const listGeometry = await page.locator("#media-history-list").evaluate(list => ({ width: list.clientWidth, content: list.scrollWidth }));
+      assert.ok(listGeometry.content <= listGeometry.width + 1, "Source controls must not hide overflow inside the history list");
       const before = await readHistory();
       const traffic = { info: infoRequests.length, listing: listingRequests.length, original: originalRequests.length };
       assert.equal(await page.isDisabled("#media-continuation-start"), true);
