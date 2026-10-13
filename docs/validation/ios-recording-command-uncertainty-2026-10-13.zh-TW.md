@@ -62,6 +62,16 @@
 - **NOT_RUN**：iPhone／實體 EOS 相機、camera-hop 與 Bridge-hop 實際斷線驗收。
 - 下一個完整批次須執行 Core 的 `RecordingReadbackClientTests`、App 的 `RecordingReadbackRecoveryTests`、`CaptureMediaJourneyTests`、`ControlResponseOwnershipTests`、`URLSessionShutterWireTests` 的 REC transport 截斷回應與上限控制、既有必要 aggregate 及雙語 REC／影片原檔 UI 流程，結果綁定最終 head SHA。沒有這些結果之前只能稱為本地 implemented，不能稱 PR ready。
 
+### 2026-10-13 首輪完整分類 CI 與 body gate 修正候選
+
+原 head `c7f768a09277d9d4773f473de71269181d7a1f55`、run `38374172415` 的 Core job `115218341099` 在 09:09:50 UTC 失敗：348 個 tests 中，同一個 `testRecordingReaderCancellationAfterReceivedHeadersClosesPendingBodyWithoutReplay` 留下兩個 failure（其中一個 unexpected）。第一個是兩秒內未收到真實 header observer；隨後取消得到 URLSession -999。這個失敗保留，不能稱 Core 全綠。`RecordingReadbackClientTests` 的 18 個 tests 已通過，亦不能取代該失敗。
+
+最小候選只修 loopback fixture：回應明確宣告 `application/json`，送出兩個 bytes `{}`，但 Content-Length 仍是 64，剩餘 62 bytes 持續停住。測試仍必須觀察真實 client headers 才進入取消，並要求 bodyComplete=false、cancelled=true、socket EOF/RESET 及一次完整 POST。取消可能先於或晚於資料 callback，因此只接受原 prefix 的 0–2 bytes，逐 byte 核對。兩秒 expectations 與三秒 socket deadline 未增加。
+
+同一原 head 的 App job `115218341297` 已在 09:36:21 UTC 回報 TEST SUCCEEDED：App 414／414、UI 38／38；双語 REC→新影片原檔→分享→關閉→返回旅程在 09:22:35 通過。這些通過不消除 Core 的失敗，也不算本次 fixture 新候選的驗證。
+
+純 headers 為何未及時送達 observer 尚未確認；這是建立「headers 已到、body 尚未完成」受控狀態的 fixture 候選，不是 production 根因修復。獨立 source review 無 blocking finding；修後 Swift runtime **NOT_RUN**，待同批完整 CI。實體相機／iPhone 仍未驗。
+
 ## Release Assessment
 
 - 最新遠端 release：本工作不查遠端，整合時沿用父工作的已驗證基準。
