@@ -42,8 +42,11 @@ Release Assessment：可見的手動恢復能力在接受交付時屬 **minor**�
 
 ## 首次正常 CI 與取消責任修正（2026-10-13 UTC）
 
-原來源 `b11bf4b1132919898351f7a0181d49c519527a6e` 已正常推送原 PR #240。[CI 38432632605](https://github.com/js051/open-eos-control/actions/runs/38432632605) 的 Kotlin production／unit test 編譯完成；JVM 1198 例中 1 例失敗：`stoppedStoreReleasesQueuedContinuationAndClearsProcessOwnership` 在等待取消後回覆時產生 `UncompletedCoroutinesError`。API 34／36 在記錄時仍執行，不能先報整體通過。
+原來源 `b11bf4b1132919898351f7a0181d49c519527a6e` 已正常推送原 PR #240。[CI 38432632605](https://github.com/js051/open-eos-control/actions/runs/38432632605) 的 Kotlin production／unit test 編譯完成；JVM 1198 例中 1 例失敗：`stoppedStoreReleasesQueuedContinuationAndClearsProcessOwnership` 在等待取消後回覆時產生 `UncompletedCoroutinesError`。API 34／36 隨後均完成 370 例、2 失敗、0 skip；完整 run 為 FAILURE。
 
 來源核對確認 Channel 的 prompt cancellation 邊界：已交付給暫停 receiver、尚未進入 actor body 的 command 可以在取消時離開 queue，既有 completion drain 因而無法完成其獨立 deferred。最小修正加入 `onUndeliveredElement`，與原 buffered command drain 共用純同步 STOPPED 拒絕；尚未執行的 admission 回覆 planAbsent，已開始／已保存操作不走此 callback。保留 stopped state、active ownership 清除和原持久化／clear 語意。
 
 原受控負例現在於 scheduler drain 後先斷言 pending 已完成，再讀原 STOPPED 結果；失敗時取消自有 pending 防止測試本身再等完整一分鐘。未增加 timeout、刪除斷言或修改必要 CI。此修正目前僅來源審查／diff check，新 head runtime 尚待同群正常 CI；原失敗完整保留。
+
+
+同輪兩 API 的失敗完全相同：`failedContinuationAdmissionNeverFallsBackToUnrecordedGalleryDownload` 原精確本地化文字被通用 formatter 加上 `MediaWorklistAdmissionException:`；修正僅讓這個由 App 自產的本地化 admission 例外顯示原 message，其餘例外診斷、回覆歸屬與 NotStarted 不變。`coldFiftyRowWorklistRequiresManualMappingAndUnknownCheckBeforeOnlyTwoNewOriginals` 對尚未 materialize 的 LazyColumn 第三個候選列直接 `performScrollTo`，找不到節點；改從既有列表的 `performScrollToNode` 取得該列再原 click。沒有隱藏列、增加時間或放寬原 2 GET／2 保存／舊清單不變斷言。這兩項與取消責任修正同批續驗，尚未取得新版 runtime 結果。
