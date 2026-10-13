@@ -159,6 +159,8 @@ public actor DesktopBridgeClient {
 
     public private(set) var recordingCommandEvidence: CameraRecordingCommandEvidence?
     private var sessionGeneration = UUID()
+    private var mediaListingOwner: UUID?
+    private var mediaListingStream: CameraHTTPStreamResponse?
     private var initializationToken: UUID?
     private var initializationCancelled = false
     private var isClosing = false
@@ -335,6 +337,9 @@ public actor DesktopBridgeClient {
         initializationCancelled = true
         guard let id = sessionID else { return completedCloseState }
         isClosing = true
+        mediaListingOwner = nil
+        mediaListingStream?.cancel()
+        mediaListingStream = nil
         focusStartTask?.cancel()
         if let start = focusStartTask { _ = await start.result }
         if let hold = focusHold { try? await releaseFocusHold(hold) }
@@ -1213,12 +1218,81 @@ public actor DesktopBridgeClient {
         guard maximumItems.map({ (1...1_000).contains($0) }) ?? true else {
             throw DesktopBridgeError.invalidResponse("maximumItems must be from 1 through 1000.")
         }
+        try Task.checkCancellation()
+        guard let sessionID, !isClosing else { throw DesktopBridgeError.notInitialized }
+        let generation = sessionGeneration
+        let owner = UUID()
+        mediaListingOwner = owner
+        mediaListingStream?.cancel()
+        mediaListingStream = nil
+        defer {
+            if mediaListingOwner == owner {
+                mediaListingOwner = nil
+                mediaListingStream = nil
+            }
+        }
         let queryItems = maximumItems.map { [URLQueryItem(name: "limit", value: String($0))] } ?? []
-        let body = try await getJSON(sessionEndpoint(["media"], queryItems: queryItems))
-        let items = body.array("items").compactMap { ($0 as? BridgeJSON).flatMap(Self.parseMediaItem) }
-        let boundedItems = maximumItems.map { Array(items.prefix($0)) } ?? items
-        await onProgress(boundedItems)
-        return boundedItems
+        let url = try sessionEndpoint(["media"], queryItems: queryItems)
+        var request = makeRequest(url: url, method: "GET", accept: BridgeMediaListingDecoder.mediaType)
+        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+        let response = try await transport.openStream(request)
+        defer { response.cancel() }
+        try requireMediaListingOwner(owner, generation: generation)
+        mediaListingStream = response
+        return try await withTaskCancellationHandler {
+            let mediaType = response.header("content-type")?.split(separator: ";", maxSplits: 1)
+                .first?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if response.statusCode == 200, mediaType == BridgeMediaListingDecoder.mediaType {
+                var decoder = BridgeMediaListingDecoder(sessionID: sessionID, limit: maximumItems)
+                for try await chunk in response.chunks {
+                    try requireMediaListingOwner(owner, generation: generation)
+                    for byte in chunk {
+                        if let snapshot = try decoder.consume(byte, parseItem: Self.parseMediaItem) {
+                            try requireMediaListingOwner(owner, generation: generation)
+                            await onProgress(snapshot)
+                            try requireMediaListingOwner(owner, generation: generation)
+                        }
+                    }
+                }
+                try requireMediaListingOwner(owner, generation: generation)
+                return try decoder.finish()
+            }
+            // Compatibility is parsed from this same response. Never replay a traversal.
+            var data = Data()
+            let maximumBytes = (200..<300).contains(response.statusCode)
+                ? BridgeMediaListingDecoder.maximumSnapshotBytes : Self.maximumErrorBodyBytes
+            for try await chunk in response.chunks {
+                try requireMediaListingOwner(owner, generation: generation)
+                guard chunk.count <= maximumBytes - data.count else {
+                    throw DesktopBridgeError.invalidResponse("Desktop Bridge listing response exceeded its byte limit.")
+                }
+                data.append(chunk)
+            }
+            try requireMediaListingOwner(owner, generation: generation)
+            let buffered = CameraHTTPResponse(statusCode: response.statusCode, headers: response.headers, body: data)
+            guard (200..<300).contains(response.statusCode) else {
+                throw Self.httpError(response: buffered, method: "GET", url: url)
+            }
+            guard mediaType == nil || mediaType == "application/json",
+                  let body = try JSONSerialization.jsonObject(with: data) as? BridgeJSON,
+                  let raw = body["items"] as? [Any] else {
+                throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid media JSON.")
+            }
+            let items = raw.compactMap { ($0 as? BridgeJSON).flatMap(Self.parseMediaItem) }
+            let boundedItems = maximumItems.map { Array(items.prefix($0)) } ?? items
+            await onProgress(boundedItems)
+            try requireMediaListingOwner(owner, generation: generation)
+            return boundedItems
+        } onCancel: {
+            response.cancel()
+        }
+    }
+
+    private func requireMediaListingOwner(_ owner: UUID, generation: UUID) throws {
+        try Task.checkCancellation()
+        guard !isClosing, sessionGeneration == generation, mediaListingOwner == owner else {
+            throw DesktopBridgeError.sessionChanged
+        }
     }
 
     public func mediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {
@@ -2058,7 +2132,8 @@ public actor DesktopBridgeClient {
     }
 
     private static func parseMediaItem(_ item: BridgeJSON) -> CameraMediaItem? {
-        guard let id = item.nonEmptyString("id"), let name = item.nonEmptyString("name") else { return nil }
+        guard let id = item["id"] as? String, !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let name = item["name"] as? String, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         let rating = item.int("rating").flatMap { (0...5).contains($0) ? $0 : nil }
         let rotation = item.int("rotationDegrees").flatMap { mediaRotations.contains($0) ? $0 : nil }
         let archived = item.optionalBool("archived")

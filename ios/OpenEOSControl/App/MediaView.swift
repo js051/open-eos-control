@@ -28,6 +28,11 @@ struct MediaView: View {
     @State private var dateFilterEnd = Date()
     @State private var dateFilterTimeZone = TimeZone.current
 
+    private struct ThumbnailDemand: Hashable {
+        let id: String
+        let deferred: Bool
+    }
+
     private let mediaColumns = [
         GridItem(.adaptive(minimum: 156, maximum: 240), spacing: 10),
     ]
@@ -71,7 +76,9 @@ struct MediaView: View {
                                 LazyVGrid(columns: mediaColumns, alignment: .leading, spacing: 10) {
                                     ForEach(group.items, id: \.idBytes) { item in
                                         mediaCard(item)
-                                            .task(id: item.id) { await camera.loadMediaThumbnail(item) }
+                                            .task(id: ThumbnailDemand(id: item.id, deferred: camera.mediaListingDefersThumbnails)) {
+                                                await camera.loadMediaThumbnail(item)
+                                            }
                                     }
                                 }
                             }

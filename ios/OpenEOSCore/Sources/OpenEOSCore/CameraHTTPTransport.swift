@@ -326,7 +326,10 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
     }
 
     public func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
-        let handle = CameraHTTPStreamTaskHandle(configuration: streamConfiguration)
+        let handle = CameraHTTPStreamTaskHandle(
+            configuration: streamConfiguration,
+            boundedListing: request.value(forHTTPHeaderField: "Accept") == BridgeMediaListingDecoder.mediaType
+        )
         return try await withTaskCancellationHandler {
             try await handle.start(request)
         } onCancel: {
@@ -482,14 +485,18 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
     private var responseDelivered = false
     private var cancellationRequested = false
     private let maximumBytes: Int?
+    private let boundedListing: Bool
     private var receivedBytes = 0
     private var terminalResultRecorded = false
     private var completedNormally = false
 
-    init(configuration: URLSessionConfiguration, maximumBytes: Int? = nil) {
+    init(configuration: URLSessionConfiguration, maximumBytes: Int? = nil, boundedListing: Bool = false) {
         self.maximumBytes = maximumBytes
+        self.boundedListing = boundedListing
         self.configuration = configuration.copy() as! URLSessionConfiguration
-        let pair = AsyncThrowingStream<Data, Error>.makeStream()
+        let pair = AsyncThrowingStream<Data, Error>.makeStream(
+            bufferingPolicy: boundedListing ? .bufferingOldest(64) : .unbounded
+        )
         chunks = pair.stream
         chunksContinuation = pair.continuation
         super.init()
@@ -557,6 +564,14 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
         completionHandler(.allow)
     }
 
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(boundedListing ? nil : request)
+    }
+
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         lock.lock()
         let exceedsLimit = maximumBytes.map { data.count > $0 - receivedBytes } ?? false
@@ -566,7 +581,28 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
             finish(error: CCAPIError.invalidResponse("Recording response exceeded the 32 KiB limit."), cancelTask: true)
             return
         }
-        chunksContinuation.yield(data)
+        if boundedListing {
+            guard data.count <= 1024 * 1024 else {
+                finish(error: DesktopBridgeError.invalidResponse("Listing transport chunk exceeded its byte limit."), cancelTask: true)
+                return
+            }
+            // Bound queued storage to 64 × 64 KiB. Overflow is a failure, never loss.
+            var start = data.startIndex
+            while start < data.endIndex {
+                let end = data.index(start, offsetBy: min(65_536, data.distance(from: start, to: data.endIndex)))
+                switch chunksContinuation.yield(Data(data[start..<end])) {
+                case .enqueued: break
+                case .dropped:
+                    finish(error: DesktopBridgeError.invalidResponse("Listing reader fell behind its bounded buffer."), cancelTask: true)
+                    return
+                case .terminated: return
+                @unknown default: return
+                }
+                start = end
+            }
+        } else {
+            chunksContinuation.yield(data)
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
