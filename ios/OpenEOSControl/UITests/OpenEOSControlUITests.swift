@@ -1501,8 +1501,39 @@ final class OpenEOSControlUITests: XCTestCase {
             _ = try XCTUnwrap(waitForLabel(latest, containing: "EARLIER_RECORDING.MP4", timeout: 30) ? true : nil)
             let mode = app.segmentedControls["capture-mode-picker"]
             _ = try XCTUnwrap(waitForInteraction(mode.buttons[videoMode], timeout: 8) ? true : nil)
+            let photo = mode.buttons[language == "english" ? "Photo" : "拍照"]
+            XCTAssertTrue(photo.isSelected, "The mode switch starts with the Photo segment selected")
+            XCTAssertFalse(mode.buttons[videoMode].isSelected)
             try tapForAsyncTest(mode.buttons[videoMode])
-            try await waitForSimulatorState { state in state["movie_mode"] as? String == "on" }
+            do {
+                try await waitForSimulatorState { state in state["movie_mode"] as? String == "on" }
+            } catch {
+                // Preserve the original failure. These observations never turn a late state into a pass.
+                var fields = ["language=\(language)", "record-button-exists=\(app.buttons["record-button"].exists)"]
+                for (name, segment) in [("photo", photo), ("video", mode.buttons[videoMode])] {
+                    let exists = segment.exists
+                    fields.append("\(name)-exists=\(exists)")
+                    if exists {
+                        fields.append("\(name)-selected=\(segment.isSelected)")
+                        fields.append("\(name)-enabled=\(segment.isEnabled)")
+                    }
+                }
+                let alert = app.alerts.firstMatch
+                let alertExists = alert.exists
+                fields.append("alert-exists=\(alertExists)")
+                if alertExists {
+                    for index in 0..<2 {
+                        let text = alert.staticTexts.element(boundBy: index)
+                        if text.exists { fields.append("alert-text-\(index)=\(String(text.label.prefix(512)))") }
+                    }
+                }
+                let attachment = XCTAttachment(string: fields.joined(separator: "\n"))
+                attachment.name = "recording-mode-failure-\(language)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                addScreenshot(name: "recording-mode-failure-\(language)")
+                throw error
+            }
             let record = app.buttons["record-button"]
             _ = try XCTUnwrap(waitForInteraction(record, timeout: 8) ? true : nil)
             try tapForAsyncTest(record)
