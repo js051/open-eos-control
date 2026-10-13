@@ -45,4 +45,10 @@
 
 ## Release Assessment
 
+### 首輪 CI 與靜態契約測試修正
+
+head `8a6cc8d4f95d8847ee03c879fc3e2ebba7880de7` 的正常 CI `38391774253`：browser control、Windows bundle、JVM／APK 與 secret scan 通過，但 desktop bridge contract 在 `tests/test_static_ui.py:271` 失敗。該檢查仍要求舊字串 `await refreshSession({ quiet: true })`，未包含本批新增的 `eventGeneration: generation` 參數；原失敗保留。
+
+最小修正只將此一字串期待對齊帶有 event owner 的確切 call，所有 API path、authentication 不持久化及其他原斷言保留。用標準 Python 載入原測試檔並逐一執行全部 6 個無參數 test 函式，6／6 通過；這不是完整 pytest／backend suite 或新 exact-head CI。產品 JavaScript 未再更動，完整 28 模組結果仍對應同一來源。修正候選尚未推送，不能稱原 CI 失敗已在遠端解除。
+
 沿用原 PR 的發布基準 v0.12.0 Development Preview；本修復是向後相容的可靠性 patch。原 PR 的完整媒體新能力仍屬 minor，不能以此降低整批影響。版本、既有 release HOLD、必要安全／驗收 gate 及真機證據界線不變；本地狀態為 implemented，PR ready 仍須推送後的精確 head `ci-complete` 成功。
