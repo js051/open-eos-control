@@ -600,24 +600,24 @@
 "media_delivery_history_clear_confirm" = "移除歷史紀錄與 App 副本";
 
 "foreground_media_title" = "前景 JPEG 副本";
-"foreground_media_help" = "直接連線至 CCAPI 後，按「開始」將新偵測到的 JPEG 原檔保留在 App 中。初次檢查時已存在的檔案會略過。";
+"foreground_media_help" = "為本次執行選擇「檔案」資料夾。新偵測到的 JPEG 原始檔會先保留在 App，再複製至您選擇的本機或雲端供應商。首次檢查時已存在的檔案不會匯入。";
 "foreground_media_foreground_help" = "請保持 App 在前景。關閉此面板仍會繼續；離開 App 就會停止。不會自動恢復或重試。";
-"foreground_media_counts" = "本次：%d 份已保留於 App · %d 份待完成";
-"foreground_media_start" = "開始準備 JPEG";
-"foreground_media_stop" = "停止準備";
+"foreground_media_counts" = "本次：App 保留 %d · 複製至檔案 %d · 未確認 %d · 等待 %d";
+"foreground_media_start" = "選擇檔案資料夾並開始";
+"foreground_media_stop" = "停止匯入";
 "foreground_media_stopping" = "正在停止…";
-"foreground_media_start_unavailable" = "請直接連線至 CCAPI，並先完成其他相機操作。";
-"foreground_media_destination_help" = "副本保留在此 App。請開啟「最近準備的原檔」，選擇匯出至「檔案」或儲存及分享。分享不代表已確認「檔案」、「照片」或其他目的地保存了原檔。";
+"foreground_media_start_unavailable" = "請直接以 CCAPI 連線，並等待先前的檔案作業實際結束後再開始。";
+"foreground_media_destination_help" = "每次開始都需重新選擇資料夾，App 不會保存存取授權。「最近原始檔」分別記錄 App 準備結果與檔案複製結果；複製完成不代表雲端同步完成。";
 "foreground_media_temporary_count" = "%d 份暫存原檔可用";
 "foreground_media_temporary_help" = "停止後可將目前的暫存原檔匯出至「檔案」或分享。可供日後使用的 App 副本請查看「最近準備的原檔」；即使無法保留副本，此處仍可能有可用的原檔。請先匯出或分享再重新開始或斷線，這兩項操作會清除目前的暫存結果。";
 "foreground_media_share_temporary" = "分享目前的暫存原檔";
 "foreground_media_share_unavailable" = "暫存原檔已無法分享。請查看「最近準備的原檔」是否有保留的 App 副本。";
 "foreground_media_limits_title" = "適用範圍與上限";
 "foreground_media_limits_files" = "僅支援直接 CCAPI 連線的 JPEG。記憶卡完整清單不得超過 1,000 個檔案。每次最多記住 4,096 個遇過的檔案、排入 20 份 JPEG，並保留 100 份原檔。";
-"foreground_media_limits_history" = "共用歷史紀錄最多保留 100 次準備嘗試及 512 MiB 的 App 副本；既有紀錄也計入上限。";
-"foreground_media_limits_stop" = "新檔案須在偵測後 30 秒內通過就緒檢查。檔案檢查、傳輸或保留結果一旦無法確認就會停止。不會自動重試或恢復，也不會觸發快門、變更設定或執行其他相機控制。";
-"foreground_media_banner_title" = "前景 JPEG 準備中";
-"foreground_media_details" = "查看準備狀態";
+"foreground_media_limits_history" = "共用歷史最多保留 100 筆準備嘗試、100 筆關聯的檔案嘗試與 512 MiB 的 App 副本。既有歷史也計入限制。";
+"foreground_media_limits_stop" = "新檔案須在 30 秒內通過就緒檢查。檢查、傳輸、儲存或檔案複製首次出現不確定結果就會停止；不會自動重試或恢復。已開始的複製可能在停止後完成。";
+"foreground_media_banner_title" = "前景 JPEG 匯入中";
+"foreground_media_details" = "查看匯入";
 "foreground_media_state_idle" = "尚未開始";
 "foreground_media_state_checking" = "正在確認支援範圍…";
 "foreground_media_state_baseline" = "正在檢查既有檔案…";
@@ -627,8 +627,8 @@
 "foreground_media_state_preparing" = "正在將原檔保留於 App…";
 "foreground_media_state_stopped" = "已停止";
 "foreground_media_state_failed" = "已停止，請檢查";
-"foreground_media_reason_user" = "已依你的操作停止。按「開始」可啟動新一輪準備。";
-"foreground_media_reason_background" = "App 離開前景後已停止。按「開始」可啟動新一輪準備。";
+"foreground_media_reason_user" = "已依您的操作停止。請重新選擇檔案資料夾以開始新一輪。";
+"foreground_media_reason_background" = "App 離開前景時已停止。請重新選擇檔案資料夾以開始新一輪。";
 "foreground_media_reason_session" = "連線已變更或結束。請確認連線後再開始。";
 "foreground_media_reason_unsupported" = "需要直接 CCAPI 連線，且相機須支援完整的素材讀取。";
 "foreground_media_reason_inventory" = "無法確認相機的完整檔案清單。請檢查相機與連線後再開始。";
@@ -763,3 +763,35 @@
 "native_monitor_stale" = "取樣監看 · 影像已過期";
 "native_monitor_lut_inactive" = "原生 RTP 未套用已載入的 LUT";
 "native_monitor_scope_notice" = "原生 RTP 使用 SDR 預覽取樣監看，每秒最多 4 次，取樣於 1 秒後失效。不支援 LUT 預覽；已載入的 LUT 會保留但不套用。";
+
+"foreground_media_state_copying" = "正在將保留的原始檔複製至檔案…";
+
+"foreground_media_reason_delivery" = "檔案交付或歷史紀錄需要檢查；App 保留的原始檔獨立存在。再次開始前，請檢查最近原始檔與所選資料夾。";
+
+"foreground_files_destination" = "本次資料夾：%@";
+
+"foreground_files_drain_help" = "已開始的檔案作業可能仍在使用原始檔。停止會阻擋後續複製；必須等這次作業實際回傳，才能開始新一輪。";
+
+"foreground_files_result_started" = "檔案作業已開始，尚待完成結果";
+
+"foreground_files_result_copied" = "檔案複製作業已完成";
+
+"foreground_files_result_notCopied" = "未完成檔案複製";
+
+"foreground_files_result_unconfirmed" = "檔案結果未確認，可能留下部分或完整檔案";
+
+"foreground_files_reason_cancelled" = "已在複製開始前停止。";
+
+"foreground_files_reason_sourceUnavailable" = "無法確認保留的來源檔案未被變更。若複製已開始，請檢查目的地檔案。";
+
+"foreground_files_reason_permissionDenied" = "無法存取資料夾。下次執行請重新選擇資料夾。";
+
+"foreground_files_reason_coordination" = "供應商未允許此次複製作業開始。";
+
+"foreground_files_reason_collision" = "產生的檔名已存在；未覆寫該檔案，也未重試此次複製。";
+
+"foreground_files_reason_copyFailed" = "複製已開始，但未成功回傳。App 未移除任何外部檔案。";
+
+"foreground_files_reason_interrupted" = "上次程序結束前未取得最終結果。請在檔案中檢查這次嘗試的檔名。";
+
+"foreground_files_history_help" = "此為本機作業紀錄，不代表雲端已同步或目的地目前仍可使用。清除 App 歷史不會刪除檔案中的副本。";

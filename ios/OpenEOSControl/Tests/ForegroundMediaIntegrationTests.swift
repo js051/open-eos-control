@@ -1,6 +1,8 @@
 import Foundation
 import OpenEOSCore
 import XCTest
+import UIKit
+import UniformTypeIdentifiers
 
 @testable import OpenEOSControl
 
@@ -9,6 +11,148 @@ import XCTest
 /// controlled; no test replaces the foreground admission/prepare callbacks.
 @MainActor
 final class ForegroundMediaIntegrationTests: XCTestCase {
+    func testFolderSelectionIsOneShotAndStaleCancelBackgroundOrSessionCallbacksCannotStart() async throws {
+        try await withFixture(peerCount: 2) { fixture in
+            let before = await fixture.peer.requests()
+            fixture.state.chooseForegroundFolder()
+            let cancelled = try XCTUnwrap(fixture.state.foregroundFolderSelection)
+            let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder])
+            ForegroundFolderCoordinator(selectionID: cancelled.id, camera: fixture.state)
+                .documentPickerWasCancelled(picker)
+            XCTAssertFalse(fixture.state.acceptForegroundFolder(fixture.folder, selectionID: cancelled.id))
+            fixture.state.chooseForegroundFolder()
+            let background = try XCTUnwrap(fixture.state.foregroundFolderSelection)
+            fixture.state.setApplicationActive(false)
+            fixture.state.setApplicationActive(true)
+            XCTAssertFalse(fixture.state.acceptForegroundFolder(fixture.folder, selectionID: background.id))
+            XCTAssertFalse(fixture.state.foregroundMedia.isRunning)
+            let after = await fixture.peer.requests()
+            XCTAssertEqual(after, before, "Choosing or cancelling never reads the camera or probes the folder")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.folder.path))
+            fixture.state.chooseForegroundFolder()
+            let retired = try XCTUnwrap(fixture.state.foregroundFolderSelection)
+            let oldBinding = ForegroundFolderPicker.presentationBinding(camera: fixture.state)
+            let oldCoordinator = ForegroundFolderCoordinator(selectionID: retired.id, camera: fixture.state)
+            let oldTeardown = ForegroundFolderCoordinator(selectionID: retired.id, camera: fixture.state)
+            await fixture.state.disconnect()
+            try await fixture.connectNextPeer()
+            fixture.state.chooseForegroundFolder()
+            let current = try XCTUnwrap(fixture.state.foregroundFolderSelection)
+            oldBinding.wrappedValue = nil
+            oldCoordinator.documentPicker(picker, didPickDocumentsAt: [fixture.folder])
+            oldTeardown.cancel()
+            XCTAssertFalse(fixture.state.acceptForegroundFolder(fixture.folder, selectionID: retired.id))
+            fixture.state.cancelForegroundFolder(retired.id)
+            XCTAssertEqual(fixture.state.foregroundFolderSelection?.id, current.id)
+            fixture.state.cancelForegroundFolder(current.id)
+        }
+    }
+
+    func testSelectedFolderGetsOneCopyFromOneOriginalAndRelaunchHistoryKeepsBothFacts() async throws {
+        try await withFixture { fixture in
+            let task = try await fixture.startAndEstablishBaseline(toFiles: true)
+            try await fixture.discover("NEW.JPG")
+            try await fixture.tickAndWait(seconds: 1)
+            XCTAssertEqual(fixture.state.foregroundMedia.preparedCount, 1)
+            XCTAssertEqual(fixture.state.foregroundMedia.copiedCount, 1)
+            XCTAssertEqual(fixture.state.foregroundMedia.unconfirmedCount, 0)
+            let requests = await fixture.peer.originalRequests()
+            XCTAssertEqual(requests.count, 1)
+            let history = await MediaDeliveryStore(root: fixture.root).snapshot()
+            XCTAssertEqual(history.records.map(\.status), [.prepared])
+            XCTAssertEqual(history.externalAttempts.map(\.status), [.copied])
+            let attempt = try XCTUnwrap(history.externalAttempts.first)
+            XCTAssertEqual(attempt.receiptID, history.records.first?.id)
+            XCTAssertEqual(try Data(contentsOf: fixture.folder.appendingPathComponent(attempt.filename)), ForegroundIntegrationPeer.original)
+            XCTAssertNil(fixture.state.foregroundFolderSelection)
+            try await fixture.stopAndDrain(task)
+            XCTAssertFalse(fixture.state.foregroundFiles.isWriting)
+            let next = try await fixture.startAndEstablishBaseline(toFiles: true)
+            try await fixture.tickAndWait(seconds: 5)
+            let afterRestart = await fixture.peer.originalRequests()
+            XCTAssertEqual(afterRestart.count, 1, "Fresh consent and baseline never backfill a prior original")
+            XCTAssertEqual(fixture.state.foregroundMedia.copiedCount, 0)
+            try await fixture.stopAndDrain(next)
+        }
+    }
+
+    func testFilesFailurePreservesPreparedCountAndStopsWithoutRetry() async throws {
+        var access = ForegroundFilesSpy().access()
+        access.copy = { _, _ in throw CocoaError(.fileWriteOutOfSpace) }
+        try await withFixture(filesAccess: access) { fixture in
+            let task = try await fixture.startAndEstablishBaseline(toFiles: true)
+            try await fixture.discover("NEW.JPG")
+            try await fixture.tick(seconds: 1)
+            try await fixture.drain(task)
+            XCTAssertEqual(fixture.state.foregroundMedia.preparedCount, 1)
+            XCTAssertEqual(fixture.state.foregroundMedia.copiedCount, 0)
+            XCTAssertEqual(fixture.state.foregroundMedia.unconfirmedCount, 1)
+            XCTAssertEqual(fixture.state.foregroundMedia.reason, .delivery)
+            let snapshot = await fixture.store.snapshot()
+            XCTAssertEqual(snapshot.records.map(\.status), [.prepared])
+            XCTAssertEqual(snapshot.externalAttempts.map(\.status), [.unconfirmed])
+            let requests = await fixture.peer.originalRequests()
+            XCTAssertEqual(requests.count, 1)
+        }
+    }
+
+    func testStopBackgroundDisconnectAndClearDrainProviderWithoutOverlappingOrLosingLateSuccess() async throws {
+        for interruption in ["stop", "background", "disconnect", "clear"] {
+            let gate = ForegroundFilesGate()
+            defer { gate.release() }
+            let spy = ForegroundFilesSpy()
+            var access = spy.access()
+            access.copy = { source, destination in
+                // Clear must leave the production worker's own lease alive:
+                // no test variable owns that lease, and bytes are read later.
+                if interruption == "clear" { gate.enter() }
+                try FileManager().copyItem(at: source, to: destination)
+                if interruption != "clear" { gate.enter() }
+            }
+            try await withFixture(peerCount: 2, filesAccess: access) { fixture in
+                defer { gate.release() }
+                let task = try await fixture.startAndEstablishBaseline(toFiles: true)
+                try await fixture.discover("LATE.JPG")
+                try await fixture.tick(seconds: 1)
+                do { try await integrationWait { gate.entered } }
+                catch { gate.release(); throw error }
+                XCTAssertFalse(fixture.state.isBusy(.media), "A provider stall must not hold camera controls")
+                switch interruption {
+                case "background": fixture.state.setApplicationActive(false)
+                case "disconnect":
+                    await fixture.state.disconnect()
+                    try await fixture.connectNextPeer(expectForegroundReady: false)
+                case "clear": await fixture.state.clearMediaDeliveryHistory()
+                default: fixture.state.stopForegroundMedia()
+                }
+                XCTAssertTrue(fixture.state.foregroundFiles.isWriting)
+                XCTAssertFalse(fixture.state.canStartForegroundMedia)
+                XCTAssertFalse(fixture.state.startForegroundMedia(folder: fixture.folder))
+                XCTAssertEqual(spy.scopeCounts, [1, 0])
+                gate.release()
+                try await fixture.drain(task)
+                XCTAssertFalse(fixture.state.foregroundFiles.isWriting)
+                XCTAssertEqual(spy.scopeCounts, [1, 1])
+                let history = await fixture.store.snapshot()
+                if interruption == "clear" {
+                    XCTAssertTrue(history.records.isEmpty)
+                    XCTAssertTrue(history.externalAttempts.isEmpty)
+                    XCTAssertEqual(fixture.state.foregroundMedia.copiedCount, 0)
+                    let files = try FileManager.default.contentsOfDirectory(at: fixture.folder, includingPropertiesForKeys: nil)
+                    XCTAssertEqual(files.count, 1)
+                    XCTAssertEqual(try Data(contentsOf: XCTUnwrap(files.first)), ForegroundIntegrationPeer.original)
+                } else {
+                    XCTAssertEqual(history.records.map(\.status), [.prepared])
+                    XCTAssertEqual(history.externalAttempts.map(\.status), [.copied])
+                    XCTAssertEqual(fixture.state.foregroundMedia.copiedCount, interruption == "disconnect" ? 0 : 1)
+                }
+                if interruption == "background" { fixture.state.setApplicationActive(true) }
+                XCTAssertFalse(fixture.state.foregroundMedia.isRunning)
+                XCTAssertNil(fixture.state.foregroundFolderSelection)
+            }
+        }
+    }
+
     func testNewJPEGIsRetainedOnlyAfterBaselineAndTwoFreshReadsAndIsNotBackfilledOnRestart() async throws {
         try await withFixture(initialNames: ["EXISTING.JPG"]) { fixture in
             let task = try await fixture.startAndEstablishBaseline()
@@ -488,11 +632,13 @@ final class ForegroundMediaIntegrationTests: XCTestCase {
         initialNames: [String] = [], limits: MediaDeliveryLimits = .production,
         replyStage: MediaDeliveryReplyStage? = nil, peerCount: Int = 1,
         liveView: Bool = false, holdLatestOnConnect: Bool = false,
+        filesAccess: ForegroundFilesAccess = ForegroundFilesSpy().access(),
         faultInjector: @escaping MediaDeliveryStore.FaultInjector = { _ in },
         _ body: @MainActor (ForegroundIntegrationFixture) async throws -> Void
     ) async throws {
         let fixture = ForegroundIntegrationFixture(initialNames: initialNames, limits: limits,
-            replyStage: replyStage, peerCount: peerCount, liveView: liveView, faultInjector: faultInjector)
+            replyStage: replyStage, peerCount: peerCount, liveView: liveView, faultInjector: faultInjector,
+            filesAccess: filesAccess)
         do {
             try await fixture.connectNextPeer(holdLatest: holdLatestOnConnect)
             try await body(fixture)
@@ -526,6 +672,7 @@ private func integrationWait(
 private final class ForegroundIntegrationFixture {
     let state: CameraAppState
     let root: URL
+    var folder: URL { root.appendingPathExtension("SelectedFiles") }
     let store: MediaDeliveryStore
     let replyGate: ForegroundIntegrationReplyGate
     let ticker: ForegroundIntegrationTicker
@@ -536,7 +683,8 @@ private final class ForegroundIntegrationFixture {
     var peer: ForegroundIntegrationPeer { peers[activePeer] }
 
     init(initialNames: [String], limits: MediaDeliveryLimits, replyStage: MediaDeliveryReplyStage?,
-         peerCount: Int, liveView: Bool, faultInjector: @escaping MediaDeliveryStore.FaultInjector) {
+         peerCount: Int, liveView: Bool, faultInjector: @escaping MediaDeliveryStore.FaultInjector,
+         filesAccess: ForegroundFilesAccess) {
         root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
             .appendingPathComponent("ForegroundIntegration-\(UUID().uuidString)", isDirectory: true)
         store = MediaDeliveryStore(root: root, limits: limits, faultInjector: faultInjector)
@@ -552,11 +700,12 @@ private final class ForegroundIntegrationFixture {
         let defaults = UserDefaults(suiteName: "ForegroundIntegrationTests.\(UUID().uuidString)")!
         state = CameraAppState(defaults: defaults, sessionFactory: {
             .ccapi(try CCAPIClient(baseURL: "http://192.0.2.1:8080", mode: .camera, transport: remaining.removeFirst()))
-        }, mediaDeliveryStore: store, mediaDeliveryReplyDelay: { await gate.enter($0) }, foregroundMedia: controller)
+        }, mediaDeliveryStore: store, mediaDeliveryReplyDelay: { await gate.enter($0) }, foregroundMedia: controller,
+           foregroundFiles: ForegroundFilesDelivery(access: filesAccess))
         state.autoRefresh = false
     }
 
-    func connectNextPeer(holdLatest: Bool = false) async throws {
+    func connectNextPeer(holdLatest: Bool = false, expectForegroundReady: Bool = true) async throws {
         activePeer += 1
         if holdLatest { await peer.holdNextOrdinaryListing("connect-latest") }
         await state.connect()
@@ -572,13 +721,21 @@ private final class ForegroundIntegrationFixture {
         state.startMediaLibraryLoad()
         try await integrationWait { self.state.mediaLibraryLoadStatus == .complete }
         XCTAssertFalse(state.isBusy(.media))
-        XCTAssertTrue(state.canStartForegroundMedia)
+        XCTAssertEqual(state.canStartForegroundMedia, expectForegroundReady)
     }
 
     func track(_ task: Task<Void, Never>) { tasks.append(task) }
 
-    func startAndEstablishBaseline() async throws -> Task<Void, Never> {
-        XCTAssertTrue(state.startForegroundMedia())
+    func startAndEstablishBaseline(toFiles: Bool = false) async throws -> Task<Void, Never> {
+        if toFiles {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            state.chooseForegroundFolder()
+            let selection = try XCTUnwrap(state.foregroundFolderSelection)
+            XCTAssertTrue(state.acceptForegroundFolder(folder, selectionID: selection.id))
+            XCTAssertFalse(state.acceptForegroundFolder(folder, selectionID: selection.id), "Picker callbacks are single-use")
+        } else {
+            XCTAssertTrue(state.startForegroundMedia())
+        }
         let task = try XCTUnwrap(state.foregroundMedia.task)
         track(task)
         try await waitForSleep()
@@ -639,6 +796,7 @@ private final class ForegroundIntegrationFixture {
             }
         }
         if FileManager.default.fileExists(atPath: root.path) { try FileManager.default.removeItem(at: root) }
+        if FileManager.default.fileExists(atPath: folder.path) { try FileManager.default.removeItem(at: folder) }
     }
 }
 

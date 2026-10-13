@@ -226,6 +226,8 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaDeliveryHistoryWarning = false
     @Published private(set) var mediaBatchWorklistWarning = false
     let foregroundMedia: ForegroundMediaController
+    let foregroundFiles: ForegroundFilesDelivery
+    @Published private(set) var foregroundFolderSelection: ForegroundFolderSelection?
     @Published private(set) var foregroundTemporaryResults: [MediaBatchResult] = []
     private var foregroundMediaOwner = UUID()
     private var foregroundMediaIOOwner: UUID?
@@ -442,10 +444,12 @@ final class CameraAppState: ObservableObject {
         rtpEventDispatcher: (@Sendable (@escaping @MainActor @Sendable () -> Void) -> Void)? = nil,
         mediaDeliveryStore: MediaDeliveryStore? = nil,
         mediaDeliveryReplyDelay: (@Sendable (MediaDeliveryReplyStage) async -> Void)? = nil,
-        foregroundMedia: ForegroundMediaController? = nil
+        foregroundMedia: ForegroundMediaController? = nil,
+        foregroundFiles: ForegroundFilesDelivery? = nil
     ) {
         self.defaults = defaults
         self.foregroundMedia = foregroundMedia ?? ForegroundMediaController()
+        self.foregroundFiles = foregroundFiles ?? ForegroundFilesDelivery()
         self.mediaDeliveryStore = mediaDeliveryStore
         self.mediaDeliveryReplyDelay = mediaDeliveryReplyDelay
         self.sessionFactory = sessionFactory
@@ -837,6 +841,7 @@ final class CameraAppState: ObservableObject {
     private func prepareDisconnect() -> CameraSession? {
         invalidateConnectionGuidance()
         foregroundMedia.retire()
+        foregroundFolderSelection = nil
         foregroundMediaOwner = UUID()
         foregroundMediaIOOwner = nil
         foregroundLiveViewRestartOwner = nil
@@ -1037,6 +1042,7 @@ final class CameraAppState: ObservableObject {
         applicationActive = active
         rtpController.setApplicationActive(active)
         if !active {
+            foregroundFolderSelection = nil
             releaseHeldAutofocus()
             invalidateCameraFocusInfo()
             cancelMediaWorklistContinuation()
@@ -2456,6 +2462,7 @@ final class CameraAppState: ObservableObject {
     var canStartForegroundMedia: Bool {
         connected && !isPreview && connectionMode == .ccapi && session != nil
             && applicationActive && mediaDeliveryStore != nil && !foregroundMedia.isRunning
+            && !foregroundFiles.isWriting
             && supports(.mediaBrowser) && supports(.mediaDownload) && !shutterReleaseRequired
     }
 
@@ -2466,10 +2473,12 @@ final class CameraAppState: ObservableObject {
     }
 
     @discardableResult
-    func startForegroundMedia() -> Bool {
+    func startForegroundMedia(folder: URL? = nil) -> Bool {
         guard canStartForegroundMedia, let session else { return false }
         let owner = UUID()
         let generation = sessionGeneration
+        let historyGeneration = mediaDeliveryClearGeneration
+        var prepared: (ticket: MediaDeliveryTicket, receiptID: UUID)?
         foregroundMediaOwner = owner
         foregroundMediaTicket = nil
         foregroundTemporaryResults = []
@@ -2494,10 +2503,80 @@ final class CameraAppState: ObservableObject {
             },
             prepare: { [weak self] item, bytes in
                 guard let self else { throw ForegroundMediaController.Failure.retired }
-                try await self.prepareForegroundOriginal(item, bytes: bytes, session: session,
-                                                         owner: owner, generation: generation)
+                prepared = try await self.prepareForegroundOriginal(item, bytes: bytes, session: session,
+                                                                    owner: owner, generation: generation)
+                guard self.mediaDeliveryClearGeneration == historyGeneration else {
+                    throw ForegroundMediaController.Failure.retired
+                }
+            },
+            deliver: folder.map { folder in
+                { [weak self] item in
+                    guard let self, let store = self.mediaDeliveryStore, let prepared else {
+                        throw ForegroundMediaController.Failure.retired
+                    }
+                    try self.checkForegroundOwner(owner, generation: generation)
+                    guard self.mediaDeliveryClearGeneration == historyGeneration else {
+                        throw ForegroundMediaController.Failure.retired
+                    }
+                    let lease: MediaDeliveryFileLease
+                    do {
+                        let leases = try await store.acquireShare(receiptIDs: [prepared.receiptID])
+                        guard let exact = leases.first else { throw MediaDeliveryStoreError.invalidSource }
+                        lease = exact
+                    } catch {
+                        guard self.foregroundMediaOwner == owner, self.sessionGeneration == generation,
+                              self.mediaDeliveryClearGeneration == historyGeneration else {
+                            throw ForegroundMediaController.Failure.retired
+                        }
+                        return ForegroundFilesDeliveryResult(outcome: .notCopied(.sourceUnavailable), historyWarning: true)
+                    }
+                    try self.checkForegroundOwner(owner, generation: generation)
+                    guard self.mediaDeliveryClearGeneration == historyGeneration else {
+                        throw ForegroundMediaController.Failure.retired
+                    }
+                    let attemptID = UUID()
+                    let result = await self.foregroundFiles.deliver(lease: lease, ticket: prepared.ticket,
+                        folder: folder, attemptID: attemptID,
+                        filename: ForegroundFilesDelivery.filename(item.name, attemptID: attemptID), store: store)
+                    // Cancellation alone must not hide late success. A retired
+                    // camera or cleared history may never publish this old result.
+                    guard self.foregroundMediaOwner == owner, self.sessionGeneration == generation,
+                          self.mediaDeliveryClearGeneration == historyGeneration else {
+                        throw ForegroundMediaController.Failure.retired
+                    }
+                    if result.historyWarning {
+                        self.mediaDeliveryRecordingWarning = true
+                        self.mediaDeliveryHistoryWarning = true
+                    }
+                    await self.refreshMediaDeliveryHistory()
+                    guard self.foregroundMediaOwner == owner, self.sessionGeneration == generation,
+                          self.mediaDeliveryClearGeneration == historyGeneration else {
+                        throw ForegroundMediaController.Failure.retired
+                    }
+                    return result
+                }
             }
-        ))
+        ), destinationLabel: folder.map { String(MediaBatchOwnedFile.safeFilename($0.lastPathComponent).prefix(120)) })
+    }
+
+    /// A one-shot picker token is bound to this exact foreground camera session.
+    /// Selecting a directory stores no bookmark and performs no probe write.
+    func chooseForegroundFolder() {
+        guard canStartForegroundMedia, foregroundFolderSelection == nil else { return }
+        foregroundFolderSelection = ForegroundFolderSelection(generation: sessionGeneration)
+    }
+
+    @discardableResult
+    func acceptForegroundFolder(_ folder: URL, selectionID: UUID) -> Bool {
+        guard let selection = foregroundFolderSelection, selection.id == selectionID,
+              selection.generation == sessionGeneration, folder.isFileURL, canStartForegroundMedia else { return false }
+        foregroundFolderSelection = nil
+        return startForegroundMedia(folder: folder)
+    }
+
+    func cancelForegroundFolder(_ selectionID: UUID) {
+        guard foregroundFolderSelection?.id == selectionID else { return }
+        foregroundFolderSelection = nil
     }
 
     func stopForegroundMedia() { foregroundMedia.stop() }
@@ -2539,7 +2618,7 @@ final class CameraAppState: ObservableObject {
 
     private func prepareForegroundOriginal(
         _ item: CameraMediaItem, bytes: Int64, session: CameraSession, owner: UUID, generation: UUID
-    ) async throws {
+    ) async throws -> (ticket: MediaDeliveryTicket, receiptID: UUID) {
         try beginForegroundRead(owner, generation: generation)
         defer { endForegroundRead(owner, generation: generation) }
         guard let mediaDeliveryStore else { throw ForegroundMediaController.Failure.storage }
@@ -2595,6 +2674,7 @@ final class CameraAppState: ObservableObject {
                 foregroundTemporaryResults = []
                 await refreshMediaDeliveryHistory()
             }
+            return (ticket, receipt)
         } catch {
             if !validOriginal {
                 let cancelled = Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled

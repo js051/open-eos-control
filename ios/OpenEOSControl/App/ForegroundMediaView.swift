@@ -6,7 +6,7 @@ struct ForegroundMediaView: View {
     @EnvironmentObject private var camera: CameraAppState
 
     var body: some View {
-        ForegroundMediaContents(controller: camera.foregroundMedia)
+        ForegroundMediaContents(controller: camera.foregroundMedia, delivery: camera.foregroundFiles)
     }
 }
 
@@ -15,6 +15,7 @@ private struct ForegroundMediaContents: View {
     @EnvironmentObject private var language: AppLanguageStore
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var controller: ForegroundMediaController
+    @ObservedObject var delivery: ForegroundFilesDelivery
     @State private var exportPayload: MediaBatchExportPayload?
     @StateObject private var filesExporter = MediaFilesExportController()
     @State private var shareUnavailable = false
@@ -31,12 +32,27 @@ private struct ForegroundMediaContents: View {
                     }
 
                     Section {
-                        Text(language.string(ForegroundMediaText.stateKey(controller.state)))
+                        Text(language.string(delivery.isWriting && !controller.isRunning ? "foreground_media_stopping" : ForegroundMediaText.stateKey(controller.state)))
                             .font(.headline)
                             .accessibilityIdentifier("foreground-media-status")
-                        Text(language.format("foreground_media_counts", controller.preparedCount, controller.pendingCount))
+                        Text(language.format("foreground_media_counts", controller.preparedCount, controller.copiedCount,
+                                             controller.unconfirmedCount, controller.pendingCount))
                             .font(.callout.monospacedDigit())
                             .accessibilityIdentifier("foreground-media-counts")
+                        if let label = controller.destinationLabel {
+                            Text(language.format("foreground_files_destination", label))
+                                .lineLimit(2)
+                                .accessibilityIdentifier("foreground-files-destination")
+                        }
+                        if let outcome = controller.lastDelivery {
+                            Text(language.string("foreground_files_result_" + outcome.status.rawValue))
+                                .accessibilityIdentifier("foreground-files-result")
+                        }
+                        if delivery.isWriting {
+                            Text(language.string("foreground_files_drain_help"))
+                                .font(.caption)
+                                .accessibilityIdentifier("foreground-files-drain-help")
+                        }
                         if let name = controller.currentName {
                             Text(verbatim: shortFilename(name))
                                 .lineLimit(2)
@@ -147,6 +163,9 @@ private struct ForegroundMediaContents: View {
             MediaBatchActivityView(payload: payload)
         }
         .mediaFilesExport(filesExporter)
+        .sheet(item: ForegroundFolderPicker.presentationBinding(camera: camera)) { selection in
+            ForegroundFolderPicker(selection: selection, camera: camera)
+        }
     }
 
     @ViewBuilder private var runAction: some View {
@@ -166,7 +185,7 @@ private struct ForegroundMediaContents: View {
         } else {
             Button {
                 shareUnavailable = false
-                _ = camera.startForegroundMedia()
+                camera.chooseForegroundFolder()
             } label: {
                 Label(language.string("foreground_media_start"), systemImage: "play.fill")
                     .fixedSize(horizontal: false, vertical: true)
@@ -174,7 +193,7 @@ private struct ForegroundMediaContents: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(Color.cameraAccent)
-            .disabled(!camera.canStartForegroundMedia)
+            .disabled(!camera.canStartForegroundMedia || camera.foregroundFolderSelection != nil)
             .accessibilityIdentifier("foreground-media-start")
         }
     }
@@ -192,11 +211,13 @@ struct ForegroundMediaBanner: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
     @ObservedObject var controller: ForegroundMediaController
+    @ObservedObject var delivery: ForegroundFilesDelivery
+    private var stopping: Bool { controller.state == .stopping || (delivery.isWriting && !controller.isRunning) }
 
     var body: some View {
-        if controller.isRunning && !camera.shutterReleaseRequired && !camera.previousShutterReleaseUnconfirmed {
+        if (controller.isRunning || delivery.isWriting) && !camera.shutterReleaseRequired && !camera.previousShutterReleaseUnconfirmed {
             VStack(alignment: .leading, spacing: 4) {
-                Text(language.string(controller.state == .stopping ? "foreground_media_stopping" : "foreground_media_banner_title"))
+                Text(language.string(stopping ? "foreground_media_stopping" : "foreground_media_banner_title"))
                     .font(.caption.weight(.semibold))
                     .accessibilityIdentifier("foreground-media-banner-status")
                 ViewThatFits(in: .horizontal) {
@@ -227,14 +248,14 @@ struct ForegroundMediaBanner: View {
         Button {
             camera.stopForegroundMedia()
         } label: {
-            Label(language.string(controller.state == .stopping ? "foreground_media_stopping" : "foreground_media_stop"), systemImage: "stop.fill")
+            Label(language.string(stopping ? "foreground_media_stopping" : "foreground_media_stop"), systemImage: "stop.fill")
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, minHeight: 44)
         }
         .buttonStyle(.borderedProminent)
         .tint(Color.cameraWarning)
         .foregroundStyle(Color.cameraBackground)
-        .disabled(controller.state == .stopping)
+        .disabled(stopping)
         .accessibilityIdentifier("foreground-media-banner-stop")
     }
 }
@@ -249,6 +270,7 @@ private enum ForegroundMediaText {
         case .waiting: "foreground_media_state_waiting"
         case .stabilizing: "foreground_media_state_stabilizing"
         case .preparing: "foreground_media_state_preparing"
+        case .copying: "foreground_media_state_copying"
         case .stopping: "foreground_media_stopping"
         case .stopped: "foreground_media_state_stopped"
         case .failed: "foreground_media_state_failed"
@@ -265,6 +287,7 @@ private enum ForegroundMediaText {
         case .metadata: "foreground_media_reason_metadata"
         case .storage: "foreground_media_reason_storage"
         case .transfer: "foreground_media_reason_transfer"
+        case .delivery: "foreground_media_reason_delivery"
         case .limit: "foreground_media_reason_limit"
         }
     }
