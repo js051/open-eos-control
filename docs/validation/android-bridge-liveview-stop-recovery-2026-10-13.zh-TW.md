@@ -26,6 +26,6 @@ UI 會持續保留本連線的停止警告，後續 false／缺欄位狀態不�
 
 ## 配對版本界線
 
-新的explicit Stop確認fixture對應PC草稿#237的Bridge修正（776a239）：LiveViewState新增可選停止證明，Stop route在確認清理後回傳該欄位。Android草稿自己的Bridge目錄仍是原基底版本，不能據其Android mock通過聲稱該整樹已驗跨端互通。舊Bridge只在已確認Start的legacy安全條件下可完成Stop；模糊Start或Stop-only責任需更新Bridge。三候選尚需正式整合與集中runtime驗證。
+新的explicit Stop確認fixture對應PC草稿#237的Bridge修正（776a239）：LiveViewState新增可選停止證明，CCAPI session 的 Stop route在確認清理後回傳明確 false。該候選的 gphoto2 session 尚無這個屬性，route 回 null，不能據此宣稱 gphoto2 也具備不確定停止的 explicit-false 恢復。Android草稿自己的Bridge目錄仍是原基底版本，不能據其Android mock通過聲稱該整樹已驗跨端互通。舊Bridge只在已確認Start的legacy安全條件下可完成Stop；模糊Start或Stop-only責任需更新Bridge。三候選尚需正式整合與集中runtime驗證。
 
 相容性以回覆證據判定，不能用目前兩份Bridge均標示的0.13.0字串猜測功能存在。已確認Start且期間未出現不確定證據時，`knownSuccessfulLegacyStartStopRemainsCompatible`保留舊Bridge的active=false相容路徑；一旦Start回覆遺失、Stop失敗或新status警告，舊版缺欄位不能安全解除責任。`lostStartIsNotReplayedAndRequiresExplicitStopProof`、`failedStopKeepsOwnerAndCannotUseLegacyFalseOnRetry`及warning競態控制保留拒絕條件。UI的EN／zh-TW `live_view_stop_unconfirmed`明示只重試Stop、必要時更新Bridge；不以忽略停止證明換取舊版表面成功。發布時必須把對應新版Bridge與手機候選一起整合驗證，不能僅憑手機mock結果發版。
