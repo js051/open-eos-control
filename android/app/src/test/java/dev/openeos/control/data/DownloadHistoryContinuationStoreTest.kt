@@ -591,12 +591,19 @@ class DownloadHistoryContinuationStoreTest {
         val pending = async(start = CoroutineStart.UNDISPATCHED) {
             store.admitContinuation(store.captureRequest(), listOf(selection), DownloadHistoryDestination.FOLDER)
         }
-        owner.cancel()
-        runCurrent()
-        assertRejected(DownloadWorklistFailure.STOPPED, pending.await())
-        assertTrue(store.state.value.activeWorklistIds.isEmpty())
-        assertTrue(store.state.value.continuationBlockedWorklistIds.isEmpty())
-        store.releaseWorklist(token)
+        try {
+            owner.cancel()
+            runCurrent()
+            assertTrue("Cancelled receiver must settle its already-delivered command", pending.isCompleted)
+            assertRejected(DownloadWorklistFailure.STOPPED, pending.await())
+            assertTrue(store.state.value.activeWorklistIds.isEmpty())
+            assertTrue(store.state.value.continuationBlockedWorklistIds.isEmpty())
+            store.releaseWorklist(token)
+        } finally {
+            owner.cancel()
+            pending.cancel()
+            runCurrent()
+        }
     }
 
     @Test fun schemaThreeLoadsWithoutRewritingAndMigratesOnExplicitContinuation() = runTest {
