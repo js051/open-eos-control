@@ -165,6 +165,7 @@
       latestVideoFound: "A newly visible video was found; this does not prove it came from that recording.",
       recordingStopUnconfirmed: "Recording stop is not confirmed by the returned camera status.",
       recordingStartUnconfirmed: "The returned camera status does not confirm recording started.",
+      recordingCommandUnconfirmed: "The recording result is unknown. Use Stop; refreshed cached status cannot confirm the camera stopped.",
       recordingStatusUnconfirmed: "The recording command was accepted, but status is unconfirmed. Refresh status; only Stop is available meanwhile.",
       stopUnconfirmedRecording: "Stop recording (status unconfirmed)",
       latestMediaNotReady: "New media is not visible yet. Check again without taking another photo.",
@@ -287,7 +288,7 @@
       stopBulb: "Stop Bulb exposure",
       bulbStarted: "Bulb exposure started",
       bulbStopped: "Bulb exposure stopped",
-      previousShutterWarning: "The shutter or autofocus may still be active after the previous connection. Check the camera and stop any active control before using it again.",
+      previousShutterWarning: "Recording, shutter, or autofocus may still be active after the previous connection. Check the camera and stop any active control before using it again.",
       confirmCameraChecked: "I've checked the camera",
       retryBulbStop: "Retry camera stop",
       bulbReleaseConfirmed: "Camera stop confirmed",
@@ -764,6 +765,7 @@
       latestVideoFound: "已找到新可見影片；不能據此證明它來自這次錄影。",
       recordingStopUnconfirmed: "相機回傳的狀態尚未確認錄影已停止。",
       recordingStartUnconfirmed: "相機回傳的狀態尚未確認錄影已開始。",
+      recordingCommandUnconfirmed: "錄影結果不明。請明確停止錄影；重新整理的快取狀態不能證明相機已停止。",
       recordingStatusUnconfirmed: "錄影命令已接受，但狀態尚未確認。請重新整理狀態；確認前僅可停止錄影。",
       stopUnconfirmedRecording: "停止錄影（狀態未確認）",
       latestMediaNotReady: "尚未找到新可見素材。可重新查找，不會再次拍攝。",
@@ -868,7 +870,7 @@
       stopBulb: "停止 Bulb 長曝光",
       bulbStarted: "Bulb 長曝光已開始",
       bulbStopped: "Bulb 長曝光已停止",
-      previousShutterWarning: "上一連線的快門或自動對焦可能仍在作用。再次操作前，請先檢查相機並停止仍在進行的操作。",
+      previousShutterWarning: "上一連線的錄影、快門或自動對焦可能仍在作用。再次操作前，請先檢查相機並停止仍在進行的操作。",
       confirmCameraChecked: "我已檢查相機",
       retryBulbStop: "重試停止相機操作",
       bulbReleaseConfirmed: "已確認相機操作停止",
@@ -1855,9 +1857,21 @@
         detail = await response.json();
       } catch (error) {
         if (mediaTransfer.isAbortError(error)) throw error;
-        // Keep the stable fallback when an intermediary returns non-JSON content.
+        // A Bridge 502 can carry the result of a camera mutation. If its error
+        // envelope is unreadable, the HTTP header alone cannot prove rejection.
+        if (response.status === 502) {
+          throw new ApiError(`${response.status} ${response.statusText}`, {
+            code: "RESPONSE_BODY_UNAVAILABLE", status: response.status,
+          });
+        }
+        // Other explicit HTTP rejections retain their stable fallback.
       }
       const error = detail?.error || {};
+      if (response.status === 502 && (typeof error.code !== "string" || !error.code.trim())) {
+        throw new ApiError(`${response.status} ${response.statusText}`, {
+          code: "RESPONSE_BODY_UNAVAILABLE", status: response.status,
+        });
+      }
       throw new ApiError(error.message || `${response.status} ${response.statusText}`, {
         code: error.code || "HTTP_ERROR",
         status: response.status,
@@ -2207,7 +2221,7 @@
         state.recordingRecovery !== recordingRecovery
       ) return false;
       [state.info, state.status, state.capabilities] = [info, status, capabilities];
-      if (state.recordingRecovery === recordingRecovery && typeof status.recording === "boolean") {
+      if (state.recordingRecovery === recordingRecovery && recordingRecovery?.acknowledged !== false && typeof status.recording === "boolean") {
         state.recordingRecovery = null;
         if (recordingRecovery?.direction === "stop" && status.recording === false && recordingRecovery.reviewAttempt) {
           state.latestMediaReviewAttempt = recordingRecovery.reviewAttempt;
@@ -2220,7 +2234,7 @@
       state.lastError = null;
       renderSession();
       const startNotConfirmed = recordingRecovery?.direction === "start" && status.recording === false;
-      if (!quiet || startNotConfirmed) setOperationState(t(recordingRecoveryActive() ? "recordingStatusUnconfirmed" : startNotConfirmed ? "recordingStartUnconfirmed" : "ready"), recordingRecoveryActive() || startNotConfirmed);
+      if (!quiet || startNotConfirmed) setOperationState(t(recordingRecoveryActive() ? (recordingRecovery?.acknowledged === false ? "recordingCommandUnconfirmed" : "recordingStatusUnconfirmed") : startNotConfirmed ? "recordingStartUnconfirmed" : "ready"), recordingRecoveryActive() || startNotConfirmed);
       return true;
     } catch (error) {
       if (
@@ -2290,6 +2304,12 @@
   }
 
   function resetSession() {
+    // Retiring a connection is not proof that an admitted REC command stopped.
+    // Keep only a previous-camera warning; never transfer its Stop to a new session.
+    if (state.session && (state.status?.recording === true ||
+        state.recordingRecovery?.session === state.session || state.recordingCommandOwner?.session === state.session)) {
+      state.shutterDisconnectWarning = true;
+    }
     if (typeof stopMediaAutoImport === "function") stopMediaAutoImport("session-retired");
     state.refreshGeneration += 1;
     stopLiveLoop();
@@ -2306,6 +2326,7 @@
     state.info = null;
     state.status = null;
     state.recordingRecovery = null;
+    state.recordingCommandOwner = null;
     state.capabilities = null;
     state.shutterAutofocus = true;
     state.fileNamingDrafts = {};
@@ -3442,6 +3463,19 @@
     } catch (error) {
       if (state.session !== session) return;
       const normalized = captureError(error);
+      const scopedRecordingUncertainty = normalized.code === "RECORDING_COMMAND_UNCONFIRMED"
+        && normalized.status === 502 && normalized.feature === FEATURES.VIDEO_RECORDING
+        && normalized.engine === "ccapi";
+      if (recordingCommandOwner && (scopedRecordingUncertainty
+        || normalized.code === "NETWORK_ERROR"
+        || (normalized.code === "RESPONSE_BODY_UNAVAILABLE" && normalized.status === 502)
+        || (normalized.code === "HTTP_ERROR" && normalized.status === 0))) {
+        state.recordingRecovery = { session, direction: recordingWasActive ? "stop" : "start", reviewAttempt, acknowledged: false };
+        state.captureMode = "video";
+        setOperationState(t("recordingCommandUnconfirmed"), true);
+        showToast(t("recordingCommandUnconfirmed"), true);
+        return;
+      }
       if (!isPhoto && normalized.code === "RECORDING_STATUS_READBACK_FAILED") {
         state.recordingRecovery = { session, direction: recordingWasActive ? "stop" : "start", reviewAttempt };
         state.captureMode = "video";

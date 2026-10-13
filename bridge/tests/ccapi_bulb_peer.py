@@ -5,6 +5,7 @@ import io
 import json
 import socket
 import threading
+from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -23,6 +24,11 @@ class BulbPeer:
         self.malformed_status = False
         self.drop_recording_response = False
         self.reject_recording = False
+        self.recording_rejection_status = 503
+        self.recording_response_fault: str | None = None
+        self.recording = False
+        self.temperature_enabled = False
+        self.drop_temperature = False
         self.drop_release = False
         self.status_failure_after_release = False
         self.status_failures = 0
@@ -59,6 +65,31 @@ class BulbPeer:
                 self.connection.shutdown(socket.SHUT_RDWR)
                 self.connection.close()
 
+            def recording_response(self, status: int, value: object) -> None:
+                if peer.recording_response_fault is None:
+                    self.respond(status, value)
+                    return
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                if peer.recording_response_fault == "invalid_chunk":
+                    self.send_header("Transfer-Encoding", "chunked")
+                    body = b"not-a-chunk-size\r\n"
+                elif peer.recording_response_fault == "oversized":
+                    # Deliberately above the Bridge's 2 MiB JSON safety ceiling.
+                    body = b"x" * (2 * 1024 * 1024 + 1)
+                    self.send_header("Content-Length", str(len(body)))
+                elif peer.recording_response_fault == "truncated":
+                    body = b"{"
+                    self.send_header("Content-Length", "100")
+                else:
+                    raise AssertionError(f"Unknown REC response fault: {peer.recording_response_fault}")
+                self.end_headers()
+                # A bounded client may close an oversized error body early.
+                with suppress(BrokenPipeError, ConnectionResetError):
+                    self.wfile.write(body)
+                    self.wfile.flush()
+                self.close_connection = True
+
             def do_GET(self) -> None:
                 path = urlsplit(self.path).path
                 if not self.path.startswith("/__test/"):
@@ -74,7 +105,8 @@ class BulbPeer:
                     self.wfile.write(b"{")
                 elif self.path == "/__test/state":
                     self.respond(200, {"commands": peer.commands, "active": peer.active,
-                                       "captureCount": peer.capture_count, "reads": peer.reads})
+                                       "captureCount": peer.capture_count, "reads": peer.reads,
+                                       "recording": peer.recording})
                 elif self.path == "/ccapi":
                     operations = [
                         {"path": "/deviceinformation", "get": True},
@@ -91,11 +123,18 @@ class BulbPeer:
                         operations.append({"path": "/shooting/control/af", "post": True})
                     if peer.media_enabled:
                         operations.append({"path": "/contents", "get": True})
+                    if peer.temperature_enabled:
+                        operations.append({"path": "/devicestatus/temperature", "get": True})
                     self.respond(200, {"ver100": operations})
                 elif self.path.endswith("/deviceinformation"):
                     self.respond(200, {"productname": "Synthetic Bulb Peer"})
                 elif self.path.endswith("/shooting/settings"):
                     self.respond(200, {"shootingmode": {"value": peer.mode, "ability": ["Bulb", "Manual"]}})
+                elif peer.temperature_enabled and path.endswith("/devicestatus/temperature"):
+                    if peer.drop_temperature:
+                        self.disconnect()
+                    else:
+                        self.respond(200, {"status": "normal"})
                 elif peer.media_enabled and path.endswith("/contents"):
                     names = ["SYNTHETIC_OLD.JPG"]
                     if peer.media_ready and peer.capture_count:
@@ -117,6 +156,7 @@ class BulbPeer:
                         "drop_press", "reject_release", "mode", "partial_press_response", "drop_status",
                         "status_failure_after_release", "direct_shutter", "dedicated_af", "drop_release",
                         "media_enabled", "media_ready", "capture_count", "manual_method",
+                        "drop_recording_response", "reject_recording",
                     ):
                         if key in body:
                             setattr(peer, key, body[key])
@@ -125,11 +165,15 @@ class BulbPeer:
                 peer.commands.append((self.command, self.path, body))
                 if self.path.endswith("/shooting/control/recbutton"):
                     if peer.reject_recording:
-                        self.respond(503, {"message": "Synthetic REC rejected"})
+                        self.recording_response(peer.recording_rejection_status, {"message": "Synthetic REC rejected"})
                         return
+                    # Independent peer state changes before a deliberately lost response.
+                    peer.recording = body.get("action") == "start"
                     if peer.drop_recording_response:
                         self.disconnect()
                         return
+                    self.recording_response(200, {})
+                    return
                 if self.path in (MANUAL_PATH, AF_PATH, DIRECT_PATH):
                     if body.get("action") in ("full_press", "half_press", "start") or self.path == DIRECT_PATH:
                         peer.active = True
