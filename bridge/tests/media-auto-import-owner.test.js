@@ -145,7 +145,7 @@ function fixture(options = {}) {
   for (const name of ["stopLiveLoop", "stopLocalVideo", "cancelEventLoop", "cancelMediaDownload", "cancelMediaUpload",
     "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh", "closeMediaPreview",
     "closeMediaDetails", "releaseObjectUrl", "clearBulbTimer", "renderHealth"]) context[name] = () => {};
-  const names = ["mediaTransferActive", "cameraInteractionBusy", "mediaAutoImportEligible", "ownsMediaAutoImport",
+  const names = ["recordingRecoveryActive", "mediaTransferActive", "cameraInteractionBusy", "mediaAutoImportEligible", "ownsMediaAutoImport",
     "mediaAutoImportManualBusy", "assertMediaAutoImportCurrent", "withMediaAutoImportRead", "requireMediaAutoImportResponse",
     "readMediaAutoImportInventory", "readMediaAutoImportMetadata", "mediaAutoImportHistoryCall", "transferMediaAutoImportItem",
     "finishMediaAutoImportOwner", "scheduleMediaAutoImport", "stepMediaAutoImport", "startMediaAutoImport", "stopMediaAutoImport", "renderMediaAutoImport", "resetSession",

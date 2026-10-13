@@ -18,7 +18,7 @@ function extract(name) {
   return app.slice(match.index, ending + 4);
 }
 const realFunctions = [
-  "api", "connectCamera", "disconnectCamera", "resetSession", "refreshSession",
+  "recordingRecoveryActive", "api", "connectCamera", "disconnectCamera", "resetSession", "refreshSession",
   "featureSupported", "cancelEventLoop", "stopEventLoop", "mediaTransferActive",
   "cameraInteractionBusy", "beginCameraInteraction", "settingByKey", "isBulbMode",
   "captureModeFromCamera", "shutterReleaseUnconfirmed", "bulbControlLocked",

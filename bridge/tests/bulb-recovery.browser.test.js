@@ -328,6 +328,52 @@ async function run() {
     await page.click("#media-preview-close");
     await page.click("#disconnect-button");
     await page.waitForSelector("#connection-view:not([hidden])");
+    for (const language of ["en", "zh-TW"]) {
+      await configure({ mode: "Manual", drop_status: false, status_failure_after_release: false,
+        media_enabled: false, reject_release: false, drop_press: false });
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      await page.locator("#control-view .language-select").selectOption(language);
+      await page.click("#video-mode-button");
+      const stopUnknown = language === "en" ? "Stop recording (status unconfirmed)" : "停止錄影（狀態未確認）";
+      const recordLabel = language === "en" ? "Record" : "開始錄影";
+      const beforeRecording = (await cameraState()).commands.length;
+      await configure({ drop_status: true });
+      const startResponse = page.waitForResponse(response => response.url().endsWith("/recording/start"));
+      await page.click("#shutter-button");
+      const startResult = await startResponse;
+      assert.equal(startResult.status(), 502);
+      assert.equal((await startResult.json()).error.code, "RECORDING_STATUS_READBACK_FAILED");
+      await page.waitForFunction(label => document.querySelector("#shutter-button")?.getAttribute("aria-label") === label,
+        stopUnknown);
+      await assertActionable(page, "#shutter-button");
+      assert.equal(await page.isDisabled("#photo-mode-button"), true);
+      assert.equal(await page.locator("#record-indicator").isHidden(), true,
+        "ACK without status must not display confirmed backend REC response");
+      assert.deepEqual((await cameraState()).commands.slice(beforeRecording), [
+        ["POST", "/ccapi/ver100/shooting/control/recbutton", {action:"start"}],
+      ], "An acknowledged Start failure never causes automatic REC replay");
+      const stopResponse = page.waitForResponse(response => response.url().endsWith("/recording/stop"));
+      await page.click("#shutter-button");
+      const stopResult = await stopResponse;
+      assert.equal(stopResult.status(), 502);
+      assert.equal((await stopResult.json()).error.code, "RECORDING_STATUS_READBACK_FAILED");
+      await page.waitForFunction(label => document.querySelector("#shutter-button")?.getAttribute("aria-label") === label &&
+        !document.querySelector("#shutter-button").disabled, stopUnknown);
+      await configure({ drop_status: false });
+      await page.click("#refresh-button");
+      await page.waitForFunction(label => document.querySelector("#shutter-button")?.getAttribute("aria-label") === label,
+        recordLabel);
+      assert.deepEqual((await cameraState()).commands.slice(beforeRecording), [
+        ["POST", "/ccapi/ver100/shooting/control/recbutton", {action:"start"}],
+        ["POST", "/ccapi/ver100/shooting/control/recbutton", {action:"stop"}],
+      ], "Read-only status recovery must not send another REC or shutter command");
+      assert.equal(await page.locator("#record-indicator").isHidden(), true);
+      await page.screenshot({path:path.join(results, `bridge-recording-readback-recovery-${language}.png`)});
+      await page.click("#disconnect-button");
+      await page.waitForSelector("#connection-view:not([hidden])");
+      console.log(`PASS: acknowledged REC readback failure preserves deliberate Stop and read-only recovery: ${language}`);
+    }
     assert.deepEqual(pageErrors, []);
     console.log("PASS: real Bridge HTTP peer + browser Bulb/short-control stop-only recovery and acknowledged capture JPEG recovery");
   } finally {

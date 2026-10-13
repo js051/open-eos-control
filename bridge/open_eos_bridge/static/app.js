@@ -164,6 +164,9 @@
       latestVideoReadFailed: "The media list could not be read. Check again without sending another REC command.",
       latestVideoFound: "A newly visible video was found; this does not prove it came from that recording.",
       recordingStopUnconfirmed: "Recording stop is not confirmed by the returned camera status.",
+      recordingStartUnconfirmed: "The returned camera status does not confirm recording started.",
+      recordingStatusUnconfirmed: "The recording command was accepted, but status is unconfirmed. Refresh status; only Stop is available meanwhile.",
+      stopUnconfirmedRecording: "Stop recording (status unconfirmed)",
       latestMediaNotReady: "New media is not visible yet. Check again without taking another photo.",
       latestMediaReadFailed: "The camera's media list could not be read. Check again without taking another photo.",
       latestMediaFound: "Newly visible media found. Open the preview to confirm it.",
@@ -760,6 +763,9 @@
       latestVideoReadFailed: "暫時無法讀取素材清單。可重新查找，不會再次送出錄影命令。",
       latestVideoFound: "已找到新可見影片；不能據此證明它來自這次錄影。",
       recordingStopUnconfirmed: "相機回傳的狀態尚未確認錄影已停止。",
+      recordingStartUnconfirmed: "相機回傳的狀態尚未確認錄影已開始。",
+      recordingStatusUnconfirmed: "錄影命令已接受，但狀態尚未確認。請重新整理狀態；確認前僅可停止錄影。",
+      stopUnconfirmedRecording: "停止錄影（狀態未確認）",
       latestMediaNotReady: "尚未找到新可見素材。可重新查找，不會再次拍攝。",
       latestMediaReadFailed: "暫時無法讀取相機的素材清單。可重新查找，不會再次拍攝。",
       latestMediaFound: "已找到新可見素材，請開啟預覽確認。",
@@ -1380,6 +1386,7 @@
     session: null,
     info: null,
     status: null,
+    recordingRecovery: null,
     capabilities: null,
     shutterAutofocus: true,
     fileNamingDrafts: {},
@@ -2176,7 +2183,13 @@
   }
 
   async function refreshSession({ quiet = false } = {}) {
-    if (!state.session) return false;
+    // A status read admitted inside a command can predate its ACK. Existing
+    // event refresh already waits for this boundary; diagnostics must too.
+    if (!state.session || state.recordingCommandOwner?.session === state.session) return false;
+    const session = state.session;
+    const recordingRecovery = state.recordingRecovery;
+    const refreshOwner = {};
+    state.refreshRequestOwner = refreshOwner;
     if (!quiet) setOperationState(t("refreshing"));
     const rawSessionId = state.session.id;
     const sessionId = encodeURIComponent(rawSessionId);
@@ -2188,20 +2201,33 @@
         api(`/v1/session/${sessionId}/capabilities`),
       ]);
       if (
-        state.session?.id !== rawSessionId ||
-        state.refreshGeneration !== refreshGeneration
+        state.session !== session ||
+        state.refreshGeneration !== refreshGeneration ||
+        state.refreshRequestOwner !== refreshOwner ||
+        state.recordingRecovery !== recordingRecovery
       ) return false;
       [state.info, state.status, state.capabilities] = [info, status, capabilities];
+      if (state.recordingRecovery === recordingRecovery && typeof status.recording === "boolean") {
+        state.recordingRecovery = null;
+        if (recordingRecovery?.direction === "stop" && status.recording === false && recordingRecovery.reviewAttempt) {
+          state.latestMediaReviewAttempt = recordingRecovery.reviewAttempt;
+          state.latestMediaReviewKind = "video";
+          void refreshLatestMedia();
+        }
+      }
       state.requestedFps = clampFps(state.requestedFps);
       syncLiveMagnificationFromCapabilities();
       state.lastError = null;
       renderSession();
-      if (!quiet) setOperationState(t("ready"));
+      const startNotConfirmed = recordingRecovery?.direction === "start" && status.recording === false;
+      if (!quiet || startNotConfirmed) setOperationState(t(recordingRecoveryActive() ? "recordingStatusUnconfirmed" : startNotConfirmed ? "recordingStartUnconfirmed" : "ready"), recordingRecoveryActive() || startNotConfirmed);
       return true;
     } catch (error) {
       if (
-        state.session?.id !== rawSessionId ||
-        state.refreshGeneration !== refreshGeneration
+        state.session !== session ||
+        state.refreshGeneration !== refreshGeneration ||
+        state.refreshRequestOwner !== refreshOwner ||
+        state.recordingRecovery !== recordingRecovery
       ) return false;
       const normalized = captureError(error);
       if (!quiet) {
@@ -2279,6 +2305,7 @@
     state.session = null;
     state.info = null;
     state.status = null;
+    state.recordingRecovery = null;
     state.capabilities = null;
     state.shutterAutofocus = true;
     state.fileNamingDrafts = {};
@@ -2752,7 +2779,7 @@
       cleanButton.className = "button secondary";
       cleanButton.dataset.cameraCommand = "sensor-cleaning";
       cleanButton.textContent = t("sensorCleaningNow");
-      cleanButton.disabled = cameraInteractionBusy() || Boolean(state.status?.recording) || bulbControlLocked();
+      cleanButton.disabled = cameraInteractionBusy() || Boolean(state.status?.recording) || recordingRecoveryActive() || bulbControlLocked();
       cleanButton.addEventListener("click", () => {
         if (window.confirm(t("sensorCleaningConfirm"))) void cleanSensor(cleanButton, false);
       });
@@ -2782,7 +2809,7 @@
       button.type = "button";
       button.className = "button danger";
       button.dataset.cameraCommand = "sleep";
-      button.disabled = cameraInteractionBusy() || Boolean(state.status?.recording) || bulbControlLocked();
+      button.disabled = cameraInteractionBusy() || Boolean(state.status?.recording) || recordingRecoveryActive() || bulbControlLocked();
       const icon = document.createElement("span");
       icon.className = "icon";
       icon.dataset.icon = "power";
@@ -3105,7 +3132,7 @@
       !state.session ||
       cameraInteractionBusy() ||
       !featureSupported(FEATURES.CAMERA_SLEEP) ||
-      state.status?.recording ||
+      state.status?.recording || recordingRecoveryActive() ||
       bulbControlLocked()
     ) return;
     const sessionId = state.session.id;
@@ -3146,7 +3173,7 @@
       !state.session ||
       cameraInteractionBusy() ||
       !featureSupported(FEATURES.SENSOR_CLEANING) ||
-      state.status?.recording ||
+      state.status?.recording || recordingRecoveryActive() ||
       bulbControlLocked()
     ) return;
     const sessionId = state.session.id;
@@ -3259,12 +3286,13 @@
   function renderCaptureMode() {
     const recording = Boolean(state.status?.recording);
     const cameraMode = captureModeFromCamera();
-    if (recording) state.captureMode = "video";
+    const stopOnly = recordingRecoveryActive();
+    if (recording || stopOnly) state.captureMode = "video";
     else if (cameraMode) state.captureMode = cameraMode;
     const releaseOnly = shutterReleaseUnconfirmed();
     const bulbActive = bulbControlLocked();
     const bulb = bulbActive || (state.captureMode === "photo" && isBulbMode());
-    if (!featureSupported(FEATURES.VIDEO_RECORDING) && !recording && state.captureMode === "video") {
+    if (!featureSupported(FEATURES.VIDEO_RECORDING) && !recording && !stopOnly && state.captureMode === "video") {
       state.captureMode = "photo";
     }
     ui.photoModeButton.classList.toggle("active", state.captureMode === "photo");
@@ -3272,24 +3300,24 @@
     ui.photoModeButton.setAttribute("aria-pressed", String(state.captureMode === "photo"));
     ui.videoModeButton.setAttribute("aria-pressed", String(state.captureMode === "video"));
     ui.shutterButton.classList.toggle("video", state.captureMode === "video");
-    ui.shutterButton.classList.toggle("recording", state.captureMode === "video" && recording);
+    ui.shutterButton.classList.toggle("recording", state.captureMode === "video" && recording && !stopOnly);
     ui.shutterButton.classList.toggle("bulb", bulb);
     ui.shutterButton.classList.toggle("bulb-active", bulbActive);
-    ui.recordIndicator.hidden = !recording;
-    const labelKey = releaseOnly ? "retryBulbStop" : bulb
+    ui.recordIndicator.hidden = !recording || stopOnly;
+    const labelKey = releaseOnly ? "retryBulbStop" : stopOnly ? "stopUnconfirmedRecording" : bulb
       ? (bulbActive ? "stopBulb" : "startBulb")
       : state.captureMode === "photo" ? "capture" : recording ? "stopRecording" : "record";
     ui.shutterLabel.textContent = t(labelKey);
     ui.shutterButton.setAttribute("aria-label", t(labelKey));
     replaceButtonIcon(
       ui.shutterButton,
-      bulbActive ? "square" : state.captureMode === "video" ? (recording ? "square" : "circle") : "camera",
+      bulbActive ? "square" : state.captureMode === "video" ? (recording || stopOnly ? "square" : "circle") : "camera",
     );
   }
 
   async function selectCaptureMode(mode) {
     if (mode === "video" && !featureSupported(FEATURES.VIDEO_RECORDING)) return;
-    if (state.status?.recording && mode !== "video") return;
+    if ((state.status?.recording || recordingRecoveryActive()) && mode !== "video") return;
     const movieMode = settingByKey("moviemode");
     if (movieMode) {
       const desired = mode === "video" ? "on" : "off";
@@ -3312,19 +3340,24 @@
 
   function canChangeShutterAF() {
     return Boolean(state.session) && state.captureMode === "photo" && !isBulbMode() &&
-      !cameraInteractionBusy() && !bulbControlLocked() && !state.status?.recording &&
+      !cameraInteractionBusy() && !bulbControlLocked() && !state.status?.recording && !recordingRecoveryActive() &&
       (shutterAFSupported() || !state.shutterAutofocus);
+  }
+
+  function recordingRecoveryActive() {
+    return Boolean(state.recordingRecovery && state.recordingRecovery.session === state.session);
   }
 
   async function operateShutter() {
     if (!state.session || cameraInteractionBusy()) return;
     const session = state.session;
     const sessionId = session.id;
-    const isPhoto = state.captureMode === "photo";
+    const isPhoto = state.captureMode === "photo" && !recordingRecoveryActive();
     const releaseOnly = shutterReleaseUnconfirmed();
     const bulbWasActive = bulbControlLocked();
     const bulb = bulbWasActive || (isPhoto && isBulbMode());
-    const recordingWasActive = !isPhoto && Boolean(state.status?.recording);
+    const recordingWasActive = !isPhoto && (Boolean(state.status?.recording) || recordingRecoveryActive());
+    const recordingCommandOwner = !isPhoto && !bulb ? { session } : null;
     const supported = bulbWasActive || recordingWasActive || (bulb
       ? featureSupported(FEATURES.BULB_EXPOSURE)
       : isPhoto ? featureSupported(FEATURES.STILL_CAPTURE)
@@ -3337,6 +3370,7 @@
       return;
     }
     beginCameraInteraction();
+    if (recordingCommandOwner) state.recordingCommandOwner = recordingCommandOwner;
     state.lastError = null;
     setOperationState(t("busy"));
     renderAvailability();
@@ -3377,9 +3411,11 @@
         state.latestMediaReviewAttempt = reviewAttempt;
         void refreshLatestMedia();
       } else {
-        const wasRecording = Boolean(state.status?.recording);
+        const wasRecording = recordingWasActive;
         if (wasRecording) {
-          reviewAttempt = { sessionId, session, kind: "video", knownIds: visibleMediaIds() };
+          const priorStop = recordingRecoveryActive() && state.recordingRecovery.direction === "stop"
+            ? state.recordingRecovery.reviewAttempt : null;
+          reviewAttempt = priorStop || { sessionId, session, kind: "video", knownIds: visibleMediaIds() };
           cancelLatestMediaRefresh();
           state.latestMediaReviewAttempt = null;
           state.latestMediaReviewKind = "video";
@@ -3393,8 +3429,9 @@
         if (state.session !== session) return;
         state.status = status;
         const stopped = status.recording === false;
-        const uncertainStop = wasRecording && !stopped;
-        const result = wasRecording ? t(stopped ? "recordingStopped" : "recordingStopUnconfirmed") : t("recordingStarted");
+        state.recordingRecovery = typeof status.recording === "boolean" ? null : { session, direction: wasRecording ? "stop" : "start", reviewAttempt };
+        const uncertainStop = wasRecording ? !stopped : status.recording !== true;
+        const result = wasRecording ? t(stopped ? "recordingStopped" : "recordingStopUnconfirmed") : t(status.recording === true ? "recordingStarted" : "recordingStartUnconfirmed");
         setOperationState(result, uncertainStop);
         showToast(result, uncertainStop);
         if (wasRecording && stopped) {
@@ -3405,6 +3442,13 @@
     } catch (error) {
       if (state.session !== session) return;
       const normalized = captureError(error);
+      if (!isPhoto && normalized.code === "RECORDING_STATUS_READBACK_FAILED") {
+        state.recordingRecovery = { session, direction: recordingWasActive ? "stop" : "start", reviewAttempt };
+        state.captureMode = "video";
+        setOperationState(t("recordingStatusUnconfirmed"), true);
+        showToast(t("recordingStatusUnconfirmed"), true);
+        return;
+      }
       if (normalized.code === "CAPTURE_STATUS_READBACK_FAILED" && reviewAttempt?.kind === "photo") {
         state.latestMediaReviewAttempt = reviewAttempt;
         void refreshLatestMedia();
@@ -3448,6 +3492,9 @@
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
     } finally {
+      if (recordingCommandOwner && state.recordingCommandOwner === recordingCommandOwner) {
+        state.recordingCommandOwner = null;
+      }
       if (state.session === session) {
         state.busy = false;
         renderSession();
@@ -5055,7 +5102,8 @@
     const interactionBusy = cameraInteractionBusy();
     const videoSupported = featureSupported(FEATURES.VIDEO_RECORDING);
     const recording = Boolean(state.status?.recording);
-    const videoAvailable = videoSupported || recording;
+    const stopOnly = recordingRecoveryActive();
+    const videoAvailable = videoSupported || recording || stopOnly;
     [ui.usbModeButton, ui.ccapiModeButton, ui.tokenInput, ui.ccapiUrlInput,
       ui.ccapiUsernameInput, ui.ccapiPasswordInput].forEach((input) => {
       if (input) input.disabled = state.busy;
@@ -5070,16 +5118,16 @@
     if (ui.connectionFixButton) ui.connectionFixButton.disabled = state.busy || Boolean(state.scanAttempt);
     ui.refreshButton.disabled = !connected || interactionBusy;
     ui.disconnectButton.disabled = !connected || state.busy;
-    ui.photoModeButton.disabled = interactionBusy || bulbActive || Boolean(state.status?.recording);
+    ui.photoModeButton.disabled = interactionBusy || bulbActive || recording || stopOnly;
     ui.videoModeButton.disabled = interactionBusy || bulbActive || !videoAvailable;
     ui.videoModeButton.hidden = !videoAvailable;
     ui.videoModeButton.parentElement.classList.toggle("single", !videoAvailable);
     const bulbActiveStop = bulbActive;
-    const shutterSupported = bulbActiveStop || recording || (state.captureMode === "photo" && isBulbMode()
+    const shutterSupported = bulbActiveStop || recording || stopOnly || (state.captureMode === "photo" && isBulbMode()
       ? featureSupported(FEATURES.BULB_EXPOSURE)
       : state.captureMode === "photo" ? featureSupported(FEATURES.STILL_CAPTURE)
       : videoSupported);
-    const temperatureAllowed = bulbActiveStop || recording || (
+    const temperatureAllowed = bulbActiveStop || recording || stopOnly || (
       state.captureMode === "photo" ? temperatureAllows("release") : temperatureAllows("movie")
     );
     const shutterAFAllowed = bulbActiveStop || state.captureMode !== "photo" || isBulbMode() ||
@@ -5153,7 +5201,7 @@
             ? featureSupported(FEATURES.DIRECTORY_CONTROL)
             : featureSupported(FEATURES.CAMERA_CLOCK_SYNC);
       button.disabled = interactionBusy || bulbActive || !supported ||
-        ((command === "sleep" || command === "sensor-cleaning") && recording);
+        ((command === "sleep" || command === "sensor-cleaning") && (recording || stopOnly));
     });
     document.querySelectorAll("#focus-step-control button").forEach((button) => {
       button.disabled = interactionBusy || bulbActive || !state.liveActive;
@@ -5766,7 +5814,7 @@
   function mediaAutoImportEligible() {
     return Boolean(state.session?.engine === "ccapi" &&
       featureSupported(FEATURES.MEDIA_BROWSER) && featureSupported(FEATURES.MEDIA_DOWNLOAD) &&
-      !state.status?.recording && !bulbControlLocked());
+      !state.status?.recording && !recordingRecoveryActive() && !bulbControlLocked());
   }
 
   function ownsMediaAutoImport(owner) {
