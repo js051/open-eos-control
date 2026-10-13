@@ -696,3 +696,10 @@
 "confirm_previous_recording_stopped" = "I checked the previous camera";
 "previous_recording_physically_verified" = "Recording is stopped on the previous camera";
 "previous_recording_confirmation_help" = "Only confirm after checking the previous camera. This dismisses the warning without sending a command.";
+
+"live_view_stop_unconfirmed" = "The Live View stop was not confirmed. Retry Stop before starting again.";
+"previous_live_view_stop_warning" = "The previous camera’s Live View stop was not confirmed. Check that camera directly.";
+"confirm_previous_live_view_stopped" = "Confirm previous Live View stopped";
+"retry_live_view_stop" = "Retry Live View Stop";
+"previous_live_view_physically_verified" = "I checked that Live View stopped";
+"previous_live_view_confirmation_help" = "This clears the warning only and sends no command to the current camera.";

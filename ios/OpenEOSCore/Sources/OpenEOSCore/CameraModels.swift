@@ -190,6 +190,7 @@ public struct CameraStatus: Equatable, Sendable {
     public let bulbExposureActive: Bool?
     /// Nil means an older peer did not supply release-confirmation evidence.
     public let shutterReleaseUnconfirmed: Bool?
+    public let liveViewStopUnconfirmed: Bool?
     public let mode: String
     public let mediaAvailable: Bool?
     public let remainingMinutes: Int?
@@ -213,6 +214,7 @@ public struct CameraStatus: Equatable, Sendable {
         recording: Bool? = nil,
         bulbExposureActive: Bool? = nil,
         shutterReleaseUnconfirmed: Bool? = nil,
+        liveViewStopUnconfirmed: Bool? = nil,
         mode: String = "unknown",
         mediaAvailable: Bool? = nil,
         remainingMinutes: Int? = nil,
@@ -235,6 +237,7 @@ public struct CameraStatus: Equatable, Sendable {
         self.recording = recording
         self.bulbExposureActive = bulbExposureActive
         self.shutterReleaseUnconfirmed = shutterReleaseUnconfirmed
+        self.liveViewStopUnconfirmed = liveViewStopUnconfirmed
         self.mode = mode
         self.mediaAvailable = mediaAvailable
         self.remainingMinutes = remainingMinutes
@@ -268,6 +271,7 @@ public struct CameraStatus: Equatable, Sendable {
             recording: recording,
             bulbExposureActive: active,
             shutterReleaseUnconfirmed: unconfirmed,
+            liveViewStopUnconfirmed: liveViewStopUnconfirmed,
             mode: mode,
             mediaAvailable: mediaAvailable,
             remainingMinutes: remainingMinutes,

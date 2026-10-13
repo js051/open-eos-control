@@ -97,6 +97,8 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
     func testAllCameraMutationRoutesFailClosedWhileReadsAndSafetyStopsRemainAvailable() async throws {
         let transport = BridgeShutterTransport()
         let client = try await initializedClient(transport)
+        await transport.enqueueJSON(method: "POST", path: "/v1/session/session-a/liveview/start", body: #"{"active":true}"#)
+        try await client.startLiveView()
         await transport.enqueueJSON(path: statusPath, body: unknown)
         _ = try await client.status()
         let item = CameraMediaItem(id: "media-1", name: "sample.JPG", kind: "image")
@@ -130,21 +132,22 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
             }
         }
         let beforeReads = await transport.requests()
-        XCTAssertEqual(beforeReads.count, 3)
+        XCTAssertEqual(beforeReads.count, 4)
         await transport.enqueueJSON(path: "/v1/session/session-a/info", body: #"{"model":"Synthetic Camera"}"#)
         _ = try await client.info()
         await transport.enqueueJSON(path: "/v1/session/session-a/capabilities", body: #"{"supported":["EVENT_POLLING"]}"#)
         _ = try await client.capabilities()
         await transport.enqueueJSON(method: "POST", path: "/v1/session/session-a/recording/stop", body: released)
         _ = try await client.stopRecording()
-        await transport.enqueueJSON(method: "POST", path: "/v1/session/session-a/liveview/stop", body: "{}")
+        await transport.enqueueJSON(method: "POST", path: "/v1/session/session-a/liveview/stop", body: #"{"active":false,"liveViewStopUnconfirmed":false}"#)
         await client.stopLiveView()
         await transport.enqueueJSON(method: "DELETE", path: "/v1/session/session-a/events", status: 204, body: "")
         await client.stopEventPolling()
         // A different stop route's response is never Bulb release proof.
         await assertPending(client)
         let requests = await transport.requests()
-        XCTAssertEqual(requests.count, 8)
+        XCTAssertEqual(requests.count, 9)
+        XCTAssertEqual(requests.filter { $0.path == "/v1/session/session-a/liveview/stop" }.count, 1)
     }
 
     func testUploadAlsoUsesMutationGate() async throws {

@@ -696,3 +696,10 @@
 "confirm_previous_recording_stopped" = "我已檢查上一台相機";
 "previous_recording_physically_verified" = "上一台相機已停止錄影";
 "previous_recording_confirmation_help" = "請直接檢查上一台相機後再確認。此操作只關閉警示，不會發送指令。";
+
+"live_view_stop_unconfirmed" = "尚未確認 Live View 已停止。請先重試停止，再重新啟動。";
+"previous_live_view_stop_warning" = "上一台相機尚未確認 Live View 已停止，請直接檢查該相機。";
+"confirm_previous_live_view_stopped" = "確認上一台 Live View 已停止";
+"retry_live_view_stop" = "重試停止 Live View";
+"previous_live_view_physically_verified" = "我已檢查 Live View 已停止";
+"previous_live_view_confirmation_help" = "此操作只清除警示，不會傳送指令到目前的相機。";

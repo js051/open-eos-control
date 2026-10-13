@@ -22,6 +22,7 @@ public enum DesktopBridgeError: Error, Equatable, Sendable {
     case invalidBaseURL(String)
     case notInitialized
     case sessionChanged
+    case liveViewStopUnconfirmed
     case shutterReleaseUnconfirmed
     case captureStatusReadbackFailed
     case recordingStatusReadbackFailed(starting: Bool)
@@ -48,6 +49,8 @@ extension DesktopBridgeError: LocalizedError {
             "The Desktop Bridge session has not been initialized."
         case .sessionChanged:
             "The Desktop Bridge session changed or is closing. Connect again before using the camera."
+        case .liveViewStopUnconfirmed:
+            "Live View stop is not confirmed. Retry Stop before starting Live View again."
         case .shutterReleaseUnconfirmed:
             "Camera shutter or autofocus stop is not confirmed. Retry Stop before starting another camera operation."
         case .captureStatusReadbackFailed:
@@ -174,6 +177,19 @@ public actor DesktopBridgeClient {
     private var bridgeVersion: String?
     private var eventPollingSupported = false
     private var liveViewMagnifications: [LiveViewMagnification] = []
+    private struct LiveViewStopObligation: Sendable {
+        let id = UUID()
+        let generation: UUID
+        let request: URLRequest
+        var acceptsLegacyStop = false
+    }
+    private var liveViewStop: LiveViewStopObligation?
+    private var liveViewStopUnconfirmed = false
+    private var liveViewRevision = UUID()
+    private var liveViewMaintenanceID: UUID?
+    private var liveViewStartTask: Task<Void, Error>?
+    private var liveViewStopTask: Task<Void, Error>?
+    private var liveViewReleaseTask: Task<Void, Error>?
 
     public init(
         baseURL: String,
@@ -268,6 +284,10 @@ public actor DesktopBridgeClient {
             throw DesktopBridgeError.sessionChanged
         }
         sessionGeneration = UUID()
+        liveViewStop = nil
+        liveViewStopUnconfirmed = false
+        liveViewRevision = UUID()
+        liveViewMaintenanceID = nil
         recordingCommandEvidence = nil
         completedCloseState = .idle
         releaseRevision = UUID()
@@ -306,6 +326,12 @@ public actor DesktopBridgeClient {
         pendingStart?.cancel()
         if let pendingStart { _ = await pendingStart.result }
         if let pendingStop { _ = await pendingStop.result }
+        if let start = liveViewStartTask {
+            start.cancel()
+            _ = await start.result
+        }
+        if let stop = liveViewStopTask { _ = await stop.result }
+        try? await releasePendingLiveView()
         await stopEventPolling()
         var result = CameraShutterReleaseState.idle
         do {
@@ -316,6 +342,7 @@ public actor DesktopBridgeClient {
             }
             try await deletion.value
         } catch {
+            if liveViewStop != nil || Self.isLiveViewStopError(error) { liveViewStopUnconfirmed = true }
             if shutterRelease != nil || Self.isShutterReleaseError(error) {
                 // DELETE can remove the server session even when cleanup fails.
                 // The caller presents this as a previous-connection warning only.
@@ -324,6 +351,8 @@ public actor DesktopBridgeClient {
                 )
             }
         }
+        liveViewStop = nil
+        liveViewRevision = UUID()
         sessionID = nil
         sessionEngine = nil
         sessionGeneration = UUID()
@@ -577,15 +606,26 @@ public actor DesktopBridgeClient {
     }
 
     public func cleanSensor(autoPowerOff: Bool) async throws {
-        try await requestOK(
-            sessionEndpoint(["maintenance", "sensor-cleaning"]),
-            method: "POST",
-            payload: ["autoPowerOff": autoPowerOff]
-        )
+        try await performLiveViewMaintenance(path: ["maintenance", "sensor-cleaning"],
+                                             payload: ["autoPowerOff": autoPowerOff])
     }
 
     public func sleepCamera() async throws {
-        try await requestOK(sessionEndpoint(["power", "sleep"]), method: "POST")
+        try await performLiveViewMaintenance(path: ["power", "sleep"], payload: nil)
+    }
+
+    private func performLiveViewMaintenance(path: [String], payload: BridgeJSON?) async throws {
+        let url = try sessionEndpoint(path)
+        try validateMutation(url: url, method: "POST")
+        guard liveViewMaintenanceID == nil else { throw DesktopBridgeError.sessionChanged }
+        let id = UUID()
+        liveViewMaintenanceID = id
+        defer { if liveViewMaintenanceID == id { liveViewMaintenanceID = nil } }
+        let generation = sessionGeneration
+        try await retryLiveViewStop()
+        try Task.checkCancellation()
+        guard generation == sessionGeneration, !isClosing else { throw DesktopBridgeError.sessionChanged }
+        try await requestOK(url, method: "POST", payload: payload)
     }
 
     public func captureStill(autofocus: Bool = true) async throws -> CameraStatus {
@@ -868,19 +908,155 @@ public actor DesktopBridgeClient {
     }
 
     public func startLiveView(_ request: LiveViewRequest = LiveViewRequest()) async throws {
-        _ = try await postJSON(
-            sessionEndpoint(["liveview", "start"]),
-            payload: [
-                "fps": request.fps,
-                "size": request.size.rawValue.uppercased(),
-                "source": Self.bridgeValue(request.source),
-            ]
-        )
+        try Task.checkCancellation()
+        guard !isClosing else { throw DesktopBridgeError.sessionChanged }
+        let startURL = try sessionEndpoint(["liveview", "start"])
+        try validateMutation(url: startURL, method: "POST")
+        guard liveViewMaintenanceID == nil, liveViewStartTask == nil, liveViewStopTask == nil, liveViewStop == nil else {
+            throw DesktopBridgeError.liveViewStopUnconfirmed
+        }
+        var start = makeRequest(url: startURL, method: "POST", accept: "application/json")
+        let payload: BridgeJSON = [
+            "fps": request.fps, "size": request.size.rawValue.uppercased(),
+            "source": Self.bridgeValue(request.source),
+        ]
+        start.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        start.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        let stop = try makeLiveViewStop()
+        // Both requests are valid before Start becomes responsible for cleanup.
+        let startRequest = start
+        let task = Task { try await self.performLiveViewStart(startRequest, stop: stop) }
+        liveViewStartTask = task
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: { task.cancel() }
     }
 
-    public func stopLiveView() async {
-        guard sessionID != nil else { return }
-        _ = try? await postJSON(sessionEndpoint(["liveview", "stop"]), payload: [:])
+    private func performLiveViewStart(_ start: URLRequest, stop: LiveViewStopObligation) async throws {
+        defer { liveViewStartTask = nil }
+        try Task.checkCancellation()
+        guard stop.generation == sessionGeneration, !isClosing else { throw DesktopBridgeError.sessionChanged }
+        try validateMutation(url: start.url!, method: "POST")
+        // Actor admission and this owned task run in separate turns. A status
+        // reply or maintenance/Stop admission may have arrived in between.
+        guard liveViewStopTask == nil else { throw CancellationError() }
+        guard liveViewMaintenanceID == nil, liveViewStop == nil, !liveViewStopUnconfirmed else {
+            throw DesktopBridgeError.liveViewStopUnconfirmed
+        }
+        liveViewStop = stop
+        liveViewRevision = UUID()
+        do {
+            let response = try await transport.send(start)
+            let body = try validateLiveViewResponse(response, request: start)
+            // Only a complete acknowledged Start permits the legacy first Stop contract.
+            // An ambiguous Start or any failed Stop requires explicit cleanup proof.
+            guard Self.strictBool(body["active"]) == true else {
+                throw DesktopBridgeError.invalidResponse("Desktop Bridge did not acknowledge Live View Start.")
+            }
+            liveViewStop?.acceptsLegacyStop = !liveViewStopUnconfirmed
+            try Task.checkCancellation()
+            guard stop.generation == sessionGeneration, !isClosing else { throw DesktopBridgeError.sessionChanged }
+        } catch {
+            let primary = error
+            do { try await releasePendingLiveView() }
+            catch {
+                if CameraConnectionFailureReason.isCancellation(primary) { throw primary }
+                try Task.checkCancellation()
+                throw DesktopBridgeError.liveViewStopUnconfirmed
+            }
+            if CameraConnectionFailureReason.isCancellation(primary) { throw primary }
+            try Task.checkCancellation()
+            throw primary
+        }
+    }
+
+    public func liveViewStopState() -> CameraLiveViewStopState {
+        CameraLiveViewStopState(stopRequired: liveViewStop != nil,
+            stopUnconfirmed: liveViewStopUnconfirmed,
+            source: liveViewStop != nil || liveViewStopUnconfirmed ? .desktopBridgeStream : nil)
+    }
+
+    public func stopLiveView() async { try? await retryLiveViewStop() }
+
+    public func retryLiveViewStop() async throws {
+        if let task = liveViewStopTask { return try await task.value }
+        let task = Task.detached { try await self.performLiveViewStop() }
+        liveViewStopTask = task
+        defer { liveViewStopTask = nil }
+        try await task.value
+    }
+
+    private func performLiveViewStop() async throws {
+        if let start = liveViewStartTask {
+            start.cancel()
+            _ = await start.result
+            if liveViewStopUnconfirmed { throw DesktopBridgeError.liveViewStopUnconfirmed }
+        }
+        try await releasePendingLiveView()
+    }
+
+    private func makeLiveViewStop() throws -> LiveViewStopObligation {
+        let url = try sessionEndpoint(["liveview", "stop"])
+        try validateMutation(url: url, method: "POST")
+        var request = makeRequest(url: url, method: "POST", accept: "application/json")
+        request.httpBody = Data("{}".utf8)
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        return LiveViewStopObligation(generation: sessionGeneration, request: request)
+    }
+
+    private func releasePendingLiveView() async throws {
+        if let task = liveViewReleaseTask { return try await task.value }
+        guard let stop = liveViewStop else { return }
+        let task = Task.detached { try await self.sendLiveViewStop(stop) }
+        liveViewReleaseTask = task
+        defer { liveViewReleaseTask = nil }
+        try await task.value
+    }
+
+    private func sendLiveViewStop(_ stop: LiveViewStopObligation) async throws {
+        do {
+            let response = try await transport.send(stop.request)
+            let body = try validateLiveViewResponse(response, request: stop.request)
+            guard stop.generation == sessionGeneration, let current = liveViewStop,
+                  current.id == stop.id else { throw DesktopBridgeError.sessionChanged }
+            let proof = Self.strictBool(body["liveViewStopUnconfirmed"])
+            // A status reply during the wire await may revoke legacy eligibility.
+            // Consume the current owner's evidence, never the pre-await snapshot.
+            guard Self.strictBool(body["active"]) == false,
+                  proof == false || (current.acceptsLegacyStop && !liveViewStopUnconfirmed &&
+                    (body["liveViewStopUnconfirmed"] == nil || body["liveViewStopUnconfirmed"] is NSNull)) else {
+                throw DesktopBridgeError.liveViewStopUnconfirmed
+            }
+            guard stop.generation == sessionGeneration else { throw DesktopBridgeError.sessionChanged }
+            liveViewStop = nil
+            liveViewStopUnconfirmed = false
+            liveViewRevision = UUID()
+        } catch {
+            if stop.generation == sessionGeneration, liveViewStop?.id == stop.id {
+                liveViewStopUnconfirmed = true
+                liveViewStop?.acceptsLegacyStop = false
+            }
+            throw DesktopBridgeError.liveViewStopUnconfirmed
+        }
+    }
+
+    private func validateLiveViewResponse(_ response: CameraHTTPResponse, request: URLRequest) throws -> BridgeJSON {
+        guard (200..<300).contains(response.statusCode) else {
+            throw Self.httpError(response: response, method: request.httpMethod ?? "POST", url: request.url!)
+        }
+        guard let body = try JSONSerialization.jsonObject(with: response.body) as? BridgeJSON else {
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid Live View JSON.")
+        }
+        if Self.strictBool(body["liveViewStopUnconfirmed"]) == true {
+            throw DesktopBridgeError.liveViewStopUnconfirmed
+        }
+        return body
+    }
+
+    private static func isLiveViewStopError(_ error: Error) -> Bool {
+        guard let error = error as? DesktopBridgeError else { return false }
+        if case .http(_, _, _, let code, _, _, _) = error { return code == "LIVE_VIEW_STOP_UNCONFIRMED" }
+        return error == .liveViewStopUnconfirmed
     }
 
     public func liveViewFrame(cacheKey: Int64) async throws -> LiveViewFrame {
@@ -1267,6 +1443,7 @@ public actor DesktopBridgeClient {
             recording: Self.strictBool(body["recording"]),
             bulbExposureActive: Self.strictBool(body["bulbExposureActive"]),
             shutterReleaseUnconfirmed: Self.strictBool(body["shutterReleaseUnconfirmed"]),
+            liveViewStopUnconfirmed: Self.strictBool(body["liveViewStopUnconfirmed"]) ?? false,
             mode: body.string("mode") ?? "unknown",
             mediaAvailable: media.optionalBool("available"),
             remainingMinutes: nil,
@@ -1433,6 +1610,7 @@ public actor DesktopBridgeClient {
         try validateMutation(url: url, method: method, shutterOperation: shutterOperation)
         let generation = sessionGeneration
         let revision = releaseRevision
+        let liveViewStatusRevision = liveViewRevision
         let scopedToSession = try isCurrentSessionURL(url)
         var request = makeRequest(
             url: url,
@@ -1528,6 +1706,12 @@ public actor DesktopBridgeClient {
             throw DesktopBridgeError.invalidResponse(
                 "Desktop Bridge returned invalid JSON for \(url.path)."
             )
+        }
+        if scopedToSession, liveViewStatusRevision == liveViewRevision,
+           Self.strictBool(object["liveViewStopUnconfirmed"]) == true {
+            if liveViewStop == nil { liveViewStop = try makeLiveViewStop() }
+            liveViewStopUnconfirmed = true
+            liveViewStop?.acceptsLegacyStop = false
         }
         if scopedToSession, !shutterOperation, revision == releaseRevision, !bulbOperationInFlight {
             let isFreshStatus = method == "GET" && url == (try? sessionEndpoint(["status"]))

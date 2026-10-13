@@ -258,6 +258,20 @@ enum CameraSession: Sendable {
         }
     }
 
+    func liveViewStopState() async -> CameraLiveViewStopState {
+        switch self {
+        case let .ccapi(client): return await client.liveViewStopState()
+        case let .desktopBridge(client): return await client.liveViewStopState()
+        }
+    }
+
+    func retryLiveViewStop() async throws {
+        switch self {
+        case let .ccapi(client): try await client.retryLiveViewStop()
+        case let .desktopBridge(client): try await client.retryLiveViewStop()
+        }
+    }
+
     func liveViewFrame(cacheKey: Int64) async throws -> LiveViewFrame {
         switch self {
         case let .ccapi(client): return try await client.liveViewFrame(cacheKey: cacheKey)
