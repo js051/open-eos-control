@@ -267,7 +267,7 @@ private struct CaptureModePicker: View {
         .pickerStyle(.segmented)
         .frame(height: 38)
         .disabled(
-            camera.recording || camera.bulbExposureActive || camera.isBusy(.setting) ||
+            camera.recordingStopRequired || camera.bulbExposureActive || camera.isBusy(.setting) ||
                 camera.isBusy(.capture) || camera.isBusy(.recording)
         )
         .accessibilityIdentifier("capture-mode-picker")
@@ -417,6 +417,26 @@ private struct CaptureBar: View {
                 .padding(.bottom, 6)
             }
 
+            if let recovery = camera.recordingReadbackRecovery {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LocalizedStringKey(recovery.starting ? "recording_start_status_unknown" : "recording_stop_status_unknown"))
+                        .font(.caption)
+                        .foregroundStyle(Color.cameraWarning)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("recording-readback-status")
+                    Button {
+                        Task { await camera.refresh() }
+                    } label: {
+                        Label("refresh", systemImage: "arrow.clockwise")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .disabled(camera.isBusy(.refresh) || camera.busyOperations.contains(.recording))
+                    .accessibilityIdentifier("recording-readback-refresh")
+                }
+                .padding(.horizontal, compact ? 8 : 18)
+                .padding(.bottom, 6)
+            }
+
             if camera.captureReviewState != .idle {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(LocalizedStringKey(camera.captureReviewKind.localizationKey(for: camera.captureReviewState)))
@@ -424,7 +444,8 @@ private struct CaptureBar: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("capture-review-status")
                     if camera.captureReviewState != .capturing {
-                        Text(LocalizedStringKey("\(camera.captureReviewKind.localizationPrefix)_limited_list"))
+                        Text(LocalizedStringKey(camera.captureReviewKind.localizationKey(suffix: "limited_list")))
+                            .accessibilityIdentifier("capture-review-limit")
                             .font(.caption2)
                             .foregroundStyle(Color.cameraSecondaryText)
                             .fixedSize(horizontal: false, vertical: true)
@@ -433,7 +454,7 @@ private struct CaptureBar: View {
                         Button {
                             camera.retryCaptureMediaReview()
                         } label: {
-                            Label(LocalizedStringKey("\(camera.captureReviewKind.localizationPrefix)_retry"), systemImage: "arrow.clockwise")
+                            Label(LocalizedStringKey(camera.captureReviewKind.localizationKey(suffix: "retry")), systemImage: "arrow.clockwise")
                                 .font(.caption.weight(.semibold))
                                 .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
                                 .contentShape(Rectangle())
@@ -492,7 +513,7 @@ private struct CaptureBar: View {
                     }
                     .overlay(alignment: .bottom) {
                         if camera.latestMediaIsPrevious {
-                            Text(LocalizedStringKey("\(camera.captureReviewKind.localizationPrefix)_previous_badge"))
+                            Text(LocalizedStringKey(camera.captureReviewKind.localizationKey(suffix: "previous_badge")))
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity)
@@ -530,7 +551,7 @@ private struct CaptureBar: View {
 
     private var captureSupported: Bool {
         if camera.shutterReleaseRequired { return true }
-        if camera.captureMode == .video && camera.recording { return true }
+        if camera.captureMode == .video && camera.recordingStopRequired { return true }
         if camera.captureMode == .photo && !camera.bulbMode && !camera.shutterAutofocusAllowed { return false }
         return camera.supports(
             camera.bulbMode ? .bulbExposure : camera.captureMode == .photo ? .stillCapture : .videoRecording
@@ -539,7 +560,7 @@ private struct CaptureBar: View {
 
     private var captureTemperatureAllowed: Bool {
         if camera.shutterReleaseRequired { return true }
-        if camera.captureMode == .video && camera.recording { return true }
+        if camera.captureMode == .video && camera.recordingStopRequired { return true }
         return camera.captureMode == .photo
             ? camera.stillCaptureTemperatureAllowed
             : camera.movieRecordingTemperatureAllowed
@@ -572,9 +593,9 @@ private struct CaptureBar: View {
                             .fill(Color.cameraWarning)
                             .frame(width: 40, height: 40)
                     } else if camera.captureMode == .video {
-                        RoundedRectangle(cornerRadius: camera.recording ? 5 : 25)
-                            .fill(Color.cameraRecording)
-                            .frame(width: camera.recording ? 28 : 54, height: camera.recording ? 28 : 54)
+                        RoundedRectangle(cornerRadius: camera.recordingStopRequired ? 5 : 25)
+                            .fill(camera.recordingReadbackRecovery != nil ? Color.cameraWarning : Color.cameraRecording)
+                            .frame(width: camera.recordingStopRequired ? 28 : 54, height: camera.recordingStopRequired ? 28 : 54)
                     } else {
                         Group {
                             if camera.bulbMode && camera.bulbExposureActive {
@@ -598,7 +619,7 @@ private struct CaptureBar: View {
                                 ? "start_bulb_exposure"
                                 : camera.captureMode == .photo
                                     ? camera.shutterAutofocus ? "capture_photo" : "capture_without_autofocus"
-                                    : camera.recording ? "stop_recording" : "start_recording"
+                                    : camera.recordingStopRequired ? "stop_recording" : "start_recording"
                         )
                     )
                 )

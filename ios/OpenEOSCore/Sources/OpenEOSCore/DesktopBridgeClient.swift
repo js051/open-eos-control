@@ -24,6 +24,7 @@ public enum DesktopBridgeError: Error, Equatable, Sendable {
     case sessionChanged
     case shutterReleaseUnconfirmed
     case captureStatusReadbackFailed
+    case recordingStatusReadbackFailed(starting: Bool)
     case invalidResponse(String)
     case http(
         statusCode: Int,
@@ -50,6 +51,8 @@ extension DesktopBridgeError: LocalizedError {
             "Camera shutter or autofocus stop is not confirmed. Retry Stop before starting another camera operation."
         case .captureStatusReadbackFailed:
             "The shutter command was acknowledged, but camera status could not be read. Check recent media without taking another photo."
+        case .recordingStatusReadbackFailed:
+            "The recording command was acknowledged, but its status could not be read. Refresh status or explicitly stop recording."
         case let .invalidResponse(message):
             message
         case let .http(statusCode, method, url, code, message, feature, engine):
@@ -769,13 +772,24 @@ public actor DesktopBridgeClient {
     }
 
     public func startRecording() async throws -> CameraStatus {
-        let body = try await postJSON(sessionEndpoint(["recording", "start"]), payload: [:])
-        return parseStatus(body)
+        try await setRecording(true)
     }
 
     public func stopRecording() async throws -> CameraStatus {
-        let body = try await postJSON(sessionEndpoint(["recording", "stop"]), payload: [:])
-        return parseStatus(body)
+        try await setRecording(false)
+    }
+
+    private func setRecording(_ enabled: Bool) async throws -> CameraStatus {
+        try Task.checkCancellation()
+        do {
+            let body = try await postJSON(sessionEndpoint(["recording", enabled ? "start" : "stop"]), payload: [:])
+            return parseStatus(body)
+        } catch let error as DesktopBridgeError {
+            if case .http(_, _, _, "RECORDING_STATUS_READBACK_FAILED", _, _, _) = error {
+                throw DesktopBridgeError.recordingStatusReadbackFailed(starting: enabled)
+            }
+            throw error
+        }
     }
 
     public func tapFocus(x: Double, y: Double) async throws -> FocusResult {

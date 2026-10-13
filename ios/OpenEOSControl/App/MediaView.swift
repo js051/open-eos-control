@@ -1211,6 +1211,9 @@ private struct MediaPreviewView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("close-media-preview")
+                    #if DEBUG
+                    .modifier(MediaDownloadTraceAccessibility(value: camera.mediaDownloadTrace.accessibilityValue))
+                    #endif
                     if let item = camera.mediaPreviewItem {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.name)
@@ -1565,3 +1568,13 @@ private extension CameraMediaFolder {
 private extension CameraMediaItem {
     var idBytes: Data { Data(id.utf8) }
 }
+
+#if DEBUG
+private struct MediaDownloadTraceAccessibility: ViewModifier {
+    let value: String?
+    @ViewBuilder func body(content: Content) -> some View {
+        if let value { content.accessibilityValue(Text(verbatim: value)) }
+        else { content }
+    }
+}
+#endif
