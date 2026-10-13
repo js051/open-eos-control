@@ -4,7 +4,7 @@
 
 本批從原 PR #236 的 `7e2f8ee1fd92a874a641b1140e85493644910f4b` 開始，補齊既有 manual still、短半按、AF start/stop 與 manual AF fallback 的失敗停止責任，沿用 Bulb 的 session-owned stop-only recovery。保持既有公開 API，不新增 held AF、相機 endpoint、盲目重拍或 camera reconnect replay。
 
-這是本地 source 實作及待執行測試，不是 PR ready、main accepted、preview released 或真機驗證。未推送、未啟動 CI、未安裝工具、未變更 main／版本／安全設定。
+初版準備時只有本地 source 與待執行測試；後續 exact-head CI 結果另列於文末。這不是 PR ready、main accepted、preview released 或真機驗證，沒有變更 main／版本／安全設定。
 
 ## 原始缺口與反例
 
@@ -50,4 +50,10 @@
 
 ## Release assessment
 
-這是既有控制與 recovery 的相容修正，影響分類為 `patch`；本批不改版、不提出立即發版。原 PR head 是本文件唯一 source baseline，最新 release baseline 未在本次本地工作重新查詢。Swift／App runtime、完整 exact-SHA CI 及真機證據均仍未取得，因此不得擴大成已驗證跨平台／實體相機能力聲明。
+### 首輪 exact-head CI 與可選欄位測試修正
+
+`30c5135516d998a289995b0e3e7c492d141d647e` 的正常 CI `38387761681` 已實跑 Core 367 項及 UI 38 項全部通過；App 427 項中，同一個新短控制測試在兩個 Simulator control 的同一 assertion 失敗（raw `CameraStatus.shutterReleaseUnconfirmed` 是 `nil`，原測試一律期待 `false`）。該 fixture 的 `/ccapi/status` 明確未提供這個 optional 欄位；Core 在沒有 pending stop／Bulb authority 時保留稀疏 Simulator status，App 則已由 stop ACK 獨立取得 `.idle`。原 `.idle`、停止次數／method／path、禁止新 press 及其他斷言沒有失敗。
+
+最小測試修正保留 fixture 與 production：無條件驗 App 的 authoritative warning 為 false；Simulator raw status 明確驗 nil，canonical raw status 明確驗 false，並附 control／method 標識。這是固定的平台契約分支，沒有以任意 nil／false 都接受或捕捉錯誤作為通過條件。原首輪失敗保留，修正版本仍須新 exact-head CI，不由 Core／UI 通過推定整批已通過。
+
+這是既有控制與 recovery 的相容修正，影響分類為 `patch`；本批不改版、不提出立即發版。原 PR head 是本文件唯一 source baseline，最新 release baseline 未在本次本地工作重新查詢。首輪有上述 runtime 成果與失敗；可選欄位測試修正的 exact-head CI 尚未執行，真機證據也未取得，因此不得擴大成已驗證跨平台／實體相機能力聲明。

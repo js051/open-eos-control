@@ -123,7 +123,15 @@ final class ShortShutterRecoveryStateTests: XCTestCase {
                 // The same recovery entry remains stop-only even after mode drift.
                 await state.toggleBulbExposure()
                 XCTAssertEqual(state.shutterReleaseState, .idle)
-                XCTAssertEqual(state.status?.shutterReleaseUnconfirmed, false)
+                XCTAssertFalse(state.shutterReleaseUnconfirmed, "\(control) \(method): the stop ACK clears the App's authoritative warning")
+                if control.simulator {
+                    // This peer deliberately omits the optional status flag. A
+                    // later sparse read remains unknown on the wire; it cannot
+                    // revoke the independently acknowledged stop above.
+                    XCTAssertNil(state.status?.shutterReleaseUnconfirmed, "\(control) \(method): preserve the sparse Simulator status contract")
+                } else {
+                    XCTAssertEqual(state.status?.shutterReleaseUnconfirmed, false, "\(control) \(method): canonical status includes local release authority")
+                }
                 XCTAssertFalse(state.canRetryShutterRelease)
                 XCTAssertFalse(state.shutterFlash, "Releasing AF or a short press is not an acknowledged Bulb photograph")
                 XCTAssertNil(state.bulbStartedAt)
