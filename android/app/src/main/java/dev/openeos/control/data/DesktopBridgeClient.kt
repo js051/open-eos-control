@@ -656,6 +656,9 @@ class DesktopBridgeClient(
             )
             requireCurrentSession(session)
             check(response.opt("active") == true) { "Desktop Bridge did not confirm Live View start." }
+            check(response.opt("liveViewStopUnconfirmed") != true) {
+                "Desktop Bridge did not confirm Live View started without a pending stop. Retry Stop before starting again."
+            }
             synchronized(liveViewStateLock) {
                 // A delayed Start acknowledgement cannot undo a newer Stop warning.
                 if (liveViewStopOwner === owner && liveViewRevision == startRevision) owner.confirmedStart = true

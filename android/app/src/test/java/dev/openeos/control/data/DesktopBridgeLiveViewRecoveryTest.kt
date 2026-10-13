@@ -40,12 +40,33 @@ class DesktopBridgeLiveViewRecoveryTest {
     }
 
     @Test fun knownSuccessfulLegacyStartStopRemainsCompatible() = runBlocking<Unit> {
+        for (startBody in listOf("""{"active":true}""", """{"active":true,"liveViewStopUnconfirmed":null}""")) {
+            Peer().use { peer ->
+                peer.start = { peer.json(startBody) }
+                val client = peer.client(); client.initialize()
+                client.startLiveView(LiveViewRequest())
+                assertTrue(client.liveViewStopRequired)
+                peer.stop = { peer.json("""{"active":false}""") }
+                client.stopLiveView(); assertFalse(client.liveViewStopRequired)
+            }
+        }
+    }
+
+    @Test fun startStopWarningCannotGrantLegacyStopProof() = runBlocking<Unit> {
         Peer().use { peer ->
+            peer.start = { peer.json("""{"active":true,"liveViewStopUnconfirmed":true}""") }
             val client = peer.client(); client.initialize()
-            client.startLiveView(LiveViewRequest())
+            assertTrue(runCatching { client.startLiveView(LiveViewRequest()) }.isFailure)
             assertTrue(client.liveViewStopRequired)
+            assertTrue(runCatching { client.startLiveView(LiveViewRequest()) }.isFailure)
             peer.stop = { peer.json("""{"active":false}""") }
-            client.stopLiveView(); assertFalse(client.liveViewStopRequired)
+            assertTrue(runCatching { client.stopLiveView() }.isFailure)
+            assertTrue(client.liveViewStopRequired)
+            peer.stop = { peer.json("""{"active":false,"liveViewStopUnconfirmed":false}""") }
+            client.stopLiveView()
+            assertFalse(client.liveViewStopRequired)
+            assertEquals(1, peer.count("liveview/start"))
+            assertEquals(2, peer.count("liveview/stop"))
         }
     }
 
