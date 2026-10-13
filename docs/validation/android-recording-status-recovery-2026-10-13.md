@@ -74,3 +74,8 @@ Validation status is unchanged: source diff/XML and normal secret hook are check
 A further source-review correction preserves explicit non-502 rejection headers before reading the Bridge response body. HTTP 401/403/503 followed by a body I/O failure therefore remains an ordinary rejected command, without producing ACK or UNKNOWN responsibility. The special HTTP 502 envelope path still retains UNKNOWN when its body is lost or malformed. Non-502 envelopes cannot claim an acknowledged-readback outcome merely by using the ACK error-code text.
 
 Additional authored fixtures use fresh peers/connections for both directions at 401, 403, 503 and 502, inject `DISCONNECT_DURING_RESPONSE_BODY`, retain complete incoming POST evidence and independent peer recording state, and require exactly one REC with no replay. The 502 case is the positive UNKNOWN control; the other statuses preserve rejection evidence. These fixtures remain NOT_RUN locally; normal hook/source checks do not substitute for JVM execution.
+
+
+## Complete error-envelope schema alignment
+
+A complete Bridge HTTP 502 error envelope now requires both `code` and `message` to be nonblank strings, matching the Bridge `ErrorDetail` schema. Code-only, blank-message, null-message, wrong-type message and code-only ACK-looking bodies stay UNKNOWN rather than establishing rejection or acknowledgement. This is defensive contract alignment; the normal Bridge handler already emits both fields. Complete known-rejection/preflight controls and exact error-code/feature/engine negative fixtures retain their original purpose and now include the required message field. Added source coverage remains NOT_RUN locally.
