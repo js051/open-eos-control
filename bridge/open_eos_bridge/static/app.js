@@ -1475,6 +1475,7 @@
     mediaLoaded: false,
     mediaLoadStatus: "NOT_LOADED",
     mediaRefreshPromise: null,
+    mediaRefreshSession: null,
     mediaScope: "recent",
     mediaHasMore: false,
     mediaFilter: "all",
@@ -2197,7 +2198,7 @@
     }
   }
 
-  async function refreshSession({ quiet = false } = {}) {
+  async function refreshSession({ quiet = false, eventGeneration = null } = {}) {
     // A status read admitted inside a command can predate its ACK. Existing
     // event refresh already waits for this boundary; diagnostics must too.
     if (!state.session || state.recordingCommandOwner?.session === state.session) return false;
@@ -2217,6 +2218,7 @@
       ]);
       if (
         state.session !== session ||
+        (eventGeneration !== null && state.eventGeneration !== eventGeneration) ||
         state.refreshGeneration !== refreshGeneration ||
         state.refreshRequestOwner !== refreshOwner ||
         state.recordingRecovery !== recordingRecovery
@@ -2240,6 +2242,7 @@
     } catch (error) {
       if (
         state.session !== session ||
+        (eventGeneration !== null && state.eventGeneration !== eventGeneration) ||
         state.refreshGeneration !== refreshGeneration ||
         state.refreshRequestOwner !== refreshOwner ||
         state.recordingRecovery !== recordingRecovery
@@ -2396,45 +2399,57 @@
     cancelEventLoop();
     if (!state.session || !featureSupported(FEATURES.EVENT_POLLING)) return;
     const generation = state.eventGeneration;
-    const sessionId = encodeURIComponent(state.session.id);
+    const session = state.session;
+    const sessionId = encodeURIComponent(session.id);
+    const current = () => state.session === session && generation === state.eventGeneration &&
+      featureSupported(FEATURES.EVENT_POLLING);
     void (async () => {
       let failures = 0;
-      while (
-        state.session &&
-        generation === state.eventGeneration &&
-        featureSupported(FEATURES.EVENT_POLLING)
-      ) {
-        const controller = new AbortController();
-        state.eventController = controller;
+      // Polling consumes the hint. Keep only the work it requires, not an
+      // accumulating key set, until both authoritative reads have succeeded.
+      let pending = null;
+      while (current()) {
+        let controller = null;
         try {
-          const event = await api(`/v1/session/${sessionId}/events`, { signal: controller.signal });
-          failures = 0;
-          if (event?.changedKeys?.length && generation === state.eventGeneration) {
-            const contentsChanged = event.changedKeys.some((key) =>
-              String(key).toLowerCase().includes("content"),
-            );
-            while (
-              cameraInteractionBusy() &&
-              state.session &&
-              generation === state.eventGeneration
-            ) await sleep(25);
-            if (!state.session || generation !== state.eventGeneration) break;
-            const refreshed = await refreshSession({ quiet: true });
-            if (
-              refreshed && contentsChanged && state.mediaLoaded &&
-              generation === state.eventGeneration
-            ) {
-              await refreshMedia({ preservePreview: true });
+          if (!pending) {
+            controller = new AbortController();
+            state.eventController = controller;
+            const event = await api(`/v1/session/${sessionId}/events`, { signal: controller.signal });
+            if (!current()) break;
+            if (!event?.changedKeys?.length) {
+              failures = 0;
+              continue;
             }
+            pending = { contentsChanged: event.changedKeys.some((key) =>
+              String(key).toLowerCase().includes("content"),
+            ) };
+          }
+          while (current() && (cameraInteractionBusy() || state.recordingCommandOwner?.session === session)) {
+            await sleep(25);
+          }
+          if (!current()) break;
+          let refreshed = await refreshSession({ quiet: true, eventGeneration: generation });
+          if (!current()) break;
+          if (refreshed && pending.contentsChanged && state.mediaLoaded && featureSupported(FEATURES.MEDIA_BROWSER)) {
+            refreshed = await refreshMedia({ preservePreview: true });
+          }
+          if (!current()) break;
+          if (refreshed) {
+            pending = null;
+            failures = 0;
+            continue;
           }
         } catch (error) {
-          if (mediaTransfer.isAbortError(error) || generation !== state.eventGeneration) break;
+          if (mediaTransfer.isAbortError(error) || !current()) break;
           captureError(error);
-          failures += 1;
-          await sleep([1000, 2000, 5000][Math.min(failures - 1, 2)]);
         } finally {
           if (state.eventController === controller) state.eventController = null;
         }
+        if (!current()) break;
+        // A successful poll is not a successful state/media refresh. Both false
+        // returns and poll failures share bounded backoff; never retry commands.
+        failures = Math.min(failures + 1, 3);
+        await sleep([1000, 2000, 5000][failures - 1]);
       }
     })();
   }
@@ -5296,24 +5311,30 @@
   }
 
   function refreshMedia({ preservePreview = false } = {}) {
-    if (state.mediaRefreshPromise) {
+    const session = state.session;
+    if (state.mediaRefreshPromise && state.mediaRefreshSession === session) {
       // An explicit refresh still dismisses review when joining a background read.
       if (!preservePreview) closeMediaPreview();
       return state.mediaRefreshPromise;
     }
     const promise = refreshMediaWhenCurrent({ preservePreview });
     state.mediaRefreshPromise = promise;
+    state.mediaRefreshSession = session;
     return promise.finally(() => {
-      if (state.mediaRefreshPromise === promise) state.mediaRefreshPromise = null;
+      if (state.mediaRefreshPromise === promise) {
+        state.mediaRefreshPromise = null;
+        state.mediaRefreshSession = null;
+      }
       renderAvailability();
     });
   }
 
   async function refreshMediaWhenCurrent({ preservePreview = false } = {}) {
-    while (state.session && featureSupported(FEATURES.MEDIA_BROWSER)) {
-      while (cameraInteractionBusy() && state.session) await sleep(25);
-      if (!state.session || !featureSupported(FEATURES.MEDIA_BROWSER)) return false;
-      const rawSessionId = state.session.id;
+    const session = state.session;
+    while (session && state.session === session && featureSupported(FEATURES.MEDIA_BROWSER)) {
+      while (cameraInteractionBusy() && state.session === session) await sleep(25);
+      if (state.session !== session || !featureSupported(FEATURES.MEDIA_BROWSER)) return false;
+      const rawSessionId = session.id;
       const interactionGeneration = state.refreshGeneration;
       const mediaScope = state.mediaScope;
       ui.mediaRefreshButton.disabled = true;
@@ -5326,8 +5347,10 @@
         const response = await api(
           `/v1/session/${encodeURIComponent(rawSessionId)}/media${limitQuery}`,
         );
+        // A retired listing cannot publish or start a retry on a replacement
+        // connection, including one whose backend reuses the same session ID.
+        if (state.session !== session) return false;
         if (
-          state.session?.id !== rawSessionId ||
           state.refreshGeneration !== interactionGeneration ||
           state.mediaScope !== mediaScope
         ) continue;
@@ -5341,7 +5364,7 @@
         if (preservePreview && ui.mediaPreviewDialog.open) renderMediaPreviewNavigation();
         return true;
       } catch (error) {
-        if (state.session?.id !== rawSessionId) return false;
+        if (state.session !== session) return false;
         if (
           state.refreshGeneration !== interactionGeneration ||
           state.mediaScope !== mediaScope
