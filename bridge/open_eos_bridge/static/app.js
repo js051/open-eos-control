@@ -2202,9 +2202,14 @@
     // A status read admitted inside a command can predate its ACK. Existing
     // event refresh already waits for this boundary; diagnostics must too.
     if (!state.session || state.recordingCommandOwner?.session === state.session) return false;
+    const previousOwner = state.refreshRequestOwner;
+    // An in-flight explicit refresh owns its completion feedback. Quiet reads
+    // can retry later, but cannot leave that request permanently "Refreshing".
+    if (quiet && previousOwner?.quiet === false && previousOwner.session === state.session &&
+        previousOwner.generation === state.refreshGeneration && previousOwner.recordingRecovery === state.recordingRecovery) return false;
     const session = state.session;
     const recordingRecovery = state.recordingRecovery;
-    const refreshOwner = {};
+    const refreshOwner = { session, quiet, generation: state.refreshGeneration, recordingRecovery };
     state.refreshRequestOwner = refreshOwner;
     if (!quiet) setOperationState(t("refreshing"));
     const rawSessionId = state.session.id;
@@ -2253,6 +2258,8 @@
         showToast(normalized.message, true);
       }
       return false;
+    } finally {
+      if (state.refreshRequestOwner === refreshOwner) state.refreshRequestOwner = null;
     }
   }
 
