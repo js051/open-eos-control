@@ -26,3 +26,8 @@
 - 正式 callback／queue 的 81 項 Node 控制通過，含 plan／row admission 後取消／斷線／替換、clear、缺少確定不存在旗標時拒絕 I/O、完整 roster 不重複 receipt。另補 store 已 commit 但回覆未確認的 row 負例：不回 receipt capability，冷讀仍是 unknown，未開始列保持 queued。最終來源固定後完整 25 模組 exit 0，6.026 秒，單 CPU／256 MiB Node heap，來源核對未變；不沿用基底結果。
 - 原 browser reload 旅程增加完整兩列與 unknown／queued 對照；第二分頁 clear 旅程保留晚 close、兩個原檔成功與不重建檢查。Browser runtime 目前 NOT_RUN，待同一原 draft 的正常 CI。
 - 完整 App／真相機／實際 File System Access provider 驗收依使用者方向開發後集中。既有必要 CI 不刪除，不新增 workflow，不改 KVM，不合併或發版。
+
+
+## 後續功能
+
+本文件保留本批歷史界線。2026-10-13 手動來源重綁及關聯新嘗試見 [未完成工作清單接續](pc-manual-worklist-continuation-2026-10-13.zh-TW.md)；不是自動重連或原 attempt 續傳。

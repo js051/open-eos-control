@@ -826,6 +826,54 @@ cases.push({
     await page.keyboard.press("Escape");
   },
 });
+for (const language of ["en", "zh-TW"]) {
+  cases.push({
+    name: `manual unfinished worklist continuation requires binding and saves a linked new result ${language}`,
+    batch: { pauseFirstWrite: true },
+    run: async ({ page, simulatorOrigin, originalRequests, infoRequests, listingRequests }) => {
+      await page.locator("#control-view .language-select").selectOption(language);
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 2);
+      await page.click("#media-select-filtered");
+      await page.click("#media-batch-start");
+      await page.waitForFunction(() => typeof window.__releaseBatchWrite === "function");
+      await page.click("#media-batch-cancel");
+      await page.evaluate(() => window.__releaseBatchWrite());
+      await page.waitForFunction(() => !document.querySelector("#media-batch-start").disabled);
+      await page.locator('#control-view [data-open-media-history]').click();
+      await page.waitForFunction(() => document.querySelectorAll('#media-history-list select').length === 2);
+      const readHistory = () => page.evaluate(async () => {
+        const store = OpenEOSMediaTransferHistory.createHistoryStore();
+        const result = await store.list(); store.close(); return result;
+      });
+      const before = await readHistory();
+      const traffic = { info: infoRequests.length, listing: listingRequests.length, original: originalRequests.length };
+      assert.equal(await page.isDisabled("#media-continuation-start"), true);
+      const queued = page.locator('#media-history-list [data-outcome="queued"] select');
+      await queued.selectOption("1");
+      assert.equal(await page.isDisabled("#media-continuation-start"), true, "Even queued rows may still be owned by another tab");
+      await page.check("#media-continuation-acknowledge");
+      assert.equal(await page.isDisabled("#media-continuation-start"), false);
+      assert.deepEqual({ info: infoRequests.length, listing: listingRequests.length, original: originalRequests.length }, traffic,
+        "Mapping and confirmation do not request any camera bytes");
+      await page.click("#media-continuation-start");
+      await page.waitForFunction(() => document.querySelectorAll('#media-batch-list [data-status="completed"]').length === 1);
+      assert.equal(originalRequests.length, traffic.original + 1);
+      assert.equal(await page.evaluate(() => window.__batchPickerCalls), 2);
+      const files = await page.evaluate(() => window.__batchFiles.filter(file => file.closed));
+      assert.equal(files.length, 1);
+      const expected = Buffer.from(await (await fetch(`${simulatorOrigin}/__test/representation/original`)).arrayBuffer());
+      assert.deepEqual(Buffer.from(files[0].bytes), expected);
+      const after = await readHistory();
+      assert.equal(after.plans.length, 2);
+      assert.deepEqual(after.plans[1], before.plans[0], "The old worklist is preserved exactly");
+      assert.equal(after.plans[0].rows[0].outcome, "completed");
+      assert.equal(after.plans[0].rows[0].origin.batchId, before.plans[0].batchId);
+      assert.equal(after.plans[0].rows[0].origin.rowId, before.plans[0].rows[1].rowId);
+    },
+  });
+}
+
 cases.push({
   name: "clearing history from a second tab prevents late batch records without stopping files",
   batch: { pauseFirstWrite: true },
