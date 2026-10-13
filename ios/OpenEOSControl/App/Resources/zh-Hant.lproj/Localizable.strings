@@ -703,3 +703,29 @@
 "retry_live_view_stop" = "重試停止 Live View";
 "previous_live_view_physically_verified" = "我已檢查 Live View 已停止";
 "previous_live_view_confirmation_help" = "此操作只清除警示，不會傳送指令到目前的相機。";
+
+"media_worklist_continue_title" = "接續工作清單";
+"media_worklist_continue_help" = "從同一份工作清單選取未完成項目，再逐項明確選擇目前已載入的原檔。已準備好的副本可直接再次分享。";
+"media_worklist_continue_selected" = "為已選取的 %d 項選擇原檔";
+"media_worklist_select_row" = "選取此未完成項目";
+"media_worklist_origin" = "此新嘗試來自 %@ 的工作清單，第 %d 項：%@。原結果保持不變。";
+"media_worklist_binding_help" = "請自行逐項選擇來源。相似檔名、大小或日期不能證明目前原檔就是舊檔。每一欄初始皆未選取，同一來源只能選一次。";
+"media_worklist_loaded_help" = "只列出這次連線中已載入的原檔。若需要其他檔案，請取消、到圖庫載入，再重新選取工作清單項目。重新載入圖庫（含相機事件更新）、切換範圍或連線，以及清除紀錄，都會關閉本次選擇。";
+"media_worklist_no_loaded_originals" = "尚未載入原檔。請取消，先到圖庫載入。";
+"media_worklist_choose_original" = "目前原檔";
+"media_worklist_no_binding" = "選擇原檔⋯";
+"media_worklist_mapping" = "舊項目：%@ → 選取原檔：%@";
+"media_worklist_unknown_warning" = "結果未知的嘗試可能已準備或儲存副本。建立另一份前，請先檢查先前的目的地；App 無法驗證「檔案」、照片或其他提供者是否已儲存。";
+"media_worklist_unknown_acknowledgement" = "我已檢查先前目的地，並了解可能建立另一份副本。";
+"media_worklist_share_semantics" = "這會在 App 內準備新的完整原檔。完成後請使用「分享已準備原檔」，明確選擇「檔案」、照片或其他目的地。準備成功與分享面板皆不代表目的地已儲存。";
+"media_worklist_share_acknowledgement" = "我會在分享已準備原檔時選擇目的地。";
+"media_worklist_review_confirm" = "確認這些對應⋯";
+"media_worklist_confirm_title" = "開始新的準備嘗試？";
+"media_worklist_confirm_prepare" = "準備所選原檔";
+"media_worklist_confirm_message" = "依畫面中的對應開始 %d 次新的完整原檔嘗試。先保存新的連結工作清單，舊結果維持不變；不會自動恢復。";
+"media_worklist_continue_unavailable" = "無法安全記錄接續工作，因此不會要求未記錄的原檔。請確認紀錄可用，以及 100 項／512 MiB 限制；不會淘汰舊紀錄。準備好後請重新選取並確認。";
+
+"media_worklist_source_kind" = "類型：%@";
+"media_worklist_source_folder" = "資料夾：%@";
+"media_worklist_source_captured" = "拍攝時間：%@";
+"media_worklist_source_size" = "大小：%@";

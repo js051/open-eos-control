@@ -703,3 +703,29 @@
 "retry_live_view_stop" = "Retry Live View Stop";
 "previous_live_view_physically_verified" = "I checked that Live View stopped";
 "previous_live_view_confirmation_help" = "This clears the warning only and sends no command to the current camera.";
+
+"media_worklist_continue_title" = "Continue a worklist";
+"media_worklist_continue_help" = "Select unfinished rows from one worklist, then explicitly choose a currently loaded original for each row. Prepared copies can be shared again above.";
+"media_worklist_continue_selected" = "Choose originals for %d selected rows";
+"media_worklist_select_row" = "Select this unfinished row";
+"media_worklist_origin" = "New attempt for worklist %@, item %d: %@. The original result is unchanged.";
+"media_worklist_binding_help" = "Choose each source yourself. Similar names, sizes or dates do not establish that a current original is the old file. Every field starts unassigned; each source can be chosen once.";
+"media_worklist_loaded_help" = "Only originals already loaded in this connection are offered. If you need another file, cancel, load it in the gallery and select the worklist rows again. Refreshing the gallery (including camera events), changing scope or connection, or clearing history dismisses these choices.";
+"media_worklist_no_loaded_originals" = "No originals are loaded. Cancel and load the gallery first.";
+"media_worklist_choose_original" = "Current original";
+"media_worklist_no_binding" = "Choose an original…";
+"media_worklist_mapping" = "Old row: %@ → chosen original: %@";
+"media_worklist_unknown_warning" = "An unknown attempt may already have prepared or saved a copy. Check the previous destination before creating another copy; this app cannot verify what Files, Photos or another provider saved.";
+"media_worklist_unknown_acknowledgement" = "I checked the previous destination and understand another copy may be created.";
+"media_worklist_share_semantics" = "This prepares new full originals in the app. Afterwards, use Share ready originals and explicitly choose Files, Photos or another destination. Preparation and the share sheet do not prove the destination saved the files.";
+"media_worklist_share_acknowledgement" = "I will choose the destination when sharing the prepared originals.";
+"media_worklist_review_confirm" = "Confirm these mappings…";
+"media_worklist_confirm_title" = "Prepare new attempts?";
+"media_worklist_confirm_prepare" = "Prepare the chosen originals";
+"media_worklist_confirm_message" = "Start %d new full-original attempts using the mappings shown. A new linked worklist is saved first. Old results stay unchanged. Nothing resumes automatically.";
+"media_worklist_continue_unavailable" = "Continuation could not be safely recorded. No unrecorded original will be requested. Check history availability and the 100-row / 512 MiB limits; records are never evicted. Select and confirm again when ready.";
+
+"media_worklist_source_kind" = "Type: %@";
+"media_worklist_source_folder" = "Folder: %@";
+"media_worklist_source_captured" = "Captured: %@";
+"media_worklist_source_size" = "Size: %@";

@@ -200,6 +200,9 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaBatchResults: [MediaBatchResult] = []
     @Published private(set) var mediaBatchState = MediaBatchState.idle
     @Published private(set) var mediaBatchProgress: CameraMediaTransferProgress?
+    @Published private(set) var mediaWorklistContinuation: MediaWorklistContinuationDraft?
+    @Published private(set) var mediaWorklistContinuationUnavailable = false
+    private var mediaBatchContinuationActive = false
     @Published private(set) var mediaBatchCancellationRequested = false
     @Published private(set) var mediaDeliverySnapshot = MediaDeliverySnapshot(records: [], retainedBytes: 0, warning: nil)
     @Published private(set) var mediaDeliveryHistoryLoading = false
@@ -277,7 +280,13 @@ final class CameraAppState: ObservableObject {
     private(set) var mediaUploadTask: Task<Void, Never>?
     private var mediaUploadToken: UUID?
     private var mediaLibraryTask: Task<Void, Never>?
-    private var mediaLibraryGeneration = UUID()
+    private var mediaLibraryGeneration = UUID() {
+        didSet {
+            // Every inventory replacement retires explicit bindings, including
+            // automatic event refresh and scope changes that reuse loaded data.
+            if mediaLibraryGeneration != oldValue { cancelMediaWorklistContinuation() }
+        }
+    }
     private(set) var latestMediaTask: Task<Void, Never>?
     private var latestMediaGeneration = UUID()
     private var observedMediaIDs = Set<String>()
@@ -993,6 +1002,8 @@ final class CameraAppState: ObservableObject {
         applicationActive = active
         rtpController.setApplicationActive(active)
         if !active {
+            cancelMediaWorklistContinuation()
+            if mediaBatchContinuationActive { cancelMediaBatchDownload() }
             foregroundMedia.stop(reason: .background)
             stopLiveViewLoop()
         } else if let session {
@@ -2402,6 +2413,97 @@ final class CameraAppState: ObservableObject {
         }
     }
 
+    var canBeginMediaWorklistContinuation: Bool {
+        !isPreview && applicationActive && connected && session != nil && mediaDeliveryStore != nil
+            && !mediaLibraryLoading && !mediaDeliveryHistoryLoading
+            && supports(.mediaDownload) && !isBusy(.media) && !shutterReleaseRequired
+            && mediaDeliverySnapshot.warning == nil && mediaDeliverySnapshot.epoch != nil
+    }
+
+    /// Selection is explicit and carries no reconstructed camera identity.
+    @discardableResult
+    func beginMediaWorklistContinuation(origins: [MediaDeliveryOrigin]) -> Bool {
+        guard canBeginMediaWorklistContinuation, let epoch = mediaDeliverySnapshot.epoch,
+              !origins.isEmpty, Set(origins).count == origins.count,
+              Set(origins.map(\.batchID)).count == 1 else { return false }
+        var rows: [MediaWorklistContinuationRow] = []
+        for origin in origins {
+            guard let batch = mediaDeliverySnapshot.plannedBatches.first(where: { $0.id == origin.batchID }),
+                  let row = batch.rows.first(where: { $0.id == origin.rowID }), row.canContinue else { return false }
+            rows.append(MediaWorklistContinuationRow(origin: origin, filename: row.filename,
+                status: row.receipt?.status, requiresUnknownAcknowledgement: row.requiresUnknownAcknowledgement))
+        }
+        mediaWorklistContinuationUnavailable = false
+        mediaWorklistContinuation = MediaWorklistContinuationDraft(epoch: epoch,
+            sessionGeneration: sessionGeneration, librarySessionID: mediaLibrarySessionID,
+            libraryGeneration: mediaLibraryGeneration, historyGeneration: mediaDeliveryClearGeneration, rows: rows)
+        return true
+    }
+
+    private func ownsMediaWorklistDraft(_ draft: MediaWorklistContinuationDraft) -> Bool {
+        applicationActive && draft.sessionGeneration == sessionGeneration && draft.librarySessionID == mediaLibrarySessionID
+            && draft.libraryGeneration == mediaLibraryGeneration && draft.historyGeneration == mediaDeliveryClearGeneration
+            && draft.epoch == mediaDeliverySnapshot.epoch
+    }
+
+    @discardableResult
+    func bindMediaWorklistOriginal(origin: MediaDeliveryOrigin, identity: Data?) -> Bool {
+        guard var draft = mediaWorklistContinuation, ownsMediaWorklistDraft(draft),
+              let index = draft.rows.firstIndex(where: { $0.origin == origin }) else { return false }
+        if let identity {
+            // Resolve only an explicit picker choice in the current loaded list.
+            // Never search old filename, size, date, URL or a previous session.
+            guard let item = mediaItems.first(where: { mediaItemIdentity($0) == identity }),
+                  !draft.rows.enumerated().contains(where: { offset, row in
+                      offset != index && row.item.map(mediaItemIdentity) == identity
+                  }) else { return false }
+            draft.rows[index].item = item
+        } else { draft.rows[index].item = nil }
+        mediaWorklistContinuation = draft
+        return true
+    }
+
+    func cancelMediaWorklistContinuation() {
+        mediaWorklistContinuation = nil
+    }
+
+    var canConfirmMediaWorklistContinuation: Bool {
+        guard canBeginMediaWorklistContinuation, let draft = mediaWorklistContinuation,
+              ownsMediaWorklistDraft(draft), !draft.rows.isEmpty else { return false }
+        let loaded = Set(mediaItems.map(mediaItemIdentity))
+        let bound = draft.rows.compactMap { $0.item.map(mediaItemIdentity) }
+        return bound.count == draft.rows.count && Set(bound).count == bound.count
+            && bound.allSatisfy { loaded.contains($0) }
+    }
+
+    /// The UI confirms every mapping and the existing prepare-then-share meaning
+    /// before calling this. Durable admission is mandatory for continuation.
+    @discardableResult
+    func confirmMediaWorklistContinuation(confirmedMappingAndShare: Bool, acknowledgedUnknown: Bool) -> Bool {
+        guard confirmedMappingAndShare, canConfirmMediaWorklistContinuation,
+              let draft = mediaWorklistContinuation,
+              !draft.requiresUnknownAcknowledgement || acknowledgedUnknown,
+              let session, begin(.media) else { return false }
+        let results = draft.rows.compactMap { $0.item.map { MediaBatchResult(item: $0) } }
+        let token = UUID()
+        mediaWorklistContinuation = nil // This authorization can be consumed once.
+        mediaBatchContinuationActive = true
+        mediaBatchToken = token
+        mediaBatchItemToken = nil
+        mediaBatchResults = results
+        mediaBatchProgress = nil
+        mediaBatchCancellationRequested = false
+        mediaDeliveryRecordingWarning = false
+        mediaBatchWorklistWarning = false
+        mediaWorklistContinuationUnavailable = false
+        mediaBatchState = .running
+        mediaBatchTask = Task { [weak self] in
+            await self?.performMediaBatchDownload(results, session: session, token: token,
+                generation: draft.sessionGeneration, continuation: draft, acknowledgedUnknown: acknowledgedUnknown)
+        }
+        return true
+    }
+
     var canStartMediaBatchDownload: Bool {
         !isPreview && connected && session != nil && !selectedMediaItems.isEmpty
             && !mediaLibraryLoading && supports(.mediaDownload) && !isBusy(.media)
@@ -2411,6 +2513,8 @@ final class CameraAppState: ObservableObject {
     @discardableResult
     func startMediaBatchDownload() -> Bool {
         guard canStartMediaBatchDownload, let session, begin(.media) else { return false }
+        cancelMediaWorklistContinuation()
+        mediaBatchContinuationActive = false
         let token = UUID()
         let generation = sessionGeneration
         // Selection, metadata, session object and generation are frozen together.
@@ -2484,6 +2588,8 @@ final class CameraAppState: ObservableObject {
     func clearMediaDeliveryHistory() async {
         guard !mediaDeliveryHistoryLoading, let mediaDeliveryStore else { return }
         foregroundMedia.stop()
+        cancelMediaWorklistContinuation()
+        if mediaBatchContinuationActive { cancelMediaBatchDownload() }
         mediaDeliveryClearGeneration = UUID()
         let owner = UUID()
         mediaDeliveryHistoryOwner = owner
@@ -2510,7 +2616,8 @@ final class CameraAppState: ObservableObject {
     }
 
     private func performMediaBatchDownload(
-        _ results: [MediaBatchResult], session: CameraSession, token: UUID, generation: UUID
+        _ results: [MediaBatchResult], session: CameraSession, token: UUID, generation: UUID,
+        continuation: MediaWorklistContinuationDraft? = nil, acknowledgedUnknown: Bool = false
     ) async {
         guard ownsMediaBatch(token: token, generation: generation) else { return }
         defer {
@@ -2519,14 +2626,36 @@ final class CameraAppState: ObservableObject {
                 mediaBatchToken = nil
                 mediaBatchItemToken = nil
                 mediaBatchProgress = nil
+                mediaBatchContinuationActive = false
                 end(.media)
+            }
+        }
+        func checkContinuationOwner() throws {
+            try Task.checkCancellation()
+            guard ownsMediaBatch(token: token, generation: generation), !mediaBatchCancellationRequested else {
+                throw CancellationError()
+            }
+            if let continuation {
+                guard ownsMediaWorklistDraft(continuation),
+                      continuation.rows.allSatisfy({ row in
+                          guard let item = row.item else { return false }
+                          return mediaItems.contains { mediaItemIdentity($0) == mediaItemIdentity(item) }
+                      }) else { throw CancellationError() }
             }
         }
         var deliveryTicket: MediaDeliveryTicket?
         var plannedRowIDs: [UUID]?
         if let mediaDeliveryStore {
             do {
-                let plan = try await mediaDeliveryStore.beginPlannedBatch(filenames: results.map { $0.item.name })
+                try checkContinuationOwner()
+                let plan: MediaDeliveryPlannedBatch
+                if let continuation {
+                    plan = try await mediaDeliveryStore.beginContinuationBatch(
+                        origins: continuation.rows.map(\.origin), filenames: results.map { $0.item.name },
+                        expectedEpoch: continuation.epoch, acknowledgedUnknown: acknowledgedUnknown)
+                } else {
+                    plan = try await mediaDeliveryStore.beginPlannedBatch(filenames: results.map { $0.item.name })
+                }
                 deliveryTicket = plan.ticket
                 plannedRowIDs = plan.rowIDs
                 await mediaDeliveryReplyDelay?(.batchPlanned)
@@ -2536,15 +2665,25 @@ final class CameraAppState: ObservableObject {
                     mediaDeliveryRecordingWarning = true
                     mediaDeliveryHistoryWarning = true
                     mediaBatchWorklistWarning = true
+                    if continuation != nil {
+                        mediaWorklistContinuationUnavailable = true
+                        mediaBatchState = Task.isCancelled || mediaBatchCancellationRequested ? .cancelled : .failed
+                    }
                 }
+                if continuation != nil { return }
             }
+        } else if continuation != nil {
+            mediaWorklistContinuationUnavailable = true
+            mediaBatchState = .failed
+            return
+        }
+        if continuation != nil, ownsMediaBatch(token: token, generation: generation) {
+            await refreshMediaDeliveryHistory()
         }
         for (index, entry) in results.enumerated() {
             guard ownsMediaBatch(token: token, generation: generation) else { return }
-            guard !Task.isCancelled, !mediaBatchCancellationRequested else {
-                mediaBatchState = .cancelled
-                return
-            }
+            do { try checkContinuationOwner() }
+            catch { mediaBatchState = .cancelled; return }
             var deliveryReceiptID: UUID?
             if let mediaDeliveryStore, let ticket = deliveryTicket, let rowIDs = plannedRowIDs {
                 do {
@@ -2561,7 +2700,11 @@ final class CameraAppState: ObservableObject {
                         mediaBatchState = .cancelled
                         return
                     }
-                    if (error as? MediaDeliveryStoreError) == .invalidTicket {
+                    if continuation != nil {
+                        mediaWorklistContinuationUnavailable = true
+                        mediaBatchState = .failed
+                        return
+                    } else if (error as? MediaDeliveryStoreError) == .invalidTicket {
                         // A confirmed clear retires the entire plan. Preserve
                         // the existing manual operation without rebuilding it.
                         deliveryTicket = nil
@@ -2574,7 +2717,15 @@ final class CameraAppState: ObservableObject {
                     }
                 }
             }
-            guard ownsMediaBatch(token: token, generation: generation) else { return }
+            guard ownsMediaBatch(token: token, generation: generation) else {
+                // Admission may have committed before a session replacement
+                // retired this reply. No GET was sent: settle only the captured
+                // old row so its live store cannot remain permanently started.
+                if continuation != nil, let mediaDeliveryStore, let deliveryTicket, let deliveryReceiptID {
+                    try? await mediaDeliveryStore.finishFailure(deliveryTicket, receiptID: deliveryReceiptID, cancelled: true)
+                }
+                return
+            }
             let itemToken = UUID()
             mediaBatchItemToken = itemToken
             mediaBatchResults[index].status = .downloading
@@ -2583,7 +2734,14 @@ final class CameraAppState: ObservableObject {
                 // The local lease also retains an incomplete destination until
                 // the request settles, including after disconnect or cancellation.
                 let ownedFile = try MediaBatchOwnedFile.create(filename: entry.item.name)
-                try Task.checkCancellation()
+                try checkContinuationOwner()
+                if continuation != nil {
+                    guard let mediaDeliveryStore, let deliveryTicket, let deliveryReceiptID else {
+                        throw MediaDeliveryStoreError.invalidTicket
+                    }
+                    try await mediaDeliveryStore.validatePlannedDownload(deliveryTicket, rowID: deliveryReceiptID)
+                    try checkContinuationOwner()
+                }
                 let download = try await session.downloadMedia(entry.item, to: ownedFile.fileURL) { [weak self] progress in
                     Task { @MainActor in
                         guard let self, self.ownsMediaBatch(token: token, generation: generation),
@@ -2592,10 +2750,12 @@ final class CameraAppState: ObservableObject {
                         self.mediaBatchProgress = progress
                     }
                 }
-                try Task.checkCancellation()
-                guard ownsMediaBatch(token: token, generation: generation) else { return }
+                try checkContinuationOwner()
+                let values = try ownedFile.fileURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
                 guard download.fileURL == ownedFile.fileURL,
-                      (try ownedFile.fileURL.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true else {
+                      mediaItemIdentity(download.item) == mediaItemIdentity(entry.item),
+                      values.isRegularFile == true, values.isSymbolicLink != true,
+                      download.bytesTransferred > 0, values.fileSize.map(Int64.init) == download.bytesTransferred else {
                     throw CocoaError(.fileReadCorruptFile)
                 }
                 mediaBatchItemToken = nil
@@ -2636,15 +2796,23 @@ final class CameraAppState: ObservableObject {
                 mediaBatchResults[index].status = cancelled ? .cancelledOrUnknown : .failed
                 mediaBatchResults[index].errorMessage = cancelled ? nil : error.localizedDescription
                 mediaBatchState = cancelled ? .cancelled : .failed
+                if continuation != nil { await refreshMediaDeliveryHistory() }
                 return // Earlier ready files survive. Later entries remain not started.
             }
             await Task.yield()
         }
         guard ownsMediaBatch(token: token, generation: generation) else { return }
+        if continuation != nil {
+            do { try checkContinuationOwner() }
+            catch { mediaBatchState = .cancelled; return }
+        }
         mediaBatchState = .completed
     }
 
     private func resetMediaBatchState() {
+        cancelMediaWorklistContinuation()
+        mediaWorklistContinuationUnavailable = false
+        mediaBatchContinuationActive = false
         let ownedMedia = mediaBatchToken != nil
         mediaBatchToken = nil
         mediaBatchItemToken = nil

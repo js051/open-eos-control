@@ -28,6 +28,12 @@ struct MediaDeliveryPlannedBatch: Sendable {
     let rowIDs: [UUID]
 }
 
+/// A local history link only. It cannot identify or reconnect camera media.
+struct MediaDeliveryOrigin: Hashable, Codable, Sendable {
+    let batchID: UUID
+    let rowID: UUID
+}
+
 struct MediaDeliveryRecord: Identifiable, Sendable {
     let id: UUID
     let batchID: UUID
@@ -46,6 +52,32 @@ struct MediaDeliveryPlannedRowRecord: Identifiable, Sendable {
     /// Nil means this validated row has no admitted attempt: it is queued.
     /// A prepared receipt remains prepared even when its copy is unavailable.
     let receipt: MediaDeliveryRecord?
+    let origin: MediaDeliveryOrigin?
+    private let isContinuationBlocked: Bool
+    private let hasUnknownLinkedAttempt: Bool
+
+    var requiresUnknownAcknowledgement: Bool { receipt?.status == .unknown || hasUnknownLinkedAttempt }
+
+    /// The actor also projects active/prepared linked work without changing
+    /// this row's historical receipt, then rechecks admission and the epoch.
+    var canContinue: Bool {
+        guard !isContinuationBlocked else { return false }
+        guard let status = receipt?.status else { return true }
+        switch status {
+        case .failed, .cancelled, .unknown: return true
+        case .started, .prepared: return false
+        }
+    }
+
+    init(id: UUID, filename: String, receipt: MediaDeliveryRecord?, origin: MediaDeliveryOrigin? = nil,
+         isContinuationBlocked: Bool = false, hasUnknownLinkedAttempt: Bool = false) {
+        self.id = id
+        self.filename = filename
+        self.receipt = receipt
+        self.origin = origin
+        self.isContinuationBlocked = isContinuationBlocked
+        self.hasUnknownLinkedAttempt = hasUnknownLinkedAttempt
+    }
 }
 
 struct MediaDeliveryPlannedBatchRecord: Identifiable, Sendable {
@@ -60,13 +92,16 @@ struct MediaDeliverySnapshot: Sendable {
     let plannedBatches: [MediaDeliveryPlannedBatchRecord]
     let retainedBytes: Int64?
     let warning: MediaDeliveryStoreError?
+    /// Nil when no validated history has been loaded. Clear changes this value.
+    let epoch: UUID?
 
     init(records: [MediaDeliveryRecord], plannedBatches: [MediaDeliveryPlannedBatchRecord] = [],
-         retainedBytes: Int64?, warning: MediaDeliveryStoreError?) {
+         retainedBytes: Int64?, warning: MediaDeliveryStoreError?, epoch: UUID? = nil) {
         self.records = records
         self.plannedBatches = plannedBatches
         self.retainedBytes = retainedBytes
         self.warning = warning
+        self.epoch = epoch
     }
 }
 
@@ -147,6 +182,7 @@ actor MediaDeliveryStore {
     private struct PlannedRow: Codable, Sendable {
         let id: UUID
         let filename: String
+        let origin: MediaDeliveryOrigin?
     }
 
     private struct PlannedBatch: Codable, Sendable {
@@ -156,7 +192,7 @@ actor MediaDeliveryStore {
     }
 
     private struct Manifest: Codable, Sendable {
-        var version = 2
+        var version = 3
         var epoch = UUID()
         var receipts: [Receipt] = []
         var tombstones: [RetainedFile] = []
@@ -224,10 +260,52 @@ actor MediaDeliveryStore {
         }
         _ = try diskUsage()
         let ticket = MediaDeliveryTicket(batchID: UUID(), epoch: manifest!.epoch)
-        let rows = filenames.map { PlannedRow(id: UUID(), filename: deliveryFilename($0)) }
+        let rows = filenames.map { PlannedRow(id: UUID(), filename: deliveryFilename($0), origin: nil) }
         var next = manifest!
         next.plannedBatches.append(PlannedBatch(id: ticket.batchID, createdAt: Date(), rows: rows))
         try commit(next)
+        return MediaDeliveryPlannedBatch(ticket: ticket, rowIDs: rows.map(\.id))
+    }
+
+    /// Admit a new inert roster after the user maps each historical row to a
+    /// current selection. Neither display names nor links authorize camera I/O.
+    /// Original rows and receipts remain untouched, including prepared facts.
+    func beginContinuationBatch(origins: [MediaDeliveryOrigin], filenames: [String],
+                                expectedEpoch: UUID, acknowledgedUnknown: Bool) throws -> MediaDeliveryPlannedBatch {
+        try Task.checkCancellation()
+        try load()
+        guard manifest!.epoch == expectedEpoch else { throw MediaDeliveryStoreError.invalidTicket }
+        guard !origins.isEmpty, origins.count == filenames.count,
+              Set(origins).count == origins.count else { throw MediaDeliveryStoreError.invalidReceipt }
+        guard origins.count <= limits.maximumRecords - reservedRecordCount(manifest!) else {
+            throw MediaDeliveryStoreError.recordLimit
+        }
+        let current = manifest!
+        let roots = lineageRoots(in: current)
+        guard Set(origins.map { roots[$0] ?? $0 }).count == origins.count else {
+            throw MediaDeliveryStoreError.invalidReceipt
+        }
+        for origin in origins {
+            guard let batch = current.plannedBatches.first(where: { $0.id == origin.batchID }),
+                  batch.rows.contains(where: { $0.id == origin.rowID }),
+                  !hasBlockingLinkedAttempt(origin, in: current) else { throw MediaDeliveryStoreError.invalidReceipt }
+            if let receipt = current.receipts.first(where: { $0.id == origin.rowID }) {
+                guard receipt.status != .started, receipt.status != .prepared else { throw MediaDeliveryStoreError.invalidReceipt }
+            }
+            guard acknowledgedUnknown || !hasLinkedAttempt(origin, in: current, matching: { $0 == .unknown }) else {
+                throw MediaDeliveryStoreError.invalidReceipt
+            }
+        }
+        let used = try diskUsage()
+        guard used < limits.maximumRetainedBytes else { throw MediaDeliveryStoreError.byteLimit }
+        let ticket = MediaDeliveryTicket(batchID: UUID(), epoch: current.epoch)
+        let rows = zip(origins, filenames).map { origin, filename in
+            PlannedRow(id: UUID(), filename: deliveryFilename(filename), origin: origin)
+        }
+        var next = current
+        next.plannedBatches.append(PlannedBatch(id: ticket.batchID, createdAt: Date(), rows: rows))
+        guard manifest!.epoch == expectedEpoch else { throw MediaDeliveryStoreError.invalidTicket }
+        try commit(next, requireUncancelled: true)
         return MediaDeliveryPlannedBatch(ticket: ticket, rowIDs: rows.map(\.id))
     }
 
@@ -241,12 +319,25 @@ actor MediaDeliveryStore {
               !manifest!.receipts.contains(where: { $0.id == rowID }) else {
             throw MediaDeliveryStoreError.invalidReceipt
         }
+        guard !hasBlockingLinkedAttempt(MediaDeliveryOrigin(batchID: batch.id, rowID: row.id), in: manifest!) else {
+            throw MediaDeliveryStoreError.invalidReceipt
+        }
         try validateExpectedBytes(expectedBytes)
         var next = manifest!
         next.receipts.append(Receipt(id: row.id, batchID: batch.id,
             filename: row.filename, startedAt: Date(), status: .started))
         try commit(next)
         return row.id
+    }
+
+    /// Revalidate immediately before the caller issues an original GET. Clear
+    /// invalidates the ticket even when an attempt was already admitted.
+    func validatePlannedDownload(_ ticket: MediaDeliveryTicket, rowID: UUID) throws {
+        _ = try receiptIndex(ticket, rowID)
+        guard manifest!.plannedBatches.contains(where: { batch in
+            batch.id == ticket.batchID && batch.rows.contains(where: { $0.id == rowID })
+        }) else { throw MediaDeliveryStoreError.invalidReceipt }
+        guard try diskUsage() < limits.maximumRetainedBytes else { throw MediaDeliveryStoreError.byteLimit }
     }
 
     func beginItem(_ ticket: MediaDeliveryTicket, filename: String, expectedBytes: Int64? = nil) throws -> UUID {
@@ -341,10 +432,17 @@ actor MediaDeliveryStore {
         let receipts = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
         let batches = (manifest?.plannedBatches ?? []).map { batch in
             MediaDeliveryPlannedBatchRecord(id: batch.id, createdAt: batch.createdAt, rows: batch.rows.map { row in
-                MediaDeliveryPlannedRowRecord(id: row.id, filename: row.filename, receipt: receipts[row.id])
+                MediaDeliveryPlannedRowRecord(id: row.id, filename: row.filename, receipt: receipts[row.id], origin: row.origin,
+                    isContinuationBlocked: manifest.map {
+                        hasBlockingLinkedAttempt(MediaDeliveryOrigin(batchID: batch.id, rowID: row.id), in: $0)
+                    } ?? false,
+                    hasUnknownLinkedAttempt: manifest.map {
+                        hasLinkedAttempt(MediaDeliveryOrigin(batchID: batch.id, rowID: row.id), in: $0, matching: { $0 == .unknown })
+                    } ?? false)
             })
         }
-        return MediaDeliverySnapshot(records: records, plannedBatches: batches, retainedBytes: retainedBytes, warning: warning)
+        return MediaDeliverySnapshot(records: records, plannedBatches: batches, retainedBytes: retainedBytes,
+            warning: warning, epoch: manifest?.epoch)
     }
 
     private func projectedRecords() -> [MediaDeliveryRecord] {
@@ -467,7 +565,7 @@ actor MediaDeliveryStore {
                 try validateManifest(saved)
                 // Migration is in memory only. Reading legacy receipts must not
                 // invent a full roster or rewrite their ownership evidence.
-                saved.version = 2
+                saved.version = 3
                 // A previous process cannot establish how far started work got.
                 for index in saved.receipts.indices where saved.receipts[index].status == .started {
                     saved.receipts[index].status = .unknown
@@ -484,7 +582,7 @@ actor MediaDeliveryStore {
     }
 
     private func validateManifest(_ value: Manifest) throws {
-        guard value.version == 1 || value.version == 2 else { throw MediaDeliveryStoreError.unsupportedSchema }
+        guard (1...3).contains(value.version) else { throw MediaDeliveryStoreError.unsupportedSchema }
         let ids = value.receipts.map(\.id) + value.tombstones.map(\.id)
         let batches = value.plannedBatches
         let rows = batches.flatMap(\.rows)
@@ -498,17 +596,35 @@ actor MediaDeliveryStore {
               Set(rowIDs).count == rowIDs.count,
               Set(rowIDs).isDisjoint(with: value.tombstones.map(\.id)),
               Set(batchIDs).isDisjoint(with: ids + rowIDs) else { throw MediaDeliveryStoreError.invalidManifest }
+        var priorRoots: [MediaDeliveryOrigin: MediaDeliveryOrigin] = [:]
         for batch in batches {
             guard validDate(batch.createdAt), !batch.rows.isEmpty else { throw MediaDeliveryStoreError.invalidManifest }
+            let origins = batch.rows.compactMap(\.origin)
+            guard Set(origins).count == origins.count,
+                  Set(origins.compactMap { priorRoots[$0] }).count == origins.count else {
+                throw MediaDeliveryStoreError.invalidManifest
+            }
             for row in batch.rows {
                 guard safeName(row.filename), row.filename == deliveryFilename(row.filename) else {
                     throw MediaDeliveryStoreError.invalidManifest
+                }
+                // References must point to an earlier batch's exact local row.
+                // This rejects dangling, self, forward, and cyclic links. Do not
+                // revalidate historical eligibility: facts may later complete.
+                if let origin = row.origin {
+                    guard value.version == 3, priorRoots[origin] != nil else {
+                        throw MediaDeliveryStoreError.invalidManifest
+                    }
                 }
                 if let receipt = value.receipts.first(where: { $0.id == row.id }) {
                     guard receipt.batchID == batch.id, receipt.filename == row.filename else {
                         throw MediaDeliveryStoreError.invalidManifest
                     }
                 }
+            }
+            for row in batch.rows {
+                let reference = MediaDeliveryOrigin(batchID: batch.id, rowID: row.id)
+                priorRoots[reference] = row.origin.flatMap { priorRoots[$0] } ?? reference
             }
         }
         for receipt in value.receipts {
@@ -559,25 +675,69 @@ actor MediaDeliveryStore {
         }
     }
 
+    /// Queued links alone do not prove a live owner after a restart. Active
+    /// receipts do. A linked prepared fact also excludes continued work even
+    /// when its local copy is unavailable; the original gallery flow remains
+    /// separate. Siblings and ancestors share the same local lineage root.
+    /// Rechecking at item admission also serializes separately admitted rosters.
+    private func hasBlockingLinkedAttempt(_ origin: MediaDeliveryOrigin, in value: Manifest) -> Bool {
+        hasLinkedAttempt(origin, in: value, matching: { $0 == .started || $0 == .prepared })
+    }
+
+    private func hasLinkedAttempt(_ origin: MediaDeliveryOrigin, in value: Manifest,
+                                  matching: (MediaDeliveryStatus) -> Bool) -> Bool {
+        let roots = lineageRoots(in: value)
+        let requestedRoot = roots[origin] ?? origin
+        return value.receipts.contains { receipt in
+            let reference = MediaDeliveryOrigin(batchID: receipt.batchID, rowID: receipt.id)
+            return matching(receipt.status) && (roots[reference] ?? reference) == requestedRoot
+        }
+    }
+
+    private func lineageRoots(in value: Manifest) -> [MediaDeliveryOrigin: MediaDeliveryOrigin] {
+        var roots: [MediaDeliveryOrigin: MediaDeliveryOrigin] = [:]
+        // Valid manifests only reference earlier batches, so roots are known
+        // before each child and traversal never follows a cycle.
+        for batch in value.plannedBatches {
+            for row in batch.rows {
+                let reference = MediaDeliveryOrigin(batchID: batch.id, rowID: row.id)
+                roots[reference] = row.origin.flatMap { roots[$0] } ?? reference
+            }
+        }
+        return roots
+    }
+
     private func validateKeys(_ data: Data) throws {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let version = object["version"] as? Int else { throw MediaDeliveryStoreError.invalidManifest }
-        guard version == 1 || version == 2 else { throw MediaDeliveryStoreError.unsupportedSchema }
+        guard (1...3).contains(version) else { throw MediaDeliveryStoreError.unsupportedSchema }
         let manifestKeys: Set<String> = version == 1
             ? ["version", "epoch", "receipts", "tombstones"]
             : ["version", "epoch", "receipts", "tombstones", "plannedBatches"]
         guard Set(object.keys) == manifestKeys,
               let receipts = object["receipts"] as? [[String: Any]],
               let tombstones = object["tombstones"] as? [[String: Any]] else { throw MediaDeliveryStoreError.invalidManifest }
-        if version == 2 {
+        if version >= 2 {
             guard let batches = object["plannedBatches"] as? [[String: Any]] else {
                 throw MediaDeliveryStoreError.invalidManifest
             }
             for batch in batches {
                 guard Set(batch.keys) == Set(["id", "createdAt", "rows"]),
-                      let rows = batch["rows"] as? [[String: Any]],
-                      rows.allSatisfy({ Set($0.keys) == Set(["id", "filename"]) }) else {
+                      let rows = batch["rows"] as? [[String: Any]] else {
                     throw MediaDeliveryStoreError.invalidManifest
+                }
+                for row in rows {
+                    let keys = Set(row.keys)
+                    guard keys == Set(["id", "filename"]) ||
+                          (version == 3 && keys == Set(["id", "filename", "origin"])) else {
+                        throw MediaDeliveryStoreError.invalidManifest
+                    }
+                    if let origin = row["origin"] {
+                        guard let reference = origin as? [String: Any],
+                              Set(reference.keys) == Set(["batchID", "rowID"]) else {
+                            throw MediaDeliveryStoreError.invalidManifest
+                        }
+                    }
                 }
             }
         }
@@ -602,7 +762,8 @@ actor MediaDeliveryStore {
         }
     }
 
-    private func commit(_ value: Manifest) throws {
+    private func commit(_ value: Manifest, requireUncancelled: Bool = false) throws {
+        if requireUncancelled { try Task.checkCancellation() }
         try verifyRoot()
         _ = try diskUsage()
         try verifyManifestIsUnchanged()
@@ -636,6 +797,9 @@ actor MediaDeliveryStore {
         if Darwin.fstatat(rootFD, Self.manifestName, &target, AT_SYMLINK_NOFOLLOW) == 0 {
             guard isRegular(target), target.st_nlink == 1 else { throw MediaDeliveryStoreError.unsafeFilesystem }
         } else if errno != ENOENT { throw MediaDeliveryStoreError.storageUnavailable }
+        // Continuation admission is cancellable until its atomic replacement.
+        // Other callers retain their existing terminal-receipt semantics.
+        if requireUncancelled { try Task.checkCancellation() }
         guard Darwin.renameat(rootFD, name, rootFD, Self.manifestName) == 0 else {
             throw MediaDeliveryStoreError.storageUnavailable
         }
