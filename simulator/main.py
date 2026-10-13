@@ -2566,6 +2566,17 @@ async def canon_live_view_flip() -> Response:
 async def canon_live_view_flip_detail(kind: str = "image") -> Response:
     if not state["canonical_live_view_active"]:
         raise HTTPException(status_code=409, detail="Live View is not active")
+    if kind == "info":
+        info = {"liveviewdata": {
+            "image": CANON_LIVE_VIEW_GEOMETRY,
+            "zoom": {"magnification": int(state["canonical_live_view_magnification"])},
+            # A simulator tap target is not evidence of a camera-reported AF frame.
+            "afframe": [],
+        }}
+        return Response(
+            content=detail_packet(0x01, json.dumps(info).encode("utf-8")),
+            media_type="application/octet-stream",
+        )
     jpeg = camera_frame_jpeg()
     if kind == "both":
         info = {"liveview": {"image": CANON_LIVE_VIEW_GEOMETRY}}
