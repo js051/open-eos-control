@@ -12,6 +12,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraUiStateTest {
+    @Test fun bridgeThumbnailDemandResumesOnlyAfterSuccessfulCompletion() {
+        for (status in MediaLibraryLoadStatus.entries) {
+            val state = CameraUiState(transport = dev.openeos.control.data.CameraTransport.DESKTOP_BRIDGE,
+                mediaLibraryLoadStatus = status)
+            assertEquals(status != MediaLibraryLoadStatus.COMPLETE, state.mediaListingDefersThumbnails)
+            assertTrue(state.copy(mediaLibraryLoading = true).mediaListingDefersThumbnails)
+            assertFalse(state.copy(transport = dev.openeos.control.data.CameraTransport.CCAPI_NETWORK,
+                mediaLibraryLoading = true).mediaListingDefersThumbnails)
+        }
+    }
+
     @Test fun pendingRecordingBlocksPhotoAndPreservesStopDuringForegroundImport() {
         for (command in dev.openeos.control.data.RecordingCommand.entries) for (unconfirmed in listOf(false, true)) {
             val state = CameraUiState().withOfflinePreview().copy(

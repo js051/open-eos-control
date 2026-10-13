@@ -340,6 +340,7 @@ class CameraViewModel(
     private var mediaUploadJob: Job? = null
     private var mediaLibraryJob: Job? = null
     private var mediaLibraryGeneration = 0L
+    private var mediaEventDemandGeneration = 0L
     private var captureReviewJob: Job? = null
     private var captureReviewGeneration = 0L
     private data class CaptureReviewAttempt(
@@ -1954,6 +1955,9 @@ class CameraViewModel(
                 throw exception
             } catch (exception: Exception) {
                 exception.printStackTrace()
+                if (generation == mediaLibraryGeneration && _uiState.value.transport == CameraTransport.DESKTOP_BRIDGE) {
+                    mediaEventDemandGeneration++
+                }
                 _uiState.update {
                     if (generation != mediaLibraryGeneration) return@update it
                     it.copy(
@@ -2002,7 +2006,7 @@ class CameraViewModel(
             return
         }
         if (
-            state.previewMode ||
+            state.previewMode || state.mediaListingDefersThumbnails ||
             !state.supports(CameraFeature.MEDIA_THUMBNAIL) ||
             item.id in state.mediaThumbnailLoadingIds ||
             item.id in mediaThumbnailJobs
@@ -2069,6 +2073,9 @@ class CameraViewModel(
             if (isVideo) !item.streamAvailable
             else !state.supports(CameraFeature.MEDIA_PREVIEW) || !item.previewAvailable
         ) return
+        if (state.transport == CameraTransport.DESKTOP_BRIDGE && state.mediaLibraryLoading) {
+            cancelMediaLibraryLoad()
+        }
         val generation = cameraSessionGeneration
         val connection = state.info
         val cancellableImageRead = !isVideo && state.transport in setOf(
@@ -3845,11 +3852,13 @@ class CameraViewModel(
         eventPollingJob = viewModelScope.launch {
             var consecutiveFailures = 0
             var pendingChangedKeys = emptySet<String>()
+            var pendingMediaDemand = mediaEventDemandGeneration
             while (isActive && generation == eventPollingGeneration) {
                 try {
                     // Polling consumes the notification. Keep its complete hint until the
                     // authoritative snapshot succeeds; an empty later poll cannot repair it.
                     if (pendingChangedKeys.isEmpty()) {
+                        pendingMediaDemand = mediaEventDemandGeneration
                         pendingChangedKeys = repository.pollEvent().changedKeys.toSet()
                         if (pendingChangedKeys.isEmpty()) {
                             consecutiveFailures = 0
@@ -3859,7 +3868,7 @@ class CameraViewModel(
                     // Publish control state before any potentially slow media listing. A command
                     // that starts or finishes during a read invalidates that snapshot and retries.
                     val capabilities = refreshEventCameraState(generation) ?: break
-                    val refreshContents = "contents" in pendingChangedKeys
+                    val refreshContents = "contents" in pendingChangedKeys && pendingMediaDemand == mediaEventDemandGeneration
                     pendingChangedKeys = emptySet()
                     consecutiveFailures = 0
                     if (refreshContents && capabilities.matrix.supports(CameraFeature.MEDIA_BROWSER)) {
@@ -4358,6 +4367,7 @@ class CameraViewModel(
     }
 
     private fun invalidateMediaLibraryLoad(status: MediaLibraryLoadStatus) {
+        if (_uiState.value.transport == CameraTransport.DESKTOP_BRIDGE) mediaEventDemandGeneration++
         mediaLibraryGeneration += 1
         mediaLibraryJob?.cancel()
         mediaLibraryJob = null

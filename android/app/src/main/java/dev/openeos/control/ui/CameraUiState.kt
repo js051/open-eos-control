@@ -248,6 +248,10 @@ private val FOREGROUND_IMPORT_CONTROL_OPERATIONS = setOf(
     CameraOperation.POWER, CameraOperation.MAINTENANCE,
 )
 
+internal val CameraUiState.mediaListingDefersThumbnails: Boolean
+    get() = transport == CameraTransport.DESKTOP_BRIDGE &&
+        (mediaLibraryLoading || mediaLibraryLoadStatus != MediaLibraryLoadStatus.COMPLETE)
+
 internal fun CameraUiState.foregroundImportCameraIdle(): Boolean =
     pendingOperations.isEmpty() && !bulbExposureActive && !shutterReleaseUnconfirmed &&
         autofocusHoldState == AutofocusHoldState.IDLE && !recordingStopAvailable &&

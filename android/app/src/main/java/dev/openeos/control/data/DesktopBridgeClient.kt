@@ -115,6 +115,11 @@ class DesktopBridgeClient(
         .callTimeout(EVENT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
     private val activeEventCall = AtomicReference<Call?>(null)
+    private val listingHttpClient = this.httpClient.newBuilder()
+        .retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false).build()
+    private class MediaListingOwner(val session: BridgeShutterReleaseSession, val call: Call)
+    private val activeMediaListing = AtomicReference<MediaListingOwner?>(null)
+    @Volatile private var closingMediaSession: BridgeShutterReleaseSession? = null
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private var sessionId: String? = null
     @Volatile private var shutterSession: BridgeShutterReleaseSession? = null
@@ -174,6 +179,8 @@ class DesktopBridgeClient(
 
     suspend fun close(): Unit = withContext(NonCancellable) {
         val session = shutterSession ?: return@withContext
+        closingMediaSession = session
+        activeMediaListing.getAndSet(null)?.call?.cancel()
         // Disconnect drops this client. Still request server cleanup if its explicit focus
         // stop failed, and keep the failure visible instead of abandoning the remote session.
         val focusFailure = runCatching { heldAutofocusSession?.close() }.exceptionOrNull()
@@ -868,16 +875,103 @@ class DesktopBridgeClient(
         }
     }
 
-    suspend fun listMedia(maximumItems: Int? = null): List<CameraMediaItem> {
+    suspend fun listMedia(
+        maximumItems: Int? = null,
+        onProgress: (List<CameraMediaItem>) -> Unit = {},
+    ): List<CameraMediaItem> = withContext(Dispatchers.IO) {
         require(maximumItems == null || maximumItems in 1..1000) {
             "maximumItems must be from 1 through 1000 when provided."
         }
-        val endpoint = sessionEndpoint("media").newBuilder().apply {
+        currentCoroutineContext().ensureActive()
+        val session = requireShutterSession()
+        requireCurrentSession(session)
+        val endpoint = endpoint("v1", "session", session.id, "media").newBuilder().apply {
             maximumItems?.let { addQueryParameter("limit", it.toString()) }
         }.build()
-        val items = getJson(endpoint).optJSONArray("items").objects().mapNotNull(::parseMediaItem)
-        observedFeatures.add(CameraFeature.MEDIA_BROWSER)
-        return items
+        val request = Request.Builder().url(endpoint).get()
+            .header("Accept", BridgeMediaListingDecoder.MEDIA_TYPE)
+            .header("Cache-Control", "no-cache, no-store").build()
+        val call = listingHttpClient.newCall(request)
+        val owner = MediaListingOwner(session, call)
+        if (closingMediaSession === session) throw CancellationException("Desktop Bridge session is closing.")
+        activeMediaListing.getAndSet(owner)?.call?.cancel()
+        val context = currentCoroutineContext()
+        fun checkOwner() {
+            context.ensureActive()
+            requireCurrentSession(session)
+            if (activeMediaListing.get() !== owner || closingMediaSession === session) {
+                throw CancellationException("Listing owner changed or session is closing.")
+            }
+        }
+        val cancelCall = AtomicBoolean(true)
+        val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally {
+                if (cancelCall.get()) {
+                    activeMediaListing.compareAndSet(owner, null)
+                    call.cancel()
+                }
+            }
+        }
+        var completed = false
+        try {
+            // Close or replacement can retire ownership between admission and installation.
+            checkOwner()
+            call.execute().use { response ->
+                checkOwner()
+                val body = response.body ?: error("Desktop Bridge returned an empty listing response.")
+                if (!response.isSuccessful) {
+                    val text = body.readBoundedUtf8(2_000)
+                    checkOwner()
+                    throw bridgeError(response.code, text, "media listing", session, session.revision)
+                }
+                val mediaType = response.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase()
+                val items = if (response.code == 200 && mediaType == BridgeMediaListingDecoder.MEDIA_TYPE) {
+                    val decoder = BridgeMediaListingDecoder(session.id, maximumItems)
+                    body.byteStream().use { input ->
+                        val bytes = ByteArray(8 * 1024)
+                        while (true) {
+                            checkOwner()
+                            val count = input.read(bytes)
+                            checkOwner()
+                            if (count < 0) break
+                            for (index in 0 until count) {
+                                decoder.consume(bytes[index], ::parseMediaItem)?.let { snapshot ->
+                                    checkOwner()
+                                    onProgress(snapshot)
+                                    checkOwner()
+                                }
+                            }
+                        }
+                    }
+                    checkOwner()
+                    decoder.finish()
+                } else {
+                    // Old Bridge replies are consumed from this one response, never retried.
+                    check(mediaType == null || mediaType == "application/json") { "Unexpected listing content type." }
+                    val json = JSONObject(body.readBoundedUtf8(BridgeMediaListingDecoder.MAX_SNAPSHOT_BYTES, strictUtf8 = true))
+                    checkOwner()
+                    val raw = json.opt("items") as? JSONArray ?: error("Invalid media listing JSON.")
+                    val legacy = raw.objects().mapNotNull(::parseMediaItem).let {
+                        if (maximumItems == null) it else it.take(maximumItems)
+                    }
+                    onProgress(legacy)
+                    checkOwner()
+                    legacy
+                }
+                checkOwner()
+                observedFeatures.add(CameraFeature.MEDIA_BROWSER)
+                completed = true
+                items
+            }
+        } catch (exception: Exception) {
+            checkOwner()
+            throw exception
+        } finally {
+            if (!completed) call.cancel()
+            cancelCall.set(false)
+            cancellationWatcher.cancel()
+            activeMediaListing.compareAndSet(owner, null)
+        }
     }
 
     suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem =
@@ -1251,8 +1345,8 @@ class DesktopBridgeClient(
         }
 
     private fun parseMediaItem(item: JSONObject): CameraMediaItem? {
-        val id = item.optString("id").trim()
-        val name = item.optString("name").trim()
+        val id = item.opt("id") as? String ?: return null
+        val name = item.opt("name") as? String ?: return null
         if (id.isBlank() || name.isBlank()) return null
         val kind = item.optString("kind", "other")
         return CameraMediaItem(
