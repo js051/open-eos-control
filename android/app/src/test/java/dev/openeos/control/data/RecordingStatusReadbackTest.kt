@@ -210,7 +210,8 @@ class RecordingStatusReadbackTest {
             client.initialize()
             for (case in listOf(Case(unknown = true), Case(code = "CCAPI_UNREACHABLE"), Case(code = "CCAPI_HTTP_ERROR"),
                 Case(code = "RECORDING_COMMAND_UNCONFIRMED_extra"), Case(code = "recording_command_unconfirmed"),
-                Case(status = 503), Case(feature = "STILL_CAPTURE"), Case(engine = "ptp"))) {
+                Case(status = 503), Case(code = "RECORDING_STATUS_READBACK_FAILED", status = 503),
+                Case(feature = "STILL_CAPTURE"), Case(engine = "ptp"))) {
                 current.set(case)
                 for (command in RecordingCommand.entries) {
                     val before = actions.size
@@ -300,6 +301,57 @@ class RecordingStatusReadbackTest {
                 assertEquals(before + 1, actions.size)
             }
         } finally { client.close(); server.shutdown() }
+    }
+
+    @Test fun interruptedBridgeRejectionBodyKeepsHeaderEvidenceWhile502RemainsUnknown() = runBlocking {
+        // Each broken response gets its own peer and connection, independent of socket recovery.
+        for (status in listOf(401, 403, 503, 502)) for (command in RecordingCommand.entries) {
+            val server = MockWebServer()
+            val actions = CopyOnWriteArrayList<String>()
+            val received = AtomicReference<RecordedRequest?>()
+            val peerRecording = AtomicBoolean(command == RecordingCommand.STOP)
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse = when {
+                    request.path == "/health" -> json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                    request.path == "/v1/session" -> json("""{"id":"synthetic-recording","engine":"ccapi"}""")
+                    request.path.orEmpty().contains("/recording/") -> {
+                        received.set(request)
+                        actions += request.path!!.substringAfterLast('/')
+                        if (status == 502) peerRecording.set(command == RecordingCommand.START)
+                        json("""{"error":{"code":"SYNTHETIC_ERROR","message":"${"x".repeat(4096)}"}}""")
+                            .setResponseCode(status).setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
+                    }
+                    else -> json()
+                }
+            }
+            server.start()
+            val client = DesktopBridgeClient(server.url("/").toString(), httpClient = http())
+            val evidence = RecordingRequestEvidence(command)
+            try {
+                client.initialize()
+                val before = server.requestCount
+                val failure = runCatching {
+                    withContext(evidence) {
+                        if (command == RecordingCommand.START) client.startRecording() else client.stopRecording()
+                    }
+                }.exceptionOrNull()
+                val detail = "$status $command: $failure"
+                assertNotNull(detail, failure)
+                assertEquals(detail, status == 502, failure is RecordingCommandUnconfirmedException)
+                assertFalse(detail, failure is RecordingStatusReadbackException)
+                assertFalse(detail, failure is CancellationException)
+                if (status != 502) assertTrue(detail, failure is java.io.IOException)
+                assertTrue(detail, evidence.attempted)
+                assertEquals(detail, status != 502, evidence.rejected)
+                assertEquals(detail, if (status == 502) command == RecordingCommand.START else command == RecordingCommand.STOP,
+                    peerRecording.get())
+                val request = requireNotNull(received.get())
+                assertNull(detail, request.failure)
+                assertEquals(detail, "POST", request.method)
+                assertEquals(detail, listOf(if (command == RecordingCommand.START) "start" else "stop"), actions.toList())
+                assertEquals(detail, before + 1, server.requestCount)
+            } finally { client.close(); server.shutdown() }
+        }
     }
 
     @Test fun bridgeHopLossIsUnknownAfterOneCompleteRequestWithNoReplay() = runBlocking {

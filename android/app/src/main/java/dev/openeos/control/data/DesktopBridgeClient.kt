@@ -548,7 +548,8 @@ class DesktopBridgeClient(
             throw exception
         } catch (exception: DesktopBridgeException) {
             when {
-                exception.code == "RECORDING_STATUS_READBACK_FAILED" -> throw RecordingStatusReadbackException(command, exception)
+                exception.statusCode == 502 && exception.code == "RECORDING_STATUS_READBACK_FAILED" ->
+                    throw RecordingStatusReadbackException(command, exception)
                 exception.isRecordingCommandUnconfirmed -> throw RecordingCommandUnconfirmedException(command, exception)
                 else -> throw exception
             }
@@ -1204,6 +1205,9 @@ class DesktopBridgeClient(
                 it.beginRequest()
             }
             call.execute().use { response ->
+                // Non-502 rejection headers remain evidence even if the error body is lost.
+                // A 502 may instead carry an acknowledged or unknown camera outcome.
+                if (!response.isSuccessful && response.code != 502) recordingEvidence?.rejected = true
                 val body = response.body?.string().orEmpty()
                 if (recordingEvidence == null) session?.let(::requireCurrentSession)
                 if (!response.isSuccessful) {
@@ -1215,8 +1219,9 @@ class DesktopBridgeClient(
                     val missingRecordingOutcome = recordingEvidence != null && response.code == 502 &&
                         (errorCode !is String || errorCode.isBlank())
                     // Preserve a complete rejection before session/cancellation checks can throw.
-                    recordingEvidence?.rejected = !(missingRecordingOutcome || (failure is DesktopBridgeException &&
-                        (failure.code == "RECORDING_STATUS_READBACK_FAILED" || failure.isRecordingCommandUnconfirmed)))
+                    recordingEvidence?.rejected = !(missingRecordingOutcome || (response.code == 502 &&
+                        failure is DesktopBridgeException && (failure.code == "RECORDING_STATUS_READBACK_FAILED" ||
+                        failure.isRecordingCommandUnconfirmed)))
                     session?.let(::requireCurrentSession)
                     if (missingRecordingOutcome) {
                         throw RecordingCommandUnconfirmedException(requireNotNull(recordingEvidence).command, failure)

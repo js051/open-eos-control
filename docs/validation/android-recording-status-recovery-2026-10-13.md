@@ -67,3 +67,10 @@ The first uncertainty candidate (`9ffba1016389c50aad7a3fde018a847d2d4e892c`) had
 The second correction treats a missing, malformed, empty, non-object or non-string-code Bridge HTTP 502 error envelope on REC as unknown. Such a body may have lost the server's acknowledgement/readback or unconfirmed-command evidence. Complete explicit rejection and legacy preflight envelopes retain ordinary failure classification; HTTP 503 remains an explicit rejection control. A complete rejection is recorded before session/cancellation checks, so cancellation does not itself convert that evidence to unknown. Additional peer tests apply Start/Stop before returning malformed 502 bodies, and verify the distinct known-rejection/preflight controls without automatic replay.
 
 Validation status is unchanged: source diff/XML and normal secret hook are checked; Kotlin/JVM/Compose/CI/device execution remains NOT_RUN. No new toolchain, push, CI trigger or release is part of this correction.
+
+
+## Rejection headers with interrupted response bodies
+
+A further source-review correction preserves explicit non-502 rejection headers before reading the Bridge response body. HTTP 401/403/503 followed by a body I/O failure therefore remains an ordinary rejected command, without producing ACK or UNKNOWN responsibility. The special HTTP 502 envelope path still retains UNKNOWN when its body is lost or malformed. Non-502 envelopes cannot claim an acknowledged-readback outcome merely by using the ACK error-code text.
+
+Additional authored fixtures use fresh peers/connections for both directions at 401, 403, 503 and 502, inject `DISCONNECT_DURING_RESPONSE_BODY`, retain complete incoming POST evidence and independent peer recording state, and require exactly one REC with no replay. The 502 case is the positive UNKNOWN control; the other statuses preserve rejection evidence. These fixtures remain NOT_RUN locally; normal hook/source checks do not substitute for JVM execution.
