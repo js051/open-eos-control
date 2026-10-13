@@ -1341,6 +1341,7 @@ private struct MediaPreviewView: View {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "square.and.arrow.up")
                         .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
                         .accessibilityLabel(Text("save_media"))
                 }
             }
@@ -1360,6 +1361,7 @@ private struct MediaPreviewView: View {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "xmark.circle.fill")
                         .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
                         .accessibilityLabel(Text("cancel_media_download"))
                 }
             }
@@ -1373,6 +1375,7 @@ private struct MediaPreviewView: View {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "arrow.down.circle")
                         .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
                         .accessibilityLabel(Text("download_media"))
                 }
             }

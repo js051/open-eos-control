@@ -1548,6 +1548,8 @@ final class OpenEOSControlUITests: XCTestCase {
             let mediaID = "/ccapi/ver100/contents/card1/100CANON/NEWLY_VISIBLE_RECORDING.MP4"
             let download = app.buttons["media-preview-download-\(mediaID)"]
             _ = try XCTUnwrap(waitForInteraction(download, timeout: 10) ? true : nil)
+            XCTAssertGreaterThanOrEqual(download.frame.width, 44, "Preview download exposes a full touch target")
+            XCTAssertGreaterThanOrEqual(download.frame.height, 44, "Preview download exposes a full touch target")
             try tapForAsyncTest(download)
             let share = app.buttons["media-preview-share-\(mediaID)"]
             let shareReady = waitForInteraction(share, timeout: 15)
