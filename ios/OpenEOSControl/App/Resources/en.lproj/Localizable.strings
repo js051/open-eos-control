@@ -600,24 +600,24 @@
 "media_delivery_history_clear_confirm" = "Remove history and app copies";
 
 "foreground_media_title" = "Foreground JPEG copies";
-"foreground_media_help" = "With a direct CCAPI connection, tap Start to keep newly detected JPEG originals in this app. Files present during the initial check are skipped.";
+"foreground_media_help" = "Choose a Files folder for this run. Newly detected JPEG originals are kept in the app, then copied to your selected local or cloud provider. Files present during the initial check are skipped.";
 "foreground_media_foreground_help" = "Keep the app in the foreground. Closing this panel keeps the run active; leaving the app stops it. Nothing resumes or retries automatically.";
-"foreground_media_counts" = "This run: %d kept in app · %d pending";
-"foreground_media_start" = "Start preparing JPEGs";
-"foreground_media_stop" = "Stop preparing";
+"foreground_media_counts" = "This run: %d kept in app · %d copied to Files · %d unconfirmed · %d pending";
+"foreground_media_start" = "Choose Files folder and start";
+"foreground_media_stop" = "Stop importing";
 "foreground_media_stopping" = "Stopping…";
-"foreground_media_start_unavailable" = "Connect directly with CCAPI and finish other camera work before starting.";
-"foreground_media_destination_help" = "Copies are kept in this app. Open Recent originals to export to Files or use Save or share. Sharing does not confirm that Files, Photos, or another destination saved them.";
+"foreground_media_start_unavailable" = "Connect directly with CCAPI. Wait for any earlier Files operation to finish before starting.";
+"foreground_media_destination_help" = "Choose a folder every time you start. The app does not save folder access. Recent originals keeps separate preparation and Files copy results; a completed copy does not confirm cloud sync.";
 "foreground_media_temporary_count" = "%d temporary originals available";
 "foreground_media_temporary_help" = "After stopping, you can export the current temporary originals to Files or share them. Check Recent originals for copies kept for later; an original may be available here even if the app could not retain it. Export or share it before starting again or disconnecting, which clears this temporary result.";
 "foreground_media_share_temporary" = "Share current temporary originals";
 "foreground_media_share_unavailable" = "The temporary originals are no longer available for sharing. Check Recent originals for retained app copies.";
 "foreground_media_limits_title" = "Scope and limits";
 "foreground_media_limits_files" = "JPEG only, through direct CCAPI. The complete card listing must contain no more than 1,000 files. Each run remembers up to 4,096 encountered files, queues up to 20 JPEGs, and keeps up to 100 originals.";
-"foreground_media_limits_history" = "Shared history holds up to 100 preparation attempts and 512 MiB of app copies. Existing history uses these limits too.";
-"foreground_media_limits_stop" = "New files must pass readiness checks within 30 seconds of detection. The first uncertain file check, transfer, or storage result stops the run. No automatic retry or resume, and no shutter, settings, or other camera control commands.";
-"foreground_media_banner_title" = "Foreground JPEG preparation active";
-"foreground_media_details" = "View preparation";
+"foreground_media_limits_history" = "Shared history holds up to 100 preparation attempts, 100 linked Files attempts and 512 MiB of app copies. Existing history uses these limits too.";
+"foreground_media_limits_stop" = "New files must pass readiness checks within 30 seconds. The first uncertain check, transfer, storage or Files result stops the run. No automatic retry or resume. A copy already in progress may finish after Stop.";
+"foreground_media_banner_title" = "Foreground JPEG import active";
+"foreground_media_details" = "View import";
 "foreground_media_state_idle" = "Not started";
 "foreground_media_state_checking" = "Checking support…";
 "foreground_media_state_baseline" = "Checking existing files…";
@@ -627,8 +627,8 @@
 "foreground_media_state_preparing" = "Keeping an original in the app…";
 "foreground_media_state_stopped" = "Stopped";
 "foreground_media_state_failed" = "Stopped for review";
-"foreground_media_reason_user" = "Stopped by you. Tap Start to begin a new run.";
-"foreground_media_reason_background" = "Stopped when the app left the foreground. Tap Start to begin a new run.";
+"foreground_media_reason_user" = "Stopped by you. Choose a Files folder to begin a new run.";
+"foreground_media_reason_background" = "Stopped when the app left the foreground. Choose a Files folder to begin a new run.";
 "foreground_media_reason_session" = "The connection changed or ended. Check the connection before starting again.";
 "foreground_media_reason_unsupported" = "A direct CCAPI connection with complete media support is required.";
 "foreground_media_reason_inventory" = "The complete camera file list could not be confirmed. Check the camera and connection before starting again.";
@@ -763,3 +763,35 @@
 "native_monitor_stale" = "Sampled scopes · expired";
 "native_monitor_lut_inactive" = "Saved LUT inactive on native RTP";
 "native_monitor_scope_notice" = "Native RTP uses sampled SDR preview scopes, up to 4 updates/sec. A sample expires after 1 second. LUT preview is unavailable; any saved LUT stays inactive.";
+
+"foreground_media_state_copying" = "Copying the retained original to Files…";
+
+"foreground_media_reason_delivery" = "Files delivery or its history record needs review. The retained app original remains separate. Check Recent originals and the selected folder before starting again.";
+
+"foreground_files_destination" = "This run’s folder: %@";
+
+"foreground_files_drain_help" = "An admitted Files operation may still be using the original. Stop prevents later copies; another run waits until this operation actually returns.";
+
+"foreground_files_result_started" = "Files operation started; completion is pending";
+
+"foreground_files_result_copied" = "Files copy operation completed";
+
+"foreground_files_result_notCopied" = "No Files copy completed";
+
+"foreground_files_result_unconfirmed" = "Files result unconfirmed; a partial or complete file may remain";
+
+"foreground_files_reason_cancelled" = "Stopped before the copy began.";
+
+"foreground_files_reason_sourceUnavailable" = "The retained source could not be confirmed unchanged. If copying began, inspect the destination file.";
+
+"foreground_files_reason_permissionDenied" = "Folder access was unavailable. Choose the folder again for a new run.";
+
+"foreground_files_reason_coordination" = "The provider did not admit the copy operation.";
+
+"foreground_files_reason_collision" = "That generated filename already existed. It was not replaced; this attempt was not retried.";
+
+"foreground_files_reason_copyFailed" = "Copying began but did not return successfully. The app did not remove any external file.";
+
+"foreground_files_reason_interrupted" = "The previous process ended without a final result. Inspect the attempted filename in Files.";
+
+"foreground_files_history_help" = "This is a local operation record, not proof of cloud sync or current destination availability. Clearing app history does not remove Files copies.";

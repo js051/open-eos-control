@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// Local receipts describe preparation in the app, never saving by a destination.
+/// Private preparation and foreground Files operation results are separate facts.
 /// Opening this screen and checking its copies do not contact a camera.
 struct MediaDeliveryHistoryView: View {
     @EnvironmentObject private var camera: CameraAppState
@@ -334,6 +334,22 @@ struct MediaDeliveryHistoryView: View {
             Text(language.string(availabilityKey(record)))
                 .font(.callout.weight(.semibold))
                 .accessibilityIdentifier("media-delivery-history-availability-\(record.id.uuidString)")
+            ForEach(camera.mediaDeliverySnapshot.externalAttempts.filter { $0.receiptID == record.id }) { attempt in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(language.string("foreground_files_result_" + attempt.status.rawValue))
+                        .accessibilityIdentifier("foreground-files-history-result-\(attempt.id.uuidString)")
+                    Text(verbatim: attempt.filename)
+                        .font(.caption)
+                        .textSelection(.enabled)
+                    if let reason = attempt.reason {
+                        Text(language.string("foreground_files_reason_" + reason.rawValue))
+                            .font(.caption)
+                    }
+                    Text(language.string("foreground_files_history_help"))
+                        .font(.caption)
+                        .foregroundStyle(Color.cameraSecondaryText)
+                }
+            }
             if let reasonKey = reasonKey(record) {
                 Text(language.string(reasonKey))
                     .font(.caption)

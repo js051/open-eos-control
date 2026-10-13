@@ -3,8 +3,8 @@ import OpenEOSCore
 
 @MainActor
 final class ForegroundMediaController: ObservableObject {
-    enum State: String { case idle, checking, baseline, watching, waiting, stabilizing, preparing, stopping, stopped, failed }
-    enum StopReason: String { case user, background, session, unsupported, inventory, metadata, storage, transfer, limit }
+    enum State: String { case idle, checking, baseline, watching, waiting, stabilizing, preparing, copying, stopping, stopped, failed }
+    enum StopReason: String { case user, background, session, unsupported, inventory, metadata, storage, transfer, delivery, limit }
     enum Admission { case ready, busy, retired }
     enum Failure: Error { case unavailable, retired, storage, transfer }
 
@@ -16,11 +16,16 @@ final class ForegroundMediaController: ObservableObject {
         /// Returns only after an owned App copy has been retained. The caller
         /// separately preserves any valid temporary original if retention fails.
         let prepare: @MainActor (CameraMediaItem, Int64) async throws -> Void
+        var deliver: (@MainActor (CameraMediaItem) async throws -> ForegroundFilesDeliveryResult)? = nil
     }
 
     @Published private(set) var state: State = .idle
     @Published private(set) var reason: StopReason?
     @Published private(set) var preparedCount = 0
+    @Published private(set) var copiedCount = 0
+    @Published private(set) var unconfirmedCount = 0
+    @Published private(set) var lastDelivery: ForegroundFilesOutcome?
+    @Published private(set) var destinationLabel: String?
     @Published private(set) var pendingCount = 0
     @Published private(set) var currentName: String?
     @Published private(set) var isRunning = false
@@ -36,13 +41,17 @@ final class ForegroundMediaController: ObservableObject {
     }
 
     @discardableResult
-    func start(_ actions: Actions) -> Bool {
+    func start(_ actions: Actions, destinationLabel: String? = nil) -> Bool {
         guard !isRunning else { return false }
         let token = UUID()
         owner = token
         state = .checking
         reason = nil
         preparedCount = 0
+        copiedCount = 0
+        unconfirmedCount = 0
+        lastDelivery = nil
+        self.destinationLabel = destinationLabel
         pendingCount = 0
         currentName = nil
         isRunning = true
@@ -138,8 +147,25 @@ final class ForegroundMediaController: ObservableObject {
                         try plan.recordPrepared(fresh)
                         preparedCount = plan.preparedCount
                         pendingCount = plan.pending.count
-                        currentName = nil
                         try Task.checkCancellation()
+                        if let deliver = actions.deliver {
+                            phaseReason = .delivery
+                            state = .copying
+                            let result = try await deliver(fresh)
+                            guard owner == token else { throw Failure.retired }
+                            lastDelivery = result.outcome
+                            if result.outcome.status == .copied { copiedCount += 1 }
+                            if result.outcome.status == .unconfirmed { unconfirmedCount += 1 }
+                            // Results remain true even if Stop raced completion.
+                            // History failure must stop later writes, too.
+                            if result.outcome.status != .copied || result.historyWarning {
+                                state = .stopped
+                                if reason == nil { reason = .delivery }
+                                return
+                            }
+                            try Task.checkCancellation()
+                        }
+                        currentName = nil
                         if preparedCount == ForegroundMediaPlan.resultLimit {
                             state = .stopped
                             reason = .limit
