@@ -462,7 +462,9 @@ private class BridgeRecoveryPeer(private val label: String) : AutoCloseable {
                             }
                         }
                     }
-                    method == "POST" && path in setOf("$sessionPath/liveview/start", "$sessionPath/liveview/stop") -> json("{}")
+                    method == "POST" && path == "$sessionPath/liveview/start" -> json("""{"active":true}""")
+                    method == "POST" && path == "$sessionPath/liveview/stop" ->
+                        json("""{"active":false,"liveViewStopUnconfirmed":false}""")
                     method == "GET" && path == "$sessionPath/liveview/frame" -> {
                         frames.incrementAndGet()
                         MockResponse().setHeader("Content-Type", "image/jpeg").setBody(Buffer().write(jpeg))
