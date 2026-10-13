@@ -83,7 +83,7 @@ function context({ reuseSessionId = false, confirmed = true } = {}) {
     releaseObjectUrl: url => { if (url) released.push(url); },
     renderMedia: () => renders.push("media"), renderDiagnostics: () => renders.push("diagnostics"),
   });
-  for (const name of ["clearConnectionError", "syncLiveMagnificationFromCapabilities", "startEventLoop",
+  for (const name of ["renderHeldAutofocus", "cameraFocusInfoEligible", "cancelCameraFocusInfo", "releaseHeldAutofocusForLifecycle", "clearConnectionError", "syncLiveMagnificationFromCapabilities", "startEventLoop",
     "refreshLatestMedia", "renderHealth", "cancelMediaDownload", "stopLiveLoop", "stopLocalVideo",
     "stopEventLoop", "cancelEventLoop", "cancelMediaUpload", "clearScheduledMediaTransferRender",
     "cancelLatestMediaRefresh", "clearBulbTimer", "renderLiveMagnification", "renderMediaTransfer",

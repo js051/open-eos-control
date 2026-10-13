@@ -110,7 +110,7 @@ function harness() {
       return response(body);
     },
   };
-  for (const name of ["clearConnectionError", "renderSession", "startEventLoop", "refreshLatestMedia",
+  for (const name of ["renderHeldAutofocus", "cameraFocusInfoEligible", "cancelCameraFocusInfo", "releaseHeldAutofocusForLifecycle", "clearConnectionError", "renderSession", "startEventLoop", "refreshLatestMedia",
     "writeCameraPreference", "showConnectionError", "renderHealth", "cancelMediaDownload",
     "cancelMediaUpload", "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh",
     "closeMediaPreview", "closeMediaDetails", "releaseObjectUrl", "clearBulbTimer", "stopLocalVideo",

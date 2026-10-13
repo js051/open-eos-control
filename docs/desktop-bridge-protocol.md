@@ -41,6 +41,9 @@ POST /v1/session/{id}/bulb/start
 POST /v1/session/{id}/bulb/stop
 POST /v1/session/{id}/shutter/half-press
 POST /v1/session/{id}/focus/auto
+POST /v1/session/{id}/focus/auto/start
+POST /v1/session/{id}/focus/auto/stop
+GET  /v1/session/{id}/liveview/focus-info
 POST /v1/session/{id}/recording/start
 POST /v1/session/{id}/recording/stop
 POST /v1/session/{id}/focus/tap
@@ -245,6 +248,46 @@ If the same SDP advertises Canon's `MP4A-LATM/48000` audio port, omission of `cp
 
 `GET /v1/session/{id}/liveview/audio?after={generation}&timeoutMs={0..5000}` is an authenticated bounded long poll. A chunk returns `audio/pcm;rate=48000;channels=2;format=s16le` plus `X-Open-EOS-Audio-Generation`, `-Sample-Rate`, `-Channels`, `-Frames`, and `-Discontinuity` headers. No newer chunk returns `204`; an inactive or unavailable path returns `409 UNSUPPORTED_FEATURE`. `after=0` starts at the newest buffered chunk to avoid playing stale muted audio. The browser validates the exact byte count, resets its WebAudio timeline on discontinuity, and remains muted until a user gesture enables playback.
 
+## Optional held autofocus and camera focus information
+
+These backwards-compatible extensions use the existing authenticated `/v1/session/{id}` routes. `CameraCapabilities.heldAutofocusSupported` and `CameraCapabilities.focusInfoSupported` are optional Boolean fields; missing fields mean `false`. They do not change the existing bounded `POST .../focus/auto` or `POST .../shutter/half-press` operations. The current implementation advertises held AF only for a discovered Canon `POST /shooting/control/af` start/stop operation. A manual shutter fallback, an AF GET/PUT operation, a generic `AUTOFOCUS` capability, or the existing libgphoto2 AF/cancel path does not imply this extension. Optional EDSDK providers are unchanged.
+
+### Held AF ownership and stop evidence
+
+Both `POST .../focus/auto/start` and `POST .../focus/auto/stop` require:
+
+```json
+{"ownerId":"a-unique-client-gesture-uuid"}
+```
+
+`ownerId` is a required string of 1–128 characters from `[A-Za-z0-9._:-]`. Clients create a new, non-sensitive identifier for each physical gesture and retain its original session and identifier until stop is acknowledged. A normal start response is `{"ownerId":"...","active":true,"stopUnconfirmed":false}`; a confirmed stop is `{"ownerId":"...","active":false,"stopUnconfirmed":false}`. These responses describe command acknowledgement, not optical focus success. The response schema allows nullable `active` and a Boolean `stopUnconfirmed`, but failures use the existing error envelope rather than a success-shaped response. Neither endpoint performs an unrelated status read after its command ACK.
+
+Before start can reach the camera, the Bridge records the owner and exact advertised AF method/path with its `{"action":"stop"}` payload. Start sends `{"action":"start"}` once. A lost or rejected start reply triggers one compensating stop, never another start. A failed stop returns HTTP 502 `SHUTTER_RELEASE_UNCONFIRMED` with `feature: "AUTOFOCUS"`; the session keeps that owner's stop responsibility. Status reports `heldAutofocusActive: null` and `shutterReleaseUnconfirmed: true`. A known held start reports `heldAutofocusActive: true` with `shutterReleaseUnconfirmed: false`; successful release reports `heldAutofocusActive: false`. Missing or null status fields are not release evidence.
+
+Repeating start for the current acknowledged owner is idempotent; repeating it while stop is uncertain is rejected. Starting a different control during held AF returns HTTP 409 `AUTOFOCUS_ACTIVE`. Owner-matched stop remains available during uncertainty. It uses the original operation even if discovery changes. The existing `.../bulb/stop` remains compatible stop-only recovery for legacy clients, including a saved AF stop, but new held-AF clients use the owner-specific route.
+
+The session remembers the most recent 64 completed or cancelled owners. A completed owner's stop returns inactive without touching a newer hold; its start is rejected with HTTP 409 `FOCUS_OWNER_MISMATCH`. An unknown owner's stop also returns `FOCUS_OWNER_MISMATCH` without camera I/O and records a cancellation so an overtaken start for that owner cannot press afterward. Clients should serialize ordinary release behind their start response, retain responsibility after an ambiguous response, use unique identifiers, and never replay start automatically. The server's session lock serializes camera requests.
+
+A server watchdog schedules one owner-bound stop after 30 seconds, including when the browser disappears. Its timer identity and owner must both still match, so an old timer cannot stop a newer hold. An explicit stop attempt cancels that timer; an unsuccessful watchdog or explicit stop retains the unresolved responsibility without an automatic retry loop. This is a deadline for a serialized stop attempt, not a guarantee that the physical camera has stopped: in-flight camera requests, unavailable transport, or a terminated Bridge process can prevent timely confirmation. `POST .../liveview/stop` attempts the saved held stop once and still tears down Live View; session deletion likewise attempts the saved stop once and follows the existing disconnected-warning contract. Cleanup never transfers to a replacement session.
+
+### Read-only focus information
+
+`GET .../liveview/focus-info` returns a normalized object or JSON `null` when the camera packet has no usable image geometry. It is available only through a capable active CCAPI Live View session. An inactive session returns HTTP 409 `LIVE_VIEW_NOT_ACTIVE`; an unsupported engine or unadvertised operation returns `UNSUPPORTED_FEATURE`. The route never starts Live View or changes focus.
+
+```json
+{
+  "frames": [{"left":0.1,"top":0.1,"right":0.3,"bottom":0.3,"status":"FOCUSED","kind":"FACE"}],
+  "magnification": 1,
+  "imageAspectRatio": 1.25
+}
+```
+
+The Bridge reads only the discovered `GET /shooting/liveview/flipdetail?kind=info` on the current camera origin. The request has a 2-second transport timeout and a 256 KiB body bound. It accepts exactly one Canon `FF00`, type `01`, big-endian length, UTF-8 JSON, `FFFF` incidental-information packet, with at most 512 AF frames. Failed transport, invalid framing, oversized bodies, or an excessive frame count return sanitized HTTP 502 `FOCUS_INFO_UNAVAILABLE`; no camera payload, credential, address, or arbitrary diagnostic text appears in this response. Responses carry `Cache-Control: no-store, max-age=0`.
+
+Image position and dimensions, zoom magnification, selection, frame geometry, and frame status must be exact signed 32-bit integer numbers; strings and Booleans are not coerced. Rectangles are selected only when Canon `select == 1`, normalized against the current image crop, clipped to `[0,1]`, and discarded if empty. Magnification other than 1 returns an empty `frames` list rather than inventing magnified coordinates. `imageAspectRatio` is the current image width divided by height; clients fit that image area within the viewfinder and preserve any letterboxing.
+
+The low status nibble maps to `STANDBY`, `FOCUSED`, `UNFOCUSED`, `SERVO_OFF`, or `FOCUSING` for values 0–4. The high nibble maps to `GENERIC`, `NORMAL`, `FACE`, or `TRACKING` for `00`, `10`, `20`, or `30`; unknown kinds or status values produce `UNKNOWN`, never a false focus-success state. These frames are camera-reported telemetry, separate from a user's Tap AF target. Clients clear them on source/session/geometry changes, missing data or read failures, and after one second without fresh matching evidence. Local UVC/HDMI preview does not acquire this camera telemetry capability. Controlled protocol tests are not physical-camera focus validation.
+
 ## CCAPI Mapping
 
 The network engine discovers versions and HTTP methods from `GET /ccapi`; a fallback identity probe establishes connectivity but does not invent unsupported command capabilities. It maps only advertised operations:
@@ -255,6 +298,7 @@ The network engine discovers versions and HTTP methods from `GET /ccapi`; a fall
 - held Bulb exposure through manual `full_press` and explicit `release`; capability requires the advertised manual shutter operation and successful release is the observation point
 - timed half-press with guaranteed release
 - independent autofocus through advertised `POST /shooting/control/af` start/stop, falling back to the advertised balanced half-press operation
+- optional owner-bound held AF through the dedicated POST AF operation, and bounded read-only focus information from active detailed Live View
 - camera Photo/Video context through matching same-version `GET`/`POST /shooting/control/moviemode`, accepting only Canon's `on`/`off` status and posting the exact `action`; this remains distinct from recording
 - movie recording start/stop through `recbutton`
 - normalized UI Tap AF mapped through detailed Live View `image` geometry to integer `positionx`/`positiony`, then sent only through advertised `PUT /shooting/liveview/afframeposition`

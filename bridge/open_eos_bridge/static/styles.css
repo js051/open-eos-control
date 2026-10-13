@@ -2113,3 +2113,50 @@ button.media-thumbnail:focus-visible {
 .media-auto-panel [hidden] { display: none; }
 .media-history-dialog time { font-size: 0.85em; color: var(--muted); }
 .media-history-dialog [hidden] { display: none; }
+
+
+.held-autofocus-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.held-autofocus-controls p { margin: 4px 0 0; }
+.held-autofocus-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#held-autofocus-stop { border-color: var(--accent); }
+.camera-focus-legend { margin: 0; padding: 6px 12px; }
+.camera-focus-overlay {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  overflow: hidden;
+}
+.camera-focus-frame {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed white;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 70%);
+}
+.camera-focus-frame.status-focused { border: 2px solid var(--success); }
+.camera-focus-frame.status-focusing { border: 2px solid #f0b429; }
+.camera-focus-frame.status-unfocused { border-color: var(--record-strong); }
+.camera-focus-frame.kind-face { border-radius: 12%; }
+.camera-focus-frame.kind-tracking { border-width: 3px; }
+
+.control-shell:has(> .held-autofocus-controls:not([hidden])) {
+  grid-template-rows: var(--topbar-height) auto minmax(0, 1fr);
+}
+@media (max-width: 820px) {
+  .control-shell:has(> .held-autofocus-controls:not([hidden])) { grid-template-rows: auto auto auto; }
+}
+
+.viewfinder-column:has(> .camera-focus-legend:not([hidden])) {
+  grid-template-rows: minmax(0, 1fr) auto 82px;
+}
+@media (max-width: 540px) {
+  .viewfinder-column:has(> .camera-focus-legend:not([hidden])) { grid-template-rows: minmax(0, 1fr) auto 72px; }
+}

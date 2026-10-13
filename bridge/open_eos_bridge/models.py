@@ -202,6 +202,9 @@ class CameraStatus(ApiModel):
     bulb_exposure_active: bool | None = None
     # Stop-only responsibility, not evidence that the camera is currently exposing.
     shutter_release_unconfirmed: bool = False
+    # Optional for older/non-reporting engines. True is an acknowledged AF start;
+    # null with shutter_release_unconfirmed means stop-only recovery is required.
+    held_autofocus_active: bool | None = None
     # Local receiver teardown is not proof that camera Live View stopped.
     live_view_stop_unconfirmed: bool = False
     mode: str = "unknown"
@@ -406,6 +409,8 @@ class CameraCapabilities(ApiModel):
     file_naming: FileNamingState | None = None
     evidence: CapabilityEvidence = Field(default_factory=CapabilityEvidence)
     shutter_autofocus_supported: bool = False
+    held_autofocus_supported: bool = False
+    focus_info_supported: bool = False
 
 
 class StillCaptureRequest(ApiModel):
@@ -472,6 +477,37 @@ class FocusResult(ApiModel):
     step: str | None = None
     x: float | None = Field(default=None, ge=0.0, le=1.0)
     y: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class HeldAutofocusRequest(ApiModel):
+    owner_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
+
+
+class HeldAutofocusState(ApiModel):
+    owner_id: str
+    active: bool | None
+    stop_unconfirmed: bool
+
+
+class CameraFocusFrame(ApiModel):
+    left: float = Field(ge=0.0, le=1.0)
+    top: float = Field(ge=0.0, le=1.0)
+    right: float = Field(ge=0.0, le=1.0)
+    bottom: float = Field(ge=0.0, le=1.0)
+    status: Literal["STANDBY", "FOCUSED", "UNFOCUSED", "SERVO_OFF", "FOCUSING", "UNKNOWN"]
+    kind: Literal["GENERIC", "NORMAL", "FACE", "TRACKING", "UNKNOWN"]
+
+    @model_validator(mode="after")
+    def validate_rectangle(self) -> CameraFocusFrame:
+        if self.right <= self.left or self.bottom <= self.top:
+            raise ValueError("Focus rectangles must have positive width and height.")
+        return self
+
+
+class CameraFocusInfo(ApiModel):
+    frames: list[CameraFocusFrame] = Field(max_length=512)
+    magnification: int = Field(gt=0, le=2147483647)
+    image_aspect_ratio: float = Field(gt=0, allow_inf_nan=False)
 
 
 class MediaItem(ApiModel):

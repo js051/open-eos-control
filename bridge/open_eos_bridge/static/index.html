@@ -162,6 +162,17 @@
         </div>
       </header>
 
+      <section id="held-autofocus-section" class="held-autofocus-controls" aria-labelledby="held-autofocus-heading" hidden>
+        <div>
+          <strong id="held-autofocus-heading" data-i18n="heldAutofocus">Held autofocus</strong>
+          <p id="held-autofocus-status" class="supporting" role="status" aria-live="polite"></p>
+        </div>
+        <div class="held-autofocus-actions">
+          <button id="held-autofocus-start" class="button secondary" type="button" aria-describedby="held-autofocus-status" data-i18n="heldAutofocusStart">Start held AF</button>
+          <button id="held-autofocus-stop" class="button secondary" type="button" aria-describedby="held-autofocus-status" data-i18n="heldAutofocusStop" disabled>Stop held AF</button>
+        </div>
+      </section>
+
       <main id="live-panel" class="live-workspace view-panel">
         <section class="viewfinder-column">
           <div id="viewfinder" class="viewfinder">
@@ -200,10 +211,12 @@
               data-i18n-aria="cameraAudioUnmute" aria-pressed="false" hidden>
               <span class="icon" data-icon="volume-x" aria-hidden="true"></span>
             </button>
+            <div id="camera-focus-overlay" class="camera-focus-overlay" aria-hidden="true" hidden></div>
             <div id="focus-reticle" class="focus-reticle" aria-hidden="true" hidden></div>
             <div id="capture-flash" class="capture-flash" aria-hidden="true"></div>
           </div>
 
+          <p id="camera-focus-legend" class="camera-focus-legend supporting" data-i18n="cameraFocusLegend" hidden>Camera AF: green = focused · amber = focusing · red dashed = unfocused · white dashed = standby/unknown</p>
           <div id="exposure-strip" class="exposure-strip" aria-label="Exposure controls" data-i18n-aria="exposureControls"></div>
         </section>
 
@@ -740,6 +753,7 @@
   <script src="/app/icons.js"></script>
   <script src="/app/diagnostics.js"></script>
   <script src="/app/monitoring.js"></script>
+  <script src="/app/camera-focus.js"></script>
   <script src="/app/lut.js"></script>
   <script src="/app/local-video.js"></script>
   <script src="/app/rtp-audio.js"></script>

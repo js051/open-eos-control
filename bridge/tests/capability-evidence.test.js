@@ -85,7 +85,7 @@ function context({ reuseSessionId = false } = {}) {
     canChangeShutterAF: () => false, localPreviewSelected: () => false,
     shutterReleaseUnconfirmed: () => false, effectiveTapAction: () => null,
   });
-  for (const name of ["clearConnectionError", "syncLiveMagnificationFromCapabilities",
+  for (const name of ["renderHeldAutofocus", "cameraFocusInfoEligible", "cancelCameraFocusInfo", "releaseHeldAutofocusForLifecycle", "clearConnectionError", "syncLiveMagnificationFromCapabilities",
     "startEventLoop", "refreshLatestMedia", "renderHealth",
     "cancelMediaDownload", "stopLiveLoop", "stopLocalVideo", "stopEventLoop", "cancelEventLoop",
     "cancelMediaUpload", "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh",

@@ -5,6 +5,8 @@
   if (!connectionGuidance) throw new Error("Open EOS connection guidance module is unavailable.");
   const diagnostics = globalThis.OpenEOSDiagnostics;
   if (!diagnostics) throw new Error("Open EOS diagnostics module is unavailable.");
+  const cameraFocus = globalThis.OpenEOSCameraFocus;
+  if (!cameraFocus) throw new Error("Open EOS camera focus module is unavailable.");
   const monitoring = globalThis.OpenEOSMonitoring;
   if (!monitoring) throw new Error("Open EOS monitoring module is unavailable.");
   const lut = globalThis.OpenEOSLut;
@@ -180,6 +182,17 @@
       ready: "Ready",
       busy: "Working",
       autofocus: "AF-ON",
+      heldAutofocus: "Held autofocus",
+      heldAutofocusStart: "Start held AF",
+      heldAutofocusStop: "Stop held AF",
+      heldAutofocusIdle: "Keeps AF pressed until Stop. Automatically releases after 30 seconds or when you leave this view.",
+      heldAutofocusStarting: "Starting held AF. Stop remains available.",
+      heldAutofocusActive: "AF is held. This does not confirm focus.",
+      heldAutofocusStopping: "Releasing held AF…",
+      heldAutofocusUnconfirmed: "AF release is unconfirmed. Retry Stop or check the camera.",
+      heldAutofocusStopped: "Held AF released",
+      cameraFocusFrames: "Camera-reported focus frames",
+      cameraFocusLegend: "Camera AF: green = focused · amber = focusing · red dashed = unfocused · white dashed = standby/unknown",
       shutterAF: "Shutter AF",
       shutterAFOn: "Shutter request asks for autofocus.",
       shutterAFOff: "Shutter request does not ask for autofocus. Camera or lens settings may still focus.",
@@ -788,6 +801,17 @@
       ready: "就緒",
       busy: "處理中",
       autofocus: "AF-ON",
+      heldAutofocus: "持續自動對焦",
+      heldAutofocusStart: "開始持續 AF",
+      heldAutofocusStop: "停止持續 AF",
+      heldAutofocusIdle: "持續按住 AF，直到按下停止。30 秒後或離開此畫面時會自動嘗試釋放。",
+      heldAutofocusStarting: "正在開始持續 AF；仍可按下停止。",
+      heldAutofocusActive: "正在持續按住 AF；不代表已實際合焦。",
+      heldAutofocusStopping: "正在釋放持續 AF…",
+      heldAutofocusUnconfirmed: "尚未確認 AF 已釋放。請重試停止或檢查相機。",
+      heldAutofocusStopped: "持續 AF 已釋放",
+      cameraFocusFrames: "相機回報的對焦框",
+      cameraFocusLegend: "相機 AF：綠色＝合焦 · 黃色＝對焦中 · 紅色虛線＝未合焦 · 白色虛線＝待機／未知",
       shutterAF: "快門自動對焦",
       shutterAFOn: "拍攝請求會要求自動對焦。",
       shutterAFOff: "拍攝請求不要求自動對焦；相機或鏡頭設定仍可能使其對焦。",
@@ -1407,6 +1431,12 @@
     recordingRecovery: null,
     capabilities: null,
     shutterAutofocus: true,
+    heldAutofocusOwner: null,
+    focusInfoGeneration: 0,
+    focusInfoRequest: null,
+    focusInfoSnapshot: null,
+    focusInfoNextAt: 0,
+    focusInfoExpiry: null,
     fileNamingDrafts: {},
     settingDrafts: {},
     operatorConfirmedFeatures: new Set(),
@@ -1624,6 +1654,12 @@
     latestMediaRetry: byId("latest-media-retry"),
     operationState: byId("operation-state"),
     autofocusButton: byId("autofocus-button"),
+    heldAutofocusSection: byId("held-autofocus-section"),
+    heldAutofocusStart: byId("held-autofocus-start"),
+    heldAutofocusStop: byId("held-autofocus-stop"),
+    heldAutofocusStatus: byId("held-autofocus-status"),
+    cameraFocusOverlay: byId("camera-focus-overlay"),
+    cameraFocusLegend: byId("camera-focus-legend"),
     halfPressButton: byId("half-press-button"),
     focusSection: byId("focus-section"),
     focusNearButton: byId("focus-near-button"),
@@ -1852,10 +1888,10 @@
 
   async function api(
     path,
-    { method = "GET", json, responseType = "json", keepalive = false, signal = null, redirect = "follow" } = {},
+    { method = "GET", json, responseType = "json", keepalive = false, signal = null, redirect = "follow", authToken = state.token } = {},
   ) {
     const headers = new Headers();
-    if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
+    if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
     if (json !== undefined) headers.set("Content-Type", "application/json");
     let response;
     try {
@@ -1871,6 +1907,11 @@
     } catch (error) {
       if (mediaTransfer.isAbortError(error)) throw error;
       throw new ApiError(error instanceof Error ? error.message : t("bridgeError"), { code: "NETWORK_ERROR" });
+    }
+    if (responseType === "focusInfo") {
+      const value = await cameraFocus.readResponse(response);
+      if (!response.ok) throw new ApiError("Camera focus information is unavailable.", { status: response.status });
+      return value;
     }
     if (!response.ok) {
       let detail = null;
@@ -2229,7 +2270,7 @@
   async function refreshSession({ quiet = false, eventGeneration = null } = {}) {
     // A status read admitted inside a command can predate its ACK. Existing
     // event refresh already waits for this boundary; diagnostics must too.
-    if (!state.session || state.recordingCommandOwner?.session === state.session) return false;
+    if (!state.session || state.recordingCommandOwner?.session === state.session || state.heldAutofocusOwner) return false;
     const previousOwner = state.refreshRequestOwner;
     // An in-flight explicit refresh owns its completion feedback. Quiet reads
     // can retry later, but cannot leave that request permanently "Refreshing".
@@ -2309,21 +2350,28 @@
   async function disconnectCamera() {
     if (!state.session) return;
     if (typeof stopMediaAutoImport === "function") stopMediaAutoImport("disconnected");
-    const sessionId = state.session.id;
-    const hadBulbResponsibility = bulbControlLocked();
+    const session = state.session;
+    const sessionId = session.id;
+    const token = state.token;
+    const heldOwner = state.heldAutofocusOwner;
+    const hadBulbResponsibility = bulbControlLocked() || Boolean(heldOwner);
     let disconnectError = null;
     beginCameraInteraction();
     cancelMediaDownload({ silent: true });
     renderAvailability();
     stopLiveLoop();
     stopLocalVideo({ announce: false });
+    if (heldOwner && !await stopHeldAutofocus({ owner: heldOwner, automatic: true })) {
+      state.shutterDisconnectWarning = true;
+    }
+    if (state.session !== session) return;
     await stopEventLoop(sessionId);
     try {
-      await api(`/v1/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+      await api(`/v1/session/${encodeURIComponent(sessionId)}`, { method: "DELETE", authToken: token });
     } catch (error) {
       state.shutterDisconnectWarning ||= hadBulbResponsibility ||
         error?.code === "SHUTTER_RELEASE_UNCONFIRMED";
-      if (state.session?.id !== sessionId) {
+      if (state.session !== session) {
         // An old close can leave a previous-camera warning, never reset the
         // replacement session or publish an old error as its current operation.
         renderAvailability();
@@ -2331,7 +2379,7 @@
       }
       disconnectError = captureError(error);
     }
-    if (state.session?.id !== sessionId) return;
+    if (state.session !== session) return;
     resetSession();
     if (disconnectError) {
       const message = hadBulbResponsibility && disconnectError.code !== "SHUTTER_RELEASE_UNCONFIRMED"
@@ -2345,6 +2393,11 @@
   }
 
   function resetSession() {
+    if (state.heldAutofocusOwner) {
+      state.shutterDisconnectWarning = true;
+      void stopHeldAutofocus({ owner: state.heldAutofocusOwner, automatic: true, keepalive: true });
+      state.heldAutofocusOwner = null;
+    }
     // Retiring a connection is not proof that an admitted REC command stopped.
     // Keep only a previous-camera warning; never transfer its Stop to a new session.
     if (state.session && (state.status?.recording === true ||
@@ -2516,10 +2569,11 @@
   }
 
   function cameraInteractionBusy() {
-    return state.busy || mediaTransferActive() || Boolean(state.mediaAutoImportReading);
+    return state.busy || Boolean(state.heldAutofocusOwner) || mediaTransferActive() || Boolean(state.mediaAutoImportReading);
   }
 
   function beginCameraInteraction() {
+    if (state.focusInfoSnapshot || state.focusInfoRequest) cancelCameraFocusInfo();
     if (ui.focusReticle) ui.focusReticle.hidden = true;
     state.refreshGeneration += 1;
     state.busy = true;
@@ -3629,6 +3683,140 @@
     }
   }
 
+  function heldAutofocusSupported() {
+    return state.capabilities?.heldAutofocusSupported === true && featureSupported(FEATURES.AUTOFOCUS);
+  }
+
+  function renderHeldAutofocus() {
+    const owner = state.heldAutofocusOwner;
+    const supported = heldAutofocusSupported();
+    ui.heldAutofocusSection.hidden = (!supported || state.activeView !== "live") && !owner;
+    ui.heldAutofocusStart.disabled = !state.session || state.activeView !== "live" || !supported || cameraInteractionBusy() || bulbControlLocked();
+    // Stop does not share the camera's busy/capability/shutter interlocks. Repeated
+    // clicks join the existing attempt, and failed attempts remain retryable.
+    ui.heldAutofocusStop.disabled = !owner;
+    const key = !owner ? "heldAutofocusIdle" : owner.stopPromise ? "heldAutofocusStopping"
+      : owner.stopUnconfirmed ? "heldAutofocusUnconfirmed"
+      : owner.startPending ? "heldAutofocusStarting" : "heldAutofocusActive";
+    ui.heldAutofocusStatus.textContent = t(key);
+    ui.heldAutofocusStatus.classList.toggle("error-text", Boolean(owner?.stopUnconfirmed));
+  }
+
+  async function heldAutofocusCommand(owner, command, keepalive = false) {
+    const controller = new AbortController();
+    let timeout;
+    // Bound both the request and waiting for a start before release. Aborting
+    // HTTP never counts as proof that the camera released its button.
+    const deadline = new Promise((_, reject) => {
+      timeout = window.setTimeout(() => {
+        controller.abort();
+        reject(new Error(t("heldAutofocusUnconfirmed")));
+      }, 8000);
+    });
+    try {
+      return await Promise.race([api(`/v1/session/${encodeURIComponent(owner.sessionId)}/focus/auto/${command}`, {
+        method: "POST", json: { ownerId: owner.ownerId }, authToken: owner.token,
+        signal: controller.signal, keepalive,
+      }), deadline]);
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  async function startHeldAutofocus() {
+    if (!state.session || !heldAutofocusSupported() || cameraInteractionBusy() || bulbControlLocked() ||
+        document.visibilityState !== "visible" || state.activeView !== "live") return;
+    const owner = {
+      session: state.session, sessionId: state.session.id, token: state.token,
+      ownerId: `pc-af-${globalThis.crypto.randomUUID ? globalThis.crypto.randomUUID()
+        : Array.from(globalThis.crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16).padStart(8, "0")).join("")}`,
+      startPending: true, stopUnconfirmed: false, released: false,
+      automaticReleaseRequested: false, startPromise: null, stopPromise: null,
+    };
+    state.heldAutofocusOwner = owner;
+    beginCameraInteraction();
+    const generation = state.refreshGeneration;
+    owner.watchdog = window.setTimeout(() => {
+      void stopHeldAutofocus({ owner, automatic: true });
+    }, 30000);
+    const current = () => state.session === owner.session && state.heldAutofocusOwner === owner;
+    owner.startPromise = (async () => {
+      try {
+        const response = await heldAutofocusCommand(owner, "start");
+        if (response?.ownerId !== owner.ownerId || response.active !== true || response.stopUnconfirmed !== false) {
+          throw new Error(t("heldAutofocusUnconfirmed"));
+        }
+      } catch (_) {
+        // A missing/rejected/malformed response cannot prove the press did not
+        // reach the camera. Keep the saved owner's stop responsibility.
+        owner.stopUnconfirmed = true;
+        if (!current()) state.shutterDisconnectWarning = true;
+      } finally {
+        owner.startPending = false;
+        if (current()) {
+          if (state.refreshGeneration === generation) state.busy = false;
+          renderAvailability();
+        }
+      }
+    })();
+    renderAvailability();
+    await owner.startPromise;
+    // A lost Start ACK may still mean the button is down. Release once, after
+    // the start promise settles; never self-await or automatically press again.
+    if (owner.stopUnconfirmed && !owner.stopPromise && !owner.automaticReleaseRequested) {
+      await stopHeldAutofocus({ owner, automatic: true });
+    }
+  }
+
+  async function stopHeldAutofocus({ owner = state.heldAutofocusOwner, automatic = false, keepalive = false } = {}) {
+    if (!owner || owner.released) return true;
+    if (owner.stopPromise) return owner.stopPromise;
+    if (automatic && owner.automaticReleaseRequested) return false;
+    if (automatic) owner.automaticReleaseRequested = true;
+    window.clearTimeout(owner.watchdog);
+    const current = () => state.session === owner.session && state.heldAutofocusOwner === owner;
+    owner.stopPromise = (async () => {
+      // Even with server serialization, HTTP can arrive out of order. Never
+      // issue Stop before the bounded Start has settled on this client.
+      await owner.startPromise;
+      try {
+        const response = await heldAutofocusCommand(owner, "stop", keepalive);
+        if (response?.ownerId !== owner.ownerId || response.active !== false || response.stopUnconfirmed !== false) {
+          throw new Error(t("heldAutofocusUnconfirmed"));
+        }
+        owner.released = true;
+        if (current()) {
+          state.heldAutofocusOwner = null;
+          state.refreshGeneration += 1;
+          // This exact-owner stop is affirmative release evidence. Ordinary
+          // status snapshots never clear this owner's unresolved responsibility.
+          if (state.status?.bulbExposureActive !== true) {
+            state.shutterReleaseUnconfirmed = false;
+            if (state.status) state.status = { ...state.status, heldAutofocusActive: false, shutterReleaseUnconfirmed: false };
+          }
+          setOperationState(t("heldAutofocusStopped"));
+        }
+        return true;
+      } catch (_) {
+        owner.stopUnconfirmed = true;
+        if (current()) setOperationState(t("heldAutofocusUnconfirmed"), true);
+        else state.shutterDisconnectWarning = true;
+        return false;
+      } finally {
+        owner.stopPromise = null;
+        if (state.session === owner.session) renderSession();
+        else renderAvailability();
+      }
+    })();
+    if (current()) renderAvailability();
+    return owner.stopPromise;
+  }
+
+  function releaseHeldAutofocusForLifecycle() {
+    const owner = state.heldAutofocusOwner;
+    if (owner) void stopHeldAutofocus({ owner, automatic: true, keepalive: true });
+  }
+
   async function autofocus() {
     if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.AUTOFOCUS)) return;
     const session = state.session;
@@ -4426,6 +4614,8 @@
   async function stopLiveView({ announce = true, remote = true, preserveError = false } = {}) {
     const session = state.session;
     if (!session) return false;
+    if (remote && state.heldAutofocusOwner && !await stopHeldAutofocus({ automatic: true })) return false;
+    if (state.session !== session) return false;
     // Only the first Stop after a confirmed start can use the legacy active=false contract.
     const previous = state.liveViewStopOwner?.session === session ? state.liveViewStopOwner : null;
     const legacyStop = !previous?.stopUnconfirmed && (previous ? previous.confirmedStart === true : state.liveActive);
@@ -4471,6 +4661,7 @@
   }
 
   function stopLiveLoop() {
+    cancelCameraFocusInfo();
     state.liveFrameAbortController?.abort();
     state.liveFrameAbortController = null;
     stopRtpAudio({ announce: false });
@@ -4521,6 +4712,7 @@
         ui.viewfinderPlaceholder.hidden = true;
         releaseObjectUrl(previous);
         renderMonitoringFrame();
+        void pollCameraFocusInfo();
         const now = performance.now();
         state.frameTimes.push(now);
         state.frameTimes = state.frameTimes.filter((time) => now - time <= 2000);
@@ -4550,6 +4742,7 @@
   }
 
   function pauseLivePolling() {
+    cancelCameraFocusInfo();
     if (!state.liveActive) return;
     state.livePollingSuspended = true;
     state.liveGeneration += 1;
@@ -4806,6 +4999,98 @@
       settings.falseColorEnabled || settings.focusPeakingEnabled;
   }
 
+  function cameraFocusInfoEligible() {
+    return Boolean(state.session && state.capabilities?.focusInfoSupported === true &&
+      state.liveActive && !state.livePollingSuspended && !state.busy && !localPreviewSelected() &&
+      state.liveMagnification === 1 && state.activeView === "live" && document.visibilityState === "visible" &&
+      state.liveObjectUrl && !ui.liveImage.hidden);
+  }
+
+  function clearCameraFocusFrames() {
+    state.focusInfoSnapshot = null;
+    window.clearTimeout(state.focusInfoExpiry);
+    state.focusInfoExpiry = null;
+    ui.cameraFocusOverlay?.replaceChildren();
+    if (ui.cameraFocusOverlay) ui.cameraFocusOverlay.hidden = true;
+    if (ui.cameraFocusLegend) ui.cameraFocusLegend.hidden = true;
+  }
+
+  function cancelCameraFocusInfo() {
+    state.focusInfoGeneration = (state.focusInfoGeneration || 0) + 1;
+    state.focusInfoRequest?.controller.abort();
+    // Retain the in-flight reservation until its promise settles, even after
+    // cancellation; a transport which ignores abort must never overlap a read.
+    state.focusInfoNextAt = 0;
+    clearCameraFocusFrames();
+  }
+
+  async function pollCameraFocusInfo() {
+    if (!cameraFocusInfoEligible()) { cancelCameraFocusInfo(); return; }
+    const now = performance.now();
+    if (state.focusInfoRequest || now < state.focusInfoNextAt) return;
+    const owner = {
+      session: state.session, liveGeneration: state.liveGeneration,
+      generation: state.focusInfoGeneration, controller: new AbortController(),
+      startedAt: now, width: ui.liveImage.naturalWidth, height: ui.liveImage.naturalHeight,
+    };
+    state.focusInfoRequest = owner;
+    state.focusInfoNextAt = now + 250;
+    const current = () => state.session === owner.session && state.liveGeneration === owner.liveGeneration &&
+      state.focusInfoGeneration === owner.generation && cameraFocusInfoEligible() &&
+      ui.liveImage.naturalWidth === owner.width && ui.liveImage.naturalHeight === owner.height;
+    const timeout = window.setTimeout(() => { owner.controller.abort(); clearCameraFocusFrames(); }, 1000);
+    try {
+      const response = await api(`/v1/session/${encodeURIComponent(owner.session.id)}/liveview/focus-info`, {
+        signal: owner.controller.signal, responseType: "focusInfo",
+      });
+      if (!current() || owner.controller.signal.aborted || performance.now() - owner.startedAt >= 1000) return;
+      const info = cameraFocus.normalize(response, owner.width / owner.height);
+      clearCameraFocusFrames();
+      if (!info || !info.frames.length) {
+        state.focusInfoNextAt = performance.now() + 2000;
+        return;
+      }
+      state.focusInfoSnapshot = { ...owner, info };
+      renderCameraFocusInfo(liveContentDisplayRect());
+      state.focusInfoExpiry = window.setTimeout(() => {
+        if (state.focusInfoSnapshot?.controller === owner.controller) clearCameraFocusFrames();
+      }, Math.max(0, 1000 - (performance.now() - owner.startedAt)));
+    } catch (_) {
+      if (current()) {
+        clearCameraFocusFrames();
+        state.focusInfoNextAt = performance.now() + 1000;
+      }
+    } finally {
+      window.clearTimeout(timeout);
+      if (state.focusInfoRequest === owner) state.focusInfoRequest = null;
+    }
+  }
+
+  function renderCameraFocusInfo(rect) {
+    const snapshot = state.focusInfoSnapshot;
+    if (!snapshot) return;
+    if (!rect || !cameraFocusInfoEligible() || state.session !== snapshot.session ||
+        state.liveGeneration !== snapshot.liveGeneration || state.focusInfoGeneration !== snapshot.generation ||
+        performance.now() - snapshot.startedAt >= 1000 ||
+        ui.liveImage.naturalWidth !== snapshot.width || ui.liveImage.naturalHeight !== snapshot.height) {
+      clearCameraFocusFrames();
+      return;
+    }
+    positionMonitorLayer(ui.cameraFocusOverlay, rect);
+    const frames = snapshot.info.frames.map((frame) => {
+      const node = document.createElement("span");
+      node.className = `camera-focus-frame status-${frame.status.toLowerCase()} kind-${frame.kind.toLowerCase()}`;
+      node.style.left = `${frame.left * 100}%`;
+      node.style.top = `${frame.top * 100}%`;
+      node.style.width = `${(frame.right - frame.left) * 100}%`;
+      node.style.height = `${(frame.bottom - frame.top) * 100}%`;
+      return node;
+    });
+    ui.cameraFocusOverlay.replaceChildren(...frames);
+    ui.cameraFocusOverlay.hidden = false;
+    ui.cameraFocusLegend.hidden = false;
+  }
+
   function liveContentDisplayRect() {
     const media = activePreviewElement();
     const dimensions = previewDimensions(media);
@@ -4838,6 +5123,7 @@
     });
     drawMonitorGuides(rect);
     positionHistogram(rect);
+    renderCameraFocusInfo(rect);
     return rect;
   }
 
@@ -5032,6 +5318,7 @@
   }
 
   function clearMonitoringLayers() {
+    clearCameraFocusFrames();
     ui.monitorLutPreview.hidden = true;
     ui.monitorPixelOverlay.hidden = true;
     ui.monitorGuidesOverlay.hidden = true;
@@ -5144,6 +5431,7 @@
     ) return;
     const target = nextLiveMagnification();
     if (target === null) return;
+    cancelCameraFocusInfo();
     beginCameraInteraction();
     setOperationState(t("busy"));
     renderAvailability();
@@ -5335,6 +5623,8 @@
     ui.shutterAFDescription.textContent = t(!shutterAFAllowed ? "shutterAFUnavailable" :
       state.shutterAutofocus ? "shutterAFOn" : "shutterAFOff");
     ui.shutterButton.title = shutterSupported && temperatureAllowed ? ui.shutterLabel.textContent : t("unsupported");
+    renderHeldAutofocus();
+    if (!cameraFocusInfoEligible()) cancelCameraFocusInfo();
     const autofocusSupported = featureSupported(FEATURES.AUTOFOCUS);
     ui.autofocusButton.hidden = !autofocusSupported;
     ui.autofocusButton.disabled = interactionBusy || bulbActive || !autofocusSupported;
@@ -5435,7 +5725,12 @@
 
   function selectView(view) {
     if (view === "media" && !featureSupported(FEATURES.MEDIA_BROWSER)) return;
+    if (view !== "live") {
+      releaseHeldAutofocusForLifecycle();
+      cancelCameraFocusInfo();
+    }
     state.activeView = view;
+    renderHeldAutofocus();
     document.querySelectorAll(".view-panel").forEach((panel) => {
       panel.hidden = panel.id !== `${view}-panel`;
     });
@@ -7879,6 +8174,8 @@
     ui.latestMediaButton.addEventListener("click", openLatestMedia);
     ui.latestMediaRetry.addEventListener("click", retryLatestMedia);
     ui.autofocusButton.addEventListener("click", autofocus);
+    ui.heldAutofocusStart.addEventListener("click", startHeldAutofocus);
+    ui.heldAutofocusStop.addEventListener("click", () => { void stopHeldAutofocus(); });
     ui.halfPressButton.addEventListener("click", halfPressShutter);
     ui.liveToggleButton.addEventListener("click", toggleLiveView);
     ui.railLiveButton.addEventListener("click", toggleLiveView);
@@ -8014,13 +8311,21 @@
     ui.mediaAutoImportStart?.addEventListener("click", startMediaAutoImport);
     ui.mediaAutoImportStop?.addEventListener("click", () => stopMediaAutoImport());
     document.addEventListener?.("visibilitychange", () => {
-      if (document.visibilityState !== "visible") stopMediaAutoImport("backgrounded");
+      if (document.visibilityState !== "visible") {
+        stopMediaAutoImport("backgrounded");
+        releaseHeldAutofocusForLifecycle();
+        cancelCameraFocusInfo();
+      }
       else {
         renderAvailability();
         renderMediaAutoImport();
       }
     });
-    window.addEventListener("pagehide", () => stopMediaAutoImport("backgrounded"));
+    window.addEventListener("pagehide", () => {
+      stopMediaAutoImport("backgrounded");
+      releaseHeldAutofocusForLifecycle();
+      cancelCameraFocusInfo();
+    });
     window.addEventListener("pageshow", () => {
       renderAvailability();
       renderMediaAutoImport();
@@ -8185,9 +8490,12 @@
       if (event.target === ui.settingDialog) ui.settingDialog.close();
     });
     window.addEventListener("resize", () => {
+      cancelCameraFocusInfo();
       if (previewActive()) applyLiveViewLayout();
     });
     window.addEventListener("beforeunload", () => {
+      releaseHeldAutofocusForLifecycle();
+      cancelCameraFocusInfo();
       cancelCameraScan();
       stopMediaAutoImport("backgrounded");
       lutPreviewRenderer?.dispose();
