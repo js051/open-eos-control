@@ -98,7 +98,7 @@ function context({ reuseSessionId = false } = {}) {
   sandbox.renderDiagnostics = () => renderedDiagnostics.push({
     session: state.session?.id || null, capabilities: sandbox.diagnosticCapabilities(),
   });
-  const names = ["connectCamera", "refreshCapabilityEvidence", "disconnectCamera", "resetSession",
+  const names = ["adoptCameraStatus", "connectCamera", "refreshCapabilityEvidence", "disconnectCamera", "resetSession",
     "featureSupported", "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
     "recordingRecoveryActive", "liveViewStopRequired", "renderAvailability", "selectView", "diagnosticCapabilities"];
   vm.runInContext(names.map(productionFunction).join("\n"), sandbox);

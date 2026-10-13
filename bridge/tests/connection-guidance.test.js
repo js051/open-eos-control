@@ -57,7 +57,7 @@ function context() {
     setOperationState() {}, writeCameraPreference() {}, renderSession() {}, startEventLoop() {},
     refreshLatestMedia() {}, showToast() {}, CCAPI_URL_KEY: "test-url", CCAPI_USERNAME_KEY: "test-user",
   });
-  vm.runInContext(["showConnectionError", "clearConnectionError", "renderConnectionGuidance", "correctConnection",
+  vm.runInContext(["adoptCameraStatus", "showConnectionError", "clearConnectionError", "renderConnectionGuidance", "correctConnection",
     "renderHealth", "validCcapiUrl", "renderConnectionMode", "selectConnectionMode", "renderCameras",
     "recordingRecoveryActive", "refreshHealth", "cancelCameraScan", "scanCameras", "connectCamera", "liveViewStopRequired", "renderAvailability"]
     .map(productionFunction).join("\n"), sandbox);
