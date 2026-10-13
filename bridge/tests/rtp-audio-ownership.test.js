@@ -25,7 +25,7 @@ const realFunctions = [
   "localPreviewSelected", "previewActive", "changePreviewInput", "clampFps", "toggleLiveView", "startLiveView", "stopLiveView",
   "stopLiveLoop", "changeLiveSource", "currentRtpAudioStatus", "refreshRtpAudioStatus",
   "renderRtpAudio", "toggleRtpAudio", "pollRtpAudio", "stopRtpAudioSources", "stopRtpAudio",
-  "renderAvailability", "setOperationState",
+  "liveViewStopRequired", "renderAvailability", "setOperationState",
 ];
 const stateStart = app.indexOf("  const state = {");
 const stateEnd = app.indexOf("\n  };", stateStart);
@@ -97,14 +97,15 @@ function harness() {
         body = currentStatus;
       } else if (url.endsWith("/info")) body = {model: "synthetic-camera"};
       else if (url.endsWith("/capabilities")) body = caps;
-      else if (url.endsWith("/liveview/start")) body = {source: liveSource, requestedFps: 15};
+      else if (url.endsWith("/liveview/start")) body = {active: true, source: liveSource, requestedFps: 15};
       else if (url.includes("/liveview/audio?")) {
         return new Promise((_, reject) => {
           const abort = () => {const error = new Error("synthetic abort"); error.name = "AbortError"; reject(error);};
           if (options.signal?.aborted) abort();
           else options.signal?.addEventListener("abort", abort, {once: true});
         });
-      } else if (options.method === "DELETE" || url.endsWith("/liveview/stop")) body = null;
+      } else if (url.endsWith("/liveview/stop")) body = {active: false, liveViewStopUnconfirmed: false};
+      else if (options.method === "DELETE") body = null;
       else throw new Error(`Unexpected mocked request: ${url}`);
       return response(body);
     },

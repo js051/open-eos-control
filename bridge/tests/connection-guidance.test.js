@@ -59,7 +59,7 @@ function context() {
   });
   vm.runInContext(["showConnectionError", "clearConnectionError", "renderConnectionGuidance", "correctConnection",
     "renderHealth", "validCcapiUrl", "renderConnectionMode", "selectConnectionMode", "renderCameras",
-    "recordingRecoveryActive", "refreshHealth", "cancelCameraScan", "scanCameras", "connectCamera", "renderAvailability"]
+    "recordingRecoveryActive", "refreshHealth", "cancelCameraScan", "scanCameras", "connectCamera", "liveViewStopRequired", "renderAvailability"]
     .map(productionFunction).join("\n"), sandbox);
   return sandbox;
 }

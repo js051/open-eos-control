@@ -100,7 +100,7 @@ function context({ reuseSessionId = false } = {}) {
   });
   const names = ["connectCamera", "refreshCapabilityEvidence", "disconnectCamera", "resetSession",
     "featureSupported", "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
-    "recordingRecoveryActive", "renderAvailability", "selectView", "diagnosticCapabilities"];
+    "recordingRecoveryActive", "liveViewStopRequired", "renderAvailability", "selectView", "diagnosticCapabilities"];
   vm.runInContext(names.map(productionFunction).join("\n"), sandbox);
   return sandbox;
 }

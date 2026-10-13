@@ -641,8 +641,10 @@ def create_app(
 
     @router.post("/session/{session_id}/liveview/stop", response_model=LiveViewState)
     def stop_live_view(session_id: str) -> LiveViewState:
-        manager.get(session_id).stop_live_view()
-        return LiveViewState(active=False)
+        session = manager.get(session_id)
+        session.stop_live_view()
+        return LiveViewState(active=False, live_view_stop_unconfirmed=
+            getattr(session, "live_view_stop_unconfirmed", None))
 
     @router.post(
         "/session/{session_id}/liveview/magnification",

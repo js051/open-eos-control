@@ -149,6 +149,8 @@
       disconnect: "Disconnect",
       startLiveView: "Start Live View",
       stopLiveView: "Stop Live View",
+      retryLiveViewStop: "Retry stopping Live View",
+      liveViewStopUnconfirmed: "Live View stop is unconfirmed. Retry Stop; update an older Bridge if it cannot confirm the stop.",
       photo: "Photo",
       video: "Video",
       capture: "Capture",
@@ -749,6 +751,8 @@
       disconnect: "中斷連線",
       startLiveView: "啟動即時預覽",
       stopLiveView: "停止即時預覽",
+      retryLiveViewStop: "重試停止即時預覽",
+      liveViewStopUnconfirmed: "尚未確認即時預覽已停止。請重試停止；若舊版 Bridge 無法確認，請更新 Bridge。",
       photo: "拍照",
       video: "錄影",
       capture: "拍攝",
@@ -1399,6 +1403,7 @@
     activeView: "live",
     captureMode: "photo",
     liveActive: false,
+    liveViewStopOwner: null,
     previewInput: "CAMERA",
     localVideoSupport: localVideo.supportState({
       secureContext: Boolean(globalThis.isSecureContext),
@@ -2334,6 +2339,7 @@
     closeMediaPreview();
     closeMediaDetails();
     state.session = null;
+    state.liveViewStopOwner = null;
     state.info = null;
     state.status = null;
     state.recordingRecovery = null;
@@ -3179,8 +3185,11 @@
       state.status?.recording || recordingRecoveryActive() ||
       bulbControlLocked()
     ) return;
-    const sessionId = state.session.id;
+    const session = state.session;
+    const sessionId = session.id;
     const wasLive = state.liveActive;
+    if ((wasLive || liveViewStopRequired()) && !await stopLiveView({ announce: false })) return;
+    if (state.session !== session) return;
     beginCameraInteraction();
     state.lastError = null;
     source.disabled = true;
@@ -3220,8 +3229,11 @@
       state.status?.recording || recordingRecoveryActive() ||
       bulbControlLocked()
     ) return;
-    const sessionId = state.session.id;
+    const session = state.session;
+    const sessionId = session.id;
     const wasLive = state.liveActive;
+    if ((wasLive || liveViewStopRequired()) && !await stopLiveView({ announce: false })) return;
+    if (state.session !== session) return;
     beginCameraInteraction();
     state.lastError = null;
     source.disabled = true;
@@ -4168,7 +4180,10 @@
       return;
     }
     const wasActive = previewActive();
-    if (state.liveActive) await stopLiveView({ announce: false });
+    const session = state.session;
+    if ((state.liveActive || liveViewStopRequired()) &&
+        !await stopLiveView({ announce: false })) return;
+    if (state.session !== session) return;
     if (state.localVideoActive) stopLocalVideo({ announce: false });
     state.previewInput = next;
     renderPreviewInput();
@@ -4214,7 +4229,7 @@
     ui.fpsSelect.value = String(state.requestedFps);
     ui.fpsRow.hidden = localPreviewSelected();
     ui.fpsSelect.disabled = localPreviewSelected() || cameraInteractionBusy() ||
-      !featureSupported(FEATURES.LIVE_VIEW);
+      (!state.liveActive && liveViewStopRequired()) || !featureSupported(FEATURES.LIVE_VIEW);
   }
 
   function renderLiveSource() {
@@ -4239,7 +4254,7 @@
     ui.liveSourceSelect.value = state.liveSource;
     ui.liveSourceRow.hidden = localPreviewSelected() || sources.length <= 1;
     ui.liveSourceSelect.disabled = localPreviewSelected() || cameraInteractionBusy() ||
-      !featureSupported(FEATURES.LIVE_VIEW);
+      (!state.liveActive && liveViewStopRequired()) || !featureSupported(FEATURES.LIVE_VIEW);
   }
 
   function effectiveTapAction() {
@@ -4262,7 +4277,13 @@
     ui.tapActionSelect.disabled = localPreviewSelected() || cameraInteractionBusy() || !state.liveActive;
   }
 
+  function liveViewStopRequired() {
+    return Boolean(state.session && (state.liveViewStopOwner?.session === state.session ||
+      state.status?.liveViewStopUnconfirmed === true));
+  }
+
   async function toggleLiveView() {
+    if (liveViewStopRequired()) { await stopLiveView(); return; }
     if (localPreviewSelected()) {
       if (state.localVideoActive) stopLocalVideo();
       else await startLocalVideo();
@@ -4274,16 +4295,20 @@
 
   async function startLiveView({ announce = true } = {}) {
     if (
-      localPreviewSelected() || !state.session || cameraInteractionBusy() || bulbControlLocked() ||
+      localPreviewSelected() || !state.session || liveViewStopRequired() || cameraInteractionBusy() || bulbControlLocked() ||
       !featureSupported(FEATURES.LIVE_VIEW)
     ) return;
+    const session = state.session;
+    const owner = { session };
+    state.liveViewStopOwner = owner;
+    const owns = () => state.session === session && state.liveViewStopOwner === owner;
     beginCameraInteraction();
     state.lastError = null;
     setOperationState(t("busy"));
     renderAvailability();
     const capabilities = liveCapabilities();
     try {
-      const response = await api(`/v1/session/${encodeURIComponent(state.session.id)}/liveview/start`, {
+      const response = await api(`/v1/session/${encodeURIComponent(session.id)}/liveview/start`, {
         method: "POST",
         json: {
           fps: clampFps(state.requestedFps),
@@ -4291,6 +4316,11 @@
           source: state.liveSource || "AUTO",
         },
       });
+      if (!owns()) return;
+      if (!response || typeof response !== "object" || Array.isArray(response) || response.active !== true) {
+        throw new Error(t("liveViewStopUnconfirmed"));
+      }
+      owner.confirmedStart = true;
       state.requestedFps = response.requestedFps || clampFps(state.requestedFps);
       state.activeLiveSource = response.source || state.liveSource;
       state.liveActive = true;
@@ -4304,11 +4334,13 @@
       setOperationState(t("liveViewStarted"));
       if (announce) showToast(t("liveViewStarted"));
     } catch (error) {
+      if (!owns()) return;
       const normalized = captureError(error);
       state.liveActive = false;
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
     } finally {
+      if (!owns()) return;
       state.busy = false;
       renderLiveState();
       renderAvailability();
@@ -4316,26 +4348,47 @@
     }
   }
 
-  async function stopLiveView({ announce = true, remote = true } = {}) {
-    if (!state.session) return;
+  async function stopLiveView({ announce = true, remote = true, preserveError = false } = {}) {
+    const session = state.session;
+    if (!session) return false;
+    // Only the first Stop after a confirmed start can use the legacy active=false contract.
+    const legacyStop = state.liveViewStopOwner?.session === session
+      ? state.liveViewStopOwner.confirmedStart === true
+      : state.liveActive && state.status?.liveViewStopUnconfirmed !== true;
+    // A Stop retires any earlier Start/Stop reply, even within this session.
+    const owner = { session, confirmedStart: false };
+    if (remote) state.liveViewStopOwner = owner;
+    const owns = () => state.session === session && state.liveViewStopOwner === owner;
     stopLiveLoop();
-    if (remote) {
-      beginCameraInteraction();
-      renderAvailability();
-      try {
-        await api(`/v1/session/${encodeURIComponent(state.session.id)}/liveview/stop`, { method: "POST" });
-        setOperationState(t("liveViewStopped"));
-        if (announce) showToast(t("liveViewStopped"));
-      } catch (error) {
-        const normalized = captureError(error);
-        setOperationState(normalized.message, true);
-        if (announce) showToast(normalized.message, true);
-      } finally {
+    if (!remote) return false; // Local receiver teardown cannot acknowledge a camera stop.
+    beginCameraInteraction();
+    renderAvailability();
+    let stopped = false;
+    try {
+      const response = await api(`/v1/session/${encodeURIComponent(session.id)}/liveview/stop`, { method: "POST" });
+      if (!owns()) return false;
+      if (response?.active !== false || !(response.liveViewStopUnconfirmed === false ||
+          (legacyStop && response.liveViewStopUnconfirmed == null))) {
+        throw new Error(t("liveViewStopUnconfirmed"));
+      }
+      state.liveViewStopOwner = null;
+      if (state.status) state.status = { ...state.status, liveViewStopUnconfirmed: false };
+      stopped = true;
+      if (!preserveError) setOperationState(t("liveViewStopped"));
+      if (announce) showToast(t("liveViewStopped"));
+    } catch (error) {
+      if (!owns()) return false;
+      const normalized = captureError(error);
+      if (!preserveError) setOperationState(normalized.message, true);
+      if (announce) showToast(normalized.message, true);
+    } finally {
+      if (state.session === session && (owns() || (stopped && !state.liveViewStopOwner))) {
         state.busy = false;
+        renderLiveState();
+        renderAvailability();
       }
     }
-    renderLiveState();
-    renderAvailability();
+    return stopped;
   }
 
   function stopLiveLoop() {
@@ -4406,11 +4459,7 @@
         stopLiveLoop();
         setOperationState(normalized.message, true);
         showToast(normalized.message, true);
-        try {
-          await api(`/v1/session/${encodeURIComponent(state.session.id)}/liveview/stop`, { method: "POST" });
-        } catch (_) {
-          // The frame error remains the primary diagnostic.
-        }
+        await stopLiveView({ announce: false, preserveError: true });
         return;
       } finally {
         if (state.liveFrameAbortController === controller) state.liveFrameAbortController = null;
@@ -4444,7 +4493,8 @@
       renderFrameIndicator();
       return;
     }
-    await stopLiveView({ announce: false });
+    const session = state.session;
+    if (!await stopLiveView({ announce: false }) || state.session !== session) return;
     await startLiveView({ announce: false });
     showToast(`${state.requestedFps} FPS`);
   }
@@ -4453,7 +4503,8 @@
     if (localPreviewSelected()) return;
     state.liveSource = ui.liveSourceSelect.value;
     if (!state.liveActive) return;
-    await stopLiveView({ announce: false });
+    const session = state.session;
+    if (!await stopLiveView({ announce: false }) || state.session !== session) return;
     await startLiveView({ announce: false });
   }
 
@@ -4464,7 +4515,7 @@
     ui.localVideo.hidden = !local || !state.localVideoActive;
     ui.viewfinderPlaceholder.hidden = active && (local ? ui.localVideo.readyState >= 1 : Boolean(state.liveObjectUrl));
     if (ui.liveImage.hidden && ui.localVideo.hidden) clearMonitoringLayers();
-    const labelKey = local
+    const labelKey = liveViewStopRequired() && !state.liveActive ? "retryLiveViewStop" : local
       ? (active ? "stopLocalVideo" : "startLocalVideo")
       : (active ? "stopLiveView" : "startLiveView");
     [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
@@ -4474,7 +4525,7 @@
         label.textContent = t(labelKey);
       }
       button.setAttribute("aria-label", t(labelKey));
-      replaceButtonIcon(button, active ? "square" : "play");
+      replaceButtonIcon(button, active || liveViewStopRequired() ? "square" : "play");
     });
     if (!state.liveActive || local) ui.focusReticle.hidden = true;
     renderPreviewInput();
@@ -5212,12 +5263,13 @@
     const cameraLiveSupported = featureSupported(FEATURES.LIVE_VIEW);
     const localLiveSupported = state.localVideoSupport.available;
     const selectedLiveSupported = localPreviewSelected() ? localLiveSupported : cameraLiveSupported;
-    const cameraLiveTemperatureAllowed = state.liveActive || temperatureAllows("liveview");
+    const liveStopRequired = liveViewStopRequired();
+    const cameraLiveTemperatureAllowed = state.liveActive || liveStopRequired || temperatureAllows("liveview");
     [ui.liveToggleButton, ui.railLiveButton].forEach((button) => {
-      button.hidden = !cameraLiveSupported && !localLiveSupported;
+      button.hidden = !liveStopRequired && !cameraLiveSupported && !localLiveSupported;
       button.disabled = localPreviewSelected()
         ? state.localVideoBusy || !localLiveSupported || (shutterReleaseUnconfirmed() && !state.localVideoActive)
-        : interactionBusy || bulbActive || !selectedLiveSupported || !cameraLiveTemperatureAllowed;
+        : interactionBusy || (!liveStopRequired && (bulbActive || !selectedLiveSupported || !cameraLiveTemperatureAllowed));
     });
     const quickActionCount = [
       autofocusSupported,
