@@ -305,6 +305,8 @@ final class CameraAppState: ObservableObject {
     private(set) var mediaUploadTask: Task<Void, Never>?
     private var mediaUploadToken: UUID?
     private var mediaLibraryTask: Task<Void, Never>?
+    private var mediaEventDemandGeneration = UUID()
+    private var eventMediaListingTask: Task<[CameraMediaItem], Error>?
     private var mediaLibraryGeneration = UUID() {
         didSet {
             // Every inventory replacement retires explicit bindings, including
@@ -2172,9 +2174,15 @@ final class CameraAppState: ObservableObject {
             }
         } catch {
             guard generation == mediaLibraryGeneration else { return }
+            retireBridgeMediaEventDemand()
             mediaLibraryLoadStatus = .failed
             record(error)
         }
+    }
+
+    var mediaListingDefersThumbnails: Bool {
+        guard let session, case .desktopBridge = session else { return false }
+        return mediaLibraryLoading || mediaLibraryLoadStatus != .complete
     }
 
     func loadMediaThumbnail(_ item: CameraMediaItem) async {
@@ -2184,6 +2192,7 @@ final class CameraAppState: ObservableObject {
         }
         guard
             !isPreview,
+            !mediaListingDefersThumbnails,
             foregroundMediaIOOwner == nil,
             supports(.mediaThumbnail),
             !loadingMediaThumbnailIDs.contains(item.id),
@@ -2224,6 +2233,9 @@ final class CameraAppState: ObservableObject {
         guard !isPreview, let session,
               video ? supports(.mediaDownload) : item.previewAvailable && supports(.mediaPreview),
               begin(.media) else { return }
+        if case .desktopBridge = session, mediaLibraryLoading {
+            invalidateMediaLibraryLoad(status: .cancelled)
+        }
         resetMediaPreview()
         let token = UUID()
         let generation = sessionGeneration
@@ -3661,9 +3673,11 @@ final class CameraAppState: ObservableObject {
             guard let self else { return }
             var failures = 0
             var pendingKeys = Set<String>()
+            var pendingMediaDemand = mediaEventDemandGeneration
             while !Task.isCancelled, generation == eventGeneration {
                 do {
                     if pendingKeys.isEmpty {
+                        pendingMediaDemand = mediaEventDemandGeneration
                         let event = try await session.pollEvent()
                         guard generation == eventGeneration, !Task.isCancelled else { break }
                         pendingKeys.formUnion(event.changedKeys)
@@ -3691,11 +3705,15 @@ final class CameraAppState: ObservableObject {
                         }
                         clampLiveViewRequest()
                     }
-                    let contentChanged = pendingKeys.contains { key in
+                    let contentChanged = pendingMediaDemand == mediaEventDemandGeneration && pendingKeys.contains { key in
                         let normalized = key.lowercased()
                         return normalized.contains("content") || normalized.contains("media")
                     }
-                    if contentChanged, latestMediaTask == nil, pendingCaptureReview == nil, captureReviewState == .idle {
+                    let bridgeGalleryRefresh: Bool
+                    if case .desktopBridge = session { bridgeGalleryRefresh = screen == .media }
+                    else { bridgeGalleryRefresh = false }
+                    if contentChanged, !bridgeGalleryRefresh, latestMediaTask == nil,
+                       pendingCaptureReview == nil, captureReviewState == .idle {
                         startLatestMediaRefresh(session: session)
                     }
                     if screen == .media, contentChanged {
@@ -3719,6 +3737,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func stopEventLoop() {
+        if eventMediaListingTask != nil { invalidateMediaLibraryLoad(status: .cancelled) }
         eventGeneration = UUID()
         eventTask?.cancel()
         eventTask = nil
@@ -3766,17 +3785,29 @@ final class CameraAppState: ObservableObject {
             let scope = mediaLibraryScope
             mediaLibraryGeneration = mediaGeneration
             mediaLibraryLoading = true
-            mediaLibraryLoadCancellable = false
+            if case .desktopBridge = session { mediaLibraryLoadCancellable = true }
+            else { mediaLibraryLoadCancellable = false }
             mediaLibraryLoadStatus = .loading
+            defer {
+                if mediaGeneration == mediaLibraryGeneration {
+                    eventMediaListingTask = nil
+                    mediaLibraryLoadCancellable = false
+                }
+            }
             do {
                 resetMediaThumbnails()
                 // An event updates the library, not the user's open viewer or transfer.
-                let items = try await session.listMedia(maximumItems: maximumMediaItems(for: scope)) { [weak self] partialItems in
-                    await self?.applyMediaListProgress(
-                        partialItems,
-                        scope: scope,
-                        generation: mediaGeneration
-                    )
+                let maximumItems = maximumMediaItems(for: scope)
+                let progress: CameraMediaListProgressHandler = { [weak self] partialItems in
+                    await self?.applyMediaListProgress(partialItems, scope: scope, generation: mediaGeneration)
+                }
+                let items: [CameraMediaItem]
+                if case .desktopBridge = session {
+                    let listing = Task { try await session.listMedia(maximumItems: maximumItems, onProgress: progress) }
+                    eventMediaListingTask = listing
+                    items = try await listing.value
+                } else {
+                    items = try await session.listMedia(maximumItems: maximumItems, onProgress: progress)
                 }
                 guard mediaGeneration == mediaLibraryGeneration else { return true }
                 mediaLibraryLoading = false
@@ -3795,6 +3826,13 @@ final class CameraAppState: ObservableObject {
                     return true
                 }
                 if error is CancellationError { return true }
+                if case .desktopBridge = session {
+                    // This content hint has been consumed. A malformed/failed stream
+                    // must not replay the traversal through the event retry loop.
+                    retireBridgeMediaEventDemand()
+                    record(error)
+                    return true
+                }
                 throw error
             }
         }
@@ -3936,8 +3974,15 @@ final class CameraAppState: ObservableObject {
         applyMediaBatch(items, scope: scope)
     }
 
+    private func retireBridgeMediaEventDemand() {
+        if let session, case .desktopBridge = session { mediaEventDemandGeneration = UUID() }
+    }
+
     private func invalidateMediaLibraryLoad(status: MediaLibraryLoadStatus = .notLoaded) {
+        retireBridgeMediaEventDemand()
         mediaLibraryGeneration = UUID()
+        eventMediaListingTask?.cancel()
+        eventMediaListingTask = nil
         mediaLibraryTask?.cancel()
         mediaLibraryTask = nil
         mediaLibraryLoading = false
