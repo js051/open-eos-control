@@ -202,6 +202,8 @@ class CameraStatus(ApiModel):
     bulb_exposure_active: bool | None = None
     # Stop-only responsibility, not evidence that the camera is currently exposing.
     shutter_release_unconfirmed: bool = False
+    # Local receiver teardown is not proof that camera Live View stopped.
+    live_view_stop_unconfirmed: bool = False
     mode: str = "unknown"
     media: StorageStatus
     exposure: ExposureState
@@ -438,6 +440,8 @@ class LiveViewStartRequest(ApiModel):
 
 class LiveViewState(ApiModel):
     active: bool
+    # Missing on legacy/non-reporting engines; false is affirmative stop evidence.
+    live_view_stop_unconfirmed: bool | None = None
     requested_fps: int | None = None
     source: str | None = None
     size: str | None = None

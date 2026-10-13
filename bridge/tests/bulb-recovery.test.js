@@ -163,7 +163,7 @@ async function run() {
     test.liveCapabilities = () => ({});
     let begun = 0;
     test.beginCameraInteraction = () => { begun += 1; throw new Error("Start must be blocked"); };
-    vm.runInContext(productionFunction("startLiveView"), test);
+    vm.runInContext(productionFunction("liveViewStopRequired") + "\n" + productionFunction("startLiveView"), test);
     try { await test.startLiveView(); } catch (_) { /* Count any attempted start below. */ }
     assert.equal(begun, 0, "Camera Start handler must respect stop-only responsibility");
     test.localPreviewSelected = () => true;

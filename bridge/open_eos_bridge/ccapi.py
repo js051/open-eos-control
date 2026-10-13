@@ -10,7 +10,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
@@ -406,6 +406,14 @@ class CcapiJpegOperations:
     stop_live_view: CcapiOperation
     frame_paths: tuple[str, ...]
     stop_payload: Mapping[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class _CcapiLiveViewStop:
+    source: str
+    operation: CcapiOperation
+    payload: tuple[tuple[str, object], ...] | None
+    close_stream: CcapiOperation | None = None
 
 
 class _CcapiLiveViewSizeUnsupported(BridgeError):
@@ -897,6 +905,8 @@ class CcapiSession:
         self._shutter_release_unconfirmed = False
         self._temperature_status: CameraTemperatureStatus | None = None
         self._live_view_active = False
+        self._pending_live_view_stop: _CcapiLiveViewStop | None = None
+        self._live_view_stop_unconfirmed = False
         self._active_live_view_source: str | None = None
         self._rtp_session: RtpLiveViewSession | None = None
         self._multipart_session: CcapiMultipartSession | None = None
@@ -1060,25 +1070,25 @@ class CcapiSession:
                 except BridgeError:
                     release_error = self._shutter_release_error(disconnected=True)
                     self._last_error = release_error.message
-            if self._live_view_active:
+            if self._pending_live_view_stop is not None:
                 try:
                     self._stop_live_view_locked()
-                except BridgeError as error:
-                    self._last_error = error.message
+                except BaseException as error:
+                    if isinstance(error, BridgeError):
+                        error = self._live_view_stop_error(disconnected=True)
+                        self._last_error = error.message
+                    if release_error is None:
+                        release_error = error
             self._live_view_active = False
             self._active_live_view_source = None
-            if self._rtp_session is not None:
-                with suppress(Exception):
-                    self._rtp_session.close()
-                self._rtp_session = None
-            if self._multipart_session is not None:
-                self._multipart_session.close()
-                self._multipart_session = None
+            self._close_live_view_receivers()
             self._settings_cache = None
             self._file_naming_cache = None
             self._media_cache.clear()
-            self.transport.close()
-            self._closed = True
+            try:
+                self.transport.close()
+            finally:
+                self._closed = True
             if release_error is not None:
                 raise release_error
 
@@ -1147,6 +1157,7 @@ class CcapiSession:
                 recording=self._recording,
                 bulb_exposure_active=self._bulb_exposure_active,
                 shutter_release_unconfirmed=self._shutter_release_unconfirmed,
+                live_view_stop_unconfirmed=self._live_view_stop_unconfirmed,
                 mode=_setting_value(settings, "shootingmode") or "unknown",
                 media=storage_status,
                 exposure=ExposureState(
@@ -1687,6 +1698,8 @@ class CcapiSession:
     def sleep_camera(self) -> None:
         with self._lock:
             self._require_shutter_release_confirmed()
+            if self._live_view_stop_unconfirmed:
+                raise self._live_view_stop_error()
             self._ensure_initialized()
             self.stop_event_polling()
             if self._live_view_active:
@@ -1711,6 +1724,8 @@ class CcapiSession:
     def clean_sensor(self, auto_power_off: bool) -> None:
         with self._lock:
             self._require_shutter_release_confirmed()
+            if self._live_view_stop_unconfirmed:
+                raise self._live_view_stop_error()
             self._ensure_initialized()
             operation = self._operation("POST", "/functions/sensorcleaning")
             if operation is None:
@@ -2053,6 +2068,17 @@ class CcapiSession:
 
     def start_live_view(self, request: LiveViewStartRequest) -> None:
         with self._lock:
+            self._require_open()
+            if self._pending_live_view_stop is not None:
+                if self._live_view_stop_unconfirmed:
+                    raise self._live_view_stop_error()
+                raise BridgeError(
+                    "LIVE_VIEW_STOP_REQUIRED",
+                    "Stop the current Live View before starting another source or changing its settings.",
+                    status_code=409,
+                    feature=CameraFeature.LIVE_VIEW.value,
+                    engine=self.engine_name,
+                )
             self._require_shutter_release_confirmed()
             self._ensure_initialized()
             self._refresh_temperature_status()
@@ -2105,7 +2131,7 @@ class CcapiSession:
                     return
                 except BridgeError as error:
                     failures.append(error)
-                    if source != "AUTO":
+                    if source != "AUTO" or self._pending_live_view_stop is not None:
                         raise
             if failures:
                 raise failures[-1]
@@ -2120,37 +2146,24 @@ class CcapiSession:
                 self.engine_name,
                 "The camera must advertise a JPEG start, frame, and explicit stop lifecycle.",
             )
-        started = False
-        try:
-            self._active_jpeg_operations = operations
-            size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
-            started = True
+        while True:
             try:
-                self._jpeg_live_view_frame()
+                with self._live_view_start_cleanup(
+                    "CCAPI_JPEG_POLLING", operations.stop_live_view, operations.stop_payload
+                ):
+                    self._active_jpeg_operations = operations
+                    size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
+                    self._jpeg_live_view_frame()
+                    self._live_view_active = True
+                    self._active_live_view_size = size if self._live_view_size_control else None
+                    self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
+                return
             except _CcapiLiveViewSizeUnsupported:
                 if size == "SMALL":
                     raise
-                try:
-                    self._stop_jpeg_live_view(operations)
-                finally:
-                    started = False
-                    self._active_jpeg_operations = None
-                self._active_jpeg_operations = operations
+                # The cleanup context confirmed the original stop before resizing.
                 self._rejected_live_view_sizes.add(size)
-                size = self._start_ccapi_live_view(request, "SMALL", operations.start_live_view.path)
-                started = True
-                self._jpeg_live_view_frame()
-            self._live_view_active = True
-            self._active_live_view_source = "CCAPI_JPEG_POLLING"
-            self._active_live_view_size = size if self._live_view_size_control else None
-            self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
-        except Exception:
-            if started:
-                with suppress(BridgeError):
-                    self._stop_jpeg_live_view(operations)
-            self._active_jpeg_operations = None
-            self._active_live_view_size = None
-            raise
+                size = "SMALL"
 
     def _start_ccapi_live_view(self, request: LiveViewStartRequest, size: str, path: str) -> str:
         try:
@@ -2193,10 +2206,12 @@ class CcapiSession:
         operations = self._multipart_live_view_operations()
         if operations is None:
             raise unsupported(CameraFeature.LIVE_VIEW_MULTIPART.value, self.engine_name)
-        size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
-        response: CcapiStreamResponse | None = None
-        session: CcapiMultipartSession | None = None
-        try:
+        with self._live_view_start_cleanup(
+            "CCAPI_MULTIPART", operations.stop_live_view, operations.stop_payload, operations.close_stream
+        ):
+            self._active_multipart_operations = operations
+            size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
+            response: CcapiStreamResponse | None = None
             for attempt in range(len(MULTIPART_START_RETRY_DELAYS) + 1):
                 response = self.transport.open_stream(
                     "GET",
@@ -2206,9 +2221,12 @@ class CcapiSession:
                 )
                 if response.status == 200:
                     break
-                payload = response.body.read(MAX_ERROR_BYTES)
                 status = response.status
-                response.close()
+                try:
+                    payload = response.body.read(MAX_ERROR_BYTES)
+                finally:
+                    with suppress(Exception):
+                        response.close()
                 response = None
                 retryable = (
                     status == 503
@@ -2224,30 +2242,15 @@ class CcapiSession:
                     CcapiResponse(status, {}, payload),
                 )
             assert response is not None
-            boundary = parse_multipart_boundary(response.headers.get("content-type"))
-            session = CcapiMultipartSession(response, boundary)
-            session.wait_until_ready(timeout=15.0)
-            response = None
-            if self._multipart_session is not None:
-                self._multipart_session.close()
-            self._multipart_session = session
-            self._active_multipart_operations = operations
+            try:
+                boundary = parse_multipart_boundary(response.headers.get("content-type"))
+                self._multipart_session = CcapiMultipartSession(response, boundary)
+            except BaseException:
+                with suppress(Exception):
+                    response.close()
+                raise
+            self._multipart_session.wait_until_ready(timeout=15.0)
             self._live_view_active = True
-            self._active_live_view_source = "CCAPI_MULTIPART"
-        except Exception:
-            if response is not None:
-                response.close()
-            if session is not None:
-                session.close()
-            with suppress(Exception):
-                self._request_ok("DELETE", operations.close_stream.path)
-            with suppress(Exception):
-                self._request_ok(
-                    operations.stop_live_view.method,
-                    operations.stop_live_view.path,
-                    dict(operations.stop_payload) if operations.stop_payload is not None else None,
-                )
-            raise
 
     def _start_rtp_live_view(self, request: LiveViewStartRequest) -> None:
         factory = self._rtp_session_factory
@@ -2263,10 +2266,12 @@ class CcapiSession:
             session = factory(description, destination)
             session.set_target_fps(request.fps)
             session.start()
-        except Exception as error:
+        except BaseException as error:
             if session is not None:
                 with suppress(Exception):
                     session.close()
+            if not isinstance(error, Exception):
+                raise
             raise BridgeError(
                 "CCAPI_RTP_START_FAILED",
                 f"Could not prepare the Canon RTP receiver: {error}",
@@ -2275,93 +2280,110 @@ class CcapiSession:
                 engine=self.engine_name,
             ) from error
         assert session is not None
+        with self._live_view_start_cleanup(
+            "CCAPI_RTP", CcapiOperation("POST", control_path), {"action": "stop", "ipaddress": ""}
+        ):
+            self._rtp_session = session
+            try:
+                self._request_ok("POST", control_path, {"action": "start", "ipaddress": destination})
+                session.wait_until_ready(timeout=5.0)
+            except Exception as error:
+                if isinstance(error, BridgeError):
+                    raise
+                raise BridgeError(
+                    "CCAPI_RTP_START_FAILED",
+                    f"Canon RTP started but no decoded video became ready: {error}",
+                    status_code=502,
+                    feature=CameraFeature.LIVE_VIEW_RTP.value,
+                    engine=self.engine_name,
+                ) from error
+            self._requested_fps = max(1, min(30, request.fps))
+            self._live_view_active = True
+            self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_RTP})
+
+    @contextmanager
+    def _live_view_start_cleanup(
+        self,
+        source: str,
+        operation: CcapiOperation,
+        payload: Mapping[str, object] | None = None,
+        close_stream: CcapiOperation | None = None,
+    ) -> Iterator[None]:
+        # Own the original stop before dispatch: a failed POST response is not
+        # proof that the camera did not start. Discovery cannot replace this owner.
+        self._pending_live_view_stop = _CcapiLiveViewStop(
+            source, operation, tuple(payload.items()) if payload is not None else None, close_stream
+        )
+        self._active_live_view_source = source
         try:
-            self._request_ok("POST", control_path, {"action": "start", "ipaddress": destination})
-            session.wait_until_ready(timeout=5.0)
-        except Exception as error:
-            with suppress(Exception):
-                session.close()
-            with suppress(BridgeError):
-                self._request_ok("POST", control_path, {"action": "stop", "ipaddress": ""})
-            if isinstance(error, BridgeError):
-                raise
-            raise BridgeError(
-                "CCAPI_RTP_START_FAILED",
-                f"Canon RTP started but no decoded video became ready: {error}",
-                status_code=502,
-                feature=CameraFeature.LIVE_VIEW_RTP.value,
-                engine=self.engine_name,
-            ) from error
-        if self._rtp_session is not None:
-            with suppress(Exception):
-                self._rtp_session.close()
-        self._rtp_session = session
-        self._requested_fps = max(1, min(30, request.fps))
-        self._live_view_active = True
-        self._active_live_view_source = "CCAPI_RTP"
-        self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_RTP})
+            yield
+        except BaseException as error:
+            try:
+                self._stop_live_view_locked()
+            except BaseException as stop_error:
+                if not isinstance(error, Exception):
+                    raise error from stop_error
+                raise stop_error from error
+            raise
 
     def stop_live_view(self) -> None:
         with self._lock:
             self._require_open()
             self._latest_live_view_geometry = None
-            if not self._live_view_active:
-                return
             self._stop_live_view_locked()
 
     def _stop_live_view_locked(self) -> None:
-        source = self._active_live_view_source
+        stop = self._pending_live_view_stop
+        if stop is None:
+            return
+        self._live_view_active = False
+        self._latest_live_view_geometry = None
         try:
-            if source == "CCAPI_RTP":
-                self._request_ok(
-                    "POST",
-                    self._api_path("POST", "/shooting/liveview/rtp"),
-                    {"action": "stop", "ipaddress": ""},
-                )
-            elif source == "CCAPI_MULTIPART":
-                operations = self._active_multipart_operations or self._multipart_live_view_operations()
-                if operations is None:
-                    raise BridgeError(
-                        "LIVE_VIEW_LIFECYCLE_MISSING",
-                        "Cannot stop multipart Live View because its advertised lifecycle is unavailable.",
-                        status_code=502,
-                        feature=CameraFeature.LIVE_VIEW_MULTIPART.value,
-                        engine=self.engine_name,
-                    )
-                if self._multipart_session is not None:
-                    self._multipart_session.close()
-                    self._multipart_session = None
+            self._close_live_view_receivers()
+            if stop.close_stream is not None:
+                # Stream teardown is best effort; Canon's general stop owns Live View.
                 with suppress(Exception):
-                    self._request_ok("DELETE", operations.close_stream.path)
-                self._request_ok(
-                    operations.stop_live_view.method,
-                    operations.stop_live_view.path,
-                    dict(operations.stop_payload) if operations.stop_payload is not None else None,
-                )
-            else:
-                operations = self._active_jpeg_operations or self._jpeg_live_view_operations()
-                if operations is None:
-                    raise BridgeError(
-                        "LIVE_VIEW_LIFECYCLE_MISSING",
-                        "Cannot stop JPEG Live View because its advertised lifecycle is unavailable.",
-                        status_code=502,
-                        feature=CameraFeature.LIVE_VIEW.value,
-                        engine=self.engine_name,
-                    )
-                self._stop_jpeg_live_view(operations)
-        finally:
-            if self._rtp_session is not None:
+                    self._request_ok(stop.close_stream.method, stop.close_stream.path)
+            self._request_ok(
+                stop.operation.method, stop.operation.path,
+                dict(stop.payload) if stop.payload is not None else None,
+            )
+        except BaseException as error:
+            self._live_view_stop_unconfirmed = True
+            failure = self._live_view_stop_error()
+            self._last_error = failure.message
+            if not isinstance(error, Exception):
+                raise
+            raise failure from error
+        self._pending_live_view_stop = None
+        self._live_view_stop_unconfirmed = False
+        self._active_multipart_operations = None
+        self._active_live_view_source = None
+        self._active_jpeg_operations = None
+        self._active_live_view_size = None
+
+    def _close_live_view_receivers(self) -> None:
+        rtp, self._rtp_session = self._rtp_session, None
+        multipart, self._multipart_session = self._multipart_session, None
+        for receiver in (rtp, multipart):
+            if receiver is not None:
                 with suppress(Exception):
-                    self._rtp_session.close()
-                self._rtp_session = None
-            if self._multipart_session is not None:
-                self._multipart_session.close()
-                self._multipart_session = None
-            self._active_multipart_operations = None
-            self._live_view_active = False
-            self._active_live_view_source = None
-            self._active_jpeg_operations = None
-            self._active_live_view_size = None
+                    receiver.close()
+
+    def _live_view_stop_error(self, *, disconnected: bool = False) -> BridgeError:
+        return BridgeError(
+            "LIVE_VIEW_STOP_UNCONFIRMED",
+            (
+                "Disconnected, but the camera did not confirm Live View stopped. "
+                "Check and stop Live View on the camera before reconnecting."
+                if disconnected else
+                "The camera did not confirm Live View stopped. Retry Stop in this session "
+                "before starting another Live View source or changing its settings."
+            ),
+            status_code=409,
+            feature=CameraFeature.LIVE_VIEW.value,
+            engine=self.engine_name,
+        )
 
     def live_view_frame(self) -> bytes:
         with self._lock:
@@ -2998,6 +3020,10 @@ class CcapiSession:
     @property
     def live_view_active(self) -> bool:
         return self._live_view_active
+
+    @property
+    def live_view_stop_unconfirmed(self) -> bool:
+        return self._live_view_stop_unconfirmed
 
     @property
     def live_view_source(self) -> str | None:
@@ -4154,13 +4180,6 @@ class CcapiSession:
                 stop_payload=stop_payload,
             )
         return None
-
-    def _stop_jpeg_live_view(self, operations: CcapiJpegOperations) -> None:
-        self._request_ok(
-            operations.stop_live_view.method,
-            operations.stop_live_view.path,
-            dict(operations.stop_payload) if operations.stop_payload is not None else None,
-        )
 
     def _multipart_live_view_operations(self) -> CcapiMultipartOperations | None:
         reads = sorted(
