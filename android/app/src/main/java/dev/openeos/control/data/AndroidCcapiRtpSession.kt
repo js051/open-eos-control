@@ -5,6 +5,8 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.net.Network
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.view.Surface
 import kotlinx.coroutines.CancellationException
@@ -21,6 +23,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withTimeout
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -58,6 +62,11 @@ internal class AndroidCcapiRtpSession(
     override val source: LiveViewSource = LiveViewSource.CCAPI_RTP
     override val sourceUrl: String = "rtp://$destinationAddress:${description.video.port}"
     override val contentType: String = "video/H264"
+    private val renderedFrameState = MutableStateFlow<NativeLiveViewRenderedFrame?>(null)
+    override val renderedFrames = renderedFrameState.asStateFlow()
+    private val decoderGeneration = AtomicLong()
+    private val renderingGeneration = AtomicLong()
+    private val renderedSequence = AtomicLong()
     override val audioStatus: NativeLiveViewAudioStatus
         get() = audioStatusState.get()
     override val videoStatus: NativeLiveViewVideoStatus
@@ -168,14 +177,18 @@ internal class AndroidCcapiRtpSession(
         val previous = this.surface.getAndSet(surface)
         synchronized(decoderGuard) {
             if (previous === surface && decoderJob?.isActive == true) return
+            val generation = decoderGeneration.incrementAndGet()
+            renderedFrameState.value = null
             decoderJob?.cancel()
-            decoderJob = scope.launch { decodeTo(surface) }
+            decoderJob = scope.launch { decodeTo(surface, generation) }
         }
     }
 
     override fun detachSurface(surface: Surface) {
         if (!this.surface.compareAndSet(surface, null)) return
         synchronized(decoderGuard) {
+            decoderGeneration.incrementAndGet()
+            renderedFrameState.value = null
             decoderJob?.cancel()
             decoderJob = null
         }
@@ -186,7 +199,8 @@ internal class AndroidCcapiRtpSession(
     }
 
     override fun setRenderingEnabled(enabled: Boolean) {
-        renderingEnabled.set(enabled)
+        if (renderingEnabled.getAndSet(enabled) != enabled) renderingGeneration.incrementAndGet()
+        if (!enabled) renderedFrameState.value = null
     }
 
     override fun setAudioEnabled(enabled: Boolean) {
@@ -225,6 +239,8 @@ internal class AndroidCcapiRtpSession(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        decoderGeneration.incrementAndGet()
+        renderedFrameState.value = null
         firstDecodableVideo.completeExceptionally(
             IllegalStateException("Canon RTP session closed before receiving a decodable H.264 key frame.")
         )
@@ -411,7 +427,7 @@ internal class AndroidCcapiRtpSession(
         }
     }
 
-    private suspend fun decodeTo(targetSurface: Surface) {
+    private suspend fun decodeTo(targetSurface: Surface, generation: Long) {
         while (accessUnits.tryReceive().isSuccess) Unit
         var codec: MediaCodec? = null
         try {
@@ -431,6 +447,24 @@ internal class AndroidCcapiRtpSession(
                 }
             }
             codec.configure(format, targetSurface, null, 0)
+            // Bound the metadata independently of codec callbacks (which may be delayed or absent).
+            val renderedGuard = Any()
+            val pendingRendered = linkedMapOf<Long, Pair<Long, Long>>()
+            var formatGeneration = 0L
+            codec.setOnFrameRenderedListener({ _, presentationTimeUs, nanoTime ->
+                synchronized(renderedGuard) {
+                    val metadata = pendingRendered.remove(presentationTimeUs)
+                    if (metadata != null && metadata.first == formatGeneration &&
+                        !closed.get() && renderingEnabled.get() &&
+                        decoderGeneration.get() == generation && surface.get() === targetSurface &&
+                        metadata.second == renderingGeneration.get() && targetSurface.isValid
+                    ) {
+                        renderedFrameState.value = NativeLiveViewRenderedFrame(
+                            targetSurface, generation, metadata.first, renderedSequence.incrementAndGet(), nanoTime,
+                        )
+                    }
+                }
+            }, Handler(Looper.getMainLooper()))
             codec.start()
 
             var needsKeyFrame = true
@@ -471,6 +505,12 @@ internal class AndroidCcapiRtpSession(
                             val frameInterval = 1_000_000_000L / targetFps.get().coerceAtLeast(1)
                             val render = renderingEnabled.get() &&
                                 (lastRenderedAtNanos == 0L || nowNanos - lastRenderedAtNanos >= frameInterval)
+                            if (render) synchronized(renderedGuard) {
+                                pendingRendered[bufferInfo.presentationTimeUs] = formatGeneration to renderingGeneration.get()
+                                while (pendingRendered.size > MAX_PENDING_FRAME_STATS) {
+                                    pendingRendered.remove(pendingRendered.keys.first())
+                                }
+                            }
                             codec.releaseOutputBuffer(outputIndex, render)
                             val encodedBytes = bytesByPresentationTime.remove(bufferInfo.presentationTimeUs) ?: encoded.size
                             if (render) {
@@ -488,8 +528,22 @@ internal class AndroidCcapiRtpSession(
 
                         outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                             val outputFormat = codec.outputFormat
-                            videoWidth = outputFormat.getIntegerOrDefault(MediaFormat.KEY_WIDTH, videoWidth)
-                            videoHeight = outputFormat.getIntegerOrDefault(MediaFormat.KEY_HEIGHT, videoHeight)
+                            synchronized(renderedGuard) {
+                                formatGeneration++
+                                pendingRendered.clear()
+                                if (decoderGeneration.get() == generation) renderedFrameState.value = null
+                            }
+                            val dimensions = nativeVideoDisplayDimensions(
+                                outputFormat.getIntegerOrDefault(MediaFormat.KEY_WIDTH, videoWidth),
+                                outputFormat.getIntegerOrDefault(MediaFormat.KEY_HEIGHT, videoHeight),
+                                outputFormat.getIntegerOrDefault("crop-left", 0),
+                                outputFormat.getIntegerOrDefault("crop-top", 0),
+                                outputFormat.getIntegerOrDefault("crop-right", -1),
+                                outputFormat.getIntegerOrDefault("crop-bottom", -1),
+                                outputFormat.getIntegerOrDefault(MediaFormat.KEY_ROTATION, 0),
+                            )
+                            videoWidth = dimensions.first
+                            videoHeight = dimensions.second
                             listener.get()?.invoke(NativeLiveViewEvent.VideoSizeChanged(videoWidth, videoHeight))
                         }
 
@@ -500,8 +554,11 @@ internal class AndroidCcapiRtpSession(
         } catch (_: CancellationException) {
             throw CancellationException()
         } catch (exception: Exception) {
-            if (!closed.get() && surface.get() === targetSurface) reportFailure("Canon H.264 decode failed", exception)
+            if (!closed.get() && decoderGeneration.get() == generation && surface.get() === targetSurface) {
+                reportFailure("Canon H.264 decode failed", exception)
+            }
         } finally {
+            if (decoderGeneration.get() == generation) renderedFrameState.value = null
             runCatching { codec?.stop() }
             runCatching { codec?.release() }
         }

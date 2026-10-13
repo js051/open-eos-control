@@ -18,10 +18,15 @@ The importer rejects 1D LUTs, combined shaper/3D files, duplicate or conflicting
 - iOS converts decoded JPEG and Desktop Bridge frames with Core Image `CIColorCube` through one conflated worker with the same bounded scheduling rule.
 - PC uploads the LUT as a floating-point WebGL2 3D texture and performs explicit trilinear interpolation for decoded Bridge or local UVC/HDMI frames on the GPU.
 
-Android and iOS native RTP retain their direct native-surface renderers. LUT preview and pixel-derived scopes are unavailable for those paths because the app does not receive a decoded CPU image; geometric guides and anamorphic desqueeze remain available.
+Android and iOS native RTP retain their direct native-surface renderers. Native video LUT presentation remains unavailable on both platforms: a saved LUT is retained but inactive. Geometric guides and anamorphic desqueeze remain available.
+
+- Android feeds the five pixel-derived assists from bounded native Surface samples, with an explicit sampled-monitoring status and freshness expiry; see [Android native RTP sampled monitoring](android-native-rtp-monitoring.md).
+- A separately prepared iOS candidate, pending integration, adds sampled SDR scopes on iOS 17.4 and later; iOS 17.0–17.3 lack the displayed-pixel readback API. Its analysis is bounded to 120×80, with at most four requests per second and a one-second acquisition/processing age budget; the platform readback still returns a full-size buffer. That candidate and its acceptance notes require separate integration; this Android change does not include the iOS implementation.
+
+These sampling designs do not apply a LUT to native video and do not imply full-rate scopes. Native compilation, renderer fixtures and runtime/device acceptance remain pending.
 
 ## Privacy And Lifetime
 
 Imported LUT contents, title and filename remain in memory for the active app/page lifetime. Diagnostics report only whether a LUT is loaded and its cube size. They never include the filename, title, table values, file path or file contents.
 
-Pixel-derived monitoring assists analyze the post-LUT image, so histogram, waveform, zebra, false color and focus peaking match the displayed preview. Removing the LUT immediately restores the unmodified decoded Live View.
+On paths that display a LUT, pixel-derived monitoring assists analyze the post-LUT image, so histogram, waveform, zebra, false color and focus peaking match that preview. Removing the LUT immediately restores the unmodified decoded Live View. Native RTP sampled assists analyze the unprocessed native preview, and the UI explicitly states that a retained LUT is not applied.
