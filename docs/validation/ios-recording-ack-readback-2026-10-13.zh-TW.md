@@ -53,3 +53,13 @@
 既有 15 秒 Share 等待失敗後，UI test 只附上 close-preview 的診斷 value 和一張畫面，接著保留原失敗斷言；沒有重試、延長 timeout 或將失敗改成成功。新增實際 DesktopBridgeClient＋原 MP4 fixture 的 manual-download control，檢查下載中狀態、同一 ID、原 bytes、準備好之 URL 與 export payload；這不是觸控或 AVPlayer 的端到端驗證。
 
 `@Published` 診斷會在 opt in 時增加 view 更新，可能改變事件時序。帶診斷的綠燈不能證明原本的根因已修復；此工具用來辨認停止位置，不承諾解釋或消除 Share 失敗。所有新增 Swift／UI 測試仍為 NOT_RUN。
+
+## 2026-10-13 本批執行結果與觸控候選
+
+精確 head `34a77cc6f6980967eb86dd7181ea17e1f37a9560` 的 CI `38357717267`：App 401/401 通過，UI 37/38；同一 REC journey 在 06:46:29 UTC 找不到 Share，原 15 秒等待失敗保留。上節 NOT_RUN 是提交前狀態，不覆蓋本次實際結果。
+
+本輪 artifact `11794605452`（179,901,983 bytes；SHA-256 `e5624a2c3394f8507baaf10d679aef002e32df497f6df1a6d2d41bbd306e40a3`）中的 `recording-original-download-stages` 是實際零位元組 attachment。啟動 log 有診斷環境變數，使用 Debug app；下載入口在任何 guard 前都記錄 request，而失敗画面仍顯示 idle Download。這縮小到手動下載 action 未進入或其觀察接線；不能把播放器的 GET 200 當成此 action 已執行。
+
+事件／AX 紀錄的 Download frame 為 17×17 pt，與原 label 的 48×48 layout 不同。點擊 (314.2, 90.2) 位於圖示青色箭桿，因此「點到空心中心」不符合畫面證據。最小候選為同位置 Download／Cancel／Share 三個按鈕 label 的既有 48×48 frame 明確設定矩形 content shape；不攔截整個播放器、不改按鍵座標、不增加重試或時間。REC journey 同時要求 Download 暴露至少 44×44 pt 觸控框，再沿用原單次 tap、Share 等待、原檔與相機命令斷言。
+
+此觸控區域修正尚未執行 Swift／UI runtime。AX frame 狹小是實際觀察，尚不足以證明它是手勢未呼叫 action 的唯一原因；後續必須由同旅程結果與 stage trace 判定，不以 source review 宣告已修復。
