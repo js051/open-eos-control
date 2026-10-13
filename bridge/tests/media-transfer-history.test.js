@@ -686,7 +686,7 @@ test("cross-tab clear removes plans and receipts in one epoch and old capabiliti
   assert.deepEqual(lateStart, { ok: false, code: "stale-ticket" });
   assert.deepEqual(lateFinish, { ok: false, code: "stale-ticket" });
   assert.equal(indexedDB.persisted().epoch, before.epoch + 1);
-  assert.deepEqual(await store.list(), { ok: true, entries: [], plans: [] });
+  assert.deepEqual(await store.list(), { ok: true, epoch: before.epoch + 1, entries: [], plans: [] });
   assert.equal((await other.beginPlannedBatch(["new.JPG"])).ok, true);
   assert.deepEqual(await store.beginPlannedAttempt(ticket, ticket.rows[2].rowId), { ok: false, code: "stale-ticket" });
   assert.equal((await store.list()).plans.length, 1);
@@ -887,4 +887,147 @@ test("committed but unacknowledged planned attempt returns no capability and col
   assert.deepEqual(indexedDB.persisted(), before, "Cold projection cannot retry or settle the unacknowledged attempt");
   assert.deepEqual(await store.beginPlannedAttempt(ticket, ticket.rows[0].rowId), { ok: false, code: "already-started" });
   cold.close(); store.close();
+});
+
+test("explicit continuation keeps the old roster and creates linked new attempts", async () => {
+  const f = fixture();
+  const original = await f.store.beginPlannedBatch(["old.jpg", "done.jpg"]);
+  const done = await f.store.beginPlannedAttempt(original.ticket, original.ticket.rows[1].rowId);
+  await f.store.finishAttempt(done.receipt, { outcome: "completed", bytesTransferred: 2 });
+  const before = await f.store.list();
+  const oldRow = original.ticket.rows[0];
+  const result = await f.store.beginContinuationBatch({ epoch: before.epoch,
+    rows: [{ batchId: original.ticket.batchId, rowId: oldRow.rowId, filename: "explicitly-chosen.jpg" }],
+    acknowledgeUnknown: true });
+  assert.equal(result.ok, true);
+  assert.notEqual(result.ticket.batchId, original.ticket.batchId);
+  assert.deepEqual(result.plan.rows[0].origin, { batchId: original.ticket.batchId, rowId: oldRow.rowId });
+  assert.equal(result.plan.rows[0].filename, "explicitly-chosen.jpg");
+  const after = await f.store.list();
+  assert.equal(after.plans.length, 2);
+  assert.deepEqual(after.plans[1], before.plans[0]);
+  const attempt = await f.store.beginPlannedAttempt(result.ticket, result.ticket.rows[0].rowId);
+  assert.equal(attempt.ok, true);
+  assert.equal((await f.store.finishAttempt(attempt.receipt, { outcome: "completed", bytesTransferred: 3 })).ok, true);
+  assert.equal((await f.store.list()).plans[1].rows[0].outcome, "queued");
+});
+
+test("continuation rejects completed, missing, duplicate and cleared origins atomically", async () => {
+  const f = fixture();
+  const plan = await f.store.beginPlannedBatch(["a.jpg", "b.jpg"]);
+  const done = await f.store.beginPlannedAttempt(plan.ticket, plan.ticket.rows[1].rowId);
+  await f.store.finishAttempt(done.receipt, { outcome: "completed", bytesTransferred: 1 });
+  const before = await f.store.list();
+  const row = { batchId: plan.ticket.batchId, rowId: plan.ticket.rows[0].rowId, filename: "new.jpg" };
+  for (const rows of [[{ ...row, rowId: plan.ticket.rows[1].rowId }],
+    [{ ...row, rowId: "f".repeat(32) }], [row, row]]) {
+    assert.equal((await f.store.beginContinuationBatch({ epoch: before.epoch, rows, acknowledgeUnknown: true })).ok, false);
+    assert.deepEqual(await f.store.list(), before);
+  }
+  await f.store.clear();
+  assert.equal((await f.store.beginContinuationBatch({ epoch: before.epoch, rows: [row], acknowledgeUnknown: true })).code, "stale-ticket");
+  assert.equal((await f.store.list()).plans.length, 0);
+});
+
+test("cold fifty-row continuation preserves five successes and unknown until explicit consent", async () => {
+  const f = fixture();
+  const old = await f.store.beginPlannedBatch(Array.from({ length: 50 }, (_, i) => `${i}.jpg`));
+  for (let i = 0; i < 6; i++) {
+    const attempt = await f.store.beginPlannedAttempt(old.ticket, old.ticket.rows[i].rowId);
+    if (i < 5) await f.store.finishAttempt(attempt.receipt, { outcome: "completed", bytesTransferred: 1 });
+  }
+  const reopened = f.second();
+  const before = await reopened.list();
+  const rows = old.ticket.rows.slice(5).map(row => ({ batchId: old.ticket.batchId, rowId: row.rowId, filename: row.filename }));
+  assert.equal((await reopened.beginContinuationBatch({ epoch: before.epoch, rows, acknowledgeUnknown: false })).code, "unknown-origin");
+  const admitted = await reopened.beginContinuationBatch({ epoch: before.epoch, rows, acknowledgeUnknown: true });
+  assert.equal(admitted.ok, true);
+  assert.equal(admitted.plan.rows.length, 45);
+  const after = await reopened.list();
+  assert.equal(after.plans.flatMap(plan => plan.rows).length, 95);
+  assert.deepEqual(after.plans[1], before.plans[0]);
+  assert.equal(after.plans[1].rows[5].receipt.unconfirmed, true);
+});
+
+test("same-store active attempts and completed descendants cannot be restarted through ancestors", async () => {
+  const f = fixture();
+  const old = await f.store.beginPlannedBatch(["a.jpg"]);
+  const request = { epoch: (await f.store.list()).epoch, acknowledgeUnknown: true,
+    rows: [{ batchId: old.ticket.batchId, rowId: old.ticket.rows[0].rowId, filename: "b.jpg" }] };
+  const next = await f.store.beginContinuationBatch(request);
+  const running = await f.store.beginPlannedAttempt(next.ticket, next.ticket.rows[0].rowId);
+  assert.equal((await f.store.beginContinuationBatch(request)).code, "active-origin");
+  await f.store.finishAttempt(running.receipt, { outcome: "completed", bytesTransferred: 2 });
+  assert.equal((await f.store.beginContinuationBatch(request)).code, "completed-origin");
+});
+
+test("ancestor continuation cannot conceal descendant uncertainty or an old late completion", async () => {
+  const f = fixture();
+  const old = await f.store.beginPlannedBatch(["a.jpg"]);
+  const request = { epoch: (await f.store.list()).epoch, acknowledgeUnknown: true,
+    rows: [{ batchId: old.ticket.batchId, rowId: old.ticket.rows[0].rowId, filename: "b.jpg" }] };
+  const next = await f.store.beginContinuationBatch(request);
+  const running = await f.store.beginPlannedAttempt(next.ticket, next.ticket.rows[0].rowId);
+  const second = f.second();
+  assert.equal((await second.beginContinuationBatch({ ...request, acknowledgeUnknown: false })).code, "unknown-origin");
+  const newest = await second.beginContinuationBatch({ ...request, acknowledgeUnknown: true });
+  assert.equal(newest.ok, true);
+  await f.store.finishAttempt(running.receipt, { outcome: "completed", bytesTransferred: 2 });
+  const after = await second.list();
+  assert.equal(after.plans[0].rows[0].outcome, "queued", "late old result does not rewrite the new row");
+  assert.equal(after.plans[1].rows[0].outcome, "completed");
+});
+
+test("continuation capacity refusal never evicts old evidence and v2 upgrades only on write", async () => {
+  const f = fixture();
+  const old = await f.store.beginPlannedBatch(Array.from({ length: 100 }, (_, i) => `${i}.jpg`));
+  const snapshot = f.indexedDB.persisted(); snapshot.schemaVersion = 2; f.indexedDB.replace(snapshot);
+  const before = await f.store.list();
+  assert.equal(f.indexedDB.persisted().schemaVersion, 2);
+  const rows = [{ batchId: old.ticket.batchId, rowId: old.ticket.rows[0].rowId, filename: "new.jpg" }];
+  assert.equal((await f.store.beginContinuationBatch({ epoch: before.epoch, rows, acknowledgeUnknown: true })).code, "capacity-exceeded");
+  assert.deepEqual(f.indexedDB.persisted(), snapshot);
+  await f.store.clear();
+  assert.equal(f.indexedDB.persisted().schemaVersion, 3);
+});
+
+test("continuation stores only local link IDs and rejects foreign, cyclic or extra link fields", async () => {
+  const f = fixture();
+  const old = await f.store.beginPlannedBatch(["a.jpg"]);
+  const next = await f.store.beginContinuationBatch({ epoch: (await f.store.list()).epoch, acknowledgeUnknown: true,
+    rows: [{ batchId: old.ticket.batchId, rowId: old.ticket.rows[0].rowId, filename: "https://private.invalid/token" }] });
+  assert.equal(next.ok, true);
+  assert.equal(next.plan.rows[0].filename, "download");
+  const valid = f.indexedDB.persisted();
+  assert.equal(JSON.stringify(valid).includes("private.invalid"), false);
+  for (const change of [row => { row.origin.path = "/private"; }, row => { row.origin.rowId = row.rowId; },
+    row => { row.origin.batchId = "f".repeat(32); }]) {
+    const broken = structuredClone(valid); change(broken.plans[0].rows[0]); f.indexedDB.replace(broken);
+    assert.equal((await f.second().list()).code, "corrupt");
+  }
+});
+
+test("queued rows also require explicit confirmation because another tab may still own their batch", async () => {
+  const f = fixture();
+  const original = await f.store.beginPlannedBatch(["a.jpg", "b.jpg"]);
+  await f.store.beginPlannedAttempt(original.ticket, original.ticket.rows[0].rowId);
+  const other = f.second();
+  const request = { epoch: (await other.list()).epoch, acknowledgeUnknown: false,
+    rows: [{ batchId: original.ticket.batchId, rowId: original.ticket.rows[1].rowId, filename: "chosen.jpg" }] };
+  assert.equal((await other.beginContinuationBatch(request)).code, "unknown-origin");
+  assert.equal((await other.beginContinuationBatch({ ...request, acknowledgeUnknown: true })).ok, true);
+});
+
+test("settled transfer loses only its in-memory active lock when terminal persistence fails", async () => {
+  const f = fixture();
+  const original = await f.store.beginPlannedBatch(["a.jpg"]);
+  const started = await f.store.beginPlannedAttempt(original.ticket, original.ticket.rows[0].rowId);
+  f.indexedDB.fault.transactionThrows = true;
+  assert.equal((await f.store.finishAttempt(started.receipt, { outcome: "failed", outcomeUnknown: true })).ok, false);
+  f.indexedDB.fault.transactionThrows = false;
+  const snapshot = await f.store.list();
+  assert.equal(snapshot.plans[0].rows[0].receipt.unconfirmed, true);
+  const request = { epoch: snapshot.epoch, acknowledgeUnknown: true,
+    rows: [{ batchId: original.ticket.batchId, rowId: original.ticket.rows[0].rowId, filename: "chosen.jpg" }] };
+  assert.equal((await f.store.beginContinuationBatch(request)).ok, true);
 });

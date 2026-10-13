@@ -516,6 +516,12 @@
       mediaHistoryFailed: "Failed",
       mediaHistoryUnconfirmed: "Result unconfirmed; check the destination",
       mediaHistoryLeftover: "A file may remain or its final state is uncertain.",
+      mediaContinuationSource: "Choose a currently loaded original for this unfinished row",
+      mediaContinuationNone: "Do not continue this row",
+      mediaContinuationAcknowledge: "I checked the destination and any other tabs. Unconfirmed attempts may already have saved a copy or still be running; I accept a separate new attempt.",
+      mediaContinuationStart: "Choose a new folder and start selected new attempts",
+      mediaContinuationInvalid: "Choose distinct currently loaded originals, confirm uncertain results, and keep this connection active. Clear or connection changes require choosing again.",
+      mediaContinuationHelp: "Select a source explicitly for each unfinished row. Filenames are not identity. This creates a linked new worklist; old results stay unchanged. Folder support is required; otherwise use the existing single-file download.",
       mediaHistoryClear: "Clear history…",
       mediaHistoryClearQuestion: "Clear these worklists and history records only? Destination files and current transfers are unchanged. Late results from existing batches will not restore cleared records.",
       mediaHistoryClearConfirm: "Clear records",
@@ -1094,6 +1100,12 @@
       mediaHistoryFailed: "失敗",
       mediaHistoryUnconfirmed: "結果未確認，請查看目的地",
       mediaHistoryLeftover: "可能留有檔案或最終狀態未確認。",
+      mediaContinuationSource: "為此未完成列明確選擇目前已載入的原始素材",
+      mediaContinuationNone: "不接續此列",
+      mediaContinuationAcknowledge: "我已檢查目的地及其他分頁。未確認嘗試可能已有副本或仍在執行；我確認另開一次新嘗試。",
+      mediaContinuationStart: "選擇新資料夾並開始選定的新嘗試",
+      mediaContinuationInvalid: "請選擇不重複且目前已載入的素材、確認未知結果，並保持同一連線。清除或連線改變後須重新選擇。",
+      mediaContinuationHelp: "請為每個未完成列明確選擇來源，檔名不能證明素材身分。這會建立關聯的新工作清單並保留舊結果。需瀏覽器支援資料夾；不支援時請用既有單檔下載。",
       mediaHistoryClear: "清除紀錄…",
       mediaHistoryClearQuestion: "只清除這些工作清單與紀錄？目的檔案與目前傳輸不變；既有批次晚到的結果不會重新建立已清除的紀錄。",
       mediaHistoryClearConfirm: "清除紀錄",
@@ -1714,6 +1726,8 @@
     mediaHistoryList: byId("media-history-list"),
     mediaHistoryStatus: byId("media-history-status"),
     mediaHistoryClear: byId("media-history-clear"),
+    mediaContinuationStart: byId("media-continuation-start"),
+    mediaContinuationAcknowledge: byId("media-continuation-acknowledge"),
     mediaHistoryConfirm: byId("media-history-confirm"),
     mediaHistoryConfirmYes: byId("media-history-confirm-yes"),
     mediaHistoryConfirmNo: byId("media-history-confirm-no"),
@@ -5652,6 +5666,7 @@
   let mediaHistoryWarning = false;
   let mediaHistoryViewGeneration = 0;
   let mediaHistoryClearOwner = null;
+  let mediaContinuationDraft = null;
 
   async function mediaHistoryCall(operation, ...args) {
     let result;
@@ -5676,16 +5691,30 @@
   async function refreshMediaHistory() {
     const generation = ++mediaHistoryViewGeneration;
     if (!ui.mediaHistoryDialog?.open) return;
+    mediaContinuationDraft = null;
+    if (ui.mediaContinuationStart) ui.mediaContinuationStart.disabled = true;
     ui.mediaHistoryStatus.textContent = t("mediaHistoryLoading");
     const result = await mediaHistoryCall("list");
     if (generation !== mediaHistoryViewGeneration || !ui.mediaHistoryDialog.open) return;
     ui.mediaHistoryList.replaceChildren();
     const plans = result.ok ? (result.plans || []) : [];
-    const plannedIDs = new Set(plans.flatMap((plan) => plan.rows.map((row) => row.rowId)));
+    const plannedRowsByID = new Map(plans.flatMap((plan) => plan.rows.map((row) => [row.rowId, row])));
+    const rootOf = (row) => {
+      let current = row;
+      for (let depth = 0; depth < plannedRowsByID.size && current?.origin; depth += 1) current = plannedRowsByID.get(current.origin.rowId);
+      return current?.rowId;
+    };
+    const families = new Map();
+    for (const candidate of plannedRowsByID.values()) {
+      const root = rootOf(candidate);
+      const family = families.get(root) || [];
+      family.push(candidate); families.set(root, family);
+    }
+    const plannedIDs = new Set(plannedRowsByID.keys());
     const legacy = result.ok ? result.entries.filter((entry) => !plannedIDs.has(entry.receiptId)) : [];
     const rows = plans.flatMap((plan) => plan.rows.map((row, index) => ({
       entry: row.receipt || { filename: row.filename, outcome: "queued", startedAtMillis: plan.createdAtMillis },
-      plan, position: index + 1,
+      plan, rowId: row.rowId, position: index + 1,
     }))).concat(legacy.map((entry) => ({ entry, plan: null })));
     ui.mediaHistoryClear.disabled = !!mediaHistoryClearOwner || !result.ok || !rows.length;
     if (!result.ok) {
@@ -5694,7 +5723,11 @@
     }
     ui.mediaHistoryStatus.textContent = rows.length ? t("mediaHistoryCount", { count: rows.length }) : t("mediaHistoryEmpty");
     const outcomeKeys = { completed: "mediaHistoryCompleted", failed: "mediaHistoryFailed", queued: "mediaHistoryQueued", "cancelled-or-unknown": "mediaHistoryUnconfirmed" };
-    for (const { entry, plan, position } of rows) {
+    const draft = { session: state.session, epoch: result.epoch, bindings: new Map(),
+      loaded: [...state.media], acknowledged: false };
+    mediaContinuationDraft = draft;
+    if (ui.mediaContinuationAcknowledge) ui.mediaContinuationAcknowledge.checked = false;
+    for (const { entry, plan, rowId, position } of rows) {
       const row = document.createElement("li");
       row.dataset.outcome = entry.outcome;
       if (plan) row.dataset.worklist = plan.batchId;
@@ -5713,8 +5746,68 @@
         warning.textContent = t("mediaHistoryLeftover");
         row.append(warning);
       }
+      const family = plan ? families.get(rootOf(plannedRowsByID.get(rowId))) || [] : [];
+      if (plan && !family.some((candidate) => candidate.receipt?.outcome === "completed") && draft.session && !state.mediaBatchOwner
+        && typeof window.showDirectoryPicker === "function") {
+        const label = document.createElement("label");
+        label.textContent = t("mediaContinuationSource");
+        const select = document.createElement("select");
+        select.setAttribute("aria-label", `${t("mediaContinuationSource")}: ${entry.filename}`);
+        const none = document.createElement("option");
+        none.value = ""; none.textContent = t("mediaContinuationNone"); select.append(none);
+        draft.loaded.forEach((item, index) => {
+          const option = document.createElement("option");
+          option.value = String(index);
+          const context = [item.folderLabel, item.captureTime, item.kind,
+            Number.isSafeInteger(item.sizeBytes) && item.sizeBytes >= 0 ? `${item.sizeBytes} B` : null]
+            .filter((value) => typeof value === "string" && value.trim()).map((value) => value.slice(0, 120));
+          option.textContent = `${index + 1}. ${item.name}${context.length ? ` · ${context.join(" · ")}` : ""}`;
+          select.append(option);
+        });
+        select.addEventListener("change", () => {
+          if (mediaContinuationDraft !== draft) return;
+          draft.bindings.delete(rowId);
+          if (select.value !== "") {
+            const item = draft.loaded[Number(select.value)];
+            if (item) draft.bindings.set(rowId, { batchId: plan.batchId, rowId, item,
+              rootId: rootOf(plannedRowsByID.get(rowId)),
+              unknown: family.some((candidate) => candidate.receipt?.outcomeUnknown || candidate.receipt?.mayRemain || candidate.receipt?.unconfirmed) });
+          }
+          updateMediaContinuationAvailability();
+        });
+        label.append(select); row.append(label);
+      }
       ui.mediaHistoryList.append(row);
     }
+    updateMediaContinuationAvailability();
+  }
+
+  function mediaContinuationSelection(draft) {
+    if (!draft || draft !== mediaContinuationDraft || !draft.session || state.session !== draft.session
+      || !ui.mediaHistoryDialog.open || cameraInteractionBusy()) return null;
+    const bindings = [...draft.bindings.values()];
+    if (!bindings.length || new Set(bindings.map((binding) => binding.rootId)).size !== bindings.length
+      || new Set(bindings.map((binding) => binding.item.id)).size !== bindings.length
+      || bindings.some((binding) => !state.media.includes(binding.item))
+      || !draft.acknowledged) return null;
+    return bindings;
+  }
+
+  function updateMediaContinuationAvailability() {
+    if (ui.mediaContinuationStart) ui.mediaContinuationStart.disabled = !mediaContinuationSelection(mediaContinuationDraft);
+  }
+
+  function continueMediaHistory() {
+    const draft = mediaContinuationDraft;
+    const bindings = mediaContinuationSelection(draft);
+    if (!bindings) { showToast(t("mediaContinuationInvalid"), true); return; }
+    const continuation = { epoch: draft.epoch, acknowledgeUnknown: draft.acknowledged,
+      rows: bindings.map(({ batchId, rowId, item }) => ({ batchId, rowId, filename: item.name })) };
+    const items = bindings.map((binding) => binding.item);
+    mediaContinuationDraft = null;
+    ui.mediaHistoryDialog.close();
+    // The picker still runs synchronously in this explicit user's click task.
+    void downloadSelectedMedia({ continuation, items, session: draft.session });
   }
 
   function openMediaHistory() {
@@ -5728,6 +5821,8 @@
   async function clearMediaHistory() {
     if (mediaHistoryClearOwner) return;
     const owner = {};
+    mediaContinuationDraft = null;
+    updateMediaContinuationAvailability();
     mediaHistoryClearOwner = owner;
     ui.mediaHistoryConfirmYes.disabled = true;
     ui.mediaHistoryClear.disabled = true;
@@ -5819,7 +5914,7 @@
           ? await mediaHistoryCall("beginPlannedAttempt", owner.historyTicket, owner.historyPlan.rows[index].rowId)
           : await mediaHistoryCall("startAttempt", owner.historyTicket, { filename: item.name, destination: "browser-directory" });
         if (owner.historyPlan && !recorded.ok) {
-          if (recorded.code === "stale-ticket") {
+          if (recorded.code === "stale-ticket" && !owner.strictHistory) {
             // A deliberate clear retires the whole plan. Keep manual saving
             // available without rebuilding cleared rows in the new epoch.
             owner.historyPlan = null;
@@ -5900,16 +5995,19 @@
     }
   }
 
-  async function downloadSelectedMedia() {
+  async function downloadSelectedMedia(options = {}) {
     if (!state.session || !featureSupported(FEATURES.MEDIA_DOWNLOAD) || cameraInteractionBusy()) return;
     if (typeof window.showDirectoryPicker !== "function") {
       showToast(t("mediaBatchUnavailable"), true);
       return;
     }
     state.mediaSelection.replaceLoaded(state.media);
-    const items = state.mediaSelection.snapshot().map((entry) => entry.item);
-    if (!items.length) return;
-    const owner = { session: state.session, controller: new AbortController(), cancelled: false, silent: false };
+    const continuation = options.continuation || null;
+    const items = continuation ? options.items : state.mediaSelection.snapshot().map((entry) => entry.item);
+    if (!items?.length || (continuation && (options.session !== state.session
+      || items.some((item) => !state.media.includes(item))))) return;
+    const owner = { session: state.session, controller: new AbortController(), cancelled: false, silent: false,
+      strictHistory: !!continuation };
     state.mediaBatchOwner = owner;
     state.refreshGeneration += 1;
     const batch = {
@@ -5927,12 +6025,13 @@
       // or fall back to automatic anchor downloads when folder access fails.
       const directoryHandle = await window.showDirectoryPicker({ mode: "readwrite" });
       assertMediaBatchCurrent(owner);
-      const planned = typeof mediaHistoryStore?.beginPlannedBatch === "function";
-      const history = planned
-        ? await mediaHistoryCall("beginPlannedBatch", items.map((item) => item.name))
-        : await mediaHistoryCall("createBatchTicket");
+      const planned = !!continuation || typeof mediaHistoryStore?.beginPlannedBatch === "function";
+      const history = continuation
+        ? await mediaHistoryCall("beginContinuationBatch", continuation)
+        : planned ? await mediaHistoryCall("beginPlannedBatch", items.map((item) => item.name))
+          : await mediaHistoryCall("createBatchTicket");
       assertMediaBatchCurrent(owner);
-      if (planned && !history.ok && history.planAbsent !== true) {
+      if (planned && !history.ok && (continuation || history.planAbsent !== true)) {
         // IndexedDB may have committed before losing its acknowledgement.
         // An unknown plan result must not fall through to unrecorded saving.
         throw new Error(t("mediaWorklistAdmissionUnknown"));
@@ -7894,7 +7993,12 @@
     });
     document.querySelectorAll("[data-open-media-history]").forEach((button) => button.addEventListener("click", openMediaHistory));
     ui.mediaHistoryClose.addEventListener("click", () => ui.mediaHistoryDialog.close());
-    ui.mediaHistoryDialog.addEventListener("close", () => { mediaHistoryViewGeneration += 1; mediaHistoryClearOwner = null; });
+    ui.mediaHistoryDialog.addEventListener("close", () => { mediaHistoryViewGeneration += 1; mediaHistoryClearOwner = null; mediaContinuationDraft = null; });
+    ui.mediaContinuationStart.addEventListener("click", continueMediaHistory);
+    ui.mediaContinuationAcknowledge.addEventListener("change", () => {
+      if (mediaContinuationDraft) mediaContinuationDraft.acknowledged = ui.mediaContinuationAcknowledge.checked;
+      updateMediaContinuationAvailability();
+    });
     ui.mediaHistoryClear.addEventListener("click", () => {
       ui.mediaHistoryConfirmYes.disabled = false;
       ui.mediaHistoryConfirm.hidden = false;

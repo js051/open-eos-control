@@ -63,7 +63,7 @@ function fixture(options = {}) {
   const calls = { pickers: [], requests: [], opens: [], raw: [], feedback: [], renders: [], history: [], historyWarnings: 0,
     historyRenders: 0, anchor: 0, directories: 0 };
   const entered = { writer: deferred(), write: deferred(), close: deferred(), abort: deferred(), api: deferred(),
-    createBatchTicket: deferred(), startAttempt: deferred(), beginPlannedBatch: deferred(), beginPlannedAttempt: deferred(),
+    createBatchTicket: deferred(), startAttempt: deferred(), beginPlannedBatch: deferred(), beginContinuationBatch: deferred(), beginPlannedAttempt: deferred(),
     finishAttempt: deferred(), clear: deferred(), historyRender: deferred() };
   // Script only the storage API boundary. IndexedDB transaction/epoch behavior is
   // covered separately; these records establish what the production caller sends
@@ -103,7 +103,7 @@ function fixture(options = {}) {
     list: (...args) => historyOperation("list", args, () => {
       const entries = Array.from(historyRows.values(), row => options.planned && row.outcome === "in-progress"
         ? { ...row, outcome: "cancelled-or-unknown", outcomeUnknown: true } : { ...row });
-      return { ok: true, entries, plans: Array.from(historyPlans.values(), plan => ({ ...plan,
+      return { ok: true, epoch: 0, entries, plans: Array.from(historyPlans.values(), plan => ({ ...plan,
         rows: plan.rows.map(row => ({ ...row, receipt: entries.find(entry => entry.receiptId === row.rowId) || null })),
       })) };
     }),
@@ -118,6 +118,13 @@ function fixture(options = {}) {
         rowId: `synthetic-row-${order}`, order, filename,
       })));
       const ticket = Object.freeze({ ...historyTicket, rows });
+      historyPlans.set(ticket.batchId, { batchId: ticket.batchId, createdAtMillis: 1700000000000, rows });
+      return { ok: true, ticket };
+    }),
+    beginContinuationBatch: input => historyOperation("beginContinuationBatch", [input], () => {
+      const rows = input.rows.map((row, order) => ({ rowId: `continued-${order}`, order, filename: row.filename,
+        origin: { batchId: row.batchId, rowId: row.rowId } }));
+      const ticket = { batchId: "continued-batch", epoch: input.epoch, rows };
       historyPlans.set(ticket.batchId, { batchId: ticket.batchId, createdAtMillis: 1700000000000, rows });
       return { ok: true, ticket };
     }),
@@ -223,8 +230,8 @@ function fixture(options = {}) {
   for (const name of ["stopLiveLoop", "stopLocalVideo", "cancelEventLoop", "cancelMediaUpload",
     "clearMediaThumbnails", "cancelLatestMediaRefresh", "closeMediaPreview", "closeMediaDetails",
     "releaseObjectUrl", "clearBulbTimer", "renderHealth"]) context[name] = () => {};
-  vm.runInContext("let mediaHistoryWarning = false; let mediaHistoryViewGeneration = 0; let mediaHistoryClearOwner = null;\n" +
-    ["mediaHistoryCall", "refreshMediaHistory", "openMediaHistory", "clearMediaHistory", "mediaTransferActive", "cameraInteractionBusy", "displayedMedia", "renderMediaSelection",
+  vm.runInContext("let mediaHistoryWarning = false; let mediaHistoryViewGeneration = 0; let mediaHistoryClearOwner = null; let mediaContinuationDraft = null;\n" +
+    ["mediaContinuationSelection", "updateMediaContinuationAvailability", "continueMediaHistory", "mediaHistoryCall", "refreshMediaHistory", "openMediaHistory", "clearMediaHistory", "mediaTransferActive", "cameraInteractionBusy", "displayedMedia", "renderMediaSelection",
     "renderMediaBatch", "ownsMediaBatch", "assertMediaBatchCurrent", "transferMediaBatchItem",
     "downloadSelectedMedia", "cancelMediaBatch", "cancelMediaDownload", "resetSession"].map(extract).join("\n") + "\n" + extractHistoryEvents(), context);
   context.renderMediaTransfer = () => context.renderMediaBatch();
@@ -1131,4 +1138,103 @@ test("a completed clear awaiting list refresh cannot steal focus after history c
   assert.equal(c.ui.mediaHistoryConfirmYes.disabled, false);
   assert.equal(c.ui.mediaHistoryList.children.length, 0);
   assert.equal(historyCalls(c, "clear").length, 1);
+});
+
+function continuationOptions(c, items = [c.items[0]]) {
+  return { session: c.state.session, items,
+    continuation: { epoch: 0, acknowledgeUnknown: true, rows: items.map((item, index) => ({
+      batchId: "old-batch", rowId: `old-row-${index}`, filename: item.name,
+    })) } };
+}
+
+test("continuation chooser is synchronous, durable admission precedes originals and closes persist new results", async () => {
+  const admission = deferred();
+  const c = fixture({ planned: true, history: { beginContinuationBatch: { gate: admission } } });
+  const options = continuationOptions(c, [c.items[2], c.items[0]]);
+  const pending = c.downloadSelectedMedia(options);
+  assert.equal(c.calls.pickers.length, 1);
+  await c.entered.beginContinuationBatch.promise;
+  assertNoOriginalIO(c);
+  assert.equal(historyCalls(c, "beginPlannedBatch").length, 0);
+  admission.resolve(); await pending;
+  assert.deepEqual(c.calls.requests.map(call => decodeURIComponent(call.url.split("/media/")[1])), options.items.map(item => item.id));
+  assert.deepEqual(statuses(c), ["completed", "completed"]);
+  assert.equal(historyCalls(c, "finishAttempt").length, 2);
+  assert.ok(historyCalls(c, "finishAttempt").every(call => call.args[1].outcome === "completed"));
+});
+
+test("continuation admission and clear failures never use the normal unrecorded fallback", async () => {
+  for (const operation of ["beginContinuationBatch", "beginPlannedAttempt"]) {
+    for (const code of ["stale-ticket", "unavailable", "capacity-exceeded"]) {
+      const c = fixture({ planned: true, history: { [operation]: { result: { ok: false, code, planAbsent: true } } } });
+      await c.downloadSelectedMedia(continuationOptions(c));
+      assertNoOriginalIO(c);
+      assert.equal(historyCalls(c, "createBatchTicket").length, 0);
+      assert.equal(historyCalls(c, "startAttempt").length, 0);
+      assert.deepEqual(statuses(c), ["not-started"]);
+    }
+  }
+});
+
+test("cancel or replacement while continuation admission is pending never starts a GET", async () => {
+  for (const retirement of ["cancel", "replace"]) {
+    const admission = deferred();
+    const c = fixture({ planned: true, history: { beginContinuationBatch: { gate: admission } } });
+    const pending = c.downloadSelectedMedia(continuationOptions(c));
+    await c.entered.beginContinuationBatch.promise;
+    if (retirement === "cancel") c.cancelMediaBatch();
+    else c.state.session = { id: c.state.session.id };
+    admission.resolve(); await pending;
+    assertNoOriginalIO(c);
+    assert.equal(historyCalls(c, "beginPlannedAttempt").length, 0);
+  }
+});
+
+test("continuation rejects stale source object even when replacement uses the same wire ID", async () => {
+  const c = fixture({ planned: true });
+  const options = continuationOptions(c);
+  c.state.media = c.items.map(item => ({ ...item }));
+  await c.downloadSelectedMedia(options);
+  assert.equal(c.calls.pickers.length, 0);
+  assertNoOriginalIO(c);
+});
+
+test("history continuation requires explicit distinct source selection and unknown acknowledgement", async () => {
+  const c = fixture({ planned: true, historyOpen: true });
+  c.historyPlans.set("old-batch", { batchId: "old-batch", createdAtMillis: 1700000000000,
+    rows: [{ rowId: "one", order: 0, filename: "old.jpg" }, { rowId: "two", order: 1, filename: "other.jpg" }] });
+  c.historyRows.set({}, { receiptId: "one", batchId: "old-batch", filename: "old.jpg", startedAtMillis: 1700000000000,
+    outcome: "in-progress", mayRemain: false, outcomeUnknown: false });
+  await c.refreshMediaHistory();
+  assert.equal(c.ui.mediaContinuationStart.disabled, true);
+  const selectors = c.ui.mediaHistoryList.children.map(row => row.children.at(-1).children[0]);
+  selectors[0].value = "0"; selectors[0].dispatchEvent({ type: "change" });
+  assert.equal(c.ui.mediaContinuationStart.disabled, true, "unknown requires explicit acknowledgement");
+  c.ui.mediaContinuationAcknowledge.checked = true;
+  c.ui.mediaContinuationAcknowledge.dispatchEvent({ type: "change" });
+  assert.equal(c.ui.mediaContinuationStart.disabled, false);
+  selectors[1].value = "0"; selectors[1].dispatchEvent({ type: "change" });
+  assert.equal(c.ui.mediaContinuationStart.disabled, true, "same original cannot be bound twice");
+  selectors[1].value = "1"; selectors[1].dispatchEvent({ type: "change" });
+  assert.equal(c.ui.mediaContinuationStart.disabled, false);
+  c.state.session = { id: c.state.session.id };
+  c.continueMediaHistory();
+  assert.equal(c.calls.pickers.length, 0);
+  assertNoOriginalIO(c);
+});
+
+
+test("explicit source picker distinguishes same-name loaded folders without persisting source metadata", async () => {
+  const c = fixture({ planned: true, historyOpen: true });
+  c.items[0].name = "SAME.JPG"; c.items[0].folderLabel = "CARD1 / DCIM"; c.items[0].captureTime = "2026-10-13T10:00:00Z";
+  c.items[1].name = "SAME.JPG"; c.items[1].folderLabel = "CARD2 / DCIM";
+  c.historyPlans.set("old", { batchId: "old", createdAtMillis: 1700000000000,
+    rows: [{ rowId: "old-row", order: 0, filename: "SAME.JPG" }] });
+  await c.refreshMediaHistory();
+  const select = c.ui.mediaHistoryList.children[0].children.at(-1).children[0];
+  assert.match(select.children[1].textContent, /CARD1 \/ DCIM/);
+  assert.match(select.children[1].textContent, /2026-10-13T10:00:00Z/);
+  assert.match(select.children[2].textContent, /CARD2 \/ DCIM/);
+  assert.equal(c.calls.requests.length, 0);
+  assert.equal(c.calls.history.some(call => call.operation !== "list"), false);
 });
