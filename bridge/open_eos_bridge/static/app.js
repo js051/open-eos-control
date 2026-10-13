@@ -1867,7 +1867,8 @@
         // Other explicit HTTP rejections retain their stable fallback.
       }
       const error = detail?.error || {};
-      if (response.status === 502 && (typeof error.code !== "string" || !error.code.trim())) {
+      if (response.status === 502 && (typeof error.code !== "string" || !error.code.trim()
+        || typeof error.message !== "string" || !error.message.trim())) {
         throw new ApiError(`${response.status} ${response.statusText}`, {
           code: "RESPONSE_BODY_UNAVAILABLE", status: response.status,
         });
