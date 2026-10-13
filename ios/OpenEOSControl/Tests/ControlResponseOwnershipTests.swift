@@ -235,7 +235,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
         }
     }
 
-    func testSensorRecoveryLiveViewCompletionCannotClearReplacementWarning() async throws {
+    func testDisconnectDrainsSensorRecoveryLiveViewBeforeReplacementAndPreservesItsWarning() async throws {
         for fails in [false, true] {
             let oldPeer = ControlOwnerPeer(owner: "A")
             let newPeer = ControlOwnerPeer(owner: "B")
@@ -243,13 +243,46 @@ final class ControlResponseOwnershipTests: XCTestCase {
             defer { state.requestDisconnect(); Task { await oldPeer.releaseAll(); await newPeer.releaseAll() } }
             try await connectAndPrepare(state)
             await oldPeer.enqueue(.liveViewStart, gate: "old-recovery", error: fails ? .networkConnectionLost : nil)
-            let old = Task { await state.cleanSensor(autoPowerOff: false) }
+            var oldFinished = false
+            let old = Task { await state.cleanSensor(autoPowerOff: false); oldFinished = true }
             try await waitForGate("old-recovery", peer: oldPeer)
-            await state.disconnect()
+            // Disconnect owns the pending Start and must drain it before the next
+            // camera is admitted. Releasing only after await disconnect deadlocks
+            // this deliberately cancellation-uncooperative fixture.
+            var disconnectEntered = false
+            var disconnected = false
+            let disconnect = Task { disconnectEntered = true; await state.disconnect(); disconnected = true }
+            defer { disconnect.cancel(); old.cancel() }
+            let entryClock = ContinuousClock()
+            let entryDeadline = entryClock.now.advanced(by: .seconds(3))
+            while !disconnectEntered, entryClock.now < entryDeadline { await Task.yield() }
+            XCTAssertTrue(disconnectEntered)
+            let originalStillHeld = await oldPeer.waiting("old-recovery")
+            XCTAssertTrue(originalStillHeld)
+            XCTAssertFalse(disconnected, "Disconnect must wait for A's held Start")
+            let beforeRelease = await newPeer.count(.info)
+            XCTAssertEqual(beforeRelease, 0)
+            await oldPeer.release("old-recovery")
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: .seconds(5))
+            while !disconnected, clock.now < deadline { await Task.yield() }
+            guard disconnected else {
+                XCTFail("Disconnect did not settle after releasing the original Start")
+                throw URLError(.timedOut)
+            }
+            await disconnect.value
             try await connectAndPrepare(state)
             state.reportCubeLutRenderFailure()
             let saved = PreservedControl(state)
-            await oldPeer.release("old-recovery")
+            // The held wire reply is already drained; the outer maintenance
+            // completion may still be scheduled. Observe it without an unbounded
+            // await, and verify it cannot clear B's warning.
+            let completionDeadline = clock.now.advanced(by: .seconds(5))
+            while !oldFinished, clock.now < completionDeadline { await Task.yield() }
+            guard oldFinished else {
+                XCTFail("Original sensor recovery did not finish after its Start drained")
+                throw URLError(.timedOut)
+            }
             await old.value
 
             assertPreserved(saved, state: state)
