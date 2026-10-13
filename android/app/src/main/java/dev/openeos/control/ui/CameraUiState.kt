@@ -8,6 +8,7 @@ import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaStreamSource
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraNetworkDiagnostics
+import dev.openeos.control.data.RecordingCommand
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraSettingControl
@@ -117,6 +118,8 @@ data class CameraUiState(
     val captureReviewLoading: Boolean = false,
     val captureReviewStatus: CaptureReviewStatus = CaptureReviewStatus.IDLE,
     val captureStatusReadbackFailed: Boolean = false,
+    val pendingRecordingCommand: RecordingCommand? = null,
+    val recordingStartNotConfirmed: Boolean = false,
     val mediaThumbnails: Map<String, Bitmap> = emptyMap(),
     val mediaThumbnailLoadingIds: Set<String> = emptySet(),
     val mediaPreviewItem: CameraMediaItem? = null,
@@ -186,6 +189,9 @@ data class CameraUiState(
     val busy: Boolean
         get() = pendingOperations.isNotEmpty() || bulbExposureActive || shutterReleaseUnconfirmed
 
+    val recordingStopAvailable: Boolean
+        get() = pendingRecordingCommand != null || status?.recording == true
+
     val bulbExposureActive: Boolean
         get() = status?.bulbExposureActive == true
 
@@ -204,9 +210,11 @@ data class CameraUiState(
 
     fun isBusy(operation: CameraOperation): Boolean =
         operation in pendingOperations ||
+            (pendingRecordingCommand != null && operation in setOf(CameraOperation.CAPTURE, CameraOperation.SETTING,
+                CameraOperation.POWER, CameraOperation.MAINTENANCE)) ||
             (CameraOperation.MEDIA in pendingOperations && foregroundJpegImport.phase in FOREGROUND_IMPORT_ACTIVE_PHASES &&
                 operation in FOREGROUND_IMPORT_CONTROL_OPERATIONS &&
-                !(operation == CameraOperation.RECORDING && status?.recording == true) &&
+                !(operation == CameraOperation.RECORDING && recordingStopAvailable) &&
                 !(operation == CameraOperation.CAPTURE && bulbExposureActive)) ||
             ((shutterReleaseUnconfirmed || CameraOperation.SHUTTER_RELEASE in pendingOperations) &&
                 operation !in setOf(CameraOperation.SHUTTER_RELEASE, CameraOperation.STATUS, CameraOperation.USB, CameraOperation.BRIDGE)) ||
@@ -231,7 +239,7 @@ private val FOREGROUND_IMPORT_CONTROL_OPERATIONS = setOf(
 
 internal fun CameraUiState.foregroundImportCameraIdle(): Boolean =
     pendingOperations.isEmpty() && !bulbExposureActive && !shutterReleaseUnconfirmed &&
-        autofocusHoldState == AutofocusHoldState.IDLE && status?.recording != true &&
+        autofocusHoldState == AutofocusHoldState.IDLE && !recordingStopAvailable &&
         !mediaLibraryLoading && !captureReviewLoading && !mediaPreviewLoading && mediaPreviewItem == null &&
         activeMediaDownloadName == null && activeMediaUploadName == null && mediaBatchProgress == null &&
         mediaSaveFeedback.values.none { it.isPending } && !cameraImportPreparing
@@ -244,8 +252,9 @@ internal fun CameraUiState.canEnableForegroundJpegImport(platformSupported: Bool
         foregroundImportCameraIdle()
 
 internal fun CameraUiState.dismissVisibleCameraMessage(): CameraUiState = when {
-    shutterReleaseUnconfirmed -> this
+    shutterReleaseUnconfirmed || pendingRecordingCommand != null -> this
     error != null || connectionRecovery != null -> copy(error = null, errorOperation = null, connectionRecovery = null)
+    recordingStartNotConfirmed -> copy(recordingStartNotConfirmed = false)
     else -> copy(errorOperation = null, shutterDisconnectWarning = false)
 }
 
@@ -260,7 +269,7 @@ internal fun CameraUiState.showShutterAutofocus(): Boolean = connected && captur
     (capabilities?.shutterAutofocusSupported == true || !shutterAutofocus)
 
 internal fun CameraUiState.canChangeShutterAutofocus(): Boolean = showShutterAutofocus() &&
-    !busy && !isBusy(CameraOperation.CAPTURE) && status?.recording != true
+    !busy && !isBusy(CameraOperation.CAPTURE) && !recordingStopAvailable
 
 internal fun CameraUiState.canStartHeldAutofocus(): Boolean = connected && !previewMode &&
     capabilities?.heldAutofocusSupported == true && uiMode == UiMode.CONTROL && hudVisible &&
@@ -291,7 +300,7 @@ internal fun CameraUiState.nextLiveViewMagnification(): LiveViewMagnification? {
 internal fun captureModeSwitchEnabled(state: CameraUiState): Boolean =
     !state.shutterReleaseUnconfirmed && state.autofocusHoldState == AutofocusHoldState.IDLE &&
     CameraOperation.FOCUS !in state.pendingOperations &&
-    state.status?.recording != true &&
+    !state.recordingStopAvailable &&
         !state.bulbExposureActive &&
         CameraOperation.SETTING !in state.pendingOperations &&
         CameraOperation.CAPTURE !in state.pendingOperations &&

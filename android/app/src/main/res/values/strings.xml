@@ -937,4 +937,8 @@
     <string name="media_worklist_admission_unknown">The worklist save could not be confirmed. No files were opened or originals requested. Check history before starting another batch.</string>
     <string name="media_save_not_started">Not started; saving stopped before this file or original request.</string>
     <string name="download_history_warning_capacity">History capacity is full. Existing worklists and uncertain items are preserved. Review history before clearing records; manual downloads remain available.</string>
+    <string name="recording_start_pending">Start command accepted. Recording status is unknown. Refresh status before starting again, or use Stop recording.</string>
+    <string name="recording_stop_pending">Stop command accepted. Stopping is not confirmed. Refresh status, or use Stop recording again if needed.</string>
+    <string name="recording_start_not_confirmed">The camera reports it is not recording after the Start command. Check the camera before starting again.</string>
+    <string name="refresh_recording_status">Refresh recording status</string>
 </resources>

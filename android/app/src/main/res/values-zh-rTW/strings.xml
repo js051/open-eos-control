@@ -700,4 +700,8 @@
     <string name="media_worklist_admission_unknown">無法確認工作清單已儲存，尚未開啟檔案或請求原檔。開始另一批前請查看紀錄。</string>
     <string name="media_save_not_started">尚未開始；已在開檔或請求此原檔前停止。</string>
     <string name="download_history_warning_capacity">紀錄容量已滿。既有工作清單與未確認項目會保留。請先查看紀錄再決定是否清除；仍可手動下載。</string>
+    <string name="recording_start_pending">開始指令已接受，錄影狀態仍不明。請先更新狀態再開始，或使用「停止錄影」。</string>
+    <string name="recording_stop_pending">停止指令已接受，但尚未確認已停止。請更新狀態，必要時可再次使用「停止錄影」。</string>
+    <string name="recording_start_not_confirmed">開始指令後，相機回報未錄影。再次開始前請檢查相機。</string>
+    <string name="refresh_recording_status">更新錄影狀態</string>
 </resources>

@@ -9,6 +9,7 @@ import android.view.inspector.WindowInspector
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
@@ -76,6 +77,8 @@ class CameraRecordingMediaJourneyTest {
     private lateinit var historyDirectory: File
     private lateinit var movieBytes: ByteArray
     private val stopped = AtomicBoolean(false)
+    private val failRecordingReadback = AtomicBoolean(false)
+    private val failedRecordingStatusReads = AtomicInteger()
     private val postStopListings = AtomicInteger()
     private val visibleOnListing = AtomicInteger(2)
     private val previousId = "${camera.label}-synthetic-previous"
@@ -96,6 +99,10 @@ class CameraRecordingMediaJourneyTest {
         camera.intercept = { request ->
             val url = requireNotNull(request.requestUrl)
             when {
+                request.method == "GET" && url.encodedPath == "/ccapi/status" && failRecordingReadback.get() -> {
+                    failedRecordingStatusReads.incrementAndGet()
+                    MockResponse().setResponseCode(503)
+                }
                 request.method == "POST" && url.encodedPath == "/ccapi/record/stop" -> {
                     camera.recording.set(false)
                     stopped.set(true)
@@ -206,6 +213,47 @@ class CameraRecordingMediaJourneyTest {
 
         openReviewedMovieAndSave()
         assertEquals("Preview, save and history must not start or stop another recording", writesBeforeRetry, camera.mutations.toList())
+        assertOnlyOneRecordingPair()
+    }
+
+    @Test
+    fun acknowledgedReadbackFailureOffersStopAndReadOnlyRefreshThenReviewsAndSavesMovie() {
+        compose.onNodeWithTag("capture-mode-VIDEO").assertIsDisplayed().performClick()
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            model.uiState.value.captureMode == CaptureMode.VIDEO && !model.uiState.value.busy
+        }
+        failRecordingReadback.set(true)
+        compose.onNodeWithContentDescription(text(R.string.start_recording)).assertIsEnabled().performClick()
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            model.uiState.value.pendingRecordingCommand == dev.openeos.control.data.RecordingCommand.START &&
+                !model.uiState.value.busy
+        }
+        assertEquals(false, model.uiState.value.status?.recording)
+        compose.onNodeWithTag("capture-mode-PHOTO").assertIsNotEnabled()
+        compose.onNodeWithContentDescription(text(R.string.stop_recording)).assertIsEnabled()
+        val writesAfterStart = camera.mutations.toList()
+        val failedReadsBeforeRefresh = failedRecordingStatusReads.get()
+        compose.onNodeWithTag("recording-status-refresh").assertIsDisplayed().assertIsEnabled().performClick()
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            failedRecordingStatusReads.get() > failedReadsBeforeRefresh && !model.uiState.value.busy
+        }
+        assertEquals(dev.openeos.control.data.RecordingCommand.START, model.uiState.value.pendingRecordingCommand)
+        assertEquals("Read-only recovery must not replay Start", writesAfterStart, camera.mutations.toList())
+        compose.onNodeWithContentDescription(text(R.string.stop_recording)).assertIsEnabled().performClick()
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            model.uiState.value.pendingRecordingCommand == dev.openeos.control.data.RecordingCommand.STOP &&
+                !model.uiState.value.busy
+        }
+        assertEquals("Unresolved Stop must not start a media review", 0, postStopListings.get())
+        val writesAfterStop = camera.mutations.toList()
+        failRecordingReadback.set(false)
+        compose.onNodeWithTag("recording-status-refresh").assertIsDisplayed().assertIsEnabled().performClick()
+        awaitReviewedMovie()
+        assertNull(model.uiState.value.pendingRecordingCommand)
+        assertEquals(false, model.uiState.value.status?.recording)
+        compose.onNodeWithTag("recording-status-refresh").assertDoesNotExist()
+        assertEquals("Recovery only reads status and the new-media listing", writesAfterStop, camera.mutations.toList())
+        openReviewedMovieAndSave()
         assertOnlyOneRecordingPair()
     }
 

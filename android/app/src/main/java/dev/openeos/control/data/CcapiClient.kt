@@ -1263,7 +1263,7 @@ class CcapiClient(
             postJson("/ccapi/record/start", JSONObject())
         }
         observedFeatures.add(CameraFeature.VIDEO_RECORDING)
-        return status()
+        return recordingStatusAfterAcknowledgement(RecordingCommand.START)
     }
 
     suspend fun stopRecording(): CameraStatus {
@@ -1282,7 +1282,16 @@ class CcapiClient(
             postJson("/ccapi/record/stop", JSONObject())
         }
         observedFeatures.add(CameraFeature.VIDEO_RECORDING)
-        return status()
+        return recordingStatusAfterAcknowledgement(RecordingCommand.STOP)
+    }
+
+    private suspend fun recordingStatusAfterAcknowledgement(command: RecordingCommand): CameraStatus = try {
+        status()
+    } catch (exception: CancellationException) {
+        throw exception
+    } catch (exception: Exception) {
+        currentCoroutineContext().ensureActive()
+        throw RecordingStatusReadbackException(command, exception)
     }
 
     suspend fun captureStill(autofocus: Boolean = true): CameraStatus {

@@ -12,6 +12,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraUiStateTest {
+    @Test fun pendingRecordingBlocksPhotoAndPreservesStopDuringForegroundImport() {
+        for (command in dev.openeos.control.data.RecordingCommand.entries) {
+            val state = CameraUiState().withOfflinePreview().copy(
+                pendingRecordingCommand = command,
+                pendingOperations = setOf(CameraOperation.MEDIA),
+                foregroundJpegImport = ForegroundJpegImportStatus(phase = ForegroundImportPhase.SAVING),
+            )
+            assertTrue(state.recordingStopAvailable)
+            assertFalse(captureModeSwitchEnabled(state))
+            assertTrue(state.isBusy(CameraOperation.CAPTURE))
+            assertTrue(state.isBusy(CameraOperation.SETTING))
+            assertFalse(state.isBusy(CameraOperation.RECORDING))
+            assertFalse(state.isBusy(CameraOperation.STATUS))
+            assertFalse(state.foregroundImportCameraIdle())
+            assertEquals(state, state.dismissVisibleCameraMessage())
+        }
+    }
+
     @Test fun boundedFocusBlocksConflictingCommandsButNotReadOnlyStatus() {
         val state = CameraUiState().withOfflinePreview().copy(pendingOperations = setOf(CameraOperation.FOCUS))
         for (operation in HELD_AF_INTERLOCK_OPERATIONS) {
