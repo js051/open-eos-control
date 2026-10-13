@@ -258,6 +258,50 @@ class RecordingStatusReadbackTest {
         }
     }
 
+    @Test fun malformedBridge502AfterAppliedCommandIsUnknownButCompleteRejectionRemainsOrdinary() = runBlocking {
+        data class Case(val body: String, val status: Int = 502, val unknown: Boolean = true)
+        val cases = listOf(Case(""), Case("invalid"), Case("{}"), Case("""{"error":{"code":5}}"""),
+            Case("""{"error":{"code":"CCAPI_HTTP_ERROR","message":"Synthetic rejection"}}""", unknown = false),
+            Case("""{"error":{"code":"CCAPI_UNREACHABLE","message":"Synthetic preflight failure"}}""", unknown = false),
+            Case("""{"error":{"code":"RECORDING_FAILED","message":"Synthetic rejection"}}""", status = 503, unknown = false))
+        val current = AtomicReference(cases.first())
+        val peerRecording = AtomicBoolean(false)
+        val actions = CopyOnWriteArrayList<String>()
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.path == "/health" -> json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                request.path == "/v1/session" -> json("""{"id":"synthetic-recording","engine":"ccapi"}""")
+                request.path.orEmpty().contains("/recording/") -> {
+                    val action = request.path!!.substringAfterLast('/')
+                    actions += action
+                    val case = current.get()
+                    if (case.unknown) peerRecording.set(action == "start")
+                    json(case.body).setResponseCode(case.status)
+                }
+                else -> json()
+            }
+        }
+        server.start()
+        val client = DesktopBridgeClient(server.url("/").toString(), httpClient = http())
+        try {
+            client.initialize()
+            for (case in cases) for (command in RecordingCommand.entries) {
+                current.set(case)
+                peerRecording.set(command == RecordingCommand.STOP)
+                val before = actions.size
+                val failure = runCatching {
+                    if (command == RecordingCommand.START) client.startRecording() else client.stopRecording()
+                }.exceptionOrNull()
+                assertEquals(case.toString(), case.unknown, failure is RecordingCommandUnconfirmedException)
+                assertFalse(failure is RecordingStatusReadbackException)
+                assertEquals(if (case.unknown) command == RecordingCommand.START else command == RecordingCommand.STOP,
+                    peerRecording.get())
+                assertEquals(before + 1, actions.size)
+            }
+        } finally { client.close(); server.shutdown() }
+    }
+
     @Test fun bridgeHopLossIsUnknownAfterOneCompleteRequestWithNoReplay() = runBlocking {
         for (command in RecordingCommand.entries) {
             val server = MockWebServer()

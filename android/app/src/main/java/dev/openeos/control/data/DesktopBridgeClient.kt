@@ -1201,20 +1201,29 @@ class DesktopBridgeClient(
         try {
             recordingEvidence?.let {
                 currentCoroutineContext().ensureActive()
-                it.attempted = true
+                it.beginRequest()
             }
             call.execute().use { response ->
                 val body = response.body?.string().orEmpty()
-                session?.let(::requireCurrentSession)
+                if (recordingEvidence == null) session?.let(::requireCurrentSession)
                 if (!response.isSuccessful) {
                     val failure = bridgeError(response.code, body, request.url.encodedPath, session, revision,
                         cameraDiscovery = cameraDiscovery)
-                    // A Bridge error header alone cannot prove camera rejection: its body
-                    // may carry acknowledged-readback or command-unconfirmed evidence.
-                    recordingEvidence?.rejected = !(failure is DesktopBridgeException &&
-                        (failure.code == "RECORDING_STATUS_READBACK_FAILED" || failure.isRecordingCommandUnconfirmed))
+                    // A malformed/missing 502 body can hide either command uncertainty or
+                    // acknowledged-readback evidence; it cannot prove camera rejection.
+                    val errorCode = runCatching { JSONObject(body).optJSONObject("error")?.opt("code") }.getOrNull()
+                    val missingRecordingOutcome = recordingEvidence != null && response.code == 502 &&
+                        (errorCode !is String || errorCode.isBlank())
+                    // Preserve a complete rejection before session/cancellation checks can throw.
+                    recordingEvidence?.rejected = !(missingRecordingOutcome || (failure is DesktopBridgeException &&
+                        (failure.code == "RECORDING_STATUS_READBACK_FAILED" || failure.isRecordingCommandUnconfirmed)))
+                    session?.let(::requireCurrentSession)
+                    if (missingRecordingOutcome) {
+                        throw RecordingCommandUnconfirmedException(requireNotNull(recordingEvidence).command, failure)
+                    }
                     throw failure
                 }
+                session?.let(::requireCurrentSession)
                 val parsed = runCatching { JSONObject(body) }
                     .getOrElse { throw IllegalStateException("Desktop Bridge returned invalid JSON for ${request.url.encodedPath}.", it) }
                 if (observeStatus && session != null && revision != null) session.observe(parseStatus(parsed), revision)
