@@ -34,7 +34,7 @@ function subject(action = "focus") {
     captureError: error => ({ message: error.message, code: error.code }),
     window: { setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {} },
   });
-  vm.runInContext(["tapFocus", "autofocus", "halfPressShutter", "beginCameraInteraction"].map(productionFunction).join("\n"), sandbox);
+  vm.runInContext(["adoptCameraStatus", "tapFocus", "autofocus", "halfPressShutter", "beginCameraInteraction"].map(productionFunction).join("\n"), sandbox);
   return sandbox;
 }
 const point = { x: 0.5, y: 0.5, displayX: 10, displayY: 10 };

@@ -20,7 +20,7 @@ function deferred() {
 function fixture() {
   const state = { session: { id: "synthetic-A" }, liveActive: true, liveGeneration: 1,
     liveSource: "CCAPI_RTP", activeLiveSource: "CCAPI_RTP", requestedFps: 15,
-    previewInput: "CAMERA", localVideoSupport: { available: true }, busy: false,
+    previewInput: "CAMERA", localVideoSupport: { available: true }, busy: false, refreshGeneration: 0,
     status: {}, frameTimes: [] };
   const requests = [], messages = [], pending = [];
   const context = vm.createContext({ state,
@@ -43,7 +43,7 @@ function fixture() {
     setOperationState: message => messages.push(message),
     api: (url, options) => { const gate = deferred(); requests.push({ url, options }); pending.push(gate); return gate.promise; },
   });
-  const names = ["stopLiveView", "startLiveView", "toggleLiveView", "changeFps", "changeLiveSource", "changePreviewInput",
+  const names = ["adoptCameraStatus", "beginCameraInteraction", "refreshSession", "stopLiveView", "startLiveView", "toggleLiveView", "changeFps", "changeLiveSource", "changePreviewInput",
     "sleepCamera", "cleanSensor"];
   if (/function liveViewStopRequired\(/.test(source)) names.push("liveViewStopRequired");
   vm.runInContext(names.map(body).join("\n"), context);
@@ -117,7 +117,7 @@ test("confirmed camera stop permits explicitly selected local preview", async ()
 });
 test("status-only stop responsibility routes toggle to Stop", async () => {
   const f = fixture(); f.state.liveActive = false;
-  f.state.status = { liveViewStopUnconfirmed: true };
+  f.adoptCameraStatus({ liveViewStopUnconfirmed: true }, f.state.session, f.state.liveViewStopRevision || 0);
   const operation = f.toggleLiveView();
   assert.match(f.requests[0].url, /liveview\/stop$/);
   f.pending[0].resolve({ active: false, liveViewStopUnconfirmed: false }); await operation;
@@ -221,3 +221,139 @@ for (const reply of [null, {}, [], { active: false }, { active: "true" }]) {
     assert.equal(await stop, false); assert.equal(f.liveViewStopRequired(), true);
   });
 }
+
+async function acceptedStatus(f, status) {
+  const offset = f.pending.length;
+  const refresh = f.refreshSession({ quiet: true });
+  assert.equal(f.requests.length, offset + 3, "Use the actual status refresh handler");
+  f.pending[offset].resolve({ model: "synthetic" });
+  f.pending[offset + 1].resolve(status);
+  f.pending[offset + 2].resolve({ liveView: { maxFps: 30 } });
+  assert.equal(await refresh, true);
+}
+
+for (const legacyReply of [{ active: false }, { active: false, liveViewStopUnconfirmed: null }]) {
+  test(`newer true status survives late Start ACK and cannot regain legacy proof: ${JSON.stringify(legacyReply)}`, async () => {
+    const f = fixture(); f.state.liveActive = false;
+    const start = f.startLiveView();
+    await acceptedStatus(f, { liveViewStopUnconfirmed: true });
+    const owner = f.state.liveViewStopOwner;
+    await acceptedStatus(f, { liveViewStopUnconfirmed: false });
+    assert.equal(f.state.liveViewStopOwner, owner);
+    f.pending[0].resolve({ active: true, source: "CCAPI_RTP" });
+    await start;
+    assert.equal(owner.stopUnconfirmed, true);
+    assert.equal(owner.confirmedStart, false, "A late ACK cannot restore revoked legacy permission");
+    const offset = f.pending.length;
+    const stop = f.stopLiveView(); f.pending[offset].resolve(legacyReply);
+    assert.equal(await stop, false);
+    assert.equal(f.liveViewStopRequired(), true);
+    const retryOffset = f.pending.length;
+    const retry = f.toggleLiveView();
+    assert.match(f.requests[retryOffset].url, /liveview\/stop$/);
+    f.pending[retryOffset].resolve({ active: false, liveViewStopUnconfirmed: false });
+    await retry;
+    assert.equal(f.liveViewStopRequired(), false);
+    assert.equal(f.requests.filter(request => request.url.endsWith("/liveview/start")).length, 1);
+  });
+}
+
+for (const status of [{ liveViewStopUnconfirmed: false }, {}, { liveViewStopUnconfirmed: null }]) {
+  test(`accepted ordinary snapshot cannot erase a prior stop warning: ${JSON.stringify(status)}`, async () => {
+    const f = fixture(); f.state.liveActive = false;
+    await acceptedStatus(f, { liveViewStopUnconfirmed: true });
+    const owner = f.state.liveViewStopOwner;
+    await acceptedStatus(f, status);
+    assert.equal(f.state.liveViewStopOwner, owner);
+    assert.equal(f.liveViewStopRequired(), true);
+    const beforeStart = f.requests.length;
+    await f.startLiveView();
+    assert.equal(f.requests.length, beforeStart);
+    const retry = f.toggleLiveView();
+    assert.match(f.requests.at(-1).url, /liveview\/stop$/);
+    f.pending.at(-1).resolve({ active: false, liveViewStopUnconfirmed: false });
+    await retry;
+    assert.equal(f.liveViewStopRequired(), false);
+  });
+}
+
+for (const [reply, accepted] of [
+  [{ active: false }, false],
+  [{ active: false, liveViewStopUnconfirmed: null }, false],
+  [{ active: false, liveViewStopUnconfirmed: false }, true],
+]) {
+  test(`status during in-flight Stop changes settlement proof: ${JSON.stringify(reply)}`, async () => {
+    const f = fixture();
+    const stop = f.stopLiveView();
+    await acceptedStatus(f, { liveViewStopUnconfirmed: true });
+    await acceptedStatus(f, { liveViewStopUnconfirmed: false });
+    f.pending[0].resolve(reply);
+    assert.equal(await stop, accepted);
+    assert.equal(f.liveViewStopRequired(), !accepted);
+  });
+}
+
+test("a stale status read cannot revive responsibility after explicit Stop acknowledgement", async () => {
+  const f = fixture();
+  const stop = f.stopLiveView();
+  const refresh = f.refreshSession({ quiet: true });
+  f.pending[0].resolve({ active: false, liveViewStopUnconfirmed: false });
+  assert.equal(await stop, true);
+  f.pending[1].resolve({ model: "synthetic" });
+  f.pending[2].resolve({ liveViewStopUnconfirmed: true });
+  f.pending[3].resolve({ liveView: { maxFps: 30 } });
+  await refresh;
+  assert.equal(f.liveViewStopRequired(), false);
+  assert.equal(f.state.liveViewStopOwner, null);
+});
+
+test("replacement session with a reused wire ID cannot inherit old status warning", async () => {
+  const f = fixture(); f.state.liveActive = false;
+  const oldSession = f.state.session;
+  const refresh = f.refreshSession({ quiet: true });
+  f.state.session = { id: oldSession.id };
+  f.state.status = { owner: "replacement" };
+  f.state.liveViewStopOwner = null;
+  f.pending[0].resolve({ model: "old" });
+  f.pending[1].resolve({ liveViewStopUnconfirmed: true });
+  f.pending[2].resolve({ liveView: { maxFps: 30 } });
+  assert.equal(await refresh, false);
+  assert.equal(f.state.status.owner, "replacement");
+  assert.equal(f.liveViewStopRequired(), false);
+  assert.equal(f.adoptCameraStatus({ liveViewStopUnconfirmed: true }, oldSession, f.state.liveViewStopRevision || 0), false);
+  assert.equal(f.state.status.owner, "replacement");
+});
+
+test("production interaction generation rejects a refresh admitted before Stop", async () => {
+  const f = fixture();
+  const refresh = f.refreshSession({ quiet: true });
+  const stop = f.stopLiveView();
+  f.pending[0].resolve({ model: "synthetic" });
+  f.pending[1].resolve({ liveViewStopUnconfirmed: true });
+  f.pending[2].resolve({ liveView: { maxFps: 30 } });
+  assert.equal(await refresh, false);
+  assert.equal(f.state.liveViewStopOwner.stopUnconfirmed, false);
+  f.pending[3].resolve({ active: false });
+  assert.equal(await stop, true);
+  assert.equal(f.liveViewStopRequired(), false);
+});
+
+test("active Start reply with explicit stop warning never publishes preview or starts polling", async () => {
+  const f = fixture(); f.state.liveActive = false;
+  let polls = 0;
+  f.pollLiveView = () => { polls++; };
+  const start = f.startLiveView();
+  f.pending[0].resolve({ active: true, liveViewStopUnconfirmed: true });
+  await start;
+  assert.equal(f.state.liveActive, false);
+  assert.equal(polls, 0);
+  assert.equal(f.messages.includes("liveViewStarted"), false);
+  assert.equal(f.liveViewStopRequired(), true);
+  const stop = f.stopLiveView();
+  f.pending[1].resolve({ active: false });
+  assert.equal(await stop, false);
+  assert.equal(f.liveViewStopRequired(), true);
+  const retry = f.stopLiveView();
+  f.pending[2].resolve({ active: false, liveViewStopUnconfirmed: false });
+  assert.equal(await retry, true);
+});

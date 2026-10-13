@@ -1404,6 +1404,7 @@
     captureMode: "photo",
     liveActive: false,
     liveViewStopOwner: null,
+    liveViewStopRevision: 0,
     previewInput: "CAMERA",
     localVideoSupport: localVideo.supportState({
       secureContext: Boolean(globalThis.isSecureContext),
@@ -2146,6 +2147,7 @@
     state.operatorConfirmedFeatures.clear();
     ui.engineState.textContent = t("connecting");
     renderAvailability();
+    let session = null;
     try {
       const sessionPayload = network
         ? {
@@ -2162,13 +2164,18 @@
         method: "POST",
         json: sessionPayload,
       });
+      session = state.session;
       state.shutterAutofocus = true;
-      const sessionId = encodeURIComponent(state.session.id);
-      [state.info, state.status, state.capabilities] = await Promise.all([
+      const sessionId = encodeURIComponent(session.id);
+      const liveViewStatusRevision = state.liveViewStopRevision || 0;
+      const [info, status, capabilities] = await Promise.all([
         api(`/v1/session/${sessionId}/info`),
         api(`/v1/session/${sessionId}/status`),
         api(`/v1/session/${sessionId}/capabilities`),
       ]);
+      if (state.session !== session) return;
+      [state.info, state.capabilities] = [info, capabilities];
+      adoptCameraStatus(status, session, liveViewStatusRevision);
       state.requestedFps = clampFps(Math.min(15, state.capabilities.liveView?.maxFps || 1));
       state.captureMode = captureModeFromCamera() || (state.status.recording ? "video" : "photo");
       syncLiveMagnificationFromCapabilities();
@@ -2187,6 +2194,7 @@
       void refreshLatestMedia();
       showToast(t("connected"));
     } catch (error) {
+      if (session && state.session !== session) return;
       if (state.session?.id) {
         try {
           await api(`/v1/session/${encodeURIComponent(state.session.id)}`, { method: "DELETE" });
@@ -2198,6 +2206,7 @@
       showConnectionError(error);
       renderHealth();
     } finally {
+      if (session && state.session && state.session !== session) return;
       state.busy = false;
       renderAvailability();
     }
@@ -2220,6 +2229,7 @@
     const rawSessionId = state.session.id;
     const sessionId = encodeURIComponent(rawSessionId);
     const refreshGeneration = state.refreshGeneration;
+    const liveViewStatusRevision = state.liveViewStopRevision || 0;
     try {
       const [info, status, capabilities] = await Promise.all([
         api(`/v1/session/${sessionId}/info`),
@@ -2233,7 +2243,8 @@
         state.refreshRequestOwner !== refreshOwner ||
         state.recordingRecovery !== recordingRecovery
       ) return false;
-      [state.info, state.status, state.capabilities] = [info, status, capabilities];
+      [state.info, state.capabilities] = [info, capabilities];
+      adoptCameraStatus(status, session, liveViewStatusRevision);
       if (state.recordingRecovery === recordingRecovery && recordingRecovery?.acknowledged !== false && typeof status.recording === "boolean") {
         state.recordingRecovery = null;
         if (recordingRecovery?.direction === "stop" && status.recording === false && recordingRecovery.reviewAttempt) {
@@ -2340,6 +2351,7 @@
     closeMediaDetails();
     state.session = null;
     state.liveViewStopOwner = null;
+    state.liveViewStopRevision = 0;
     state.info = null;
     state.status = null;
     state.recordingRecovery = null;
@@ -3093,25 +3105,34 @@
 
   async function syncCameraClock(source) {
     if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.CAMERA_CLOCK_SYNC)) return;
+    const session = state.session;
     beginCameraInteraction();
+    const generation = state.refreshGeneration;
+    const isCurrent = () => state.session === session && state.refreshGeneration === generation;
+    const liveViewStatusRevision = state.liveViewStopRevision || 0;
     state.lastError = null;
     source.disabled = true;
     setOperationState(t("busy"));
     renderAvailability();
     try {
-      state.status = await api(
-        `/v1/session/${encodeURIComponent(state.session.id)}/clock/sync`,
+      const status = await api(
+        `/v1/session/${encodeURIComponent(session.id)}/clock/sync`,
         { method: "POST", json: {} },
       );
+      if (!isCurrent()) return false;
+      adoptCameraStatus(status, session, liveViewStatusRevision);
       state.lastClockSyncAt = Date.now();
       await refreshCapabilityEvidence();
+      if (!isCurrent()) return false;
       setOperationState(t("ready"));
       showToast(t("cameraClockSynced"));
     } catch (error) {
+      if (!isCurrent()) return false;
       const normalized = captureError(error);
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
     } finally {
+      if (!isCurrent()) return false;
       state.busy = false;
       renderSession();
     }
@@ -3246,16 +3267,22 @@
         method: "POST",
         json: { autoPowerOff },
       });
+      if (state.session !== session) return;
       if (autoPowerOff) {
         try {
           await api(`/v1/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
         } catch (_) {
           // The camera can become unreachable after the accepted cleaning command.
         }
+        if (state.session !== session) return;
         resetSession();
       } else {
-        state.status = await api(`/v1/session/${encodeURIComponent(sessionId)}/status`);
+        const liveViewStatusRevision = state.liveViewStopRevision || 0;
+        const status = await api(`/v1/session/${encodeURIComponent(sessionId)}/status`);
+        if (state.session !== session) return;
+        adoptCameraStatus(status, session, liveViewStatusRevision);
         await refreshCapabilityEvidence();
+        if (state.session !== session) return;
         state.busy = false;
         startEventLoop();
         if (wasLive) await startLiveView({ announce: false });
@@ -3264,6 +3291,7 @@
       }
       showToast(t("sensorCleaningComplete"));
     } catch (error) {
+      if (state.session !== session) return;
       const normalized = captureError(error);
       state.busy = false;
       startEventLoop();
@@ -3312,27 +3340,35 @@
 
   async function updateSetting(setting, value, source) {
     if (!state.session || cameraInteractionBusy()) return false;
+    const session = state.session;
     beginCameraInteraction();
+    const generation = state.refreshGeneration;
+    const isCurrent = () => state.session === session && state.refreshGeneration === generation;
+    const liveViewStatusRevision = state.liveViewStopRevision || 0;
     state.lastError = null;
     source.disabled = true;
     setOperationState(t("busy"));
     renderAvailability();
     try {
-      state.status = await api(
-        `/v1/session/${encodeURIComponent(state.session.id)}/settings/${encodeURIComponent(setting.key)}`,
+      const status = await api(
+        `/v1/session/${encodeURIComponent(session.id)}/settings/${encodeURIComponent(setting.key)}`,
         { method: "POST", json: { value } },
       );
+      if (!isCurrent()) return false;
+      adoptCameraStatus(status, session, liveViewStatusRevision);
       setting.value = value;
       if (setting.inputKind === "text") delete state.settingDrafts[setting.key];
       setOperationState(t("ready"));
       showToast(t("settingUpdated", { label: settingLabel(setting), value: settingValueLabel(setting, value) }));
       return true;
     } catch (error) {
+      if (!isCurrent()) return false;
       const normalized = captureError(error);
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
       return false;
     } finally {
+      if (!isCurrent()) return false;
       state.busy = false;
       source.disabled = false;
       renderSession();
@@ -3430,6 +3466,7 @@
     state.lastError = null;
     setOperationState(t("busy"));
     renderAvailability();
+    const liveViewStatusRevision = state.liveViewStopRevision || 0;
     try {
       if (bulb) {
         if (!bulbWasActive) pauseLivePolling();
@@ -3439,7 +3476,7 @@
           { method: "POST" },
         );
         if (state.session !== session) return;
-        state.status = status;
+        adoptCameraStatus(status, session, liveViewStatusRevision);
         state.shutterReleaseUnconfirmed = status.shutterReleaseUnconfirmed === true;
         const result = releaseOnly ? t("bulbReleaseConfirmed") : bulbWasActive ? t("bulbStopped") : t("bulbStarted");
         if (bulbWasActive && !bulbControlLocked()) {
@@ -3460,7 +3497,7 @@
           method: "POST", json: { af: autofocus },
         });
         if (state.session !== session) return;
-        state.status = captured;
+        adoptCameraStatus(captured, session, liveViewStatusRevision);
         flashCapture();
         setOperationState(t("captureComplete"));
         showToast(t("captureComplete"));
@@ -3489,7 +3526,7 @@
           || (status.recording != null && typeof status.recording !== "boolean")) {
           throw new ApiError(t("recordingCommandUnconfirmed"));
         }
-        state.status = status;
+        adoptCameraStatus(status, session, liveViewStatusRevision);
         const stopped = status.recording === false;
         state.recordingRecovery = typeof status.recording === "boolean" ? null : { session, direction: wasRecording ? "stop" : "start", reviewAttempt };
         const uncertainStop = wasRecording ? !stopped : status.recording !== true;
@@ -3539,9 +3576,10 @@
         ].includes(normalized.code);
         state.shutterReleaseUnconfirmed ||= uncertain;
         try {
+          const liveViewRecoveryRevision = state.liveViewStopRevision || 0;
           const status = await api(`/v1/session/${encodeURIComponent(sessionId)}/status`);
           if (state.session !== session) return;
-          state.status = status;
+          adoptCameraStatus(status, session, liveViewRecoveryRevision);
           if (
             bulbWasActive && status.shutterReleaseUnconfirmed === false &&
             status.bulbExposureActive === false
@@ -3586,12 +3624,13 @@
     const isCurrent = () => state.session === session && state.refreshGeneration === generation;
     setOperationState(t("busy"));
     renderAvailability();
+    const liveViewStatusRevision = state.liveViewStopRevision || 0;
     try {
       const status = await api(`/v1/session/${encodeURIComponent(sessionId)}/focus/auto`, {
         method: "POST",
       });
       if (!isCurrent()) return;
-      state.status = status;
+      adoptCameraStatus(status, session, liveViewStatusRevision);
       setOperationState(t("autofocusComplete"));
       showToast(t("autofocusComplete"));
     } catch (error) {
@@ -3620,12 +3659,13 @@
     const isCurrent = () => state.session === session && state.refreshGeneration === generation;
     setOperationState(t("busy"));
     renderAvailability();
+    const liveViewStatusRevision = state.liveViewStopRevision || 0;
     try {
       const status = await api(`/v1/session/${encodeURIComponent(sessionId)}/shutter/half-press`, {
         method: "POST",
       });
       if (!isCurrent()) return;
-      state.status = status;
+      adoptCameraStatus(status, session, liveViewStatusRevision);
       setOperationState(t("halfPressComplete"));
       showToast(t("halfPressComplete"));
     } catch (error) {
@@ -4277,9 +4317,25 @@
     ui.tapActionSelect.disabled = localPreviewSelected() || cameraInteractionBusy() || !state.liveActive;
   }
 
+  function adoptCameraStatus(status, session, expectedLiveViewRevision) {
+    if (!session || state.session !== session) return false;
+    state.status = status;
+    // Ordinary false/missing snapshots are not acknowledgements of a Stop.
+    // Reads remain relevant across Stop admission. Only Start admission or a
+    // confirmed Stop retires older observations for this session.
+    if ((state.liveViewStopRevision || 0) === expectedLiveViewRevision && status?.liveViewStopUnconfirmed === true) {
+      const owner = state.liveViewStopOwner?.session === session
+        ? state.liveViewStopOwner : { session, confirmedStart: false };
+      owner.stopUnconfirmed = true;
+      owner.confirmedStart = false;
+      owner.legacyStop = false;
+      state.liveViewStopOwner = owner;
+    }
+    return true;
+  }
+
   function liveViewStopRequired() {
-    return Boolean(state.session && (state.liveViewStopOwner?.session === state.session ||
-      state.status?.liveViewStopUnconfirmed === true));
+    return Boolean(state.session && state.liveViewStopOwner?.session === state.session);
   }
 
   async function toggleLiveView() {
@@ -4300,6 +4356,7 @@
     ) return;
     const session = state.session;
     const owner = { session };
+    state.liveViewStopRevision = (state.liveViewStopRevision || 0) + 1;
     state.liveViewStopOwner = owner;
     const owns = () => state.session === session && state.liveViewStopOwner === owner;
     beginCameraInteraction();
@@ -4317,10 +4374,11 @@
         },
       });
       if (!owns()) return;
-      if (!response || typeof response !== "object" || Array.isArray(response) || response.active !== true) {
+      if (!response || typeof response !== "object" || Array.isArray(response) || response.active !== true ||
+          response.liveViewStopUnconfirmed === true) {
         throw new Error(t("liveViewStopUnconfirmed"));
       }
-      owner.confirmedStart = true;
+      owner.confirmedStart = owner.stopUnconfirmed !== true;
       state.requestedFps = response.requestedFps || clampFps(state.requestedFps);
       state.activeLiveSource = response.source || state.liveSource;
       state.liveActive = true;
@@ -4335,6 +4393,9 @@
       if (announce) showToast(t("liveViewStarted"));
     } catch (error) {
       if (!owns()) return;
+      owner.stopUnconfirmed = true;
+      owner.confirmedStart = false;
+      owner.legacyStop = false;
       const normalized = captureError(error);
       state.liveActive = false;
       setOperationState(normalized.message, true);
@@ -4352,11 +4413,11 @@
     const session = state.session;
     if (!session) return false;
     // Only the first Stop after a confirmed start can use the legacy active=false contract.
-    const legacyStop = state.liveViewStopOwner?.session === session
-      ? state.liveViewStopOwner.confirmedStart === true
-      : state.liveActive && state.status?.liveViewStopUnconfirmed !== true;
+    const previous = state.liveViewStopOwner?.session === session ? state.liveViewStopOwner : null;
+    const legacyStop = !previous?.stopUnconfirmed && (previous ? previous.confirmedStart === true : state.liveActive);
     // A Stop retires any earlier Start/Stop reply, even within this session.
-    const owner = { session, confirmedStart: false };
+    // Status adoption can still revoke this new owner's legacy eligibility while HTTP waits.
+    const owner = { session, confirmedStart: false, legacyStop, stopUnconfirmed: previous?.stopUnconfirmed === true };
     if (remote) state.liveViewStopOwner = owner;
     const owns = () => state.session === session && state.liveViewStopOwner === owner;
     stopLiveLoop();
@@ -4368,16 +4429,20 @@
       const response = await api(`/v1/session/${encodeURIComponent(session.id)}/liveview/stop`, { method: "POST" });
       if (!owns()) return false;
       if (response?.active !== false || !(response.liveViewStopUnconfirmed === false ||
-          (legacyStop && response.liveViewStopUnconfirmed == null))) {
+          (owner.legacyStop && !owner.stopUnconfirmed && response.liveViewStopUnconfirmed == null))) {
         throw new Error(t("liveViewStopUnconfirmed"));
       }
       state.liveViewStopOwner = null;
-      if (state.status) state.status = { ...state.status, liveViewStopUnconfirmed: false };
+      state.liveViewStopRevision = (state.liveViewStopRevision || 0) + 1;
+      if (state.status) adoptCameraStatus({ ...state.status, liveViewStopUnconfirmed: false }, session, state.liveViewStopRevision);
       stopped = true;
       if (!preserveError) setOperationState(t("liveViewStopped"));
       if (announce) showToast(t("liveViewStopped"));
     } catch (error) {
       if (!owns()) return false;
+      owner.stopUnconfirmed = true;
+      owner.confirmedStart = false;
+      owner.legacyStop = false;
       const normalized = captureError(error);
       if (!preserveError) setOperationState(normalized.message, true);
       if (announce) showToast(normalized.message, true);
@@ -4550,10 +4615,11 @@
     const ownsRefresh = () => state.session === session && state.liveGeneration === liveGeneration &&
       state.refreshGeneration === refreshGeneration && state.liveActive &&
       state.activeLiveSource === "CCAPI_RTP" && !localPreviewSelected();
+    const liveViewStatusRevision = state.liveViewStopRevision || 0;
     try {
       const status = await api(`/v1/session/${encodeURIComponent(session.id)}/status`);
       if (!ownsRefresh()) return;
-      state.status = status;
+      adoptCameraStatus(status, session, liveViewStatusRevision);
     } catch (_) {
       // Video remains usable even when this optional status refresh fails.
     }
@@ -5163,6 +5229,7 @@
     ui.focusReticle.hidden = false;
     setOperationState(t("busy"));
     renderAvailability();
+    const liveViewStatusRevision = state.liveViewStopRevision || 0;
     try {
       if (action === "whiteBalance") {
         const status = await api(`/v1/session/${encodeURIComponent(session.id)}/whitebalance/click`, {
@@ -5170,7 +5237,7 @@
           json: { x: point.x, y: point.y },
         });
         if (!isCurrent()) return;
-        state.status = status;
+        adoptCameraStatus(status, session, liveViewStatusRevision);
       } else {
         await api(`/v1/session/${encodeURIComponent(session.id)}/focus/tap`, {
           method: "POST",

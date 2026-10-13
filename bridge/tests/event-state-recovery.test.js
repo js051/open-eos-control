@@ -71,7 +71,7 @@ function fixture(t, { ignorePollAbort = false } = {}) {
       return gate.promise;
     },
   });
-  vm.runInContext(["startEventLoop", "cancelEventLoop", "refreshSession", "featureSupported",
+  vm.runInContext(["adoptCameraStatus", "startEventLoop", "cancelEventLoop", "refreshSession", "featureSupported",
     "refreshMedia", "refreshMediaWhenCurrent", "mediaTransferActive", "cameraInteractionBusy",
     "beginCameraInteraction", "setOperationState"].map(productionFunction).join("\n"), context, { timeout: 1000 });
   t.after(() => {

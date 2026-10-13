@@ -92,7 +92,7 @@ function context({ reuseSessionId = false, confirmed = true } = {}) {
     sandbox[name] = (...args) => feedback.push([name, ...args]);
   }
   sandbox.renderSession = () => sandbox.renderAvailability();
-  const names = ["recordingRecoveryActive", "connectCamera", "disconnectCamera", "resetSession", "refreshSession",
+  const names = ["adoptCameraStatus", "recordingRecoveryActive", "connectCamera", "disconnectCamera", "resetSession", "refreshSession",
     "featureSupported", "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
     "liveViewStopRequired", "renderAvailability", "deleteMedia", "captureError", "clearMediaThumbnails",
     "closeMediaPreview", "clearMediaPreview", "resetMediaPreviewTransform",

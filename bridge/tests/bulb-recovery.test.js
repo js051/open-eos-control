@@ -54,7 +54,7 @@ function context(status = {}) {
     },
   });
   vm.runInContext([
-    "recordingRecoveryActive", "shutterReleaseUnconfirmed", "bulbControlLocked", "renderCaptureMode", "operateShutter",
+    "adoptCameraStatus", "recordingRecoveryActive", "shutterReleaseUnconfirmed", "bulbControlLocked", "renderCaptureMode", "operateShutter",
   ].map(productionFunction).join("\n"), sandbox);
   return sandbox;
 }

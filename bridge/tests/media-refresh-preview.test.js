@@ -143,7 +143,7 @@ function fixture(t, { dated = false } = {}) {
     "renderMediaTransfer", "scheduleMediaTransferRender", "cancelMediaUpload",
     "clearScheduledMediaTransferRender", "closeMediaDetails",
     "clearBulbTimer", "renderHealth"]) s[name] = () => {};
-  const names = ["startEventLoop", "cancelEventLoop", "refreshSession", "refreshMedia", "refreshMediaWhenCurrent",
+  const names = ["adoptCameraStatus", "startEventLoop", "cancelEventLoop", "refreshSession", "refreshMedia", "refreshMediaWhenCurrent",
     "mediaTransferActive", "cameraInteractionBusy", "openMediaPreview", "closeMediaPreview", "clearMediaPreview",
     "resetMediaPreviewTransform", "renderMediaPreviewNavigation", "previewableMedia", "displayedMedia",
     "renderMediaSummary", "renderMediaSelection", "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel", "mediaDisplayTimeZone", "resetSession", "cancelLatestMediaRefresh",

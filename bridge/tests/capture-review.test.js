@@ -97,7 +97,7 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
     },
     listing: [OLD_A, OLD_B],
   });
-  const functionNames = [
+  const functionNames = ["adoptCameraStatus",
     "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
     "shutterReleaseUnconfirmed", "bulbControlLocked", "operateShutter", "autofocus", "halfPressShutter",
     "cancelLatestMediaRefresh", "latestMediaFrom", "refreshLatestMedia",
@@ -1391,3 +1391,32 @@ for (const recording of [0,1,'false',[],{}]) {
     });
   }
 }
+
+test("accepted shutter status admitted before Live View Stop revokes its legacy proof", async () => {
+  const s = context();
+  s.state.liveActive = true;
+  s.state.liveViewStopRevision = 1;
+  s.state.liveViewStopOwner = { session: s.state.session, confirmedStart: true };
+  s.featureSupported = feature => feature !== "MEDIA_BROWSER" && feature !== "MEDIA_THUMBNAIL";
+  s.stopLiveLoop = () => { s.state.liveActive = false; };
+  s.renderLiveState = () => {};
+  vm.runInContext(["stopLiveView", "liveViewStopRequired"].map(productionFunction).join("\n"), s);
+  const captureReply = deferred(), stopReply = deferred();
+  s.api = async (url, options) => {
+    s.requests.push({ url, method: options?.method || "GET" });
+    if (url.endsWith("/capture/still")) return captureReply.promise;
+    if (url.endsWith("/liveview/stop")) return stopReply.promise;
+    assert.fail(`Unexpected request ${url}`);
+  };
+  const capture = s.operateShutter();
+  const stop = s.stopLiveView();
+  captureReply.resolve({ mode: "Manual", recording: false, liveViewStopUnconfirmed: true });
+  await capture;
+  assert.equal(s.state.liveViewStopOwner.stopUnconfirmed, true,
+    "The real shutter response remains accepted across Stop's interaction generation");
+  stopReply.resolve({ active: false });
+  assert.equal(await stop, false);
+  assert.equal(s.liveViewStopRequired(), true);
+  assert.deepEqual(s.requests.map(request => request.url.split("/").slice(-2).join("/")),
+    ["capture/still", "liveview/stop"]);
+});
