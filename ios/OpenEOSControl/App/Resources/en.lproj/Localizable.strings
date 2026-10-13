@@ -690,3 +690,9 @@
 "recording_start_status_unknown" = "Start was acknowledged, but recording status is unknown. Refresh status or explicitly stop recording.";
 "recording_stop_status_unknown" = "Stop was acknowledged, but stopped status is not confirmed. Refresh status or explicitly stop recording.";
 "recording_start_not_confirmed" = "The camera reports that recording is stopped. Start was not confirmed.";
+
+"recording_command_unconfirmed" = "Recording command result unknown. The camera may still be recording. Refresh cannot confirm a cached status; check the camera and press Stop.";
+"previous_recording_warning" = "Recording on the previous camera was not confirmed stopped. Check that camera directly. Connecting another camera does not stop the previous one.";
+"confirm_previous_recording_stopped" = "I checked the previous camera";
+"previous_recording_physically_verified" = "Recording is stopped on the previous camera";
+"previous_recording_confirmation_help" = "Only confirm after checking the previous camera. This dismisses the warning without sending a command.";

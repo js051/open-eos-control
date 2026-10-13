@@ -189,6 +189,13 @@ enum CameraSession: Sendable {
         }
     }
 
+    func recordingCommandEvidence() async -> CameraRecordingCommandEvidence? {
+        switch self {
+        case let .ccapi(client): return await client.recordingCommandEvidence
+        case let .desktopBridge(client): return await client.recordingCommandEvidence
+        }
+    }
+
     func startRecording() async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.startRecording()

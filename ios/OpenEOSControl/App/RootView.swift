@@ -89,10 +89,11 @@ struct RootView: View {
 private struct ShutterReleaseRecoveryView: View {
     @EnvironmentObject private var camera: CameraAppState
     @State private var confirmingPreviousRelease = false
+    @State private var confirmingPreviousRecording = false
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     var body: some View {
-        if camera.shutterReleaseRequired || camera.previousShutterReleaseUnconfirmed {
+        if camera.shutterReleaseRequired || camera.previousShutterReleaseUnconfirmed || !camera.previousRecordingWarnings.isEmpty {
             VStack(spacing: 8) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
@@ -104,6 +105,16 @@ private struct ShutterReleaseRecoveryView: View {
                                 Text("shutter_release_recovery_help")
                                     .font(.subheadline)
                             }
+                        }
+                        if !camera.previousRecordingWarnings.isEmpty {
+                            Text("previous_recording_warning")
+                                .font(.subheadline)
+                                .accessibilityIdentifier("previous-recording-warning")
+                            Button("confirm_previous_recording_stopped") {
+                                confirmingPreviousRecording = true
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("confirm-previous-recording-button")
                         }
                         if camera.previousShutterReleaseUnconfirmed {
                             Text("previous_shutter_release_warning")
@@ -139,6 +150,11 @@ private struct ShutterReleaseRecoveryView: View {
             .padding(12)
             .foregroundStyle(Color.cameraWarning)
             .background(Color.cameraSurface)
+            .confirmationDialog("confirm_previous_recording_stopped", isPresented: $confirmingPreviousRecording) {
+                Button("previous_recording_physically_verified") { camera.confirmPreviousRecordingStopped() }
+            } message: {
+                Text("previous_recording_confirmation_help")
+            }
             .confirmationDialog("confirm_previous_shutter_released", isPresented: $confirmingPreviousRelease) {
                 Button("previous_shutter_physically_verified") { camera.confirmPreviousShutterReleased() }
             } message: {

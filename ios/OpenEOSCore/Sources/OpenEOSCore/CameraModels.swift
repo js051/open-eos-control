@@ -822,3 +822,10 @@ public struct CameraSnapshot: Equatable, Sendable {
         self.capabilities = capabilities
     }
 }
+
+/// Command-boundary evidence, never an independent observation of camera state.
+/// Kept separately from thrown errors so cancellation still propagates unchanged.
+public enum CameraRecordingCommandEvidence: Equatable, Sendable {
+    case unconfirmed(starting: Bool)
+    case acknowledged(starting: Bool)
+}

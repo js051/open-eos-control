@@ -370,6 +370,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     private var settingsLoaded = false
     private var discoverySource = "unknown"
     private var cachedModel = "Canon Camera"
+    public private(set) var recordingCommandEvidence: CameraRecordingCommandEvidence?
     private var recording: Bool?
     private var bulbExposureActive = false
     private struct BulbRelease: Sendable {
@@ -4101,24 +4102,53 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             try requireTemperatureAllowsMovieRecording()
         }
         try Task.checkCancellation()
+        let command: URLRequest
         if resolvedMode == .simulator {
-            _ = try await requestJSON(path: "/ccapi/record/\(enabled ? "start" : "stop")", method: .post, json: [:])
+            command = try request(path: "/ccapi/record/\(enabled ? "start" : "stop")", method: .post, json: [:])
         } else {
             guard let operation = recordingOperation() else {
                 throw CCAPIError.unsupported(.videoRecording)
             }
-            try await commandOK(operation: operation, json: ["action": enabled ? "start" : "stop"])
+            command = try request(path: operation.path, method: operation.method, json: ["action": enabled ? "start" : "stop"])
         }
+        guard !closing else { throw CCAPIError.notInitialized }
+        try Task.checkCancellation()
+        recordingCommandEvidence = .unconfirmed(starting: enabled)
+        let exchange: CameraHTTPRecordingResponse
+        do {
+            exchange = try await transport.sendRecordingCommand(command)
+        } catch {
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
+            throw CCAPIError.recordingCommandUnconfirmed(starting: enabled)
+        }
+        let response = exchange.response
+        let rejected = !(200..<300).contains(response.statusCode)
+        // A received rejection remains known even if its diagnostic body is lost.
+        if rejected { recordingCommandEvidence = nil }
+        if exchange.cancelled { throw CancellationError() }
+        if !exchange.bodyComplete, !rejected {
+            throw CCAPIError.recordingCommandUnconfirmed(starting: enabled)
+        }
+        try validate(response, request: command)
+        try Task.checkCancellation()
+        guard !closing else { throw CCAPIError.notInitialized }
+        if resolvedMode == .simulator {
+            do { _ = try decodeJSONObject(response.body) }
+            catch { throw CCAPIError.recordingCommandUnconfirmed(starting: enabled) }
+        }
+        recordingCommandEvidence = .acknowledged(starting: enabled)
         recording = enabled
         observedFeatures.insert(.videoRecording)
         do {
-            return try await status()
+            let status = try await status()
+            if status.recording == false { recordingCommandEvidence = nil }
+            return status
         } catch {
             // Cancellation retains its existing propagation contract. In camera
             // mode ordinary optional status-read failures are absorbed by status().
             if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
-            // Only this read follows a received command ACK. A command rejection
-            // or lost command response must retain its original error instead.
+            // Only this read follows a received command ACK. Command result
+            // uncertainty has its own evidence and never enters this branch.
             throw CCAPIError.recordingStatusReadbackFailed(starting: enabled)
         }
     }
@@ -4336,6 +4366,14 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         )
     }
 
+    private func simulatorRecordingObservation(_ value: Any?) throws -> Bool? {
+        guard let value, !(value is NSNull) else { return nil }
+        guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
+            throw CCAPIError.invalidResponse("Simulator recording status must be Boolean, null, or absent.")
+        }
+        return number.boolValue
+    }
+
     private func parseSimulatorStatus(_ value: JSONDictionary) throws -> CameraStatus {
         guard let battery = value.object("battery"),
               let media = value.object("media"),
@@ -4346,7 +4384,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             connected: value.bool("connected") ?? true,
             batteryLevel: battery.integer("level"),
             batteryStatus: battery.string("status", default: "unknown"),
-            recording: value.bool("recording"),
+            recording: try simulatorRecordingObservation(value["recording"]),
             bulbExposureActive: value.bool("bulb_exposure_active") ?? value.bool("bulbExposureActive"),
             mode: value.string("mode", default: "unknown"),
             mediaAvailable: media.bool("available"),

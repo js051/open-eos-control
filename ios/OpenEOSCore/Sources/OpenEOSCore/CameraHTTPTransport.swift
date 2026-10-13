@@ -22,6 +22,20 @@ public struct CameraHTTPResponse: Sendable {
     }
 }
 
+/// REC-only transport evidence. A received HTTP status survives a failed body,
+/// while callers must never treat an incomplete success body as a command ACK.
+public struct CameraHTTPRecordingResponse: Sendable {
+    public let response: CameraHTTPResponse
+    public let bodyComplete: Bool
+    public let cancelled: Bool
+
+    public init(response: CameraHTTPResponse, bodyComplete: Bool = true, cancelled: Bool = false) {
+        self.response = response
+        self.bodyComplete = bodyComplete
+        self.cancelled = cancelled
+    }
+}
+
 public struct CameraHTTPDownloadResponse: Sendable {
     public let statusCode: Int
     public let headers: [String: String]
@@ -96,6 +110,7 @@ public struct CameraHTTPStreamResponse: Sendable {
 
 public protocol CameraHTTPTransport: Sendable {
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse
+    func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse
     func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse
     func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse
     func download(
@@ -110,6 +125,12 @@ public protocol CameraHTTPTransport: Sendable {
 }
 
 public extension CameraHTTPTransport {
+    func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse {
+        // Existing custom transports retain their send/cancellation contract.
+        // There is exactly one invocation, never a fallback after failure.
+        CameraHTTPRecordingResponse(response: try await send(request))
+    }
+
     func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
         let response = try await send(request)
         let chunks = AsyncThrowingStream<Data, Error> { continuation in
@@ -255,6 +276,53 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
         let result = CameraHTTPResponse(statusCode: http.statusCode, headers: Self.headers(http), body: data)
         try CameraHTTPResponseIntegrity.validate(result, requestMethod: request.httpMethod ?? "GET")
         return result
+    }
+
+    public func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse {
+        try await sendRecordingCommand(request, onResponseHeaders: nil)
+    }
+
+    // Read-only observation for deterministic wire tests. It neither changes the
+    // request nor provides an alternate send path or response-body implementation.
+    func sendRecordingCommand(
+        _ request: URLRequest, onResponseHeaders: (@Sendable (Int) -> Void)?
+    ) async throws -> CameraHTTPRecordingResponse {
+        try Task.checkCancellation()
+        let handle = CameraHTTPStreamTaskHandle(
+            configuration: streamConfiguration, maximumBytes: CameraHTTPResponseBodyAccumulator.maximumBytes
+        )
+        let stream = try await withTaskCancellationHandler {
+            try await handle.start(request)
+        } onCancel: {
+            handle.cancel()
+        }
+        defer { stream.cancel() }
+        onResponseHeaders?(stream.statusCode)
+        return await withTaskCancellationHandler {
+            var body = CameraHTTPResponseBodyAccumulator()
+            do {
+                for try await chunk in stream.chunks {
+                    guard body.append(chunk) else {
+                        throw CCAPIError.invalidResponse("Recording response exceeded the 32 KiB limit.")
+                    }
+                }
+                let response = CameraHTTPResponse(statusCode: stream.statusCode, headers: stream.headers, body: body.data)
+                try CameraHTTPResponseIntegrity.validate(response, requestMethod: request.httpMethod ?? "GET")
+                return CameraHTTPRecordingResponse(
+                    response: response,
+                    bodyComplete: handle.recordingBodyCompleted(collectedBytes: body.data.count),
+                    cancelled: Task.isCancelled
+                )
+            } catch {
+                return CameraHTTPRecordingResponse(
+                    response: CameraHTTPResponse(statusCode: stream.statusCode, headers: stream.headers, body: body.data),
+                    bodyComplete: false,
+                    cancelled: Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
+                )
+            }
+        } onCancel: {
+            stream.cancel()
+        }
     }
 
     public func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
@@ -412,8 +480,14 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
     private var session: URLSession?
     private var task: URLSessionDataTask?
     private var responseDelivered = false
+    private var cancellationRequested = false
+    private let maximumBytes: Int?
+    private var receivedBytes = 0
+    private var terminalResultRecorded = false
+    private var completedNormally = false
 
-    init(configuration: URLSessionConfiguration) {
+    init(configuration: URLSessionConfiguration, maximumBytes: Int? = nil) {
+        self.maximumBytes = maximumBytes
         self.configuration = configuration.copy() as! URLSessionConfiguration
         let pair = AsyncThrowingStream<Data, Error>.makeStream()
         chunks = pair.stream
@@ -429,13 +503,23 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
             let task = session.dataTask(with: request)
             self.session = session
             self.task = task
+            let shouldCancel = cancellationRequested
             lock.unlock()
-            task.resume()
+            if shouldCancel { task.cancel() } else { task.resume() }
         }
+    }
+
+    func recordingBodyCompleted(collectedBytes: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        // AsyncThrowingStream iteration can end early on task cancellation.
+        // Require the producer's terminal success and every delivered body byte.
+        return terminalResultRecorded && completedNormally && receivedBytes == collectedBytes
     }
 
     func cancel() {
         lock.lock()
+        cancellationRequested = true
         let task = task
         let session = session
         lock.unlock()
@@ -474,6 +558,14 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.lock()
+        let exceedsLimit = maximumBytes.map { data.count > $0 - receivedBytes } ?? false
+        if maximumBytes != nil, !exceedsLimit { receivedBytes += data.count }
+        lock.unlock()
+        guard !exceedsLimit else {
+            finish(error: CCAPIError.invalidResponse("Recording response exceeded the 32 KiB limit."), cancelTask: true)
+            return
+        }
         chunksContinuation.yield(data)
     }
 
@@ -481,11 +573,16 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
         finish(error: error)
     }
 
-    private func finish(error: Error?) {
+    private func finish(error: Error?, cancelTask: Bool = false) {
         lock.lock()
         let continuation = responseContinuation
         responseContinuation = nil
         let delivered = responseDelivered
+        if !terminalResultRecorded {
+            terminalResultRecorded = true
+            completedNormally = delivered && error == nil
+        }
+        let activeTask = task
         task = nil
         let session = session
         self.session = nil
@@ -499,7 +596,12 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
         } else {
             chunksContinuation.finish()
         }
-        session?.finishTasksAndInvalidate()
+        if cancelTask {
+            activeTask?.cancel()
+            session?.invalidateAndCancel()
+        } else {
+            session?.finishTasksAndInvalidate()
+        }
     }
 }
 

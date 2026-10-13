@@ -25,6 +25,7 @@ public enum DesktopBridgeError: Error, Equatable, Sendable {
     case shutterReleaseUnconfirmed
     case captureStatusReadbackFailed
     case recordingStatusReadbackFailed(starting: Bool)
+    case recordingCommandUnconfirmed(starting: Bool)
     case invalidResponse(String)
     case http(
         statusCode: Int,
@@ -51,6 +52,8 @@ extension DesktopBridgeError: LocalizedError {
             "Camera shutter or autofocus stop is not confirmed. Retry Stop before starting another camera operation."
         case .captureStatusReadbackFailed:
             "The shutter command was acknowledged, but camera status could not be read. Check recent media without taking another photo."
+        case .recordingCommandUnconfirmed:
+            "The recording command result is unknown. Check the camera and explicitly stop recording; refreshing cached status cannot confirm it stopped."
         case .recordingStatusReadbackFailed:
             "The recording command was acknowledged, but its status could not be read. Refresh status or explicitly stop recording."
         case let .invalidResponse(message):
@@ -151,6 +154,7 @@ public actor DesktopBridgeClient {
         var stopAttemptCompleted = false
     }
 
+    public private(set) var recordingCommandEvidence: CameraRecordingCommandEvidence?
     private var sessionGeneration = UUID()
     private var initializationToken: UUID?
     private var initializationCancelled = false
@@ -264,6 +268,7 @@ public actor DesktopBridgeClient {
             throw DesktopBridgeError.sessionChanged
         }
         sessionGeneration = UUID()
+        recordingCommandEvidence = nil
         completedCloseState = .idle
         releaseRevision = UUID()
         shutterRelease = nil
@@ -359,6 +364,9 @@ public actor DesktopBridgeClient {
 
     public func status() async throws -> CameraStatus {
         let body = try await getJSON(sessionEndpoint(["status"]))
+        guard Self.hasValidRecordingField(body) else {
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge recording status must be Boolean, null, or absent.")
+        }
         return parseStatus(body)
     }
 
@@ -782,11 +790,25 @@ public actor DesktopBridgeClient {
     private func setRecording(_ enabled: Bool) async throws -> CameraStatus {
         try Task.checkCancellation()
         do {
-            let body = try await postJSON(sessionEndpoint(["recording", enabled ? "start" : "stop"]), payload: [:])
-            return parseStatus(body)
+            let body = try await requestJSON(
+                url: sessionEndpoint(["recording", enabled ? "start" : "stop"]),
+                method: "POST", payload: [:], recordingCommand: enabled
+            )
+            if !Self.hasValidRecordingField(body) {
+                // REC may already have been applied. A numeric/string flag is not
+                // a stopped observation and must never permit another Start.
+                throw DesktopBridgeError.recordingCommandUnconfirmed(starting: enabled)
+            }
+            let status = parseStatus(body)
+            recordingCommandEvidence = status.recording == false ? nil : .acknowledged(starting: enabled)
+            return status
         } catch let error as DesktopBridgeError {
-            if case .http(_, _, _, "RECORDING_STATUS_READBACK_FAILED", _, _, _) = error {
+            if case .http(502, _, _, "RECORDING_STATUS_READBACK_FAILED", _, _, _) = error {
+                recordingCommandEvidence = .acknowledged(starting: enabled)
                 throw DesktopBridgeError.recordingStatusReadbackFailed(starting: enabled)
+            }
+            if Self.isRecordingCommandUnconfirmed(error) {
+                throw DesktopBridgeError.recordingCommandUnconfirmed(starting: enabled)
             }
             throw error
         }
@@ -1242,7 +1264,7 @@ public actor DesktopBridgeClient {
             connected: body.optionalBool("connected") ?? true,
             batteryLevel: battery.int("level"),
             batteryStatus: battery.string("status") ?? "unknown",
-            recording: body.optionalBool("recording"),
+            recording: Self.strictBool(body["recording"]),
             bulbExposureActive: Self.strictBool(body["bulbExposureActive"]),
             shutterReleaseUnconfirmed: Self.strictBool(body["shutterReleaseUnconfirmed"]),
             mode: body.string("mode") ?? "unknown",
@@ -1316,6 +1338,11 @@ public actor DesktopBridgeClient {
             && strictBool(body["bulbExposureActive"]) == false
     }
 
+    private static func hasValidRecordingField(_ body: BridgeJSON) -> Bool {
+        guard let value = body["recording"], !(value is NSNull) else { return true }
+        return strictBool(value) != nil
+    }
+
     private static func strictBool(_ value: Any?) -> Bool? {
         guard let number = value as? NSNumber,
               CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
@@ -1364,6 +1391,27 @@ public actor DesktopBridgeClient {
         }
     }
 
+    private static func isRecordingCommandUnconfirmed(_ error: DesktopBridgeError) -> Bool {
+        if case .http(502, "POST", _, "RECORDING_COMMAND_UNCONFIRMED", _, .some("VIDEO_RECORDING"), .some("ccapi")) = error {
+            return true
+        }
+        return false
+    }
+
+    private static func isRecordingResponseUnconfirmed(_ response: CameraHTTPResponse, error: DesktopBridgeError) -> Bool {
+        if isRecordingCommandUnconfirmed(error) { return true }
+        guard response.statusCode == 502 else { return false }
+        // A gateway status alone does not say whether the camera applied REC.
+        // Require an intact Bridge error envelope before calling it a rejection.
+        guard let object = (try? JSONSerialization.jsonObject(
+                with: Data(response.body.prefix(maximumErrorBodyBytes))
+              )) as? BridgeJSON,
+              let detail = object["error"] as? BridgeJSON,
+              detail.nonEmptyString("code") != nil,
+              detail.nonEmptyString("message") != nil else { return true }
+        return false
+    }
+
     private func getJSON(_ url: URL) async throws -> BridgeJSON {
         try await requestJSON(url: url, method: "GET", payload: nil)
     }
@@ -1379,7 +1427,8 @@ public actor DesktopBridgeClient {
         timeoutInterval: TimeInterval = 10,
         maximumBytes: Int? = nil,
         shutterOperation: Bool = false,
-        connectionGuidance: Bool = false
+        connectionGuidance: Bool = false,
+        recordingCommand: Bool? = nil
     ) async throws -> BridgeJSON {
         try validateMutation(url: url, method: method, shutterOperation: shutterOperation)
         let generation = sessionGeneration
@@ -1399,15 +1448,59 @@ public actor DesktopBridgeClient {
             request.cachePolicy = .reloadIgnoringLocalCacheData
             request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         }
-        let response = try await transport.send(request)
+        if let recordingCommand {
+            try Task.checkCancellation()
+            recordingCommandEvidence = .unconfirmed(starting: recordingCommand)
+        }
+        let response: CameraHTTPResponse
+        var recordingBodyComplete = true
+        var recordingResponseCancelled = false
+        do {
+            if recordingCommand != nil {
+                let exchange = try await transport.sendRecordingCommand(request)
+                response = exchange.response
+                recordingBodyComplete = exchange.bodyComplete
+                recordingResponseCancelled = exchange.cancelled
+            } else {
+                response = try await transport.send(request)
+            }
+        } catch {
+            // This boundary follows all request construction and session checks.
+            // A thrown transport error cannot establish that REC was rejected.
+            if let recordingCommand, generation == sessionGeneration,
+               !(error is CancellationError), (error as? URLError)?.code != .cancelled {
+                throw DesktopBridgeError.recordingCommandUnconfirmed(starting: recordingCommand)
+            }
+            throw error
+        }
+        let responseError = (200..<300).contains(response.statusCode)
+            ? nil : Self.httpError(response: response, method: method, url: url, preservingProtocolStrings: recordingCommand != nil)
+        if recordingCommand != nil, generation == sessionGeneration, !isClosing,
+           let error = responseError, response.statusCode != 502 || recordingBodyComplete,
+           !Self.isRecordingResponseUnconfirmed(response, error: error) {
+            // Consume known rejection evidence before preserving cancellation's
+            // thrown error. An intact rejection cannot become an unknown Start.
+            if case .http(502, _, _, "RECORDING_STATUS_READBACK_FAILED", _, _, _) = error {
+                // ACK consumption retains the existing cancellation contract.
+            } else {
+                recordingCommandEvidence = nil
+            }
+        }
+        if recordingResponseCancelled { throw CancellationError() }
         if scopedToSession {
             try Task.checkCancellation()
             guard generation == sessionGeneration, !isClosing || shutterOperation else {
                 throw DesktopBridgeError.sessionChanged
             }
         }
-        guard (200..<300).contains(response.statusCode) else {
-            let error = Self.httpError(response: response, method: method, url: url)
+        if let recordingCommand, !recordingBodyComplete,
+           responseError == nil || response.statusCode == 502 {
+            throw DesktopBridgeError.recordingCommandUnconfirmed(starting: recordingCommand)
+        }
+        if let error = responseError {
+            if let recordingCommand, Self.isRecordingResponseUnconfirmed(response, error: error) {
+                throw DesktopBridgeError.recordingCommandUnconfirmed(starting: recordingCommand)
+            }
             if scopedToSession, revision == releaseRevision, !shutterOperation,
                Self.isShutterReleaseError(error) {
                 try adoptShutterRelease(unconfirmed: true, acceptsLegacyStop: false)
@@ -1429,6 +1522,9 @@ public actor DesktopBridgeClient {
             let value = try? JSONSerialization.jsonObject(with: response.body),
             let object = value as? BridgeJSON
         else {
+            if let recordingCommand {
+                throw DesktopBridgeError.recordingCommandUnconfirmed(starting: recordingCommand)
+            }
             throw DesktopBridgeError.invalidResponse(
                 "Desktop Bridge returned invalid JSON for \(url.path)."
             )
@@ -1810,12 +1906,15 @@ public actor DesktopBridgeClient {
         return text
     }
 
-    private static func httpError(response: CameraHTTPResponse, method: String, url: URL) -> DesktopBridgeError {
+    private static func httpError(
+        response: CameraHTTPResponse, method: String, url: URL, preservingProtocolStrings: Bool = false
+    ) -> DesktopBridgeError {
         httpError(
             statusCode: response.statusCode,
             body: response.body,
             method: method,
-            url: url
+            url: url,
+            preservingProtocolStrings: preservingProtocolStrings
         )
     }
 
@@ -1852,20 +1951,25 @@ public actor DesktopBridgeClient {
         statusCode: Int,
         body: Data,
         method: String,
-        url: URL
+        url: URL,
+        preservingProtocolStrings: Bool = false
     ) -> DesktopBridgeError {
         let boundedBody = Data(body.prefix(maximumErrorBodyBytes))
         let object = (try? JSONSerialization.jsonObject(with: boundedBody)) as? BridgeJSON
         let detail = object?.dictionary("error") ?? [:]
         let fallback = String(data: boundedBody, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        func protocolString(_ key: String) -> String? {
+            guard let value = detail[key] as? String, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return preservingProtocolStrings ? value : detail.nonEmptyString(key)
+        }
         return .http(
             statusCode: statusCode,
             method: method,
             url: url.absoluteString,
-            code: detail.nonEmptyString("code") ?? "HTTP_\(statusCode)",
+            code: protocolString("code") ?? "HTTP_\(statusCode)",
             message: detail.nonEmptyString("message") ?? fallback?.nilIfEmpty ?? "Desktop Bridge returned HTTP \(statusCode).",
-            feature: detail.nonEmptyString("feature"),
-            engine: detail.nonEmptyString("engine")
+            feature: protocolString("feature"),
+            engine: protocolString("engine")
         )
     }
 }
