@@ -2,6 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
+const { createHash } = require("node:crypto");
 const fs = require("node:fs");
 const net = require("node:net");
 const os = require("node:os");
@@ -738,6 +739,194 @@ async function verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin) {
       if (cleanupErrors.length) {
         if (!scenarioError) throw new AggregateError(cleanupErrors, `Date journey cleanup failed: ${language}`);
         console.error(`Date journey cleanup also failed: ${language}`, cleanupErrors);
+      }
+    }
+  }
+}
+
+async function verifyRecordingReviewJourneys(browser, bridgeOrigin, simulatorOrigin) {
+  const videoBytes = fs.readFileSync(path.join(
+    REPOSITORY_ROOT, "ios", "OpenEOSControl", "Tests", "Fixtures", "valid-h264-baseline.mp4",
+  ));
+  const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+  const videoHash = sha256(videoBytes);
+  assert.equal(videoBytes.length, 1813);
+  assert.equal(videoHash, "2a8036931d1d15c7c9d1e7d4412e6796dc0faa8517871cdc64c2800f8a776627");
+  const oldVideo = "EARLIER_RECORDING.MP4";
+  const newVideo = "NEWLY_VISIBLE_RECORDING.MP4";
+  const firstPhoto = "POST_STOP_PHOTO.JPG";
+  const frontPhoto = "NEWER_VISIBLE_PHOTO.JPG";
+  const uploadFixture = async (name, bytes, contentType) => {
+    const response = await fetch(`${simulatorOrigin}/ccapi/media?filename=${encodeURIComponent(name)}`, {
+      method: "POST",
+      headers: { "Content-Type": contentType, "Content-Length": String(bytes.length) },
+      body: bytes,
+    });
+    assert.equal(response.status, 201, `Synthetic fixture upload failed: ${name}`);
+    const item = await response.json();
+    assert.equal(item.id, name);
+    assert.equal(item.name, name);
+    assert.equal(item.kind, contentType === "video/mp4" ? "video" : "image");
+    assert.equal(item.size_bytes, bytes.length);
+  };
+
+  for (const language of ["en", "zh-TW"]) {
+    const reset = await fetch(`${simulatorOrigin}/ccapi/test/reset`, { method: "POST" });
+    assert.equal(reset.ok, true);
+    const photoResponse = await fetch(`${simulatorOrigin}/ccapi/ver100/contents/card1/100CANON/SIM_0002.PNG`);
+    assert.equal(photoResponse.ok, true);
+    assert.match(photoResponse.headers.get("content-type"), /^image\/jpeg/);
+    const photoBytes = Buffer.from(await photoResponse.arrayBuffer());
+    // REC/STOP in the existing simulator changes status only. Inject actual media
+    // through its existing upload API; do not claim STOP created these files.
+    await uploadFixture(oldVideo, videoBytes, "video/mp4");
+    const context = await browser.newContext({
+      locale: language === "en" ? "en-US" : "zh-TW",
+      viewport: { width: 1440, height: 900 },
+      acceptDownloads: true,
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(15_000);
+    const requests = [];
+    const errors = [];
+    let scenarioError = null;
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (!url.pathname.startsWith("/v1/session")) return;
+      requests.push({ method: request.method(), pathname: url.pathname, limit: url.searchParams.get("limit") });
+    });
+    const notReady = language === "en" ? "New video is not visible yet" : "尚未找到新可見影片";
+    const found = language === "en" ? "A newly visible video was found" : "已找到新可見影片";
+    const waitForNotReady = () => page.waitForFunction((text) => {
+      const retry = document.querySelector("#latest-media-retry");
+      return document.querySelector("#latest-media-review-status")?.textContent.includes(text) &&
+        retry && !retry.hidden && !retry.disabled;
+    }, notReady);
+    try {
+      await page.goto(bridgeOrigin, { waitUntil: "networkidle" });
+      await page.click("#ccapi-mode-button");
+      await page.fill("#ccapi-url-input", simulatorOrigin);
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      await page.locator("#control-view .language-select").selectOption(language);
+      await page.waitForFunction((name) => document.querySelector("#latest-media-label")?.textContent === name, oldVideo);
+      await page.click("#video-mode-button");
+      await waitForSimulatorState(simulatorOrigin, (state) => state.movie_mode === "on", "recording journey movie mode");
+      await page.click("#shutter-button");
+      await waitForSimulatorState(simulatorOrigin,
+        (state) => state.recording && state.record_start_count === 1, "recording journey start");
+      const beforeStop = requests.length;
+      await page.click("#shutter-button");
+      await waitForSimulatorState(simulatorOrigin,
+        (state) => !state.recording && state.record_stop_count === 1, "recording journey confirmed stop");
+      await waitForNotReady();
+      assert.equal(await page.locator("#latest-media-label").innerText(), oldVideo,
+        "A known old video cannot satisfy the stop review");
+      const stopRequests = requests.slice(beforeStop);
+      const stopIndex = stopRequests.findIndex((request) => request.pathname.endsWith("/recording/stop"));
+      const listIndex = stopRequests.findIndex((request) => request.pathname.endsWith("/media"));
+      assert.ok(stopIndex >= 0 && listIndex > stopIndex, "STOP must precede the review's bounded listing reads");
+      assert.ok(stopRequests.filter((request) => request.pathname.endsWith("/media"))
+        .every((request) => request.method === "GET" && request.limit === "8"));
+      const stopped = await readSimulatorState(simulatorOrigin);
+      assert.equal(stopped.media_ids.includes(newVideo), false, "The fixture does not manufacture a recording output");
+      assert.equal(stopped.capture_count, 0);
+      fs.mkdirSync(RESULTS_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-recording-review-not-ready-${language}.png`) });
+
+      // A new photo alone must leave video review pending, without another REC.
+      await uploadFixture(firstPhoto, photoBytes, "image/jpeg");
+      const beforePhotoRetry = requests.length;
+      await page.click("#latest-media-retry");
+      await waitForNotReady();
+      assert.equal(await page.locator("#latest-media-label").innerText(), oldVideo);
+      assert.ok(requests.slice(beforePhotoRetry).length > 0);
+      assert.ok(requests.slice(beforePhotoRetry).every((request) => request.method === "GET"),
+        "Photo-only retry may read media but must not send a camera mutation");
+
+      await uploadFixture(newVideo, videoBytes, "video/mp4");
+      await uploadFixture(frontPhoto, photoBytes, "image/jpeg");
+      const newContents = await fetch(`${simulatorOrigin}/ccapi/ver100/contents`);
+      assert.equal(newContents.ok, true);
+      const listedPaths = (await newContents.json()).path;
+      assert.ok(listedPaths[0].endsWith(frontPhoto) && listedPaths[1].endsWith(newVideo),
+        "The camera order deliberately places a newly visible photo before the new video");
+      const beforeVideoRetry = requests.length;
+      await page.click("#latest-media-retry");
+      await page.waitForFunction(({ name, status }) =>
+        document.querySelector("#latest-media-label")?.textContent === name &&
+        document.querySelector("#latest-media-review-status")?.textContent.includes(status) &&
+        document.querySelector("#latest-media-retry")?.hidden,
+      { name: newVideo, status: found });
+      assert.ok(requests.slice(beforeVideoRetry).every((request) => request.method === "GET"),
+        "Finding the new video is read-only, even with a newer photo in front");
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-recording-review-available-${language}.png`) });
+      await page.click("#latest-media-button");
+      await page.waitForFunction((name) => {
+        const video = document.querySelector("#media-preview-video");
+        return document.querySelector("#media-preview-dialog")?.open &&
+          document.querySelector("#media-preview-title")?.textContent === name &&
+          video && !video.hidden && video.readyState >= 2 && video.videoWidth === 160 &&
+          video.videoHeight === 90 && !video.error;
+      }, newVideo);
+      assert.equal(await page.locator("#media-preview-image").isHidden(), true);
+      assert.equal(await page.locator("#media-preview-unavailable").isHidden(), true);
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-recording-review-video-${language}.png`) });
+
+      // Canon listings omit size. Use the normal explicit Details read to learn
+      // the small file size before choosing the normal browser-download path.
+      // No picker override, synthetic writable, playback response, or App state is substituted.
+      const [infoResponse] = await Promise.all([
+        page.waitForResponse((response) => response.request().method() === "GET" &&
+          /\/v1\/session\/[^/]+\/media\/[^/]+\/info$/.test(new URL(response.url()).pathname)),
+        page.click("#media-preview-details"),
+      ]);
+      assert.equal(infoResponse.ok(), true);
+      const videoInfo = await infoResponse.json();
+      assert.equal(videoInfo.name, newVideo);
+      assert.equal(videoInfo.sizeBytes, videoBytes.length);
+      await page.waitForSelector("#media-details-dialog[open] #media-details-loading[hidden]", { state: "attached" });
+      assert.match(await page.locator("#media-details-summary").innerText(), /video\/mp4/);
+      const beforeDownload = requests.length;
+      const [download] = await Promise.all([
+        page.waitForEvent("download"),
+        page.click("#media-details-download"),
+      ]);
+      assert.equal(await download.failure(), null);
+      assert.equal(download.suggestedFilename(), newVideo);
+      const downloadedBytes = fs.readFileSync(await download.path());
+      assert.deepEqual(downloadedBytes, videoBytes, "The browser must receive the original MP4, not a thumbnail or display image");
+      assert.equal(sha256(downloadedBytes), videoHash);
+      assert.ok(requests.slice(beforeDownload).some((request) => request.method === "GET" &&
+        /\/media\/[^/]+$/.test(request.pathname)), "Download must use the real original-media endpoint");
+      const delivered = await readSimulatorState(simulatorOrigin);
+      assert.equal(delivered.record_start_count, 1);
+      assert.equal(delivered.record_stop_count, 1);
+      assert.equal(delivered.capture_count, 0);
+      assert.deepEqual(delivered.canonical.shutter_af_requests, []);
+      assert.deepEqual(requests.filter((request) => /\/recording\/(?:start|stop)$/.test(request.pathname))
+        .map((request) => request.pathname.split("/").at(-1)), ["start", "stop"]);
+      assert.equal(requests.some((request) => request.method !== "GET" && request.pathname.includes("/capture/")), false);
+      assert.deepEqual(errors, []);
+      await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-recording-review-original-${language}.png`) });
+      console.log(`PASS: synthetic PC recording stop, read-only video review, and exact original download: ${language}`);
+    } catch (error) {
+      scenarioError = error;
+      throw error;
+    } finally {
+      const cleanupErrors = [];
+      try {
+        if (await page.locator("dialog[open]").count()) await page.keyboard.press("Escape");
+        if (await page.locator("#control-view:not([hidden])").count()) {
+          await page.click("#disconnect-button");
+          await page.waitForSelector("#connection-view:not([hidden])");
+        }
+      } catch (error) { cleanupErrors.push(error); }
+      try { await context.close(); } catch (error) { cleanupErrors.push(error); }
+      if (cleanupErrors.length) {
+        if (!scenarioError) throw new AggregateError(cleanupErrors, `Recording journey cleanup failed: ${language}`);
+        console.error(`Recording journey cleanup also failed: ${language}`, cleanupErrors);
       }
     }
   }
@@ -1742,6 +1931,7 @@ async function run() {
     await verifyCapabilityResponseOwnership(browser, bridgeOrigin);
     await verifyMediaDeleteResponseOwnership(browser, bridgeOrigin);
     await verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin);
+    await verifyRecordingReviewJourneys(browser, bridgeOrigin, simulatorOrigin);
   } finally {
     if (browser) await browser.close();
     await stopProcess(bridge?.process);

@@ -159,6 +159,11 @@
       previouslyVisibleMedia: "Previously visible media",
       openPreviousMedia: "Open previously visible media",
       latestMediaSearching: "Looking for newly visible media…",
+      latestVideoSearching: "Recording stopped. Looking for newly visible video…",
+      latestVideoNotReady: "New video is not visible yet. Check again without sending another REC command.",
+      latestVideoReadFailed: "The media list could not be read. Check again without sending another REC command.",
+      latestVideoFound: "A newly visible video was found; this does not prove it came from that recording.",
+      recordingStopUnconfirmed: "Recording stop is not confirmed by the returned camera status.",
       latestMediaNotReady: "New media is not visible yet. Check again without taking another photo.",
       latestMediaReadFailed: "The camera's media list could not be read. Check again without taking another photo.",
       latestMediaFound: "Newly visible media found. Open the preview to confirm it.",
@@ -750,6 +755,11 @@
       previouslyVisibleMedia: "先前可見素材",
       openPreviousMedia: "開啟先前可見素材",
       latestMediaSearching: "正在尋找新可見素材…",
+      latestVideoSearching: "錄影已停止，正在尋找新可見影片…",
+      latestVideoNotReady: "尚未找到新可見影片。可重新查找，不會再次送出錄影命令。",
+      latestVideoReadFailed: "暫時無法讀取素材清單。可重新查找，不會再次送出錄影命令。",
+      latestVideoFound: "已找到新可見影片；不能據此證明它來自這次錄影。",
+      recordingStopUnconfirmed: "相機回傳的狀態尚未確認錄影已停止。",
       latestMediaNotReady: "尚未找到新可見素材。可重新查找，不會再次拍攝。",
       latestMediaReadFailed: "暫時無法讀取相機的素材清單。可重新查找，不會再次拍攝。",
       latestMediaFound: "已找到新可見素材，請開啟預覽確認。",
@@ -1495,6 +1505,7 @@
     latestMediaController: null,
     latestMediaCandidates: null,
     latestMediaReviewAttempt: null,
+    latestMediaReviewKind: "photo",
     latestMediaReviewStatus: "IDLE",
     latestMediaReviewReadFailed: false,
     busy: false,
@@ -2309,6 +2320,7 @@
     state.latestMediaCandidates = null;
     state.latestMediaReviewAttempt = null;
     state.latestMediaReviewStatus = "IDLE";
+    state.latestMediaReviewKind = "photo";
     state.latestMediaReviewReadFailed = false;
     state.captureMode = "photo";
     state.previewInput = "CAMERA";
@@ -3306,7 +3318,8 @@
 
   async function operateShutter() {
     if (!state.session || cameraInteractionBusy()) return;
-    const sessionId = state.session.id;
+    const session = state.session;
+    const sessionId = session.id;
     const isPhoto = state.captureMode === "photo";
     const releaseOnly = shutterReleaseUnconfirmed();
     const bulbWasActive = bulbControlLocked();
@@ -3335,7 +3348,7 @@
           `/v1/session/${encodeURIComponent(sessionId)}${bulbPath}`,
           { method: "POST" },
         );
-        if (state.session?.id !== sessionId) return;
+        if (state.session !== session) return;
         state.status = status;
         state.shutterReleaseUnconfirmed = status.shutterReleaseUnconfirmed === true;
         const result = releaseOnly ? t("bulbReleaseConfirmed") : bulbWasActive ? t("bulbStopped") : t("bulbStarted");
@@ -3346,7 +3359,8 @@
         setOperationState(result);
         showToast(result);
       } else if (isPhoto) {
-        reviewAttempt = { sessionId, knownIds: visibleMediaIds() };
+        reviewAttempt = { sessionId, session, kind: "photo", knownIds: visibleMediaIds() };
+        state.latestMediaReviewKind = "photo";
         // A new shutter supersedes an old review before the command waits for ACK.
         cancelLatestMediaRefresh();
         state.latestMediaReviewAttempt = null;
@@ -3355,7 +3369,7 @@
         const captured = await api(`/v1/session/${encodeURIComponent(sessionId)}/capture/still`, {
           method: "POST", json: { af: autofocus },
         });
-        if (state.session?.id !== sessionId) return;
+        if (state.session !== session) return;
         state.status = captured;
         flashCapture();
         setOperationState(t("captureComplete"));
@@ -3364,20 +3378,34 @@
         void refreshLatestMedia();
       } else {
         const wasRecording = Boolean(state.status?.recording);
+        if (wasRecording) {
+          reviewAttempt = { sessionId, session, kind: "video", knownIds: visibleMediaIds() };
+          cancelLatestMediaRefresh();
+          state.latestMediaReviewAttempt = null;
+          state.latestMediaReviewKind = "video";
+          state.latestMediaReviewStatus = "IDLE";
+          state.latestMediaReviewReadFailed = false;
+        }
         const status = await api(
           `/v1/session/${encodeURIComponent(sessionId)}/recording/${wasRecording ? "stop" : "start"}`,
           { method: "POST" },
         );
-        if (state.session?.id !== sessionId) return;
+        if (state.session !== session) return;
         state.status = status;
-        const result = wasRecording ? t("recordingStopped") : t("recordingStarted");
-        setOperationState(result);
-        showToast(result);
+        const stopped = status.recording === false;
+        const uncertainStop = wasRecording && !stopped;
+        const result = wasRecording ? t(stopped ? "recordingStopped" : "recordingStopUnconfirmed") : t("recordingStarted");
+        setOperationState(result, uncertainStop);
+        showToast(result, uncertainStop);
+        if (wasRecording && stopped) {
+          state.latestMediaReviewAttempt = reviewAttempt;
+          void refreshLatestMedia();
+        }
       }
     } catch (error) {
-      if (state.session?.id !== sessionId) return;
+      if (state.session !== session) return;
       const normalized = captureError(error);
-      if (normalized.code === "CAPTURE_STATUS_READBACK_FAILED" && reviewAttempt) {
+      if (normalized.code === "CAPTURE_STATUS_READBACK_FAILED" && reviewAttempt?.kind === "photo") {
         state.latestMediaReviewAttempt = reviewAttempt;
         void refreshLatestMedia();
       }
@@ -3393,7 +3421,7 @@
         state.shutterReleaseUnconfirmed ||= uncertain;
         try {
           const status = await api(`/v1/session/${encodeURIComponent(sessionId)}/status`);
-          if (state.session?.id !== sessionId) return;
+          if (state.session !== session) return;
           state.status = status;
           if (
             bulbWasActive && status.shutterReleaseUnconfirmed === false &&
@@ -3410,7 +3438,7 @@
           }
           state.shutterReleaseUnconfirmed ||= status.shutterReleaseUnconfirmed === true;
         } catch (_) {
-          if (state.session?.id !== sessionId) return;
+          if (state.session !== session) return;
           // A failed refresh never erases the stop-only warning.
           state.shutterReleaseUnconfirmed = true;
         }
@@ -3420,7 +3448,7 @@
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
     } finally {
-      if (state.session?.id === sessionId) {
+      if (state.session === session) {
         state.busy = false;
         renderSession();
       }
@@ -3519,10 +3547,10 @@
     return ids;
   }
 
-  function latestMediaFrom(items, knownIds = new Set(), photosOnly = false) {
+  function latestMediaFrom(items, knownIds = new Set(), photosOnly = false, videosOnly = false) {
     return mediaLibrary.itemsForDisplay(
       (Array.isArray(items) ? items : []).filter((item) =>
-        !knownIds.has(item.id) && (!photosOnly || !mediaIsVideo(item)),
+        !knownIds.has(item.id) && (!photosOnly || !mediaIsVideo(item)) && (!videosOnly || mediaIsVideo(item)),
       ),
       "all",
       // The bounded camera response is already ordered by the camera. Keep that
@@ -3572,7 +3600,8 @@
             const candidates = (Array.isArray(response.items) ? response.items : []).slice(0, LATEST_MEDIA_LIMIT);
             state.latestMediaCandidates = { sessionId: rawSessionId, ids: new Set(candidates.map((item) => item.id)) };
             state.latestMediaReviewReadFailed = false;
-            latest = latestMediaFrom(candidates, reviewAttempt?.knownIds, Boolean(reviewAttempt));
+            latest = latestMediaFrom(candidates, reviewAttempt?.knownIds,
+              Boolean(reviewAttempt) && reviewAttempt.kind !== "video", reviewAttempt?.kind === "video");
           } catch (error) {
             if (!stillOwnsReview() || mediaTransfer.isAbortError(error)) return false;
             if (!reviewAttempt) throw error;
@@ -3677,6 +3706,7 @@
     if (!button) return;
     const supported = Boolean(state.session) && featureSupported(FEATURES.MEDIA_BROWSER);
     const reviewStatus = state.latestMediaReviewStatus;
+    const reviewPrefix = state.latestMediaReviewKind === "video" ? "latestVideo" : "latestMedia";
     const pending = reviewStatus === "SEARCHING" || reviewStatus === "NOT_READY";
     button.hidden = !supported;
     button.disabled = !state.latestMediaItem;
@@ -3684,9 +3714,9 @@
       ? t(pending ? "openPreviousMedia" : "openLatestMedia") : t("latestMediaEmpty"));
     ui.latestMediaHeading.textContent = t(pending ? "previouslyVisibleMedia" : "latestMedia");
     ui.latestMediaReview.hidden = !supported || reviewStatus === "IDLE";
-    ui.latestMediaReviewStatus.textContent = t(reviewStatus === "SEARCHING" ? "latestMediaSearching" :
-      reviewStatus === "NOT_READY" ? (state.latestMediaReviewReadFailed ? "latestMediaReadFailed" : "latestMediaNotReady") :
-        "latestMediaFound");
+    ui.latestMediaReviewStatus.textContent = t(reviewStatus === "SEARCHING" ? `${reviewPrefix}Searching` :
+      reviewStatus === "NOT_READY" ? (state.latestMediaReviewReadFailed ? `${reviewPrefix}ReadFailed` : `${reviewPrefix}NotReady`) :
+        `${reviewPrefix}Found`);
     ui.latestMediaRetry.hidden = !pending;
     ui.latestMediaRetry.disabled = reviewStatus !== "NOT_READY" || cameraInteractionBusy() ||
       Boolean(state.latestMediaRefreshPromise);

@@ -768,6 +768,7 @@ cases.push({
     assert.deepEqual(originalRequests, []);
     await page.locator(".media-actions button").first().click();
     await page.waitForSelector("#media-details-dialog[open]");
+    await page.waitForSelector("#media-details-download:not([disabled])");
     assert.equal(await page.isDisabled("#media-details-download"), false);
     await page.keyboard.press("Escape");
   },
@@ -1051,6 +1052,7 @@ async function run() {
         try {
           if (await page.locator("#media-date-dialog[open]").count()) await page.keyboard.press("Escape");
           if (await page.locator("#media-preview-dialog[open]").count()) await page.click("#media-preview-close");
+          if (await page.locator("#media-details-dialog[open]").count()) await page.click("#media-details-close");
           await page.evaluate(() => window.__releaseSyntheticWrite?.());
           await page.evaluate(() => window.__releaseBatchWrite?.());
           if (await page.locator("#control-view:not([hidden])").count()) {

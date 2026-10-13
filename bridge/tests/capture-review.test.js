@@ -820,3 +820,105 @@ test("download owner retains normal active-transfer cancellation and discards pa
   assert.equal(subject.state.mediaDownload, null);
   assert.equal(subject.state.mediaDownloadOwner, null);
 });
+
+// Recording review uses only observations already loaded before STOP.
+const OLD_VIDEO = { id: "old-video", name: "OLD.MP4", kind: "VIDEO", date: "2099-01-01" };
+const NEW_VIDEO = { id: "new-video", name: "NEW.MP4", kind: "VIDEO", date: "2026-01-01" };
+function recordingSubject({ stop = { recording: false } } = {}) {
+  const s = context({ loaded: [OLD_A, OLD_VIDEO], latest: OLD_A });
+  s.state.captureMode = "video"; s.state.status.recording = true;
+  const originalApi = s.api;
+  s.api = async (url, options = {}) => {
+    if (url.endsWith("/recording/stop")) {
+      s.requests.push({ url, method: "POST" });
+      if (stop instanceof Error) throw stop;
+      return stop;
+    }
+    return originalApi(url, options);
+  };
+  return s;
+}
+test("confirmed recording stop reviews only a newly visible video", async () => {
+  const s = recordingSubject(); s.listing = [NEW_C, OLD_VIDEO, NEW_VIDEO];
+  await captureAndReview(s);
+  assert.equal(s.state.latestMediaItem?.id, NEW_VIDEO.id);
+  assert.equal(s.state.latestMediaReviewStatus, "READY");
+  assert.equal(writes(s).length, 1); assert.match(writes(s)[0].url, /recording\/stop$/);
+});
+test("recording retry excludes old video and does not replay REC", async () => {
+  const s = recordingSubject(); s.listing = [NEW_C, OLD_VIDEO]; await captureAndReview(s);
+  assert.equal(s.state.latestMediaReviewStatus, "NOT_READY");
+  assert.equal(listingRequests(s).length, 4);
+  s.listing = [NEW_C, OLD_VIDEO, NEW_VIDEO]; await s.retryLatestMedia();
+  assert.equal(s.state.latestMediaItem?.id, NEW_VIDEO.id); assert.equal(writes(s).length, 1);
+});
+for (const stop of [{}, { recording: null }, { recording: true }, new Error("STOP response lost")]) {
+  test(`unconfirmed recording stop does not read new media: ${JSON.stringify(stop)}`, async () => {
+    const s = recordingSubject({ stop }); s.listing = [NEW_VIDEO]; await captureAndReview(s);
+    assert.equal(listingRequests(s).length, 0); assert.equal(writes(s).length, 1);
+    assert.notEqual(s.state.latestMediaReviewStatus, "READY");
+  });
+}
+
+test("recording start does not start a post-stop listing", async () => {
+  const s = recordingSubject(); s.state.status.recording = false;
+  s.api = async (url) => { s.requests.push({url, method: "POST"}); assert.match(url, /recording\/start$/); return {recording:true}; };
+  await captureAndReview(s); assert.equal(writes(s).length, 1); assert.equal(listingRequests(s).length, 0);
+});
+test("lost STOP cannot be mistaken for acknowledged still-capture readback recovery", async () => {
+  const error = new Error("ambiguous STOP"); error.code = "CAPTURE_STATUS_READBACK_FAILED";
+  const s = recordingSubject({stop:error}); await captureAndReview(s);
+  assert.equal(listingRequests(s).length, 0); assert.equal(writes(s).length, 1);
+});
+test("confirmed STOP without media capability sends no listing", async () => {
+  const s = recordingSubject(); s.featureSupported = feature => feature !== "MEDIA_BROWSER";
+  await captureAndReview(s); assert.equal(listingRequests(s).length, 0); assert.equal(writes(s).length, 1);
+});
+test("video retry while media is busy sends neither listing nor REC", async () => {
+  const s = recordingSubject(); s.listing = [OLD_VIDEO]; await captureAndReview(s);
+  const reads = listingRequests(s).length; s.state.mediaDownloadPreparing = true;
+  await s.retryLatestMedia(); assert.equal(listingRequests(s).length, reads); assert.equal(writes(s).length, 1);
+});
+test("video review excludes previously observed candidates outside the current gallery", async () => {
+  const s = recordingSubject(); s.state.latestMediaCandidates = {sessionId:s.state.session.id, ids:new Set([NEW_VIDEO.id])};
+  s.listing = [NEW_VIDEO, NEW_C]; await captureAndReview(s);
+  assert.equal(s.state.latestMediaReviewStatus, "NOT_READY"); assert.equal(s.state.latestMediaItem.id, OLD_A.id);
+});
+test("new still capture retires a pending video review and restores photo selection", async () => {
+  const s = recordingSubject(); const held = deferred(); const api = s.api; let heldOnce = false;
+  s.api = async (url, options) => {
+    if (url.endsWith("/media?limit=8") && !heldOnce) { heldOnce=true; return held.promise; }
+    return api(url,options);
+  };
+  await s.operateShutter(); const oldReview = s.state.latestMediaRefreshPromise;
+  s.state.captureMode = "photo"; s.listing = [NEW_VIDEO, NEW_C]; await captureAndReview(s);
+  assert.equal(s.state.latestMediaItem.id, NEW_C.id); assert.equal(s.state.latestMediaReviewKind, "photo");
+  held.resolve({items:[NEW_VIDEO]}); await oldReview;
+  assert.equal(s.state.latestMediaItem.id, NEW_C.id); assert.equal(writes(s).length, 2);
+});
+test("recording STOP retires an old pending still review before the stop response", async () => {
+  const s = context(); const held = deferred(); const api = s.api; let first=true;
+  s.api = async (url,options) => {
+    if (url.endsWith("/recording/stop")) { s.requests.push({url,method:"POST"}); return {recording:false}; }
+    if (url.endsWith("/media?limit=8") && first) { first=false; return held.promise; }
+    return api(url,options);
+  };
+  await s.operateShutter(); const oldReview=s.state.latestMediaRefreshPromise;
+  s.state.captureMode="video";s.state.status.recording=true;s.listing=[NEW_C,NEW_VIDEO];
+  await captureAndReview(s); held.resolve({items:[NEW_C]});await oldReview;
+  assert.equal(s.state.latestMediaItem.id,NEW_VIDEO.id);assert.equal(s.state.latestMediaReviewKind,"video");
+});
+for (const failure of [false,true]) {
+  test(`retired STOP ${failure ? "failure" : "success"} cannot replace reused-ID session state`, async () => {
+    const s=recordingSubject(); const held=deferred(); s.api=async url=>{s.requests.push({url,method:"POST"});return held.promise;};
+    const run=s.operateShutter();s.state.session={id:s.state.session.id};s.state.status={owner:"B"};s.state.busy=true;
+    if(failure) held.reject(new Error("old STOP"));else held.resolve({recording:false});await run;
+    assert.equal(s.state.status.owner,"B");assert.equal(s.state.busy,true);assert.equal(listingRequests(s).length,0);
+  });
+}
+test("video review uses video-specific retry and result messages", async () => {
+  const s=recordingSubject(); installLatestMediaRenderer(s);s.listing=[OLD_VIDEO];await captureAndReview(s);
+  assert.equal(s.ui.latestMediaReviewStatus.textContent,"latestVideoNotReady");
+  s.listing=[NEW_VIDEO];await s.retryLatestMedia();
+  assert.equal(s.ui.latestMediaReviewStatus.textContent,"latestVideoFound");
+});
