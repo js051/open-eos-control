@@ -119,6 +119,8 @@ data class CameraUiState(
     val captureReviewStatus: CaptureReviewStatus = CaptureReviewStatus.IDLE,
     val captureStatusReadbackFailed: Boolean = false,
     val pendingRecordingCommand: RecordingCommand? = null,
+    val recordingCommandUnconfirmed: Boolean = false,
+    val recordingDisconnectWarning: Boolean = false,
     val recordingStartNotConfirmed: Boolean = false,
     val mediaThumbnails: Map<String, Bitmap> = emptyMap(),
     val mediaThumbnailLoadingIds: Set<String> = emptySet(),
@@ -255,6 +257,7 @@ internal fun CameraUiState.dismissVisibleCameraMessage(): CameraUiState = when {
     shutterReleaseUnconfirmed || pendingRecordingCommand != null -> this
     error != null || connectionRecovery != null -> copy(error = null, errorOperation = null, connectionRecovery = null)
     recordingStartNotConfirmed -> copy(recordingStartNotConfirmed = false)
+    recordingDisconnectWarning -> copy(recordingDisconnectWarning = false)
     else -> copy(errorOperation = null, shutterDisconnectWarning = false)
 }
 

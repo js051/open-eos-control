@@ -22,6 +22,7 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -1248,41 +1249,39 @@ class CcapiClient(
     suspend fun startRecording(): CameraStatus {
         refreshTemperatureStatusForRestrictedCommand()
         requireMovieRecordingAllowed()
-        if (isRealCamera) {
-            val operation = recordingOperation()
-            if (enforceAdvertisedOperations && operation == null) {
-                error("Camera did not advertise movie recording control.")
-            }
-            commandOk(
-                pathSuffix = "/shooting/control/recbutton",
-                payload = JSONObject().put("action", "start"),
-                operation = operation,
-            )
-            isRecording = true
-        } else {
-            postJson("/ccapi/record/start", JSONObject())
-        }
-        observedFeatures.add(CameraFeature.VIDEO_RECORDING)
-        return recordingStatusAfterAcknowledgement(RecordingCommand.START)
+        return recordingCommand(RecordingCommand.START)
     }
 
-    suspend fun stopRecording(): CameraStatus {
-        if (isRealCamera) {
-            val operation = recordingOperation()
-            if (enforceAdvertisedOperations && operation == null) {
-                error("Camera did not advertise movie recording control.")
+    suspend fun stopRecording(): CameraStatus = recordingCommand(RecordingCommand.STOP)
+
+    private suspend fun recordingCommand(command: RecordingCommand): CameraStatus {
+        val operation = if (isRealCamera) recordingOperation() else null
+        if (isRealCamera && enforceAdvertisedOperations && operation == null) {
+            error("Camera did not advertise movie recording control.")
+        }
+        val evidence = currentCoroutineContext()[RecordingRequestEvidence] ?: RecordingRequestEvidence(command)
+        try {
+            if (isRealCamera) {
+                commandOk(
+                    pathSuffix = "/shooting/control/recbutton",
+                    payload = JSONObject().put("action", if (command == RecordingCommand.START) "start" else "stop"),
+                    operation = operation,
+                    recordingEvidence = evidence,
+                )
+                isRecording = command == RecordingCommand.START
+            } else {
+                postJson("/ccapi/record/${if (command == RecordingCommand.START) "start" else "stop"}", JSONObject(), evidence)
             }
-            commandOk(
-                pathSuffix = "/shooting/control/recbutton",
-                payload = JSONObject().put("action", "stop"),
-                operation = operation,
-            )
-            isRecording = false
-        } else {
-            postJson("/ccapi/record/stop", JSONObject())
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Exception) {
+            if (evidence.unresolved && (exception is IOException || exception is JSONException)) {
+                throw RecordingCommandUnconfirmedException(command, exception)
+            }
+            throw exception
         }
         observedFeatures.add(CameraFeature.VIDEO_RECORDING)
-        return recordingStatusAfterAcknowledgement(RecordingCommand.STOP)
+        return recordingStatusAfterAcknowledgement(command)
     }
 
     private suspend fun recordingStatusAfterAcknowledgement(command: RecordingCommand): CameraStatus = try {
@@ -2874,6 +2873,7 @@ class CcapiClient(
         pathSuffix: String,
         payload: JSONObject,
         operation: CcapiApiOperation? = null,
+        recordingEvidence: RecordingRequestEvidence? = null,
     ) {
         val selected = operation ?: if (!enforceAdvertisedOperations) {
             CcapiApiOperation(method = "POST", path = "$apiVersionPrefix$pathSuffix")
@@ -2887,7 +2887,7 @@ class CcapiClient(
             "POST" -> builder.post(requestBody).build()
             else -> error("Unsupported CCAPI command method ${selected.method} for ${selected.path}")
         }
-        requestOk(request)
+        requestOk(request, recordingEvidence = recordingEvidence)
     }
 
     private suspend fun withRecoverableFocusRelease(
@@ -3972,11 +3972,11 @@ class CcapiClient(
         }
     }
 
-    private suspend fun postJson(path: String, payload: JSONObject): JSONObject = requestJson(
+    private suspend fun postJson(path: String, payload: JSONObject, recordingEvidence: RecordingRequestEvidence? = null): JSONObject = requestJson(
         Request.Builder()
             .url("$baseUrl$path")
             .post(payload.toString().toRequestBody(jsonMediaType))
-            .build(),
+            .build(), recordingEvidence,
     )
 
     private suspend fun patchJson(path: String, payload: JSONObject): JSONObject = requestJson(
@@ -4045,7 +4045,7 @@ class CcapiClient(
         return mutationHttpClient.newCall(request.newBuilder().method(request.method, oneShot).build())
     }
 
-    private suspend fun requestJson(request: Request): JSONObject = withContext(Dispatchers.IO) {
+    private suspend fun requestJson(request: Request, recordingEvidence: RecordingRequestEvidence? = null): JSONObject = withContext(Dispatchers.IO) {
         val call = newCameraCall(request)
         val readOnly = request.method == "GET" || request.method == "HEAD"
         val cancelCall = AtomicBoolean(true)
@@ -4053,7 +4053,12 @@ class CcapiClient(
             try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
         } else null
         try {
+            recordingEvidence?.let {
+                currentCoroutineContext().ensureActive()
+                it.attempted = true
+            }
             call.execute().use { response ->
+                recordingEvidence?.rejected = !response.isSuccessful
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
                     throw CcapiHttpException(
@@ -4108,8 +4113,14 @@ class CcapiClient(
     private suspend fun requestOk(
         request: Request,
         expectedStatusCode: Int? = null,
+        recordingEvidence: RecordingRequestEvidence? = null,
     ): Unit = withContext(Dispatchers.IO) {
+        recordingEvidence?.let {
+            currentCoroutineContext().ensureActive()
+            it.attempted = true
+        }
         newCameraCall(request).execute().use { response ->
+            recordingEvidence?.rejected = !response.isSuccessful
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw CcapiHttpException(

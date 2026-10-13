@@ -704,4 +704,6 @@
     <string name="recording_stop_pending">停止指令已接受，但尚未確認已停止。請更新狀態，必要時可再次使用「停止錄影」。</string>
     <string name="recording_start_not_confirmed">開始指令後，相機回報未錄影。再次開始前請檢查相機。</string>
     <string name="refresh_recording_status">更新錄影狀態</string>
+    <string name="recording_command_unconfirmed">錄影指令結果不明，相機可能仍在錄影。請使用「停止錄影」或在機身確認；更新狀態無法確認遺失的指令回應。</string>
+    <string name="recording_disconnect_warning">上一台相機可能仍在錄影，尚未確認已停止，請在機身確認。</string>
 </resources>

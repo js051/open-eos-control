@@ -941,4 +941,6 @@
     <string name="recording_stop_pending">Stop command accepted. Stopping is not confirmed. Refresh status, or use Stop recording again if needed.</string>
     <string name="recording_start_not_confirmed">The camera reports it is not recording after the Start command. Check the camera before starting again.</string>
     <string name="refresh_recording_status">Refresh recording status</string>
+    <string name="recording_command_unconfirmed">The recording command result is unknown. The camera may still be recording. Use Stop recording or check the camera. Refresh cannot confirm a lost command response.</string>
+    <string name="recording_disconnect_warning">Check the previous camera: recording may still be active and was not confirmed stopped.</string>
 </resources>

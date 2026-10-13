@@ -13,6 +13,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -24,6 +25,7 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -612,6 +614,182 @@ class CameraRecordingReviewRecoveryTest {
         assertEquals(listOf("start"), peer.recordingActions.toList())
     }
 
+    @Test fun appliedStartWithLostResponseCannotBeClearedByCachedFalseOrOldEventsAndNextTapStops() = runBlocking {
+        connect()
+        peer.enqueueRecordingEvent("stop")
+        assertTrue(pumpUntil(advanceTime = true) { model.uiState.value.status?.recording == false })
+        peer.dropNextRecordingResponse.set(true)
+        model.toggleRecording()
+        awaitRecordingPending(RecordingCommand.START)
+        assertTrue(peer.recording.get()) // Independent camera truth, changed before losing the response.
+        assertTrue(model.uiState.value.recordingCommandUnconfirmed)
+        assertEquals(false, model.uiState.value.status?.recording)
+        val request = peer.recordingRequests.single()
+        assertNull(request.failure)
+        assertEquals("POST", request.method)
+        assertEquals("start", JSONObject(request.body.clone().readUtf8()).getString("action"))
+        val writes = peer.recordingActions.toList()
+        repeat(2) {
+            model.refresh()
+            assertTrue(pumpUntil { !model.uiState.value.busy })
+            assertTrue(model.uiState.value.recordingCommandUnconfirmed)
+            assertEquals(RecordingCommand.START, model.uiState.value.pendingRecordingCommand)
+        }
+        peer.enqueueRecordingEvent("stop")
+        advanceAndSettle()
+        assertTrue(model.uiState.value.recordingCommandUnconfirmed)
+        assertTrue(model.uiState.value.recordingStopAvailable)
+        assertEquals(writes, peer.recordingActions.toList())
+        // Withdrawal of optional capabilities or a temperature restriction must not hide Stop.
+        overrideState { it.copy(capabilities = null, status = it.status?.copy(
+            temperature = dev.openeos.control.data.CameraTemperatureStatus.RESTRICTION_MOVIE_RECORDING)) }
+        assertFalse(model.uiState.value.movieRecordingTemperatureAllowed)
+        model.toggleRecording()
+        assertTrue(pumpUntil { !model.uiState.value.busy && model.uiState.value.pendingRecordingCommand == null })
+        assertFalse(peer.recording.get())
+        assertFalse(model.uiState.value.recordingCommandUnconfirmed)
+        assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
+    }
+
+    @Test fun rejectedStartNeverCreatesUnknownAndRejectedStopPreservesUnknownStart() = runBlocking {
+        connect(native = false)
+        peer.rejectStart.set(true)
+        model.toggleRecording()
+        assertTrue(pumpUntil { !model.uiState.value.busy && model.uiState.value.errorOperation == CameraOperation.RECORDING })
+        assertFalse(peer.recording.get())
+        assertNull(model.uiState.value.pendingRecordingCommand)
+        assertFalse(model.uiState.value.recordingCommandUnconfirmed)
+        peer.rejectStart.set(false)
+        peer.dropNextRecordingResponse.set(true)
+        model.toggleRecording()
+        awaitRecordingPending(RecordingCommand.START)
+        peer.rejectStop.set(true)
+        model.toggleRecording()
+        assertTrue(pumpUntil { !model.uiState.value.busy && model.uiState.value.errorOperation == CameraOperation.RECORDING })
+        peer.reportedRecording.set(false)
+        model.refresh()
+        assertTrue(pumpUntil { !model.uiState.value.busy })
+        assertTrue(peer.recording.get())
+        assertTrue(model.uiState.value.recordingCommandUnconfirmed)
+        assertEquals(RecordingCommand.START, model.uiState.value.pendingRecordingCommand)
+        assertEquals(CaptureReviewStatus.IDLE, model.uiState.value.captureReviewStatus)
+        assertEquals(listOf("start", "start", "stop"), peer.recordingActions.toList())
+    }
+
+    @Test fun lostStopKeepsOriginalReviewBaselineAcrossGalleryRefreshAndManualStopAck() = runBlocking {
+        connect(native = false)
+        startRecording()
+        peer.dropNextRecordingResponse.set(true)
+        model.toggleRecording()
+        awaitRecordingPending(RecordingCommand.STOP)
+        assertFalse(peer.recording.get())
+        assertTrue(model.uiState.value.recordingCommandUnconfirmed)
+        val reads = peer.listingReads.get()
+        peer.reportedRecording.set(false)
+        model.refresh()
+        assertTrue(pumpUntil { !model.uiState.value.busy })
+        assertTrue(model.uiState.value.recordingCommandUnconfirmed)
+        assertEquals(reads, peer.listingReads.get())
+        peer.publishAfterStopRead.set(0)
+        model.refreshMedia()
+        assertTrue(pumpUntil { !model.uiState.value.mediaLibraryLoading && model.uiState.value.mediaItems.any { it.name == "NEW.MP4" } })
+        model.toggleRecording()
+        assertTrue(pumpUntil(advanceTime = true) {
+            model.uiState.value.pendingRecordingCommand == null && model.uiState.value.captureReviewItem?.name == "NEW.MP4"
+        })
+        assertFalse(model.uiState.value.recordingCommandUnconfirmed)
+        assertEquals(listOf("start", "stop", "stop"), peer.recordingActions.toList())
+    }
+
+    @Test fun cancelBeforeSendHasNoResponsibilityButCancelAfterPeerAppliedStartRetainsStop() = runBlocking {
+        connect()
+        val preflight = peer.gateNextTemperature()
+        model.toggleRecording()
+        assertTrue(pumpUntil { preflight.entered.count == 0L })
+        val cancelledBeforeSend = recordingJob()
+        cancelledBeforeSend.cancel()
+        preflight.release.countDown()
+        assertTrue(pumpUntil { cancelledBeforeSend.isCompleted && !model.uiState.value.busy })
+        assertTrue(cancelledBeforeSend.isCancelled)
+        assertTrue(peer.recordingActions.isEmpty())
+        assertNull(model.uiState.value.pendingRecordingCommand)
+        val gate = peer.gateNextRecording()
+        model.toggleRecording()
+        assertTrue(pumpUntil { gate.entered.count == 0L })
+        assertTrue(peer.recording.get())
+        val job = recordingJob()
+        job.cancel()
+        gate.release.countDown()
+        assertTrue(pumpUntil { job.isCompleted && !model.uiState.value.busy })
+        assertTrue(job.isCancelled)
+        assertTrue(model.uiState.value.recordingCommandUnconfirmed)
+        assertEquals(RecordingCommand.START, model.uiState.value.pendingRecordingCommand)
+        peer.reportedRecording.set(false)
+        model.refresh()
+        assertTrue(pumpUntil { !model.uiState.value.busy })
+        assertTrue(model.uiState.value.recordingCommandUnconfirmed)
+        peer.reportedRecording.set(null)
+        model.toggleRecording()
+        assertTrue(pumpUntil { !model.uiState.value.busy && model.uiState.value.pendingRecordingCommand == null })
+        assertFalse(peer.recording.get())
+        assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
+    }
+
+    @Test fun lateUnknownRefreshCannotRestoreResponsibilityAfterNewManualStopAck() = runBlocking {
+        connect(native = false)
+        peer.dropNextRecordingResponse.set(true)
+        model.toggleRecording()
+        awaitRecordingPending(RecordingCommand.START)
+        peer.reportedRecording.set(false)
+        val gate = peer.gateNextStatus()
+        model.refresh()
+        assertTrue(pumpUntil { gate.entered.count == 0L })
+        model.toggleRecording()
+        assertTrue(pumpUntil { CameraOperation.RECORDING !in model.uiState.value.pendingOperations &&
+            model.uiState.value.pendingRecordingCommand == null })
+        assertFalse(peer.recording.get())
+        gate.release.countDown()
+        assertTrue(pumpUntil { !model.uiState.value.busy })
+        assertFalse(model.uiState.value.recordingCommandUnconfirmed)
+        assertNull(model.uiState.value.pendingRecordingCommand)
+        assertEquals(false, model.uiState.value.status?.recording)
+        assertEquals(listOf("start", "stop"), peer.recordingActions.toList())
+    }
+
+    @Test fun disconnectAfterSendWarnsAboutOldCameraWithoutSendingStopOrInheritingOwner() = runBlocking {
+        connect(native = false)
+        val gate = peer.gateNextRecording()
+        model.toggleRecording()
+        assertTrue(pumpUntil { gate.entered.count == 0L })
+        assertTrue(peer.recording.get())
+        model.disconnect()
+        assertTrue(model.uiState.value.recordingDisconnectWarning)
+        gate.release.countDown()
+        assertTrue(pumpUntil { !model.uiState.value.connected && !model.uiState.value.busy })
+        assertNull(model.uiState.value.pendingRecordingCommand)
+        assertFalse(model.uiState.value.recordingCommandUnconfirmed)
+        peer.reportedRecording.set(false)
+        connect(native = false)
+        advanceAndSettle()
+        assertTrue(model.uiState.value.recordingDisconnectWarning)
+        assertNull(model.uiState.value.pendingRecordingCommand)
+        assertFalse(model.uiState.value.recordingStopAvailable)
+        assertEquals(listOf("start"), peer.recordingActions.toList())
+    }
+
+    private fun recordingJob(): Job {
+        val field = CameraViewModel::class.java.getDeclaredField("cameraOperationJobs").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        return requireNotNull((field.get(model) as Map<CameraOperation, Job>)[CameraOperation.RECORDING])
+    }
+
+    private fun overrideState(update: (CameraUiState) -> CameraUiState) {
+        val field = CameraViewModel::class.java.getDeclaredField("_uiState").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val state = field.get(model) as MutableStateFlow<CameraUiState>
+        state.value = update(state.value)
+    }
+
     private suspend fun awaitRecordingPending(command: RecordingCommand) {
         assertTrue("Pending ${model.uiState.value.pendingRecordingCommand}; error=${model.uiState.value.error}",
             pumpUntil { model.uiState.value.pendingRecordingCommand == command && !model.uiState.value.busy })
@@ -662,6 +840,9 @@ private class RecordingReviewPeer {
     val server = MockWebServer()
     lateinit var baseUrl: String
     val recordingActions = CopyOnWriteArrayList<String>()
+    val recordingRequests = CopyOnWriteArrayList<RecordedRequest>()
+    val dropNextRecordingResponse = AtomicBoolean(false)
+    private val recordingEvent = AtomicReference<String?>()
     val writes = CopyOnWriteArrayList<String>()
     val recording = AtomicBoolean(false)
     val reportedRecording = AtomicReference<Boolean?>()
@@ -687,11 +868,16 @@ private class RecordingReviewPeer {
     private val gates = CopyOnWriteArrayList<Gate>()
     private val nextStatus = AtomicReference<Gate?>()
     private val nextStop = AtomicReference<Gate?>()
+    private val nextRecording = AtomicReference<Gate?>()
+    private val nextTemperature = AtomicReference<Gate?>()
     private val nextListing = AtomicReference<Gate?>()
     private val nextInfo = AtomicReference<Gate?>()
     private val nextEventDelete = AtomicReference<Gate?>()
     fun gateNextStatus() = Gate().also { gates += it; nextStatus.set(it) }
     fun gateNextStop() = Gate().also { gates += it; nextStop.set(it) }
+    fun gateNextRecording() = Gate().also { gates += it; nextRecording.set(it) }
+    fun gateNextTemperature() = Gate().also { gates += it; nextTemperature.set(it) }
+    fun enqueueRecordingEvent(action: String) { recordingEvent.set(action) }
     fun gateNextListing() = Gate().also { gates += it; nextListing.set(it) }
     fun gateNextInfo() = Gate().also { gates += it; nextInfo.set(it) }
     fun gateNextEventDelete() = Gate().also { gates += it; nextEventDelete.set(it) }
@@ -709,8 +895,9 @@ private class RecordingReviewPeer {
                     return if (rejectCapture.get()) MockResponse().setResponseCode(503) else json("{}")
                 }
                 if (request.method == "POST" && (path.endsWith("/recbutton") || path.startsWith("/ccapi/record/"))) {
-                    val action = if (path.endsWith("/recbutton")) JSONObject(request.body.readUtf8()).getString("action")
+                    val action = if (path.endsWith("/recbutton")) JSONObject(request.body.clone().readUtf8()).getString("action")
                         else path.substringAfterLast('/')
+                    recordingRequests += request
                     recordingActions += action
                     if (action == "stop" && rejectStop.get()) return MockResponse().setResponseCode(503)
                     if (action == "start" && rejectStart.get()) return MockResponse().setResponseCode(503)
@@ -720,12 +907,15 @@ private class RecordingReviewPeer {
                         stopReviewReads.set(0)
                         hold(nextStop)
                     }
+                    hold(nextRecording)
+                    if (dropNextRecordingResponse.getAndSet(false)) return MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
                     return json("{}")
                 }
                 return when {
-                    path == "/ccapi" -> json("""{"ver110":[{"path":"/deviceinformation","get":true},{"path":"/devicestatus/battery","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/control/recbutton","post":true},{"path":"/shooting/control/shutterbutton","post":true},{"path":"/contents","get":true},{"path":"/event/polling","get":true,"delete":true}]}""")
+                    path == "/ccapi" -> json("""{"ver110":[{"path":"/deviceinformation","get":true},{"path":"/devicestatus/battery","get":true},{"path":"/devicestatus/temperature","get":true},{"path":"/shooting/settings","get":true},{"path":"/shooting/control/recbutton","post":true},{"path":"/shooting/control/shutterbutton","post":true},{"path":"/contents","get":true},{"path":"/event/polling","get":true,"delete":true}]}""")
                     path.endsWith("/deviceinformation") -> json("""{"productname":"Synthetic recording review","serialnumber":"TEST-REC-REVIEW"}""")
                     path.endsWith("/devicestatus/battery") -> json("""{"level":"90"}""")
+                    path.endsWith("/devicestatus/temperature") -> { hold(nextTemperature); json("""{"status":"normal"}""") }
                     path.endsWith("/shooting/settings") -> json("{}")
                     path == "/ccapi/info" -> json("""{"connected":true,"model":"Synthetic recording review","serial":"TEST-REC-REVIEW","api":"simulator"}""")
                     path == "/ccapi/status" -> {
@@ -742,7 +932,10 @@ private class RecordingReviewPeer {
                         if (changed) nonemptyEvents.incrementAndGet()
                         if (path == "/ccapi/events") json(JSONObject().put("sequence", nonemptyEvents.get())
                             .put("keys", JSONArray(if (changed) listOf("contents") else emptyList<String>())).toString())
-                        else json(if (changed) """{"contents":{}}""" else "{}")
+                        else {
+                            val action = recordingEvent.getAndSet(null)
+                            json(if (action != null) """{"recbutton":{"action":"$action"}}""" else if (changed) """{"contents":{}}""" else "{}")
+                        }
                     }
                     path == "/ccapi/media" -> {
                         countListing()
