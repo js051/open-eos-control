@@ -199,7 +199,7 @@ class RecordingStatusReadbackTest {
                 request.path.orEmpty().contains("/recording/") -> {
                     actions += request.path!!.substringAfterLast('/')
                     val c = current.get()
-                    json("""{"error":{"code":"${c.code}","feature":"${c.feature}","engine":"${c.engine}"}}""").setResponseCode(c.status)
+                    json("""{"error":{"code":"${c.code}","message":"Synthetic failure","feature":"${c.feature}","engine":"${c.engine}"}}""").setResponseCode(c.status)
                 }
                 else -> json()
             }
@@ -261,7 +261,15 @@ class RecordingStatusReadbackTest {
 
     @Test fun malformedBridge502AfterAppliedCommandIsUnknownButCompleteRejectionRemainsOrdinary() = runBlocking {
         data class Case(val body: String, val status: Int = 502, val unknown: Boolean = true)
-        val cases = listOf(Case(""), Case("invalid"), Case("{}"), Case("""{"error":{"code":5}}"""),
+        val cases = listOf(Case(""), Case("invalid"), Case("{}"),
+            Case("""{"error":{"code":5,"message":"Synthetic failure"}}"""),
+            Case("""{"error":{"code":"CCAPI_HTTP_ERROR"}}"""),
+            Case("""{"error":{"code":"CCAPI_HTTP_ERROR","message":""}}"""),
+            Case("""{"error":{"code":"CCAPI_HTTP_ERROR","message":"   "}}"""),
+            Case("""{"error":{"code":"CCAPI_HTTP_ERROR","message":5}}"""),
+            Case("""{"error":{"code":"CCAPI_HTTP_ERROR","message":null}}"""),
+            Case("""{"error":{"code":"CCAPI_HTTP_ERROR","message":{}}}"""),
+            Case("""{"error":{"code":"RECORDING_STATUS_READBACK_FAILED"}}"""),
             Case("""{"error":{"code":"CCAPI_HTTP_ERROR","message":"Synthetic rejection"}}""", unknown = false),
             Case("""{"error":{"code":"CCAPI_UNREACHABLE","message":"Synthetic preflight failure"}}""", unknown = false),
             Case("""{"error":{"code":"RECORDING_FAILED","message":"Synthetic rejection"}}""", status = 503, unknown = false))

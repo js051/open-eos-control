@@ -1215,9 +1215,12 @@ class DesktopBridgeClient(
                         cameraDiscovery = cameraDiscovery)
                     // A malformed/missing 502 body can hide either command uncertainty or
                     // acknowledged-readback evidence; it cannot prove camera rejection.
-                    val errorCode = runCatching { JSONObject(body).optJSONObject("error")?.opt("code") }.getOrNull()
+                    val errorEnvelope = runCatching { JSONObject(body).optJSONObject("error") }.getOrNull()
+                    val errorCode = errorEnvelope?.opt("code")
+                    val errorMessage = errorEnvelope?.opt("message")
                     val missingRecordingOutcome = recordingEvidence != null && response.code == 502 &&
-                        (errorCode !is String || errorCode.isBlank())
+                        (errorCode !is String || errorCode.isBlank() ||
+                            errorMessage !is String || errorMessage.isBlank())
                     // Preserve a complete rejection before session/cancellation checks can throw.
                     recordingEvidence?.rejected = !(missingRecordingOutcome || (response.code == 502 &&
                         failure is DesktopBridgeException && (failure.code == "RECORDING_STATUS_READBACK_FAILED" ||
