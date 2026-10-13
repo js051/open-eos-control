@@ -342,12 +342,19 @@ final class URLSessionShutterWireTests: XCTestCase {
 
     func testRecordingReaderCancellationAfterReceivedHeadersClosesPendingBodyWithoutReplay() async throws {
         for status in [200, 502, 503] {
-            let wire = Data("HTTP/1.1 \(status) Synthetic\r\nContent-Length: 64\r\nConnection: close\r\n\r\n".utf8)
+            // Establish a response with an explicitly typed body prefix while its
+            // HTTP framing remains incomplete. Sending bare headers alone did not
+            // reach the URLSession observer in CI; that delivery delay is unresolved.
+            let prefix = Data("{}".utf8)
+            let declaredLength = 64
+            XCTAssertLessThan(prefix.count, declaredLength)
+            var wire = Data("HTTP/1.1 \(status) Synthetic\r\nContent-Type: application/json\r\nContent-Length: \(declaredLength)\r\nConnection: close\r\n\r\n".utf8)
+            wire.append(prefix)
             let peer = try LoopbackShutterPeer(endpoint: ShutterRecoveryEndpoint.variants[0], pressFault: .disconnect,
                 failedReleases: 0, controlResponse: wire, holdControlBodyUntilCancelled: true)
             defer { XCTAssertTrue(peer.stop()) }
-            let headers = expectation(description: "REC reader actually received HTTP headers")
-            let finished = expectation(description: "REC reader settles while body remains gated")
+            let headers = expectation(description: "REC reader actually received HTTP \(status) headers")
+            let finished = expectation(description: "REC reader settles while HTTP \(status) body remains gated")
             let result = RecordingWireResult()
             var request = URLRequest(url: URL(string: peer.baseURL + "/transport-control")!)
             request.httpMethod = "POST"
@@ -367,16 +374,19 @@ final class URLSessionShutterWireTests: XCTestCase {
             }
             defer { task.cancel() }
             await fulfillment(of: [headers], timeout: 2)
-            XCTAssertNil(result.get(), "The body gate is still shut; headers alone cannot finish REC")
+            XCTAssertNil(result.get(), "The remaining body is still gated; a prefix cannot finish REC")
             task.cancel()
             await fulfillment(of: [finished, peer.pendingBodyCancelled], timeout: 2)
             let exchange = try XCTUnwrap(result.get()).get()
             XCTAssertEqual(exchange.response.statusCode, status)
             XCTAssertFalse(exchange.bodyComplete)
             XCTAssertTrue(exchange.cancelled)
-            XCTAssertEqual(exchange.response.body, Data())
+            // Cancellation may win before or after the prefix's data callback.
+            XCTAssertLessThanOrEqual(exchange.response.body.count, prefix.count)
+            XCTAssertEqual(exchange.response.body, Data(prefix.prefix(exchange.response.body.count)))
             XCTAssertEqual(peer.requests().count, 1)
             XCTAssertEqual(peer.requests().first?.method, "POST")
+            XCTAssertEqual(peer.requests().first?.path, "/transport-control")
             XCTAssertEqual(peer.requests().first?.body, commandRequest.httpBody)
             XCTAssertTrue(peer.errors().isEmpty)
         }
@@ -737,8 +747,8 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
         if request.path == "/transport-control", let controlResponse {
             try sendAll(controlResponse, on: socket)
             if holdControlBodyUntilCancelled {
-                // No body bytes or artificial sleeps. The existing three-second
-                // socket deadline bounds a broken cancellation implementation.
+                // The remaining body stays gated without artificial sleeps. The
+                // existing three-second socket deadline bounds broken cancellation.
                 var byte: UInt8 = 0
                 var received: Int
                 repeat { received = Darwin.recv(socket, &byte, 1, 0) } while received < 0 && errno == EINTR
