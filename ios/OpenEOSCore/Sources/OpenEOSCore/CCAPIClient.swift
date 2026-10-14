@@ -910,7 +910,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 magnifications: liveViewMagnifications,
                 currentMagnification: currentLiveViewMagnification,
                 maximumFPS: 30,
-                focusInfoSupported: !ccapiLiveViewSources().isEmpty() && detailedLiveViewOperation() != nil
+                focusInfoSupported: !ccapiLiveViewSources().isEmpty && detailedLiveViewOperation() != nil
             ),
             profile: CameraProfile.from(modelName: cachedModel),
             evidence: capabilityEvidence(),
