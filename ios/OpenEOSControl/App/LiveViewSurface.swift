@@ -8,7 +8,7 @@ struct LiveViewSurface: View {
     @EnvironmentObject private var camera: CameraAppState
 
     var body: some View {
-        LiveViewSurfaceContent(nativeMonitor: camera.rtpController.pixelMonitor)
+        LiveViewSurfaceContent(nativeMonitor: camera.rtpController.pixelMonitor, nativeVideo: camera.rtpController.videoPresentation)
     }
 }
 
@@ -16,6 +16,7 @@ private struct LiveViewSurfaceContent: View {
     @EnvironmentObject private var camera: CameraAppState
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var nativeMonitor: IOSRTPPixelMonitor
+    @ObservedObject var nativeVideo: IOSNativeVideoPresentation
     @State private var monitorOwner = UUID()
     @State private var monitorAnalysis: LiveViewMonitorAnalysis?
     @State private var lutPreviewFrame: LiveViewLutPreviewFrame?
@@ -61,7 +62,7 @@ private struct LiveViewSurfaceContent: View {
                             Text(LocalizedStringKey(nativeMonitor.status.rawValue))
                         }
                         if camera.monitorSettings.cubeLut != nil {
-                            Text("native_monitor_lut_inactive")
+                            Text(LocalizedStringKey(nativeVideo.status.rawValue))
                         }
                     }
                     .font(.caption2)
@@ -235,10 +236,13 @@ private struct LiveViewSurfaceContent: View {
             }
         }
         .task(id: nativeMonitorTaskID) {
-            nativeMonitor.configure(settings: nativeMonitorTaskID.enabled ? camera.monitorSettings : nil, owner: monitorOwner)
+            let settings = nativeMonitorTaskID.enabled ? camera.monitorSettings : nil
+            nativeMonitor.configure(settings: settings, owner: monitorOwner)
+            camera.rtpController.configureVideoProcessing(settings: settings, owner: monitorOwner)
         }
         .onDisappear {
             nativeMonitor.deactivate(owner: monitorOwner)
+            camera.rtpController.deactivateVideoProcessing(owner: monitorOwner)
         }
         .task(id: lutPreviewTaskID) {
             guard pixelMonitoringAvailable,

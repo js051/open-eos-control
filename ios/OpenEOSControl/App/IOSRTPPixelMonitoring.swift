@@ -53,7 +53,7 @@ enum IOSRTPMonitorStatus: String {
 }
 
 /// One retained, read-only renderer buffer and one bounded analysis job. The
-/// native decoder/audio remain the presentation path; this never renders a LUT.
+/// native decoder/audio remain the presentation path; LUT processing happens upstream.
 @MainActor
 final class IOSRTPPixelMonitor: ObservableObject {
     @Published private(set) var analysis: LiveViewMonitorAnalysis?
@@ -85,10 +85,8 @@ final class IOSRTPPixelMonitor: ObservableObject {
     var isProcessing: Bool { lease.inFlight != nil }
 
     func configure(settings requested: LiveViewMonitorSettings?, owner: UUID) {
-        // A retained LUT selection is inactive on native RTP. Analyze exactly
-        // the unmodified native image and disclose that separately in the UI.
+        // Analyze the actual processed output once; LUT identity retires obsolete analyses.
         var next = requested
-        next?.cubeLut = nil
         if next?.needsPixelAnalysis != true { next = nil }
         guard settings != next || configurationOwner != owner else { return }
         configurationOwner = owner
@@ -113,21 +111,19 @@ final class IOSRTPPixelMonitor: ObservableObject {
         lastSubmission = nil
         publishedAt = nil
         analysis = nil
-        status = settings == nil ? .off : (Self.supported ? .waiting : .unsupportedOS)
+        status = settings == nil ? .off : .waiting
     }
 
     func currentAnalysis(settings requested: LiveViewMonitorSettings) -> LiveViewMonitorAnalysis? {
-        var requested = requested
-        requested.cubeLut = nil
         guard settings == requested, let publishedAt,
               ProcessInfo.processInfo.systemUptime - publishedAt < IOSRTPMonitorLease.maximumAge else { return nil }
         return analysis
     }
 
     func frameSubmitted(layer nextLayer: AVSampleBufferDisplayLayer, owner nextOwner: UUID,
-                        format nextFormat: CMVideoFormatDescription) {
+                        format nextFormat: CMVideoFormatDescription, suppliedBuffer: CVPixelBuffer? = nil) {
         guard let settings else { return }
-        guard #available(iOS 17.4, *) else {
+        if suppliedBuffer == nil && !Self.supported {
             status = .unsupportedOS
             return
         }
@@ -148,8 +144,10 @@ final class IOSRTPPixelMonitor: ObservableObject {
         // Swift spelling differs from Objective-C copyDisplayedPixelBuffer.
         // nil is a supported outcome (not ready/protected/unavailable).
         let buffer: CVPixelBuffer?
-        if let readPixels { buffer = readPixels(nextLayer) }
-        else { buffer = renderer.displayedPixelBuffer() }
+        if let suppliedBuffer { buffer = suppliedBuffer }
+        else if let readPixels { buffer = readPixels(nextLayer) }
+        else if #available(iOS 17.4, *) { buffer = renderer.displayedPixelBuffer() }
+        else { buffer = nil }
         guard let buffer else {
             finishFailure(ticket, status: .unavailable)
             return

@@ -119,10 +119,18 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
     @MainActor private var latestPPS: Data?
     @MainActor private var formatDescription: CMVideoFormatDescription?
     @MainActor private var needsKeyFrame = true
+    @MainActor private var deliveryContinuity = IOSRTPVideoDecodeContinuity()
     @MainActor private var renderingEnabled = true
     @MainActor private var renderedSessionID: UUID?
     @MainActor private var pixelReadbackBarrier: UUID?
     @MainActor private(set) lazy var pixelMonitor = IOSRTPPixelMonitor()
+    private let videoProcessor = IOSRTPVideoProcessor()
+    @MainActor private(set) lazy var videoPresentation = IOSNativeVideoPresentation()
+    @MainActor private var videoProcessingOwner: UUID?
+    @MainActor private var videoProcessingGeneration = UUID()
+    @MainActor private var videoLut: CubeLut?
+    @MainActor private var videoProcessingRequired = false
+    @MainActor private var videoProcessingUnavailable = false
     @MainActor var isPixelReadbackSuspended: Bool { pixelReadbackBarrier != nil }
 
     init(videoConsumer: (@MainActor @Sendable (CCAPIH264AccessUnit) -> Void)? = nil,
@@ -175,6 +183,26 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
 
     func setEventHandler(_ handler: @escaping @Sendable (IOSCcapiRTPDelivery) -> Void) {
         handlerLock.synchronized { eventHandler = handler }
+    }
+
+    @MainActor
+    func configureVideoProcessing(settings: LiveViewMonitorSettings?, owner: UUID) {
+        let lut = settings?.cubeLut
+        let required = lut != nil || (!IOSRTPPixelMonitor.supported && settings?.needsPixelAnalysis == true)
+        guard videoProcessingOwner != owner || videoLut != lut || videoProcessingRequired != required else { return }
+        videoProcessingOwner = owner
+        videoLut = lut
+        videoProcessingRequired = required
+        videoProcessingUnavailable = false
+        videoPresentation.status = lut == nil ? .off : .waiting
+        resetRenderer(removingImage: true)
+    }
+
+    @MainActor
+    func deactivateVideoProcessing(owner: UUID) {
+        guard videoProcessingOwner == owner else { return }
+        configureVideoProcessing(settings: nil, owner: owner)
+        videoProcessingOwner = nil
     }
 
     @MainActor
@@ -324,7 +352,9 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
         _ accessUnit: CCAPIH264AccessUnit,
         sequenceParameterSet: Data?,
         pictureParameterSet: Data?,
-        sessionID: UUID
+        sessionID: UUID,
+        presentFrame: Bool = true,
+        deliverySequence: UInt64? = nil
     ) {
         guard audioStateLock.synchronized({ activeAudioSessionID == sessionID && deliveryOwner == sessionID && applicationActive }),
               renderingEnabled else { return }
@@ -332,6 +362,8 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
             clearRendererSession()
             renderedSessionID = sessionID
         }
+        if let deliverySequence,
+           !deliveryContinuity.admit(sequence: deliverySequence, keyFrame: accessUnit.keyFrame) { return }
         if let videoConsumer {
             videoConsumer(accessUnit)
             return
@@ -375,8 +407,61 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
                 accessUnit: accessUnit,
                 formatDescription: formatDescription
             )
+            if videoProcessingRequired && !videoProcessingUnavailable, let latestSPS {
+                let generation = videoProcessingGeneration
+                let attachment = ObjectIdentifier(displayLayer)
+                let accepted = videoProcessor.submit(sampleBuffer, format: formatDescription, lut: videoLut,
+                    sps: latestSPS, present: presentFrame) { [weak self] result in
+                        guard let self, self.videoProcessingGeneration == generation,
+                              let layer = self.displayLayer, ObjectIdentifier(layer) == attachment,
+                              self.renderingEnabled,
+                              self.audioStateLock.synchronized({ self.deliveryOwner == sessionID && self.applicationActive }) else { return }
+                        switch result {
+                        case let .frame(frame):
+                            let output = layer.sampleBufferRenderer
+                            guard self.pixelReadbackBarrier == nil else { return }
+                            guard output.status != .failed, !output.requiresFlushToResumeDecoding else {
+                                self.resetRenderer(removingImage: true)
+                                return
+                            }
+                            guard output.isReadyForMoreMediaData else { return }
+                            output.enqueue(frame.sampleBuffer)
+                            self.videoPresentation.status = self.videoLut == nil ? .off : .applied
+                            // 17.4+ reads the actual displayed image. Older supported OS versions
+                            // analyze the identical processed buffer accepted by this renderer.
+                            self.pixelMonitor.frameSubmitted(layer: layer, owner: sessionID, format: frame.format,
+                                suppliedBuffer: IOSRTPPixelMonitor.supported ? nil : frame.pixelBuffer)
+                            self.emit(.frame(encodedBytes: accessUnit.encodedByteCount, at: Date()), owner: sessionID)
+                        case .backpressure:
+                            break // A dropped output never queues or replays compressed data.
+                        case .unsupportedColor, .unavailable, .failed:
+                            self.videoProcessingUnavailable = true
+                            switch result {
+                            case .unsupportedColor: self.videoPresentation.status = .unsupportedColor
+                            case .unavailable: self.videoPresentation.status = .unavailable
+                            default: self.videoPresentation.status = .failed
+                            }
+                            // Same-session unfiltered native fallback; no camera command or retry loop.
+                            self.resetRenderer(removingImage: true)
+                        }
+                    }
+                // Skipping an encoded inter frame invalidates the prediction chain. Resume only at IDR.
+                needsKeyFrame = !accepted
+                return
+            }
+            if !presentFrame,
+               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true) as? NSArray,
+               let attachment = attachments.firstObject as? NSMutableDictionary {
+                attachment[kCMSampleAttachmentKey_DoNotDisplay] = kCFBooleanTrue
+            }
+            guard renderer.isReadyForMoreMediaData else {
+                // A skipped compressed AU breaks prediction. Wait for IDR rather than accumulating.
+                needsKeyFrame = true
+                return
+            }
             renderer.enqueue(sampleBuffer)
             needsKeyFrame = false
+            guard presentFrame else { return }
             if pixelReadbackBarrier == nil {
                 pixelMonitor.frameSubmitted(layer: displayLayer, owner: sessionID, format: formatDescription)
             }
@@ -484,7 +569,10 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
 
     @MainActor
     private func clearRendererSession() {
+        videoProcessingUnavailable = false
+        videoPresentation.status = videoLut == nil ? .off : .waiting
         renderedSessionID = nil
+        deliveryContinuity = IOSRTPVideoDecodeContinuity()
         latestSPS = nil
         latestPPS = nil
         formatDescription = nil
@@ -493,6 +581,8 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
 
     @MainActor
     private func resetRenderer(removingImage: Bool) {
+        videoProcessingGeneration = UUID()
+        videoProcessor.invalidate()
         pixelMonitor.invalidate()
         needsKeyFrame = true
         let barrier = UUID()
@@ -513,7 +603,7 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
         }
     }
 
-    private static func makeFormatDescription(sps: Data, pps: Data) throws -> CMVideoFormatDescription {
+    static func makeFormatDescription(sps: Data, pps: Data) throws -> CMVideoFormatDescription {
         var result: CMFormatDescription?
         let status = sps.withUnsafeBytes { spsBytes in
             pps.withUnsafeBytes { ppsBytes in
@@ -541,7 +631,7 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
         return result
     }
 
-    private static func makeSampleBuffer(
+    static func makeSampleBuffer(
         accessUnit: CCAPIH264AccessUnit,
         formatDescription: CMVideoFormatDescription
     ) throws -> CMSampleBuffer {
@@ -631,6 +721,7 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
     private var targetFPS = 30
     private var closed = false
     private var lastSubmittedAt: UInt64 = 0
+    private var videoDelivery = IOSRTPVideoDeliveryGate()
     private var latestSPS: Data?
     private var latestPPS: Data?
     private lazy var depacketizer = CCAPIH264RTPDepacketizer(payloadType: description.video.payloadType)
@@ -811,17 +902,25 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
                 let now = DispatchTime.now().uptimeNanoseconds
                 let targetFPS = self.stateLock.synchronized { self.targetFPS }
                 let interval = 1_000_000_000 / UInt64(max(targetFPS, 1))
-                if accessUnit.keyFrame || self.lastSubmittedAt == 0 || now - self.lastSubmittedAt >= interval {
-                    self.lastSubmittedAt = now
+                let present = accessUnit.keyFrame || self.lastSubmittedAt == 0 || now - self.lastSubmittedAt >= interval
+                let ticket = self.stateLock.synchronized { () -> IOSRTPVideoDeliveryGate.Ticket? in
+                    guard !self.closed else { return nil }
+                    return self.videoDelivery.admit(keyFrame: accessUnit.keyFrame)
+                }
+                if let ticket {
+                    if present { self.lastSubmittedAt = now }
                     let latestSPS = self.latestSPS
                     let latestPPS = self.latestPPS
                     Task { @MainActor [weak self] in
                         guard let self else { return }
+                        defer { self.stateLock.synchronized { self.videoDelivery.complete() } }
                         self.sink.enqueue(
                             accessUnit,
                             sequenceParameterSet: latestSPS,
                             pictureParameterSet: latestPPS,
-                            sessionID: self.sessionID
+                            sessionID: self.sessionID,
+                            presentFrame: present,
+                            deliverySequence: ticket.sequence
                         )
                     }
                 }

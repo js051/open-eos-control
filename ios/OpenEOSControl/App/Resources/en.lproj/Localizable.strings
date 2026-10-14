@@ -755,14 +755,14 @@
 "media_files_export_source_unavailable" = "The prepared source is unavailable. Refresh history or explicitly prepare the original again before exporting.";
 
 "native_monitor_off" = "Sampled scopes paused";
-"native_monitor_requires_ios174" = "Native RTP scopes require iOS 17.4 or later.";
+"native_monitor_requires_ios174" = "Pixel monitoring is unavailable on this unprocessed native stream.";
 "native_monitor_waiting" = "Sampled scopes · waiting for pixels";
 "native_monitor_no_pixels" = "Sampled scopes · image unavailable";
 "native_monitor_failed" = "Sampled scopes · unsupported image or conversion failed";
-"native_monitor_sampled" = "Sampled scopes · up to 4 updates/sec · no LUT";
+"native_monitor_sampled" = "Sampled preview scopes · up to 4 updates/sec";
 "native_monitor_stale" = "Sampled scopes · expired";
 "native_monitor_lut_inactive" = "Saved LUT inactive on native RTP";
-"native_monitor_scope_notice" = "Native RTP uses sampled SDR preview scopes, up to 4 updates/sec. A sample expires after 1 second. LUT preview is unavailable; any saved LUT stays inactive.";
+"native_monitor_scope_notice" = "Native LUT processing uses supported 8-bit SDR video. Scopes sample the processed image up to 4 times/sec. iOS 17.4+ reads the display; earlier versions analyze the same processed buffer submitted for display. Unsupported formats keep unfiltered native video.";
 
 "foreground_media_state_copying" = "Copying the retained original to Files…";
 
@@ -795,3 +795,15 @@
 "foreground_files_reason_interrupted" = "The previous process ended without a final result. Inspect the attempted filename in Files.";
 
 "foreground_files_history_help" = "This is a local operation record, not proof of cloud sync or current destination availability. Clearing app history does not remove Files copies.";
+
+"native_lut_off" = "Native video without a LUT";
+
+"native_lut_waiting" = "Waiting for a frame with the selected LUT";
+
+"native_lut_applied" = "LUT applied to native video";
+
+"native_lut_unsupported_color" = "LUT not applied: unsupported color format; native video retained";
+
+"native_lut_unavailable" = "LUT processor unavailable; native video retained";
+
+"native_lut_failed" = "LUT processing failed; native video fallback, LUT retained";
