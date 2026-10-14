@@ -654,7 +654,8 @@ async function verifyMediaDateJourneys(browser, bridgeOrigin, simulatorOrigin) {
       assert.equal(await page.locator(".media-card").count(), 0);
       assert.match(await page.locator("#media-date-summary").innerText(), language === "en" ? /0 of 85.*2 loaded items have unknown dates/ : /85 項中符合 0 項.*2 項日期不明/);
       assert.match(await page.locator("#media-list").innerText(), language === "en" ? /No loaded media matches/ : /沒有符合篩選/);
-      assert.match(await page.locator("#media-summary").innerText(), language === "en" ? /refresh failed.*85 previous/ : /重新整理失敗.*85/);
+      assert.equal(await page.locator("#media-summary").innerText(), language === "en"
+        ? "Media refresh failed - keeping 85 item(s)" : "媒體重新整理失敗 - 保留 85 個");
       assert.deepEqual(snapshot(), failedReads, "Applying a zero-match range preserves the failed-refresh warning without retries");
       await verifyDateDialogLayout(page, language);
 
