@@ -3869,15 +3869,37 @@ class CameraScreensTest {
     }
 
     @Test
-    fun nativeRtpDisablesPixelAnalysisButKeepsGeometricAssists() {
+    fun nativeRtpEnablesSampledPixelAssistsButDisablesLutPreview() {
         val picker = mutableStateOf<SettingPicker?>(SettingPicker.LIVE_VIEW)
-        val actions = noOpActions().copy(openPicker = { picker.value = it })
+        val settings = mutableStateOf(LiveViewMonitorSettings())
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            setHistogramVisible = {
+                settings.value = settings.value.copy(
+                    histogramVisible = it,
+                    waveformVisible = if (it) false else settings.value.waveformVisible,
+                )
+            },
+            setWaveformVisible = {
+                settings.value = settings.value.copy(
+                    waveformVisible = it,
+                    histogramVisible = if (it) false else settings.value.histogramVisible,
+                )
+            },
+            setZebraThreshold = { settings.value = settings.value.copy(zebraThresholdPercent = it) },
+            setFalseColorEnabled = { settings.value = settings.value.copy(falseColorEnabled = it) },
+            setFocusPeakingEnabled = { settings.value = settings.value.copy(focusPeakingEnabled = it) },
+            setFrameGuide = { settings.value = settings.value.copy(frameGuide = it) },
+            setSafeAreaVisible = { settings.value = settings.value.copy(safeAreaVisible = it) },
+            setDesqueeze = { settings.value = settings.value.copy(desqueeze = it) },
+        )
         compose.setContent {
             MaterialTheme {
                 CameraControlScreen(
                     connectedState().copy(
                         activeSettingPicker = picker.value,
                         liveViewSource = LiveViewSource.CCAPI_RTP,
+                        monitorSettings = settings.value,
                     ),
                     actions,
                 )
@@ -3885,13 +3907,74 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.monitoring_assists)).performClick()
-        compose.onNodeWithText(resourceText(R.string.monitoring_assists_rtp_unavailable)).assertExists()
-        compose.onNodeWithText(resourceText(R.string.histogram)).assertIsNotEnabled()
-        compose.onNodeWithText(resourceText(R.string.luma_waveform)).assertIsNotEnabled()
+        compose.onNodeWithText(resourceText(R.string.native_monitor_lut_unavailable)).assertExists()
+        compose.onNodeWithText(resourceText(R.string.monitoring_assists_rtp_unavailable)).assertDoesNotExist()
+        compose.onNodeWithText(resourceText(R.string.histogram))
+            .performScrollTo().assertIsEnabled().performClick().assertIsOn()
+        compose.onNodeWithText(resourceText(R.string.luma_waveform))
+            .performScrollTo().assertIsEnabled().performClick().assertIsOn()
+        compose.onNodeWithText(resourceText(R.string.histogram)).assertIsOff()
         compose.onNodeWithTag("monitor-lut-options").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.load_cube_lut)).assertIsNotEnabled()
-        compose.onNodeWithText(resourceText(R.string.frame_guide)).assertExists()
-        compose.onNodeWithText(resourceText(R.string.anamorphic_desqueeze)).assertExists()
+        compose.onNodeWithTag("monitor-zebra-options").performScrollTo().performScrollToIndex(6)
+        compose.onNodeWithText(resourceText(R.string.zebra_threshold, 95))
+            .assertIsEnabled().performClick().assertIsSelected()
+        compose.onNodeWithText(resourceText(R.string.false_color))
+            .performScrollTo().assertIsEnabled().performClick().assertIsOn()
+        compose.onNodeWithText(resourceText(R.string.focus_peaking))
+            .performScrollTo().assertIsEnabled().performClick().assertIsOn()
+        compose.onNodeWithTag("monitor-frame-guide-options").performScrollTo().performScrollToIndex(2)
+        compose.onNodeWithText(resourceText(R.string.ratio_2_39))
+            .performScrollTo().assertIsEnabled().performClick().assertIsSelected()
+        compose.onNodeWithText(resourceText(R.string.safe_area))
+            .performScrollTo().assertIsEnabled().performClick().assertIsOn()
+        compose.onNodeWithTag("monitor-desqueeze-options").performScrollTo().performScrollToIndex(4)
+        compose.onNodeWithText(resourceText(R.string.desqueeze_value, 2f))
+            .performScrollTo().assertIsEnabled().performClick().assertIsSelected()
+        compose.runOnIdle {
+            assertFalse(settings.value.histogramVisible)
+            assertTrue(settings.value.waveformVisible)
+            assertEquals(95, settings.value.zebraThresholdPercent)
+            assertTrue(settings.value.falseColorEnabled)
+            assertTrue(settings.value.focusPeakingEnabled)
+            assertEquals(LiveViewFrameGuide.RATIO_2_39, settings.value.frameGuide)
+            assertTrue(settings.value.safeAreaVisible)
+            assertEquals(LiveViewDesqueeze.X2, settings.value.desqueeze)
+        }
+    }
+
+    @Test
+    fun offlinePreviewDisablesPixelAnalysisButKeepsGeometricAssists() {
+        val picker = mutableStateOf<SettingPicker?>(SettingPicker.LIVE_VIEW)
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    connectedState().copy(
+                        activeSettingPicker = picker.value,
+                        previewMode = true,
+                        liveViewSource = LiveViewSource.CCAPI_RTP,
+                    ),
+                    noOpActions().copy(openPicker = { picker.value = it }),
+                )
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.monitoring_assists)).performClick()
+        compose.onNodeWithText(resourceText(R.string.monitoring_assists_rtp_unavailable)).assertExists()
+        compose.onNodeWithText(resourceText(R.string.native_monitor_lut_unavailable)).assertDoesNotExist()
+        compose.onNodeWithText(resourceText(R.string.histogram)).performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText(resourceText(R.string.luma_waveform)).performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("monitor-lut-options").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.load_cube_lut)).assertIsNotEnabled()
+        compose.onNodeWithTag("monitor-zebra-options").performScrollTo().performScrollToIndex(6)
+        compose.onNodeWithText(resourceText(R.string.zebra_threshold, 95)).assertIsNotEnabled()
+        compose.onNodeWithText(resourceText(R.string.false_color)).performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText(resourceText(R.string.focus_peaking)).performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("monitor-frame-guide-options").performScrollTo().performScrollToIndex(2)
+        compose.onNodeWithText(resourceText(R.string.ratio_2_39)).performScrollTo().assertIsEnabled()
+        compose.onNodeWithText(resourceText(R.string.safe_area)).performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("monitor-desqueeze-options").performScrollTo().performScrollToIndex(4)
+        compose.onNodeWithText(resourceText(R.string.desqueeze_value, 2f)).performScrollTo().assertIsEnabled()
     }
 
     @Test
