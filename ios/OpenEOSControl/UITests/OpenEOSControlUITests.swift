@@ -1906,18 +1906,16 @@ final class OpenEOSControlUITests: XCTestCase {
     ) -> Bool {
         let predicate = NSPredicate { value, _ in
             guard let element = value as? XCUIElement else { return false }
-            trace?("exists:start")
-            let exists = element.exists
-            trace?("exists=\(exists)")
-            guard exists else { return false }
-            trace?("enabled:start")
-            let enabled = element.isEnabled
-            trace?("enabled=\(enabled)")
-            guard enabled else { return false }
+            // Hittability already requires existence. Avoid a redundant full AX
+            // query while retaining the enabled check and the same wait budget.
             trace?("hittable:start")
             let hittable = element.isHittable
             trace?("hittable=\(hittable)")
-            return hittable
+            guard hittable else { return false }
+            trace?("enabled:start")
+            let enabled = element.isEnabled
+            trace?("enabled=\(enabled)")
+            return enabled
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
