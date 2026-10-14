@@ -1913,14 +1913,34 @@ final class CameraAppState: ObservableObject {
         }
     }
 
+    enum CaptureModeTraceStage: String {
+        case pickerSelection, request, rejected, localFallback, alreadyConfigured, dispatch, settled
+    }
+
+    func traceCaptureMode(_ stage: CaptureModeTraceStage, requested mode: AppCaptureMode) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.environment["OEC_CAPTURE_MODE_TRACE"] == "1" else { return }
+        // Opt-in synthetic UI evidence: closed enums and booleans only. No view
+        // publication, retries, delays, camera identities, routes or error prose.
+        print("CAPTURE_MODE_TRACE stage=\(stage.rawValue) requested=\(mode.rawValue) current=\(captureMode.rawValue) " +
+              "stopRequired=\(recordingStopRequired) bulb=\(bulbExposureActive) " +
+              "settingBusy=\(isBusy(.setting)) captureBusy=\(isBusy(.capture)) recordingBusy=\(isBusy(.recording))")
+        #endif
+    }
+
     func setCaptureMode(_ mode: AppCaptureMode) async {
+        traceCaptureMode(.request, requested: mode)
         guard captureMode != mode,
               !recordingStopRequired,
               !bulbExposureActive,
               !isBusy(.setting),
               !isBusy(.capture),
-              !isBusy(.recording) else { return }
+              !isBusy(.recording) else {
+            traceCaptureMode(.rejected, requested: mode)
+            return
+        }
         guard let setting = capabilities.flatMap({ captureModeSetting($0.settings) }) else {
+            traceCaptureMode(.localFallback, requested: mode)
             captureMode = mode
             return
         }
@@ -1932,14 +1952,18 @@ final class CameraAppState: ObservableObject {
             setting: setting,
             preferredPhotoValue: lastPhotoShootingMode
         ) else {
+            traceCaptureMode(.localFallback, requested: mode)
             captureMode = mode
             return
         }
         if target == setting.value {
+            traceCaptureMode(.alreadyConfigured, requested: mode)
             captureMode = mode
             return
         }
+        traceCaptureMode(.dispatch, requested: mode)
         await setSetting(key: setting.key, value: target)
+        traceCaptureMode(.settled, requested: mode)
     }
 
     func setSetting(key: String, value: String) async {

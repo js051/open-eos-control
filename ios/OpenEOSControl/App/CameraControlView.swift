@@ -15,18 +15,22 @@ struct CameraControlView: View {
             }
         }
         .background(Color.black.ignoresSafeArea())
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 40).onEnded { gesture in
-                if abs(gesture.translation.height) > abs(gesture.translation.width) {
-                    withAnimation(.easeOut(duration: 0.18)) { camera.hudVisible.toggle() }
-                }
+    }
+
+    // Camera controls own their touches. In particular, dragging out of AF-ON
+    // releases that press without also hiding its entire control hierarchy.
+    private var hudVisibilityGesture: some Gesture {
+        DragGesture(minimumDistance: 40).onEnded { gesture in
+            if abs(gesture.translation.height) > abs(gesture.translation.width) {
+                withAnimation(.easeOut(duration: 0.18)) { camera.hudVisible.toggle() }
             }
-        )
+        }
     }
 
     private func portraitLayout(_ proxy: GeometryProxy) -> some View {
         ZStack {
             LiveViewSurface()
+                .simultaneousGesture(hudVisibilityGesture)
             if camera.hudVisible {
                 VStack(spacing: 0) {
                     CameraOverlayHeader(controlRotation: controlRotation)
@@ -58,6 +62,7 @@ struct CameraControlView: View {
         HStack(spacing: 0) {
             ZStack(alignment: .top) {
                 LiveViewSurface()
+                    .simultaneousGesture(hudVisibilityGesture)
                 if camera.hudVisible {
                     VStack(spacing: 6) {
                         CameraOverlayHeader(controlRotation: controlRotation)
@@ -273,7 +278,10 @@ private struct CaptureModePicker: View {
     var body: some View {
         Picker("capture_mode", selection: Binding(
             get: { camera.captureMode },
-            set: { mode in Task { await camera.setCaptureMode(mode) } }
+            set: { mode in
+                camera.traceCaptureMode(.pickerSelection, requested: mode)
+                Task { await camera.setCaptureMode(mode) }
+            }
         )) {
             Text("photo").tag(AppCaptureMode.photo)
             Text("video").tag(AppCaptureMode.video)
