@@ -1195,12 +1195,12 @@ async function verifyHeldAutofocusAndFocusFrames(browser, origin) {
         fs.mkdirSync(RESULTS_DIR, { recursive: true });
         await page.screenshot({ path: path.join(RESULTS_DIR, "desktop-camera-focus-frames.png"), fullPage: true });
         focusAspectRatio = 1.5;
-        await page.waitForSelector("#camera-focus-overlay[hidden]");
+        await page.waitForSelector("#camera-focus-overlay[hidden]", { state: "attached" });
         // Resize clears immediately, and invalid metadata must not reappear.
         await page.setViewportSize({ width: 390, height: 844 });
         assert.equal(await page.locator("#camera-focus-overlay").isVisible(), false);
         await page.click("#rail-live-button");
-        await page.waitForSelector("#live-image[hidden]");
+        await page.waitForSelector("#live-image[hidden]", { state: "attached" });
         assert.equal(await page.locator("#camera-focus-overlay").isVisible(), false);
         assert.equal(await page.locator("#camera-focus-legend").isVisible(), false);
       } else {
