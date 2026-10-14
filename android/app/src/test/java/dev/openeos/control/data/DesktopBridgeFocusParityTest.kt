@@ -8,6 +8,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import okhttp3.Call
+import okhttp3.EventListener
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -18,6 +20,7 @@ import okio.Buffer
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
+import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -89,7 +92,7 @@ class DesktopBridgeFocusParityTest {
         }
     }
 
-    @Test fun unknownStartAndFailedStopRetainOriginalOwnerForStopOnlyRetry() = runBlocking {
+    @Test fun unknownStartAndFailedStopRetainOriginalOwnerForStopOnlyRetry() = runBlocking<Unit> {
         Peer().use { peer ->
             peer.start = { MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST) }
             peer.stop = { peer.error("SHUTTER_RELEASE_UNCONFIRMED") }
@@ -217,6 +220,101 @@ class DesktopBridgeFocusParityTest {
         }
     }
 
+    @Test fun cancellingCloseFinishesOwnedFocusStopAndRetiresSession() = runBlocking<Unit> {
+        Peer().use { peer ->
+            val stopReceived = CountDownLatch(1)
+            val respondToStop = CountDownLatch(1)
+            peer.stop = { owner ->
+                stopReceived.countDown()
+                check(respondToStop.await(3, TimeUnit.SECONDS))
+                peer.ack(owner, false)
+            }
+            val client = peer.ready()
+            val held = CompletableDeferred<Unit>()
+            val releaseHold = CompletableDeferred<Unit>()
+            val holding = launch { client.holdAutofocus { held.complete(Unit); releaseHold.await() } }
+            held.await()
+            val closing = launch(Dispatchers.IO) { client.close() }
+            try {
+                assertTrue(withContext(Dispatchers.IO) { stopReceived.await(2, TimeUnit.SECONDS) })
+                closing.cancel()
+                respondToStop.countDown()
+                withTimeout(2_000) { closing.join() }
+                val stopCall = peer.calls.single { it.request().url.encodedPath.endsWith("/focus/auto/stop") }
+                assertFalse("Caller cancellation must not abort its owned focus release", stopCall.isCanceled())
+                assertTrue("Protected focus release must finish before local retirement", stopCall in peer.finishedCalls)
+                assertFalse("A cancelled caller must not begin the session DELETE", peer.requests.any { it.startsWith("DELETE ") })
+                client.initialize() // Reusing the wire ID must not retain the retired session.
+                client.capabilities()
+                releaseHold.complete(Unit)
+                holding.join()
+                assertEquals(1, peer.count("focus/auto/stop"))
+                client.holdAutofocus {}
+                assertEquals(2, peer.count("focus/auto/start"))
+                assertEquals(2, peer.count("focus/auto/stop"))
+            } finally {
+                respondToStop.countDown()
+                closing.cancelAndJoin()
+                releaseHold.complete(Unit)
+                holding.cancelAndJoin()
+            }
+        }
+    }
+
+    @Test fun cancelledCloseWithFailedFocusStopStillAttemptsBoundedSessionDelete() = runBlocking<Unit> {
+        for ((callTimeoutMillis, paceDelete) in listOf(8_000L to false, 300L to false, 300L to true)) Peer(callTimeoutMillis).use { peer ->
+            peer.stop = { peer.error("SHUTTER_RELEASE_UNCONFIRMED") }
+            if (paceDelete) peer.delete = {
+                MockResponse().setBody(" ".repeat(512)).throttleBody(1, 25, TimeUnit.MILLISECONDS)
+            }
+            val client = peer.ready()
+            assertTrue(runCatching { client.holdAutofocus {} }.exceptionOrNull() is AutofocusReleaseException)
+            val stopReceived = CountDownLatch(1)
+            val respondToStop = CountDownLatch(1)
+            peer.stop = {
+                stopReceived.countDown()
+                check(respondToStop.await(3, TimeUnit.SECONDS))
+                peer.error("SHUTTER_RELEASE_UNCONFIRMED")
+            }
+            val failure = CompletableDeferred<Throwable?>()
+            val closing = launch(Dispatchers.IO) {
+                failure.complete(runCatching { client.close() }.exceptionOrNull())
+            }
+            try {
+                assertTrue(withContext(Dispatchers.IO) { stopReceived.await(2, TimeUnit.SECONDS) })
+                closing.cancel()
+                respondToStop.countDown()
+                withTimeout(2_000) { closing.join() }
+                val closeFailure = failure.await()
+                val deleteCall = peer.calls.single { it.request().method == "DELETE" }
+                assertEquals("Remote cleanup must be dispatched exactly once", 1,
+                    peer.requests.count { it == "DELETE /v1/session/synthetic-session" })
+                if (paceDelete) {
+                    assertTrue("Paced cleanup must expire within its existing short deadline", closeFailure is IOException)
+                    assertTrue("Cleanup expiry must retain the original release failure",
+                        requireNotNull(closeFailure).suppressed.any { it is AutofocusReleaseException })
+                    assertTrue("The deadline must abort the paced DELETE", deleteCall.isCanceled())
+                } else {
+                    assertTrue("The original release failure must stay visible", closeFailure is AutofocusReleaseException)
+                    assertTrue("Remote cleanup must finish before local retirement", deleteCall in peer.finishedCalls)
+                    assertFalse("Failed release cleanup remains protected", deleteCall.isCanceled())
+                }
+                assertEquals(minOf(callTimeoutMillis, 5_000L),
+                    TimeUnit.NANOSECONDS.toMillis(deleteCall.timeout().timeoutNanos()))
+                assertEquals(1, peer.focusCommands.map { it.first }.toSet().size)
+                assertEquals(1, peer.count("focus/auto/start"))
+                assertEquals(2, peer.count("focus/auto/stop"))
+                client.initialize()
+                client.capabilities()
+                client.retryAutofocusStop()
+                assertEquals(2, peer.count("focus/auto/stop"))
+            } finally {
+                respondToStop.countDown()
+                closing.cancelAndJoin()
+            }
+        }
+    }
+
     @Test fun oldHeldCallbackCannotReleaseReinitializedSessionWithSameWireId() = runBlocking {
         Peer().use { peer ->
             val client = peer.ready()
@@ -336,14 +434,17 @@ class DesktopBridgeFocusParityTest {
         }
     }
 
-    private class Peer : AutoCloseable {
+    private class Peer(private val callTimeoutMillis: Long = 8_000L) : AutoCloseable {
         private val server = MockWebServer()
         val requests = CopyOnWriteArrayList<String>()
+        val calls = CopyOnWriteArrayList<Call>()
+        val finishedCalls = CopyOnWriteArrayList<Call>()
         val focusCommands = CopyOnWriteArrayList<Pair<String, Boolean>>()
         val focusCacheHeaders = CopyOnWriteArrayList<String>()
         var capabilityFields = ",\"heldAutofocusSupported\":true,\"focusInfoSupported\":true"
         var supported = "[\"AUTOFOCUS\",\"LIVE_VIEW\",\"STILL_CAPTURE\"]"
         var sources = "[\"CCAPI_JPEG_POLLING\"]"
+        var delete: () -> MockResponse = { MockResponse().setResponseCode(204) }
         var start: (String) -> MockResponse = { ack(it, true) }
         var stop: (String) -> MockResponse = { ack(it, false) }
         var focusInfo: () -> MockResponse = { json(bridgeFocusInfoJson().toString()) }
@@ -370,7 +471,7 @@ class DesktopBridgeFocusParityTest {
                         path.endsWith("/liveview/start") -> json("""{"active":true,"liveViewStopUnconfirmed":false}""")
                         path.endsWith("/liveview/stop") -> json("""{"active":false,"liveViewStopUnconfirmed":false}""")
                         path.endsWith("/status") || path.endsWith("/capture/still") -> status()
-                        request.method == "DELETE" -> MockResponse().setResponseCode(204)
+                        request.method == "DELETE" -> delete()
                         else -> error("UNEXPECTED_ENDPOINT", 404)
                     }
                 }
@@ -378,7 +479,11 @@ class DesktopBridgeFocusParityTest {
             server.start()
         }
         val url get() = server.url("/").toString()
-        fun http() = OkHttpClient.Builder().readTimeout(6, TimeUnit.SECONDS).callTimeout(8, TimeUnit.SECONDS).build()
+        fun http() = OkHttpClient.Builder().readTimeout(6, TimeUnit.SECONDS).callTimeout(callTimeoutMillis, TimeUnit.MILLISECONDS)
+            .eventListener(object : EventListener() {
+                override fun callStart(call: Call) { calls += call }
+                override fun callEnd(call: Call) { finishedCalls += call }
+            }).build()
         suspend fun ready() = DesktopBridgeClient(url, httpClient = http()).also { it.initialize(); it.capabilities() }
         fun count(suffix: String) = requests.count { it.endsWith("/$suffix") }
         fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
