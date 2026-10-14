@@ -46,6 +46,20 @@ final class CCAPIFocusInfoClientTests: XCTestCase {
         }
     }
 
+    func testDetailedFocusInfoWithoutUsableLiveViewSourceIsNotAdvertisedOrProbed() async throws {
+        let peer = MockCameraHTTPTransport()
+        await peer.enqueueJSON(path: "/ccapi", body:
+            #"{"ver130":[{"path":"/shooting/liveview/flipdetail","get":true}]}"#)
+        let client = try CCAPIClient(baseURL: "http://127.0.0.1:18080", mode: .camera, transport: peer)
+        let capabilities = try await client.capabilities()
+        XCTAssertTrue(capabilities.liveView.sources.isEmpty)
+        XCTAssertFalse(capabilities.liveView.focusInfoSupported)
+        let info = try await client.liveViewFocusInfo()
+        XCTAssertNil(info)
+        let requests = await peer.requests()
+        XCTAssertEqual(requests.map(\.path), ["/ccapi"])
+    }
+
     private var discovery: String {
         #"{"ver130":[{"path":"/shooting/liveview","post":true,"delete":true},{"path":"/shooting/liveview/flip","get":true},{"path":"/shooting/liveview/flipdetail","get":true}]}"#
     }
