@@ -50,7 +50,7 @@ internal class NativeRtpMonitorSampler : AutoCloseable {
     private var expiry: Runnable? = null
 
     fun matches(owner: NativeLiveViewSession?, settings: LiveViewMonitorSettings, rotation: Float): Boolean =
-        !closed && enabled && this.owner === owner && this.settings == settings.copy(cubeLut = null) && this.rotation == rotation
+        !closed && enabled && this.owner === owner && this.settings == settings && this.rotation == rotation
 
     fun pause() {
         enabled = false
@@ -60,8 +60,8 @@ internal class NativeRtpMonitorSampler : AutoCloseable {
     fun configure(owner: NativeLiveViewSession?, enabled: Boolean, settings: LiveViewMonitorSettings, rotation: Float) {
         if (closed) return
         val active = enabled && owner != null && settings.needsPixelAnalysis
-        // LUT selection has no effect on the unprocessed native surface.
-        val pixelSettings = settings.copy(cubeLut = null)
+        // PixelCopy reads the final displayed Surface. LUT identity retires old post-processing results.
+        val pixelSettings = settings
         if (this.owner === owner && this.enabled == active && this.settings == pixelSettings && this.rotation == rotation) return
         if (this.owner !== owner) {
             if (attachedOwner !== owner) surface = null

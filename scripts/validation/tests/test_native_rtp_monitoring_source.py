@@ -58,7 +58,9 @@ class NativeRtpMonitoringSourceTests(unittest.TestCase):
             self.ui.index("state.nativeLiveViewSession != null -> key"),
             self.ui.index("lutPreviewActive && lutPreviewBitmap != null -> Image"),
         )
-        self.assertIn("settings.copy(cubeLut = null)", self.sampler)
+        self.assertIn("val pixelSettings = settings", self.sampler)
+        self.assertIn("setVideoLut(nativeLut)", self.ui)
+        self.assertIn("PixelCopy.request(target, bitmap", self.sampler)
         self.assertNotIn("applyCubeLut", self.sampler)
 
     def test_monotonic_freshness_has_a_fixed_budget_and_survives_new_frames(self):
@@ -80,7 +82,7 @@ class NativeRtpMonitoringSourceTests(unittest.TestCase):
         self.assertIn("surface.get() === targetSurface", failure)
 
     def test_status_resources_exist_in_both_languages(self):
-        required = set(re.findall(r"R.string.(native_monitor_\w+)", self.ui)) | {"native_monitor_lut_unavailable"}
+        required = set(re.findall(r"R.string.(native_(?:monitor|lut)_\w+)", self.ui)) | {"native_lut_preview_contract"}
         for qualifier in ("values", "values-zh-rTW"):
             resources = ET.parse(ROOT / f"android/app/src/main/res/{qualifier}/strings.xml").getroot()
             actual = {node.attrib.get("name") for node in resources}

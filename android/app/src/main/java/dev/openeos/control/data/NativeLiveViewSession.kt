@@ -14,6 +14,7 @@ data class NativeLiveViewRenderedFrame(
 )
 
 private val noRenderedFrames = MutableStateFlow<NativeLiveViewRenderedFrame?>(null)
+private val noVideoLut = MutableStateFlow(NativeVideoLutStatus.OFF)
 
 sealed interface NativeLiveViewEvent {
     data class FrameRendered(
@@ -88,6 +89,10 @@ interface NativeLiveViewSession : AutoCloseable {
         get() = NativeLiveViewVideoStatus.None
     val renderedFrames: StateFlow<NativeLiveViewRenderedFrame?>
         get() = noRenderedFrames
+
+    val supportsVideoLut: Boolean get() = false
+    val videoLutStatus: StateFlow<NativeVideoLutStatus> get() = noVideoLut
+    fun setVideoLut(lut: NativeVideoLut?) = Unit
 
     fun start()
     suspend fun awaitReady(timeoutMillis: Long)
