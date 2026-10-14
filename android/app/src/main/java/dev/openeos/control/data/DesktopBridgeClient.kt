@@ -177,38 +177,49 @@ class DesktopBridgeClient(
             ?.takeIf(String::isNotEmpty)
     }
 
-    suspend fun close(): Unit = withContext(NonCancellable) {
-        val session = shutterSession ?: return@withContext
-        closingMediaSession = session
-        activeMediaListing.getAndSet(null)?.call?.cancel()
-        // Disconnect drops this client. Still request server cleanup if its explicit focus
-        // stop failed, and keep the failure visible instead of abandoning the remote session.
-        val focusFailure = runCatching { heldAutofocusSession?.close() }.exceptionOrNull()
-        session.mutex.withLock {
-            if (session.closed) return@withLock
-            try {
-                stopEventPolling()
-                requestOk(Request.Builder().url(endpoint("v1", "session", session.id)).delete().build())
-            } catch (exception: Exception) {
-                focusFailure?.let(exception::addSuppressed)
-                throw exception
-            } finally {
-                session.close()
-                if (shutterSession === session) {
-                    if (liveViewStopOwner?.session === session) liveViewStopOwner = null
-                    shutterSession = null
-                    heldAutofocusSession = null
-                    sessionId = null
-                    sessionCameraModel = null
-                    eventPollingSupported = false
-                    shutterAutofocusSupported = false
-                    heldAutofocusSupported = false
-                    focusInfoSupported = false
-                    liveViewMagnifications = emptyList()
+    suspend fun close() {
+        val callerContext = currentCoroutineContext()
+        withContext(NonCancellable) {
+            val session = shutterSession ?: return@withContext
+            closingMediaSession = session
+            activeMediaListing.getAndSet(null)?.call?.cancel()
+            // Disconnect drops this client. Still request server cleanup if its explicit focus
+            // stop failed, and keep the failure visible instead of abandoning the remote session.
+            val focusFailure = runCatching { heldAutofocusSession?.close() }.exceptionOrNull()
+            session.mutex.withLock {
+                if (session.closed) return@withLock
+                try {
+                    stopEventPolling()
+                    val deleteRequest = Request.Builder().url(endpoint("v1", "session", session.id)).delete().build()
+                    if (focusFailure != null || session.hasReleaseResponsibility) {
+                        // Unresolved release still needs a remote cleanup attempt after caller
+                        // cancellation. This bounded app cleanup policy is not a camera ACK.
+                        requestOk(deleteRequest, recoveryCleanup = true)
+                    } else {
+                        // Ordinary DELETE remains cancellable throughout response-body reads.
+                        withContext(callerContext) { requestOk(deleteRequest) }
+                    }
+                } catch (exception: Exception) {
+                    focusFailure?.let(exception::addSuppressed)
+                    throw exception
+                } finally {
+                    session.close()
+                    if (shutterSession === session) {
+                        if (liveViewStopOwner?.session === session) liveViewStopOwner = null
+                        shutterSession = null
+                        heldAutofocusSession = null
+                        sessionId = null
+                        sessionCameraModel = null
+                        eventPollingSupported = false
+                        shutterAutofocusSupported = false
+                        heldAutofocusSupported = false
+                        focusInfoSupported = false
+                        liveViewMagnifications = emptyList()
+                    }
                 }
             }
+            if (focusFailure != null) throw focusFailure
         }
-        if (focusFailure != null) throw focusFailure
     }
 
     suspend fun info(): CameraInfo {
@@ -1599,10 +1610,17 @@ class DesktopBridgeClient(
         }
     }
 
-    private suspend fun requestOk(request: Request): Unit = withContext(Dispatchers.IO) {
+    private suspend fun requestOk(request: Request, recoveryCleanup: Boolean = false): Unit = withContext(Dispatchers.IO) {
         val session = sessionForRequest(request)
         val revision = session?.revision
         val call = newBridgeCall(request)
+        if (recoveryCleanup) {
+            // Share the release-recovery budget, including continuously paced response bodies,
+            // without extending a shorter transport deadline or changing ordinary requests.
+            val maximum = TimeUnit.SECONDS.toNanos(RECOVERY_STATUS_CALL_TIMEOUT_SECONDS)
+            val configured = call.timeout().timeoutNanos()
+            if (configured == 0L || configured > maximum) call.timeout().timeout(maximum, TimeUnit.NANOSECONDS)
+        }
         val cancelCall = AtomicBoolean(true)
         val cancellationWatcher = launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
