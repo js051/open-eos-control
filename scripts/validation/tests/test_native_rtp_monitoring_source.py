@@ -1,10 +1,9 @@
 """Controlled source contracts, not Kotlin compilation or native rendering evidence."""
 
-from pathlib import Path
 import re
 import unittest
 import xml.etree.ElementTree as ET
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 JAVA = ROOT / "android/app/src/main/java/dev/openeos/control"
@@ -43,7 +42,10 @@ class NativeRtpMonitoringSourceTests(unittest.TestCase):
         self.assertNotIn("nativePixelCopyInFlight.set(false)", close)
         self.assertIn("if (!gate.busy) scope.cancel()", close)
         self.assertIn("nativePixelCopyInFlight.compareAndSet(false, true)", self.sampler)
-        self.assertIn("nativePixelCopyStartedAtNanos.get()?.let { now - it < NativeFrameSamplingGate.INTERVAL_NANOS }", self.sampler)
+        self.assertIn(
+            "nativePixelCopyStartedAtNanos.get()?.let { now - it < NativeFrameSamplingGate.INTERVAL_NANOS }",
+            self.sampler,
+        )
         self.assertIn("nativePixelCopyStartedAtNanos.set(now)", self.sampler)
 
     def test_lifecycle_owner_and_lut_contract_are_wired(self):
@@ -52,7 +54,10 @@ class NativeRtpMonitoringSourceTests(unittest.TestCase):
         self.assertIn("key(state.nativeLiveViewSession)", self.ui)
         self.assertIn("sampler.detach(session, holder.surface)", self.ui)
         self.assertIn("state.nativeLiveViewSession != null -> key", self.ui)
-        self.assertLess(self.ui.index("state.nativeLiveViewSession != null -> key"), self.ui.index("lutPreviewActive && lutPreviewBitmap != null -> Image"))
+        self.assertLess(
+            self.ui.index("state.nativeLiveViewSession != null -> key"),
+            self.ui.index("lutPreviewActive && lutPreviewBitmap != null -> Image"),
+        )
         self.assertIn("settings.copy(cubeLut = null)", self.sampler)
         self.assertNotIn("applyCubeLut", self.sampler)
 
@@ -68,7 +73,9 @@ class NativeRtpMonitoringSourceTests(unittest.TestCase):
 
     def test_replaced_decoder_cannot_publish_failure_to_the_same_surface(self):
         decode = self.session.split("private suspend fun decodeTo(", 1)[1].split("private fun queueDecoderInput(", 1)[0]
-        failure = decode.split('reportFailure("Canon H.264 decode failed"', 1)[0].rsplit("catch (exception: Exception)", 1)[1]
+        failure = decode.split('reportFailure("Canon H.264 decode failed"', 1)[0].rsplit(
+            "catch (exception: Exception)", 1
+        )[1]
         self.assertIn("decoderGeneration.get() == generation", failure)
         self.assertIn("surface.get() === targetSurface", failure)
 
