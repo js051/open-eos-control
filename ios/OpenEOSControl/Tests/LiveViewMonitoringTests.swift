@@ -1,8 +1,46 @@
+import CoreGraphics
+import UIKit
 import XCTest
 
 @testable import OpenEOSControl
 
 final class LiveViewMonitoringTests: XCTestCase {
+    func testRawCGImageAndEncodedPNGKeepAsymmetricRowsInTheSpatialOverlay() throws {
+        // Independent of Core Image/RTP: top red/green, bottom blue/white.
+        // Keep this fixture asymmetric so histogram-only checks cannot hide a flip.
+        let rgba: [UInt8] = [
+            255, 0, 0, 255, 0, 255, 0, 255,
+            0, 0, 255, 255, 255, 255, 255, 255,
+        ]
+        let provider = try XCTUnwrap(CGDataProvider(data: Data(rgba) as CFData))
+        let source = try XCTUnwrap(CGImage(
+            width: 2, height: 2, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 8,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.last.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
+        ))
+        var settings = LiveViewMonitorSettings()
+        settings.falseColorEnabled = true
+        let expected: [UInt8] = [
+            41, 182, 209, 224, 242, 209, 61, 224,
+            32, 61, 160, 224, 232, 59, 53, 224,
+        ]
+        let image = UIImage(cgImage: source)
+        let png = try XCTUnwrap(image.pngData())
+        for result in [analyzeLiveViewCGImage(source, settings: settings),
+                       analyzeLiveViewImage(image, settings: settings),
+                       analyzeLiveViewData(png, settings: settings)] {
+            let analysis = try XCTUnwrap(result)
+            XCTAssertEqual(analysis.width, 2)
+            XCTAssertEqual(analysis.height, 2)
+            XCTAssertEqual(analysis.overlayRGBA, expected)
+            let overlay = try XCTUnwrap(analysis.overlayImage()?.cgImage)
+            let overlayData = try XCTUnwrap(overlay.dataProvider?.data)
+            XCTAssertEqual(Array(overlayData as Data), expected,
+                           "The image consumed by the UI must retain the same spatial rows")
+        }
+    }
+
     func testAnalysisDimensionsStayWithinTheBoundedWorkSurface() {
         let dimensions = liveViewAnalysisDimensions(width: 4_000, height: 3_000)
 
