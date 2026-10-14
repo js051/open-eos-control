@@ -2790,10 +2790,10 @@ class CcapiSession:
                 group: list[str] = []
                 groups.append(group)
 
-                def progress(paths: list[str]) -> None:
+                def progress(paths: list[str], target_group: list[str] = group) -> None:
                     check()
-                    group[:] = [path for path in paths if _is_media_path(path)]
-                    identities.update(group)
+                    target_group[:] = [path for path in paths if _is_media_path(path)]
+                    identities.update(target_group)
                     if len(identities) > MAX_LIST_SNAPSHOT_ITEMS:
                         raise self._listing_incomplete("media identity resource bound exceeded")
                     on_progress(items())
