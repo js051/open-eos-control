@@ -1,6 +1,9 @@
 package dev.openeos.control.ui
 
 import android.graphics.Bitmap
+import dev.openeos.control.data.NativeVideoLut
+import dev.openeos.control.data.NativeVideoLutStatus
+import kotlinx.coroutines.flow.MutableStateFlow
 import android.graphics.drawable.BitmapDrawable
 import android.os.SystemClock
 import android.text.format.Formatter
@@ -982,6 +985,14 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         state.nativeLiveViewSession == null
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val nativeSampler = remember { NativeRtpMonitorSampler() }
+    val inactiveLut = remember { MutableStateFlow(NativeVideoLutStatus.OFF) }
+    val nativeLutStatus by (state.nativeLiveViewSession?.videoLutStatus ?: inactiveLut).collectAsState()
+    val nativeLut = remember(state.monitorSettings.cubeLut) {
+        state.monitorSettings.cubeLut?.let { lut ->
+            runCatching { NativeVideoLut(lut.size, lut.domainMin, lut.domainMax, lut.values) }.getOrNull()
+        }
+    }
+    SideEffect { state.nativeLiveViewSession?.setVideoLut(nativeLut) }
     val nativeMonitor by nativeSampler.result.collectAsState()
     val nativeSamplingEnabled = !state.previewMode && state.liveViewAutoRefresh &&
         state.liveViewTemperatureAllowed && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
@@ -1234,20 +1245,30 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             if (state.monitorSettings.waveformVisible) {
                 monitorAnalysis?.waveform?.let { WaveformOverlay(it, hudVisible = false) }
             }
-            if (state.nativeLiveViewSession != null && state.monitorSettings.needsPixelAnalysis && nativeSamplingEnabled) {
-                Text(
-                    stringResource(when (if (nativeMonitorCurrent) nativeMonitor.status else NativeMonitorStatus.WAITING) {
-                        NativeMonitorStatus.SAMPLED -> R.string.native_monitor_sampled
-                        NativeMonitorStatus.NO_DATA -> R.string.native_monitor_no_data
-                        NativeMonitorStatus.FAILED -> R.string.native_monitor_failed
-                        NativeMonitorStatus.STALE -> R.string.native_monitor_stale
-                        else -> R.string.native_monitor_waiting
-                    }),
-                    color = AppMutedText,
-                    fontSize = 11.sp,
-                    modifier = Modifier.align(Alignment.TopCenter).padding(8.dp)
-                        .background(Color.Black.copy(alpha = 0.7f)).padding(4.dp).testTag("native-monitor-status"),
-                )
+            if (state.nativeLiveViewSession != null && nativeSamplingEnabled &&
+                (state.monitorSettings.needsPixelAnalysis || state.monitorSettings.cubeLut != null)) {
+                Column(Modifier.align(Alignment.TopCenter).padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.7f)).padding(4.dp).testTag("native-monitor-status")) {
+                    if (state.monitorSettings.needsPixelAnalysis) {
+                        Text(stringResource(when (if (nativeMonitorCurrent) nativeMonitor.status else NativeMonitorStatus.WAITING) {
+                            NativeMonitorStatus.SAMPLED -> R.string.native_monitor_sampled
+                            NativeMonitorStatus.NO_DATA -> R.string.native_monitor_no_data
+                            NativeMonitorStatus.FAILED -> R.string.native_monitor_failed
+                            NativeMonitorStatus.STALE -> R.string.native_monitor_stale
+                            else -> R.string.native_monitor_waiting
+                        }), color = AppMutedText, fontSize = 11.sp)
+                    }
+                    if (state.monitorSettings.cubeLut != null) {
+                        val status = if (nativeLut == null) NativeVideoLutStatus.FAILED else nativeLutStatus
+                        Text(stringResource(when (status) {
+                            NativeVideoLutStatus.APPLIED -> R.string.native_lut_applied
+                            NativeVideoLutStatus.UNSUPPORTED_COLOR -> R.string.native_lut_unsupported_color
+                            NativeVideoLutStatus.UNSUPPORTED_GPU -> R.string.native_lut_unsupported_gpu
+                            NativeVideoLutStatus.FAILED -> R.string.native_lut_failed
+                            else -> R.string.native_lut_waiting
+                        }), color = AppMutedText, fontSize = 11.sp)
+                    }
+                }
             }
             val hasFocusImage = !state.previewMode && state.liveViewAutoRefresh &&
                 (bitmap != null || (state.liveViewFrameUrl != null && loadedFrameBitmap != null) ||

@@ -30,3 +30,7 @@ These sampling designs do not apply a LUT to native video and do not imply full-
 Imported LUT contents, title and filename remain in memory for the active app/page lifetime. Diagnostics report only whether a LUT is loaded and its cube size. They never include the filename, title, table values, file path or file contents.
 
 On paths that display a LUT, pixel-derived monitoring assists analyze the post-LUT image, so histogram, waveform, zebra, false color and focus peaking match that preview. Removing the LUT immediately restores the unmodified decoded Live View. Native RTP sampled assists analyze the unprocessed native preview, and the UI explicitly states that a retained LUT is not applied.
+
+## Native RTP candidate update (2026-10-14)
+
+The historical native-RTP limitations above describe the earlier delivered baseline. This branch now contains a new native LUT candidate; its native compilation/runtime checks are still NOT_RUN. See the [current pipeline, fallback, post-LUT scope and validation contract](validation/native-rtp-lut-2026-10-14.md). Android and iOS candidates live on separate development branches; neither this document nor the preceding green CI proves a combined tree or physical-camera parity.

@@ -919,9 +919,7 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pixelAnalysisAvailable = !state.previewMode
-    val lutAvailable = pixelAnalysisAvailable &&
-        state.liveViewSource != LiveViewSource.CCAPI_RTP &&
-        state.nativeLiveViewSession == null
+    val lutAvailable = pixelAnalysisAvailable
     val lutLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             scope.launch {
@@ -936,8 +934,8 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
     }
     if (!pixelAnalysisAvailable) {
         Text(stringResource(R.string.monitoring_assists_rtp_unavailable), color = AppWarning)
-    } else if (!lutAvailable) {
-        Text(stringResource(R.string.native_monitor_lut_unavailable), color = AppWarning)
+    } else if (state.liveViewSource == LiveViewSource.CCAPI_RTP) {
+        Text(stringResource(R.string.native_lut_preview_contract), color = AppMutedText)
     }
     MonitorSwitchRow(
         label = stringResource(R.string.histogram),

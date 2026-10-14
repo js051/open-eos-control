@@ -686,7 +686,7 @@
     <string name="monitoring_assists">Monitoring assists</string>
     <string name="monitoring_assists_rtp_unavailable">Histogram, luma waveform, LUT preview, zebra, false color, and focus peaking require decoded Live View frames. Frame guides and desqueeze remain available.</string>
     <string name="native_monitor_lut_unavailable">Native RTP scopes use sampled preview frames (up to 4 updates/sec). LUT preview is unavailable on this path; any loaded LUT is retained but not applied.</string>
-    <string name="native_monitor_sampled">Sampled scopes · up to 4 updates/sec · no LUT</string>
+    <string name="native_monitor_sampled">Sampled displayed-image scopes · up to 4 updates/sec</string>
     <string name="native_monitor_waiting">Scopes: waiting for a fresh native frame</string>
     <string name="native_monitor_no_data">Scopes: native frame pixels not ready</string>
     <string name="native_monitor_failed">Scopes: frame sampling unavailable</string>
@@ -967,4 +967,10 @@
     <string name="media_continuation_link_hint">New attempt linked by your manual choice; source identity is not verified.</string>
     <string name="media_continuation_expired">This continuation was cancelled or its connection changed. Open history and map the originals again.</string>
     <string name="media_continuation_linked_from">Manually linked from %1$s, item %2$d in worklist %3$s</string>
+    <string name="native_lut_preview_contract">Native video LUT preview uses a supported SDR GPU path. Scopes sample the resulting display, up to 4 times/sec. Unsupported GPU or color formats keep native video without applying the LUT.</string>
+    <string name="native_lut_applied">LUT applied to native video</string>
+    <string name="native_lut_waiting">Waiting for a frame with the selected LUT</string>
+    <string name="native_lut_unsupported_color">LUT not applied: unsupported color format; native video retained</string>
+    <string name="native_lut_unsupported_gpu">LUT not applied: GPU path unavailable; native video retained</string>
+    <string name="native_lut_failed">LUT processing failed; native video fallback, LUT retained</string>
 </resources>

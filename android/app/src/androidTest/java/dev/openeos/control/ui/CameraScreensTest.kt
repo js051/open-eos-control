@@ -3869,7 +3869,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun nativeRtpEnablesSampledPixelAssistsButDisablesLutPreview() {
+    fun nativeRtpEnablesLutSelectionWithExplicitRuntimeFallbackContract() {
         val picker = mutableStateOf<SettingPicker?>(SettingPicker.LIVE_VIEW)
         val settings = mutableStateOf(LiveViewMonitorSettings())
         val actions = noOpActions().copy(
@@ -3907,7 +3907,7 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.monitoring_assists)).performClick()
-        compose.onNodeWithText(resourceText(R.string.native_monitor_lut_unavailable)).assertExists()
+        compose.onNodeWithText(resourceText(R.string.native_lut_preview_contract)).assertExists()
         compose.onNodeWithText(resourceText(R.string.monitoring_assists_rtp_unavailable)).assertDoesNotExist()
         compose.onNodeWithText(resourceText(R.string.histogram))
             .performScrollTo().assertIsEnabled().performClick().assertIsOn()
@@ -3915,7 +3915,7 @@ class CameraScreensTest {
             .performScrollTo().assertIsEnabled().performClick().assertIsOn()
         compose.onNodeWithText(resourceText(R.string.histogram)).assertIsOff()
         compose.onNodeWithTag("monitor-lut-options").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText(resourceText(R.string.load_cube_lut)).assertIsNotEnabled()
+        compose.onNodeWithText(resourceText(R.string.load_cube_lut)).assertIsEnabled()
         compose.onNodeWithTag("monitor-zebra-options").performScrollTo().performScrollToIndex(6)
         compose.onNodeWithText(resourceText(R.string.zebra_threshold, 95))
             .assertIsEnabled().performClick().assertIsSelected()
@@ -3961,7 +3961,7 @@ class CameraScreensTest {
 
         compose.onNodeWithText(resourceText(R.string.monitoring_assists)).performClick()
         compose.onNodeWithText(resourceText(R.string.monitoring_assists_rtp_unavailable)).assertExists()
-        compose.onNodeWithText(resourceText(R.string.native_monitor_lut_unavailable)).assertDoesNotExist()
+        compose.onNodeWithText(resourceText(R.string.native_lut_preview_contract)).assertDoesNotExist()
         compose.onNodeWithText(resourceText(R.string.histogram)).performScrollTo().assertIsNotEnabled()
         compose.onNodeWithText(resourceText(R.string.luma_waveform)).performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("monitor-lut-options").performScrollTo().assertIsDisplayed()
