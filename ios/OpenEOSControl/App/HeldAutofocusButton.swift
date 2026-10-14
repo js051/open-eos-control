@@ -15,7 +15,7 @@ struct HeldAutofocusButton: UIViewRepresentable {
         button.titleLabel?.font = .systemFont(ofSize: 12, weight: .bold)
         button.accessibilityIdentifier = "held-autofocus-button"
         button.addTarget(context.coordinator, action: #selector(Coordinator.down), for: .touchDown)
-        button.addTarget(context.coordinator, action: #selector(Coordinator.release), for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
+        button.addTarget(context.coordinator, action: #selector(Coordinator.releaseHold), for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
         button.activation = { [weak coordinator = context.coordinator] in coordinator?.activate() }
         return button
     }
@@ -32,7 +32,7 @@ struct HeldAutofocusButton: UIViewRepresentable {
         button.accessibilityHint = NSLocalizedString("held_autofocus_hint", comment: "")
     }
 
-    static func dismantleUIView(_ uiView: AccessibleFocusButton, coordinator: Coordinator) { coordinator.release() }
+    static func dismantleUIView(_ uiView: AccessibleFocusButton, coordinator: Coordinator) { coordinator.releaseHold() }
 
     @MainActor final class Coordinator: NSObject {
         let camera: CameraAppState
@@ -42,13 +42,13 @@ struct HeldAutofocusButton: UIViewRepresentable {
             guard owner == nil else { return }
             owner = camera.beginHeldAutofocus()
         }
-        @objc func release() {
+        @objc func releaseHold() {
             guard let owner else { return }
             self.owner = nil
             camera.releaseHeldAutofocus(owner: owner)
         }
         func activate() {
-            if owner != nil { release() } else { down() }
+            if owner != nil { releaseHold() } else { down() }
         }
     }
 }
