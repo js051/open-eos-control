@@ -25,3 +25,7 @@ Android and iOS native RTP retain their direct native-surface renderers. LUT pre
 Imported LUT contents, title and filename remain in memory for the active app/page lifetime. Diagnostics report only whether a LUT is loaded and its cube size. They never include the filename, title, table values, file path or file contents.
 
 Pixel-derived monitoring assists analyze the post-LUT image, so histogram, waveform, zebra, false color and focus peaking match the displayed preview. Removing the LUT immediately restores the unmodified decoded Live View.
+
+## Native RTP candidate update (2026-10-14)
+
+The historical native-RTP limitations above describe the earlier delivered baseline. This branch now contains a new native LUT candidate; its native compilation/runtime checks are still NOT_RUN. See the [current pipeline, fallback, post-LUT scope and validation contract](validation/native-rtp-lut-2026-10-14.md). Android and iOS candidates live on separate development branches; neither this document nor the preceding green CI proves a combined tree or physical-camera parity.

@@ -755,14 +755,14 @@
 "media_files_export_source_unavailable" = "已準備的來源目前無法使用。請重新整理歷史紀錄，或明確重新準備原檔後再匯出。";
 
 "native_monitor_off" = "取樣監看已暫停";
-"native_monitor_requires_ios174" = "原生 RTP 像素監看需要 iOS 17.4 或更新版本。";
+"native_monitor_requires_ios174" = "此未處理的原生串流沒有可用的像素監看。";
 "native_monitor_waiting" = "取樣監看 · 等待影像";
 "native_monitor_no_pixels" = "取樣監看 · 暫無可取樣影像";
 "native_monitor_failed" = "取樣監看 · 不支援的影像或轉換失敗";
-"native_monitor_sampled" = "取樣監看 · 每秒最多 4 次 · 未套用 LUT";
+"native_monitor_sampled" = "預覽取樣監看 · 每秒最多 4 次";
 "native_monitor_stale" = "取樣監看 · 影像已過期";
 "native_monitor_lut_inactive" = "原生 RTP 未套用已載入的 LUT";
-"native_monitor_scope_notice" = "原生 RTP 使用 SDR 預覽取樣監看，每秒最多 4 次，取樣於 1 秒後失效。不支援 LUT 預覽；已載入的 LUT 會保留但不套用。";
+"native_monitor_scope_notice" = "原生 LUT 處理支援 8-bit SDR 影片，監看每秒最多取樣 4 次。iOS 17.4 以上讀回顯示畫面；較舊版本分析送往顯示器的同一處理後影格。不支援的格式保留未套 LUT 的原生影片。";
 
 "foreground_media_state_copying" = "正在將保留的原始檔複製至檔案…";
 
@@ -795,3 +795,15 @@
 "foreground_files_reason_interrupted" = "上次程序結束前未取得最終結果。請在檔案中檢查這次嘗試的檔名。";
 
 "foreground_files_history_help" = "此為本機作業紀錄，不代表雲端已同步或目的地目前仍可使用。清除 App 歷史不會刪除檔案中的副本。";
+
+"native_lut_off" = "原生影片未套 LUT";
+
+"native_lut_waiting" = "等待套用所選 LUT 的影格";
+
+"native_lut_applied" = "原生影片已套用 LUT";
+
+"native_lut_unsupported_color" = "未套用 LUT：色彩格式不支援，保留原生影片";
+
+"native_lut_unavailable" = "LUT 處理器不可用，保留原生影片";
+
+"native_lut_failed" = "LUT 處理失敗；降回原生影片並保留 LUT";

@@ -529,7 +529,7 @@ private struct MonitoringAssistView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if !pixelAnalysisAvailable {
-                        Label(LocalizedStringKey(camera.activeLiveViewSource == .ccapiRTP ? "native_monitor_requires_ios174" : "monitoring_assists_rtp_unavailable"), systemImage: "exclamationmark.triangle")
+                        Label(LocalizedStringKey("monitoring_assists_rtp_unavailable"), systemImage: "exclamationmark.triangle")
                             .font(.caption)
                             .foregroundStyle(Color.cameraWarning)
                             .fixedSize(horizontal: false, vertical: true)
@@ -683,11 +683,10 @@ private struct MonitoringAssistView: View {
     private var pixelAnalysisAvailable: Bool {
         !camera.isPreview
             && camera.activeLiveViewSource != nil
-            && (camera.activeLiveViewSource != .ccapiRTP || IOSRTPPixelMonitor.supported)
     }
 
     private var lutAvailable: Bool {
-        pixelAnalysisAvailable && camera.activeLiveViewSource != .ccapiRTP
+        pixelAnalysisAvailable
     }
 
     private func monitorToggle(
