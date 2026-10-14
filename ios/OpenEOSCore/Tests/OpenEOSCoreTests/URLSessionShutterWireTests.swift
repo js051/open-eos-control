@@ -191,7 +191,7 @@ final class URLSessionShutterWireTests: XCTestCase {
             let connections = peer.connectionIDs()
             XCTAssertEqual(beforeRetry[pressIndex - 1].method, "GET", context)
             XCTAssertEqual(connections[pressIndex], connections[pressIndex - 1],
-                           "\(context): this case must exercise a real URLSession reused connection")
+                           "\(context): this case must exercise a real URLSession reused connection. \(peer.connectionTrace())")
         }
 
         try await client.retryShutterRelease()
@@ -244,7 +244,7 @@ final class URLSessionShutterWireTests: XCTestCase {
                 if connectionMode == .pooled {
                     let connections = peer.connectionIDs()
                     XCTAssertEqual(connections.count, 2, context)
-                    XCTAssertEqual(connections.first, connections.last, "\(context): the press must reuse the GET connection")
+                    XCTAssertEqual(connections.first, connections.last, "\(context): the press must reuse the GET connection. \(peer.connectionTrace())")
                 }
                 XCTAssertTrue(peer.errors().isEmpty, "\(context): \(peer.errors().joined(separator: "\n"))")
             }
@@ -547,6 +547,8 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
     private var activeConnection: Int32?
     private var recorded: [ShutterRecoveryRequest] = []
     private var recordedConnectionIDs: [Int] = []
+    // Synthetic test-only evidence. Never changes socket admission or transport behavior.
+    private var connectionEvents: [String] = []
     private var failures: [String] = []
     // Used only on the serial socket-serving queue.
     private var releaseCount = 0
@@ -639,6 +641,18 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
         return recordedConnectionIDs
     }
 
+    func connectionTrace() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return connectionEvents.joined(separator: "; ")
+    }
+
+    private func recordConnectionEvent(_ event: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        connectionEvents.append("\(DispatchTime.now().uptimeNanoseconds): \(event)")
+    }
+
     private var isStopped: Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -668,6 +682,7 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
             lock.lock()
             activeConnection = connection
             lock.unlock()
+            recordConnectionEvent("accepted connection \(connectionNumber)")
             var timeout = timeval(tv_sec: 3, tv_usec: 0)
             var noSignal: Int32 = 1
             _ = setsockopt(connection, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
@@ -675,12 +690,17 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
             _ = setsockopt(connection, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
             do {
                 while !isStopped {
-                    guard let request = try Self.readRequest(connection) else { break }
+                    guard let request = try Self.readRequest(connection) else {
+                        recordConnectionEvent("idle EOF on connection \(connectionNumber)")
+                        break
+                    }
+                    recordConnectionEvent("connection \(connectionNumber) received \(request.method) \(request.path)")
                     lock.lock()
                     recorded.append(request)
                     recordedConnectionIDs.append(connectionNumber)
                     lock.unlock()
                     let keepAlive = try reply(to: request, on: connection)
+                    recordConnectionEvent("connection \(connectionNumber) reply complete; keepAlive=\(keepAlive)")
                     if !keepAlive { break }
                 }
             } catch {
