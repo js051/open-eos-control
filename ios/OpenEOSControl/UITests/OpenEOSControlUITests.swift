@@ -1567,6 +1567,7 @@ final class OpenEOSControlUITests: XCTestCase {
             try await uploadSimulatorVideoFixture(filename: "EARLIER_RECORDING.MP4")
             let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
                              environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString,
+                                           "OEC_CAPTURE_MODE_TRACE": "1",
                                            "OEC_MEDIA_DOWNLOAD_TRACE": "1"])
             defer { app.terminate() }
             try tapForAsyncTest(app.buttons["preset-http-button"])
