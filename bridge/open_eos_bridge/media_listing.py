@@ -9,6 +9,7 @@ import re
 import secrets
 import threading
 from collections.abc import Callable, Iterator
+from contextlib import suppress
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
@@ -212,11 +213,9 @@ class _Listing:
                 code = error.code if isinstance(error, BridgeError) else "MEDIA_LIST_FAILED"
                 if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", code):
                     code = "MEDIA_LIST_FAILED"
-                try:
+                with suppress(_ListingCancelled):
                     # Camera response prose and URLs may contain private information.
                     self.emit(type="error", code=code, message="Media listing did not finish. Retry manually.")
-                except _ListingCancelled:
-                    pass
         finally:
             self.owner._release(self)
             self.finished.set()

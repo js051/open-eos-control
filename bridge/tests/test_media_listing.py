@@ -125,7 +125,9 @@ class ProgressiveTraversalTests(unittest.TestCase):
                 original = transport.request
                 calls = []
 
-                def request(method, url, **kwargs):
+                def request(
+                    method, url, calls=calls, count_query=count_query, cancelled=cancelled, original=original, **kwargs,
+                ):
                     calls.append(url)
                     if ("kind=number" in url) == count_query:
                         cancelled.set()
@@ -472,18 +474,22 @@ class StreamingLifecycleTests(unittest.TestCase):
             with self.subTest(shutdown=shutdown):
                 session, transport = session_for(unpaged([PHOTO]))
                 app = app_for(session)
-                with session._lock, serving(app) as base, httpx.Client(timeout=3, trust_env=False) as client:
-                    with client.stream("GET", f"{base}/v1/session/fixture/media", headers=ACCEPT) as response:
-                        self.assertEqual(json.loads(next(response.iter_lines()))["type"], "start")
-                        active = app.state.media_listings._active[id(session)]
-                        if shutdown:
-                            app.state.media_listings.close()
-                        else:
-                            replacement, _ = session_for(unpaged([SECOND]))
-                            app.state.session_manager._sessions["fixture"] = replacement
-                        self.assertTrue(active.finished.wait(2))
-                        self.assertEqual(transport.requests, [])
-                        self.assertEqual(session._media_cache, {})
+                with (
+                    session._lock,
+                    serving(app) as base,
+                    httpx.Client(timeout=3, trust_env=False) as client,
+                    client.stream("GET", f"{base}/v1/session/fixture/media", headers=ACCEPT) as response,
+                ):
+                    self.assertEqual(json.loads(next(response.iter_lines()))["type"], "start")
+                    active = app.state.media_listings._active[id(session)]
+                    if shutdown:
+                        app.state.media_listings.close()
+                    else:
+                        replacement, _ = session_for(unpaged([SECOND]))
+                        app.state.session_manager._sessions["fixture"] = replacement
+                    self.assertTrue(active.finished.wait(2))
+                    self.assertEqual(transport.requests, [])
+                    self.assertEqual(session._media_cache, {})
 
     def test_thread_start_failure_releases_reservation(self):
         async def run():
@@ -491,9 +497,11 @@ class StreamingLifecycleTests(unittest.TestCase):
             request = Request({"type": "http", "method": "GET", "path": "/"})
             response = owner.response(request, "fixture", session, None, lambda *args, **kwargs: [], lambda: True)
             active = owner._active[id(session)]
-            with patch("open_eos_bridge.media_listing.threading.Thread.start", side_effect=RuntimeError("fixture")):
-                with self.assertRaisesRegex(RuntimeError, "fixture"):
-                    await anext(response.body_iterator)
+            with (
+                patch("open_eos_bridge.media_listing.threading.Thread.start", side_effect=RuntimeError("fixture")),
+                self.assertRaisesRegex(RuntimeError, "fixture"),
+            ):
+                await anext(response.body_iterator)
             self.assertNotIn(id(session), owner._active)
             self.assertTrue(active.finished.is_set())
 
