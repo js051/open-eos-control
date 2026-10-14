@@ -10,6 +10,7 @@ const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const { chromium } = require("playwright");
+const { datedListingResponse } = require("./media-listing-browser-fixture.js");
 
 const BRIDGE_ROOT = path.resolve(__dirname, "..");
 const SIMULATOR_ROOT = path.resolve(BRIDGE_ROOT, "../simulator");
@@ -260,11 +261,8 @@ async function applyMediaDateRange(page, start, end) {
 async function installDatedListing(page, dateForName) {
   await page.route(/\/v1\/session\/[^/]+\/media(?:\?.*)?$/, async (route) => {
     const response = await route.fetch();
-    const payload = await response.json();
-    await route.fulfill({ response, json: {
-      ...payload,
-      items: payload.items.map((item) => ({ ...item, captureTime: dateForName(item.name) })),
-    } });
+    const decorated = datedListingResponse(await response.text(), response.headers(), dateForName);
+    await route.fulfill({ response, ...decorated });
   });
 }
 
