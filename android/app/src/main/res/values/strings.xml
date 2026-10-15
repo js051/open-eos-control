@@ -763,6 +763,7 @@
     <string name="capture_status_readback_failed">The shutter command was acknowledged, but its camera status check failed.</string>
     <string name="capture_review_searching">Checking for newly visible media…</string>
     <string name="capture_review_not_ready">New media has not been found yet.</string>
+    <string name="capture_review_no_candidate_read_failed">Completed checks found no eligible new media. The last list read failed; retry to check again.</string>
     <string name="capture_review_read_failed">Recent media could not be read. New media availability is unknown.</string>
     <string name="capture_review_latest_visible">Latest visible media is available.</string>
     <string name="capture_review_explanation">This only checks recent camera media and does not send another camera control command. A newly visible item cannot be linked conclusively to this capture or recording.</string>

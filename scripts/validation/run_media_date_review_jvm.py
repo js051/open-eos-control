@@ -13,6 +13,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from capture_review_evidence_fixture import emit_capture_review_evidence_provider
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -96,6 +98,7 @@ def main():
             ]
         )
     )
+    evidence_provider, evidence_metadata = emit_capture_review_evidence_provider(root, args.output)
     model_path = (
         root / "android/app/src/main/java/dev/openeos/control/data/CameraModels.kt"
     )
@@ -132,6 +135,8 @@ def main():
     tests = [
         "MediaDateReviewContractTest",
         "MediaReviewSelectionTest",
+        "CaptureReviewEvidenceTest",
+        "CaptureReviewEvidenceContractTest",
         "MediaDateRangeTest",
         "MediaRatingFilterTest",
     ]
@@ -140,7 +145,8 @@ def main():
         for name in ["MediaCaptureDate", "MediaLibrary", "MediaReviewSelection"]
     ]
     sources += [
-        "android/app/src/test/java/dev/openeos/control/ui/MediaDateReviewFixture.kt"
+        "android/app/src/test/java/dev/openeos/control/ui/MediaDateReviewFixture.kt",
+        "android/app/src/test/java/dev/openeos/control/ui/CaptureReviewEvidenceFixture.kt",
     ]
     sources += [
         f"android/app/src/test/java/dev/openeos/control/ui/{name}.kt" for name in tests
@@ -163,6 +169,7 @@ def main():
             str(target),
             *[str(root / s) for s in sources],
             str(provider),
+            str(evidence_provider),
             str(model_copy),
         ],
         check=False,
@@ -181,10 +188,12 @@ def main():
             "Gradle resource mapping",
             "full Android SDK build",
             "Compose timezone broadcast/lifecycle UI",
-            "ViewModel HTTP integration",
+            "ViewModel HTTP integration (including actual malformed-list adapter decoding)",
+            "Compose review-evidence UI",
             "foreground import integration",
             "physical camera",
         ],
+        "review_evidence_fixture": evidence_metadata,
         "fixture_sha256": hashlib.sha256(data).hexdigest(),
         "fixture_vectors": len(fixture["vectors"]),
         "fixture_zones": len(fixture["displayZones"]),

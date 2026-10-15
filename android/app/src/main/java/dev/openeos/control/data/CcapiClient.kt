@@ -2904,8 +2904,16 @@ class CcapiClient(
     }
 
     private suspend fun listSimulatorMedia(): List<CameraMediaItem> {
-        val items = getJson("/ccapi/media").optJSONArray("items") ?: return emptyList()
-        return List(items.length()) { index -> parseSimulatorMediaItem(items.getJSONObject(index)) }.filterNotNull()
+        // A successful HTTP response is not a successfully parsed listing. Missing,
+        // mistyped or invalid identities must not become empty/no-candidate evidence.
+        val items = getJson("/ccapi/media").getJSONArray("items")
+        return List(items.length()) { index ->
+            val item = items.getJSONObject(index)
+            check(item.opt("id") is String && item.opt("name") is String) {
+                "Simulator returned an invalid media identity."
+            }
+            checkNotNull(parseSimulatorMediaItem(item)) { "Simulator returned an invalid media identity." }
+        }
     }
 
     private fun parseSimulatorMediaItem(item: JSONObject): CameraMediaItem? {
@@ -3154,11 +3162,9 @@ class CcapiClient(
         } else {
             getFirstJson(numberPaths)
         }
-        val pageCount = if (strict && pageInfo != null) {
-            pageInfo.inventoryPageCount()
-        } else {
-            pageInfo?.optInt("pagenumber", 0) ?: 0
-        }
+        // All listing consumers need valid page metadata; strict also controls
+        // inventory transport fallback, independently of response validation.
+        val pageCount = pageInfo?.inventoryPageCount() ?: 0
         check(pageCount >= 0) { "Camera returned a negative media page count at $containerPath." }
         val paths = linkedSetOf<String>()
         if (pageCount <= 0) {
@@ -3168,12 +3174,12 @@ class CcapiClient(
             } else {
                 getFirstJsonRequired(listOf(containerPath), "Reading camera media page")
             }
-            paths.addAll(response.contentPaths(strict = strict))
+            paths.addAll(response.contentPaths(strict = true))
             onPage(paths.toList())
         } else if (mediaDescendingOrderSupported == false) {
             for (page in pageCount downTo 1) {
                 val response = getContentPage(containerPath, page, strict, beforeRequest)
-                paths.addAll(response.contentPaths(reverse = true, strict = strict))
+                paths.addAll(response.contentPaths(reverse = true, strict = true))
                 if (!onPage(paths.toList())) break
             }
         } else {
@@ -3181,15 +3187,15 @@ class CcapiClient(
             if (mediaDescendingOrderSupported == false) {
                 for (page in pageCount downTo 1) {
                     val response = if (page == 1) firstResponse else getContentPage(containerPath, page, strict, beforeRequest)
-                    paths.addAll(response.contentPaths(reverse = true, strict = strict))
+                    paths.addAll(response.contentPaths(reverse = true, strict = true))
                     if (!onPage(paths.toList())) break
                 }
             } else {
-                paths.addAll(firstResponse.contentPaths(strict = strict))
+                paths.addAll(firstResponse.contentPaths(strict = true))
                 if (onPage(paths.toList())) {
                     for (page in 2..pageCount) {
                         val response = getContentPage(containerPath, page, strict, beforeRequest)
-                        paths.addAll(response.contentPaths(strict = strict))
+                        paths.addAll(response.contentPaths(strict = true))
                         if (!onPage(paths.toList())) break
                     }
                 }

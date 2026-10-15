@@ -4033,6 +4033,8 @@ class CameraViewModel(
         mediaWorklistUnavailable = false,
         foregroundJpegImport = ForegroundJpegImportStatus(),
         captureReviewStatus = CaptureReviewStatus.IDLE,
+        captureReviewObservation = CaptureReviewObservation.UNREAD,
+        captureReviewEvidence = CaptureReviewEvidence(),
         captureStatusReadbackFailed = false,
         pendingRecordingCommand = null,
         recordingCommandUnconfirmed = false,
@@ -4168,6 +4170,7 @@ class CameraViewModel(
         val generation = beginCaptureReviewLoad()
         fun stillOwnsReview() = generation == captureReviewGeneration &&
             sessionGeneration == cameraSessionGeneration && _uiState.value.info === connection
+        var terminalResultAccepted = false
         captureReviewJob = viewModelScope.launch {
             val result = awaitCaptureReviewItem(
                 previousIds = attempt?.previousIds.orEmpty(),
@@ -4189,20 +4192,34 @@ class CameraViewModel(
                     }
                 }
             }
+            coroutineContext.ensureActive()
             if (!stillOwnsReview()) return@launch
+            terminalResultAccepted = true
             when (result) {
-                is CaptureReviewResult.Found -> publishCaptureReview(result.item, generation)
-                CaptureReviewResult.NotReady, CaptureReviewResult.ReadFailed -> _uiState.update { it.copy(
+                is CaptureReviewResult.Found -> publishCaptureReview(result.item, generation, result.evidence)
+                is CaptureReviewResult.NotReady, is CaptureReviewResult.ReadFailed -> _uiState.update { it.copy(
                     captureReviewLoading = false,
                     captureReviewStatus = when {
                         attempt == null -> CaptureReviewStatus.IDLE
-                        result == CaptureReviewResult.ReadFailed -> CaptureReviewStatus.READ_FAILED
+                        result is CaptureReviewResult.ReadFailed -> CaptureReviewStatus.READ_FAILED
                         else -> CaptureReviewStatus.NOT_READY
                     },
+                    captureReviewObservation = result.observation,
+                    captureReviewEvidence = result.evidence,
                 ) }
             }
         }.also { job ->
             job.invokeOnCompletion {
+                // Retirement never publishes partial evidence. Restore the prior terminal
+                // presentation for an unchanged owner, including a zero-read/pre-launch retry.
+                // A replaced owner must not alter its successor's state.
+                if (job.isCancelled && stillOwnsReview()) {
+                    _uiState.update { it.copy(
+                        captureReviewLoading = false,
+                        // Optional thumbnail cancellation cannot undo an accepted FOUND result.
+                        captureReviewStatus = if (terminalResultAccepted) it.captureReviewStatus else state.captureReviewStatus,
+                    ) }
+                }
                 if (captureReviewJob === job) captureReviewJob = null
             }
         }
@@ -4215,7 +4232,11 @@ class CameraViewModel(
         // Event/gallery refreshes must not turn the old image into this attempt's result.
         if (attempt != null && selected == null) {
             // A successful event/gallery listing resolves read failure, not the pending capture.
-            _uiState.update { it.copy(captureReviewStatus = CaptureReviewStatus.NOT_READY) }
+            _uiState.update { it.copy(
+                captureReviewStatus = CaptureReviewStatus.NOT_READY,
+                captureReviewObservation = CaptureReviewObservation.NO_CANDIDATE_OBSERVED,
+                captureReviewEvidence = CaptureReviewEvidence(1, 0, CaptureReviewRead.SUCCESS),
+            ) }
             return
         }
         if (selected == null) {
@@ -4244,7 +4265,11 @@ class CameraViewModel(
         return captureReviewGeneration
     }
 
-    private suspend fun publishCaptureReview(item: CameraMediaItem, generation: Long) {
+    private suspend fun publishCaptureReview(
+        item: CameraMediaItem,
+        generation: Long,
+        evidence: CaptureReviewEvidence = CaptureReviewEvidence(1, 0, CaptureReviewRead.SUCCESS),
+    ) {
         if (generation != captureReviewGeneration) return
         pendingCaptureReview = null
         val existing = _uiState.value
@@ -4253,6 +4278,8 @@ class CameraViewModel(
             it.copy(
                 captureReviewItem = item,
                 captureReviewStatus = CaptureReviewStatus.IDLE,
+                captureReviewObservation = CaptureReviewObservation.FOUND,
+                captureReviewEvidence = evidence,
                 captureReviewThumbnail = it.captureReviewThumbnail.takeIf { _ -> it.captureReviewItem?.id == item.id },
                 captureReviewLoading = canLoadThumbnail,
             )
@@ -4287,6 +4314,8 @@ class CameraViewModel(
         _uiState.update { it.copy(
             captureReviewLoading = false,
             captureReviewStatus = CaptureReviewStatus.IDLE,
+            captureReviewObservation = CaptureReviewObservation.UNREAD,
+            captureReviewEvidence = CaptureReviewEvidence(),
             captureStatusReadbackFailed = false,
         ) }
     }

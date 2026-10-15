@@ -52,7 +52,7 @@ class MediaLibraryTest {
             if (calls < 3) listOf(old) else listOf(new, old)
         }
 
-        assertEquals(CaptureReviewResult.Found(new), selected)
+        assertEquals(CaptureReviewResult.Found(new, CaptureReviewEvidence(3, 0, CaptureReviewRead.SUCCESS)), selected)
         assertEquals(3, calls)
     }
 
@@ -66,7 +66,12 @@ class MediaLibraryTest {
                     if (calls++ != successfulRound) throw IOException("Synthetic private detail")
                     items
                 }
-                assertEquals(if (successfulRound < 0) CaptureReviewResult.ReadFailed else CaptureReviewResult.NotReady, result)
+                val evidence = CaptureReviewEvidence(
+                    if (successfulRound < 0) 0 else 1, if (successfulRound < 0) 4 else 3,
+                    if (successfulRound == 3) CaptureReviewRead.SUCCESS else CaptureReviewRead.FAILURE,
+                )
+                assertEquals(if (successfulRound < 0) CaptureReviewResult.ReadFailed(evidence)
+                    else CaptureReviewResult.NotReady(evidence), result)
                 assertEquals(4, calls)
             }
         }
@@ -84,7 +89,7 @@ class MediaLibraryTest {
                 else -> listOf(photo, video)
             }
         }
-        assertEquals(CaptureReviewResult.Found(video), result)
+        assertEquals(CaptureReviewResult.Found(video, CaptureReviewEvidence(2, 1, CaptureReviewRead.SUCCESS)), result)
         assertEquals(3, calls)
     }
 

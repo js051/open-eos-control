@@ -123,6 +123,8 @@ data class CameraUiState(
     val captureReviewThumbnail: Bitmap? = null,
     val captureReviewLoading: Boolean = false,
     val captureReviewStatus: CaptureReviewStatus = CaptureReviewStatus.IDLE,
+    val captureReviewObservation: CaptureReviewObservation = CaptureReviewObservation.UNREAD,
+    val captureReviewEvidence: CaptureReviewEvidence = CaptureReviewEvidence(),
     val captureStatusReadbackFailed: Boolean = false,
     val pendingRecordingCommand: RecordingCommand? = null,
     val recordingCommandUnconfirmed: Boolean = false,
