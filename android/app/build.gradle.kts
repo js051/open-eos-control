@@ -68,6 +68,9 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // One bounded synthetic contract is consumed by all platform tests.
+    sourceSets.getByName("test").resources.srcDir("../../contracts/media-delivery/v1")
 }
 
 kotlin {

@@ -123,7 +123,7 @@ internal suspend fun executeMediaBatch(
     val uniqueItems = items.distinctBy(CameraMediaItem::id)
     val failures = mutableListOf<String>()
     var succeeded = 0
-    uniqueItems.forEachIndexed { index, item ->
+    for ((index, item) in uniqueItems.withIndex()) {
         coroutineContext.ensureActive()
         onProgress(
             MediaBatchProgress(
@@ -144,6 +144,10 @@ internal suspend fun executeMediaBatch(
             if (operation == MediaBatchOperation.DOWNLOAD && exception is MediaWorklistAdmissionException) throw exception
             exception.printStackTrace()
             failures += item.name
+            // A failed or uncertain download retires this batch. Keep earlier
+            // confirmations and leave later durable rows unstarted for explicit
+            // continuation; metadata/mutation batches retain their own policy.
+            if (operation == MediaBatchOperation.DOWNLOAD) break
         }
     }
     return MediaBatchResult(
@@ -2851,6 +2855,7 @@ class CameraViewModel(
                         }
                     }
                 }
+                if (result.notStartedItems > 0) finishPendingMediaSave(request, MediaSaveFeedback.NotStarted)
                 updateMediaSave(request) { it.copy(lastMediaBatchResult = result) }
             } catch (failure: Exception) {
                 if (continuation != null && (request === retiredContinuationRequest ||
