@@ -142,7 +142,7 @@
     <string name="auto_refresh">Auto refresh</string>
     <string name="composition_grid">Composition grid</string>
     <string name="rtp_audio_monitor">Camera audio monitor</string>
-    <string name="rtp_audio_monitor_hint">Plays audio advertised by the camera RTP session. Each session starts muted.</string>
+    <string name="rtp_audio_monitor_hint">Plays camera RTP audio. Starts muted. Enable again after backgrounding or a stall. Output-clock progress does not prove audibility.</string>
     <string name="rtp_audio_monitor_unavailable">The camera advertised RTP audio, but this device could not prepare it.</string>
     <string name="rtp_audio_monitor_description">Camera RTP audio monitor</string>
     <string name="no_settings">No settings are available for this mode.</string>
@@ -219,8 +219,8 @@
     <string name="rtp_audio_channels">Decoded audio channels</string>
     <string name="rtp_audio_packets">RTP audio packets</string>
     <string name="rtp_audio_access_units">AAC access units</string>
-    <string name="rtp_audio_decoded_units">Decoded AAC access units</string>
-    <string name="rtp_audio_played_frames">Played PCM sample frames</string>
+    <string name="rtp_audio_decoded_units">Decoded PCM buffers</string>
+    <string name="rtp_audio_played_frames">Output-clock frame progress (not audibility proof)</string>
     <string name="rtp_audio_dropped_units">Dropped audio access units</string>
     <string name="rtp_audio_underruns">Audio output underruns</string>
     <string name="rtp_audio_latest_packet">Latest audio packet</string>
@@ -1106,4 +1106,7 @@
     <string name="recording_observed_stopped">Fresh camera observation: stopped</string>
     <string name="recording_observed_unavailable">Current recording state unavailable</string>
     <string name="recording_receipt_details">%1$s: %2$s. %3$s. Refresh reads the state without repeating the command.</string>
+    <string name="rtp_audio_pipeline_state">Audio pipeline state / evidence</string>
+    <string name="rtp_audio_queued_units">AAC units queued to decoder</string>
+    <string name="rtp_audio_submitted_frames">PCM frames submitted to output</string>
 </resources>

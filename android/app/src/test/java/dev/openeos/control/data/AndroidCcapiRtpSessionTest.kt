@@ -1,6 +1,6 @@
 package dev.openeos.control.data
 
-import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -105,6 +105,74 @@ class AndroidCcapiRtpSessionTest {
             sender.close()
             session.close()
         }
+    }
+
+    @Test
+    fun backgroundMutesAndForegroundRequiresANewManualEnable() {
+        val videoPort = availableUdpPort()
+        val starts = AtomicInteger()
+        val session = session(videoPort, availableUdpPort(setOf(videoPort)),
+            extractorFactory = { PassthroughLatmExtractor() },
+            audioPlayerFactory = { RtpAudioPlayer { _, _ -> starts.incrementAndGet(); awaitCancellation() } })
+        try {
+            session.start()
+            session.setAudioEnabled(true)
+            await { starts.get() == 1 }
+            session.setRenderingEnabled(false)
+            await { !session.audioStatus.enabled && session.audioStatus.state == "muted" }
+            session.setAudioEnabled(true)
+            assertEquals(1, starts.get())
+            session.setRenderingEnabled(true)
+            assertFalse(session.audioStatus.enabled)
+            assertEquals(1, starts.get())
+            session.setAudioEnabled(true)
+            await { starts.get() == 2 }
+            assertEquals(2L, session.audioStatus.playbackEpoch)
+        } finally { session.close() }
+    }
+
+    @Test
+    fun audioPlayerFailureIsAudioOnlyAndExplicitRetryUsesANewEpoch() {
+        val videoPort = availableUdpPort()
+        val starts = AtomicInteger()
+        val events = Collections.synchronizedList(mutableListOf<NativeLiveViewEvent>())
+        val session = session(videoPort, availableUdpPort(setOf(videoPort)),
+            extractorFactory = { PassthroughLatmExtractor() },
+            audioPlayerFactory = { RtpAudioPlayer { _, _ ->
+                if (starts.incrementAndGet() == 1) error("synthetic audio decoder failure")
+                awaitCancellation()
+            } })
+        try {
+            session.setListener(events::add)
+            session.start()
+            session.setAudioEnabled(true)
+            await { session.audioStatus.state == "failed" }
+            assertFalse(session.audioStatus.enabled)
+            assertTrue(session.audioStatus.error!!.contains("synthetic audio decoder failure"))
+            assertTrue(events.none { it is NativeLiveViewEvent.Failed })
+            session.setAudioEnabled(true)
+            await { starts.get() == 2 }
+            assertEquals(2L, session.audioStatus.playbackEpoch)
+            assertTrue(session.audioStatus.enabled)
+            assertEquals(null, session.audioStatus.error)
+        } finally { session.close() }
+    }
+
+    @Test
+    fun audioExtractorInitializationFailureDoesNotEscapeIntoVideoStartup() {
+        val videoPort = availableUdpPort()
+        val events = Collections.synchronizedList(mutableListOf<NativeLiveViewEvent>())
+        val session = session(videoPort, availableUdpPort(setOf(videoPort)),
+            extractorFactory = { error("synthetic parser initialization failure") },
+            audioPlayerFactory = { error("Audio must stay muted") })
+        try {
+            session.setListener(events::add)
+            session.start()
+            await { session.audioStatus.error?.contains("parser initialization") == true }
+            assertFalse(session.audioStatus.available)
+            assertFalse(session.audioStatus.enabled)
+            assertTrue(events.none { it is NativeLiveViewEvent.Failed })
+        } finally { session.close() }
     }
 
     @Test

@@ -1260,10 +1260,10 @@ class CameraViewModel(
         val session = state.nativeLiveViewSession ?: return
         if (!enabled) {
             session.setAudioEnabled(false)
-            _uiState.update { it.copy(liveViewAudioStatus = it.liveViewAudioStatus.copy(enabled = false)) }
+            _uiState.update { it.copy(liveViewAudioStatus = session.audioStatus) }
             return
         }
-        if (state.liveViewSource != LiveViewSource.CCAPI_RTP || !state.liveViewAudioStatus.available) return
+        if (!appInForeground || !state.liveViewAutoRefresh || state.liveViewSource != LiveViewSource.CCAPI_RTP || !state.liveViewAudioStatus.available) return
         session.setAudioEnabled(true)
     }
 
@@ -4815,7 +4815,8 @@ class CameraViewModel(
                 if (_uiState.value.maintenanceSuspended || !appInForeground || !_uiState.value.liveViewAutoRefresh) return@launch
                 when (event) {
                     is NativeLiveViewEvent.AudioStatusChanged -> _uiState.update {
-                        it.copy(liveViewAudioStatus = event.status)
+                        // A queued old-epoch callback must not re-enable or overwrite a newer manual attempt.
+                        it.copy(liveViewAudioStatus = session.audioStatus)
                     }
 
                     is NativeLiveViewEvent.FrameRendered -> _uiState.update {

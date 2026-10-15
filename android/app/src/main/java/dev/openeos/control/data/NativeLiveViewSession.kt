@@ -55,12 +55,22 @@ data class NativeLiveViewAudioStatus(
     val packetsReceived: Long = 0,
     val accessUnitsReceived: Long = 0,
     val decodedAccessUnits: Long = 0,
+    // AudioTrack playback-head progress, not physical audibility.
     val playedSampleFrames: Long = 0,
     val droppedAccessUnits: Long = 0,
     val underruns: Int = 0,
     val lastPacketAtMillis: Long? = null,
     val lastPcmAtMillis: Long? = null,
     val error: String? = null,
+    val playbackEpoch: Long = 0,
+    val retirementPending: Boolean = false,
+    val state: String = "muted",
+    val evidenceLevel: String = "none",
+    val queuedAccessUnits: Long = 0,
+    val decodedSampleFrames: Long = 0,
+    val submittedSampleFrames: Long = 0,
+    val lastOutputAtMillis: Long? = null,
+    val pcmFresh: Boolean = false,
 ) {
     companion object {
         val None = NativeLiveViewAudioStatus()
