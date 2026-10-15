@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraInfo
+import dev.openeos.control.data.MediaUploadStatus
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaStreamSource
 import dev.openeos.control.data.CameraMediaTransferProgress
@@ -150,6 +151,8 @@ data class CameraUiState(
     val activeMediaUploadName: String? = null,
     val mediaUploadProgress: CameraMediaTransferProgress? = null,
     val lastUploadedMediaName: String? = null,
+    val mediaUploadStatus: MediaUploadStatus? = null,
+    val mediaUploadRefreshFailed: Boolean = false,
     val lastDeletedMediaName: String? = null,
     val mediaBatchProgress: MediaBatchProgress? = null,
     val lastMediaBatchResult: MediaBatchResult? = null,

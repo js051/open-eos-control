@@ -81,7 +81,7 @@ class CameraMediaPickerSessionTest {
                             .put("name", url.queryParameter("filename"))
                             .put("kind", "image").put("size_bytes", bytes.size)
                         uploadedItems += item
-                        camera.json(item.toString())
+                        camera.json(item.toString()).setResponseCode(201)
                     }
                     request.method == "GET" && url.encodedPath == "/ccapi/media" && uploadedItems.isNotEmpty() -> {
                         val items = JSONObject(camera.mediaJson()).getJSONArray("items")

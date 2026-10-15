@@ -303,14 +303,20 @@ class PtpProtocolTest {
             keywords = "",
         )
 
+        var dispatches = 0
         val result = session.uploadObject(
             storageId = 0x00010001,
             parentObject = UINT32_MAX,
             objectInfo = objectInfo,
             source = ByteArrayInputStream(objectBytes),
+            beforeDispatch = {
+                assertFalse(transport.sent.any { it.code == PtpOperationCode.SEND_OBJECT_INFO })
+                dispatches++
+            },
         ) { transferred, total -> progress += transferred to total }
         session.shutdown()
 
+        assertEquals(1, dispatches)
         assertEquals(PtpSendObjectInfoResult(0x00010001, UINT32_MAX, 0x77), result)
         val uploadContainers = transport.sent.filter {
             it.code == PtpOperationCode.SEND_OBJECT_INFO || it.code == PtpOperationCode.SEND_OBJECT

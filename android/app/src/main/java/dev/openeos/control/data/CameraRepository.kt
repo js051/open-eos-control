@@ -309,8 +309,9 @@ class CameraRepository(
         sizeBytes: Long,
         contentType: String?,
         source: InputStream,
+        evidence: MediaUploadEvidence = MediaUploadEvidence(),
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
-    ): CameraMediaUploadResult = backend.uploadMedia(name, sizeBytes, contentType, source, onProgress)
+    ): CameraMediaUploadResult = backend.uploadMedia(name, sizeBytes, contentType, source, evidence, onProgress)
 
     suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = backend.mediaInfo(item)
 

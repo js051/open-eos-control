@@ -25,6 +25,11 @@ import dev.openeos.control.data.RecordingRequestEvidence
 import dev.openeos.control.data.RecordingCommand
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraFileNamingField
+import dev.openeos.control.data.canStartMediaUpload
+import dev.openeos.control.data.MediaUploadAttempt
+import dev.openeos.control.data.MediaUploadEvidence
+import dev.openeos.control.data.MediaUploadStatus
+import dev.openeos.control.data.ownsMediaUpload
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.MediaMetadataField
 import dev.openeos.control.data.MediaMetadataTarget
@@ -258,7 +263,7 @@ class CameraViewModel(
     private var liveViewJob: Job? = null
     private class LiveViewFrameRead(val job: Job, var stopped: Boolean = false)
     private val liveViewFrameReads = mutableSetOf<LiveViewFrameRead>()
-    private var cameraSessionGeneration = 0L
+    @Volatile private var cameraSessionGeneration = 0L
     private val mediaPickerRequests = CameraMediaPickerRequests()
     private var cameraStateRevision = 0L
     private val cameraOperationJobs = mutableMapOf<CameraOperation, Job>()
@@ -308,6 +313,7 @@ class CameraViewModel(
     }
     @Volatile private var mediaSaveRequest: MediaSaveRequest? = null
     private var mediaUploadJob: Job? = null
+    @Volatile private var mediaUploadAttempt: MediaUploadAttempt? = null
     private var mediaLibraryJob: Job? = null
     private var mediaLibraryGeneration = 0L
     private var mediaEventDemandGeneration = 0L
@@ -923,6 +929,7 @@ class CameraViewModel(
 
     private suspend fun applyConnectedSession(session: CameraSession) {
         coroutineContext.ensureActive()
+        mediaUploadAttempt = null
         val supportedFps = _uiState.value.liveViewFrameRateFps.coerceIn(
             session.capabilities.liveView.minFps,
             session.capabilities.liveView.maxFps,
@@ -939,6 +946,11 @@ class CameraViewModel(
             it.copy(
                 transport = session.transport,
                 info = session.info,
+                activeMediaUploadName = null,
+                mediaUploadProgress = null,
+                lastUploadedMediaName = null,
+                mediaUploadStatus = null,
+                mediaUploadRefreshFailed = false,
                 status = session.status,
                 shutterReleaseUnconfirmed = session.status.shutterReleaseUnconfirmed == true,
                 liveViewStopUnconfirmed = session.liveViewStartError != null && repository.isLiveViewStopRequired(),
@@ -992,6 +1004,7 @@ class CameraViewModel(
         val recordingWarning = retireRecordingAttempt(previousState)
         val liveViewWarning = previousState.liveViewDisconnectWarning || previousState.needsLiveViewStopRecovery
         val shutterWarning = previousState.needsShutterDisconnectWarning()
+        mediaUploadAttempt?.cancel()
         cameraSessionGeneration += 1
         val operationJobs = cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)
         cameraOperationJobs.clear()
@@ -1903,7 +1916,8 @@ class CameraViewModel(
                         capabilities = capabilities ?: it.capabilities,
                         lastDownloadedMediaName = null,
                         lastDownloadLocation = null,
-                        lastUploadedMediaName = null,
+                        lastUploadedMediaName = if (it.mediaUploadStatus == MediaUploadStatus.CONFIRMED) it.lastUploadedMediaName else null,
+                        mediaUploadRefreshFailed = false,
                         lastDeletedMediaName = null,
                         lastMediaBatchResult = null,
                     )
@@ -3048,52 +3062,54 @@ class CameraViewModel(
 
     fun uploadMedia(context: Context, sourceUri: Uri) {
         val state = _uiState.value
-        if (
-            state.previewMode ||
-            state.isBusy(CameraOperation.MEDIA) ||
-            !state.supports(CameraFeature.MEDIA_UPLOAD) ||
-            mediaUploadJob != null ||
-            mediaDownloadJob != null
+        if (!canStartMediaUpload(state.previewMode, state.supports(CameraFeature.MEDIA_UPLOAD),
+            state.isBusy(CameraOperation.MEDIA), mediaUploadJob != null, mediaDownloadJob != null)
         ) return
+        val generation = cameraSessionGeneration
+        val attempt = MediaUploadAttempt()
+        mediaUploadAttempt = attempt
+        fun owns(current: CameraUiState = _uiState.value): Boolean = ownsMediaUpload(
+            attempt, mediaUploadAttempt, state.info, current.info, generation, cameraSessionGeneration,
+        )
+        fun publish(transform: (CameraUiState) -> CameraUiState) {
+            _uiState.update { if (owns(it)) transform(it) else it }
+        }
         val appContext = context.applicationContext
         val resolver = appContext.contentResolver
-        _uiState.update { it.copy(lastUploadedMediaName = null) }
-        val job = launchCameraOperation(CameraOperation.MEDIA) {
+        publish { it.copy(lastUploadedMediaName = null, mediaUploadStatus = MediaUploadStatus.PREPARING,
+            mediaUploadRefreshFailed = false) }
+        val job = launchCameraOperation(CameraOperation.MEDIA, onRegistered = { mediaUploadJob = it },
+            afterFinally = {
+                // Admission can be cancelled while older media reads are still joining.
+                val outcome = attempt.finish()
+                publish { it.copy(activeMediaUploadName = null, mediaUploadProgress = null,
+                    mediaUploadStatus = outcome, lastUploadedMediaName = attempt.confirmedResult()?.item?.name) }
+            },
+        ) {
             var temporaryFile: File? = null
+            var refreshed = false
             try {
                 val metadata = withContext(Dispatchers.IO) {
-                    resolver.query(
-                        sourceUri,
-                        arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
-                        null,
-                        null,
-                        null,
-                    )?.use { cursor ->
+                    coroutineContext.ensureActive()
+                    if (!owns()) throw CancellationException("Upload owner changed.")
+                    resolver.query(sourceUri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+                        null, null, null)?.use { cursor ->
                         if (!cursor.moveToFirst()) return@use null
                         val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                         val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
                         MediaUploadMetadata(
-                            name = nameIndex.takeIf { it >= 0 && !cursor.isNull(it) }
-                                ?.let(cursor::getString)
-                                .orEmpty(),
-                            sizeBytes = sizeIndex.takeIf { it >= 0 && !cursor.isNull(it) }
-                                ?.let(cursor::getLong),
+                            nameIndex.takeIf { it >= 0 && !cursor.isNull(it) }?.let(cursor::getString).orEmpty(),
+                            sizeIndex.takeIf { it >= 0 && !cursor.isNull(it) }?.let(cursor::getLong),
                         )
                     }
-                } ?: MediaUploadMetadata(
-                    name = sourceUri.lastPathSegment?.substringAfterLast('/').orEmpty(),
-                    sizeBytes = null,
-                )
+                } ?: MediaUploadMetadata(sourceUri.lastPathSegment?.substringAfterLast('/').orEmpty(), null)
                 val name = metadata.name.trim()
                 check(name.isNotEmpty()) { "Android could not determine the selected media filename." }
-                _uiState.update {
-                    it.copy(
-                        activeMediaUploadName = name,
-                        mediaUploadProgress = CameraMediaTransferProgress(0L, metadata.sizeBytes),
-                        lastUploadedMediaName = null,
-                    )
-                }
-                val result = withContext(Dispatchers.IO) {
+                publish { it.copy(activeMediaUploadName = name,
+                    mediaUploadProgress = CameraMediaTransferProgress(0L, metadata.sizeBytes)) }
+                withContext(Dispatchers.IO) {
+                    coroutineContext.ensureActive()
+                    if (!owns()) throw CancellationException("Upload owner changed.")
                     val cached = File(appContext.cacheDir, "media-upload-${UUID.randomUUID()}.tmp")
                     temporaryFile = cached
                     val rawInput = resolver.openInputStream(sourceUri)
@@ -3104,156 +3120,101 @@ class CameraViewModel(
                             var copied = 0L
                             while (true) {
                                 coroutineContext.ensureActive()
+                                if (!owns()) throw CancellationException("Upload owner changed.")
                                 val count = input.read(buffer)
                                 if (count < 0) break
                                 if (count == 0) continue
                                 copied += count
-                                check(copied <= MAX_MEDIA_UPLOAD_BYTES) {
-                                    "Selected media exceeds the $MAX_MEDIA_UPLOAD_BYTES-byte upload limit."
-                                }
+                                check(copied <= MAX_MEDIA_UPLOAD_BYTES) { "Selected media exceeds the upload limit." }
+                                coroutineContext.ensureActive()
                                 output.write(buffer, 0, count)
-                                _uiState.update { current ->
-                                    current.copy(
-                                        mediaUploadProgress = CameraMediaTransferProgress(
-                                            copied,
-                                            metadata.sizeBytes?.takeIf { it > 0L },
-                                        )
-                                    )
-                                }
+                                publish { if (attempt.acceptsProgress()) it.copy(mediaUploadProgress =
+                                    CameraMediaTransferProgress(copied, metadata.sizeBytes?.takeIf { size -> size > 0L })) else it }
                             }
                             copied
                         }
                     }
-                    check(resolvedSize in 1L..MAX_MEDIA_UPLOAD_BYTES) {
-                        "Selected media size must be from 1 through $MAX_MEDIA_UPLOAD_BYTES bytes."
-                    }
+                    check(resolvedSize in 1L..MAX_MEDIA_UPLOAD_BYTES) { "Selected media size is outside the upload limit." }
+                    coroutineContext.ensureActive()
+                    if (!owns()) throw CancellationException("Upload owner changed.")
                     BufferedInputStream(FileInputStream(cached)).use { input ->
-                        repository.uploadMedia(
-                            name = name,
-                            sizeBytes = resolvedSize,
-                            contentType = resolver.getType(sourceUri),
-                            source = input,
+                        repository.uploadMedia(name, resolvedSize, resolver.getType(sourceUri), input,
+                            evidence = MediaUploadEvidence(
+                                beforeDispatch = {
+                                    if (!owns()) throw CancellationException("Upload owner changed.")
+                                    attempt.beforeDispatch()
+                                    publish { it.copy(mediaUploadStatus = MediaUploadStatus.SENDING,
+                                        mediaUploadProgress = CameraMediaTransferProgress(0L, resolvedSize)) }
+                                },
+                                // Runs in the transport before withContext's prompt cancellation boundary.
+                                // The receipt remains on this attempt even if its return value is cancelled.
+                                onConfirmed = attempt::confirm,
+                            ),
                         ) { progress ->
-                            _uiState.update { current -> current.copy(mediaUploadProgress = progress) }
+                            publish { if (attempt.acceptsProgress()) it.copy(mediaUploadProgress = progress) else it }
                         }
                     }
                 }
-                val finishUpload: suspend () -> Unit = finish@{
-                    if (_uiState.value.info !== state.info) return@finish
-                    _uiState.update {
-                        it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.LOADING)
-                    }
-                    val items = try {
-                        repository.listMedia()
-                    } catch (exception: CancellationException) {
-                        throw exception
-                    } catch (exception: Exception) {
-                        _uiState.update {
-                            if (it.info === state.info) it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED) else it
+                val receipt = attempt.confirmedResult()
+                check(receipt != null) { "Upload did not return a completion receipt." }
+                publish { it.copy(lastUploadedMediaName = receipt.item.name,
+                    mediaUploadStatus = MediaUploadStatus.CONFIRMED) }
+                // Refresh only the current browsing scope. It cannot confirm or undo this receipt.
+                coroutineContext.ensureActive()
+                val refresh: suspend () -> Unit = {
+                    if (owns()) {
+                        publish { it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.LOADING) }
+                        try {
+                            val items = repository.listMedia(maximumItemsFor(state.mediaLibraryScope))
+                            coroutineContext.ensureActive()
+                            if (owns()) {
+                                cancelMediaThumbnailLoads()
+                                val batch = items.toMediaLibraryBatch(state.mediaLibraryScope)
+                                publish { it.copy(mediaItems = batch.items, mediaLibraryHasMore = batch.hasMore,
+                                    mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE, mediaThumbnails = emptyMap()) }
+                                refreshed = true
+                            }
+                        } catch (exception: CancellationException) {
+                            publish { it.copy(mediaUploadRefreshFailed = true, mediaLibraryLoadStatus = MediaLibraryLoadStatus.CANCELLED) }
+                            throw exception
+                        } catch (_: Exception) {
+                            publish { it.copy(mediaUploadRefreshFailed = true, mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED) }
                         }
-                        throw exception
-                    }
-                    if (_uiState.value.info !== state.info) return@finish
-                    check(
-                        items.any {
-                            it.id == result.item.id ||
-                                (it.name == result.item.name && it.sizeBytes == result.item.sizeBytes)
-                        }
-                    ) {
-                        "The uploaded media was not present in the camera's refreshed media list."
-                    }
-                    val capabilities = runCatching { repository.refreshCapabilities() }.getOrNull()
-                    if (_uiState.value.info !== state.info) return@finish
-                    cancelMediaThumbnailLoads()
-                    _uiState.update {
-                        it.copy(
-                            mediaItems = items,
-                            mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
-                            mediaThumbnails = emptyMap(),
-                            capabilities = capabilities ?: it.capabilities,
-                            lastUploadedMediaName = result.item.name,
-                        )
                     }
                 }
                 if (state.transport == CameraTransport.USB_PTP) {
-                    withContext(NonCancellable) { finishUpload() }
-                } else {
-                    finishUpload()
-                }
+                    withContext(NonCancellable) { refresh() }
+                } else refresh()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                // Neither a transport error nor a failed local read authorizes retry or a success guess.
+                // The final status below is based solely on actual dispatch and receipt evidence.
             } finally {
+                val outcome = attempt.finish()
                 withContext(NonCancellable + Dispatchers.IO) { temporaryFile?.delete() }
-                _uiState.update { it.copy(activeMediaUploadName = null, mediaUploadProgress = null) }
+                val receipt = attempt.confirmedResult()
+                publish { it.copy(activeMediaUploadName = null, mediaUploadProgress = null,
+                    mediaUploadStatus = outcome, lastUploadedMediaName = receipt?.item?.name,
+                    mediaUploadRefreshFailed = outcome == MediaUploadStatus.CONFIRMED && !refreshed) }
+                if (outcome == MediaUploadStatus.UNCERTAIN && state.transport == CameraTransport.USB_PTP && owns()) {
+                    withContext(NonCancellable + Dispatchers.IO) { runCatching { repository.disconnect() } }
+                    if (owns()) {
+                        closeMediaStream()
+                        publish { it.withClearedSession(baseUrl = it.baseUrl,
+                            error = appContext.getString(R.string.media_upload_usb_uncertain)) }
+                    }
+                }
             }
         }
-        mediaUploadJob = job
-        job?.invokeOnCompletion {
-            if (mediaUploadJob === job) mediaUploadJob = null
-        }
+        if (job == null && mediaUploadAttempt === attempt) mediaUploadAttempt = null
+        job?.invokeOnCompletion { if (mediaUploadJob === job) mediaUploadJob = null }
     }
 
     fun cancelMediaUpload() {
         val job = mediaUploadJob ?: return
-        val state = _uiState.value
-        if (state.transport !in setOf(CameraTransport.USB_PTP, CameraTransport.DESKTOP_BRIDGE)) {
-            job.cancel()
-            return
-        }
-        val name = state.activeMediaUploadName
-        val sizeBytes = state.mediaUploadProgress?.totalBytes
-        mediaUploadJob = null
-        val generation = cameraSessionGeneration
-        val cleanupJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
-            job.cancelAndJoin()
-            if (generation != cameraSessionGeneration || _uiState.value.info !== state.info) return@launch
-            if (_uiState.value.lastUploadedMediaName != null) return@launch
-            if (state.transport == CameraTransport.DESKTOP_BRIDGE && name != null) {
-                reconcileCancelledBridgeUpload(name, sizeBytes, generation)
-                return@launch
-            }
-            withContext(NonCancellable + Dispatchers.IO) { runCatching { repository.disconnect() } }
-            closeMediaStream()
-            _uiState.update { current ->
-                if (generation == cameraSessionGeneration && current.info === state.info) {
-                    current.withClearedSession(
-                        baseUrl = current.baseUrl,
-                        error = "USB upload was interrupted before commit confirmation. Reconnect and refresh media before retrying.",
-                    )
-                } else {
-                    current
-                }
-            }
-        }
-        mediaUploadCleanupJob = cleanupJob
-        cleanupJob.invokeOnCompletion { if (mediaUploadCleanupJob === cleanupJob) mediaUploadCleanupJob = null }
-        cleanupJob.start()
-    }
-
-    private suspend fun reconcileCancelledBridgeUpload(name: String, sizeBytes: Long?, generation: Long) {
-        _uiState.update {
-            it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.LOADING)
-        }
-        val items = withContext(NonCancellable + Dispatchers.IO) {
-            runCatching { repository.listMedia() }.getOrNull()
-        } ?: run {
-            if (generation == cameraSessionGeneration) _uiState.update {
-                it.copy(mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED)
-            }
-            return
-        }
-        if (generation != cameraSessionGeneration) return
-        val uploaded = items.firstOrNull { item ->
-            item.name.equals(name, ignoreCase = true) &&
-                (sizeBytes == null || item.sizeBytes == sizeBytes)
-        }
-        cancelMediaThumbnailLoads()
-        _uiState.update { current ->
-            current.copy(
-                mediaItems = items,
-                mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE,
-                mediaThumbnails = emptyMap(),
-                lastUploadedMediaName = uploaded?.name,
-            )
-        }
+        mediaUploadAttempt?.cancel()
+        job.cancel()
     }
 
     fun deleteMedia(item: CameraMediaItem) {
@@ -3493,6 +3454,7 @@ class CameraViewModel(
             val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
             val recordingWarning = retireRecordingAttempt(_uiState.value)
             _uiState.update { it.copy(recordingDisconnectWarning = recordingWarning) }
+            mediaUploadAttempt?.cancel()
             cameraSessionGeneration += 1
             cancelDownloadContinuation()
             (cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)).also { jobs ->
@@ -4015,6 +3977,7 @@ class CameraViewModel(
         val handoffCleanup = handoffOwner.cancelUnlaunched()
         foregroundImportPreferences?.unregisterOnSharedPreferenceChangeListener(foregroundImportWarningListener)
         val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
+        mediaUploadAttempt?.cancel()
         cameraSessionGeneration += 1
         val operationJobs = cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)
         cameraOperationJobs.clear()
@@ -4099,6 +4062,8 @@ class CameraViewModel(
         activeMediaUploadName = null,
         mediaUploadProgress = null,
         lastUploadedMediaName = null,
+        mediaUploadStatus = null,
+        mediaUploadRefreshFailed = false,
         lastDeletedMediaName = null,
         mediaBatchProgress = null,
         lastMediaBatchResult = null,

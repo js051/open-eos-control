@@ -1906,6 +1906,7 @@ class CcapiClient(
         sizeBytes: Long,
         contentType: String?,
         source: InputStream,
+        evidence: MediaUploadEvidence = MediaUploadEvidence(),
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaUploadResult = withContext(Dispatchers.IO) {
         if (isRealCamera) {
@@ -1918,6 +1919,7 @@ class CcapiClient(
             .addQueryParameter("filename", name)
             .build()
         val mediaType = (contentType ?: "application/octet-stream").substringBefore(';').trim().toMediaType()
+        val uploadContext = currentCoroutineContext()
         var bytesTransferred = 0L
         val body = object : RequestBody() {
             override fun contentType() = mediaType
@@ -1927,10 +1929,12 @@ class CcapiClient(
                 val buffer = ByteArray(MEDIA_TRANSFER_BUFFER_BYTES)
                 onProgress(CameraMediaTransferProgress(0L, sizeBytes))
                 while (bytesTransferred < sizeBytes) {
+                    uploadContext.ensureActive()
                     val requested = minOf(buffer.size.toLong(), sizeBytes - bytesTransferred).toInt()
                     val count = source.read(buffer, 0, requested)
                     check(count >= 0) { "Upload source ended after $bytesTransferred of $sizeBytes bytes." }
                     if (count == 0) continue
+                    uploadContext.ensureActive()
                     sink.write(buffer, 0, count)
                     bytesTransferred += count
                     onProgress(CameraMediaTransferProgress(bytesTransferred, sizeBytes))
@@ -1949,6 +1953,8 @@ class CcapiClient(
         }
         try {
             val response = try {
+                currentCoroutineContext().ensureActive()
+                evidence.beforeDispatch()
                 call.execute()
             } catch (exception: CancellationException) {
                 throw exception
@@ -1957,7 +1963,7 @@ class CcapiClient(
                 throw exception
             }
             response.use {
-                val responseBody = response.body?.string().orEmpty()
+                val responseBody = response.body?.let { readStrictMediaJsonText(it.byteStream(), it.contentLength(), 65_536) }.orEmpty()
                 if (!response.isSuccessful) {
                     throw CcapiHttpException(
                         response.code,
@@ -1965,12 +1971,21 @@ class CcapiClient(
                     )
                 }
                 check(bytesTransferred == sizeBytes) { "Simulator upload byte count did not match the source." }
-                val item = parseSimulatorMediaItem(JSONObject(responseBody))
-                    ?: error("Simulator returned invalid uploaded media information.")
+                val strictReceipt = StrictMediaJson(responseBody).also { it.validate() }
+                val receipt = JSONObject(responseBody)
+                check(validUploadReceipt(response.code, name, sizeBytes, bytesTransferred,
+                    receipt.opt("id"), receipt.opt("name"), receipt.opt("size_bytes"), receipt.opt("kind"), strictReceipt.topLevelToken("size_bytes"))) {
+                    "Upload has no valid operation-specific completion receipt."
+                }
+                val item = CameraMediaItem(
+                    id = receipt.getString("id"), name = receipt.getString("name"), kind = receipt.getString("kind"),
+                    sizeBytes = sizeBytes, contentType = receipt.cameraMediaContentType(),
+                )
                 check(item.name == name && item.sizeBytes == sizeBytes) {
                     "Simulator did not verify the uploaded filename and size."
                 }
                 CameraMediaUploadResult(item, bytesTransferred).also {
+                    evidence.onConfirmed(it)
                     observedFeatures.add(CameraFeature.MEDIA_UPLOAD)
                 }
             }

@@ -26,7 +26,11 @@ internal fun readStrictMediaJsonText(input: InputStream, declaredBytes: Long, ma
 /** Android's JSONTokener accepts non-JSON syntax. Validate grammar and decoded keys first. */
 internal class StrictMediaJson(private val text: String) {
     private var offset = 0
+    private val topLevelMembers = mutableMapOf<String, String>()
+    fun topLevelToken(key: String): String? = topLevelMembers[key]
     fun validate() {
+        offset = 0
+        topLevelMembers.clear()
         value(0)
         whitespace()
         check(offset == text.length) { "Trailing listing JSON." }
@@ -47,9 +51,13 @@ internal class StrictMediaJson(private val text: String) {
                 if (take('}')) return
                 do {
                     whitespace()
-                    check(keys.add(string())) { "Duplicate listing JSON member." }
+                    val key = string()
+                    check(keys.add(key)) { "Duplicate listing JSON member." }
                     check(take(':'))
+                    whitespace()
+                    val start = offset
                     value(depth + 1)
+                    if (depth == 0) topLevelMembers[key] = text.substring(start, offset)
                 } while (take(','))
                 check(take('}'))
             }

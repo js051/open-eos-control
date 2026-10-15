@@ -52,6 +52,7 @@ import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraFeature
+import dev.openeos.control.data.MediaUploadStatus
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.MediaMetadataField
 import dev.openeos.control.data.metadataWritable
@@ -583,7 +584,8 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions, cur
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        stringResource(R.string.uploading_media, name),
+                        stringResource(if (state.mediaUploadStatus == MediaUploadStatus.PREPARING)
+                            R.string.preparing_media_upload else R.string.uploading_media, name),
                         color = AppText,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -630,6 +632,25 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions, cur
                 color = AppSuccess,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             )
+        }
+
+        val uploadNotice = when {
+            state.mediaUploadStatus == MediaUploadStatus.NOT_SENT -> R.string.media_upload_not_sent
+            state.mediaUploadStatus == MediaUploadStatus.UNCERTAIN -> R.string.media_upload_uncertain
+            state.mediaUploadStatus == MediaUploadStatus.CONFIRMED && state.mediaUploadRefreshFailed ->
+                R.string.media_upload_refresh_failed
+            else -> null
+        }
+        uploadNotice?.let { notice ->
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text(stringResource(notice), color = AppWarning)
+                if (state.mediaUploadStatus == MediaUploadStatus.UNCERTAIN || state.mediaUploadRefreshFailed) {
+                    TextButton(onClick = actions.refreshMedia,
+                        enabled = !state.isBusy(CameraOperation.MEDIA) && !state.mediaLibraryLoading) {
+                        Text(stringResource(R.string.media_upload_inspect))
+                    }
+                }
+            }
         }
 
         state.lastDeletedMediaName?.let { name ->

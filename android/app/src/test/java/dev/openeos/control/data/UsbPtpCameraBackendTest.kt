@@ -181,6 +181,24 @@ class UsbPtpCameraBackendTest {
     }
 
     @Test
+    fun localCancellationAtUsbDispatchBoundaryDoesNotSendOrAbortSession() = runTest {
+        val transport = ScriptedTransport(advertiseCapture = false, advertiseUpload = true)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-upload"),
+            transportFactory = PtpTransportFactory { transport })
+        backend.initialize()
+        val attempt = MediaUploadAttempt().also { it.cancel() }
+        val failure = runCatching {
+            backend.uploadMedia("SYNTHETIC.JPG", 1, "image/jpeg", ByteArrayInputStream(byteArrayOf(7)),
+                evidence = MediaUploadEvidence(attempt::beforeDispatch, attempt::confirm))
+        }.exceptionOrNull()
+        assertTrue(failure is kotlinx.coroutines.CancellationException)
+        assertEquals(MediaUploadStatus.NOT_SENT, attempt.finish())
+        assertFalse(PtpOperationCode.SEND_OBJECT_INFO in transport.sentOperations)
+        assertFalse(transport.closed)
+        backend.close()
+    }
+
+    @Test
     fun mediaUploadRequiresAdvertisedOperationsAndVerifiesExactObjectInfo() = runTest {
         val transport = ScriptedTransport(advertiseCapture = false, advertiseUpload = true)
         val backend = UsbPtpCameraBackend(
@@ -189,6 +207,7 @@ class UsbPtpCameraBackendTest {
         )
         val bytes = "phone-to-camera".toByteArray()
         val progress = mutableListOf<CameraMediaTransferProgress>()
+        val attempt = MediaUploadAttempt()
         backend.initialize()
 
         val capabilities = backend.capabilities()
@@ -197,9 +216,13 @@ class UsbPtpCameraBackendTest {
             sizeBytes = bytes.size.toLong(),
             contentType = "image/jpeg",
             source = ByteArrayInputStream(bytes),
+            evidence = MediaUploadEvidence(attempt::beforeDispatch, attempt::confirm),
             onProgress = progress::add,
         )
 
+        attempt.cancel()
+        assertEquals(MediaUploadStatus.CONFIRMED, attempt.finish())
+        assertEquals(result, attempt.confirmedResult())
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_UPLOAD))
         assertEquals("PHONE_0001.JPG", result.item.name)
         assertEquals(bytes.size.toLong(), result.item.sizeBytes)
@@ -226,17 +249,20 @@ class UsbPtpCameraBackendTest {
         )
         backend.initialize()
 
+        val attempt = MediaUploadAttempt()
         val failure = runCatching {
             backend.uploadMedia(
                 name = "PHONE_0002.JPG",
                 sizeBytes = 2,
                 contentType = "image/jpeg",
                 source = ByteArrayInputStream(byteArrayOf(1)),
+                evidence = MediaUploadEvidence(attempt::beforeDispatch, attempt::confirm),
                 onProgress = {},
             )
         }.exceptionOrNull()
         backend.close()
 
+        assertEquals(MediaUploadStatus.UNCERTAIN, attempt.finish())
         assertTrue(failure is PtpProtocolException)
         assertTrue(failure?.message.orEmpty().contains("reconnect"))
         assertTrue(transport.closed)

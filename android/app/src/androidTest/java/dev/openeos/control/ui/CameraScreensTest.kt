@@ -3250,6 +3250,31 @@ class CameraScreensTest {
     }
 
     @Test
+    fun unknownUploadShowsInspectionActionWithoutSuccessOrAutomaticRetry() {
+        var refreshes = 0
+        var uploads = 0
+        val state = CameraUiState().withOfflinePreview().copy(previewMode = false, uiMode = UiMode.MEDIA,
+            mediaUploadStatus = dev.openeos.control.data.MediaUploadStatus.UNCERTAIN)
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                MediaScreen(state, noOpActions().copy(refreshMedia = { refreshes++ }, uploadMedia = { uploads++ }))
+            }
+        }
+        compose.onNodeWithText(resourceText(R.string.media_upload_uncertain)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.media_upload_inspect)).performClick()
+        compose.runOnIdle { assertEquals(1, refreshes); assertEquals(0, uploads) }
+    }
+
+    @Test
+    fun locallyPreparingUploadIsNotPresentedAsSending() {
+        val state = CameraUiState().withOfflinePreview().copy(previewMode = false, uiMode = UiMode.MEDIA,
+            activeMediaUploadName = "SAME.JPG", mediaUploadStatus = dev.openeos.control.data.MediaUploadStatus.PREPARING)
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, noOpActions()) } }
+        compose.onNodeWithText(resourceText(R.string.preparing_media_upload, "SAME.JPG")).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.uploading_media, "SAME.JPG")).assertDoesNotExist()
+    }
+
+    @Test
     fun photoStateShowsModeSelectorAndExplainsMissingStillCaptureCapability() {
         var selectedMode: CaptureMode? = null
         compose.setContent {
