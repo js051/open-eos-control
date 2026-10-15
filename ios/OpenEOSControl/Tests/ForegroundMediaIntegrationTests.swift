@@ -197,6 +197,67 @@ final class ForegroundMediaIntegrationTests: XCTestCase {
         }
     }
 
+    func testInvalidOriginalKeepsPriorFilesAndFailedHistoryThenExplicitReenableExcludesOldIDs() async throws {
+        for failure in ["bytes", "response-mime"] {
+            try await withFixture { fixture in
+                let task = try await fixture.startAndEstablishBaseline(toFiles: true)
+                try await fixture.discover("GOOD.JPG")
+                try await fixture.tickAndWait(seconds: 1)
+                let before = await fixture.store.snapshot()
+                let good = try XCTUnwrap(before.records.first)
+                let copied = try XCTUnwrap(before.externalAttempts.first)
+                let goodURL = fixture.folder.appendingPathComponent(copied.filename)
+                XCTAssertEqual(try Data(contentsOf: goodURL), ForegroundIntegrationPeer.original)
+                // Size and fresh image/jpeg metadata both match this failed body.
+                if failure == "bytes" {
+                    await fixture.peer.setOriginal(Data([0xFF, 0xD8, 0xFF, 0xD9]))
+                } else {
+                    await fixture.peer.setOriginal(ForegroundIntegrationPeer.original, headers: ["content-type": "image/png"])
+                }
+                try await fixture.discover("BAD.JPG")
+                try await fixture.tick(seconds: 1)
+                try await fixture.drain(task)
+                XCTAssertEqual(fixture.state.foregroundMedia.state, .failed)
+                XCTAssertEqual(fixture.state.foregroundMedia.reason, .transfer)
+                XCTAssertEqual(fixture.state.foregroundMedia.preparedCount, 1)
+                XCTAssertEqual(fixture.state.foregroundMedia.copiedCount, 1)
+                XCTAssertEqual(fixture.state.foregroundTemporaryCount, 0)
+                let failed = await fixture.store.snapshot()
+                XCTAssertEqual(failed.records.first { $0.id == good.id }?.status, .prepared)
+                XCTAssertEqual(failed.records.first { $0.filename == "BAD.JPG" }?.status, .failed)
+                XCTAssertEqual(failed.records.first { $0.filename == "BAD.JPG" }?.reason, .downloadFailed)
+                XCTAssertEqual(failed.records.first { $0.filename == "BAD.JPG" }?.availability, .notRetained)
+                XCTAssertEqual(failed.externalAttempts.count, 1)
+                XCTAssertEqual(fixture.state.mediaDeliverySnapshot.records.first { $0.filename == "BAD.JPG" }?.status, .failed)
+                XCTAssertEqual(try Data(contentsOf: goodURL), ForegroundIntegrationPeer.original)
+                for url in await fixture.peer.returnedTemporaryFiles() {
+                    XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+                }
+                let stopped = await fixture.peer.originalRequests()
+                XCTAssertEqual(stopped.map(\.path), [ForegroundIntegrationPeer.path("GOOD.JPG"), ForegroundIntegrationPeer.path("BAD.JPG")])
+                XCTAssertTrue(fixture.state.canStartForegroundMedia)
+                await fixture.peer.setOriginal(ForegroundIntegrationPeer.original)
+                let recovery = try await fixture.startAndEstablishBaseline(toFiles: true)
+                try await fixture.tickAndWait(seconds: 5)
+                let baselineRequests = await fixture.peer.originalRequests()
+                XCTAssertEqual(baselineRequests, stopped, "Explicit re-enable excludes both the successful and failed old IDs")
+                try await fixture.discover("RECOVERED.JPG")
+                try await fixture.tickAndWait(seconds: 1)
+                XCTAssertEqual(fixture.state.foregroundMedia.preparedCount, 1)
+                XCTAssertEqual(fixture.state.foregroundMedia.copiedCount, 1)
+                let recovered = await fixture.store.snapshot()
+                XCTAssertEqual(recovered.records.first { $0.filename == "BAD.JPG" }?.status, .failed)
+                XCTAssertEqual(recovered.records.first { $0.filename == "RECOVERED.JPG" }?.status, .prepared)
+                let requests = await fixture.peer.requests()
+                XCTAssertTrue(requests.allSatisfy { $0.method == "GET" }, "No shutter resend or camera write")
+                let finalOriginals = await fixture.peer.originalRequests()
+                XCTAssertEqual(finalOriginals.count, 3)
+                XCTAssertEqual(try Data(contentsOf: goodURL), ForegroundIntegrationPeer.original)
+                try await fixture.stopAndDrain(recovery)
+            }
+        }
+    }
+
     func testFreshTypeDriftStopsBeforeOriginalRetentionOrFilesCopyWithoutResend() async throws {
         for fields in [["kind": "raw"], ["name": "RENAMED.JPG"], ["contenttype": "video/mp4"],
                        ["contenttype": "image/jpg"], ["contenttype": " "]] {
@@ -301,7 +362,8 @@ final class ForegroundMediaIntegrationTests: XCTestCase {
     func testStorageByteAndRecordCapacityRejectBeforeAnyOriginalGET() async throws {
         for recordLimit in [false, true] {
             let limits = MediaDeliveryLimits(maximumRecords: recordLimit ? 1 : 100,
-                maximumRetainedBytes: recordLimit ? 1_024 : Int64(ForegroundIntegrationPeer.original.count - 1))
+                maximumRetainedBytes: recordLimit ? Int64(ForegroundIntegrationPeer.original.count * 2)
+                    : Int64(ForegroundIntegrationPeer.original.count - 1))
             try await withFixture(limits: limits) { fixture in
                 if recordLimit {
                     let ticket = try await fixture.store.beginBatch()
@@ -915,7 +977,7 @@ private actor ForegroundIntegrationReplyGate {
 /// Held replies ignore cancellation to exercise production post-await ownership.
 private actor ForegroundIntegrationPeer: CameraForegroundHTTPTransport {
     static let root = "/ccapi/ver140/contents"
-    static let original = Data([0xFF, 0xD8, 0xFF, 0xD9])
+    static let original = try! JPEGOriginalTestVectors.bytes("rgb-baseline")
     static func path(_ name: String) -> String { "\(root)/card1/100CANON/\(name)" }
     struct Request: Equatable, Sendable {
         let method: String
@@ -925,6 +987,8 @@ private actor ForegroundIntegrationPeer: CameraForegroundHTTPTransport {
     private var names: [String]
     private var freshTypeFields: [String: String] = [:]
     private var freshSize = ForegroundIntegrationPeer.original.count
+    private var originalBody = ForegroundIntegrationPeer.original
+    private var originalHeaders = ["content-type": "image/jpeg"]
     private let liveView: Bool
     private var recorded: [Request] = []
     private var originals: [Request] = []
@@ -937,6 +1001,9 @@ private actor ForegroundIntegrationPeer: CameraForegroundHTTPTransport {
     func append(_ name: String) { names.append(name) }
     func setFreshTypeFields(_ fields: [String: String]) { freshTypeFields = fields }
     func setFreshSize(_ size: Int) { freshSize = size }
+    func setOriginal(_ data: Data, headers: [String: String] = ["content-type": "image/jpeg"]) {
+        originalBody = data; originalHeaders = headers; freshSize = data.count
+    }
     func requests() -> [Request] { recorded }
     func originalRequests() -> [Request] { originals }
     func freshRequests() -> [Request] { recorded.filter { $0.foreground && $0.path.hasSuffix("?kind=info") } }
@@ -1021,7 +1088,7 @@ private actor ForegroundIntegrationPeer: CameraForegroundHTTPTransport {
 
     func downloadForeground(_ request: URLRequest, maximumBytes: Int64,
                             progress: @escaping CameraMediaProgressHandler) async throws -> CameraHTTPDownloadResponse {
-        guard maximumBytes == Int64(Self.original.count) else { throw URLError(.dataLengthExceedsMaximum) }
+        guard maximumBytes == Int64(originalBody.count) else { throw URLError(.dataLengthExceedsMaximum) }
         return try await downloadOriginal(request, foreground: true, progress: progress)
     }
 
@@ -1037,11 +1104,12 @@ private actor ForegroundIntegrationPeer: CameraForegroundHTTPTransport {
             await withCheckedContinuation { gates[gate] = $0 }
         }
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("ForegroundHTTP-\(UUID().uuidString)")
-        try Self.original.write(to: file)
+        try originalBody.write(to: file)
         temporaryFiles.append(file)
-        progress(CameraMediaTransferProgress(bytesTransferred: Int64(Self.original.count), totalBytes: Int64(Self.original.count)))
-        return CameraHTTPDownloadResponse(statusCode: 200,
-            headers: ["content-type": "image/jpeg", "content-length": String(Self.original.count)], temporaryFileURL: file)
+        progress(CameraMediaTransferProgress(bytesTransferred: Int64(originalBody.count), totalBytes: Int64(originalBody.count)))
+        var headers = originalHeaders
+        headers["content-length"] = String(originalBody.count)
+        return CameraHTTPDownloadResponse(statusCode: 200, headers: headers, temporaryFileURL: file)
     }
 
     @discardableResult

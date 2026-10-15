@@ -112,7 +112,7 @@ final class CameraForegroundHTTPTask: NSObject, URLSessionDataDelegate, @uncheck
             return
         }
         let headers = response.allHeaderFields.reduce(into: [String: String]()) { result, entry in
-            result[String(describing: entry.key).lowercased()] = String(describing: entry.value)
+            result[String(describing: entry.key)] = String(describing: entry.value)
         }
         // The streamed decoded body is bounded even when Content-Length is absent
         // or describes an encoded representation. Validation is repeated at EOF.
