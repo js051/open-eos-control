@@ -93,7 +93,7 @@ function fixture(options = {}) {
       return { ok: true, ticket: "synthetic-ticket", receipt: "synthetic-receipt" };
     };
   }
-  const context = vm.createContext({ state, ui, window, document, mediaAutoImport, mediaBatchDestination, mediaTransfer, mediaLibrary,
+  const context = vm.createContext({ cancelCameraConnection() {}, state, ui, window, document, mediaAutoImport, mediaBatchDestination, mediaTransfer, mediaLibrary,
     mediaHistoryStore: historyStore, AbortController, performance: { now: () => now },
     URL: { createObjectURL: () => "blob:synthetic-thumbnail" },
     MEDIA_PAGE_SIZE: 72, MAX_MEDIA_THUMBNAIL_BYTES: 1024, MAX_MEDIA_THUMBNAIL_CACHE_ITEMS: 72,

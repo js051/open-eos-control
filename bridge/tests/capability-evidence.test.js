@@ -55,7 +55,8 @@ function context({ reuseSessionId = false } = {}) {
   const renderedDiagnostics = [];
   const feedback = [];
   let connections = 0, aReads = 0;
-  const sandbox = vm.createContext({ state, ui, FEATURES, requests, capabilities, lateA, renderedDiagnostics, feedback,
+  const sandbox = vm.createContext({ URL, window: { location: { href: "http://bridge.invalid/" } },
+    connectionGuidance: require("../open_eos_bridge/static/connection-guidance.js"), state, ui, FEATURES, requests, capabilities, lateA, renderedDiagnostics, feedback,
     document: {
       querySelectorAll(selector) { return selector === ".tab" ? tabs : selector === ".view-panel" ? panels : []; },
       querySelector(selector) {
@@ -64,6 +65,7 @@ function context({ reuseSessionId = false } = {}) {
       },
     },
     api: async (url, options = {}) => {
+      url = url.replace(/^http:\/\/bridge.invalid/, "");
       requests.push({ url, method: options.method || "GET" });
       if (url === "/v1/session" && options.method === "POST") {
         connections += 1;
@@ -86,7 +88,7 @@ function context({ reuseSessionId = false } = {}) {
     shutterReleaseUnconfirmed: () => false, effectiveTapAction: () => null,
   });
   for (const name of ["renderHeldAutofocus", "cameraFocusInfoEligible", "cancelCameraFocusInfo", "releaseHeldAutofocusForLifecycle", "clearConnectionError", "syncLiveMagnificationFromCapabilities",
-    "startEventLoop", "refreshLatestMedia", "renderHealth",
+    "startEventLoop", "refreshLatestMedia", "renderHealth", "renderConnectionGuidance",
     "cancelMediaDownload", "stopLiveLoop", "stopLocalVideo", "stopEventLoop", "cancelEventLoop",
     "cancelMediaUpload", "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh",
     "closeMediaPreview", "closeMediaDetails", "releaseObjectUrl", "clearBulbTimer", "renderLiveMagnification",
@@ -98,7 +100,7 @@ function context({ reuseSessionId = false } = {}) {
   sandbox.renderDiagnostics = () => renderedDiagnostics.push({
     session: state.session?.id || null, capabilities: sandbox.diagnosticCapabilities(),
   });
-  const names = ["adoptCameraStatus", "connectCamera", "refreshCapabilityEvidence", "disconnectCamera", "cancelSetting", "resetSession",
+  const names = ["adoptCameraStatus", "connectionRetirementBlocked", "renderConnectionCleanup", "recordConnectionCleanupWarning", "cancelCameraConnection", "retireConnectionAttempt", "connectCamera", "refreshCapabilityEvidence", "disconnectCamera", "cancelSetting", "resetSession",
     "featureSupported", "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
     "recordingRecoveryActive", "liveViewStopRequired", "maintenanceStopRetryAvailable", "renderAvailability", "selectView", "diagnosticCapabilities"];
   vm.runInContext(names.map(productionFunction).join("\n"), sandbox);

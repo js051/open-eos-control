@@ -68,7 +68,7 @@ function harness({ outputSupported = false, closePending = false } = {}) {
     setTimeout(fn, delay) { const id = ++timerId; timers.set(id, {fn, at: now + delay}); return id; },
     clearTimeout(id) { timers.delete(id); },
   };
-  for (const name of ["cancelRecordingWait", "suspendMaintenanceForLifecycle", "stopMediaAutoImport", "cancelMediaMutation",
+  for (const name of ["cancelCameraConnection", "cancelRecordingWait", "suspendMaintenanceForLifecycle", "stopMediaAutoImport", "cancelMediaMutation",
     "releaseHeldAutofocusForLifecycle", "cancelCameraFocusInfo", "refreshMediaDateZone", "renderAvailability",
     "renderMediaAutoImport", "cancelMediaUpload"]) h[name] = () => {};
   vm.createContext(h);

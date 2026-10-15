@@ -2181,3 +2181,12 @@ button.media-thumbnail:focus-visible {
   font-size: 12px;
   pointer-events: none;
 }
+
+/* Previous connection evidence stays visible without covering recovery controls. */
+.connection-cleanup-notice {
+  margin: 12px 0;
+  padding: 12px;
+  color: var(--warning);
+  border: 1px solid var(--line);
+  line-height: 1.5;
+}
