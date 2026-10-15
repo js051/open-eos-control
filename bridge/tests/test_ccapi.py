@@ -310,8 +310,9 @@ class FakeCcapiTransport:
         headers: dict[str, str] | None = None,
         timeout: float = 15.0,
         max_bytes: int = 2 * 1024 * 1024,
+        strict_control: bool = False,
     ) -> CcapiResponse:
-        del headers, timeout, max_bytes
+        del headers, timeout, max_bytes, strict_control
         path = _request_path(url)
         payload = json.loads(body) if body else None
         self.requests.append(RecordedRequest(method, path, payload))
@@ -733,8 +734,10 @@ class FakeCcapiTransport:
         *,
         headers: dict[str, str] | None = None,
         timeout: float = 60.0,
+        follow_redirects: bool = True,
+        strict_control: bool = False,
     ) -> CcapiStreamResponse:
-        del headers, timeout
+        del headers, timeout, follow_redirects, strict_control
         path = _request_path(url)
         self.requests.append(RecordedRequest(method, path, None))
         if method == "GET" and path == "/ccapi/ver100/shooting/liveview/multipart":

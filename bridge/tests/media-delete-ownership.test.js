@@ -108,7 +108,7 @@ function context({ reuseSessionId = false, confirmed = true } = {}) {
   sandbox.renderSession = () => sandbox.renderAvailability();
   const names = ["adoptCameraStatus", "recordingRecoveryActive", "connectCamera", "disconnectCamera", "cancelSetting", "resetSession", "refreshSession",
     "featureSupported", "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
-    "liveViewStopRequired", "renderAvailability", "deleteMedia", "runMediaDelete", "sendMediaDelete", "mediaDeleteRows", "mediaDeleteConfirmation", "mediaDeleteOwnerDescription", "applyConfirmedMediaDelete", "captureError", "clearMediaThumbnails",
+    "liveViewStopRequired", "maintenanceStopRetryAvailable", "renderAvailability", "deleteMedia", "runMediaDelete", "sendMediaDelete", "mediaDeleteRows", "mediaDeleteConfirmation", "mediaDeleteOwnerDescription", "applyConfirmedMediaDelete", "captureError", "clearMediaThumbnails",
     "closeMediaPreview", "clearMediaPreview", "resetMediaPreviewTransform",
     "closeMediaDetails", "clearMediaDetails"];
   vm.runInContext(names.map(productionFunction).join("\n"), sandbox);

@@ -77,12 +77,12 @@
       value.ability.every((item) => whole(/^[0-9]{3}[A-Z0-9_]{5}$/, item)) &&
       new Set(value.ability).size === value.ability.length && value.ability.includes(value.value);
   }
-  function parseJson(text) {
+  function parseJson(text, strictIntegerTokens = false) {
     const value = JSON.parse(text);
     // JSON.parse silently takes the last duplicate key and accepts lone escaped
     // surrogates. Neither is safe for exact request or media identity binding.
     // Scan the already grammar-checked text without recursive parsing.
-    const stack = [];
+    const stack = [], replacements = [];
     for (let index = 0; index < text.length; index++) {
       const character = text[index];
       if (character === "{") stack.push({ keys: new Set(), key: true });
@@ -103,11 +103,21 @@
           object.keys.add(decoded);
           object.key = false;
         }
+      } else if (strictIntegerTokens && (character === "-" || /[0-9]/.test(character))) {
+        const token = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/.exec(text.slice(index))[0];
+        // Maintenance wire integers must not be created by decimal/exponent coercion.
+        // Replace only that invalid field, preserving independent base response evidence.
+        if (/[.eE]/.test(token)) replacements.push({ start: index, end: index + token.length });
+        index += token.length - 1;
       }
+    }
+    if (replacements.length) {
+      for (const { start, end } of replacements.reverse()) text = text.slice(0, start) + "null" + text.slice(end);
+      return JSON.parse(text);
     }
     return value;
   }
-  async function transfer(path, { method = "GET", payload, token = "", signal, strictSettings = false } = {}) {
+  async function transfer(path, { method = "GET", payload, token = "", signal, strictSettings = false, strictIntegerTokens = false, emptyResponseStatus = null } = {}) {
     const headers = { Accept: "application/json", "Cache-Control": "no-cache, no-store" };
     if (token) headers.Authorization = `Bearer ${token}`;
     if (payload !== undefined) headers["Content-Type"] = "application/json";
@@ -120,6 +130,12 @@
       // hold the operation open after its response has already been rejected.
       try { void response.body?.cancel?.().catch(() => {}); } catch (_) { /* Preserve rejection. */ }
       throw new TypeError("Ambiguous setting response representation");
+    }
+    if (response.status === emptyResponseStatus && response.body === null) {
+      if (![null, "0"].includes(response.headers.get("content-length")) || response.headers.has("transfer-encoding")) {
+        throw new TypeError("Ambiguous empty control response");
+      }
+      return { status: response.status, body: null };
     }
     if (!response.body?.getReader) throw new TypeError("Configuration response stream unavailable");
     const reader = response.body.getReader(), decoder = new TextDecoder("utf-8", { fatal: true });
@@ -142,7 +158,7 @@
       if (length !== null && (!whole(/^(?:0|[1-9][0-9]*)$/, length) || Number(length) !== bytes ||
           response.headers.has("transfer-encoding"))) throw new TypeError("Ambiguous setting response length");
     }
-    return { status: response.status, body: parseJson(text) };
+    return { status: response.status, body: parseJson(text, strictIntegerTokens) };
   }
   return Object.freeze({ validReceipt, validFieldValue, whole, outcome, ownership, canRecover, validNaming, valueFor, validSelection, transfer });
 });

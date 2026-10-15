@@ -25,7 +25,7 @@ const realFunctions = [
   "localPreviewSelected", "previewActive", "changePreviewInput", "clampFps", "toggleLiveView", "startLiveView", "stopLiveView",
   "stopLiveLoop", "changeLiveSource", "currentRtpAudioStatus", "refreshRtpAudioStatus",
   "renderRtpAudio", "toggleRtpAudio", "pollRtpAudio", "stopRtpAudioSources", "stopRtpAudio",
-  "adoptCameraStatus", "liveViewStopRequired", "renderAvailability", "setOperationState",
+  "adoptCameraStatus", "liveViewStopRequired", "maintenanceStopRetryAvailable", "renderAvailability", "setOperationState",
 ];
 const stateStart = app.indexOf("  const state = {");
 const stateEnd = app.indexOf("\n  };", stateStart);

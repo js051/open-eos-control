@@ -93,7 +93,7 @@ function fixture() {
       throw new Error(`Unexpected request ${url}`);
     },
   });
-  const names = ["api", "refreshMedia", "refreshMediaWhenCurrent", "cancelMediaListing", "renderMedia", "renderMediaSummary", "renderMediaSelection",
+  const names = ["maintenanceHeld", "maintenancePaused", "api", "refreshMedia", "refreshMediaWhenCurrent", "cancelMediaListing", "renderMedia", "renderMediaSummary", "renderMediaSelection",
     "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel", "mediaDisplayTimeZone",
     "displayedMedia", "mediaDateGroup", "formatMediaTime", "mediaIsVideo", "renderMediaThumbnail", "observeMediaThumbnail", "loadMediaThumbnail",
     "updateVisibleMediaThumbnail", "clearMediaThumbnails", "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",

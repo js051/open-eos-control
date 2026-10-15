@@ -20,6 +20,7 @@
   const mediaUpload = globalThis.OpenEOSMediaUpload;
   const captureConfiguration = globalThis.OpenEOSCaptureConfiguration;
   const shootingSettings = globalThis.OpenEOSShootingSettings;
+  const maintenanceLifecycle = globalThis.OpenEOSMaintenanceLifecycle;
   if (!mediaUpload) throw new Error("Open EOS media upload module is unavailable.");
   const mediaListing = globalThis.OpenEOSMediaListing;
   if (!mediaListing) throw new Error("Open EOS media listing module is unavailable.");
@@ -163,6 +164,7 @@
       stopLiveView: "Stop Live View",
       retryLiveViewStop: "Retry stopping Live View",
       liveViewStopUnconfirmed: "Live View stop is unconfirmed. Retry Stop; update an older Bridge if it cannot confirm the stop.",
+      maintenanceRetireUnconfirmed: "Bridge local session retirement is unconfirmed. Camera Stop evidence remains separate; check the Bridge before reconnecting.",
       photo: "Photo",
       video: "Video",
       capture: "Capture",
@@ -247,10 +249,35 @@
       anamorphicDesqueeze: "Anamorphic desqueeze",
       moreSettings: "More settings",
       syncCameraClock: "Camera date and time",
-      syncCameraClockHint: "Set the camera clock and time zone from this computer, then verify the camera readback.",
+      syncCameraClockHint: "Set the camera clock, then verify time and only the time-zone/DST evidence supported by this connection.",
       cameraClockSyncedAt: "Verified at {time}",
       syncNow: "Sync now",
       cameraClockSynced: "Camera date and time verified",
+      "maintenanceHistory": "Maintenance history",
+      "maintenanceStop": "Stop preparation",
+      "maintenanceCommand": "Command response",
+      "maintenanceInitialClock": "Initial clock check",
+      "maintenanceLatestRead": "Latest read-only observation",
+      "maintenanceRestore": "Control restoration",
+      "maintenancePreviousSession": "Previous connection",
+      "maintenanceRestoreAction": "Restore controls / monitoring",
+      "maintenanceRestoreConfirm": "Read the camera again, then restore controls and only the monitoring that was previously active? This does not prove cleaning finished.",
+      "maintenanceReviewOutcome": "Review the retained command response and observation evidence.",
+      "maintenanceEvidenceBoundary": "A response or reachable camera does not prove sleep or cleaning completed. Read-only recovery never repeats an action or restarts monitoring.",
+      "maintenance_not-required": "Not required",
+      "maintenance_pending": "Pending",
+      "maintenance_confirmed": "Confirmed",
+      "maintenance_unknown": "Unknown",
+      "maintenance_not-sent": "Not sent",
+      "maintenance_response-received": "Response received",
+      "maintenance_not-read": "Not read",
+      "maintenance_not-applicable": "Not applicable",
+      "maintenance_matched": "Matched",
+      "maintenance_mismatch": "Mismatch",
+      "maintenance_unavailable": "Unavailable",
+      "maintenance_observed": "Observed now",
+      "maintenance_reachable": "Required read succeeded",
+      "maintenance_not-requested": "Not requested",
       createCaptureDirectory: "Create capture directory",
       createCaptureDirectoryHint: "Leave blank for the camera default, or enter exactly 5 uppercase letters, numbers, or underscores.",
       directoryNamePlaceholder: "EOSXX or blank",
@@ -296,17 +323,17 @@
       nickname: "Nickname",
       textMetadataRule: "Printable ASCII, up to 255 bytes.",
       sensorCleaning: "Clean camera sensor",
-      sensorCleaningHint: "Runs the camera's built-in sensor-cleaning cycle. Live View pauses while cleaning is in progress.",
+      sensorCleaningHint: "Requests the camera sensor-cleaning cycle. Monitoring stays paused until you explicitly restore it.",
       sensorCleaningNow: "Clean now",
       sensorCleaningPowerOff: "Clean and turn off",
       sensorCleaningConfirm: "Run the camera's built-in sensor-cleaning cycle now? Shooting and recording are unavailable during cleaning.",
-      sensorCleaningPowerOffConfirm: "Clean the sensor and turn off the camera afterward? Live View and this connection will end.",
-      sensorCleaningComplete: "Sensor cleaning completed",
+      sensorCleaningPowerOffConfirm: "Request sensor cleaning followed by power-off? Monitoring stays paused. Check the camera itself; the retained response cannot prove completion.",
+      sensorCleaningComplete: "Sensor-cleaning response received; check the camera",
       cameraSleep: "Put camera to sleep",
-      cameraSleepHint: "Ends CCAPI and immediately puts the camera into power-saving sleep.",
+      cameraSleepHint: "Requests power-saving sleep. Monitoring stays paused while the result remains available here.",
       cameraSleepNow: "Sleep now",
-      cameraSleepConfirm: "Put the camera to sleep now? Live View and this connection will end. Wake the camera physically before reconnecting.",
-      cameraSleepComplete: "Camera entered sleep mode",
+      cameraSleepConfirm: "Request camera sleep now? Monitoring stays paused. Check and wake the camera itself before explicitly reconnecting.",
+      cameraSleepComplete: "Sleep response received; check the camera",
       diagnosticSafe: "Authentication secrets and camera serial are excluded",
       physicalValidation: "Physical validation",
       physicalValidationHint: "Only camera-advertised features observed successfully in this connection can be confirmed. Check a feature after seeing the physical camera perform it.",
@@ -900,6 +927,7 @@
       startLiveView: "啟動即時預覽",
       stopLiveView: "停止即時預覽",
       retryLiveViewStop: "重試停止即時預覽",
+      maintenanceRetireUnconfirmed: "Bridge 本機連線退役尚未確認；相機停止證據仍獨立保留，重新連線前請檢查 Bridge。",
       liveViewStopUnconfirmed: "尚未確認即時預覽已停止。請重試停止；若舊版 Bridge 無法確認，請更新 Bridge。",
       photo: "拍照",
       video: "錄影",
@@ -985,27 +1013,52 @@
       anamorphicDesqueeze: "變形鏡頭反擠壓",
       moreSettings: "更多設定",
       syncCameraClock: "相機日期與時間",
-      syncCameraClockHint: "使用此電腦的時間與時區設定相機，並回讀確認結果。",
+      syncCameraClockHint: "設定相機時鐘，再讀回核對時間，以及此連線所支援的時區／夏令時間證據。",
       cameraClockSyncedAt: "已於 {time} 驗證",
       syncNow: "立即同步",
       cameraClockSynced: "已驗證相機日期與時間",
+      "maintenanceHistory": "維護動作紀錄",
+      "maintenanceStop": "停止準備",
+      "maintenanceCommand": "動作回應",
+      "maintenanceInitialClock": "首次時鐘驗證",
+      "maintenanceLatestRead": "最近唯讀觀察",
+      "maintenanceRestore": "控制恢復",
+      "maintenancePreviousSession": "先前連線",
+      "maintenanceRestoreAction": "恢復控制／監看",
+      "maintenanceRestoreConfirm": "重新讀取相機後，恢復控制與原本啟用的監看？這不代表清潔已完成。",
+      "maintenanceReviewOutcome": "請查看保留的命令回應與觀察證據。",
+      "maintenanceEvidenceBoundary": "收到回應或相機仍可讀取，不代表休眠或清潔完成。唯讀恢復不重送動作，也不重啟監看。",
+      "maintenance_not-required": "不需要",
+      "maintenance_pending": "進行中",
+      "maintenance_confirmed": "已確認",
+      "maintenance_unknown": "結果不確定",
+      "maintenance_not-sent": "尚未送出",
+      "maintenance_response-received": "已收到回應",
+      "maintenance_not-read": "尚未讀取",
+      "maintenance_not-applicable": "不適用",
+      "maintenance_matched": "符合",
+      "maintenance_mismatch": "不符合",
+      "maintenance_unavailable": "無法取得",
+      "maintenance_observed": "已讀到目前值",
+      "maintenance_reachable": "必要讀取成功",
+      "maintenance_not-requested": "尚未要求",
       createCaptureDirectory: "建立拍攝目錄",
       createCaptureDirectoryHint: "留空可使用相機預設名稱，或輸入剛好 5 個大寫英文字母、數字或底線。",
       directoryNamePlaceholder: "EOSXX 或留空",
       directoryCreated: "已建立 {name}",
       create: "建立",
       sensorCleaning: "清潔相機感光元件",
-      sensorCleaningHint: "執行相機內建的感光元件清潔程序；清潔期間會暫停 Live View。",
+      sensorCleaningHint: "請求相機執行感光元件清潔；監看會保持暫停，直到你明確恢復。",
       sensorCleaningNow: "立即清潔",
       sensorCleaningPowerOff: "清潔後關機",
       sensorCleaningConfirm: "要立即執行相機內建的感光元件清潔程序嗎？清潔期間無法拍照或錄影。",
-      sensorCleaningPowerOffConfirm: "要清潔感光元件並在完成後關閉相機嗎？Live View 與目前連線將會結束。",
-      sensorCleaningComplete: "感光元件清潔已完成",
+      sensorCleaningPowerOffConfirm: "要請求清潔感光元件並在完成後關機嗎？監看會保持暫停；請確認相機實際狀態，保留的回應不能證明完成。",
+      sensorCleaningComplete: "已收到清潔回應；請確認相機狀態",
       cameraSleep: "讓相機進入休眠",
-      cameraSleepHint: "結束 CCAPI 連線並立即讓相機進入省電休眠。",
+      cameraSleepHint: "請求相機進入省電休眠；監看保持暫停，結果保留於此。",
       cameraSleepNow: "立即休眠",
-      cameraSleepConfirm: "要立即讓相機進入休眠嗎？Live View 與目前連線將會結束；再次連線前，請先在相機上將其喚醒。",
-      cameraSleepComplete: "相機已進入休眠",
+      cameraSleepConfirm: "要請求相機休眠嗎？監看會保持暫停；請確認並喚醒相機，再明確重新連線。",
+      cameraSleepComplete: "已收到休眠回應；請確認相機狀態",
       diagnosticSafe: "診斷內容不包含驗證機密與相機序號",
       physicalValidation: "真機驗證",
       physicalValidationHint: "僅能確認相機已公告，且在本次連線中成功觀測的功能。請在看見實體相機確實執行後再勾選。",
@@ -1658,6 +1711,11 @@
     settingOwner: null,
     settingEditor: 0,
     settingObservationRevision: 0,
+    maintenanceSequence: 0,
+    maintenanceObservationRevision: 0,
+    maintenanceHistory: [],
+    maintenanceOwner: null,
+    maintenanceHold: null,
     operatorConfirmedFeatures: new Set(),
     lastClockSyncAt: null,
     lastCreatedDirectoryName: null,
@@ -2531,7 +2589,7 @@
   async function refreshSession({ quiet = false, eventGeneration = null } = {}) {
     // A status read admitted inside a command can predate its ACK. Existing
     // event refresh already waits for this boundary; diagnostics must too.
-    if (!state.session || state.settingOwner || state.recordingCommandOwner?.session === state.session || state.heldAutofocusOwner) return false;
+    if (!state.session || state.maintenanceOwner || state.maintenanceHold?.owner === state.session || state.settingOwner || state.recordingCommandOwner?.session === state.session || state.heldAutofocusOwner) return false;
     if (state.mediaListingOwner) {
       if (quiet) return false;
       state.mediaListingOwner.cancel({ silent: true });
@@ -2601,12 +2659,15 @@
 
   async function refreshCapabilityEvidence() {
     const session = state.session;
-    if (!session || state.settingOwner) return;
+    if (!session || state.maintenanceOwner || state.maintenanceHold?.owner === state.session || state.settingOwner) return;
     const settingRevision = state.settingObservationRevision || 0;
+    const maintenanceRevision = state.maintenanceObservationRevision || 0;
     try {
       const capabilities = await api(`/v1/session/${encodeURIComponent(session.id)}/capabilities`);
       // Connection and mutation generation own this read, even if IDs are reused.
-      if (state.session !== session || (state.settingObservationRevision || 0) !== settingRevision || state.settingOwner) return;
+      if (state.session !== session || (state.settingObservationRevision || 0) !== settingRevision ||
+          (state.maintenanceObservationRevision || 0) !== maintenanceRevision || state.maintenanceOwner ||
+          state.maintenanceHold?.owner === session || state.settingOwner) return;
       state.capabilities = capabilities;
     } catch (_) {
       // Evidence refresh must not turn an already successful camera operation into a failure.
@@ -2623,6 +2684,12 @@
     const token = state.token;
     const heldOwner = state.heldAutofocusOwner;
     const hadBulbResponsibility = bulbControlLocked() || Boolean(heldOwner);
+    const maintenanceRecord = state.liveViewStopOwner?.maintenanceRecord ||
+      (state.maintenanceHold?.owner === session ? state.maintenanceHold : null) || state.maintenanceOwner?.record;
+    if (maintenanceRecord) {
+      await disconnectMaintenanceCamera(session, maintenanceRecord);
+      return;
+    }
     let disconnectError = null;
     beginCameraInteraction();
     cancelMediaDownload({ silent: true });
@@ -2661,6 +2728,10 @@
   }
 
   function resetSession() {
+    state.liveViewStopOwner?.maintenanceController?.abort();
+    state.maintenanceCloseOwner?.maintenanceController?.abort();
+    state.maintenanceCloseOwner = null;
+    if (typeof cancelMaintenance === "function") cancelMaintenance({ retire: true });
     state.mediaListingOwner?.cancel({ silent: true });
     if (typeof cancelMediaMutation === "function") cancelMediaMutation();
     if (state.heldAutofocusOwner) {
@@ -2776,11 +2847,11 @@
 
   function startEventLoop() {
     cancelEventLoop();
-    if (!state.session || !featureSupported(FEATURES.EVENT_POLLING)) return;
+    if (!state.session || maintenancePaused() || !featureSupported(FEATURES.EVENT_POLLING)) return;
     const generation = state.eventGeneration;
     const session = state.session;
     const sessionId = encodeURIComponent(session.id);
-    const current = () => state.session === session && generation === state.eventGeneration &&
+    const current = () => state.session === session && generation === state.eventGeneration && !maintenancePaused() &&
       featureSupported(FEATURES.EVENT_POLLING);
     void (async () => {
       let failures = 0;
@@ -2851,15 +2922,20 @@
     state.eventController = null;
   }
 
-  async function stopEventLoop(sessionId) {
+  async function stopEventLoop(sessionId, { strict = false, maintenanceInvocation = null } = {}) {
     const supported = featureSupported(FEATURES.EVENT_POLLING);
     cancelEventLoop();
-    if (!supported) return;
+    if (!supported) return true;
     try {
-      await api(`/v1/session/${encodeURIComponent(sessionId)}/events`, { method: "DELETE" });
+      if (maintenanceInvocation) await maintenanceControlRequest(maintenanceInvocation,
+        `/v1/session/${encodeURIComponent(sessionId)}/events`, { method: "DELETE" });
+      else await api(`/v1/session/${encodeURIComponent(sessionId)}/events`, { method: "DELETE" });
     } catch (error) {
       if (state.session?.id === sessionId) captureError(error);
+      if (strict) throw error;
+      return false;
     }
+    return true;
   }
 
   function mediaTransferActive() {
@@ -2868,7 +2944,10 @@
   }
 
   function cameraInteractionBusy() {
-    return state.busy || Boolean(state.heldAutofocusOwner) || mediaTransferActive() || Boolean(state.mediaAutoImportReading);
+    return state.busy || Boolean(state.maintenanceOwner) ||
+      Boolean(state.maintenanceHold && state.maintenanceHold.owner === state.session && !state.maintenanceHold.retired) ||
+      Boolean(state.heldAutofocusOwner) ||
+      mediaTransferActive() || Boolean(state.mediaAutoImportReading);
   }
 
   function beginCameraInteraction() {
@@ -3196,6 +3275,7 @@
     if (fileNamingSupported) renderFileNamingSettings();
     renderCaptureConfigurationHistory();
     renderSettingHistory();
+    renderMaintenanceHistory();
     if (sensorCleaningSupported) {
       const row = document.createElement("div");
       row.className = "settings-command";
@@ -3214,7 +3294,8 @@
       cleanButton.textContent = t("sensorCleaningNow");
       cleanButton.disabled = cameraInteractionBusy() || Boolean(state.status?.recording) || recordingRecoveryActive() || bulbControlLocked();
       cleanButton.addEventListener("click", () => {
-        if (window.confirm(t("sensorCleaningConfirm"))) void cleanSensor(cleanButton, false);
+        const owner = state.session;
+        if (window.confirm(t("sensorCleaningConfirm")) && state.session === owner) void cleanSensor(cleanButton, false);
       });
       const powerOffButton = document.createElement("button");
       powerOffButton.type = "button";
@@ -3223,7 +3304,8 @@
       powerOffButton.textContent = t("sensorCleaningPowerOff");
       powerOffButton.disabled = cleanButton.disabled;
       powerOffButton.addEventListener("click", () => {
-        if (window.confirm(t("sensorCleaningPowerOffConfirm"))) void cleanSensor(powerOffButton, true);
+        const owner = state.session;
+        if (window.confirm(t("sensorCleaningPowerOffConfirm")) && state.session === owner) void cleanSensor(powerOffButton, true);
       });
       actions.append(cleanButton, powerOffButton);
       row.append(copy, actions);
@@ -3251,7 +3333,8 @@
       label.textContent = t("cameraSleepNow");
       button.append(icon, label);
       button.addEventListener("click", () => {
-        if (window.confirm(t("cameraSleepConfirm"))) void sleepCamera(button);
+        const owner = state.session;
+        if (window.confirm(t("cameraSleepConfirm")) && state.session === owner) void sleepCamera(button);
       });
       row.append(copy, button);
       ui.advancedSettings.append(row);
@@ -3506,39 +3589,320 @@
     return value;
   }
 
-  async function syncCameraClock(source) {
-    if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.CAMERA_CLOCK_SYNC)) return;
-    const session = state.session;
-    beginCameraInteraction();
-    const generation = state.refreshGeneration;
-    const isCurrent = () => state.session === session && state.refreshGeneration === generation;
-    const liveViewStatusRevision = state.liveViewStopRevision || 0;
-    state.lastError = null;
-    source.disabled = true;
-    setOperationState(t("busy"));
-    renderAvailability();
-    try {
-      const status = await api(
-        `/v1/session/${encodeURIComponent(session.id)}/clock/sync`,
-        { method: "POST", json: {} },
-      );
-      if (!isCurrent()) return false;
-      adoptCameraStatus(status, session, liveViewStatusRevision);
-      state.lastClockSyncAt = Date.now();
-      await refreshCapabilityEvidence();
-      if (!isCurrent()) return false;
-      setOperationState(t("ready"));
-      showToast(t("cameraClockSynced"));
-    } catch (error) {
-      if (!isCurrent()) return false;
-      const normalized = captureError(error);
-      setOperationState(normalized.message, true);
-      showToast(normalized.message, true);
-    } finally {
-      if (!isCurrent()) return false;
-      state.busy = false;
-      renderSession();
+  function maintenanceHeld() {
+    return Boolean(state.maintenanceHold && state.maintenanceHold.owner === state.session && !state.maintenanceHold.retired);
+  }
+
+  function maintenancePaused() {
+    return maintenanceHeld() && !(state.maintenanceOwner?.mode === "restore" && state.maintenanceOwner.restoreAdmitted &&
+      !state.maintenanceOwner.cancelled && !state.maintenanceOwner.controller.signal.aborted);
+  }
+
+  function maintenanceCurrent(invocation) {
+    return state.session === invocation.record.owner && state.maintenanceOwner === invocation && !invocation.record.retired;
+  }
+
+  function maintenancePublishable(invocation) {
+    return maintenanceCurrent(invocation) && !invocation.cancelled && !invocation.controller.signal.aborted;
+  }
+
+  function maintenanceSafetyClear() {
+    return !state.status?.recording && !recordingRecoveryActive() && !bulbControlLocked() && !state.heldAutofocusOwner;
+  }
+
+  function maintenanceOtherBusy() {
+    return state.busy || Boolean(state.maintenanceOwner) || Boolean(state.heldAutofocusOwner) ||
+      mediaTransferActive() || Boolean(state.mediaAutoImportReading);
+  }
+
+  function cancelMaintenance({ retire = false } = {}) {
+    const invocation = state.maintenanceOwner;
+    if (invocation) {
+      invocation.cancelled = true;
+      if (invocation.mode === "action") invocation.record.cancelled = true;
+      invocation.record.retired ||= retire;
+      invocation.controller.abort();
     }
+    if (retire) {
+      for (const record of state.maintenanceHistory || []) if (record.owner === state.session) record.retired = true;
+      state.maintenanceOwner = null; state.maintenanceHold = null;
+    }
+  }
+
+  function suspendMaintenanceForLifecycle() {
+    const preserve = maintenanceHeld() || Boolean(state.maintenanceOwner) || Boolean(state.maintenanceCloseOwner) ||
+      Boolean(state.liveViewStopOwner?.maintenanceRecord);
+    cancelMaintenance();
+    state.liveViewStopOwner?.maintenanceController?.abort();
+    state.maintenanceCloseOwner?.maintenanceController?.abort();
+    if (preserve) {
+      cancelEventLoop();
+      stopLiveLoop(); // Local receiver cleanup only; no camera Stop/DELETE.
+    }
+    return preserve;
+  }
+
+  function renderMaintenanceHistory() {
+    if (!state.maintenanceHistory?.length) return;
+    const section = document.createElement("section"); section.dataset.maintenanceHistory = "true";
+    const title = document.createElement("h3"); title.textContent = t("maintenanceHistory"); section.append(title);
+    for (const record of [...state.maintenanceHistory].reverse()) {
+      const row = document.createElement("div"); row.className = "settings-command";
+      const copy = document.createElement("span"), heading = document.createElement("strong"), detail = document.createElement("small");
+      heading.textContent = t(record.operation === "clock-sync" ? "syncCameraClock" : record.operation === "sleep" ? "cameraSleep" :
+        record.autoPowerOff ? "sensorCleaningPowerOff" : "sensorCleaning");
+      detail.textContent = `${t("maintenanceStop")}: ${t(`maintenance_${record.stopEvidence}`)} · ` +
+        `${t("maintenanceCommand")}: ${t(`maintenance_${record.responseEvidence}`)} · ` +
+        `${t("maintenanceInitialClock")}: ${t(`maintenance_${record.clockReadEvidence}`)} · ` +
+        `${t("maintenanceLatestRead")}: ${t(`maintenance_${record.latestObservation.observationEvidence}`)} · ` +
+        `${t("maintenanceRestore")}: ${t(`maintenance_${record.restoreEvidence}`)}` +
+        (record.cancelled ? ` · ${t("configCancelled")}` : "") + (record.retired ? ` · ${t("maintenancePreviousSession")}` : "");
+      copy.append(heading, detail); row.append(copy);
+      const actions = document.createElement("div"); actions.className = "settings-command-actions";
+      const active = state.maintenanceOwner?.record === record;
+      const read = document.createElement("button"); read.type = "button";
+      read.dataset.maintenanceAction = active ? "cancel" : "recover"; read.dataset.maintenanceId = String(record.id);
+      read.textContent = t(active ? "cancel" : "configReadOnlyRecovery");
+      read.disabled = active ? state.maintenanceOwner.controller.signal.aborted :
+        record.owner !== state.session || record.retired || maintenanceOtherBusy();
+      read.addEventListener("click", () => active ? cancelMaintenance() : recoverMaintenance(record)); actions.append(read);
+      if (record.operation === "sensor-cleaning" && !record.autoPowerOff) {
+        const restore = document.createElement("button"); restore.type = "button";
+        restore.dataset.maintenanceAction = "restore"; restore.dataset.maintenanceId = String(record.id);
+        restore.textContent = t("maintenanceRestoreAction");
+        restore.disabled = record.owner !== state.session || record.retired || record.cancelled || maintenanceOtherBusy() ||
+          record.responseEvidence !== "response-received" || !["confirmed", "not-required"].includes(record.stopEvidence) || state.maintenanceHold !== record;
+        restore.addEventListener("click", () => {
+          const owner = state.session;
+          if (window.confirm(t("maintenanceRestoreConfirm")) && state.session === owner && record.owner === owner) void restoreMaintenance(record);
+        }); actions.append(restore);
+      }
+      row.append(actions); section.append(row);
+    }
+    const warning = document.createElement("small"); warning.textContent = t("maintenanceEvidenceBoundary");
+    section.append(warning); ui.advancedSettings.append(section);
+  }
+
+  async function maintenanceControlRequest(invocation, path, { method = "POST", payload } = {}) {
+    if (!maintenancePublishable(invocation)) throw new Error("Maintenance action is no longer current");
+    const route = path.replace(/\/(liveview\/(?:start|stop)|events)$/, "/maintenance/control/$1");
+    const response = await captureConfiguration.transfer(route, { method, payload, token: invocation.record.token,
+      signal: invocation.controller.signal, strictSettings: true, strictIntegerTokens: true, emptyResponseStatus: method === "DELETE" ? 204 : null });
+    if (response.status !== (method === "DELETE" ? 204 : 200)) throw new Error("Maintenance control response unavailable");
+    return response.body;
+  }
+
+  async function maintenanceOwnedControl(owner, path, { method = "POST" } = {}) {
+    const record = owner.maintenanceRecord;
+    if (!record || record.owner !== state.session || owner.session !== state.session || record.retired ||
+        owner.maintenanceController?.signal.aborted) throw new Error("Maintenance owner is no longer current");
+    const response = await captureConfiguration.transfer(path, { method, token: record.token,
+      signal: owner.maintenanceController.signal, strictSettings: true, strictIntegerTokens: true,
+      emptyResponseStatus: method === "DELETE" ? 204 : null });
+    if (response.status !== (method === "DELETE" ? 204 : 200)) throw new Error("Maintenance control response unavailable");
+    return response.body;
+  }
+
+  function maintenanceStopRetryAvailable() {
+    return liveViewStopRequired() && Boolean(state.liveViewStopOwner.maintenanceRecord) &&
+      !state.busy && !state.maintenanceOwner && !state.heldAutofocusOwner &&
+      !mediaTransferActive() && !state.mediaAutoImportReading;
+  }
+
+  async function disconnectMaintenanceCamera(session, record) {
+    const owner = { session, maintenanceRecord: record, maintenanceController: new AbortController() };
+    const current = () => state.session === session && state.maintenanceCloseOwner === owner;
+    cancelMaintenance();
+    state.liveViewStopOwner?.maintenanceController?.abort();
+    state.maintenanceCloseOwner = owner;
+    const timer = setTimeout(() => owner.maintenanceController.abort(), 45000);
+    let failure = null;
+    let retireFailure = false;
+    let shutterReleaseFailed = false;
+    beginCameraInteraction(); cancelMediaDownload({ silent: true }); stopLocalVideo({ announce: false });
+    cancelEventLoop(); renderAvailability();
+    try {
+      // A restored connection may acquire a new physical shutter obligation.
+      // Preserve its existing explicit-Disconnect release before local retirement.
+      if (state.heldAutofocusOwner && !await stopHeldAutofocus({ owner: state.heldAutofocusOwner, automatic: true })) {
+        state.shutterDisconnectWarning = true;
+        shutterReleaseFailed = true;
+        failure = new Error(t("bulbDisconnectWarning"));
+      }
+      if (!current()) return;
+      if (bulbControlLocked() && !owner.maintenanceController.signal.aborted) {
+        try {
+          const status = await maintenanceOwnedControl(owner,
+            `/v1/session/${encodeURIComponent(session.id)}/bulb/stop`);
+          if (status?.bulbExposureActive !== false || status?.shutterReleaseUnconfirmed !== false) {
+            throw new Error(t("bulbDisconnectWarning"));
+          }
+        } catch (error) { state.shutterDisconnectWarning = true; shutterReleaseFailed = true; failure ||= error; }
+      }
+      if (!current()) return;
+      if (!owner.maintenanceController.signal.aborted && !shutterReleaseFailed &&
+          (state.liveActive || liveViewStopRequired())) {
+        if (!await stopLiveView({ announce: false, maintenanceRecord: record })) {
+          failure = new Error(t("liveViewStopUnconfirmed"));
+        }
+      } else stopLiveLoop();
+      if (!current()) return;
+      state.busy = true;
+      if (record.wasEvents && !shutterReleaseFailed && !owner.maintenanceController.signal.aborted) {
+        try { await maintenanceOwnedControl(owner,
+          `/v1/session/${encodeURIComponent(session.id)}/maintenance/control/events`, { method: "DELETE" }); }
+        catch (error) { failure ||= error; }
+      }
+      if (!current()) return;
+      try {
+        await maintenanceOwnedControl(owner,
+          `/v1/session/${encodeURIComponent(session.id)}/maintenance/control/session`, { method: "DELETE" });
+      } catch (error) { retireFailure = true; failure ||= error; }
+    } finally {
+      clearTimeout(timer);
+      if (current()) {
+        stopLiveLoop(); resetSession();
+        if (failure) {
+          const message = [captureError(failure).message, retireFailure ? t("maintenanceRetireUnconfirmed") : null]
+            .filter(Boolean).join(" ");
+          ui.connectionError.textContent = message; ui.connectionError.hidden = false;
+          showToast(message, true);
+        } else showToast(t("disconnected"));
+      }
+    }
+  }
+
+  async function runMaintenance(operation, autoPowerOff = false) {
+    const feature = operation === "clock-sync" ? FEATURES.CAMERA_CLOCK_SYNC :
+      operation === "sensor-cleaning" ? FEATURES.SENSOR_CLEANING : FEATURES.CAMERA_SLEEP;
+    if (!state.session || cameraInteractionBusy() || !maintenanceSafetyClear() || !featureSupported(feature)) return false;
+    const record = { id: ++state.maintenanceSequence, owner: state.session, engine: state.session.engine, token: state.token,
+      operation, autoPowerOff, wasLive: state.liveActive, resume: { source: state.activeLiveSource || state.liveSource,
+        fps: state.requestedFps, size: liveCapabilities().defaultSize || liveCapabilities().sizes?.[0] || "MEDIUM" }, wasEvents: featureSupported(FEATURES.EVENT_POLLING),
+      stopEvidence: operation === "clock-sync" ? "not-required" : "pending", responseEvidence: "not-sent",
+      clockReference: null, clockObservation: null, clockReadEvidence: operation === "clock-sync" ? "not-read" : "not-applicable",
+      latestObservation: { observationEvidence: "not-read", clockObservation: null },
+      restoreEvidence: operation === "sensor-cleaning" && !autoPowerOff ? "not-requested" : "not-applicable",
+      cancelled: false, retired: false };
+    const invocation = { record, mode: "action", controller: new AbortController(), cancelled: false };
+    state.maintenanceObservationRevision = (state.maintenanceObservationRevision || 0) + 1;
+    state.maintenanceOwner = invocation;
+    state.maintenanceHistory.push(record); state.maintenanceHistory = state.maintenanceHistory.slice(-20);
+    if (operation !== "clock-sync") state.maintenanceHold = record;
+    beginCameraInteraction(); state.lastError = null;
+    const timer = setTimeout(() => { invocation.cancelled = true; record.cancelled = true; invocation.controller.abort(); }, 90000);
+    renderAdvancedSettings(); renderAvailability();
+    try {
+      if (operation !== "clock-sync") {
+        const mustStop = record.wasLive || liveViewStopRequired();
+        if (mustStop) {
+          const stopped = await stopLiveView({ announce: false, maintenanceInvocation: invocation });
+          if (!stopped) { record.stopEvidence = "unknown"; return false; }
+        }
+        if (!maintenancePublishable(invocation)) { record.stopEvidence = "unknown"; return false; }
+        stopLiveLoop();
+        await stopEventLoop(record.owner.id, { strict: true, maintenanceInvocation: invocation });
+        record.stopEvidence = mustStop || record.wasEvents ? "confirmed" : "not-required";
+      }
+      if (!maintenancePublishable(invocation) || !maintenanceSafetyClear()) return false;
+      state.busy = true; record.responseEvidence = "unknown";
+      const response = await captureConfiguration.transfer(`/v1/session/${encodeURIComponent(record.owner.id)}/maintenance/${operation}/outcome`,
+        { method: "POST", payload: { autoPowerOff }, token: record.token, signal: invocation.controller.signal, strictSettings: true, strictIntegerTokens: true });
+      // Original transport evidence may settle history after cancel/retirement, never a new session.
+      Object.assign(record, maintenanceLifecycle.parseOutcome({ status: response.status, engine: record.engine,
+        operation, autoPowerOff, response: response.body }));
+      if (maintenancePublishable(invocation) && record.clockReadEvidence === "matched") state.lastClockSyncAt = Date.now();
+      return record.responseEvidence === "response-received";
+    } catch (_) {
+      if (record.stopEvidence === "pending") record.stopEvidence = "unknown";
+      return false;
+    } finally {
+      clearTimeout(timer);
+      if (maintenanceCurrent(invocation)) {
+        state.maintenanceOwner = null; state.busy = false; state.refreshGeneration += 1;
+        setOperationState(t(operation === "clock-sync" && record.clockReadEvidence === "matched" ? "cameraClockSynced" : "maintenanceReviewOutcome"));
+        renderSession();
+      }
+    }
+  }
+
+  async function maintenanceRead(invocation) {
+    const record = invocation.record;
+    const response = await captureConfiguration.transfer(`/v1/session/${encodeURIComponent(record.owner.id)}/maintenance/${record.operation}`,
+      { token: record.token, signal: invocation.controller.signal, strictSettings: true, strictIntegerTokens: true });
+    return maintenanceLifecycle.parseObservation({ status: response.status, engine: record.engine,
+      operation: record.operation, response: response.body });
+  }
+
+  async function recoverMaintenance(record) {
+    if (!state.maintenanceHistory.includes(record) || record.owner !== state.session || record.retired || maintenanceOtherBusy()) return false;
+    const invocation = { record, mode: "read", controller: new AbortController(), cancelled: false };
+    state.maintenanceObservationRevision = (state.maintenanceObservationRevision || 0) + 1;
+    state.maintenanceOwner = invocation; beginCameraInteraction();
+    const timer = setTimeout(() => { invocation.cancelled = true; invocation.controller.abort(); }, 30000);
+    renderAdvancedSettings(); renderAvailability();
+    try {
+      const observed = await maintenanceRead(invocation);
+      if (maintenancePublishable(invocation)) record.latestObservation = observed;
+      return observed.observationEvidence !== "unavailable";
+    } catch (_) {
+      if (maintenancePublishable(invocation)) record.latestObservation = { observationEvidence: "unavailable", clockObservation: null };
+      return false;
+    } finally {
+      clearTimeout(timer);
+      if (maintenanceCurrent(invocation)) {
+        state.maintenanceOwner = null; state.busy = false; state.refreshGeneration += 1; renderSession();
+      }
+    }
+  }
+
+  async function restoreMaintenance(record) {
+    if (!state.maintenanceHistory.includes(record) || record.owner !== state.session || record.retired ||
+        record.cancelled || maintenanceOtherBusy() || state.maintenanceHold !== record) return false;
+    const invocation = { record, mode: "restore", controller: new AbortController(), cancelled: false, restoreAdmitted: false };
+    state.maintenanceObservationRevision = (state.maintenanceObservationRevision || 0) + 1;
+    state.maintenanceOwner = invocation; beginCameraInteraction(); record.restoreEvidence = "pending";
+    const timer = setTimeout(() => { invocation.cancelled = true; invocation.controller.abort(); }, 60000);
+    renderAdvancedSettings(); renderAvailability();
+    try {
+      const observed = await maintenanceRead(invocation); // A new read, never a cached recovery result.
+      if (!maintenancePublishable(invocation)) return false;
+      record.latestObservation = observed;
+      const permission = maintenanceLifecycle.ownership({ sameOwner: record.owner === state.session,
+        sameAttempt: state.maintenanceOwner === invocation, retired: record.retired, cancelled: record.cancelled || invocation.cancelled,
+        responseReceived: record.responseEvidence === "response-received", stopConfirmed: ["confirmed", "not-required"].includes(record.stopEvidence),
+        operation: record.operation, autoPowerOff: record.autoPowerOff, wasLive: record.wasLive,
+        freshReachable: observed.observationEvidence === "reachable", safetyClear: maintenanceSafetyClear() && !liveViewStopRequired() });
+      if (!permission.canRestore) return false;
+      invocation.restoreAdmitted = true;
+      if (record.wasLive) {
+        await startLiveView({ announce: false, maintenanceRestore: invocation });
+        if (!maintenancePublishable(invocation) || !state.liveActive || state.liveViewStopOwner?.stopUnconfirmed === true) return false;
+      }
+      if (!maintenancePublishable(invocation)) return false;
+      record.restoreEvidence = "confirmed"; state.maintenanceHold = null;
+      if (record.wasEvents) startEventLoop();
+      return true;
+    } catch (_) { return false; }
+    finally {
+      clearTimeout(timer);
+      if (record.restoreEvidence === "pending") record.restoreEvidence = "unknown";
+      if (maintenanceCurrent(invocation)) {
+        state.maintenanceOwner = null; state.busy = false; state.refreshGeneration += 1; renderSession();
+      }
+    }
+  }
+
+  async function syncCameraClock(source) {
+    return runMaintenance("clock-sync", false);
+  }
+
+  async function sleepCamera(source) {
+    return runMaintenance("sleep", false);
+  }
+
+  async function cleanSensor(source, autoPowerOff) {
+    return runMaintenance("sensor-cleaning", autoPowerOff);
   }
 
   function editCaptureConfigurationDraft(key, value, { edited = true } = {}) {
@@ -3781,111 +4145,6 @@
 
   async function updateFileNaming(field, value, source) {
     return runCaptureConfiguration("set-file-naming", value, field);
-  }
-
-  async function sleepCamera(source) {
-    if (
-      !state.session ||
-      cameraInteractionBusy() ||
-      !featureSupported(FEATURES.CAMERA_SLEEP) ||
-      state.status?.recording || recordingRecoveryActive() ||
-      bulbControlLocked()
-    ) return;
-    const session = state.session;
-    const sessionId = session.id;
-    const wasLive = state.liveActive;
-    if ((wasLive || liveViewStopRequired()) && !await stopLiveView({ announce: false })) return;
-    if (state.session !== session) return;
-    beginCameraInteraction();
-    state.lastError = null;
-    source.disabled = true;
-    setOperationState(t("busy"));
-    stopLiveLoop();
-    await stopEventLoop(sessionId);
-    renderAvailability();
-    try {
-      await api(`/v1/session/${encodeURIComponent(sessionId)}/power/sleep`, {
-        method: "POST",
-        json: {},
-      });
-      try {
-        await api(`/v1/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
-      } catch (_) {
-        // The camera may already be unreachable; the accepted sleep command remains authoritative.
-      }
-      resetSession();
-      showToast(t("cameraSleepComplete"));
-    } catch (error) {
-      const normalized = captureError(error);
-      state.busy = false;
-      startEventLoop();
-      if (wasLive) await startLiveView({ announce: false });
-      state.lastError = normalized.message;
-      setOperationState(normalized.message, true);
-      showToast(normalized.message, true);
-      renderSession();
-    }
-  }
-
-  async function cleanSensor(source, autoPowerOff) {
-    if (
-      !state.session ||
-      cameraInteractionBusy() ||
-      !featureSupported(FEATURES.SENSOR_CLEANING) ||
-      state.status?.recording || recordingRecoveryActive() ||
-      bulbControlLocked()
-    ) return;
-    const session = state.session;
-    const sessionId = session.id;
-    const wasLive = state.liveActive;
-    if ((wasLive || liveViewStopRequired()) && !await stopLiveView({ announce: false })) return;
-    if (state.session !== session) return;
-    beginCameraInteraction();
-    state.lastError = null;
-    source.disabled = true;
-    setOperationState(t("busy"));
-    stopLiveLoop();
-    await stopEventLoop(sessionId);
-    renderAvailability();
-    try {
-      await api(`/v1/session/${encodeURIComponent(sessionId)}/maintenance/sensor-cleaning`, {
-        method: "POST",
-        json: { autoPowerOff },
-      });
-      if (state.session !== session) return;
-      if (autoPowerOff) {
-        try {
-          await api(`/v1/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
-        } catch (_) {
-          // The camera can become unreachable after the accepted cleaning command.
-        }
-        if (state.session !== session) return;
-        resetSession();
-      } else {
-        const liveViewStatusRevision = state.liveViewStopRevision || 0;
-        const status = await api(`/v1/session/${encodeURIComponent(sessionId)}/status`);
-        if (state.session !== session) return;
-        adoptCameraStatus(status, session, liveViewStatusRevision);
-        await refreshCapabilityEvidence();
-        if (state.session !== session) return;
-        state.busy = false;
-        startEventLoop();
-        if (wasLive) await startLiveView({ announce: false });
-        setOperationState(t("ready"));
-        renderSession();
-      }
-      showToast(t("sensorCleaningComplete"));
-    } catch (error) {
-      if (state.session !== session) return;
-      const normalized = captureError(error);
-      state.busy = false;
-      startEventLoop();
-      if (wasLive) await startLiveView({ announce: false });
-      state.lastError = normalized.message;
-      setOperationState(normalized.message, true);
-      showToast(normalized.message, true);
-      renderSession();
-    }
   }
 
   function settingMatchesCaptureMode(setting) {
@@ -5247,6 +5506,7 @@
       owner.stopUnconfirmed = true;
       owner.confirmedStart = false;
       owner.legacyStop = false;
+      if (owner.maintenanceRecord) owner.maintenanceWarningRevision = (owner.maintenanceWarningRevision || 0) + 1;
       state.liveViewStopOwner = owner;
     }
     return true;
@@ -5257,7 +5517,10 @@
   }
 
   async function toggleLiveView() {
-    if (liveViewStopRequired()) { await stopLiveView(); return; }
+    if (liveViewStopRequired()) {
+      if (state.liveViewStopOwner.maintenanceRecord && !maintenanceStopRetryAvailable()) return;
+      await stopLiveView(); return;
+    }
     if (localPreviewSelected()) {
       if (state.localVideoActive) stopLocalVideo();
       else await startLocalVideo();
@@ -5267,35 +5530,41 @@
     else await startLiveView();
   }
 
-  async function startLiveView({ announce = true } = {}) {
+  async function startLiveView({ announce = true, maintenanceRestore = null } = {}) {
+    const restoring = maintenanceRestore && state.maintenanceOwner === maintenanceRestore &&
+      maintenanceRestore.mode === "restore" && maintenanceRestore.restoreAdmitted && maintenancePublishable(maintenanceRestore);
     if (
-      localPreviewSelected() || !state.session || liveViewStopRequired() || cameraInteractionBusy() || bulbControlLocked() ||
+      localPreviewSelected() || !state.session || liveViewStopRequired() || (cameraInteractionBusy() && !restoring) || bulbControlLocked() ||
       !featureSupported(FEATURES.LIVE_VIEW)
     ) return;
     const session = state.session;
     const owner = { session };
+    if (restoring) { owner.stopUnconfirmed = true; owner.maintenanceRecord = maintenanceRestore.record; }
     state.liveViewStopRevision = (state.liveViewStopRevision || 0) + 1;
     state.liveViewStopOwner = owner;
     const owns = () => state.session === session && state.liveViewStopOwner === owner;
+    const maintenanceWarningRevision = owner.maintenanceWarningRevision || 0;
     beginCameraInteraction();
     state.lastError = null;
     setOperationState(t("busy"));
     renderAvailability();
     const capabilities = liveCapabilities();
     try {
-      const response = await api(`/v1/session/${encodeURIComponent(session.id)}/liveview/start`, {
-        method: "POST",
-        json: {
-          fps: clampFps(state.requestedFps),
-          size: capabilities.defaultSize || capabilities.sizes?.[0] || "MEDIUM",
-          source: state.liveSource || "AUTO",
-        },
-      });
+      const path = `/v1/session/${encodeURIComponent(session.id)}/liveview/start`;
+      const payload = restoring ? { ...maintenanceRestore.record.resume } : { fps: clampFps(state.requestedFps),
+        size: capabilities.defaultSize || capabilities.sizes?.[0] || "MEDIUM", source: state.liveSource || "AUTO" };
+      const response = restoring ? await maintenanceControlRequest(maintenanceRestore, path, { payload }) :
+        await api(path, { method: "POST", json: payload });
       if (!owns()) return;
-      if (!response || typeof response !== "object" || Array.isArray(response) || response.active !== true ||
-          response.liveViewStopUnconfirmed === true) {
+      if (restoring && !maintenancePublishable(maintenanceRestore)) { owner.stopUnconfirmed = true; return; }
+      if (restoring && (owner.maintenanceWarningRevision || 0) !== maintenanceWarningRevision) {
         throw new Error(t("liveViewStopUnconfirmed"));
       }
+      if (!response || typeof response !== "object" || Array.isArray(response) || response.active !== true ||
+          response.liveViewStopUnconfirmed === true || (restoring && response.liveViewStopUnconfirmed !== false)) {
+        throw new Error(t("liveViewStopUnconfirmed"));
+      }
+      if (restoring) owner.stopUnconfirmed = false;
       owner.confirmedStart = owner.stopUnconfirmed !== true;
       state.requestedFps = response.requestedFps || clampFps(state.requestedFps);
       state.activeLiveSource = response.source || state.liveSource;
@@ -5327,7 +5596,7 @@
     }
   }
 
-  async function stopLiveView({ announce = true, remote = true, preserveError = false } = {}) {
+  async function stopLiveView({ announce = true, remote = true, preserveError = false, maintenanceInvocation = null, maintenanceRecord = null } = {}) {
     const session = state.session;
     if (!session) return false;
     if (remote && state.heldAutofocusOwner && !await stopHeldAutofocus({ automatic: true })) return false;
@@ -5338,18 +5607,36 @@
     // A Stop retires any earlier Start/Stop reply, even within this session.
     // Status adoption can still revoke this new owner's legacy eligibility while HTTP waits.
     const owner = { session, confirmedStart: false, legacyStop, stopUnconfirmed: previous?.stopUnconfirmed === true };
+    owner.maintenanceRecord = maintenanceInvocation?.record || maintenanceRecord || previous?.maintenanceRecord || null;
+    if (owner.maintenanceRecord) owner.legacyStop = false;
+    let maintenanceTimer = null;
+    if (remote && owner.maintenanceRecord && !maintenanceInvocation) {
+      owner.maintenanceController = new AbortController();
+      maintenanceTimer = setTimeout(() => owner.maintenanceController.abort(), 15000);
+    }
     if (remote) state.liveViewStopOwner = owner;
     const owns = () => state.session === session && state.liveViewStopOwner === owner;
+    const maintenanceWarningRevision = owner.maintenanceWarningRevision || 0;
     stopLiveLoop();
     if (!remote) return false; // Local receiver teardown cannot acknowledge a camera stop.
     beginCameraInteraction();
     renderAvailability();
     let stopped = false;
     try {
-      const response = await api(`/v1/session/${encodeURIComponent(session.id)}/liveview/stop`, { method: "POST" });
+      const path = `/v1/session/${encodeURIComponent(session.id)}/liveview/stop`;
+      const response = maintenanceInvocation ? await maintenanceControlRequest(maintenanceInvocation, path) :
+        owner.maintenanceRecord ? await maintenanceOwnedControl(owner,
+          `/v1/session/${encodeURIComponent(session.id)}/maintenance/control/liveview/stop`) :
+          await api(path, { method: "POST" });
       if (!owns()) return false;
+      if (owner.maintenanceRecord && (owner.maintenanceWarningRevision || 0) !== maintenanceWarningRevision) {
+        throw new Error(t("liveViewStopUnconfirmed"));
+      }
+      if (owner.maintenanceController?.signal.aborted || (maintenanceInvocation && !maintenancePublishable(maintenanceInvocation))) {
+        owner.stopUnconfirmed = true; return false;
+      }
       if (response?.active !== false || !(response.liveViewStopUnconfirmed === false ||
-          (owner.legacyStop && !owner.stopUnconfirmed && response.liveViewStopUnconfirmed == null))) {
+          (!owner.maintenanceRecord && owner.legacyStop && !owner.stopUnconfirmed && response.liveViewStopUnconfirmed == null))) {
         throw new Error(t("liveViewStopUnconfirmed"));
       }
       state.liveViewStopOwner = null;
@@ -5367,6 +5654,7 @@
       if (!preserveError) setOperationState(normalized.message, true);
       if (announce) showToast(normalized.message, true);
     } finally {
+      if (maintenanceTimer !== null) clearTimeout(maintenanceTimer);
       if (state.session === session && (owns() || (stopped && !state.liveViewStopOwner))) {
         state.busy = false;
         renderLiveState();
@@ -5401,7 +5689,7 @@
 
   async function pollLiveView(generation) {
     while (
-      state.liveActive && !state.livePollingSuspended &&
+      state.liveActive && !state.livePollingSuspended && !maintenancePaused() &&
       generation === state.liveGeneration && state.session
     ) {
       const started = performance.now();
@@ -5412,12 +5700,12 @@
           responseType: "blob",
           signal: controller.signal,
         });
-        if (!state.liveActive || state.livePollingSuspended || generation !== state.liveGeneration) return;
+        if (!state.liveActive || state.livePollingSuspended || maintenancePaused() || generation !== state.liveGeneration) return;
         const url = URL.createObjectURL(blob);
         const previous = state.liveObjectUrl;
         ui.liveImage.src = url;
         await ui.liveImage.decode();
-        if (!state.liveActive || state.livePollingSuspended || generation !== state.liveGeneration) {
+        if (!state.liveActive || state.livePollingSuspended || maintenancePaused() || generation !== state.liveGeneration) {
           if (previous) ui.liveImage.src = previous;
           else ui.liveImage.removeAttribute("src");
           releaseObjectUrl(url);
@@ -5468,7 +5756,7 @@
   }
 
   function resumeLivePolling() {
-    if (!state.liveActive || !state.livePollingSuspended || !state.session) return;
+    if (!state.liveActive || !state.livePollingSuspended || !state.session || maintenancePaused()) return;
     state.livePollingSuspended = false;
     state.liveGeneration += 1;
     pollLiveView(state.liveGeneration);
@@ -6361,7 +6649,8 @@
       button.hidden = !liveStopRequired && !cameraLiveSupported && !localLiveSupported;
       button.disabled = localPreviewSelected()
         ? state.localVideoBusy || !localLiveSupported || (shutterReleaseUnconfirmed() && !state.localVideoActive)
-        : interactionBusy || (!liveStopRequired && (bulbActive || !selectedLiveSupported || !cameraLiveTemperatureAllowed));
+        : (interactionBusy && !maintenanceStopRetryAvailable()) ||
+          (!liveStopRequired && (bulbActive || !selectedLiveSupported || !cameraLiveTemperatureAllowed));
     });
     const quickActionCount = [
       autofocusSupported,
@@ -6390,6 +6679,7 @@
     });
     [...new Set([...document.querySelectorAll("#advanced-settings .settings-command button"),
       ...document.querySelectorAll("#advanced-settings button[data-camera-command=setting]")])].forEach((button) => {
+      if (button.dataset.maintenanceAction) return;
       if (button.dataset.settingOutcomeAction && renderSettingButtonAvailability(button, interactionBusy, bulbActive)) return;
       if ((button.dataset.captureConfigurationAction || ["directory", "file-naming"].includes(button.dataset.cameraCommand)) &&
           renderCaptureConfigurationButtonAvailability(button, interactionBusy, bulbActive)) return;
@@ -9466,6 +9756,7 @@
     ui.mediaAutoImportStop?.addEventListener("click", () => stopMediaAutoImport());
     document.addEventListener?.("visibilitychange", () => {
       if (document.visibilityState !== "visible") {
+        suspendMaintenanceForLifecycle();
         stopMediaAutoImport("backgrounded");
         if (typeof cancelMediaMutation === "function") cancelMediaMutation();
         releaseHeldAutofocusForLifecycle();
@@ -9478,6 +9769,7 @@
       }
     });
     window.addEventListener("pagehide", () => {
+      suspendMaintenanceForLifecycle();
       cancelMediaUpload({ silent: true, retire: true });
       stopMediaAutoImport("backgrounded");
       if (typeof cancelMediaMutation === "function") cancelMediaMutation();
@@ -9658,6 +9950,7 @@
       if (previewActive()) applyLiveViewLayout();
     });
     window.addEventListener("beforeunload", () => {
+      const preserveMaintenance = suspendMaintenanceForLifecycle();
       state.mediaListingOwner?.cancel({ silent: true });
       if (typeof cancelMediaMutation === "function") cancelMediaMutation();
       releaseHeldAutofocusForLifecycle();
@@ -9675,6 +9968,7 @@
       stopRtpAudio({ announce: false });
       if (!state.session) return;
       cancelEventLoop();
+      if (preserveMaintenance) return;
       if (featureSupported(FEATURES.EVENT_POLLING)) {
         api(`/v1/session/${encodeURIComponent(state.session.id)}/events`, {
           method: "DELETE",

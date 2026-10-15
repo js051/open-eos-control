@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
@@ -26,6 +27,8 @@ from .local_media import (
     is_previewable_media,
     preview_content_type,
 )
+from .maintenance import observation as maintenance_observation
+from .maintenance import require_intent, response_received
 from .media_folders import camera_folder_fields
 from .media_upload import validate_upload_request
 from .models import (
@@ -1776,6 +1779,102 @@ class GPhoto2Session:
             self.engine_name,
             "The public libgphoto2 CLI contract does not expose a verified sensor-cleaning action.",
         )
+
+    def _maintenance_config(self, known: GPhotoConfig, deadline: float) -> GPhotoConfig:
+        self._require_open()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Clock read timed out.", status_code=504)
+        if self._live_view_stream is not None:
+            raise BridgeError("MAINTENANCE_READ_UNAVAILABLE", "Pause active movie transport before clock reads.",
+                              status_code=409)
+        # This exact read must not call _run(), which silently stops movie streaming.
+        output = self.runner.run(self._camera_arguments(["--get-config", known.path]), timeout=remaining).stdout
+        if time.monotonic() >= deadline or len(output) > 65536:
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Clock response incomplete or late.", status_code=504)
+        try:
+            lines = output.decode("utf-8", errors="strict").splitlines()
+            if any(line.startswith("/") for line in lines):
+                if not lines or lines[0] != known.path:
+                    raise ValueError("Wrong config path")
+                lines = lines[1:]
+            if not lines or lines[-1] != "END" or lines.count("END") != 1:
+                raise ValueError("Incomplete config response")
+            fields = [line.split(":", 1)[0] for line in lines if ":" in line and not line.startswith("Choice:")]
+            if len(fields) != len(set(fields)) or not {"Label", "Readonly", "Type", "Current"} <= set(fields):
+                raise ValueError("Ambiguous config response")
+            parsed = parse_config_dump(known.path + "\n" + "\n".join(lines))[known.path]
+            if parsed.kind != known.kind or len(parsed.choices) != len(set(parsed.choices)):
+                raise ValueError("Changed clock descriptor")
+            return parsed
+        except (UnicodeError, ValueError, KeyError) as error:
+            raise BridgeError("MAINTENANCE_READ_INVALID", "Exact fresh clock config unavailable.",
+                              status_code=502) from error
+
+    def _maintenance_clock_sample(self, config: GPhotoConfig, deadline: float) -> dict[str, object]:
+        value = _config_epoch_seconds(self._maintenance_config(config, deadline))
+        if value is None:
+            raise BridgeError("MAINTENANCE_READ_INVALID", "Exact DATE clock observation unavailable.", status_code=502)
+        return {"epochSeconds": value, "utcOffsetMinutes": None, "daylightSaving": None}
+
+    def read_maintenance(self, operation: str) -> dict[str, object]:
+        require_intent(operation, False)
+        if operation != "clock-sync":
+            raise unsupported("MAINTENANCE_READBACK", self.engine_name)
+        deadline = time.monotonic() + 15.0
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Clock read lock timed out.", status_code=504)
+        try:
+            self._require_open()
+            pair = self._camera_clock_control()
+            if pair is None:
+                raise unsupported(CameraFeature.CAMERA_CLOCK_SYNC.value, self.engine_name)
+            return maintenance_observation(self.engine_name, operation,
+                                           self._maintenance_clock_sample(pair[1], deadline))
+        finally:
+            self._lock.release()
+
+    def perform_maintenance_outcome(self, operation: str, auto_power_off: bool) -> dict[str, object]:
+        require_intent(operation, auto_power_off)
+        if operation != "clock-sync":
+            raise unsupported(CameraFeature.CAMERA_SLEEP.value if operation == "sleep"
+                              else CameraFeature.SENSOR_CLEANING.value, self.engine_name)
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Clock write lock timed out.", status_code=504)
+        try:
+            self._require_open()
+            if self._bulb_exposure_active:
+                raise BridgeError("CAMERA_BUSY", "Stop Bulb before synchronizing the clock.", status_code=409)
+            pair = self._camera_clock_control()
+            if pair is None:
+                raise unsupported(CameraFeature.CAMERA_CLOCK_SYNC.value, self.engine_name)
+            action, readback = pair
+            deadline = time.monotonic() + 15.0
+            fresh = self._maintenance_config(action, deadline)
+            if fresh.readonly:
+                raise unsupported(CameraFeature.CAMERA_CLOCK_SYNC.value, self.engine_name)
+            # A fresh exact DATE read validates the paired observation, without broad enumeration.
+            self._maintenance_clock_sample(readback, deadline)
+            recording = self._recording_config()
+            if recording is not None:
+                fresh_recording = self._maintenance_config(recording, deadline)
+                if fresh_recording.current.casefold() == "card":
+                    raise BridgeError("CAMERA_BUSY", "Stop recording before clock synchronization.", status_code=409)
+            requested = int(time.time())
+            self._set_config_value(fresh, "1", refresh=False, update_current=False)
+            # Preserve the completed CLI response even if the subsequent exact read fails.
+            # The existing gphoto window ends at the verified read, not the CLI write response.
+            observed = None
+            with suppress(Exception):
+                observed = self._maintenance_clock_sample(readback, time.monotonic() + 15.0)
+            reference = {"earliestEpochSeconds": requested - 10, "latestEpochSeconds": int(time.time()) + 10,
+                         "utcOffsetMinutes": None, "daylightSaving": None}
+            result = response_received(self.engine_name, operation, False, reference, lambda: observed)
+            if result["clockReadEvidence"] == "matched":
+                self._observed.add(CameraFeature.CAMERA_CLOCK_SYNC)
+            return result
+        finally:
+            self._lock.release()
 
     def sync_camera_clock(self) -> CameraStatus:
         with self._lock:

@@ -125,6 +125,18 @@ class SessionManager:
             with self._lock:
                 self._camera_sessions.pop(f"{session.engine_name}:{session.camera.id}", None)
 
+    def retire_maintenance(self, session_id: str) -> None:
+        # Keep registration while retirement is in flight, so a replacement cannot race it.
+        with self._lock:
+            session = self.get(session_id)
+            retire = getattr(session, "maintenance_retire", None)
+            if not callable(retire):
+                raise BridgeError("UNSUPPORTED_MAINTENANCE_RETIRE", "Local-only retirement is unavailable.",
+                                  status_code=409, engine=session.engine_name)
+            retire()
+            self._sessions.pop(session_id, None)
+            self._camera_sessions.pop(f"{session.engine_name}:{session.camera.id}", None)
+
     def close_all(self) -> None:
         with self._lock:
             sessions = list(self._sessions.values())

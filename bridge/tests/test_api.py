@@ -54,6 +54,7 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
         script = client.get("/app/app.js")
         media_transfer = client.get("/app/media-transfer.js")
         capture_configuration = client.get("/app/capture-configuration.js")
+        maintenance = client.get("/app/maintenance-lifecycle.js")
         styles = client.get("/app/styles.css")
         icon = client.get("/app/app-icon.png")
         protected_api = client.get("/v1/cameras")
@@ -66,11 +67,17 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
     assert script.headers["content-type"].startswith(("text/javascript", "application/javascript"))
     assert "Bearer ${state.token}" in script.text
     assert "CAMERA_CLOCK_SYNC" in script.text
-    assert "/clock/sync" in script.text
+    assert 'runMaintenance("clock-sync", false)' in script.text
+    assert "/clock/sync" not in script.text
     assert "SENSOR_CLEANING" in script.text
-    assert "/maintenance/sensor-cleaning" in script.text
+    assert 'runMaintenance("sensor-cleaning", autoPowerOff)' in script.text
     assert "CAMERA_SLEEP" in script.text
-    assert "/power/sleep" in script.text
+    assert 'runMaintenance("sleep", false)' in script.text
+    assert "/power/sleep" not in script.text
+    assert "/maintenance/${operation}/outcome" in script.text
+    assert maintenance.status_code == 200
+    assert 'src="/app/maintenance-lifecycle.js"' in page.text
+    assert "parseOutcome" in maintenance.text
     assert "DIRECTORY_CONTROL" in script.text
     assert '"directories"' in script.text
     assert 'src="/app/capture-configuration.js"' in page.text
