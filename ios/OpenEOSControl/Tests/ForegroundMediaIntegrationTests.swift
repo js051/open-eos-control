@@ -197,6 +197,72 @@ final class ForegroundMediaIntegrationTests: XCTestCase {
         }
     }
 
+    func testFreshTypeDriftStopsBeforeOriginalRetentionOrFilesCopyWithoutResend() async throws {
+        for fields in [["kind": "raw"], ["name": "RENAMED.JPG"], ["contenttype": "video/mp4"],
+                       ["contenttype": "image/jpg"], ["contenttype": " "]] {
+            try await withFixture { fixture in
+                let task = try await fixture.startAndEstablishBaseline(toFiles: true)
+                try await fixture.discover("NEW.JPG")
+                await fixture.peer.setFreshTypeFields(fields)
+                try await fixture.tick(seconds: 1)
+                try await fixture.drain(task)
+                XCTAssertEqual(fixture.state.foregroundMedia.reason, .metadata)
+                XCTAssertEqual(fixture.state.foregroundMedia.preparedCount, 0)
+                XCTAssertEqual(fixture.state.foregroundMedia.copiedCount, 0)
+                let originals = await fixture.peer.originalRequests()
+                XCTAssertTrue(originals.isEmpty)
+                let fresh = await fixture.peer.freshRequests()
+                XCTAssertEqual(fresh.count, 2, "Exactly the existing two observations; no metadata retries")
+                let history = await fixture.store.snapshot()
+                XCTAssertTrue(history.records.isEmpty)
+                XCTAssertTrue(history.externalAttempts.isEmpty)
+                let requests = await fixture.peer.requests()
+                XCTAssertTrue(requests.allSatisfy { $0.method == "GET" }, "No shutter, REC, AF or other write")
+            }
+        }
+    }
+
+    func testUnreadyFreshSizeWaitsAndRequiresTwoNewPositiveObservations() async throws {
+        try await withFixture { fixture in
+            let task = try await fixture.startAndEstablishBaseline()
+            try await fixture.discover("NEW.JPG")
+            await fixture.peer.setFreshSize(0)
+            await fixture.peer.setFreshTypeFields(["contenttype": "application/octet-stream"])
+            try await fixture.tickAndWait(seconds: 1)
+            XCTAssertTrue(fixture.state.foregroundMedia.isRunning)
+            XCTAssertEqual(fixture.state.foregroundMedia.preparedCount, 0)
+            let unreadyOriginals = await fixture.peer.originalRequests()
+            XCTAssertTrue(unreadyOriginals.isEmpty)
+            await fixture.peer.setFreshSize(ForegroundIntegrationPeer.original.count)
+            await fixture.peer.setFreshTypeFields([:])
+            try await fixture.tickAndWait(seconds: 1)
+            XCTAssertEqual(fixture.state.foregroundMedia.preparedCount, 0, "Unready size invalidated the first positive read")
+            try await fixture.tickAndWait(seconds: 1)
+            XCTAssertEqual(fixture.state.foregroundMedia.preparedCount, 1)
+            let originals = await fixture.peer.originalRequests()
+            let fresh = await fixture.peer.freshRequests()
+            XCTAssertEqual(originals.count, 1)
+            XCTAssertEqual(fresh.count, 4)
+            try await fixture.stopAndDrain(task)
+        }
+    }
+
+    func testUnreadyFreshSizeExpiresWithoutTransferOrNewDeadline() async throws {
+        try await withFixture { fixture in
+            let task = try await fixture.startAndEstablishBaseline()
+            await fixture.peer.setFreshSize(0)
+            try await fixture.discover("NEW.JPG")
+            try await fixture.tick(seconds: 31)
+            try await fixture.drain(task)
+            XCTAssertEqual(fixture.state.foregroundMedia.reason, .metadata)
+            XCTAssertEqual(fixture.state.foregroundMedia.preparedCount, 0)
+            let originals = await fixture.peer.originalRequests()
+            let fresh = await fixture.peer.freshRequests()
+            XCTAssertTrue(originals.isEmpty)
+            XCTAssertEqual(fresh.count, 1, "Expiry must not schedule another camera read")
+        }
+    }
+
     func testStopWhileBeginItemReplyIsSuspendedRecordsCancellationWithoutOriginalGET() async throws {
         try await withFixture(replyStage: .itemStarted) { fixture in
             let task = try await fixture.startAndEstablishBaseline()
@@ -857,6 +923,8 @@ private actor ForegroundIntegrationPeer: CameraForegroundHTTPTransport {
         let foreground: Bool
     }
     private var names: [String]
+    private var freshTypeFields: [String: String] = [:]
+    private var freshSize = ForegroundIntegrationPeer.original.count
     private let liveView: Bool
     private var recorded: [Request] = []
     private var originals: [Request] = []
@@ -867,6 +935,8 @@ private actor ForegroundIntegrationPeer: CameraForegroundHTTPTransport {
     private var temporaryFiles: [URL] = []
     init(names: [String], liveView: Bool) { self.names = names; self.liveView = liveView }
     func append(_ name: String) { names.append(name) }
+    func setFreshTypeFields(_ fields: [String: String]) { freshTypeFields = fields }
+    func setFreshSize(_ size: Int) { freshSize = size }
     func requests() -> [Request] { recorded }
     func originalRequests() -> [Request] { originals }
     func freshRequests() -> [Request] { recorded.filter { $0.foreground && $0.path.hasSuffix("?kind=info") } }
@@ -926,7 +996,8 @@ private actor ForegroundIntegrationPeer: CameraForegroundHTTPTransport {
         } else if url.path == Self.root {
             object = ["path": names.map(Self.path)]
         } else if url.path.hasPrefix(Self.root + "/"), kind == "info" {
-            object = ["filesize": Self.original.count, "contenttype": "image/jpeg", "rating": "off"]
+            object = ["filesize": freshSize, "contenttype": "image/jpeg", "rating": "off"]
+            for (key, value) in freshTypeFields { object[key] = value }
         } else if url.path.hasPrefix(Self.root + "/"), kind == "thumbnail" || kind == "display" {
             return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: Self.original)
         } else if url.path.hasSuffix("/shooting/control/shutterbutton") {

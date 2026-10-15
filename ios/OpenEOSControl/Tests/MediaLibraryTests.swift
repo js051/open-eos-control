@@ -197,11 +197,12 @@ final class MediaLibraryTests: XCTestCase {
         )
     }
 
-    func testVideoFilterUsesKindOrFilenameExtension() {
+    func testVideoFilterUsesConsistentKindOrFilenameExtensionAndRejectsConflicts() {
         let items = [
             media("photo", "IMG_1.JPG", nil),
             CameraMediaItem(id: "kind", name: "CLIP.bin", kind: "video"),
-            media("extension", "CLIP.MP4", nil),
+            CameraMediaItem(id: "extension", name: "CLIP.MP4", kind: "unknown"),
+            CameraMediaItem(id: "conflict", name: "CLIP.MP4", kind: "image"),
         ]
 
         XCTAssertEqual(
@@ -360,7 +361,7 @@ final class MediaLibraryTests: XCTestCase {
         let items = [
             media("outside", "IMG_0.JPG", "2026-08-13T10:00:00Z"),
             media("raw", "IMG_2.CR3", "2026-08-14T10:00:00Z"),
-            media("video", "IMG_1.MP4", "2026-08-14T12:00:00Z"),
+            media("video", "IMG_1.MP4", "2026-08-14T12:00:00Z", kind: "video"),
             media("jpeg", "IMG_2.JPG", "2026-08-14T10:00:00Z"),
             media("early", "IMG_10.JPG", "2026-08-14T08:00:00Z"),
             media("unknown", "IMG_3.JPG", nil),
@@ -391,8 +392,8 @@ final class MediaLibraryTests: XCTestCase {
             media("photo", "PHOTO.JPG", "2026-08-14T10:00:00Z"),
             media("unknown-photo", "UNKNOWN.CR3", nil),
             CameraMediaItem(id: "video", name: "CLIP.bin", kind: "video", captureTime: "2026-08-14T11:00:00Z"),
-            media("unknown-video", "UNKNOWN.MOV", "not-a-date"),
-            media("outside-video", "OLD.MP4", "2026-08-13T10:00:00Z"),
+            media("unknown-video", "UNKNOWN.MOV", "not-a-date", kind: "video"),
+            media("outside-video", "OLD.MP4", "2026-08-13T10:00:00Z", kind: "video"),
         ]
         let day = try instant("2026-08-14T12:00:00Z")
         let range = try XCTUnwrap(MediaDateRange(startDate: day, endDate: day, timeZone: zone("UTC")))
@@ -560,7 +561,7 @@ final class MediaLibraryTests: XCTestCase {
             media("outside", "OUTSIDE.JPG", "2026-08-13T23:59:59Z", rating: 5),
             media("unknown-date", "UNKNOWN.JPG", nil, rating: 5),
             media("raw", "PAIR.CR3", "2026-08-14T00:00:00Z", rating: 4),
-            media("video", "CLIP.MP4", "2026-08-14T12:00:00Z", rating: 5),
+            media("video", "CLIP.MP4", "2026-08-14T12:00:00Z", rating: 5, kind: "video"),
             media("low", "LOW.JPG", "2026-08-14T12:00:00Z", rating: 3),
             media("jpeg", "PAIR.JPG", "2026-08-14T23:59:59Z", rating: 4),
             media("unknown-rating", "UNKNOWN.JPG", "2026-08-14T12:00:00Z"),
@@ -601,7 +602,7 @@ final class MediaLibraryTests: XCTestCase {
             media("invalid", "INVALID.JPG", "2026-08-14T12:00:00Z", rating: 6),
             media("unknown-date", "UNKNOWN.JPG", nil),
             media("outside", "OUTSIDE.JPG", "2026-08-13T12:00:00Z"),
-            media("video", "CLIP.MOV", "2026-08-14T12:00:00Z"),
+            media("video", "CLIP.MOV", "2026-08-14T12:00:00Z", kind: "video"),
         ]
 
         XCTAssertEqual(
@@ -635,7 +636,7 @@ final class MediaLibraryTests: XCTestCase {
             media("unknown-five", "UNKNOWN.JPG", nil, rating: 5),
             media("unknown-zero", "ZERO.JPG", "not-a-date", rating: 0),
             media("unknown-both", "MISSING.JPG", nil),
-            media("video", "CLIP.MP4", nil, rating: 5),
+            media("video", "CLIP.MP4", nil, rating: 5, kind: "video"),
         ]
 
         XCTAssertEqual(
@@ -662,8 +663,8 @@ final class MediaLibraryTests: XCTestCase {
             media("invalid", "INVALID.JPG", "2026-08-14T12:00:00Z", rating: -1),
             media("outside", "OUTSIDE.JPG", "2026-08-13T12:00:00Z", rating: 3),
             media("unknown-date", "UNKNOWN.JPG", nil, rating: 4),
-            media("video", "CLIP.MP4", "2026-08-14T12:00:00Z", rating: 2),
-            media("unknown-video", "UNKNOWN.MOV", nil),
+            media("video", "CLIP.MP4", "2026-08-14T12:00:00Z", rating: 2, kind: "video"),
+            media("unknown-video", "UNKNOWN.MOV", nil, kind: "video"),
         ]
 
         for dateRange in [nil, range] as [MediaDateRange?] {
@@ -746,7 +747,7 @@ final class MediaLibraryTests: XCTestCase {
         let items = [
             media("card1/DCIM/100CANON/IMAGE.JPG", "100CANON/IMAGE.JPG", nil),
             media("ptp:storage/parent/file", "DIRECTORY.CR3", nil),
-            media("known", "CLIP.MP4", nil, folder: known),
+            media("known", "CLIP.MP4", nil, folder: known, kind: "video"),
         ]
         XCTAssertEqual(mediaItemsForDisplay(items, filter: .all, sort: .camera), items)
         XCTAssertEqual(
@@ -836,7 +837,7 @@ final class MediaLibraryTests: XCTestCase {
             media("unknown-folder-low", "LOW.JPG", "2026-08-14T12:00:00Z", rating: 3),
             media("unknown-folder-date", "DATE.JPG", nil, rating: 5),
             media("unknown-folder-old", "OLD.JPG", "2026-08-13T12:00:00Z", rating: 5),
-            media("unknown-folder-video", "CLIP.MP4", "2026-08-14T12:00:00Z", rating: 5),
+            media("unknown-folder-video", "CLIP.MP4", "2026-08-14T12:00:00Z", rating: 5, kind: "video"),
             media("known-unknown-date", "DATE.JPG", nil, rating: 5, folder: known),
             media("known-unknown-rating", "RATING.JPG", "2026-08-14T12:00:00Z", folder: known),
             media("known-invalid-rating", "RATING.JPG", "2026-08-14T12:00:00Z", rating: 9, folder: known),
@@ -879,8 +880,8 @@ final class MediaLibraryTests: XCTestCase {
             media("missing-rating", "RATING.JPG", "2026-08-14T12:00:00Z", folder: first),
             media("outside", "OLD.JPG", "2026-08-13T12:00:00Z", rating: 3, folder: second),
             media("unknown-date", "DATE.JPG", nil, rating: 4, folder: first),
-            media("video", "CLIP.MP4", "2026-08-14T12:00:00Z", rating: 2, folder: first),
-            media("unknown-video", "UNKNOWN.MOV", nil),
+            media("video", "CLIP.MP4", "2026-08-14T12:00:00Z", rating: 2, folder: first, kind: "video"),
+            media("unknown-video", "UNKNOWN.MOV", nil, kind: "video"),
         ]
         for dateRange in [nil, range] as [MediaDateRange?] {
             for filter in MediaFilter.allCases {
@@ -961,9 +962,10 @@ final class MediaLibraryTests: XCTestCase {
     }
 
     private func media(
-        _ id: String, _ name: String, _ captureTime: String?, rating: Int? = nil, folder: CameraMediaFolder? = nil
+        _ id: String, _ name: String, _ captureTime: String?, rating: Int? = nil, folder: CameraMediaFolder? = nil,
+        kind: String = "image"
     ) -> CameraMediaItem {
-        CameraMediaItem(id: id, name: name, kind: "image", captureTime: captureTime, rating: rating, folder: folder)
+        CameraMediaItem(id: id, name: name, kind: kind, captureTime: captureTime, rating: rating, folder: folder)
     }
 
     private func folder(_ id: String, _ label: String) throws -> CameraMediaFolder {

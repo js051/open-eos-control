@@ -555,7 +555,8 @@ struct MediaView: View {
     private func mediaThumbnailContent(_ item: CameraMediaItem) -> some View {
         ZStack {
             Color.cameraSurfaceRaised
-            if let data = camera.mediaThumbnails[item.id], let image = UIImage(data: data) {
+            if (mediaIsPhoto(item) || mediaIsVideo(item)),
+               let data = camera.mediaThumbnails[item.id], let image = UIImage(data: data) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
@@ -563,7 +564,7 @@ struct MediaView: View {
             } else if camera.loadingMediaThumbnailIDs.contains(item.id) {
                 ProgressView().tint(Color.cameraAccent).controlSize(.small)
             } else {
-                Image(systemName: mediaIcon(item.kind))
+                Image(systemName: mediaIcon(item))
                     .font(.title3)
                     .foregroundStyle(Color.cameraAccent)
             }
@@ -689,11 +690,12 @@ struct MediaView: View {
         )
     }
 
-    private func mediaIcon(_ kind: String) -> String {
-        switch kind.lowercased() {
-        case "video": "film"
-        case "raw": "camera.aperture"
-        default: "photo"
+    private func mediaIcon(_ item: CameraMediaItem) -> String {
+        switch CameraMediaType.classify(item) {
+        case .video: "film"
+        case .photo: "photo"
+        case .audio: "waveform"
+        case .other, .unknown, .conflict: "doc"
         }
     }
 
@@ -702,7 +704,7 @@ struct MediaView: View {
         if mediaIsVideo(item) {
             return camera.supports(.mediaDownload)
         }
-        return item.previewAvailable && camera.supports(.mediaPreview)
+        return mediaIsPhoto(item) && item.previewAvailable && camera.supports(.mediaPreview)
     }
 
     private var dateFilterCalendar: Calendar {
@@ -1184,7 +1186,7 @@ private struct MediaPreviewView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let playback = camera.mediaVideoPlayback,
-               let item = camera.mediaPreviewItem {
+               let item = camera.mediaPreviewItem, mediaIsVideo(item) {
                 CameraVideoPreview(
                     playback: playback,
                     item: item,
@@ -1197,6 +1199,7 @@ private struct MediaPreviewView: View {
                     }
                 )
             } else if let item = camera.mediaPreviewItem,
+                      mediaIsPhoto(item),
                       let data = camera.mediaPreviewData,
                       let image = UIImage(data: data) {
                 ZoomableMediaImage(
@@ -1213,7 +1216,7 @@ private struct MediaPreviewView: View {
                 VStack(spacing: 12) {
                     Text("media_preview_unavailable")
                         .foregroundStyle(Color.cameraSecondaryText)
-                    if let item = camera.mediaPreviewItem, !mediaIsVideo(item), item.previewAvailable {
+                    if let item = camera.mediaPreviewItem, mediaIsPhoto(item), item.previewAvailable {
                         Button {
                             Task { await camera.retryMediaPreview() }
                         } label: {

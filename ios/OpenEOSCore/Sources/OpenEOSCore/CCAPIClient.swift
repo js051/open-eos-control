@@ -2355,12 +2355,25 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         let path = try foregroundResourcePath(item.id, root: apiPath(.get, suffix: "/contents"))
         guard Self.isMediaPath(path) else { throw CameraForegroundMediaError.invalidInventory }
         let body = try await foregroundJSON(path: "\(path)?kind=info", transport: strictTransport, budget: &budget)
+        let canonicalName = (path as NSString).lastPathComponent
+        let freshID = try Self.mediaInfoString(body, keys: ["id"], fallback: item.id)
+        let freshName = try Self.mediaInfoString(body, keys: ["name", "filename"], fallback: canonicalName)
+        guard freshID?.utf8.elementsEqual(item.id.utf8) == true,
+              freshName?.utf8.elementsEqual(item.name.utf8) == true else {
+            throw CameraMediaMetadataError.invalidMetadata
+        }
         guard let size = Self.foregroundInteger(body["filesize"]), size > 0 else {
             throw CameraForegroundMediaError.freshSizeUnavailable
         }
-        // parseMediaInfo's legacy fallback cannot be reached with this validated
-        // integer field, and the caller's identity bytes/provenance stay unchanged.
-        return parseMediaInfo(item, body: body)
+        // Missing type/name declarations bind to the requested camera resource,
+        // never to cached kind/MIME. Fresh absent MIME remains genuinely absent.
+        let canonical = CameraMediaItem(id: item.id, name: canonicalName, kind: Self.mediaKind(path),
+                                        previewAvailable: item.previewAvailable, folder: item.folder)
+        let metadata = try parseMediaInfo(canonical, body: body)
+        guard CameraMediaType.admitsFreshAutomaticJPEG(original: item, metadata: metadata, fresh: true) else {
+            throw CameraMediaMetadataError.invalidMetadata
+        }
+        return metadata
     }
 
     public func downloadForegroundOriginal(
@@ -2371,6 +2384,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     ) async throws -> CameraMediaDownload {
         let strictTransport = try foregroundTransport()
         try Task.checkCancellation()
+        guard CameraMediaType.isAutomaticJPEG(item) else { throw CameraMediaMetadataError.invalidMetadata }
         guard expectedBytes > 0, item.sizeBytes == expectedBytes else {
             throw CameraForegroundMediaError.freshSizeUnavailable
         }
@@ -2487,7 +2501,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                     rating: item.integer("rating").flatMap { (0...5).contains($0) ? $0 : nil },
                     rotationDegrees: item.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil },
                     archived: item.bool("archive"),
-                    contentType: item.string("content_type").nilIfEmpty,
+                    contentType: try CameraMediaType.declaredMIME(in: item),
                     widthPixels: item.integer("width_pixels").flatMap { $0 > 0 ? $0 : nil },
                     heightPixels: item.integer("height_pixels").flatMap { $0 > 0 ? $0 : nil }
                 )
@@ -2649,6 +2663,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         offset: Int64,
         length: Int64? = nil
     ) async throws -> CameraMediaStreamResponse {
+        guard CameraMediaType.classify(item) == .video else { throw CameraMediaMetadataError.invalidMetadata }
         try await ensureInitialized()
         guard offset >= 0, length.map({ $0 > 0 }) ?? true else {
             throw CCAPIError.invalidResponse("Media byte range must be positive.")
@@ -2718,6 +2733,9 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     }
 
     public func mediaThumbnail(_ item: CameraMediaItem) async throws -> CameraMediaThumbnail {
+        guard [.photo, .video].contains(CameraMediaType.classify(item)) else {
+            throw CameraMediaMetadataError.invalidMetadata
+        }
         let response = try await mediaImageRepresentation(
             item,
             kind: "thumbnail",
@@ -2734,7 +2752,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         let previewEligible = resolvedMode == .simulator
             ? imageKind
             : imageKind && Self.isCCAPIDisplayPreviewPath(item.id)
-        guard previewEligible else {
+        guard CameraMediaType.classify(item) == .photo, previewEligible else {
             throw CCAPIError.invalidResponse("CCAPI display preview is available only for JPEG or CR3 items.")
         }
         let response = try await mediaImageRepresentation(
@@ -2755,7 +2773,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         }
         let path = try mediaPath(item)
         let body = try await requestJSON(path: "\(path)?kind=info")
-        return parseMediaInfo(item, body: body)
+        return try parseMediaInfo(item, body: body)
     }
 
     public func setMediaProtection(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
@@ -2850,7 +2868,9 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         return try normalizeCameraResource(item.id).components(separatedBy: "?")[0]
     }
 
-    private func parseMediaInfo(_ item: CameraMediaItem, body: JSONDictionary) -> CameraMediaItem {
+    private func parseMediaInfo(_ item: CameraMediaItem, body: JSONDictionary) throws -> CameraMediaItem {
+        let id = try Self.mediaInfoString(body, keys: ["id"], fallback: item.id)
+        guard id?.utf8.elementsEqual(item.id.utf8) == true else { throw CameraMediaMetadataError.invalidMetadata }
         let protected: Bool? = switch body.string("protect") {
         case "enable": true
         case "disable": false
@@ -2865,8 +2885,8 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         let archived = Self.parseMediaArchive(body.string("archive"))
         return CameraMediaItem(
             id: item.id,
-            name: item.name,
-            kind: item.kind,
+            name: try Self.mediaInfoString(body, keys: ["name", "filename"], fallback: item.name) ?? "",
+            kind: try Self.mediaInfoString(body, keys: ["kind"], fallback: item.kind) ?? "",
             sizeBytes: body.integer64("filesize").flatMap { $0 > 0 ? $0 : nil } ?? item.sizeBytes,
             captureTime: body.string("lastmodifieddate").nilIfEmpty ?? item.captureTime,
             previewAvailable: item.previewAvailable,
@@ -2874,11 +2894,31 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             rating: rating,
             rotationDegrees: rotation,
             archived: archived,
-            contentType: item.contentType,
+            contentType: try CameraMediaType.declaredMIME(in: body),
             widthPixels: item.widthPixels,
             heightPixels: item.heightPixels,
             folder: item.folder
         )
+    }
+
+    /// Do not erase an explicit blank, null, malformed field or conflicting
+    /// alias by substituting listing metadata in an explicitly fresh response.
+    private static func mediaInfoString(_ body: JSONDictionary, keys: [String], fallback: String?) throws -> String? {
+        var present = false
+        var result: String?
+        for key in keys {
+            guard let raw = body[key] else { continue }
+            let value: String?
+            if raw is NSNull { value = nil }
+            else if let string = raw as? String { value = string }
+            else { throw CameraMediaMetadataError.invalidMetadata }
+            if present, result.map({ Data($0.utf8) }) != value.map({ Data($0.utf8) }) {
+                throw CameraMediaMetadataError.invalidMetadata
+            }
+            present = true
+            result = value
+        }
+        return present ? result : fallback
     }
 
     private static func parseMediaArchive(_ value: String) -> Bool? {

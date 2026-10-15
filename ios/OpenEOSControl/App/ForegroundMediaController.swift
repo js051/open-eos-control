@@ -130,7 +130,15 @@ final class ForegroundMediaController: ObservableObject {
                     phaseReason = .metadata
                     state = .stabilizing
                     currentName = pending.item.name
-                    let fresh = try await actions.freshInfo(pending.item)
+                    let fresh: CameraMediaItem
+                    do {
+                        fresh = try await actions.freshInfo(pending.item)
+                    } catch CameraForegroundMediaError.freshSizeUnavailable {
+                        try checkOwner(token)
+                        try plan.observeUnreadySize(at: now())
+                        try await sleep(1_000_000_000)
+                        continue
+                    }
                     try checkOwner(token)
                     if let size = try plan.observeFresh(fresh, at: now()) {
                         switch actions.admission() {

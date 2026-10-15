@@ -107,7 +107,7 @@ func selectLatestMediaItem(
     // Visibility is not exposure provenance. Exclude every observed ID first,
     // enforce the requested kind, and retain bounded camera response order.
     selectLatestMediaItem(items.filter {
-        !previousIDs.contains($0.id) && mediaIsVideo($0) == (kind == .video)
+        !previousIDs.contains($0.id) && CameraMediaType.classify($0) == (kind == .video ? .video : .photo)
     })
 }
 
@@ -381,9 +381,11 @@ enum MediaSort: String, CaseIterable, Identifiable {
 }
 
 func mediaIsVideo(_ item: CameraMediaItem) -> Bool {
-    if item.kind.caseInsensitiveCompare("video") == .orderedSame { return true }
-    let videoExtensions = Set(["mp4", "mov", "m4v", "avi", "mkv"])
-    return videoExtensions.contains((item.name as NSString).pathExtension.lowercased())
+    CameraMediaType.classify(item) == .video
+}
+
+func mediaIsPhoto(_ item: CameraMediaItem) -> Bool {
+    CameraMediaType.classify(item) == .photo
 }
 
 private struct MediaDisplayItem {
@@ -448,7 +450,7 @@ func mediaCaptureDate(_ item: CameraMediaItem, displayZone: TimeZone) -> MediaCa
 private func mediaMatchesFilter(_ item: CameraMediaItem, filter: MediaFilter) -> Bool {
     switch filter {
     case .all: true
-    case .photos: !mediaIsVideo(item)
+    case .photos: mediaIsPhoto(item)
     case .videos: mediaIsVideo(item)
     }
 }
