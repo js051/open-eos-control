@@ -384,4 +384,26 @@ class CameraViewModelPreviewTest {
         assertEquals(2, viewModel.uiState.value.lastMediaBatchResult?.succeededItems)
         assertEquals(MediaBatchOperation.DELETE, viewModel.uiState.value.lastMediaBatchResult?.operation)
     }
+    @Test
+    fun delayedOwnerBoundMetadataSelectionCannotModifyReplacementPreviewWithReusedIds() = runTest(dispatcher) {
+        val model = CameraViewModel()
+        try {
+            model.enterOfflinePreview()
+            val oldState = model.uiState.value
+            val selection = MediaMetadataSelection(oldState.mediaItems,
+                MediaMetadataOwner(oldState.info, oldState.mediaSessionGeneration))
+            model.enterOfflinePreview()
+            val replacementItems = model.uiState.value.mediaItems
+            assertEquals(selection.map { it.id }, replacementItems.map { it.id })
+            model.setMediaRatingBatch(selection, 5)
+            model.setMediaProtectionBatch(selection, true)
+            model.setMediaArchivedBatch(selection, true)
+            model.setMediaRotationBatch(selection, 90)
+            model.cancelMediaMetadataBatch(selection.owner)
+            advanceUntilIdle()
+            assertEquals(replacementItems, model.uiState.value.mediaItems)
+            assertNull(model.uiState.value.mediaMetadataBatch)
+        } finally { model.viewModelScope.cancel() }
+    }
+
 }

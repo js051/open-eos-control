@@ -1710,7 +1710,7 @@ class CcapiClient(
         if (isRealCamera && enforceAdvertisedOperations && !supportsApi("GET", "/contents")) {
             error("Camera did not advertise CCAPI media browsing.")
         }
-        return parseMediaInfo(item, getJson("${mediaItemPath(item)}?kind=info"))
+        return parseMediaInfo(item, getJson("${mediaItemPath(item)}?kind=info", strictMediaJsonLimit = MAX_MEDIA_METADATA_JSON_BYTES))
     }
 
     suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
@@ -1719,7 +1719,7 @@ class CcapiClient(
             action = "protect",
             value = if (enabled) "enable" else "disable",
             feature = CameraFeature.MEDIA_PROTECT,
-            matches = { it.protected == enabled },
+            target = MediaMetadataTarget(MediaMetadataField.PROTECTION, if (enabled) 1 else 0),
         )
 
     suspend fun setMediaArchived(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
@@ -1728,7 +1728,7 @@ class CcapiClient(
             action = "archive",
             value = if (enabled) "enable" else "disable",
             feature = CameraFeature.MEDIA_ARCHIVE,
-            matches = { it.archived == enabled },
+            target = MediaMetadataTarget(MediaMetadataField.ARCHIVE, if (enabled) 1 else 0),
         )
 
     suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem {
@@ -1738,7 +1738,7 @@ class CcapiClient(
             action = "rating",
             value = if (rating == 0) "off" else rating.toString(),
             feature = CameraFeature.MEDIA_RATING,
-            matches = { it.rating == rating },
+            target = MediaMetadataTarget(MediaMetadataField.RATING, rating),
         )
     }
 
@@ -1749,7 +1749,7 @@ class CcapiClient(
             action = "rotate",
             value = degrees.toString(),
             feature = CameraFeature.MEDIA_ROTATE,
-            matches = { it.rotationDegrees == degrees },
+            target = MediaMetadataTarget(MediaMetadataField.ROTATION, degrees),
         )
     }
 
@@ -1758,7 +1758,7 @@ class CcapiClient(
         action: String,
         value: String,
         feature: CameraFeature,
-        matches: (CameraMediaItem) -> Boolean,
+        target: MediaMetadataTarget,
     ): CameraMediaItem {
         if (isRealCamera && enforceAdvertisedOperations && !supportsMediaModify()) {
             error("Camera did not advertise ${feature.label.lowercase()}.")
@@ -1768,7 +1768,7 @@ class CcapiClient(
         var latest = item
         repeat(3) { attempt ->
             latest = mediaInfo(item)
-            if (matches(latest)) {
+            if (target.matches(item.id, latest.metadataReadback())) {
                 observedFeatures.add(feature)
                 return latest
             }
@@ -1786,12 +1786,6 @@ class CcapiClient(
 
     private fun parseMediaInfo(item: CameraMediaItem, body: JSONObject): CameraMediaItem {
         val canonicalName = if (isRealCamera) mediaItemPath(item).substringAfterLast('/') else item.name
-        val ratingValue = body.optString("rating").let { value ->
-            when (value) {
-                "off" -> 0
-                else -> value.toIntOrNull()?.takeIf { it in 1..5 }
-            }
-        }
         return item.copy(
             // Canon may omit identity/type fields. Explicit returned evidence must not be hidden.
             id = if (body.has("id")) body.opt("id") as? String ?: "" else item.id,
@@ -1800,18 +1794,10 @@ class CcapiClient(
             contentType = body.cameraMediaContentType(),
             sizeBytes = body.optLong("filesize").takeIf { it > 0L } ?: item.sizeBytes,
             captureTime = body.optString("lastmodifieddate").takeIf { it.isNotBlank() } ?: item.captureTime,
-            protected = when (body.optString("protect")) {
-                "enable" -> true
-                "disable" -> false
-                else -> null
-            },
-            archived = when (body.optString("archive")) {
-                "enable" -> true
-                "disable" -> false
-                else -> null
-            },
-            rating = ratingValue,
-            rotationDegrees = body.optString("rotate").toIntOrNull()?.takeIf { it in MEDIA_ROTATIONS },
+            protected = canonicalMediaMetadataFlag(body.opt("protect")),
+            archived = canonicalMediaMetadataFlag(body.opt("archive")),
+            rating = canonicalMediaMetadataRating(body.opt("rating")),
+            rotationDegrees = canonicalMediaMetadataRotation(body.opt("rotate")),
         )
     }
 
@@ -2917,7 +2903,7 @@ class CcapiClient(
     private suspend fun listSimulatorMedia(): List<CameraMediaItem> {
         // A successful HTTP response is not a successfully parsed listing. Missing,
         // mistyped or invalid identities must not become empty/no-candidate evidence.
-        val items = getJson("/ccapi/media").getJSONArray("items")
+        val items = getJson("/ccapi/media", strictMediaJsonLimit = BridgeMediaListingDecoder.MAX_SNAPSHOT_BYTES).getJSONArray("items")
         return List(items.length()) { index ->
             val item = items.getJSONObject(index)
             check(item.opt("id") is String && item.opt("name") is String) {
@@ -2943,8 +2929,11 @@ class CcapiClient(
             protected = item.opt("protect") as? Boolean,
             archived = item.opt("archive") as? Boolean,
             rating = item.normalizedMediaRating(),
-            rotationDegrees = item.optInt("rotate").takeIf { item.has("rotate") && it in MEDIA_ROTATIONS },
-            ratingWritable = true,
+            rotationDegrees = normalizedMediaMetadataInteger(item.opt("rotate"), MEDIA_ROTATIONS),
+            ratingWritable = normalizedMediaMetadataBoolean(item.opt("ratingWritable")) ?: true,
+            protectionWritable = normalizedMediaMetadataBoolean(item.opt("protectionWritable")),
+            archiveWritable = normalizedMediaMetadataBoolean(item.opt("archiveWritable")),
+            rotationWritable = normalizedMediaMetadataBoolean(item.opt("rotationWritable")),
             streamAvailable = cameraMediaHasVideoTransportHint(kind, name) && cameraMediaIsVideo(kind, name, contentType),
             contentType = contentType,
             widthPixels = item.optInt("width_pixels").takeIf { item.has("width_pixels") && it > 0 },
@@ -3970,8 +3959,8 @@ class CcapiClient(
         return settings.optJSONObject(key)
     }
 
-    private suspend fun getJson(path: String): JSONObject = requestJson(
-        Request.Builder().url("$baseUrl$path").get().build(),
+    private suspend fun getJson(path: String, strictMediaJsonLimit: Int? = null): JSONObject = requestJson(
+        Request.Builder().url("$baseUrl$path").get().build(), strictMediaJsonLimit = strictMediaJsonLimit,
     )
 
     private suspend fun getText(path: String): String = withContext(Dispatchers.IO) {
@@ -4074,7 +4063,7 @@ class CcapiClient(
         return mutationHttpClient.newCall(request.newBuilder().method(request.method, oneShot).build())
     }
 
-    private suspend fun requestJson(request: Request, recordingEvidence: RecordingRequestEvidence? = null): JSONObject = withContext(Dispatchers.IO) {
+    private suspend fun requestJson(request: Request, recordingEvidence: RecordingRequestEvidence? = null, strictMediaJsonLimit: Int? = null): JSONObject = withContext(Dispatchers.IO) {
         val call = newCameraCall(request)
         val readOnly = request.method == "GET" || request.method == "HEAD"
         val cancelCall = AtomicBoolean(true)
@@ -4088,13 +4077,17 @@ class CcapiClient(
             }
             call.execute().use { response ->
                 recordingEvidence?.rejected = !response.isSuccessful
-                val body = response.body?.string().orEmpty()
+                val body = response.body?.let {
+                    if (strictMediaJsonLimit == null) it.string()
+                    else it.byteStream().use { input -> readStrictMediaJsonText(input, it.contentLength(), strictMediaJsonLimit) }
+                }.orEmpty()
                 if (!response.isSuccessful) {
                     throw CcapiHttpException(
                         statusCode = response.code,
                         message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body",
                     )
                 }
+                if (strictMediaJsonLimit != null) StrictMediaJson(body).validate()
                 JSONObject(body)
             }
         } catch (exception: Exception) {

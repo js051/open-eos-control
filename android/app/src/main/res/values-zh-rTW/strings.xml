@@ -739,4 +739,26 @@
     <string name="native_lut_unsupported_gpu">未套用 LUT：GPU 路徑不可用，保留原生影片</string>
     <string name="native_lut_failed">LUT 處理失敗；降回原生影片並保留 LUT</string>
     <string name="media_time_zone_unknown">時區未知</string>
+    <string name="media_metadata_frozen_scope">固定選取 %1$d 個 · 篩選隱藏 %2$d 個 · 已不在載入清單 %3$d 個。僅包含這些完整 ID；未載入或不可寫入的項目不送出。</string>
+    <string name="media_metadata_summary">整理結果：已確認 %1$d 個 · 不確定 %2$d 個 · 未送出 %3$d 個 · 未開始 %4$d 個 · 等待讀回 %5$d 個</string>
+    <string name="media_metadata_cancel">取消剩餘變更</string>
+    <string name="media_metadata_uncertain_help">目前變更可能已送達相機，後續項目已停止。請先檢查此完整 ID 的項目，再明確開始下一次變更。</string>
+    <string name="media_metadata_not_started">未開始</string>
+    <string name="media_metadata_confirmed">已讀回確認</string>
+    <string name="media_metadata_uncertain">結果不確定</string>
+    <string name="media_metadata_not_sent">未送出（未載入、不支援或不可寫入）</string>
+    <string name="media_metadata_row">%1$s [%2$s]：%3$s</string>
+    <string name="media_metadata_target">要求的%1$s：%2$s</string>
+    <string name="media_metadata_enabled">啟用</string>
+    <string name="media_metadata_disabled">停用</string>
+    <string name="media_metadata_in_flight">等待讀回</string>
+    <string name="media_metadata_reason_unloaded">目前清單沒有此項目</string>
+    <string name="media_metadata_reason_unknown">封存狀態未知</string>
+    <string name="media_metadata_reason_not_writable">此項目不可寫入</string>
+    <string name="media_metadata_reason_unsupported">不支援此操作</string>
+    <string name="media_metadata_reason_cancelled">已停止；送出的變更仍可能生效</string>
+    <string name="media_metadata_reason_owner">相機連線已變更</string>
+    <string name="media_metadata_reason_readback">未讀回確認要求的值</string>
+    <string name="media_metadata_previous_session">上一個相機連線的歷史結果，不代表目前相機狀態。</string>
+    <string name="media_metadata_selection_unloaded">%1$d 個已選項目已不在載入清單。整理操作會保留為未開始；傳輸或刪除前請重新選取可用項目。</string>
 </resources>

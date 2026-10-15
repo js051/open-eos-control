@@ -26,6 +26,12 @@ import dev.openeos.control.data.RecordingCommand
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraFileNamingField
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.MediaMetadataField
+import dev.openeos.control.data.MediaMetadataTarget
+import dev.openeos.control.data.metadataReadback
+import dev.openeos.control.data.currentMediaMetadataItem
+import dev.openeos.control.data.withVerifiedMetadata
+import dev.openeos.control.data.metadataWritable
 import dev.openeos.control.data.isVisualMedia
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaTransferProgress
@@ -2160,124 +2166,163 @@ class CameraViewModel(
     }
 
     fun setMediaProtection(item: CameraMediaItem, enabled: Boolean) = updateMediaMetadata(
-        item,
-        CameraFeature.MEDIA_PROTECT,
+        item, CameraFeature.MEDIA_PROTECT,
+        MediaMetadataTarget(MediaMetadataField.PROTECTION, if (enabled) 1 else 0),
         previewUpdate = { it.copy(protected = enabled) },
-    ) { repository.setMediaProtection(item, enabled) }
+    ) { repository.setMediaProtection(it, enabled) }
 
     fun setMediaArchived(item: CameraMediaItem, enabled: Boolean) = updateMediaMetadata(
-        item,
-        CameraFeature.MEDIA_ARCHIVE,
+        item, CameraFeature.MEDIA_ARCHIVE,
+        MediaMetadataTarget(MediaMetadataField.ARCHIVE, if (enabled) 1 else 0),
         previewUpdate = { it.copy(archived = enabled) },
-    ) { repository.setMediaArchived(item, enabled) }
+    ) { repository.setMediaArchived(it, enabled) }
 
     fun setMediaRating(item: CameraMediaItem, rating: Int) {
         if (rating !in 0..5) return
-        updateMediaMetadata(
-            item,
-            CameraFeature.MEDIA_RATING,
+        updateMediaMetadata(item, CameraFeature.MEDIA_RATING,
+            MediaMetadataTarget(MediaMetadataField.RATING, rating),
             previewUpdate = { it.copy(rating = rating) },
-        ) { repository.setMediaRating(item, rating) }
+        ) { repository.setMediaRating(it, rating) }
     }
 
     fun setMediaRotation(item: CameraMediaItem, degrees: Int) {
         if (degrees !in setOf(0, 90, 180, 270)) return
-        updateMediaMetadata(
-            item,
-            CameraFeature.MEDIA_ROTATE,
+        updateMediaMetadata(item, CameraFeature.MEDIA_ROTATE,
+            MediaMetadataTarget(MediaMetadataField.ROTATION, degrees),
             previewUpdate = { it.copy(rotationDegrees = degrees) },
-        ) { repository.setMediaRotation(item, degrees) }
+        ) { repository.setMediaRotation(it, degrees) }
     }
 
     fun setMediaProtectionBatch(items: List<CameraMediaItem>, enabled: Boolean) = updateMediaMetadataBatch(
-        items = items,
-        feature = CameraFeature.MEDIA_PROTECT,
-        operation = if (enabled) MediaBatchOperation.PROTECT else MediaBatchOperation.UNPROTECT,
+        items, CameraFeature.MEDIA_PROTECT,
+        if (enabled) MediaBatchOperation.PROTECT else MediaBatchOperation.UNPROTECT,
+        MediaMetadataTarget(MediaMetadataField.PROTECTION, if (enabled) 1 else 0),
         previewUpdate = { it.copy(protected = enabled) },
-    ) { item -> repository.setMediaProtection(item, enabled) }
+    ) { repository.setMediaProtection(it, enabled) }
 
     fun setMediaArchivedBatch(items: List<CameraMediaItem>, enabled: Boolean) = updateMediaMetadataBatch(
-        items = items,
-        feature = CameraFeature.MEDIA_ARCHIVE,
-        operation = if (enabled) MediaBatchOperation.ARCHIVE else MediaBatchOperation.UNARCHIVE,
+        items, CameraFeature.MEDIA_ARCHIVE,
+        if (enabled) MediaBatchOperation.ARCHIVE else MediaBatchOperation.UNARCHIVE,
+        MediaMetadataTarget(MediaMetadataField.ARCHIVE, if (enabled) 1 else 0),
         previewUpdate = { it.copy(archived = enabled) },
-    ) { item -> repository.setMediaArchived(item, enabled) }
+    ) { repository.setMediaArchived(it, enabled) }
 
     fun setMediaRatingBatch(items: List<CameraMediaItem>, rating: Int) {
         if (rating !in 0..5) return
-        updateMediaMetadataBatch(
-            items = items,
-            feature = CameraFeature.MEDIA_RATING,
-            operation = MediaBatchOperation.RATE,
-            previewUpdate = {
-                check(it.ratingWritable != false) { "${it.name} does not allow rating changes." }
-                it.copy(rating = rating)
-            },
-        ) { item ->
-            check(item.ratingWritable != false) { "${item.name} does not allow rating changes." }
-            repository.setMediaRating(item, rating)
-        }
+        updateMediaMetadataBatch(items, CameraFeature.MEDIA_RATING, MediaBatchOperation.RATE,
+            MediaMetadataTarget(MediaMetadataField.RATING, rating),
+            previewUpdate = { it.copy(rating = rating) },
+        ) { repository.setMediaRating(it, rating) }
     }
 
     fun setMediaRotationBatch(items: List<CameraMediaItem>, degrees: Int) {
         if (degrees !in setOf(0, 90, 180, 270)) return
-        updateMediaMetadataBatch(
-            items = items,
-            feature = CameraFeature.MEDIA_ROTATE,
-            operation = MediaBatchOperation.ROTATE,
+        updateMediaMetadataBatch(items, CameraFeature.MEDIA_ROTATE, MediaBatchOperation.ROTATE,
+            MediaMetadataTarget(MediaMetadataField.ROTATION, degrees),
             previewUpdate = { it.copy(rotationDegrees = degrees) },
-        ) { item -> repository.setMediaRotation(item, degrees) }
+        ) { repository.setMediaRotation(it, degrees) }
     }
 
     private fun updateMediaMetadata(
         item: CameraMediaItem,
         feature: CameraFeature,
+        target: MediaMetadataTarget,
         previewUpdate: (CameraMediaItem) -> CameraMediaItem,
-        update: suspend () -> CameraMediaItem,
+        update: suspend (CameraMediaItem) -> CameraMediaItem,
     ) {
+        fun currentItem(current: CameraUiState): CameraMediaItem = currentMediaMetadataItem(
+            item, current.mediaItems, current.mediaPreviewItem, current.captureReviewItem)
+        fun eligible(current: CameraUiState, selected: CameraMediaItem): Boolean =
+            mediaMetadataPreflight(target.field, current.supports(feature), item.id, selected.id,
+                selected.archived, selected.metadataWritable(target.field)) == null
         val state = _uiState.value
-        if (state.isBusy(CameraOperation.MEDIA) || !state.supports(feature)) return
+        if (state.isBusy(CameraOperation.MEDIA) || !eligible(state, currentItem(state))) return
         if (state.previewMode) {
             _uiState.update { current ->
-                val currentItem = current.mediaItems.firstOrNull { it.id == item.id } ?: item
-                current.withUpdatedMedia(previewUpdate(currentItem))
+                val selected = currentItem(current)
+                if (current.info !== state.info || !eligible(current, selected)) current
+                else current.withVerifiedMediaMetadata(target, previewUpdate(selected))
             }
             return
         }
+        val generation = cameraSessionGeneration
         runCamera(CameraOperation.MEDIA) {
-            val updated = update()
-            _uiState.update { current -> current.withUpdatedMedia(updated) }
+            coroutineContext.ensureActive()
+            if (generation != cameraSessionGeneration || _uiState.value.info !== state.info) return@runCamera
+            val current = _uiState.value
+            val selected = currentItem(current)
+            if (!eligible(current, selected)) return@runCamera
+            val updated = update(selected)
+            coroutineContext.ensureActive()
+            check(target.matches(item.id, updated.metadataReadback())) { "The requested media change is unconfirmed." }
+            _uiState.update { current ->
+                if (generation == cameraSessionGeneration && current.info === state.info) current.withVerifiedMediaMetadata(target, updated)
+                else current
+            }
         }
+    }
+
+    fun cancelMediaMetadataBatch(owner: MediaMetadataOwner? = null) {
+        val state = _uiState.value
+        if (owner != null && !owner.matches(state.info, state.mediaSessionGeneration)) return
+        if (state.mediaMetadataBatch?.running == true) cameraOperationJobs[CameraOperation.MEDIA]?.cancel()
     }
 
     private fun updateMediaMetadataBatch(
         items: List<CameraMediaItem>,
         feature: CameraFeature,
         operation: MediaBatchOperation,
+        target: MediaMetadataTarget,
         previewUpdate: (CameraMediaItem) -> CameraMediaItem,
         update: suspend (CameraMediaItem) -> CameraMediaItem,
     ) {
         val state = _uiState.value
-        val selectedItems = items.distinctBy(CameraMediaItem::id)
+        if (items is MediaMetadataSelection && !items.owner.matches(state.info, state.mediaSessionGeneration)) return
+        val selectedItems = items.distinctBy(CameraMediaItem::id).toList()
         if (selectedItems.isEmpty() || state.isBusy(CameraOperation.MEDIA) || !state.supports(feature)) return
-        _uiState.update { it.copy(lastMediaBatchResult = null) }
-        runCamera(CameraOperation.MEDIA) {
-            val result = executeMediaBatch(
-                items = selectedItems,
-                operation = operation,
-                onProgress = { progress ->
-                    _uiState.update { current -> current.copy(mediaBatchProgress = progress) }
+        if (selectedItems.size > MAX_MEDIA_METADATA_BATCH_ITEMS) {
+            _uiState.update { it.copy(error = "Select at most $MAX_MEDIA_METADATA_BATCH_ITEMS items for one metadata batch.",
+                errorOperation = CameraOperation.MEDIA) }
+            return
+        }
+        val generation = cameraSessionGeneration
+        val requests = selectedItems.map { MediaMetadataRequest(it.id, it.name, target) }
+        fun isCurrent(): Boolean = generation == cameraSessionGeneration && _uiState.value.info === state.info
+        _uiState.update { it.copy(lastMediaBatchResult = null, mediaMetadataBatch = MediaMetadataBatchResult(requests.map { MediaMetadataRow(it) }, running = true)) }
+        runCamera(CameraOperation.MEDIA, afterFinally = {
+            _uiState.update { current ->
+                if (isCurrent()) current.copy(mediaMetadataBatch = current.mediaMetadataBatch?.copy(running = false)) else current
+            }
+        }) {
+            executeMediaMetadataBatch(
+                requests = requests,
+                isCurrent = ::isCurrent,
+                preflight = { request ->
+                    val current = _uiState.value
+                    val loaded = current.mediaItems.firstOrNull { it.id == request.id }
+                    mediaMetadataPreflight(target.field, current.supports(feature), request.id, loaded?.id,
+                        loaded?.archived, loaded?.metadataWritable(target.field))
                 },
-            ) { item ->
-                val updated = if (state.previewMode) previewUpdate(item) else update(item)
-                _uiState.update { current -> current.withUpdatedMedia(updated) }
-            }
-            _uiState.update {
-                it.copy(
-                    mediaBatchProgress = null,
-                    lastMediaBatchResult = result,
-                )
-            }
+                action = { request ->
+                    val item = _uiState.value.mediaItems.first { it.id == request.id }
+                    if (state.previewMode) previewUpdate(item) else update(item)
+                },
+                readback = CameraMediaItem::metadataReadback,
+                onConfirmed = { updated ->
+                    _uiState.update { current -> if (isCurrent()) current.withVerifiedMediaMetadata(target, updated) else current }
+                },
+                onChanged = { receipt ->
+                    _uiState.update { current ->
+                        if (!isCurrent()) current else current.copy(
+                            mediaMetadataBatch = receipt,
+                            mediaBatchProgress = null,
+                            lastMediaBatchResult = if (receipt.running) null else MediaBatchResult(
+                                operation, receipt.rows.size, receipt.confirmed,
+                                receipt.rows.filter { it.outcome == MediaMetadataOutcome.FAILED_NOT_SENT }.map { it.request.name }),
+                        )
+                    }
+                },
+            )
         }
     }
 
@@ -3214,7 +3259,7 @@ class CameraViewModel(
     fun deleteMedia(item: CameraMediaItem) {
         val state = _uiState.value
         if (state.isBusy(CameraOperation.MEDIA) || !state.supports(CameraFeature.MEDIA_DELETE)) return
-        _uiState.update { it.copy(lastMediaBatchResult = null) }
+        _uiState.update { it.copy(lastMediaBatchResult = null, mediaMetadataBatch = null) }
         if (state.previewMode) {
             applyDeletedMedia(item)
             refreshCaptureReview(_uiState.value.mediaItems)
@@ -3235,7 +3280,7 @@ class CameraViewModel(
             state.isBusy(CameraOperation.MEDIA) ||
             !state.supports(CameraFeature.MEDIA_DELETE)
         ) return
-        _uiState.update { it.copy(lastMediaBatchResult = null) }
+        _uiState.update { it.copy(lastMediaBatchResult = null, mediaMetadataBatch = null) }
         runCamera(CameraOperation.MEDIA) {
             val result = executeMediaBatch(
                 items = selectedItems,
@@ -3464,6 +3509,7 @@ class CameraViewModel(
         _uiState.update {
             it.copy(
                 pendingOperations = it.pendingOperations + operation,
+                mediaMetadataBatch = if (operation == CameraOperation.MEDIA && it.mediaMetadataBatch?.running != true) null else it.mediaMetadataBatch,
                 connectionRecovery = null,
                 error = null,
                 errorOperation = null,
@@ -4056,6 +4102,8 @@ class CameraViewModel(
         lastDeletedMediaName = null,
         mediaBatchProgress = null,
         lastMediaBatchResult = null,
+        mediaMetadataBatch = null,
+        previousMediaMetadataBatch = mediaMetadataBatch?.retiredMetadataReceipt() ?: previousMediaMetadataBatch,
         cameraImportPreparing = false,
         pendingCameraImportHandoff = null,
         lastCameraImportReceiptSummary = null,
@@ -4097,6 +4145,13 @@ class CameraViewModel(
             lastDownloadedMediaName = lastDownloadedMediaName.takeUnless { it == item.name },
             lastDeletedMediaName = item.name,
         )
+    }
+
+    private fun CameraUiState.withVerifiedMediaMetadata(target: MediaMetadataTarget, readback: CameraMediaItem): CameraUiState {
+        fun merge(current: CameraMediaItem): CameraMediaItem =
+            if (current.id == readback.id) current.withVerifiedMetadata(target, readback) else current
+        return copy(mediaItems = mediaItems.map(::merge), mediaPreviewItem = mediaPreviewItem?.let(::merge),
+            captureReviewItem = captureReviewItem?.let(::merge))
     }
 
     private fun CameraUiState.withUpdatedMedia(item: CameraMediaItem): CameraUiState = copy(

@@ -976,4 +976,26 @@
     <string name="native_lut_unsupported_gpu">LUT not applied: GPU path unavailable; native video retained</string>
     <string name="native_lut_failed">LUT processing failed; native video fallback, LUT retained</string>
     <string name="media_time_zone_unknown">Time zone unknown</string>
+    <string name="media_metadata_frozen_scope">Frozen selection: %1$d items · %2$d hidden by filters · %3$d no longer loaded. Only these exact IDs are included; unloaded or non-writable rows are not sent.</string>
+    <string name="media_metadata_summary">Metadata: %1$d confirmed · %2$d uncertain · %3$d not sent · %4$d not started · %5$d awaiting readback</string>
+    <string name="media_metadata_cancel">Cancel remaining changes</string>
+    <string name="media_metadata_uncertain_help">The current change may have reached the camera. No further changes were sent. Check this exact item before explicitly starting another change.</string>
+    <string name="media_metadata_not_started">Not started</string>
+    <string name="media_metadata_confirmed">Confirmed by readback</string>
+    <string name="media_metadata_uncertain">Uncertain</string>
+    <string name="media_metadata_not_sent">Not sent (unloaded, unsupported, or not writable)</string>
+    <string name="media_metadata_row">%1$s [%2$s]: %3$s</string>
+    <string name="media_metadata_target">Requested %1$s: %2$s</string>
+    <string name="media_metadata_enabled">Enabled</string>
+    <string name="media_metadata_disabled">Disabled</string>
+    <string name="media_metadata_in_flight">Awaiting readback</string>
+    <string name="media_metadata_reason_unloaded">No current loaded item</string>
+    <string name="media_metadata_reason_unknown">Archive state is unknown</string>
+    <string name="media_metadata_reason_not_writable">Item is not writable</string>
+    <string name="media_metadata_reason_unsupported">Operation is not supported</string>
+    <string name="media_metadata_reason_cancelled">Stopped; dispatched changes may still apply</string>
+    <string name="media_metadata_reason_owner">Camera session changed</string>
+    <string name="media_metadata_reason_readback">Exact target readback was not confirmed</string>
+    <string name="media_metadata_previous_session">Previous camera connection. These historical results do not describe the current camera.</string>
+    <string name="media_metadata_selection_unloaded">%1$d selected items are no longer loaded. Metadata keeps these rows unstarted; reselect available items for transfer or delete.</string>
 </resources>
