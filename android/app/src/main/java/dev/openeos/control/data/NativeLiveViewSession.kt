@@ -4,13 +4,16 @@ import android.view.Surface
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-/** A render notification is a freshness signal, not the identity of later PixelCopy pixels. */
+/** Progress from a native API, with optional pixels captured from that exact GPU frame. */
 data class NativeLiveViewRenderedFrame(
     val surface: Surface,
     val decoderGeneration: Long,
     val formatGeneration: Long,
     val sequence: Long,
     val renderedAtNanos: Long,
+    val identity: NativeRtpFrameIdentity = NativeRtpFrameIdentity(decoderGeneration, formatGeneration, 0, 0, sequence),
+    val evidence: NativeFrameEvidence = NativeFrameEvidence.CODEC_RENDER_CALLBACK,
+    val pixels: NativeRtpFramePixels? = null,
 )
 
 private val noRenderedFrames = MutableStateFlow<NativeLiveViewRenderedFrame?>(null)
@@ -22,6 +25,8 @@ sealed interface NativeLiveViewEvent {
         val atMillis: Long,
         val width: Int,
         val height: Int,
+        val evidence: NativeFrameEvidence = NativeFrameEvidence.CODEC_RENDER_CALLBACK,
+        val frameId: Long? = null,
     ) : NativeLiveViewEvent
 
     data class VideoSizeChanged(
@@ -72,6 +77,10 @@ data class NativeLiveViewVideoStatus(
     val hasSequenceParameterSet: Boolean = false,
     val hasPictureParameterSet: Boolean = false,
     val ready: Boolean = false,
+    val decodedFrames: Long = 0,
+    val presentationFrames: Long = 0,
+    val lastDecodedAtMillis: Long? = null,
+    val lastPresentationAtMillis: Long? = null,
     val error: String? = null,
 ) {
     companion object {
@@ -93,8 +102,10 @@ interface NativeLiveViewSession : AutoCloseable {
     val supportsVideoLut: Boolean get() = false
     val videoLutStatus: StateFlow<NativeVideoLutStatus> get() = noVideoLut
     fun setVideoLut(lut: NativeVideoLut?) = Unit
+    fun setMonitorSamplingEnabled(enabled: Boolean) = Unit
 
     fun start()
+    /** Completes only after real decoded output. ACKs, SPS/PPS/IDR and queue intent are insufficient. */
     suspend fun awaitReady(timeoutMillis: Long)
     fun attachSurface(surface: Surface)
     fun detachSurface(surface: Surface)

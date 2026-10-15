@@ -4802,11 +4802,17 @@ class CameraViewModel(
         session.setRenderingEnabled(appInForeground && _uiState.value.liveViewAutoRefresh)
         session.setListener { event ->
             viewModelScope.launch {
-                if (generation != liveViewGeneration || !repository.ownsLiveView(owner) ||
-                    _uiState.value.maintenanceSuspended || !appInForeground || !_uiState.value.liveViewAutoRefresh) return@launch
+                if (generation != liveViewGeneration || !repository.ownsLiveView(owner)) return@launch
                 if (_uiState.value.nativeLiveViewSession !== session && repository.nativeLiveViewSession() !== session) {
                     return@launch
                 }
+                // Terminal evidence has priority even while backgrounded/interlocked. Retirement
+                // retains the exact Stop owner; reconciliation still obeys camera control interlocks.
+                if (event is NativeLiveViewEvent.Failed) {
+                    retireFailedLiveView(generation, owner, event.message)
+                    return@launch
+                }
+                if (_uiState.value.maintenanceSuspended || !appInForeground || !_uiState.value.liveViewAutoRefresh) return@launch
                 when (event) {
                     is NativeLiveViewEvent.AudioStatusChanged -> _uiState.update {
                         it.copy(liveViewAudioStatus = event.status)

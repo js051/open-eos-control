@@ -1,13 +1,13 @@
 package dev.openeos.control.ui
 
-import android.graphics.Bitmap
-import android.graphics.ColorSpace
 import android.os.Handler
 import android.os.Looper
-import android.view.PixelCopy
 import android.view.Surface
+import dev.openeos.control.data.NativeFrameEvidence
 import dev.openeos.control.data.NativeLiveViewRenderedFrame
 import dev.openeos.control.data.NativeLiveViewSession
+import dev.openeos.control.data.NativeRtpFrameIdentity
+import dev.openeos.control.data.NativeRtpMonitorEvidence
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,20 +17,21 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicReference
 
 internal enum class NativeMonitorStatus { OFF, WAITING, SAMPLED, NO_DATA, FAILED, STALE }
 
 internal data class NativeMonitorResult(
     val status: NativeMonitorStatus = NativeMonitorStatus.OFF,
     val analysis: LiveViewMonitorAnalysis? = null,
+    val identity: NativeRtpFrameIdentity? = null,
+    val evidence: NativeFrameEvidence? = null,
+    val sampledAtNanos: Long? = null,
 )
 
-// Also bounds overlap if a whole Compose screen is disposed/recreated before PixelCopy returns.
-private val nativePixelCopyInFlight = AtomicBoolean(false)
-private val nativePixelCopyStartedAtNanos = AtomicReference<Long?>(null)
+// Retiring a screen never opens a second physical analysis slot before its work finishes.
+private val nativeAnalysisInFlight = AtomicBoolean(false)
 
-/** Samples only decoder surfaces. Never copies a Window or replaces native video with bitmaps. */
+/** Analyzes immutable pixels from the exact GPU draw, never a later asynchronous Surface copy. */
 internal class NativeRtpMonitorSampler : AutoCloseable {
     private val handler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -40,13 +41,11 @@ internal class NativeRtpMonitorSampler : AutoCloseable {
     private var owner: NativeLiveViewSession? = null
     private var attachedOwner: NativeLiveViewSession? = null
     private var surface: Surface? = null
-    private var width = 0
-    private var height = 0
     private var enabled = false
     private var closed = false
     private var settings = LiveViewMonitorSettings()
     private var rotation = 0f
-    private var formatOwner: Pair<Long, Long>? = null
+    private var formatOwner: NativeRtpFrameIdentity? = null
     private var expiry: Runnable? = null
 
     fun matches(owner: NativeLiveViewSession?, settings: LiveViewMonitorSettings, rotation: Float): Boolean =
@@ -54,33 +53,31 @@ internal class NativeRtpMonitorSampler : AutoCloseable {
 
     fun pause() {
         enabled = false
+        owner?.setMonitorSamplingEnabled(false)
         invalidate()
     }
 
     fun configure(owner: NativeLiveViewSession?, enabled: Boolean, settings: LiveViewMonitorSettings, rotation: Float) {
         if (closed) return
         val active = enabled && owner != null && settings.needsPixelAnalysis
-        // PixelCopy reads the final displayed Surface. LUT identity retires old post-processing results.
-        val pixelSettings = settings
-        if (this.owner === owner && this.enabled == active && this.settings == pixelSettings && this.rotation == rotation) return
+        if (this.owner === owner && this.enabled == active && this.settings == settings && this.rotation == rotation) return
         if (this.owner !== owner) {
+            this.owner?.setMonitorSamplingEnabled(false)
             if (attachedOwner !== owner) surface = null
             formatOwner = null
         }
         this.owner = owner
         this.enabled = active
-        this.settings = pixelSettings
+        this.settings = settings
         this.rotation = rotation
+        owner?.setMonitorSamplingEnabled(active)
         invalidate()
     }
 
     fun attach(owner: NativeLiveViewSession, surface: Surface, width: Int, height: Int) {
         if (closed) return
-        // surfaceChanged also marks buffer/layout replacement when the Surface wrapper is reused.
         attachedOwner = owner
-        this.surface = surface
-        this.width = width
-        this.height = height
+        this.surface = surface.takeIf { width > 0 && height > 0 }
         formatOwner = null
         invalidate()
     }
@@ -101,113 +98,92 @@ internal class NativeRtpMonitorSampler : AutoCloseable {
             return
         }
         val target = surface ?: return
-        if (attachedOwner !== owner || frame.surface !== target || !target.isValid || width <= 0 || height <= 0) return
-        val currentFormat = frame.decoderGeneration to frame.formatGeneration
-        if (formatOwner != currentFormat) {
-            formatOwner = currentFormat
-            invalidate()
+        if (attachedOwner !== owner || frame.surface !== target || !target.isValid) return
+        if (!sameRenderer(formatOwner, frame.identity)) {
+            formatOwner = frame.identity
+            invalidate(frame.renderedAtNanos)
         }
         val now = System.nanoTime()
-        if (!NativeFrameSamplingGate.fresh(frame.renderedAtNanos, now)) {
-            expire()
+        if (!NativeFrameSamplingGate.fresh(frame.renderedAtNanos, now)) { expire(); return }
+        val pixels = frame.pixels ?: run {
+            if (frame.evidence == NativeFrameEvidence.CODEC_RENDER_CALLBACK) {
+                resultState.value = NativeMonitorResult(NativeMonitorStatus.NO_DATA)
+            }
             return
         }
-        if (nativePixelCopyStartedAtNanos.get()?.let { now - it < NativeFrameSamplingGate.INTERVAL_NANOS } == true) return
-        if (!nativePixelCopyInFlight.compareAndSet(false, true)) return
+        if (!nativeAnalysisInFlight.compareAndSet(false, true)) return
         val ticket = gate.begin(frame.sequence, frame.renderedAtNanos, now)
-        if (ticket == null) {
-            nativePixelCopyInFlight.set(false)
-            return
-        }
-        nativePixelCopyStartedAtNanos.set(now)
+        if (ticket == null) { nativeAnalysisInFlight.set(false); return }
         val capturedSettings = settings
-        val (sampleWidth, sampleHeight) = analysisDimensions(width, height)
-        val bitmap = try {
-            Bitmap.createBitmap(sampleWidth, sampleHeight, Bitmap.Config.ARGB_8888, false, ColorSpace.get(ColorSpace.Named.SRGB))
-        } catch (_: RuntimeException) {
-            finish(ticket, NativeMonitorStatus.FAILED, null)
-            return
-        }
-        try {
-            PixelCopy.request(target, bitmap, { status ->
-                if (closed || !gate.owns(ticket) || status != PixelCopy.SUCCESS) {
-                    bitmap.recycle()
-                    finish(ticket, if (status == PixelCopy.ERROR_SOURCE_NO_DATA) NativeMonitorStatus.NO_DATA else NativeMonitorStatus.FAILED, null)
-                } else {
-                    // Physical ownership lasts through analysis; no cancellation can open a second slot.
-                    scope.launch {
-                        val analysis = try {
-                            withContext(Dispatchers.Default) {
-                                val pixels = IntArray(sampleWidth * sampleHeight)
-                                bitmap.getPixels(pixels, 0, sampleWidth, 0, 0, sampleWidth, sampleHeight)
-                                analyzeLiveViewPixels(
-                                    pixels, sampleWidth, sampleHeight,
-                                    capturedSettings.zebraThresholdPercent,
-                                    capturedSettings.focusPeakingEnabled,
-                                    capturedSettings.falseColorEnabled,
-                                    capturedSettings.waveformVisible,
-                                )
-                            }
-                        } catch (_: Exception) {
-                            null
-                        } finally {
-                            bitmap.recycle()
-                        }
-                        finish(ticket, if (analysis == null) NativeMonitorStatus.FAILED else NativeMonitorStatus.SAMPLED, analysis)
-                    }
+        scope.launch {
+            val analysis = try {
+                withContext(Dispatchers.Default) {
+                    analyzeLiveViewPixels(pixels.copyPixels(), pixels.width, pixels.height,
+                        capturedSettings.zebraThresholdPercent, capturedSettings.focusPeakingEnabled,
+                        capturedSettings.falseColorEnabled, capturedSettings.waveformVisible)
                 }
-            }, handler)
-        } catch (_: RuntimeException) {
-            bitmap.recycle()
-            finish(ticket, NativeMonitorStatus.FAILED, null)
+            } catch (_: Exception) { null }
+            finish(owner, frame, ticket, analysis)
         }
     }
 
-    private fun finish(ticket: NativeFrameSamplingGate.Ticket, status: NativeMonitorStatus, analysis: LiveViewMonitorAnalysis?) {
+    private fun finish(capturedOwner: NativeLiveViewSession, frame: NativeLiveViewRenderedFrame,
+        ticket: NativeFrameSamplingGate.Ticket, analysis: LiveViewMonitorAnalysis?) {
         val owned = gate.owns(ticket)
-        val currentFrame = owner?.renderedFrames?.value
-        val accepted = gate.complete(ticket, System.nanoTime()) && surface?.isValid == true &&
-            currentFrame?.surface === surface &&
-            currentFrame?.let { it.decoderGeneration to it.formatGeneration } == formatOwner
-        nativePixelCopyInFlight.set(false)
-        if (closed) {
-            scope.cancel()
-            return
-        }
+        val current = owner?.renderedFrames?.value
+        val now = System.nanoTime()
+        val identity = frame.identity
+        val evidence = NativeRtpMonitorEvidence(
+            active = enabled && !closed && surface?.isValid == true,
+            sameOwner = owner === capturedOwner && current?.surface === surface,
+            sameRenderer = sameRenderer(current?.identity, identity),
+            foregroundRequired = true, foreground = enabled, terminal = capturedOwner.videoStatus.error != null,
+            stopPending = !closed,
+            sampleFrame = identity.frameId, currentFrame = frame.identity.frameId,
+            sampleLut = identity.lutRevision, currentLut = current?.identity?.lutRevision,
+            sampleAgeMs = (now - ticket.startedAtNanos) / 1_000_000.0,
+            frameAgeMs = (now - frame.renderedAtNanos) / 1_000_000.0,
+            maxAgeMs = NativeFrameSamplingGate.MAX_AGE_NANOS / 1_000_000.0,
+            evidence = when (frame.evidence) {
+                NativeFrameEvidence.CODEC_RENDER_CALLBACK -> "presentation-confirmed"
+                NativeFrameEvidence.EGL_SURFACE_SUBMISSION -> "surface-submitted"
+            },
+        ).evaluate()
+        val accepted = gate.complete(ticket, now) && evidence.canPublishSubmittedAnalysis
+        nativeAnalysisInFlight.set(false)
+        if (closed) { scope.cancel(); return }
         if (!enabled || !owned) return
         cancelExpiry()
-        resultState.value = if (accepted) NativeMonitorResult(status, analysis) else NativeMonitorResult(NativeMonitorStatus.STALE)
+        resultState.value = if (accepted && analysis != null) {
+            NativeMonitorResult(NativeMonitorStatus.SAMPLED, analysis, frame.identity, frame.evidence, frame.renderedAtNanos)
+        } else NativeMonitorResult(if (accepted) NativeMonitorStatus.FAILED else NativeMonitorStatus.STALE)
         if (accepted && analysis != null) {
-            // One-shot freshness expiry; this never requests another capture.
             val delayMillis = ((ticket.renderedAtNanos + NativeFrameSamplingGate.MAX_AGE_NANOS - System.nanoTime()) / 1_000_000L).coerceAtLeast(1)
             expiry = Runnable { if (gate.owns(ticket)) expire() }.also { handler.postDelayed(it, delayMillis) }
         }
     }
 
-    private fun invalidate() {
-        gate.invalidate(System.nanoTime())
+    private fun sameRenderer(first: NativeRtpFrameIdentity?, second: NativeRtpFrameIdentity): Boolean =
+        first != null && first.decoderGeneration == second.decoderGeneration && first.formatGeneration == second.formatGeneration &&
+            first.renderingGeneration == second.renderingGeneration && first.lutRevision == second.lutRevision
+
+    private fun invalidate(atNanos: Long = System.nanoTime()) {
+        gate.invalidate(atNanos)
         cancelExpiry()
         resultState.value = NativeMonitorResult(if (enabled && !closed) NativeMonitorStatus.WAITING else NativeMonitorStatus.OFF)
     }
 
-    private fun cancelExpiry() {
-        expiry?.let(handler::removeCallbacks)
-        expiry = null
-    }
-
-    private fun expire() {
-        cancelExpiry()
-        resultState.value = NativeMonitorResult(NativeMonitorStatus.STALE)
-    }
+    private fun cancelExpiry() { expiry?.let(handler::removeCallbacks); expiry = null }
+    private fun expire() { cancelExpiry(); resultState.value = NativeMonitorResult(NativeMonitorStatus.STALE) }
 
     override fun close() {
+        owner?.setMonitorSamplingEnabled(false)
         closed = true
         enabled = false
         owner = null
         attachedOwner = null
         surface = null
         invalidate()
-        // Do not cancel work holding PixelCopy's destination. Its callback/finally owns release.
         if (!gate.busy) scope.cancel()
     }
 }

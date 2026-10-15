@@ -33,6 +33,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /** Real decoder/GLES/Surface/PixelCopy evidence; no camera or native API is mocked. */
 @RunWith(AndroidJUnit4::class)
@@ -99,8 +100,8 @@ class NativeRtpLutRenderingTest {
         }
     }
 
-    private fun verifyPostLutScopes(target: Target, onCase: (Int) -> Unit) {
-        // Only notification timing is controlled; every pixel is the actual native GPU output.
+    private fun verifyPostLutScopes(target: Target, nextFrame: () -> NativeLiveViewRenderedFrame, onCase: (Int) -> Unit) {
+        // Every case receives a new actual decoder/GPU draw, its original identity and timestamp.
         val session = ObservedSurfaceSession(target.surface)
         val lut = CubeLut("Synthetic swap", 2, floatArrayOf(0f, 0f, 0f), floatArrayOf(1f, 1f, 1f), table(true))
         val cases = listOf(
@@ -116,31 +117,23 @@ class NativeRtpLutRenderingTest {
             for ((sequence, settings) in cases.withIndex()) {
                 onCase(sequence)
                 Thread.sleep(270) // Respect the production global 4 Hz cadence, including earlier tests.
+                onMain { sampler.configure(session, true, settings, 0f) }
+                val frame = nextFrame()
+                val exactPixels = requireNotNull(frame.pixels)
                 onMain {
-                    sampler.configure(session, true, settings, 0f)
-                    // A newly observed format retires its first notification; a subsequent one is fresh.
-                    repeat(2) { index ->
-                        session.renderedFrames.value = NativeLiveViewRenderedFrame(target.surface, 1, 1,
-                            sequence * 2L + index + 2L, System.nanoTime())
-                        sampler.onFrame(session, session.renderedFrames.value)
-                    }
+                    session.renderedFrames.value = frame
+                    sampler.onFrame(session, frame)
                 }
                 val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
                 while (sampler.result.value.analysis == null && System.nanoTime() < deadline) Thread.sleep(10)
                 val actual = requireNotNull(sampler.result.value.analysis) { "Real post-LUT Surface did not reach the bounded sampler" }
-                val dimensions = analysisDimensions(target.width, target.height)
-                val sample = copy(target.surface, dimensions.first, dimensions.second)
-                try {
-                    val pixels = IntArray(sample.width * sample.height)
-                    sample.getPixels(pixels, 0, sample.width, 0, 0, sample.width, sample.height)
-                    val expected = analyzeLiveViewPixels(pixels, sample.width, sample.height,
-                        settings.zebraThresholdPercent, settings.focusPeakingEnabled, settings.falseColorEnabled, settings.waveformVisible)
-                    assertArrayEquals(expected.histogram, actual.histogram)
-                    assertEquals(expected.waveform == null, actual.waveform == null)
-                    expected.waveform?.let { assertArrayEquals(it.density, requireNotNull(actual.waveform).density) }
-                    assertEquals(expected.overlayPixels == null, actual.overlayPixels == null)
-                    expected.overlayPixels?.let { assertArrayEquals(it, requireNotNull(actual.overlayPixels)) }
-                } finally { sample.recycle() }
+                val expected = analyzeLiveViewPixels(exactPixels.copyPixels(), exactPixels.width, exactPixels.height,
+                    settings.zebraThresholdPercent, settings.focusPeakingEnabled, settings.falseColorEnabled, settings.waveformVisible)
+                assertArrayEquals(expected.histogram, actual.histogram)
+                assertEquals(expected.waveform == null, actual.waveform == null)
+                expected.waveform?.let { assertArrayEquals(it.density, requireNotNull(actual.waveform).density) }
+                assertEquals(expected.overlayPixels == null, actual.overlayPixels == null)
+                expected.overlayPixels?.let { assertArrayEquals(it, requireNotNull(actual.overlayPixels)) }
             }
             onMain { sampler.pause() }
             assertNull(sampler.result.value.analysis)
@@ -157,11 +150,14 @@ class NativeRtpLutRenderingTest {
         val completed = CountDownLatch(1)
         val failed = CountDownLatch(1)
         val presentedTimeUs = AtomicLong(Long.MIN_VALUE)
+        val submittedFrame = AtomicReference<NativeLiveViewRenderedFrame?>()
         val lut = overrideLut ?: NativeVideoLut(2, floatArrayOf(0f, 0f, 0f), floatArrayOf(1f, 1f, 1f), table(swap))
-        val renderer = NativeRtpLutRenderer(target.surface, lut, { true }, {
-            presentedTimeUs.set(it)
+        val renderer = NativeRtpLutRenderer(target.surface, lut, { true }, { timeUs, pixels ->
+            submittedFrame.set(NativeLiveViewRenderedFrame(target.surface, 1, 1, timeUs, System.nanoTime(),
+                evidence = NativeFrameEvidence.EGL_SURFACE_SUBMISSION, pixels = pixels))
+            presentedTimeUs.set(timeUs)
             completed.countDown()
-        }, { failed.countDown() })
+        }, { failed.countDown() }, { true })
         var codec: MediaCodec? = null
         var phase = "input-surface"
         var decoder = "unavailable"
@@ -205,7 +201,21 @@ class NativeRtpLutRenderingTest {
             assertEquals("Decoder/GPU did not present fixture", 0L, completed.count)
             assertTrue("Decoder must report the fixture's color format", outputFormat != "unobserved")
             if (swap && overrideLut == null) {
-                verifyPostLutScopes(target) { phase = "post-lut-scopes-$it" }
+                var nextTimeUs = 2_000L
+                val activeCodec = requireNotNull(codec)
+                verifyPostLutScopes(target, nextFrame = {
+                    val expectedTimeUs = nextTimeUs++
+                    val inputIndex = activeCodec.dequeueInputBuffer(TimeUnit.SECONDS.toMicros(2))
+                    check(inputIndex >= 0)
+                    requireNotNull(activeCodec.getInputBuffer(inputIndex)).put(fixture)
+                    activeCodec.queueInputBuffer(inputIndex, 0, fixture.size, expectedTimeUs, 0)
+                    val nextDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(4)
+                    while (submittedFrame.get()?.sequence != expectedTimeUs && System.nanoTime() < nextDeadline) {
+                        val output = activeCodec.dequeueOutputBuffer(info, 10_000)
+                        if (output >= 0) activeCodec.releaseOutputBuffer(output, true)
+                    }
+                    requireNotNull(submittedFrame.get()).also { check(it.sequence == expectedTimeUs && it.pixels != null) }
+                }) { phase = "post-lut-scopes-$it" }
             }
             phase = "pixel-copy"
             return copy(target.surface, 64, 48).also { bitmap ->
