@@ -90,6 +90,7 @@ struct MediaDeliveryPlannedBatchRecord: Identifiable, Sendable {
 struct MediaDeliverySnapshot: Sendable {
     let records: [MediaDeliveryRecord]
     let externalAttempts: [ForegroundFilesRecord]
+    let filesExportAttempts: [MediaFilesExportHistoryRecord]
     let plannedBatches: [MediaDeliveryPlannedBatchRecord]
     let retainedBytes: Int64?
     let warning: MediaDeliveryStoreError?
@@ -98,14 +99,21 @@ struct MediaDeliverySnapshot: Sendable {
 
     init(records: [MediaDeliveryRecord], plannedBatches: [MediaDeliveryPlannedBatchRecord] = [],
          retainedBytes: Int64?, warning: MediaDeliveryStoreError?, epoch: UUID? = nil,
-         externalAttempts: [ForegroundFilesRecord] = []) {
+         externalAttempts: [ForegroundFilesRecord] = [], filesExportAttempts: [MediaFilesExportHistoryRecord] = []) {
         self.records = records
         self.externalAttempts = externalAttempts
+        self.filesExportAttempts = filesExportAttempts
         self.plannedBatches = plannedBatches
         self.retainedBytes = retainedBytes
         self.warning = warning
         self.epoch = epoch
     }
+}
+
+/// A process capability, never restored from the display-only export history.
+struct MediaFilesExportHistoryTicket: Sendable {
+    let attemptID: UUID
+    fileprivate let epoch: UUID
 }
 
 /// Holding a lease pins its retained copy through clear and subsequent batches.
@@ -204,8 +212,11 @@ actor MediaDeliveryStore {
         var tombstones: [RetainedFile] = []
         var plannedBatches: [PlannedBatch] = []
         var externalAttempts: [ForegroundFilesRecord] = []
+        var filesExportAttempts: [MediaFilesExportHistoryRecord] = []
 
-        private enum CodingKeys: String, CodingKey { case version, epoch, receipts, tombstones, plannedBatches, externalAttempts }
+        private enum CodingKeys: String, CodingKey {
+            case version, epoch, receipts, tombstones, plannedBatches, externalAttempts, filesExportAttempts
+        }
 
         init() {}
 
@@ -219,6 +230,7 @@ actor MediaDeliveryStore {
             if version == 1 { plannedBatches = [] }
             else { plannedBatches = try values.decode([PlannedBatch].self, forKey: .plannedBatches) }
             externalAttempts = version >= 4 ? try values.decode([ForegroundFilesRecord].self, forKey: .externalAttempts) : []
+            filesExportAttempts = version >= 5 ? try values.decode([MediaFilesExportHistoryRecord].self, forKey: .filesExportAttempts) : []
         }
 
         func encode(to encoder: Encoder) throws {
@@ -230,6 +242,7 @@ actor MediaDeliveryStore {
             try values.encode(plannedBatches, forKey: .plannedBatches)
             // Private-only history remains v3 until the first external attempt.
             if version >= 4 { try values.encode(externalAttempts, forKey: .externalAttempts) }
+            if version >= 5 { try values.encode(filesExportAttempts, forKey: .filesExportAttempts) }
         }
     }
 
@@ -449,7 +462,7 @@ actor MediaDeliveryStore {
             throw MediaDeliveryStoreError.invalidReceipt
         }
         var next = manifest!
-        next.version = 4
+        next.version = max(4, next.version)
         next.externalAttempts.append(ForegroundFilesRecord(id: attemptID, receiptID: receiptID,
             filename: filename, startedAt: Date(), status: .started))
         try commit(next)
@@ -468,6 +481,50 @@ actor MediaDeliveryStore {
         next.externalAttempts[index].reason = outcome.reason
         next.externalAttempts[index].completedAt = Date()
         // No cancellation check: an actual completed copy remains true.
+        try commit(next)
+    }
+
+    /// Batch-level picker observations only: names never identify provider output.
+    /// The bounded admission is durable before any source is handed to UIKit.
+    func beginFilesExportHistory(attemptID: UUID, filenames: [String], expectedEpoch: UUID) throws -> MediaFilesExportHistoryTicket {
+        try load()
+        guard manifest!.epoch == expectedEpoch else { throw MediaDeliveryStoreError.invalidTicket }
+        guard !filenames.isEmpty, filenames.count <= limits.maximumRecords,
+              filenames.allSatisfy({ safeName($0) }),
+              !manifest!.filesExportAttempts.contains(where: { $0.id == attemptID }) else {
+            throw MediaDeliveryStoreError.invalidReceipt
+        }
+        let used = manifest!.filesExportAttempts.reduce(0) { $0 + $1.filenames.count }
+        guard used <= limits.maximumRecords - filenames.count else { throw MediaDeliveryStoreError.recordLimit }
+        var next = manifest!
+        next.version = 5
+        // Apply the same history-only redaction as preparation receipts. The
+        // pinned source filename is unchanged; query/fragment-like labels are not persisted.
+        next.filesExportAttempts.append(MediaFilesExportHistoryRecord(id: attemptID, filenames: filenames.map(deliveryFilename),
+            startedAt: Date(), completedAt: nil, status: .started, reportedCount: nil))
+        try commit(next)
+        return MediaFilesExportHistoryTicket(attemptID: attemptID, epoch: next.epoch)
+    }
+
+    func finishFilesExportHistory(_ ticket: MediaFilesExportHistoryTicket, event: MediaFilesExportEvent) throws {
+        try load()
+        guard manifest!.epoch == ticket.epoch,
+              let index = manifest!.filesExportAttempts.firstIndex(where: { $0.id == ticket.attemptID }),
+              manifest!.filesExportAttempts[index].status == .started else {
+            throw MediaDeliveryStoreError.invalidTicket
+        }
+        var next = manifest!
+        let expected = next.filesExportAttempts[index].filenames.count
+        next.filesExportAttempts[index].completedAt = Date()
+        switch event {
+        case .reported(let count):
+            // Bound malformed callback counts; do not invent a per-file mapping.
+            next.filesExportAttempts[index].reportedCount = (0...100).contains(count) ? count : nil
+            next.filesExportAttempts[index].status = count > 0 && count == expected ? .providerReported : .unconfirmed
+        case .cancelled: next.filesExportAttempts[index].status = .cancelled
+        case .unconfirmed: next.filesExportAttempts[index].status = .unconfirmed
+        case .sourceUnavailable: next.filesExportAttempts[index].status = .sourceUnavailable
+        }
         try commit(next)
     }
 
@@ -496,7 +553,8 @@ actor MediaDeliveryStore {
             })
         }
         return MediaDeliverySnapshot(records: records, plannedBatches: batches, retainedBytes: retainedBytes,
-            warning: warning, epoch: manifest?.epoch, externalAttempts: manifest?.externalAttempts ?? [])
+            warning: warning, epoch: manifest?.epoch, externalAttempts: manifest?.externalAttempts ?? [],
+            filesExportAttempts: manifest?.filesExportAttempts ?? [])
     }
 
     private func projectedRecords() -> [MediaDeliveryRecord] {
@@ -547,6 +605,7 @@ actor MediaDeliveryStore {
         next.receipts = []
         next.plannedBatches = []
         next.externalAttempts = []
+        next.filesExportAttempts = []
         try commit(next)
         try cleanTombstones()
     }
@@ -638,6 +697,9 @@ actor MediaDeliveryStore {
                     saved.externalAttempts[index].status = .unconfirmed
                     saved.externalAttempts[index].reason = .interrupted
                 }
+                for index in saved.filesExportAttempts.indices where saved.filesExportAttempts[index].status == .started {
+                    saved.filesExportAttempts[index].status = .unconfirmed
+                }
                 manifest = saved
                 committedManifestData = data
             }
@@ -649,7 +711,7 @@ actor MediaDeliveryStore {
     }
 
     private func validateManifest(_ value: Manifest) throws {
-        guard (1...4).contains(value.version) else { throw MediaDeliveryStoreError.unsupportedSchema }
+        guard (1...5).contains(value.version) else { throw MediaDeliveryStoreError.unsupportedSchema }
         let ids = value.receipts.map(\.id) + value.tombstones.map(\.id)
         let batches = value.plannedBatches
         let rows = batches.flatMap(\.rows)
@@ -761,6 +823,29 @@ actor MediaDeliveryStore {
                 }
             }
         }
+        let exports = value.filesExportAttempts
+        guard (value.version >= 5 || exports.isEmpty), exports.count <= limits.maximumRecords,
+              exports.reduce(0, { $0 + $1.filenames.count }) <= limits.maximumRecords,
+              Set(exports.map(\.id)).count == exports.count else { throw MediaDeliveryStoreError.invalidManifest }
+        for attempt in exports {
+            guard !attempt.filenames.isEmpty, attempt.filenames.allSatisfy({ safeName($0) && $0 == deliveryFilename($0) }),
+                  validDate(attempt.startedAt), attempt.completedAt.map(validDate) != false,
+                  attempt.reportedCount.map({ (0...100).contains($0) }) != false else {
+                throw MediaDeliveryStoreError.invalidManifest
+            }
+            switch attempt.status {
+            case .started:
+                guard attempt.completedAt == nil, attempt.reportedCount == nil else { throw MediaDeliveryStoreError.invalidManifest }
+            case .providerReported:
+                guard attempt.completedAt != nil, attempt.reportedCount == attempt.filenames.count else {
+                    throw MediaDeliveryStoreError.invalidManifest
+                }
+            case .cancelled, .sourceUnavailable:
+                guard attempt.completedAt != nil, attempt.reportedCount == nil else { throw MediaDeliveryStoreError.invalidManifest }
+            case .unconfirmed:
+                guard attempt.completedAt != nil || attempt.reportedCount == nil else { throw MediaDeliveryStoreError.invalidManifest }
+            }
+        }
     }
 
     private func reservedRecordCount(_ value: Manifest) -> Int {
@@ -805,11 +890,12 @@ actor MediaDeliveryStore {
     private func validateKeys(_ data: Data) throws {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let version = object["version"] as? Int else { throw MediaDeliveryStoreError.invalidManifest }
-        guard (1...4).contains(version) else { throw MediaDeliveryStoreError.unsupportedSchema }
+        guard (1...5).contains(version) else { throw MediaDeliveryStoreError.unsupportedSchema }
         var manifestKeys: Set<String> = version == 1
             ? ["version", "epoch", "receipts", "tombstones"]
             : ["version", "epoch", "receipts", "tombstones", "plannedBatches"]
         if version >= 4 { manifestKeys.insert("externalAttempts") }
+        if version >= 5 { manifestKeys.insert("filesExportAttempts") }
         guard Set(object.keys) == manifestKeys,
               let receipts = object["receipts"] as? [[String: Any]],
               let tombstones = object["tombstones"] as? [[String: Any]] else { throw MediaDeliveryStoreError.invalidManifest }
@@ -845,6 +931,18 @@ actor MediaDeliveryStore {
             for attempt in attempts {
                 let keys = Set(attempt.keys)
                 guard required.isSubset(of: keys), keys.isSubset(of: required.union(["completedAt", "reason"])) else {
+                    throw MediaDeliveryStoreError.invalidManifest
+                }
+            }
+        }
+        if version >= 5 {
+            guard let attempts = object["filesExportAttempts"] as? [[String: Any]] else {
+                throw MediaDeliveryStoreError.invalidManifest
+            }
+            let required: Set<String> = ["id", "filenames", "startedAt", "status"]
+            for attempt in attempts {
+                let keys = Set(attempt.keys)
+                guard required.isSubset(of: keys), keys.isSubset(of: required.union(["completedAt", "reportedCount"])) else {
                     throw MediaDeliveryStoreError.invalidManifest
                 }
             }

@@ -105,7 +105,7 @@ private struct ForegroundMediaContents: View {
                             .disabled(controller.isRunning)
                             .accessibilityIdentifier("foreground-media-share-temporary")
                             Button {
-                                filesExporter.begin(camera.makeForegroundMediaExportPayload())
+                                camera.beginMediaFilesExport(filesExporter, payload: camera.makeForegroundMediaExportPayload())
                             } label: {
                                 Label(language.string("media_files_export_ready"), systemImage: "folder")
                                     .fixedSize(horizontal: false, vertical: true)

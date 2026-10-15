@@ -2843,6 +2843,16 @@ final class CameraAppState: ObservableObject {
         MediaBatchExportPayload(results: mediaBatchResults)
     }
 
+    @discardableResult
+    func beginMediaFilesExport(_ controller: MediaFilesExportController, payload: MediaBatchExportPayload?) -> Bool {
+        let generation = mediaDeliveryClearGeneration
+        return controller.beginRecorded(payload, store: mediaDeliveryStore, isCurrent: { [weak self] in
+            self?.mediaDeliveryClearGeneration == generation && self?.applicationActive == true
+        }, didChange: { [weak self] in
+            Task { await self?.refreshMediaDeliveryHistory() }
+        })
+    }
+
     /// History belongs to this App installation, independently of any camera session.
     func refreshMediaDeliveryHistory() async {
         let owner = UUID()
