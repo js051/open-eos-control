@@ -104,11 +104,6 @@ internal class AndroidCcapiRtpSession(
         capacity = RTP_ACCESS_UNIT_QUEUE_CAPACITY,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
-    private val audioAccessUnits = Channel<AacAccessUnit>(
-        capacity = RTP_AUDIO_ACCESS_UNIT_QUEUE_CAPACITY,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-        onUndeliveredElement = { recordDroppedAudioAccessUnit() },
-    )
     private val listener = AtomicReference<((NativeLiveViewEvent) -> Unit)?>(null)
     private val targetFps = AtomicInteger(DEFAULT_RTP_RENDER_FPS)
     private val renderingEnabled = AtomicBoolean(true)
@@ -127,14 +122,14 @@ internal class AndroidCcapiRtpSession(
     private val presentationDeadline = LiveViewInactivityDeadline(RTP_VIDEO_INACTIVITY_NANOS)
     private val decodedDeadline = LiveViewInactivityDeadline(RTP_VIDEO_INACTIVITY_NANOS)
     private val surfaceWait = NativeRtpSurfaceWait(RTP_VIDEO_INACTIVITY_NANOS)
-    private val audioEnabled = AtomicBoolean(false)
     private val surface = AtomicReference<Surface?>(null)
     private val decoderGuard = Any()
-    private val audioPlayerGuard = Any()
     private val audioSupport = description.audio.latmAudioSupport()
+    private val audioParseDrops = AtomicLong()
     private val audioStatusState = AtomicReference(
         NativeLiveViewAudioStatus(
             advertised = description.audio != null,
+            state = if (description.audio != null && audioSupport.supported) "muted" else "unavailable",
             codec = description.audio?.codec,
             rtpPort = description.audio?.port,
             rtpClockRate = description.audio?.clockRate,
@@ -143,6 +138,8 @@ internal class AndroidCcapiRtpSession(
         )
     )
 
+    private val audioPlayback = RtpAudioPlaybackOwner(scope, audioPlayerFactory, ::recordAudioOwnerStatus)
+
     @Volatile
     private var videoSocket: DatagramSocket? = null
     @Volatile
@@ -150,7 +147,6 @@ internal class AndroidCcapiRtpSession(
     private var receiverJob: Job? = null
     private var decoderJob: Job? = null
     private var audioReceiverJob: Job? = null
-    private var audioPlayerJob: Job? = null
     private val sdpParameterSets = description.video.h264ParameterSets()
     @Volatile
     private var latestSps: ByteArray? = sdpParameterSets?.sequenceParameterSet
@@ -274,6 +270,7 @@ internal class AndroidCcapiRtpSession(
             renderingGeneration.incrementAndGet()
             if (enabled && surface.get()?.isValid == true) presentationDeadline.arm(System.nanoTime())
         }
+        audioPlayback.setForeground(enabled)
         if (!enabled) {
             presentationDeadline.disarm()
             renderedFrameState.value = null
@@ -282,31 +279,8 @@ internal class AndroidCcapiRtpSession(
 
     override fun setAudioEnabled(enabled: Boolean) {
         if (closed.get()) return
-        if (!enabled) {
-            stopAudioPlayer()
-            return
-        }
-        if (!audioStatusState.get().available || !audioEnabled.compareAndSet(false, true)) return
-        while (audioAccessUnits.tryReceive().isSuccess) Unit
-        updateAudioStatus { it.copy(enabled = true, error = null) }
-        synchronized(audioPlayerGuard) {
-            audioPlayerJob?.cancel()
-            audioPlayerJob = scope.launch {
-                try {
-                    audioPlayerFactory().play(audioAccessUnits, ::recordAudioPlaybackStats)
-                } catch (_: CancellationException) {
-                    throw CancellationException()
-                } catch (exception: Exception) {
-                    audioEnabled.set(false)
-                    updateAudioStatus {
-                        it.copy(
-                            enabled = false,
-                            error = "Canon RTP audio playback failed: ${exception.message ?: exception.javaClass.simpleName}",
-                        )
-                    }
-                }
-            }
-        }
+        if (!enabled) audioPlayback.mute()
+        else if (audioStatusState.get().available && renderingEnabled.get()) audioPlayback.enable()
     }
 
     override fun setListener(listener: ((NativeLiveViewEvent) -> Unit)?) {
@@ -330,23 +304,18 @@ internal class AndroidCcapiRtpSession(
             IllegalStateException("Canon RTP session closed before producing a decoded H.264 picture.")
         )
         listener.set(null)
-        audioEnabled.set(false)
         videoSocket?.close()
         videoSocket = null
         audioSocket?.close()
         audioSocket = null
         receiverJob?.cancel()
         audioReceiverJob?.cancel()
-        synchronized(audioPlayerGuard) {
-            audioPlayerJob?.cancel()
-            audioPlayerJob = null
-        }
+        audioPlayback.close()
         synchronized(decoderGuard) {
             decoderJob?.cancel()
             decoderJob = null
         }
         accessUnits.close()
-        audioAccessUnits.close()
         scope.cancel()
     }
 
@@ -355,16 +324,19 @@ internal class AndroidCcapiRtpSession(
         if (!audioSupport.supported) return
         if (audio.port == description.video.port) {
             updateAudioStatus {
-                it.copy(error = "Canon RTP audio shares the video UDP port; RTP multiplexing is unsupported.")
+                it.copy(state = "unavailable", error = "Canon RTP audio shares the video UDP port; RTP multiplexing is unsupported.")
             }
             return
         }
-        val datagramSocket = DatagramSocket(null).apply {
-            reuseAddress = true
-            receiveBufferSize = RTP_AUDIO_RECEIVE_BUFFER_BYTES
-            soTimeout = RTP_SOCKET_TIMEOUT_MILLIS
+        val datagramSocket = try { DatagramSocket(null) } catch (exception: Exception) {
+            updateAudioStatus { it.copy(available = false, state = "unavailable",
+                error = "Unable to create Canon RTP audio receiver: ${exception.message ?: exception.javaClass.simpleName}") }
+            return
         }
         try {
+            datagramSocket.reuseAddress = true
+            datagramSocket.receiveBufferSize = RTP_AUDIO_RECEIVE_BUFFER_BYTES
+            datagramSocket.soTimeout = RTP_SOCKET_TIMEOUT_MILLIS
             socketBinder.bind(datagramSocket)
             datagramSocket.bind(InetSocketAddress(audio.port))
         } catch (exception: Exception) {
@@ -372,6 +344,7 @@ internal class AndroidCcapiRtpSession(
             updateAudioStatus {
                 it.copy(
                     available = false,
+                    state = "unavailable",
                     error = "Unable to bind Canon RTP audio port ${audio.port}: ${exception.message ?: exception.javaClass.simpleName}",
                 )
             }
@@ -441,7 +414,11 @@ internal class AndroidCcapiRtpSession(
         audio: RtpMediaDescription,
     ) {
         val depacketizer = LatmRtpDepacketizer(audio.payloadType)
-        var extractor = latmExtractorFactory()
+        var extractor = try { latmExtractorFactory() } catch (exception: Exception) {
+            audioPlayback.setAvailable(false, error = "Canon RTP LATM parser initialization failed: ${exception.message ?: exception.javaClass.simpleName}")
+            updateAudioStatus { it.copy(available = false) }
+            return
+        }
         val buffer = ByteArray(MAX_RTP_DATAGRAM_BYTES)
         val packet = DatagramPacket(buffer, buffer.size)
         var firstTimestamp: Long? = null
@@ -458,7 +435,7 @@ internal class AndroidCcapiRtpSession(
                 throw CancellationException()
             } catch (exception: Exception) {
                 if (!closed.get() && datagramSocket.isClosed.not()) {
-                    stopAudioPlayer()
+                    audioPlayback.setAvailable(false, error = "Canon RTP audio receive failed: ${exception.message ?: exception.javaClass.simpleName}")
                     updateAudioStatus {
                         it.copy(
                             available = false,
@@ -488,12 +465,9 @@ internal class AndroidCcapiRtpSession(
                     updateAudioStatus(notify = false) {
                         it.copy(
                             accessUnitsReceived = it.accessUnitsReceived + samples.size,
-                            error = if (samples.isNotEmpty()) null else it.error,
                         )
                     }
-                    if (audioEnabled.get()) {
-                        samples.forEach { audioAccessUnits.trySend(it) }
-                    }
+                    audioPlayback.submit(samples)
                 }
                 if (lastPublishedAtMillis == 0L || nowMillis - lastPublishedAtMillis >= AUDIO_STATS_INTERVAL_MILLIS) {
                     lastPublishedAtMillis = nowMillis
@@ -503,14 +477,17 @@ internal class AndroidCcapiRtpSession(
                 throw CancellationException()
             } catch (exception: Exception) {
                 depacketizer.resetAfterDiscontinuity()
-                extractor = latmExtractorFactory().also { it.reset() }
                 recordDroppedAudioAccessUnit()
-                updateAudioStatus(notify = false) {
-                    it.copy(
-                        error = "Canon RTP LATM parse failed: ${exception.message ?: exception.javaClass.simpleName}",
-                    )
+                audioPlayback.setAvailable(false,
+                    error = "Canon RTP LATM parse failed: ${exception.message ?: exception.javaClass.simpleName}")
+                updateAudioStatus(notify = false) { it.copy(available = false) }
+                extractor = try { latmExtractorFactory().also { it.reset() } } catch (reset: Exception) {
+                    updateAudioStatus { it.copy(available = false,
+                        error = "Canon RTP LATM parser reset failed: ${reset.message ?: reset.javaClass.simpleName}") }
+                    return
                 }
-                publishAudioStatus()
+                audioPlayback.setAvailable(true)
+                updateAudioStatus { it.copy(available = true) }
             }
         }
     }
@@ -767,31 +744,34 @@ internal class AndroidCcapiRtpSession(
         close()
     }
 
-    private fun stopAudioPlayer() {
-        audioEnabled.set(false)
-        synchronized(audioPlayerGuard) {
-            audioPlayerJob?.cancel()
-            audioPlayerJob = null
-        }
-        while (audioAccessUnits.tryReceive().isSuccess) Unit
-        updateAudioStatus { it.copy(enabled = false) }
-    }
-
-    private fun recordAudioPlaybackStats(stats: RtpAudioPlaybackStats) {
+    private fun recordAudioOwnerStatus(owner: RtpAudioOwnerStatus) {
+        val stats = owner.stats
         updateAudioStatus {
             it.copy(
+                enabled = owner.enabled,
+                playbackEpoch = owner.epoch,
+                retirementPending = owner.retirementPending,
+                state = owner.state,
+                evidenceLevel = owner.evidenceLevel,
+                queuedAccessUnits = stats.queuedAccessUnits,
+                decodedSampleFrames = stats.decodedSampleFrames,
                 decodedAccessUnits = stats.decodedAccessUnits,
+                submittedSampleFrames = stats.submittedSampleFrames,
                 playedSampleFrames = stats.playedSampleFrames,
                 sampleRate = stats.sampleRate,
-                channels = stats.channels ?: it.channels,
+                channels = stats.channels ?: description.audio?.channels,
                 underruns = stats.underruns,
                 lastPcmAtMillis = stats.lastPcmAtMillis,
-                error = null,
+                lastOutputAtMillis = stats.lastOutputAtMillis,
+                pcmFresh = stats.pcmFresh,
+                droppedAccessUnits = owner.droppedAccessUnits + audioParseDrops.get(),
+                error = owner.error,
             )
         }
     }
 
     private fun recordDroppedAudioAccessUnit() {
+        audioParseDrops.incrementAndGet()
         updateAudioStatus(notify = false) { it.copy(droppedAccessUnits = it.droppedAccessUnits + 1) }
     }
 
@@ -845,7 +825,6 @@ private const val DEFAULT_RTP_RENDER_FPS = 30
 private const val MIN_RTP_RENDER_FPS = 1
 private const val MAX_RTP_RENDER_FPS = 30
 private const val RTP_ACCESS_UNIT_QUEUE_CAPACITY = 3
-private const val RTP_AUDIO_ACCESS_UNIT_QUEUE_CAPACITY = 24
 private const val MAX_RTP_DATAGRAM_BYTES = 65_535
 private const val RTP_RECEIVE_BUFFER_BYTES = 2 * 1024 * 1024
 private const val RTP_AUDIO_RECEIVE_BUFFER_BYTES = 512 * 1024
