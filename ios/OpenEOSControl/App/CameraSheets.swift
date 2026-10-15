@@ -134,6 +134,9 @@ private struct ExposureSettingsView: View {
     @EnvironmentObject private var camera: CameraAppState
     @Environment(\.dismiss) private var dismiss
     let selectedSheet: CameraSheet
+    @State private var choiceDrafts: [String: String] = [:]
+    @State private var draftRevisions: [String: UUID] = [:]
+    @State private var editorOwner = UUID()
 
     var body: some View {
         NavigationStack {
@@ -143,6 +146,8 @@ private struct ExposureSettingsView: View {
                     .padding(.vertical, 8)
                 Divider().overlay(Color.cameraBorder)
                 valueRail
+                applySelection.padding(.horizontal, 16)
+                ShootingSettingPanel().padding(.horizontal, 16).padding(.bottom, 8)
             }
             .background(Color.cameraSurface)
             .navigationTitle(title)
@@ -153,8 +158,12 @@ private struct ExposureSettingsView: View {
                 }
             }
         }
-        .presentationDetents([.height(270), .medium])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .onDisappear { camera.cancelShootingSetting(); editorOwner = UUID() }
+        .onChange(of: camera.mediaLibrarySessionID) { _, _ in
+            editorOwner = UUID(); choiceDrafts.removeAll(); draftRevisions.removeAll()
+        }
     }
 
     private var exposureTabs: some View {
@@ -187,9 +196,10 @@ private struct ExposureSettingsView: View {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 8) {
                     ForEach(setting?.values ?? [], id: \.self) { value in
-                        let selected = value == currentValue
+                        let selected = value == (choiceDrafts[key] ?? currentValue)
                         Button {
-                            Task { await camera.setSetting(key: key, value: value) }
+                            choiceDrafts[key] = value
+                            draftRevisions[key] = UUID()
                         } label: {
                             VStack(spacing: 7) {
                                 Text(value)
@@ -206,7 +216,7 @@ private struct ExposureSettingsView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                         }
                         .buttonStyle(.plain)
-                        .disabled(camera.isBusy(.setting))
+                        .disabled(!camera.canStartShootingSetting)
                         .id(value)
                         .accessibilityIdentifier("setting-value-\(value)")
                     }
@@ -223,6 +233,33 @@ private struct ExposureSettingsView: View {
                 guard let currentValue else { return }
                 DispatchQueue.main.async { reader.scrollTo(currentValue, anchor: .center) }
             }
+        }
+    }
+
+    private var applySelection: some View {
+        HStack {
+            if let selected = choiceDrafts[key] {
+                Text(verbatim: selected).font(.callout.weight(.semibold))
+                if setting?.accepts(selected) != true { Text("shooting_setting_draft_unavailable").font(.caption) }
+            }
+            Spacer()
+            Button("apply") {
+                let targetKey = key
+                guard let selected = choiceDrafts[targetKey], setting?.accepts(selected) == true else { return }
+                let revision = draftRevisions[targetKey] ?? UUID()
+                draftRevisions[targetKey] = revision
+                let owner = editorOwner
+                let sessionOwner = camera.mediaLibrarySessionID
+                Task {
+                    let consumed = await camera.setSetting(key: targetKey, value: selected, draftRevision: revision)
+                    if consumed, owner == editorOwner, sessionOwner == camera.mediaLibrarySessionID,
+                       draftRevisions[targetKey] == revision { choiceDrafts[targetKey] = nil }
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(!camera.canStartShootingSetting || choiceDrafts[key] == nil || choiceDrafts[key] == currentValue
+                || choiceDrafts[key].map { setting?.accepts($0) != true } == true)
+            .accessibilityIdentifier("exposure-setting-apply")
         }
     }
 
@@ -738,7 +775,10 @@ private struct MoreSettingsView: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
     @Environment(\.dismiss) private var dismiss
-    @State private var pendingRangeIndices: [String: Double] = [:]
+    @State private var choiceDrafts: [String: String] = [:]
+    @State private var pendingRangeValues: [String: String] = [:]
+    @State private var settingDraftRevisions: [String: UUID] = [:]
+    @State private var settingEditorOwner = UUID()
     @State private var showSleepConfirmation = false
     @State private var showSensorCleaningConfirmation = false
     @State private var directoryName = ""
@@ -748,6 +788,7 @@ private struct MoreSettingsView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    ShootingSettingPanel().padding(.vertical, 10)
                     if camera.supports(.clickWhiteBalance) {
                         liveViewTapActionRow
                         Divider().overlay(Color.cameraBorder)
@@ -807,6 +848,14 @@ private struct MoreSettingsView: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .onDisappear { camera.cancelShootingSetting(); settingEditorOwner = UUID() }
+        .onChange(of: camera.mediaLibrarySessionID) { _, _ in
+            settingEditorOwner = UUID()
+            textDrafts.removeAll()
+            choiceDrafts.removeAll()
+            pendingRangeValues.removeAll()
+            settingDraftRevisions.removeAll()
+        }
         .alert("camera_sleep_confirm_title", isPresented: $showSleepConfirmation) {
             Button("cancel", role: .cancel) {}
             Button("sleep_now", role: .destructive) {
@@ -1076,18 +1125,22 @@ private struct MoreSettingsView: View {
                     Text(localizedSettingLabel(setting))
                         .font(.callout.weight(.semibold))
                         .foregroundStyle(Color.cameraText)
-                    Text(localizedSettingValue(setting, value: currentValue(for: setting)))
+                    Text(localizedSettingValue(setting, value: choiceDrafts[setting.key] ?? currentValue(for: setting)))
                         .font(.caption)
                         .foregroundStyle(Color.cameraSecondaryText)
                         .lineLimit(1)
+                    if let selected = choiceDrafts[setting.key], !setting.accepts(selected) {
+                        Text("shooting_setting_draft_unavailable").font(.caption)
+                    }
                 }
                 Spacer()
                 Menu {
                     ForEach(setting.values, id: \.self) { value in
                         Button {
-                            Task { await camera.setSetting(key: setting.key, value: value) }
+                            choiceDrafts[setting.key] = value
+                            settingDraftRevisions[setting.key] = UUID()
                         } label: {
-                            if value == currentValue(for: setting) {
+                            if value == (choiceDrafts[setting.key] ?? currentValue(for: setting)) {
                                 Label(localizedSettingValue(setting, value: value), systemImage: "checkmark")
                             } else {
                                 Text(localizedSettingValue(setting, value: value))
@@ -1100,9 +1153,28 @@ private struct MoreSettingsView: View {
                         .foregroundStyle(Color.cameraAccent)
                         .accessibilityLabel(Text("choose_setting"))
                 }
-                .disabled(camera.isBusy(.setting))
+                .disabled(!camera.canStartShootingSetting)
+                Button("apply") { applyChoiceDraft(setting) }
+                    .buttonStyle(.bordered)
+                    .disabled(!camera.canStartShootingSetting || choiceDrafts[setting.key] == nil
+                        || choiceDrafts[setting.key] == currentValue(for: setting)
+                        || choiceDrafts[setting.key].map { !setting.accepts($0) } == true)
+                    .accessibilityIdentifier("\(setting.key)-choice-apply")
             }
             .frame(minHeight: 64)
+        }
+    }
+
+    private func applyChoiceDraft(_ setting: CameraSetting) {
+        guard let selected = choiceDrafts[setting.key], camera.capabilities?.setting(setting.key)?.accepts(selected) == true else { return }
+        let revision = settingDraftRevisions[setting.key] ?? UUID()
+        settingDraftRevisions[setting.key] = revision
+        let owner = settingEditorOwner
+        let sessionOwner = camera.mediaLibrarySessionID
+        Task {
+            let consumed = await camera.setSetting(key: setting.key, value: selected, draftRevision: revision)
+            if consumed, owner == settingEditorOwner, sessionOwner == camera.mediaLibrarySessionID,
+               settingDraftRevisions[setting.key] == revision { choiceDrafts[setting.key] = nil }
         }
     }
 
@@ -1111,7 +1183,7 @@ private struct MoreSettingsView: View {
         let draft = textDrafts[setting.key] ?? current
         let binding = Binding<String>(
             get: { textDrafts[setting.key] ?? currentValue(for: setting) },
-            set: { textDrafts[setting.key] = $0 }
+            set: { textDrafts[setting.key] = $0; settingDraftRevisions[setting.key] = UUID() }
         )
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -1132,9 +1204,14 @@ private struct MoreSettingsView: View {
                     .accessibilityIdentifier("\(setting.key)-input")
                 Button("apply") {
                     let value = binding.wrappedValue
+                    let revision = settingDraftRevisions[setting.key] ?? UUID()
+                    settingDraftRevisions[setting.key] = revision
+                    let owner = settingEditorOwner
+                    let sessionOwner = camera.mediaLibrarySessionID
                     Task {
-                        await camera.setSetting(key: setting.key, value: value)
-                        if camera.lastError == nil {
+                        let consumed = await camera.setSetting(key: setting.key, value: value, draftRevision: revision)
+                        if consumed, owner == settingEditorOwner, sessionOwner == camera.mediaLibrarySessionID,
+                           settingDraftRevisions[setting.key] == revision {
                             textDrafts[setting.key] = nil
                         }
                     }
@@ -1143,7 +1220,7 @@ private struct MoreSettingsView: View {
                 .tint(Color.cameraAccent)
                 .disabled(
                     camera.isPreview ||
-                    camera.isBusy(.setting) ||
+                    !camera.canStartShootingSetting ||
                     !setting.accepts(draft) ||
                     draft == current
                 )
@@ -1154,42 +1231,51 @@ private struct MoreSettingsView: View {
     }
 
     private func rangeSettingRow(_ setting: CameraSetting) -> some View {
-        let currentIndex = setting.values.firstIndex(of: currentValue(for: setting)) ?? 0
-        let pendingIndex = min(
-            max(Int((pendingRangeIndices[setting.key] ?? Double(currentIndex)).rounded()), 0),
-            setting.values.count - 1
-        )
+        let current = currentValue(for: setting)
+        let draft = pendingRangeValues[setting.key] ?? current
+        let currentIndex = setting.values.firstIndex(of: current) ?? 0
+        let displayedIndex = setting.values.firstIndex(of: draft) ?? currentIndex
         let selection = Binding<Double>(
-            get: { pendingRangeIndices[setting.key] ?? Double(currentIndex) },
-            set: { pendingRangeIndices[setting.key] = $0 }
+            get: { Double(setting.values.firstIndex(of: pendingRangeValues[setting.key] ?? currentValue(for: setting)) ?? currentIndex) },
+            set: {
+                let index = min(max(Int($0.rounded()), 0), max(0, setting.values.count - 1))
+                guard setting.values.indices.contains(index) else { return }
+                pendingRangeValues[setting.key] = setting.values[index]
+                settingDraftRevisions[setting.key] = UUID()
+            }
         )
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(localizedSettingLabel(setting))
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(Color.cameraText)
+                Text(localizedSettingLabel(setting)).font(.callout.weight(.semibold)).foregroundStyle(Color.cameraText)
                 Spacer()
-                Text(verbatim: rangeSettingValue(setting, value: setting.values[pendingIndex]))
-                    .font(.callout.weight(.bold))
-                    .foregroundStyle(Color.cameraAccent)
+                Text(verbatim: rangeSettingValue(setting, value: draft)).font(.callout.weight(.bold)).foregroundStyle(Color.cameraAccent)
             }
-            Slider(
-                value: selection,
-                in: 0...Double(setting.values.count - 1),
-                step: 1
-            ) { editing in
-                guard !editing else { return }
-                let selected = setting.values[pendingIndex]
-                pendingRangeIndices[setting.key] = nil
-                guard selected != currentValue(for: setting) else { return }
-                Task { await camera.setSetting(key: setting.key, value: selected) }
+            if !setting.values.contains(draft) { Text("shooting_setting_draft_unavailable").font(.caption) }
+            Slider(value: selection, in: 0...Double(max(1, setting.values.count - 1)), step: 1)
+                .tint(Color.cameraAccent)
+                .disabled(!camera.canStartShootingSetting || setting.values.count < 2)
+                .accessibilityLabel(Text(localizedSettingLabel(setting)))
+                .accessibilityValue(Text(verbatim: rangeSettingValue(setting, value: draft)))
+                .accessibilityIdentifier("\(setting.key)-range-\(displayedIndex)")
+            Button("apply") {
+                guard let selected = pendingRangeValues[setting.key], selected != currentValue(for: setting),
+                      camera.capabilities?.setting(setting.key)?.accepts(selected) == true else { return }
+                let revision = settingDraftRevisions[setting.key] ?? UUID()
+                settingDraftRevisions[setting.key] = revision
+                let owner = settingEditorOwner
+                let sessionOwner = camera.mediaLibrarySessionID
+                Task {
+                    let consumed = await camera.setSetting(key: setting.key, value: selected, draftRevision: revision)
+                    if consumed, owner == settingEditorOwner, sessionOwner == camera.mediaLibrarySessionID,
+                       settingDraftRevisions[setting.key] == revision { pendingRangeValues[setting.key] = nil }
+                }
             }
-            .tint(Color.cameraAccent)
-            .disabled(camera.isBusy(.setting))
-            .accessibilityLabel(Text(localizedSettingLabel(setting)))
-            .accessibilityValue(Text(verbatim: rangeSettingValue(setting, value: setting.values[pendingIndex])))
+            .buttonStyle(.bordered)
+            .disabled(!camera.canStartShootingSetting || pendingRangeValues[setting.key] == nil
+                || draft == current || !setting.accepts(draft))
+            .accessibilityIdentifier("\(setting.key)-range-apply")
         }
-        .frame(minHeight: 72)
+        .frame(minHeight: 100)
     }
 
     private func rangeSettingValue(_ setting: CameraSetting, value: String) -> String {

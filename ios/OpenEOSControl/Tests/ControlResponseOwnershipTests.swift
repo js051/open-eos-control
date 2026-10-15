@@ -529,6 +529,125 @@ final class ControlResponseOwnershipTests: XCTestCase {
         XCTAssertEqual(writes, 21)
     }
 
+    func testSettingResponseSurvivesReadFailureAndRecoveryNeverWrites() async throws {
+        for bridge in [false, true] {
+            let peer = ControlOwnerPeer(owner: "setting-response")
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndPrepare(state)
+            await peer.enqueue(.setting, gate: "write")
+            let write = Task { await state.setSetting(key: "iso", value: "800") }
+            try await waitForGate("write", peer: peer)
+            await peer.enqueue(.capabilities, error: .networkConnectionLost)
+            await peer.release("write")
+            let consumed = await write.value
+            XCTAssertFalse(consumed)
+            XCTAssertEqual(state.shootingSettingRecord?.outcome.writeEvidence, .responded)
+            XCTAssertEqual(state.shootingSettingRecord?.outcome.readbackEvidence, .unavailable)
+            XCTAssertEqual(state.status?.exposure.iso, "100")
+            let writes = await peer.count(.setting)
+            await state.recoverShootingSetting()
+            XCTAssertEqual(state.shootingSettingRecord?.outcome.writeEvidence, .responded)
+            XCTAssertEqual(state.shootingSettingRecord?.outcome.readbackEvidence, .matched)
+            XCTAssertEqual(state.status?.exposure.iso, "800")
+            let after = await peer.count(.setting)
+            XCTAssertEqual(after, writes)
+        }
+    }
+
+    func testSettingDoubleApplyCancelAndLateResponseRetainEvidenceWithoutPublishing() async throws {
+        for bridge in [false, true] {
+            let peer = ControlOwnerPeer(owner: "setting-cancel")
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndPrepare(state)
+            await peer.enqueue(.setting, gate: "held")
+            let original = Task { await state.setSetting(key: "iso", value: "800", draftRevision: UUID()) }
+            try await waitForGate("held", peer: peer)
+            let duplicate = await state.setSetting(key: "iso", value: "800")
+            XCTAssertFalse(duplicate)
+            state.cancelShootingSetting()
+            XCTAssertFalse(state.canPrepareShootingSettingDraft)
+            await peer.release("held")
+            let consumed = await original.value
+            XCTAssertFalse(consumed)
+            XCTAssertEqual(state.shootingSettingRecord?.outcome.writeEvidence, .responded)
+            XCTAssertTrue(state.shootingSettingRecord?.cancelled == true)
+            XCTAssertEqual(state.status?.exposure.iso, "100")
+            let writes = await peer.count(.setting)
+            XCTAssertEqual(writes, 1)
+            await state.recoverShootingSetting()
+            XCTAssertEqual(state.status?.exposure.iso, "800")
+            let after = await peer.count(.setting)
+            XCTAssertEqual(after, 1)
+        }
+    }
+
+    func testManualRefreshCannotPublishPrewriteSnapshotOverScopedSettingReadback() async throws {
+        let peer = ControlOwnerPeer(owner: "setting-observation")
+        let state = makeState([peer], bridge: true)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectAndPrepare(state)
+        await peer.enqueue(.setting, gate: "held")
+        let original = Task { await state.setSetting(key: "iso", value: "800") }
+        try await waitForGate("held", peer: peer)
+        let reads = await peer.count(.capabilities)
+        await state.refresh()
+        let after = await peer.count(.capabilities)
+        XCTAssertEqual(after, reads, "Unscoped refresh cannot overtake the setting owner")
+        XCTAssertEqual(state.status?.exposure.iso, "100")
+        await peer.release("held")
+        let consumed = await original.value
+        XCTAssertTrue(consumed)
+        XCTAssertEqual(state.status?.exposure.iso, "800")
+        XCTAssertEqual(state.shootingSettingRecord?.outcome.writeEvidence, .responded)
+        XCTAssertFalse(state.isBusy(.setting))
+    }
+
+    func testSettingUnknownMatchingRecoveryCannotAuthorizeDraftConsumptionOrReplay() async throws {
+        let peer = ControlOwnerPeer(owner: "setting-unknown")
+        let state = makeState([peer], bridge: true)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectAndPrepare(state)
+        await peer.enqueue(.setting, error: .networkConnectionLost)
+        let consumed = await state.setSetting(key: "iso", value: "800")
+        XCTAssertFalse(consumed)
+        XCTAssertEqual(state.shootingSettingRecord?.outcome.writeEvidence, .unknown)
+        await state.recoverShootingSetting()
+        XCTAssertEqual(state.shootingSettingRecord?.outcome.writeEvidence, .unknown)
+        XCTAssertEqual(state.shootingSettingRecord?.outcome.readbackEvidence, .matched)
+        let duplicate = await state.setSetting(key: "iso", value: "800")
+        XCTAssertFalse(duplicate)
+        let writes = await peer.count(.setting)
+        XCTAssertEqual(writes, 1)
+    }
+
+    func testSettingHistoryIsBoundedAndRecoveryPreservesNewestIntent() async throws {
+        let peer = ControlOwnerPeer(owner: "setting-history")
+        let state = makeState([peer], bridge: true)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectAndPrepare(state)
+        var first: UUID?
+        for index in 0..<21 {
+            if index > 0 { state.newShootingSettingDraft() }
+            _ = await state.setSetting(key: "iso", value: "800")
+            if index == 0 { first = state.shootingSettingRecord?.id }
+        }
+        XCTAssertEqual(state.shootingSettingHistory.count, 20)
+        XCTAssertFalse(state.shootingSettingHistory.contains { $0.id == first })
+        let newest = state.shootingSettingCurrentID
+        let older = try XCTUnwrap(state.shootingSettingHistory.first?.id)
+        await state.recoverShootingSetting(older)
+        XCTAssertEqual(state.shootingSettingCurrentID, newest)
+        let writes = await peer.count(.setting)
+        XCTAssertEqual(writes, 21)
+        await state.disconnect()
+        XCTAssertFalse(state.canRecoverShootingSetting(older))
+        await state.recoverShootingSetting(older)
+        let after = await peer.count(.setting)
+        XCTAssertEqual(after, 21)
+    }
+
     private func assertRetired(_ action: ControlOwnerAction, bridge: Bool, fails: Bool,
                                readback: ControlOwnerWire? = nil) async throws {
         let oldPeer = ControlOwnerPeer(owner: "A", recording: action == .recordingStop)
@@ -647,7 +766,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
         case .whiteBalance: await state.clickWhiteBalance(x: 0.2, y: 0.3)
         case .drive: await state.driveFocus(direction: .near, step: .small)
         case .magnification: await state.setLiveViewMagnification(.x5)
-        case .setting: await state.setSetting(key: "iso", value: "800")
+        case .setting: _ = await state.setSetting(key: "iso", value: "800")
         }
     }
 
@@ -792,7 +911,9 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case .status:
             object = statusJSON()
         case .capabilities:
-            object = capabilitiesJSON(simulator: simulator)
+            object = path.hasSuffix("/settings/iso")
+                ? ["version": 1, "engine": "ccapi", "setting": shootingSettingJSON()]
+                : capabilitiesJSON(simulator: simulator)
         case .directoryReadback:
             object = ["operation": "create-directory", "directorySelection": ["value": directory, "ability": directoryOptions()]]
         case .namingReadback:
@@ -821,7 +942,9 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             object = statusJSON()
         case .setting:
             iso = "800"
-            object = statusJSON()
+            object = simulator ? statusJSON() : ["version": 1, "engine": "ccapi", "key": "iso",
+                "requestedValue": "800", "writeEvidence": "response-received", "readbackEvidence": "matched",
+                "setting": shootingSettingJSON()]
         case .whiteBalance:
             whiteBalance = "click"
             object = statusJSON()
@@ -841,6 +964,14 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         }
         if let gate = plan.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
         if let error = plan.error { throw URLError(error) }
+        if wire == .setting, !simulator, plans[.capabilities]?.isEmpty == false {
+            let readback = plans[.capabilities]!.removeFirst()
+            if let gate = readback.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
+            if readback.error != nil {
+                object["readbackEvidence"] = "unavailable"
+                object["setting"] = NSNull()
+            }
+        }
         // A synthetic response-phase gate, not an additional network request.
         if wire == .naming, plans[.namingReadback]?.isEmpty == false {
             let readback = plans[.namingReadback]!.removeFirst()
@@ -864,7 +995,7 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case ("DELETE", ""): return .close
         case ("GET", "/info"): return .info
         case ("GET", "/status"): return .status
-        case ("GET", "/capabilities"): return .capabilities
+        case ("GET", "/capabilities"), ("GET", "/settings/iso"): return .capabilities
         case ("GET", "/capture-configuration/create-directory"): return .directoryReadback
         case ("GET", "/capture-configuration/set-file-naming"): return .namingReadback
         case ("GET", "/events"): return .events
@@ -886,9 +1017,13 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case ("POST", "/whitebalance/click"): return .whiteBalance
         case ("POST", "/focus/drive"): return .drive
         case ("POST", "/liveview/magnification"): return .magnification
-        case ("PATCH", "/exposure"), ("POST", "/settings/iso"): return .setting
+        case ("PATCH", "/exposure"), ("POST", "/settings/iso"), ("POST", "/settings/iso/outcome"): return .setting
         default: throw URLError(.unsupportedURL)
         }
+    }
+
+    private func shootingSettingJSON() -> [String: Any] {
+        ["key": "iso", "label": "ISO", "value": iso, "values": ["100", "800"], "inputKind": "choice"]
     }
 
     private func statusJSON() -> [String: Any] {

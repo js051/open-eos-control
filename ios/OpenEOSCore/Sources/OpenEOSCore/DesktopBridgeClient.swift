@@ -606,6 +606,29 @@ public actor DesktopBridgeClient {
         return parseStatus(body)
     }
 
+    public func applyShootingSetting(key: String, value: String, attempt: CameraShootingSettingAttempt) async throws {
+        try attempt.validate(key: key, value: value)
+        attempt.readbackUnavailable()
+        // The new endpoint carries write and fresh-read evidence independently.
+        // Missing endpoint / timeout never authorizes fallback to the legacy POST.
+        _ = try await requestJSON(url: sessionEndpoint(["settings", key, "outcome"]), method: "POST",
+            payload: ["value": value], timeoutInterval: 15, maximumBytes: 64 * 1024,
+            shootingSettingAttempt: attempt)
+    }
+
+    public func refreshShootingSetting(_ attempt: CameraShootingSettingAttempt) async throws {
+        attempt.readbackUnavailable()
+        let engine = captureConfigurationSessionEngine
+        let key = attempt.snapshot.key
+        let body = try await requestJSON(url: sessionEndpoint(["settings", key]), method: "GET", payload: nil,
+            timeoutInterval: 15, maximumBytes: 64 * 1024, shootingSettingRead: true)
+        guard CameraShootingSettingWire.validEnvelope(body, engine: engine),
+              let setting = CameraShootingSettingValue.parse(body["setting"], key: key) else {
+            throw DesktopBridgeError.invalidResponse("Bridge omitted the exact fresh setting observation.")
+        }
+        attempt.observe(setting)
+    }
+
     public func createDirectory(name: String, attempt: CameraCaptureConfigurationAttempt? = nil) async throws -> String {
         let attempt = attempt ?? CameraCaptureConfigurationAttempt(operation: .createDirectory, requestedValue: name)
         try attempt.validate(operation: .createDirectory, value: name)
@@ -1925,7 +1948,9 @@ public actor DesktopBridgeClient {
         mediaMetadata: Bool = false,
         mediaMutationAttempt: CameraMediaMutationAttempt? = nil,
         captureConfigurationAttempt: CameraCaptureConfigurationAttempt? = nil,
-        captureConfigurationRead: Bool = false
+        captureConfigurationRead: Bool = false,
+        shootingSettingAttempt: CameraShootingSettingAttempt? = nil,
+        shootingSettingRead: Bool = false
     ) async throws -> BridgeJSON {
         try validateMutation(url: url, method: method, shutterOperation: shutterOperation)
         let ordinaryMutation = !["GET", "HEAD", "OPTIONS"].contains(method) && !shutterOperation
@@ -1947,7 +1972,7 @@ public actor DesktopBridgeClient {
             request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         }
         if method == "GET", scopedToSession,
-           url == (try? sessionEndpoint(["status"])) || url.path.contains("/capture-configuration/") {
+           url == (try? sessionEndpoint(["status"])) || url.path.contains("/capture-configuration/") || shootingSettingRead {
             request.cachePolicy = .reloadIgnoringLocalCacheData
             request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         }
@@ -1955,7 +1980,7 @@ public actor DesktopBridgeClient {
             try Task.checkCancellation()
             recordingCommandEvidence = .unconfirmed(starting: recordingCommand)
         }
-        let readDeadline = captureConfigurationRead ? ContinuousClock.now.advanced(by: .seconds(timeoutInterval)) : nil
+        let readDeadline = (captureConfigurationRead || shootingSettingRead) ? ContinuousClock.now.advanced(by: .seconds(timeoutInterval)) : nil
         let response: CameraHTTPResponse
         var recordingBodyComplete = true
         var recordingResponseCancelled = false
@@ -1969,7 +1994,10 @@ public actor DesktopBridgeClient {
                 if mediaMetadata { try Task.checkCancellation() }
                 try mediaMutationAttempt?.markDispatched()
                 try captureConfigurationAttempt?.markDispatched()
-                if captureConfigurationAttempt != nil || captureConfigurationRead {
+                try shootingSettingAttempt?.markDispatched()
+                if shootingSettingAttempt != nil || shootingSettingRead {
+                    response = try await transport.sendShootingSetting(request)
+                } else if captureConfigurationAttempt != nil || captureConfigurationRead {
                     response = try await transport.sendCaptureConfiguration(request)
                 } else {
                     response = try await transport.send(request)
@@ -1987,7 +2015,7 @@ public actor DesktopBridgeClient {
         if let readDeadline, ContinuousClock.now >= readDeadline {
             throw DesktopBridgeError.invalidResponse("Capture configuration readback exceeded its bounded deadline.")
         }
-        if captureConfigurationAttempt != nil || captureConfigurationRead {
+        if captureConfigurationAttempt != nil || captureConfigurationRead || shootingSettingAttempt != nil || shootingSettingRead {
             guard response.body.count <= 64 * 1024 else {
                 throw DesktopBridgeError.invalidResponse("Capture configuration response exceeded 64 KiB.")
             }
@@ -1999,6 +2027,16 @@ public actor DesktopBridgeClient {
         if let captureConfigurationAttempt {
             Self.observeCaptureConfigurationResponse(response, connectedEngine: captureConfigurationEngine,
                                                      attempt: captureConfigurationAttempt)
+        }
+        if let shootingSettingAttempt, response.statusCode == 200 {
+            guard let object = try? decodeShootingSettingJSONObject(response.body),
+                  CameraShootingSettingWire.observe(object, engine: captureConfigurationEngine,
+                      attempt: shootingSettingAttempt) else {
+                throw DesktopBridgeError.invalidResponse("Bridge returned an invalid setting outcome envelope.")
+            }
+        }
+        if shootingSettingAttempt != nil || shootingSettingRead {
+            guard response.statusCode == 200 else { throw DesktopBridgeError.invalidResponse("Setting evidence requires HTTP 200.") }
         }
         let responseError = (200..<300).contains(response.statusCode)
             ? nil : Self.httpError(response: response, method: method, url: url, preservingProtocolStrings: recordingCommand != nil)
@@ -2049,7 +2087,9 @@ public actor DesktopBridgeClient {
             )
         }
         let decoded: Any?
-        if captureConfigurationAttempt != nil || captureConfigurationRead {
+        if shootingSettingAttempt != nil || shootingSettingRead {
+            decoded = try? decodeShootingSettingJSONObject(response.body)
+        } else if captureConfigurationAttempt != nil || captureConfigurationRead {
             decoded = try? decodeForegroundJSONObject(response.body)
         } else if mediaMetadata {
             decoded = try? CameraMediaMetadataJSON.decode(response.body)

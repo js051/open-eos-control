@@ -108,6 +108,7 @@ final class CameraAppState: ObservableObject {
     }
     @Published private(set) var snapshot: CameraSnapshot? {
         didSet {
+            shootingSettingObservationRevision &+= 1
             liveViewMagnification = snapshot?.capabilities.liveView.currentMagnification
             if recordingRecovery != nil {
                 captureMode = .video
@@ -277,6 +278,12 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var deletedMediaName: String?
     @Published private(set) var lastClockSyncAt: Date?
     @Published private(set) var lastCreatedDirectoryName: String?
+    @Published private(set) var shootingSettingHistory: [ShootingSettingRecord] = []
+    @Published private(set) var shootingSettingCurrentID: UUID?
+    private var shootingSettingActiveID: UUID?
+    private var shootingSettingTask: Task<String?, Never>?
+    private var shootingSettingAttempts: [UUID: CameraShootingSettingAttempt] = [:]
+    private var shootingSettingObservationRevision: UInt64 = 0
     @Published private(set) var captureConfigurationHistory: [CaptureConfigurationRecord] = []
     @Published private(set) var captureConfigurationCurrentID: UUID?
     @Published private(set) var captureConfigurationDraftRevision = UUID()
@@ -298,6 +305,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaFolderFilter = MediaFolderFilter.all
     private var session: CameraSession? {
         didSet {
+            retireShootingSetting()
             retireCaptureConfiguration()
             singleMediaMetadataAttempt?.cancel()
             singleMediaMetadataAttempt = nil
@@ -607,6 +615,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func invalidateConnectionGuidance() {
+        retireShootingSetting()
         retireCaptureConfiguration()
         connectionConfigurationOwner = UUID()
         connectionRecovery = nil
@@ -2126,7 +2135,8 @@ final class CameraAppState: ObservableObject {
         #endif
     }
 
-    func setCaptureMode(_ mode: AppCaptureMode) async {
+    @discardableResult
+    func setCaptureMode(_ mode: AppCaptureMode, draftRevision: UUID? = nil) async -> Bool {
         traceCaptureMode(.request, requested: mode)
         guard captureMode != mode,
               !recordingStopRequired,
@@ -2135,12 +2145,12 @@ final class CameraAppState: ObservableObject {
               !isBusy(.capture),
               !isBusy(.recording) else {
             traceCaptureMode(.rejected, requested: mode)
-            return
+            return false
         }
         guard let setting = capabilities.flatMap({ captureModeSetting($0.settings) }) else {
             traceCaptureMode(.localFallback, requested: mode)
             captureMode = mode
-            return
+            return true
         }
         if setting.key.lowercased() != "moviemode", appCaptureMode(for: setting) == .photo {
             lastPhotoShootingMode = setting.value
@@ -2152,47 +2162,149 @@ final class CameraAppState: ObservableObject {
         ) else {
             traceCaptureMode(.localFallback, requested: mode)
             captureMode = mode
-            return
+            return true
         }
         if target == setting.value {
             traceCaptureMode(.alreadyConfigured, requested: mode)
             captureMode = mode
-            return
+            return true
         }
         traceCaptureMode(.dispatch, requested: mode)
-        await setSetting(key: setting.key, value: target)
+        let consumed = await setSetting(key: setting.key, value: target, draftRevision: draftRevision)
         traceCaptureMode(.settled, requested: mode)
+        return consumed
     }
 
-    func setSetting(key: String, value: String) async {
-        guard let setting = capabilities?.setting(key), setting.accepts(value), begin(.setting) else { return }
+    var shootingSettingRecord: ShootingSettingRecord? {
+        shootingSettingHistory.first { $0.id == shootingSettingCurrentID }
+    }
+    var canStartShootingSetting: Bool {
+        shootingSettingTask == nil && !isBusy(.setting) && !isBusy(.directory)
+            && captureConfigurationTask == nil && (isPreview || shootingSettingCurrentID == nil)
+    }
+    var canPrepareShootingSettingDraft: Bool { shootingSettingTask == nil }
+    func newShootingSettingDraft() {
+        guard canPrepareShootingSettingDraft else { return }
+        shootingSettingCurrentID = nil
+    }
+    func canRecoverShootingSetting(_ id: UUID) -> Bool {
+        guard let record = shootingSettingHistory.first(where: { $0.id == id }) else { return false }
+        return CameraShootingSettingPolicy.canRecover(
+            sameOwner: record.owner == sessionGeneration && record.configurationOwner == connectionConfigurationOwner && !record.retired,
+            writeActive: shootingSettingTask != nil || captureConfigurationTask != nil || !busyOperations.isEmpty,
+            readActive: false, hasRecord: shootingSettingAttempts[id] != nil)
+    }
+    func cancelShootingSetting() {
+        guard let id = shootingSettingActiveID else { return }
+        // Cancellation may suppress a not-yet-dispatched write. It cannot undo
+        // a dispatched command or erase a complete response received afterward.
+        shootingSettingAttempts[id]?.cancel()
+        shootingSettingTask?.cancel()
+        if let index = shootingSettingHistory.firstIndex(where: { $0.id == id }) {
+            shootingSettingHistory[index].cancelled = true
+        }
+    }
+    private func retireShootingSetting() {
+        if shootingSettingActiveID != nil { busyOperations.remove(.setting) }
+        cancelShootingSetting()
+        for index in shootingSettingHistory.indices { shootingSettingHistory[index].retired = true }
+        shootingSettingActiveID = nil
+        shootingSettingCurrentID = nil
+        shootingSettingTask = nil
+    }
+
+    @discardableResult
+    func setSetting(key: String, value: String, draftRevision: UUID? = nil) async -> Bool {
+        guard canStartShootingSetting, let setting = capabilities?.setting(key), setting.accepts(value), begin(.setting) else { return false }
         let generation = sessionGeneration
-        defer { end(.setting, generation: generation) }
-        lastError = nil
+        let configurationOwner = connectionConfigurationOwner
         if isPreview {
-            guard let snapshot else { return }
-            let exposure = snapshot.status.exposure.replacing(key: key, value: value)
-            self.snapshot = CameraSnapshot(
-                info: snapshot.info,
-                status: snapshot.status.replacing(exposure: exposure),
-                capabilities: snapshot.capabilities.replacingSetting(key: key, value: value)
-            )
-            return
+            defer { end(.setting, generation: generation) }
+            guard let snapshot else { return false }
+            self.snapshot = CameraSnapshot(info: snapshot.info,
+                status: snapshot.status.replacing(exposure: snapshot.status.exposure.replacing(key: key, value: value)),
+                capabilities: snapshot.capabilities.replacingSetting(key: key, value: value))
+            return true
         }
-        guard let session else { return }
-        do {
-            let status = try await session.setSetting(key: key, value: value)
-            guard generation == sessionGeneration else { return }
-            let capabilities = try await session.capabilities()
-            guard generation == sessionGeneration else { return }
-            if let snapshot {
-                self.snapshot = CameraSnapshot(info: snapshot.info, status: status, capabilities: capabilities)
-            }
-            lastError = nil
-        } catch {
-            guard generation == sessionGeneration else { return }
-            record(error)
+        guard let session else { end(.setting, generation: generation); return false }
+        let attempt = CameraShootingSettingAttempt(key: key, requestedValue: value)
+        let record = ShootingSettingRecord(owner: generation, configurationOwner: configurationOwner,
+            draftRevision: draftRevision ?? UUID(), outcome: attempt.snapshot)
+        shootingSettingHistory.append(record)
+        if shootingSettingHistory.count > 20 {
+            let removed = shootingSettingHistory.removeFirst()
+            shootingSettingAttempts.removeValue(forKey: removed.id)
         }
+        shootingSettingAttempts[record.id] = attempt
+        shootingSettingCurrentID = record.id
+        shootingSettingActiveID = record.id
+        let observation = shootingSettingObservationRevision
+        let revision = operationRevision
+        let task = Task<String?, Never> {
+            do { try await session.applyShootingSetting(key: key, value: value, attempt: attempt); return nil }
+            catch { return error.localizedDescription }
+        }
+        shootingSettingTask = task
+        let failure = await withTaskCancellationHandler(operation: { await task.value }, onCancel: {
+            attempt.cancel(); task.cancel()
+        })
+        return finishShootingSetting(record: record, attempt: attempt, observation: observation, revision: revision,
+            failed: failure != nil, cancelled: task.isCancelled)
+    }
+
+    func recoverShootingSetting(_ requestedID: UUID? = nil) async {
+        guard let id = requestedID ?? shootingSettingCurrentID, canRecoverShootingSetting(id),
+              let record = shootingSettingHistory.first(where: { $0.id == id }),
+              let attempt = shootingSettingAttempts[id], let session, begin(.setting) else { return }
+        shootingSettingActiveID = id
+        if let index = shootingSettingHistory.firstIndex(where: { $0.id == id }) {
+            shootingSettingHistory[index].running = true
+            shootingSettingHistory[index].reading = true
+        }
+        let observation = shootingSettingObservationRevision
+        let revision = operationRevision
+        let task = Task<String?, Never> {
+            do { try await session.refreshShootingSetting(attempt); return nil }
+            catch { return error.localizedDescription }
+        }
+        shootingSettingTask = task
+        let failure = await withTaskCancellationHandler(operation: { await task.value }, onCancel: { task.cancel() })
+        _ = finishShootingSetting(record: record, attempt: attempt, observation: observation, revision: revision,
+            failed: failure != nil, cancelled: task.isCancelled, recovering: true)
+    }
+
+    private func finishShootingSetting(record: ShootingSettingRecord, attempt: CameraShootingSettingAttempt,
+        observation: UInt64, revision: UInt64, failed: Bool, cancelled: Bool, recovering: Bool = false) -> Bool {
+        guard let index = shootingSettingHistory.firstIndex(where: { $0.id == record.id }) else { return false }
+        shootingSettingHistory[index].outcome = attempt.snapshot
+        shootingSettingHistory[index].running = false
+        shootingSettingHistory[index].reading = false
+        shootingSettingHistory[index].cancelled = shootingSettingHistory[index].cancelled || cancelled
+        let sameOwner = record.owner == sessionGeneration && record.configurationOwner == connectionConfigurationOwner
+        let sameAttempt = shootingSettingActiveID == record.id && (recovering || shootingSettingCurrentID == record.id)
+        let sameObservation = observation == shootingSettingObservationRevision && revision == operationRevision
+        shootingSettingHistory[index].superseded = !sameObservation
+        let current = shootingSettingHistory[index]
+        // Record late evidence on its original bounded history only. An old
+        // operation must not clear a replacement task's busy flag or draft.
+        guard sameOwner, sameAttempt, !current.retired else { return false }
+        shootingSettingActiveID = nil
+        shootingSettingTask = nil
+        end(.setting, generation: record.owner)
+        guard CameraShootingSettingPolicy.canPublish(sameOwner: sameOwner, sameAttempt: sameAttempt,
+            sameObservation: sameObservation, retired: current.retired, cancelled: cancelled) else { return false }
+        if let observed = current.outcome.observedSetting, let snapshot {
+            self.snapshot = CameraSnapshot(info: snapshot.info,
+                status: snapshot.status.replacing(exposure: snapshot.status.exposure.replacing(key: observed.key, value: observed.value)),
+                capabilities: snapshot.capabilities.applyingShootingSetting(observed))
+        }
+        if shootingSettingCurrentID == record.id {
+            let complete = current.outcome.writeEvidence == .responded && current.outcome.readbackEvidence == .matched
+            lastError = failed && !complete ? NSLocalizedString(current.readbackKey, comment: "") : nil
+        }
+        return !recovering && CameraShootingSettingPolicy.canConsumeDraft(sameOwner: sameOwner,
+            sameAttempt: sameAttempt, sameDraftRevision: true, responded: current.outcome.writeEvidence == .responded,
+            matched: current.outcome.readbackEvidence == .matched, retired: current.retired, cancelled: cancelled)
     }
 
     private func prepareCaptureMediaReview(kind: CaptureReviewKind) {
@@ -4247,6 +4359,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func begin(_ operation: CameraOperation) -> Bool {
+        if shootingSettingTask != nil, operation == .directory || operation == .setting || operation == .refresh { return false }
         if captureConfigurationTask != nil, operation == .directory || operation == .setting { return false }
         if foregroundMediaIOOwner != nil { return false }
         if heldAutofocusOwner != nil, operation != .refresh { return false }

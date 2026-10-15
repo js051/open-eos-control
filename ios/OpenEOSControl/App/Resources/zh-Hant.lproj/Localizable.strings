@@ -946,3 +946,24 @@
 "capture_config_readback_matched" = "目前讀回值與要求值一致。";
 "capture_config_readback_mismatch" = "目前讀回值與要求值不同。";
 "capture_config_readback_refreshed" = "目前資料夾設定已重新讀取。";
+
+// Ordinary shooting-setting response and current-value evidence.
+"shooting_setting_not_sent" = "設定指令尚未送出。";
+"shooting_setting_unknown" = "指令結果未明，不能判定失敗或自動重送。";
+"shooting_setting_responded" = "已收到成功的傳輸回應；這不代表目前設定已符合要求。";
+"shooting_setting_not_read" = "尚未讀回目前值。";
+"shooting_setting_unavailable" = "目前無法取得新的設定讀值。";
+"shooting_setting_matched" = "新讀回的值符合要求，但不證明是此次寫入造成。";
+"shooting_setting_mismatch" = "新讀回的值與要求不同。";
+"shooting_setting_reading" = "正在唯讀更新這個設定⋯";
+"shooting_setting_working" = "正在套用一次設定變更⋯";
+"shooting_setting_refresh" = "唯讀更新目前值";
+"shooting_setting_new" = "準備新的變更";
+"shooting_setting_no_replay" = "更新只會讀取。新的寫入需要重新選擇或按下套用。";
+"shooting_setting_history" = "最近的設定變更";
+"shooting_setting_requested" = "要求值：%@";
+"shooting_setting_observed" = "讀回值：%@";
+"shooting_setting_cancelled" = "已取消等待；已送出的寫入仍可能生效。";
+"shooting_setting_retired" = "僅屬原連線；重新連線不會重送此變更。";
+"shooting_setting_superseded" = "目前畫面由較新的觀測或操作負責。";
+"shooting_setting_draft_unavailable" = "草稿選值已不在相機提供的選項中，請重新選擇後套用。";

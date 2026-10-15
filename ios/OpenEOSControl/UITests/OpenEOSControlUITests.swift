@@ -1342,6 +1342,9 @@ final class OpenEOSControlUITests: XCTestCase {
         let iso1600 = app.buttons["setting-value-1600"]
         _ = try XCTUnwrap((iso1600.waitForExistence(timeout: 8)) ? true : nil)
         try tapForAsyncTest(iso1600)
+        let selectedOnly = try await simulatorRequest(path: "/ccapi/test/state")
+        XCTAssertNotEqual((selectedOnly["exposure"] as? [String: Any])?["iso"] as? String, "1600", "Selection alone does not write")
+        try tapForAsyncTest(app.buttons["exposure-setting-apply"])
         try await waitForSimulatorState { state in
             (state["exposure"] as? [String: Any])?["iso"] as? String == "1600"
         }
@@ -1427,9 +1430,11 @@ final class OpenEOSControlUITests: XCTestCase {
                 (state["bulb_stop_count"] as? NSNumber)?.intValue == 1
         }
 
+        try prepareNewShootingSettingForAsyncTest(in: app)
         let captureMode = app.segmentedControls["capture-mode-picker"]
         _ = try XCTUnwrap((captureMode.waitForExistence(timeout: 8)) ? true : nil)
         try tapForAsyncTest(captureMode.buttons["Video"])
+        try tapForAsyncTest(app.buttons["capture-mode-apply"])
         try await waitForSimulatorState { state in
             state["movie_mode"] as? String == "on" &&
                 (state["movie_mode_update_count"] as? NSNumber)?.intValue == 1
@@ -1441,7 +1446,9 @@ final class OpenEOSControlUITests: XCTestCase {
         _ = try XCTUnwrap((waitForLabel(record, containing: "Stop recording", timeout: 15)) ? true : nil)
         try tapForAsyncTest(record)
         try await waitForSimulatorState { state in state["recording"] as? Bool == false }
+        try prepareNewShootingSettingForAsyncTest(in: app)
         try tapForAsyncTest(captureMode.buttons["Photo"])
+        try tapForAsyncTest(app.buttons["capture-mode-apply"])
         try await waitForSimulatorState { state in
             state["movie_mode"] as? String == "off" &&
                 (state["movie_mode_update_count"] as? NSNumber)?.intValue == 2
@@ -1797,6 +1804,7 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertTrue(photo.isSelected, "The mode switch starts with the Photo segment selected")
             XCTAssertFalse(mode.buttons[videoMode].isSelected)
             try tapForAsyncTest(mode.buttons[videoMode])
+            try tapForAsyncTest(app.buttons["capture-mode-apply"])
             do {
                 try await waitForSimulatorState { state in state["movie_mode"] as? String == "on" }
             } catch {
@@ -2971,6 +2979,17 @@ final class OpenEOSControlUITests: XCTestCase {
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    @MainActor
+    private func prepareNewShootingSettingForAsyncTest(in app: XCUIApplication) throws {
+        let result = app.buttons["shooting-setting-open-result"]
+        guard result.exists else { return }
+        try tapForAsyncTest(result)
+        let prepare = app.buttons["shooting-setting-new"]
+        _ = try XCTUnwrap(waitForInteraction(prepare, timeout: 8) ? true : nil)
+        try tapForAsyncTest(prepare)
+        try tapForAsyncTest(app.buttons["Done"])
     }
 
     private func waitForSimulatorState(

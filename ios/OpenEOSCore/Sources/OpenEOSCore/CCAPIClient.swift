@@ -953,6 +953,19 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     }
 
     public func setSetting(key: String, value: String) async throws -> CameraStatus {
+        try await writeShootingSetting(key: key, value: value)
+        return try await status()
+    }
+
+    public func applyShootingSetting(key: String, value: String, attempt: CameraShootingSettingAttempt) async throws {
+        attempt.readbackUnavailable()
+        try await writeShootingSetting(key: key, value: value, attempt: attempt)
+        try Task.checkCancellation()
+        try await refreshShootingSetting(attempt)
+    }
+
+    private func writeShootingSetting(key: String, value: String, attempt: CameraShootingSettingAttempt? = nil) async throws {
+        try attempt?.validate(key: key, value: value)
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
         // A refresh that predates this command cannot later publish stale
@@ -960,25 +973,40 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         retireShootingSettingsReads()
         try await ensureInitialized()
         if resolvedMode == .simulator {
+            if attempt != nil {
+                let advertised = try await requestJSON(path: "/ccapi/capabilities", timeoutInterval: 15,
+                    maximumBytes: 64 * 1024, shootingSettingRead: true)
+                let values: [String]
+                if Self.primarySettingKeys.contains(key) {
+                    values = advertised[key == "whitebalance" ? "white_balance" : key] as? [String] ?? []
+                } else if let object = advertised[key] as? JSONDictionary,
+                          let observed = shootingSettingObservation(object, key: key, field: nil) {
+                    values = observed.values
+                } else { values = [] }
+                guard values.contains(where: { $0.utf8.elementsEqual(value.utf8) }) else {
+                    throw CCAPIError.invalidSetting(key: key, value: value)
+                }
+            }
             switch key {
             case "iso", "shutter", "aperture":
-                _ = try await requestJSON(path: "/ccapi/exposure", method: .patch, json: [key: value])
+                _ = try await requestJSON(path: "/ccapi/exposure", method: .patch, json: [key: value], shootingSettingAttempt: attempt)
             case "whitebalance":
                 _ = try await requestJSON(
                     path: "/ccapi/white-balance",
                     method: .patch,
-                    json: ["white_balance": value]
+                    json: ["white_balance": value],
+                    shootingSettingAttempt: attempt
                 )
             case Self.zoomSettingKey:
                 guard let zoom = Int(value), String(zoom) == value, (0...100).contains(zoom) else {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
-                _ = try await requestJSON(path: "/ccapi/zoom", method: .post, json: ["value": zoom])
+                _ = try await requestJSON(path: "/ccapi/zoom", method: .post, json: ["value": zoom], shootingSettingAttempt: attempt)
             case Self.movieModeSettingKey:
                 guard Self.movieModeValues.contains(value) else {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
-                try await requestOK(path: "/ccapi/movie-mode", method: .post, json: ["action": value])
+                try await requestOK(path: "/ccapi/movie-mode", method: .post, json: ["action": value], shootingSettingAttempt: attempt)
             case Self.stillCardSelectionSettingKey:
                 guard Self.cardSelectionValues.contains(value) else {
                     throw CCAPIError.invalidSetting(key: key, value: value)
@@ -986,7 +1014,8 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 try await requestOK(
                     path: "/ccapi/card-selection/stillimage",
                     method: .put,
-                    json: ["value": value]
+                    json: ["value": value],
+                    shootingSettingAttempt: attempt
                 )
             case Self.movieCardSelectionSettingKey:
                 guard Self.cardSelectionValues.contains(value) else {
@@ -995,14 +1024,15 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 try await requestOK(
                     path: "/ccapi/card-selection/movie",
                     method: .put,
-                    json: ["value": value]
+                    json: ["value": value],
+                    shootingSettingAttempt: attempt
                 )
             case let deviceKey where Self.deviceFunctionSettingKeys.contains(deviceKey):
                 guard let endpoint = Self.deviceFunctionSettingEndpoints.first(where: { $0.key == deviceKey }),
                       endpoint.values.subtracting(Set([Self.autoPowerOffImmediately])).contains(value) else {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
-                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value])
+                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value], shootingSettingAttempt: attempt)
             case let soundLevelKey where Self.soundRecordingLevelSettingKeys.contains(soundLevelKey):
                 guard let endpoint = Self.soundRecordingLevelEndpoints.first(where: { $0.key == soundLevelKey }),
                       let level = Int(value),
@@ -1013,20 +1043,21 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 try await requestOK(
                     path: endpoint.simulatorPath,
                     method: .put,
-                    json: ["value": level]
+                    json: ["value": level],
+                    shootingSettingAttempt: attempt
                 )
             case let soundKey where Self.soundRecordingSettingKeys.contains(soundKey):
                 guard let endpoint = Self.soundRecordingEndpoints.first(where: { $0.key == soundKey }),
                       endpoint.values.contains(value) else {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
-                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value])
+                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value], shootingSettingAttempt: attempt)
             case let focusKey where Self.focusBracketingStringSettingKeys.contains(focusKey):
                 guard let endpoint = Self.focusBracketingStringEndpoints.first(where: { $0.key == focusKey }),
                       endpoint.values.contains(value) else {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
-                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value])
+                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value], shootingSettingAttempt: attempt)
             case let focusKey where Self.focusBracketingIntegerSettingKeys.contains(focusKey):
                 guard let endpoint = Self.focusBracketingIntegerEndpoints.first(where: { $0.key == focusKey }),
                       let integer = Int(value),
@@ -1034,26 +1065,47 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                       Self.simulatorFocusBracketingValues[focusKey]?.contains(value) == true else {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
-                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": integer])
+                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": integer], shootingSettingAttempt: attempt)
             case let movieKey where Self.movieSettingKeys.contains(movieKey):
                 guard let endpoint = Self.movieSettingEndpoints.first(where: { $0.key == movieKey }),
                       Self.simulatorMovieSettingValues[movieKey]?.contains(value) == true else {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
-                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value])
+                try await requestOK(path: endpoint.simulatorPath, method: .put, json: ["value": value], shootingSettingAttempt: attempt)
             case Self.directorySelectionSettingKey:
                 guard Self.isValidDirectorySelection(value) else {
                     throw CCAPIError.invalidSetting(key: key, value: value)
                 }
-                try await requestOK(path: "/ccapi/directory-selection", method: .put, json: ["value": value])
+                try await requestOK(path: "/ccapi/directory-selection", method: .put, json: ["value": value], shootingSettingAttempt: attempt)
             default:
                 throw CCAPIError.unsupported(.advancedSettings)
             }
             observedFeatures.insert(featureForSetting(key))
-            return try await status()
+            return
         }
 
-        if Self.cardSelectionSettingKeys.contains(key.lowercased()) ||
+        var settings = cachedSettings
+        if let attempt {
+            let structured = structuredSettingParts(key)
+            let candidates = structured.map { [$0.baseKey] } ?? shootingSettingAliases(for: key)
+            guard let baseKey = candidates.first(where: { settingPaths[$0] != nil }), let path = settingPaths[baseKey] else {
+                throw CCAPIError.invalidSetting(key: key, value: value)
+            }
+            try prepareShootingSettingRoute(path: path, attempt: attempt)
+            let raw = try await readShootingSettingObject(path: path, baseKey: baseKey, field: structured?.field)
+            if let structured, !validShootingSettingSiblings(raw, baseKey: structured.baseKey) {
+                throw CCAPIError.invalidSetting(key: key, value: value)
+            }
+            guard let fresh = shootingSettingObservation(raw, key: key, field: structured?.field),
+                  fresh.values.contains(where: { $0.utf8.elementsEqual(value.utf8) }),
+                  !(key == "autopoweroff" && value == Self.autoPowerOffImmediately) else {
+                throw CCAPIError.invalidSetting(key: key, value: value)
+            }
+            // Pass only this fresh selected object to the existing payload builders.
+            var selected = cachedSettings ?? [:]
+            selected[baseKey] = structured == nil ? ["value": fresh.value, "ability": fresh.values] : raw
+            settings = selected
+        } else if Self.cardSelectionSettingKeys.contains(key.lowercased()) ||
             Self.deviceFunctionSettingKeys.contains(key.lowercased()) ||
             Self.soundRecordingSettingKeys.contains(key.lowercased()) ||
             Self.soundRecordingLevelSettingKeys.contains(key.lowercased()) ||
@@ -1066,50 +1118,190 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         }
         // Use one committed value/route view after all required reads. A
         // concurrent invalidation remains a closed gate, never a stale fallback.
-        let settings = cachedSettings
+        if attempt == nil { settings = cachedSettings }
         guard let control = cameraSettings(settings).first(where: { $0.key == key }),
               control.values.contains(value) else {
             throw CCAPIError.invalidSetting(key: key, value: value)
         }
         if key == Self.movieModeSettingKey {
-            guard let path = settingPaths[Self.movieModeSettingKey] else {
+            guard let path = attempt?.readRoute?.writePath ?? settingPaths[Self.movieModeSettingKey] else {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
-            try await requestOK(path: path, method: .post, json: ["action": value])
+            try await requestOK(path: path, method: .post, json: ["action": value], shootingSettingAttempt: attempt)
             invalidateShootingSettingsCache()
         } else if key == Self.zoomSettingKey {
-            guard let path = settingPaths[Self.zoomSettingKey],
+            guard let path = attempt?.readRoute?.writePath ?? settingPaths[Self.zoomSettingKey],
                   let zoom = Int(value), String(zoom) == value else {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
-            _ = try await requestJSON(path: path, method: .post, json: ["value": zoom])
+            _ = try await requestJSON(path: path, method: .post, json: ["value": zoom], shootingSettingAttempt: attempt)
             invalidateShootingSettingsCache()
         } else if Self.soundRecordingLevelSettingKeys.contains(key) {
-            guard let path = settingPaths[key],
+            guard let path = attempt?.readRoute?.writePath ?? settingPaths[key],
                   let level = Int(value), String(level) == value else {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
-            _ = try await requestJSON(path: path, method: .put, json: ["value": level])
+            _ = try await requestJSON(path: path, method: .put, json: ["value": level], shootingSettingAttempt: attempt)
             invalidateShootingSettingsCache()
         } else if Self.focusBracketingIntegerSettingKeys.contains(key) {
-            guard let path = settingPaths[key],
+            guard let path = attempt?.readRoute?.writePath ?? settingPaths[key],
                   let integer = Int(value), String(integer) == value else {
                 throw CCAPIError.invalidSetting(key: key, value: value)
             }
-            _ = try await requestJSON(path: path, method: .put, json: ["value": integer])
+            _ = try await requestJSON(path: path, method: .put, json: ["value": integer], shootingSettingAttempt: attempt)
             invalidateShootingSettingsCache()
         } else if let structured = structuredSettingParts(key) {
             try await putStructuredSettingValue(
                 settings: settings,
                 baseKey: structured.baseKey,
                 field: structured.field,
-                value: value
+                value: value,
+                shootingSettingAttempt: attempt
             )
         } else {
-            try await putSettingValue(candidateKeys: aliases(for: key), value: value)
+            try await putSettingValue(candidateKeys: shootingSettingAliases(for: key), value: value, shootingSettingAttempt: attempt)
         }
         observedFeatures.insert(featureForSetting(key))
-        return try await status()
+        return
+    }
+
+    private func shootingSettingAliases(for key: String) -> [String] {
+        switch key {
+        case "shutter": return ["shutter", "shutterspeed", "tv"]
+        case "aperture": return ["aperture", "av"]
+        case "whitebalance": return ["whitebalance", "white_balance", "wb"]
+        default: return [key]
+        }
+    }
+
+    private func shootingSettingRoute(path: String, baseKey: String, field: String?) -> CameraShootingSettingRoute? {
+        if operations.contains(CCAPIOperation(method: .get, path: path)) {
+            return CameraShootingSettingRoute(writePath: path, path: path, baseKey: baseKey, field: field, aggregate: false, simulator: false)
+        }
+        // An aggregate endpoint is usable only when advertised for this exact version.
+        let suffix = "/shooting/settings/" + baseKey
+        if path.hasSuffix(suffix) {
+            let aggregate = String(path.dropLast(baseKey.count + 1))
+            if operations.contains(CCAPIOperation(method: .get, path: aggregate)) {
+                return CameraShootingSettingRoute(writePath: path, path: aggregate, baseKey: baseKey, field: field, aggregate: true, simulator: false)
+            }
+        }
+        return nil
+    }
+
+    private func prepareShootingSettingRoute(path: String, attempt: CameraShootingSettingAttempt) throws {
+        let key = attempt.snapshot.key
+        if resolvedMode == .simulator {
+            try attempt.configure(CameraShootingSettingRoute(writePath: path, path: "/ccapi/capabilities", baseKey: key,
+                field: nil, aggregate: true, simulator: true))
+        } else {
+            let structured = structuredSettingParts(key)
+            let baseKey = structured?.baseKey ?? String(path.split(separator: "/").last ?? Substring(key))
+            if let route = shootingSettingRoute(path: path, baseKey: baseKey, field: structured?.field) {
+                try attempt.configure(route)
+            }
+        }
+    }
+
+    private func readShootingSettingObject(path: String, baseKey: String, field: String?) async throws -> JSONDictionary {
+        guard let route = shootingSettingRoute(path: path, baseKey: baseKey, field: field) else {
+            throw CCAPIError.invalidResponse("Camera did not advertise a read for this exact setting route.")
+        }
+        let raw = try await requestJSON(path: route.path, timeoutInterval: 15, maximumBytes: 64 * 1024,
+                                        shootingSettingRead: true)
+        guard let value = route.aggregate ? raw[baseKey] as? JSONDictionary : raw else {
+            throw CCAPIError.invalidResponse("Camera omitted the requested setting object.")
+        }
+        return value
+    }
+
+    public func refreshShootingSetting(_ attempt: CameraShootingSettingAttempt) async throws {
+        attempt.readbackUnavailable()
+        try Task.checkCancellation()
+        guard !closing, let route = attempt.readRoute else {
+            throw CCAPIError.invalidResponse("No original setting read route is available.")
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(15))
+        let raw = try await requestJSON(path: route.path, timeoutInterval: 15, maximumBytes: 64 * 1024,
+                                        shootingSettingRead: true)
+        let key = attempt.snapshot.key
+        let object: JSONDictionary
+        if route.simulator, Self.primarySettingKeys.contains(key) {
+            let abilityKey = key == "whitebalance" ? "white_balance" : key
+            guard let ability = raw[abilityKey] as? [String] else {
+                throw CCAPIError.invalidResponse("Simulator omitted this setting's abilities.")
+            }
+            let remaining = ContinuousClock.now.duration(to: deadline)
+            let seconds = Double(remaining.components.seconds) + Double(remaining.components.attoseconds) / 1e18
+            guard seconds > 0 else { throw CCAPIError.invalidResponse("Setting readback exceeded its deadline.") }
+            let status = try await requestJSON(path: "/ccapi/status", timeoutInterval: seconds,
+                maximumBytes: 64 * 1024, shootingSettingRead: true)
+            guard let exposure = status["exposure"] as? JSONDictionary,
+                  let value = exposure[abilityKey] as? String else {
+                throw CCAPIError.invalidResponse("Simulator omitted the current setting value.")
+            }
+            object = ["value": value, "ability": ability]
+        } else if route.aggregate {
+            guard let value = raw[route.baseKey] as? JSONDictionary else {
+                throw CCAPIError.invalidResponse("Camera omitted the requested setting.")
+            }
+            object = value
+        } else { object = raw }
+        guard ContinuousClock.now < deadline else { throw CCAPIError.invalidResponse("Setting readback exceeded its deadline.") }
+        try Task.checkCancellation()
+        guard !closing, let observed = shootingSettingObservation(object, key: key, field: route.field) else {
+            throw CCAPIError.invalidResponse("Camera returned an invalid current setting value or ability.")
+        }
+        attempt.observe(observed)
+    }
+
+    private func validShootingSettingSiblings(_ object: JSONDictionary, baseKey: String) -> Bool {
+        guard let current = object["value"] as? JSONDictionary,
+              let ability = object["ability"] as? JSONDictionary,
+              Set(current.keys) == Set(ability.keys), !current.isEmpty else { return false }
+        if baseKey == Self.wbShiftSettingKey {
+            guard Set(current.keys) == Set(Self.wbShiftFields) else { return false }
+            return Self.wbShiftFields.allSatisfy { field in
+                guard let value = Self.strictInteger(current[field]), let range = ability[field] as? JSONDictionary,
+                      Set(range.keys) == Set(["min", "max", "step"]) else { return false }
+                return Self.boundedIntegerRangeValues(range).contains(String(value))
+            }
+        }
+        guard baseKey == Self.imageQualitySettingKey,
+              Set(current.keys).isSubset(of: Set(Self.imageQualityFields)) else { return false }
+        return current.keys.allSatisfy { field in
+            guard let value = current[field] as? String, CameraShootingSettingValue.validString(value),
+                  let values = ability[field] as? [String], (1...1024).contains(values.count),
+                  values.allSatisfy({ !$0.isEmpty && CameraShootingSettingValue.validString($0) }),
+                  Set(values.map { Data($0.utf8) }).count == values.count else { return false }
+            return values.contains(where: { $0.utf8.elementsEqual(value.utf8) })
+        }
+    }
+
+    private func shootingSettingObservation(_ object: JSONDictionary, key: String, field: String?) -> CameraSetting? {
+        var normalized = object
+        if let field {
+            let baseKey = key.hasPrefix(Self.wbShiftSettingKey + ".") ? Self.wbShiftSettingKey : Self.imageQualitySettingKey
+            guard validShootingSettingSiblings(object, baseKey: baseKey), let current = object["value"] as? JSONDictionary,
+                  let ability = object["ability"] as? JSONDictionary else { return nil }
+            if key.hasPrefix(Self.wbShiftSettingKey + ".") {
+                guard let value = Self.strictInteger(current[field]), let range = ability[field] as? JSONDictionary else { return nil }
+                normalized = ["value": String(value), "ability": Self.boundedIntegerRangeValues(range)]
+            } else {
+                guard let value = current[field] as? String, let values = ability[field] as? [String] else { return nil }
+                normalized = ["value": value, "ability": values]
+            }
+        } else if key == Self.movieModeSettingKey {
+            guard let value = object["status"] as? String ?? object["value"] as? String,
+                  Self.movieModeValues.contains(value) else { return nil }
+            normalized = ["value": value, "ability": Array(Self.movieModeValues).sorted()]
+        } else if object["value"] is NSNumber {
+            guard let range = Self.validatedIntegerRangeSetting(object) else { return nil }
+            normalized = range
+        }
+        guard let value = normalized["value"] as? String,
+              let values = normalized["ability"] as? [String] else { return nil }
+        return CameraShootingSettingValue.parse(["key": key, "label": Self.settingLabel(key), "value": value, "values": values, "inputKind": "choice"], key: key)
     }
 
     public func createDirectory(name: String, attempt: CameraCaptureConfigurationAttempt? = nil) async throws -> String {
@@ -4342,38 +4534,31 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         return CameraSetting(key: key, label: label, value: current, values: options)
     }
 
-    private func putSettingValue(candidateKeys: [String], value: String) async throws {
+    private func putSettingValue(candidateKeys: [String], value: String,
+                                 shootingSettingAttempt: CameraShootingSettingAttempt? = nil) async throws {
         if !settingsLoaded { _ = try await loadShootingSettings() }
-        let paths = candidateKeys.compactMap { settingPaths[$0] }.removingDuplicates()
-        guard !paths.isEmpty else {
-            throw CCAPIError.invalidResponse(
-                "Camera did not advertise a writable setting for \(candidateKeys.joined(separator: ", "))."
-            )
+        guard let path = shootingSettingAttempt?.readRoute?.writePath ?? candidateKeys.compactMap({ settingPaths[$0] }).first else {
+            throw CCAPIError.invalidResponse("Camera did not advertise this writable setting.")
         }
-        var failures: [String] = []
-        for path in paths {
-            do {
-                try await requestOK(path: path, method: .put, json: ["value": value])
-                return
-            } catch {
-                if error is CancellationError { throw error }
-                failures.append("\(path): \(error.localizedDescription)")
-            }
-        }
-        throw CCAPIError.invalidResponse(
-            "Setting write failed for '\(value)'.\n" + failures.map { "- \($0)" }.joined(separator: "\n")
-        )
+        // A failed response never authorizes an alias retry of the same logical write.
+        try await requestOK(path: path, method: .put, json: ["value": value], shootingSettingAttempt: shootingSettingAttempt)
     }
 
     private func putStructuredSettingValue(
         settings: JSONDictionary?,
         baseKey: String,
         field: String,
-        value: String
+        value: String,
+        shootingSettingAttempt: CameraShootingSettingAttempt? = nil
     ) async throws {
-        guard let path = settingPaths[baseKey],
-              let setting = settings?.object(baseKey),
-              let current = setting.object("value") else {
+        guard let path = shootingSettingAttempt?.readRoute?.writePath ?? settingPaths[baseKey] else {
+            throw CCAPIError.invalidSetting(key: "\(baseKey).\(field)", value: value)
+        }
+        // The outcome path supplies the fresh preflight object, including all
+        // siblings. Legacy API callers retain their existing object semantics.
+        guard let fresh = settings?.object(baseKey), let control = (baseKey == Self.wbShiftSettingKey ? structuredWBShiftControls(fresh) : structuredImageQualityControls(fresh))
+                .first(where: { $0.key == "\(baseKey).\(field)" }), control.accepts(value),
+              let current = fresh.object("value") else {
             throw CCAPIError.invalidSetting(key: "\(baseKey).\(field)", value: value)
         }
         var updated = current
@@ -4397,7 +4582,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 throw CCAPIError.invalidSetting(key: "\(baseKey).\(field)", value: value)
             }
         }
-        try await requestOK(path: path, method: .put, json: ["value": updated])
+        try await requestOK(path: path, method: .put, json: ["value": updated], shootingSettingAttempt: shootingSettingAttempt)
     }
 
     private func structuredSettingParts(_ key: String) -> (baseKey: String, field: String)? {
@@ -5174,13 +5359,21 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         maximumBytes: Int? = nil,
         mediaMetadata: Bool = false,
         captureConfigurationAttempt: CameraCaptureConfigurationAttempt? = nil,
-        captureConfigurationRead: Bool = false
+        captureConfigurationRead: Bool = false,
+        shootingSettingAttempt: CameraShootingSettingAttempt? = nil,
+        shootingSettingRead: Bool = false
     ) async throws -> JSONDictionary {
         let request = try request(path: path, method: method, json: json, timeoutInterval: timeoutInterval)
-        let readDeadline = captureConfigurationRead ? ContinuousClock.now.advanced(by: .seconds(timeoutInterval)) : nil
+        let readDeadline = (captureConfigurationRead || shootingSettingRead) ? ContinuousClock.now.advanced(by: .seconds(timeoutInterval)) : nil
         try captureConfigurationAttempt?.markDispatched()
+        if let shootingSettingAttempt {
+            try prepareShootingSettingRoute(path: path, attempt: shootingSettingAttempt)
+            try shootingSettingAttempt.markDispatched()
+        }
         let response: CameraHTTPResponse
-        if captureConfigurationAttempt != nil || captureConfigurationRead {
+        if shootingSettingAttempt != nil || shootingSettingRead {
+            response = try await transport.sendShootingSetting(request)
+        } else if captureConfigurationAttempt != nil || captureConfigurationRead {
             response = try await transport.sendCaptureConfiguration(request)
         } else {
             response = try await transport.send(request)
@@ -5188,13 +5381,18 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         if let readDeadline, ContinuousClock.now >= readDeadline {
             throw CCAPIError.invalidResponse("Capture configuration readback exceeded its bounded deadline.")
         }
-        if captureConfigurationAttempt != nil || captureConfigurationRead {
+        if captureConfigurationAttempt != nil || captureConfigurationRead || shootingSettingAttempt != nil || shootingSettingRead {
             try CameraHTTPResponseIntegrity.validate(response, requestMethod: method.rawValue)
             guard response.statusCode != 206, response.header("content-range") == nil else {
                 throw CCAPIError.invalidResponse("Capture configuration requires a complete response.")
             }
         }
+        if shootingSettingRead, response.statusCode != 200 { throw CCAPIError.invalidResponse("Setting readback requires HTTP 200.") }
+        if shootingSettingAttempt != nil || shootingSettingRead {
+            guard response.body.count <= 64 * 1024 else { throw CCAPIError.invalidResponse("Setting response exceeded 64 KiB.") }
+        }
         try validate(response, request: request)
+        shootingSettingAttempt?.responded()
         if captureConfigurationAttempt != nil, response.body.count > 64 * 1024 {
             throw CCAPIError.invalidResponse("Capture configuration acknowledgment exceeded its size limit.")
         }
@@ -5202,6 +5400,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             throw CCAPIError.invalidResponse("Camera response at \(path) exceeded the \(maximumBytes)-byte limit.")
         }
         do {
+            if shootingSettingAttempt != nil || shootingSettingRead { return try decodeShootingSettingJSONObject(response.body) }
             if captureConfigurationAttempt != nil || captureConfigurationRead { return try decodeForegroundJSONObject(response.body) }
             return try mediaMetadata ? CameraMediaMetadataJSON.decode(response.body) : decodeJSONObject(response.body)
         } catch let error as CCAPIError {
@@ -5231,11 +5430,24 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         method: HTTPMethod,
         json: JSONDictionary? = nil,
         timeoutInterval: TimeInterval = 10,
-        expectedStatusCode: Int? = nil
+        expectedStatusCode: Int? = nil,
+        shootingSettingAttempt: CameraShootingSettingAttempt? = nil
     ) async throws {
         let request = try request(path: path, method: method, json: json, timeoutInterval: timeoutInterval)
-        let response = try await transport.send(request)
+        if let shootingSettingAttempt {
+            try prepareShootingSettingRoute(path: path, attempt: shootingSettingAttempt)
+            try shootingSettingAttempt.markDispatched()
+        }
+        let response: CameraHTTPResponse
+        if shootingSettingAttempt != nil { response = try await transport.sendShootingSetting(request) }
+        else { response = try await transport.send(request) }
+        if shootingSettingAttempt != nil {
+            try CameraHTTPResponseIntegrity.validate(response, requestMethod: method.rawValue)
+            guard response.statusCode != 206, response.header("content-range") == nil,
+                  response.body.count <= 64 * 1024 else { throw CCAPIError.invalidResponse("Setting response was incomplete or oversized.") }
+        }
         try validate(response, request: request)
+        shootingSettingAttempt?.responded()
         if let expectedStatusCode, response.statusCode != expectedStatusCode {
             throw CCAPIError.invalidResponse(
                 "Camera request \(method.rawValue) \(path) returned HTTP \(response.statusCode); " +

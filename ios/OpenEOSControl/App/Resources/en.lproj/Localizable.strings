@@ -946,3 +946,24 @@
 "capture_config_readback_matched" = "The current readback matches the requested value.";
 "capture_config_readback_mismatch" = "The current readback differs from the requested value.";
 "capture_config_readback_refreshed" = "Current directory settings were refreshed.";
+
+// Ordinary shooting-setting response and current-value evidence.
+"shooting_setting_not_sent" = "Setting command was not sent.";
+"shooting_setting_unknown" = "The command result is unknown. Do not assume it failed or resend automatically.";
+"shooting_setting_responded" = "A successful transport response was received. This is not proof of the current setting.";
+"shooting_setting_not_read" = "Current value has not been read.";
+"shooting_setting_unavailable" = "Fresh current value is unavailable.";
+"shooting_setting_matched" = "Fresh observed value matches the request; it does not prove causation.";
+"shooting_setting_mismatch" = "Fresh observed value differs from the request.";
+"shooting_setting_reading" = "Reading this setting only…";
+"shooting_setting_working" = "Applying one setting change…";
+"shooting_setting_refresh" = "Read current value";
+"shooting_setting_new" = "Prepare new change";
+"shooting_setting_no_replay" = "Refresh only reads. A new change requires a new explicit selection or Apply.";
+"shooting_setting_history" = "Recent setting changes";
+"shooting_setting_requested" = "Requested: %@";
+"shooting_setting_observed" = "Observed: %@";
+"shooting_setting_cancelled" = "Cancelled observation; any dispatched write may already have taken effect.";
+"shooting_setting_retired" = "Original connection only. Reconnect does not replay this change.";
+"shooting_setting_superseded" = "A newer observation or operation owns the current display.";
+"shooting_setting_draft_unavailable" = "The selected draft is no longer in the advertised choices. Select again before applying.";

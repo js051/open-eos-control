@@ -112,6 +112,20 @@ enum CameraSession: Sendable {
         }
     }
 
+    func applyShootingSetting(key: String, value: String, attempt: CameraShootingSettingAttempt) async throws {
+        switch self {
+        case let .ccapi(client): try await client.applyShootingSetting(key: key, value: value, attempt: attempt)
+        case let .desktopBridge(client): try await client.applyShootingSetting(key: key, value: value, attempt: attempt)
+        }
+    }
+
+    func refreshShootingSetting(_ attempt: CameraShootingSettingAttempt) async throws {
+        switch self {
+        case let .ccapi(client): try await client.refreshShootingSetting(attempt)
+        case let .desktopBridge(client): try await client.refreshShootingSetting(attempt)
+        }
+    }
+
     func setSetting(key: String, value: String) async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.setSetting(key: key, value: value)
