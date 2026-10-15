@@ -119,17 +119,25 @@ enum CameraSession: Sendable {
         }
     }
 
-    func createDirectory(name: String) async throws -> String {
+    func createDirectory(name: String, attempt: CameraCaptureConfigurationAttempt? = nil) async throws -> String {
         switch self {
-        case let .ccapi(client): return try await client.createDirectory(name: name)
-        case let .desktopBridge(client): return try await client.createDirectory(name: name)
+        case let .ccapi(client): return try await client.createDirectory(name: name, attempt: attempt)
+        case let .desktopBridge(client): return try await client.createDirectory(name: name, attempt: attempt)
         }
     }
 
-    func setFileNaming(field: CameraFileNamingField, value: String) async throws -> CameraFileNaming {
+    func setFileNaming(field: CameraFileNamingField, value: String,
+                       attempt: CameraCaptureConfigurationAttempt? = nil) async throws -> CameraFileNaming {
         switch self {
-        case let .ccapi(client): return try await client.setFileNaming(field: field, value: value)
-        case let .desktopBridge(client): return try await client.setFileNaming(field: field, value: value)
+        case let .ccapi(client): return try await client.setFileNaming(field: field, value: value, attempt: attempt)
+        case let .desktopBridge(client): return try await client.setFileNaming(field: field, value: value, attempt: attempt)
+        }
+    }
+
+    func refreshCaptureConfiguration(_ attempt: CameraCaptureConfigurationAttempt) async throws {
+        switch self {
+        case let .ccapi(client): try await client.refreshCaptureConfiguration(attempt)
+        case let .desktopBridge(client): try await client.refreshCaptureConfiguration(attempt)
         }
     }
 

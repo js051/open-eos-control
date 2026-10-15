@@ -1112,7 +1112,9 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         return try await status()
     }
 
-    public func createDirectory(name: String) async throws -> String {
+    public func createDirectory(name: String, attempt: CameraCaptureConfigurationAttempt? = nil) async throws -> String {
+        let attempt = attempt ?? CameraCaptureConfigurationAttempt(operation: .createDirectory, requestedValue: name)
+        try attempt.validate(operation: .createDirectory, value: name)
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
@@ -1124,7 +1126,8 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             response = try await requestJSON(
                 path: "/ccapi/directory",
                 method: .post,
-                json: ["directoryname": name]
+                json: ["directoryname": name],
+                captureConfigurationAttempt: attempt
             )
         } else {
             guard let operations = directoryOperations() else {
@@ -1133,23 +1136,34 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             response = try await requestJSON(
                 path: operations.create.path,
                 method: operations.create.method,
-                json: ["directoryname": name]
+                json: ["directoryname": name],
+                captureConfigurationAttempt: attempt
             )
         }
-        let created = response.string("directoryname")
-        guard Self.isValidCreatedDirectoryName(created) else {
+        guard let created = response["directoryname"] as? String,
+              Self.isValidCreatedDirectoryName(created) else {
             throw CCAPIError.invalidResponse("Canon directory creation returned an invalid directory name.")
         }
+        attempt.acknowledge(created)
         observedFeatures.insert(.directoryControl)
-        invalidateShootingSettingsCache()
-        if resolvedMode != .simulator { _ = try await loadShootingSettings() }
+        // Retire in-flight aggregate reads, but retain unrelated cached fields.
+        // Only the canonical directoryselection GET can supply readback proof.
+        retireShootingSettingsReads()
+        if resolvedMode != .simulator {
+            attempt.readbackUnavailable()
+            try Task.checkCancellation()
+            try await refreshCaptureConfiguration(attempt)
+        }
         return created
     }
 
     public func setFileNaming(
         field: CameraFileNamingField,
-        value: String
+        value: String,
+        attempt: CameraCaptureConfigurationAttempt? = nil
     ) async throws -> CameraFileNaming {
+        let attempt = attempt ?? CameraCaptureConfigurationAttempt(operation: .setFileNaming, requestedValue: value, field: field)
+        try attempt.validate(operation: .setFileNaming, value: value, field: field)
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
@@ -1174,11 +1188,17 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             let response = try await requestJSON(
                 path: "/ccapi/file-naming/\(field.rawValue)",
                 method: .put,
-                json: ["value": value]
+                json: ["value": value],
+                captureConfigurationAttempt: attempt
             )
             guard let naming = Self.validatedBridgeFileNaming(response) else {
                 throw CCAPIError.invalidResponse("Simulator returned an invalid file-naming state.")
             }
+            guard naming.value(for: field) == value else {
+                throw CCAPIError.invalidResponse("Simulator returned a mismatched file-naming update.")
+            }
+            attempt.acknowledge(value)
+            attempt.observe(naming)
             updated = naming
         } else {
             guard let operations = fileNamingOperations(),
@@ -1199,7 +1219,8 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             let response = try await requestJSON(
                 path: operation.write.path,
                 method: operation.write.method,
-                json: [endpoint.responseKey: requestValue]
+                json: [endpoint.responseKey: requestValue],
+                captureConfigurationAttempt: attempt
             )
             let responseMatches: Bool
             if let integer = requestValue as? Int {
@@ -1210,10 +1231,14 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             guard responseMatches else {
                 throw CCAPIError.invalidResponse("Canon file-naming control returned an invalid update response.")
             }
+            attempt.acknowledge(value)
+            attempt.readbackUnavailable()
+            try Task.checkCancellation()
             fileNamingLoaded = false
-            guard let naming = try await loadFileNaming(force: true) else {
+            guard let naming = try await loadFileNaming(force: true, captureConfigurationRead: true) else {
                 throw CCAPIError.invalidResponse("Canon file-naming control returned an invalid state after update.")
             }
+            attempt.observe(naming)
             updated = naming
         }
         guard updated.value(for: field) == value else {
@@ -1223,6 +1248,74 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         fileNamingLoaded = true
         observedFeatures.insert(.fileNamingControl)
         return updated
+    }
+
+    /// Explicit recovery only reads the original client's advertised resources.
+    /// It cannot dispatch a write or turn observation into missing ACK evidence.
+    public func refreshCaptureConfiguration(_ attempt: CameraCaptureConfigurationAttempt) async throws {
+        try Task.checkCancellation()
+        try await ensureInitialized()
+        let outcome = attempt.snapshot
+        attempt.readbackUnavailable()
+        if outcome.operation == .setFileNaming {
+            let naming: CameraFileNaming?
+            if resolvedMode == .simulator {
+                naming = try await simulatorCapabilities(captureConfigurationRead: true).fileNaming
+            } else {
+                naming = try await readCaptureFileNaming()
+            }
+            guard let naming else { throw CCAPIError.invalidResponse("File-naming readback is unavailable.") }
+            try Task.checkCancellation()
+            guard !closing else { throw CancellationError() }
+            cachedFileNaming = naming
+            fileNamingLoaded = true
+            observedFeatures.insert(.fileNamingControl)
+            attempt.observe(naming)
+        } else if resolvedMode == .simulator {
+            guard let selection = try await simulatorCapabilities(captureConfigurationRead: true).setting(Self.directorySelectionSettingKey) else {
+                throw CCAPIError.invalidResponse("Capture directory readback is unavailable.")
+            }
+            try Task.checkCancellation()
+            attempt.observe(selection)
+        } else {
+            guard let operations = directoryOperations() else { throw CCAPIError.unsupported(.directoryControl) }
+            let raw = try await requestJSON(path: operations.read.path, timeoutInterval: 15, maximumBytes: 64 * 1024,
+                                            captureConfigurationRead: true)
+            guard let normalized = Self.validatedDirectorySelectionSetting(raw),
+                  let selection = control(Self.directorySelectionSettingKey,
+                      Self.settingLabel(Self.directorySelectionSettingKey), normalized) else {
+                throw CCAPIError.invalidResponse("Capture directory readback is invalid.")
+            }
+            try Task.checkCancellation()
+            guard !closing else { throw CancellationError() }
+            cachedSettings = (cachedSettings ?? [:]).merging([Self.directorySelectionSettingKey: normalized]) { _, new in new }
+            settingPaths[Self.directorySelectionSettingKey] = operations.write.path
+            observedFeatures.insert(.directoryControl)
+            attempt.observe(selection)
+        }
+    }
+
+    private func readCaptureFileNaming() async throws -> CameraFileNaming? {
+        guard let operations = fileNamingOperations() else { return nil }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(15))
+        var responses: [CameraFileNamingField: JSONDictionary] = [:]
+        for endpoint in Self.fileNamingEndpoints {
+            try Task.checkCancellation()
+            let duration = ContinuousClock.now.duration(to: deadline).components
+            let remaining = Double(duration.seconds) + Double(duration.attoseconds) / 1e18
+            guard let operation = operations[endpoint.field], remaining > 0 else {
+                throw CCAPIError.invalidResponse("File-naming readback exceeded its bounded deadline.")
+            }
+            responses[endpoint.field] = try await requestJSON(path: operation.read.path,
+                timeoutInterval: min(10, remaining), maximumBytes: 64 * 1024, captureConfigurationRead: true)
+            guard ContinuousClock.now < deadline else {
+                throw CCAPIError.invalidResponse("File-naming readback exceeded its bounded deadline.")
+            }
+        }
+        guard ContinuousClock.now < deadline else {
+            throw CCAPIError.invalidResponse("File-naming readback exceeded its bounded deadline.")
+        }
+        return Self.validatedCanonicalFileNaming(responses)
     }
 
     public func sleepCamera() async throws {
@@ -3900,7 +3993,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         return cachedSettings
     }
 
-    private func loadFileNaming(force: Bool = false) async throws -> CameraFileNaming? {
+    private func loadFileNaming(force: Bool = false, captureConfigurationRead: Bool = false) async throws -> CameraFileNaming? {
         if fileNamingLoaded, !force { return cachedFileNaming }
         observedFeatures.remove(.fileNamingControl)
         guard let operations = fileNamingOperations() else {
@@ -3910,8 +4003,10 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         }
         var responses: [CameraFileNamingField: JSONDictionary] = [:]
         for endpoint in Self.fileNamingEndpoints {
+            try Task.checkCancellation()
             guard let operation = operations[endpoint.field],
-                  let response = try await firstJSON(paths: [operation.read.path], required: false) else {
+                  let response = try await firstJSON(paths: [operation.read.path], required: false,
+                                                     captureConfigurationRead: captureConfigurationRead) else {
                 cachedFileNaming = nil
                 fileNamingLoaded = true
                 return nil
@@ -4193,15 +4288,15 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     }
 
     private static func isValidDirectoryCreateName(_ value: String) -> Bool {
-        value.range(of: #"^(?:[A-Z0-9_]{5})?$"#, options: .regularExpression) != nil
+        CameraCaptureConfigurationValue.directorySuffix(value, allowEmpty: true)
     }
 
     private static func isValidCreatedDirectoryName(_ value: String) -> Bool {
-        value.range(of: #"^[A-Z0-9_]{5}$"#, options: .regularExpression) != nil
+        CameraCaptureConfigurationValue.directorySuffix(value)
     }
 
     private static func isValidDirectorySelection(_ value: String) -> Bool {
-        value.range(of: #"^[0-9]{3}[A-Z0-9_]{5}$"#, options: .regularExpression) != nil
+        CameraCaptureConfigurationValue.directorySelection(value)
     }
 
     private static func validatedStringAbilitySetting(
@@ -4509,8 +4604,9 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         if let primaryFailure { throw primaryFailure }
     }
 
-    private func simulatorCapabilities() async throws -> CameraCapabilities {
-        let value = try await requestJSON(path: "/ccapi/capabilities")
+    private func simulatorCapabilities(captureConfigurationRead: Bool = false) async throws -> CameraCapabilities {
+        let value = try await requestJSON(path: "/ccapi/capabilities", maximumBytes: captureConfigurationRead ? 64 * 1024 : nil,
+                                          captureConfigurationRead: captureConfigurationRead)
         let fileNaming = value.object("fileNaming").flatMap(Self.validatedBridgeFileNaming)
         let simulatorMagnifications: [LiveViewMagnification] = {
             guard let liveView = value.object("liveView"),
@@ -5043,12 +5139,14 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     }
 
     private func firstJSON(paths: [String], required: Bool,
-                           preservingConnectionEvidence: Bool = false) async throws -> JSONDictionary? {
+                           preservingConnectionEvidence: Bool = false,
+                           captureConfigurationRead: Bool = false) async throws -> JSONDictionary? {
         var failures: [String] = []
         var reasons = Set<CameraConnectionFailureReason>()
         for path in paths {
             do {
-                let result = try await requestJSON(path: path)
+                let result = try await requestJSON(path: path, maximumBytes: captureConfigurationRead ? 64 * 1024 : nil,
+                                                   captureConfigurationRead: captureConfigurationRead)
                 if preservingConnectionEvidence { try Task.checkCancellation() }
                 return result
             } catch {
@@ -5074,15 +5172,37 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         json: JSONDictionary? = nil,
         timeoutInterval: TimeInterval = 10,
         maximumBytes: Int? = nil,
-        mediaMetadata: Bool = false
+        mediaMetadata: Bool = false,
+        captureConfigurationAttempt: CameraCaptureConfigurationAttempt? = nil,
+        captureConfigurationRead: Bool = false
     ) async throws -> JSONDictionary {
         let request = try request(path: path, method: method, json: json, timeoutInterval: timeoutInterval)
-        let response = try await transport.send(request)
+        let readDeadline = captureConfigurationRead ? ContinuousClock.now.advanced(by: .seconds(timeoutInterval)) : nil
+        try captureConfigurationAttempt?.markDispatched()
+        let response: CameraHTTPResponse
+        if captureConfigurationAttempt != nil || captureConfigurationRead {
+            response = try await transport.sendCaptureConfiguration(request)
+        } else {
+            response = try await transport.send(request)
+        }
+        if let readDeadline, ContinuousClock.now >= readDeadline {
+            throw CCAPIError.invalidResponse("Capture configuration readback exceeded its bounded deadline.")
+        }
+        if captureConfigurationAttempt != nil || captureConfigurationRead {
+            try CameraHTTPResponseIntegrity.validate(response, requestMethod: method.rawValue)
+            guard response.statusCode != 206, response.header("content-range") == nil else {
+                throw CCAPIError.invalidResponse("Capture configuration requires a complete response.")
+            }
+        }
         try validate(response, request: request)
+        if captureConfigurationAttempt != nil, response.body.count > 64 * 1024 {
+            throw CCAPIError.invalidResponse("Capture configuration acknowledgment exceeded its size limit.")
+        }
         if let maximumBytes, response.body.count > maximumBytes {
             throw CCAPIError.invalidResponse("Camera response at \(path) exceeded the \(maximumBytes)-byte limit.")
         }
         do {
+            if captureConfigurationAttempt != nil || captureConfigurationRead { return try decodeForegroundJSONObject(response.body) }
             return try mediaMetadata ? CameraMediaMetadataJSON.decode(response.body) : decodeJSONObject(response.body)
         } catch let error as CCAPIError {
             throw error

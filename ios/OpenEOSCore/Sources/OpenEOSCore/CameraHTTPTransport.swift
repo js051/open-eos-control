@@ -114,6 +114,7 @@ public struct CameraHTTPStreamResponse: Sendable {
 public protocol CameraHTTPTransport: Sendable {
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse
     func sendMediaDelete(_ request: URLRequest) async throws -> CameraHTTPResponse
+    func sendCaptureConfiguration(_ request: URLRequest) async throws -> CameraHTTPResponse
     func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse
     func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse
     func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse
@@ -132,6 +133,12 @@ public extension CameraHTTPTransport {
     /// Custom transports must preserve one logical send. Production URLSession
     /// uses its dedicated no-redirect, non-replayable DELETE task below.
     func sendMediaDelete(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        try await send(request)
+    }
+
+    /// Deterministic/custom transports keep one invocation; production uses the
+    /// scoped no-replay task. No fallback to ordinary send after any failure.
+    func sendCaptureConfiguration(_ request: URLRequest) async throws -> CameraHTTPResponse {
         try await send(request)
     }
 
@@ -290,6 +297,10 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
 
     public func sendMediaDelete(_ request: URLRequest) async throws -> CameraHTTPResponse {
         try await CameraHTTPDeleteTask(configuration: streamConfiguration).run(request)
+    }
+
+    public func sendCaptureConfiguration(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        try await CameraHTTPCaptureConfigurationTask(configuration: streamConfiguration).run(request)
     }
 
     public func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse {
