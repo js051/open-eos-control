@@ -28,6 +28,7 @@ from .engine_registry import LocalEngineRegistry
 from .errors import BridgeError, unsupported
 from .gphoto2 import GPhoto2Engine
 from .media_listing import MediaListingStreams, accepts_media_stream
+from .media_metadata import media_response_content_type
 from .media_streaming import (
     InvalidMediaRange,
     MediaPlaybackCache,
@@ -386,7 +387,9 @@ def create_app(
         elif size_bytes > 0:
             headers["Content-Length"] = str(size_bytes)
         if request.method == "HEAD":
-            return Response(status_code=status_code, media_type=item.content_type, headers=headers)
+            return Response(
+                status_code=status_code, media_type=media_response_content_type(item.content_type), headers=headers,
+            )
         return StreamingResponse(
             _staged_media_chunks(
                 staged,
@@ -403,7 +406,7 @@ def create_app(
                 ),
             ),
             status_code=status_code,
-            media_type=item.content_type,
+            media_type=media_response_content_type(item.content_type),
             headers=headers,
             background=None if cache_owned else BackgroundTask(_remove_staged_media, staged),
         )

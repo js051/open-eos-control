@@ -127,12 +127,12 @@ function runDateContract() {
     item("before", "IMG_1.JPG", "2024-02-28"),
     item("raw", "IMG_2.CR3", "2024-02-29T12:00:00"),
     item("jpeg", "IMG_2.JPG", "2024-02-29T12:00:00"),
-    item("video", "CLIP.MP4", "2024-02-29T23:59:59.999"),
+    item("video", "CLIP.MP4", "2024-02-29T23:59:59.999", "video"),
     item("date-only", "IMG_3.JPG", "2024-02-29"),
     item("after", "IMG_4.JPG", "2024-03-01"),
     item("unknown", "IMG_5.JPG"),
     item("invalid", "IMG_6.JPG", "2024-04-31"),
-    item("unknown-video", "CLIP_2.MOV"),
+    item("unknown-video", "CLIP_2.MOV", null, "video"),
   ];
   const snapshot = JSON.stringify(rangeItems);
   const filtered = mediaLibrary.itemsForDisplay(rangeItems, "all", "camera", "en-US", oneDay);
@@ -207,7 +207,7 @@ function run() {
     item("photo", "IMG_1.JPG"),
     item("kind", "CLIP.bin", null, "video"),
     item("mime", "CLIP.data", null, "other", "video/mp4"),
-    item("extension", "CLIP.MP4"),
+    item("extension", "CLIP.MP4", null, "unknown"),
   ];
   assert.deepEqual(
     mediaLibrary.itemsForDisplay(videos, "video", "name", "en-US").map(({ id }) => id),

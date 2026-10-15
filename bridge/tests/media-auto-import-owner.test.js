@@ -130,7 +130,7 @@ function fixture(options = {}) {
         entered.metadata.resolve();
         if (options.metadataGate) await options.metadataGate.promise;
         const sizeBytes = options.sizes?.[metadata++] ?? 3;
-        return Response.json({ ...added, sizeBytes }, { headers: options.missingHeader === "metadata" ? {} : { "X-Open-EOS-Fresh-Metadata": "v1" } });
+        return Response.json({ ...added, sizeBytes, ...(options.metadataFields || {}) }, { headers: options.missingHeader === "metadata" ? {} : { "X-Open-EOS-Fresh-Metadata": "v1" } });
       }
       assert.ok(url.endsWith("?attempt=single"), "one strict original path, with no fallback");
       entered.original.resolve();
@@ -452,7 +452,7 @@ test("close rejection and abort failure remain uncertain and never become saved"
 
 test("rendering uses literal destination and filenames, with localized unknown stop reasons", async () => {
   const c = fixture({ directoryName: "<img src=x> $& {name}" });
-  c.added.name = "<b>synthetic</b>.JPG";
+  c.added.name = "<img src=x>.JPG";
   await c.stableCandidate();
   await c.step(7000);
   assert.match(c.ui.mediaAutoImportDestination.textContent, /<img src=x>/);
@@ -796,4 +796,68 @@ test("details completion, details close and preview close refresh stopped import
   assert.equal(c.timers.size, 0);
   assert.equal(c.calls.picker, 1);
   assert.equal(originalCalls(c).length, 0);
+});
+
+
+test("fresh type contradictions stop the real owner before creating destination or requesting an original", async () => {
+  for (const metadataFields of [{ kind: "video" }, { kind: "raw" }, { kind: "IMAGE" },
+    { name: "OTHER.JPG" }, { contentType: "video/mp4" }, { contentType: "image/jpg" },
+    { contentType: "application/octet-stream" }, { contentType: " " }, { contentType: "image/jpeg; x=\n" }]) {
+    const c = fixture({ metadataFields }); await c.stableCandidate(); await c.step(7000);
+    assert.equal(originalCalls(c).length, 0); assert.equal(c.calls.directories, 0);
+    assert.equal(c.calls.raw.length, 0); assert.equal(c.calls.history.length, 0);
+  }
+});
+
+test("unknown or contradictory media cannot enter gallery/latest image decode paths", async () => {
+  for (const item of [{ id: "unknown", name: "FILE.bin", kind: "unknown" },
+    { id: "conflict", name: "FRAME.JPG", kind: "video" },
+    { id: "audio", name: "SOUND.wav", kind: "audio" }]) {
+    const c = fixture(); await c.context.loadMediaThumbnail(item);
+    c.state.latestMediaItem = item; c.state.latestMediaGeneration = 1;
+    await c.context.loadLatestMediaThumbnail(item, 1, c.state.session.id, new AbortController().signal);
+    assert.equal(c.calls.requests.length, 0);
+  }
+});
+
+test("cached thumbnail URLs cannot render an image after same-ID classification becomes unknown or conflicting", () => {
+  const c = fixture(), created = [];
+  c.context.mediaIsVideo = mediaLibrary.isVideo;
+  c.document.createElement = (tag) => { created.push(tag); return element(); };
+  vm.runInContext(extract("renderMediaThumbnail") + "\n" + extract("renderLatestMedia"), c.context);
+  const container = element(); container.classList = { toggle() {} };
+  for (const item of [{ ...c.base, kind: "video" }, { ...c.base, name: "FILE.bin", kind: "unknown" }]) {
+    c.context.renderMediaThumbnail(container, item, "blob:previously-valid-image");
+    c.state.latestMediaItem = item; c.state.latestMediaThumbnailUrl = "blob:previously-valid-image";
+    c.context.renderLatestMedia();
+  }
+  assert.equal(created.includes("img"), false);
+  c.context.renderMediaThumbnail(container, c.base, "blob:photo");
+  c.context.renderMediaThumbnail(container, { ...c.base, name: "CLIP.MP4", kind: "video" }, "blob:video-poster");
+  assert.equal(created.filter((tag) => tag === "img").length, 2, "valid photo and video-poster paths remain supported");
+});
+
+test("late gallery thumbnail does not publish after same-ID name or classification changes", async () => {
+  for (const changes of [{ kind: "video" }, { name: "OTHER.JPG" }, { kind: "unknown", name: "FILE.bin" }]) {
+    const gate = deferred(), c = fixture({ thumbnailGate: gate });
+    const container = element(); container.dataset.mediaId = c.base.id; c.ui.mediaList.children = [container];
+    const pending = c.context.loadMediaThumbnail(c.base); await c.entered.thumbnail.promise;
+    c.state.media = [{ ...c.base, ...changes }]; gate.resolve(); await pending;
+    assert.equal(c.state.mediaThumbnailUrls.size, 0);
+    assert.equal(c.state.mediaThumbnailLoads.size, 0);
+  }
+});
+
+test("late latest-photo thumbnail and a queued request recheck current name/type before decode", async () => {
+  for (const queued of [false, true]) {
+    const gate = deferred(), c = fixture(queued ? {} : { thumbnailGate: gate });
+    c.state.latestMediaItem = c.base; c.state.latestMediaGeneration = 1; c.state.latestMediaThumbnailUrl = null;
+    if (queued) c.state.mediaAutoImportReading = { readSettled: gate.promise };
+    const pending = c.context.loadLatestMediaThumbnail(c.base, 1, c.state.session.id, new AbortController().signal);
+    if (!queued) await c.entered.thumbnail.promise;
+    c.state.latestMediaItem = { ...c.base, kind: "video" };
+    c.state.mediaAutoImportReading = null; gate.resolve(); await pending;
+    assert.equal(c.state.latestMediaThumbnailUrl, null);
+    assert.equal(c.calls.requests.length, queued ? 0 : 1);
+  }
 });
