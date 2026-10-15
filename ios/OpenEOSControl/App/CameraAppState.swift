@@ -214,7 +214,26 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var downloadedFileName: String?
     @Published private(set) var activeMediaDownloadID: String?
     @Published private(set) var mediaDownloadProgress: CameraMediaTransferProgress?
-    @Published private(set) var selectedMediaItems: [CameraMediaItem] = []
+    private var mediaSelectionTokens: [Data: UUID] = [:]
+    @Published private(set) var selectedMediaItems: [CameraMediaItem] = [] {
+        didSet {
+            let identities = Set(selectedMediaItems.map(mediaItemIdentity))
+            mediaSelectionTokens = mediaSelectionTokens.filter { identities.contains($0.key) }
+            for identity in identities where mediaSelectionTokens[identity] == nil { mediaSelectionTokens[identity] = UUID() }
+        }
+    }
+    @Published private(set) var mediaDeleteRuns: [MediaDeleteRun] = []
+    @Published private(set) var mediaDeleteRejection: MediaDeleteReason?
+    private var mediaDeleteHistoryEpoch = UUID()
+    private var mediaDeleteBridgeEngine: String?
+    private var mediaDeleteBridgeEndpoint: String?
+    private var mediaDeleteToken: UUID?
+    private let mediaDeleteBeforeDispatch: (@MainActor (Int, CameraMediaDeleteAttempt) -> Void)?
+    private let mediaDeleteBeforeItem: (@MainActor (Int) -> Void)?
+    private let mediaDeleteAfterResponse: (@MainActor () async -> Void)?
+    private var mediaDeleteAttempt: CameraMediaDeleteAttempt?
+    private(set) var mediaDeleteTask: Task<Void, Never>?
+
     @Published private(set) var mediaMetadataBatches: [MediaMetadataBatchRun] = []
     @Published private(set) var mediaMetadataBatchRejection: MediaMetadataBatchRejection?
     private var mediaMetadataHistoryEpoch = UUID()
@@ -275,6 +294,9 @@ final class CameraAppState: ObservableObject {
             singleMediaMetadataAttempt?.cancel()
             singleMediaMetadataAttempt = nil
             retireMediaMetadataBatch()
+            retireMediaDelete()
+            mediaDeleteBridgeEngine = nil
+            mediaDeleteBridgeEndpoint = nil
             resetMediaBatchState()
             selectedMediaItems = []
             exportGeneration = UUID()
@@ -468,10 +490,16 @@ final class CameraAppState: ObservableObject {
         foregroundMedia: ForegroundMediaController? = nil,
         foregroundFiles: ForegroundFilesDelivery? = nil,
         latestMediaReviewDelay: (@Sendable (UInt64) async throws -> Void)? = nil,
-        mediaMetadataBeforeItem: (@MainActor (Int) -> Void)? = nil
+        mediaMetadataBeforeItem: (@MainActor (Int) -> Void)? = nil,
+        mediaDeleteBeforeItem: (@MainActor (Int) -> Void)? = nil,
+        mediaDeleteBeforeDispatch: (@MainActor (Int, CameraMediaDeleteAttempt) -> Void)? = nil,
+        mediaDeleteAfterResponse: (@MainActor () async -> Void)? = nil
     ) {
         self.defaults = defaults
         self.mediaMetadataBeforeItem = mediaMetadataBeforeItem
+        self.mediaDeleteBeforeItem = mediaDeleteBeforeItem
+        self.mediaDeleteBeforeDispatch = mediaDeleteBeforeDispatch
+        self.mediaDeleteAfterResponse = mediaDeleteAfterResponse
         self.latestMediaReviewDelay = latestMediaReviewDelay
         self.foregroundMedia = foregroundMedia ?? ForegroundMediaController()
         self.foregroundFiles = foregroundFiles ?? ForegroundFilesDelivery()
@@ -700,6 +728,8 @@ final class CameraAppState: ObservableObject {
             }
             let release = await newSession.shutterReleaseState()
             let liveViewStop = await newSession.liveViewStopState()
+            let deleteEngine = await newSession.mediaDeleteEngine()
+            let deleteEndpoint = await newSession.mediaDeleteBridgeEndpoint()
             guard generation == sessionGeneration else { return }
             if Task.isCancelled || configurationOwner != connectionConfigurationOwner {
                 let release = await newSession.closeWithShutterReleaseState()
@@ -709,6 +739,8 @@ final class CameraAppState: ObservableObject {
                 return
             }
             snapshot = newSnapshot
+            mediaDeleteBridgeEngine = deleteEngine
+            mediaDeleteBridgeEndpoint = deleteEndpoint
             liveViewStopState = liveViewStop
             applyShutterReleaseState(release)
             isPreview = false
@@ -1079,6 +1111,7 @@ final class CameraAppState: ObservableObject {
             cancelMediaWorklistContinuation()
             if mediaBatchContinuationActive { cancelMediaBatchDownload() }
             cancelMediaMetadataBatch()
+            cancelMediaDelete()
             foregroundMedia.stop(reason: .background)
             stopLiveViewLoop()
         } else if let session {
@@ -3700,25 +3733,217 @@ final class CameraAppState: ObservableObject {
         }
     }
 
+    var canPrepareMediaDelete: Bool {
+        !isPreview && applicationActive && connected && session != nil
+            && !mediaLibraryLoading && !isBusy(.media) && !shutterReleaseRequired
+    }
+
+    func makeMediaDeleteDraft(items: [CameraMediaItem]? = nil, displayed: [CameraMediaItem], owner: UUID) -> MediaDeleteDraft? {
+        guard owner == mediaLibrarySessionID, canPrepareMediaDelete, let session else { return nil }
+        let selection = items ?? selectedMediaItems
+        guard !selection.isEmpty else { return nil }
+        var seen = Set<Data>()
+        let visible = Set(displayed.map(mediaItemIdentity))
+        let rows = selection.filter { seen.insert(mediaItemIdentity($0)).inserted }.map { snapshot in
+            let current = currentDeleteItem(snapshot.id)
+            let item = current ?? snapshot
+            let source = MediaDeleteSource.resolve(item, usesBridge: session.mediaDeleteUsesBridge, bridgeEngine: mediaDeleteBridgeEngine)
+            return MediaDeleteRow(item: item, source: source, selectionToken: mediaSelectionTokens[mediaItemIdentity(item)],
+                loadedAtConfirmation: current != nil, qualificationUnknown: item.protected == nil || item.writable == nil,
+                skipReason: MediaDeleteEligibility.reason(snapshot: item, current: current, source: source,
+                    currentSource: source, supported: supports(.mediaDelete)))
+        }
+        return MediaDeleteDraft(owner: owner, generation: sessionGeneration, historyEpoch: mediaDeleteHistoryEpoch,
+            ownerLabel: (snapshot?.info.model ?? "") + " · " + (session.mediaDeleteUsesBridge ? "Desktop Bridge · " + (mediaDeleteBridgeEndpoint ?? "") : "CCAPI"),
+            rows: rows, hiddenCount: rows.filter { $0.loadedAtConfirmation && !visible.contains(mediaItemIdentity($0.item)) }.count)
+    }
+
+    private func currentDeleteItem(_ id: String) -> CameraMediaItem? {
+        let identity = Data(id.utf8)
+        return mediaItems.first { mediaItemIdentity($0) == identity }
+            ?? [mediaPreviewItem, latestMediaItem].compactMap { $0 }.first { mediaItemIdentity($0) == identity }
+    }
+
+    /// Only a newly confirmed, immutable review can admit this one-shot executor.
+    @discardableResult
+    func startMediaDelete(_ draft: MediaDeleteDraft, confirmed: Bool) -> Bool {
+        guard confirmed, !draft.rows.isEmpty, !mediaDeleteRuns.contains(where: { $0.id == draft.id }) else { return false }
+        let roster = CameraMediaDeletePolicy.roster(draft.rows.map { $0.item.id })
+        guard roster.allowed else { mediaDeleteRejection = roster.reason == "too-many" ? .limit : .invalid; return false }
+        if draft.historyEpoch != mediaDeleteHistoryEpoch { mediaDeleteRejection = .staleReview; return false }
+        if draft.rows.count > MediaDeleteHistory.maximumBatchRows { mediaDeleteRejection = .limit; return false }
+        mediaDeleteRejection = nil
+        var run = MediaDeleteRun(id: draft.id, owner: draft.owner, ownerLabel: draft.ownerLabel,
+            hiddenCount: draft.hiddenCount, unloadedCount: draft.unloadedCount, rows: draft.rows)
+        let stale = draft.owner != mediaLibrarySessionID || draft.generation != sessionGeneration
+        guard CameraMediaDeletePolicy.admits(openingOwner: draft.owner, currentOwner: mediaLibrarySessionID,
+            confirmed: confirmed, consumed: false, busy: isBusy(.media)),
+              !stale, canPrepareMediaDelete, let session else {
+            run.running = false; run.ownerRetired = stale
+            for index in run.rows.indices { run.rows[index].reason = stale ? .ownerChanged : .blocked }
+            // Never shift an active executor's history indices for a denied admission.
+            if !mediaDeleteRuns.contains(where: { $0.running }), reserveMediaDeleteHistory(rows: draft.rows.count) {
+                mediaDeleteRuns.append(run)
+            }
+            mediaDeleteRejection = stale ? .ownerChanged : .blocked
+            return false
+        }
+        guard reserveMediaDeleteHistory(rows: draft.rows.count), begin(.media) else { return false }
+        mediaDeleteRuns.append(run)
+        mediaDeleteToken = draft.id
+        mediaDeleteTask = Task { [weak self] in await self?.performMediaDelete(draft, session: session) }
+        return true
+    }
+
+    private func reserveMediaDeleteHistory(rows: Int) -> Bool {
+        guard !mediaDeleteRuns.contains(where: { $0.running }) else { mediaDeleteRejection = .blocked; return false }
+        var retainedRows = mediaDeleteRuns.reduce(0) { $0 + $1.rows.count }
+        var evicted = 0
+        while mediaDeleteRuns.count - evicted >= MediaDeleteHistory.maximumBatches
+            || rows > MediaDeleteHistory.maximumRows - retainedRows {
+            guard evicted < mediaDeleteRuns.count, !mediaDeleteRuns[evicted].running else {
+                mediaDeleteRejection = .capacity; return false
+            }
+            retainedRows -= mediaDeleteRuns[evicted].rows.count
+            evicted += 1
+        }
+        if evicted > 0 {
+            mediaDeleteRuns.removeFirst(evicted) // Whole oldest batches only.
+            // Eviction must not make an old confirmation reusable after its run
+            // ID leaves history. Invalidate every previously opened review.
+            mediaDeleteHistoryEpoch = UUID()
+        }
+        return true
+    }
+
+    /// Compatibility for immediate internal actions/tests. User UI always opens
+    /// MediaDeleteReview with an opening owner and consumes that exact draft.
     func deleteMedia(_ item: CameraMediaItem) async {
-        guard !mediaLibraryLoading, supports(.mediaDelete), begin(.media) else { return }
-        let generation = sessionGeneration
-        defer { end(.media, generation: generation) }
         if isPreview {
-            applyDeletedMedia(item)
-            lastError = nil
+            guard !mediaLibraryLoading, supports(.mediaDelete), begin(.media) else { return }
+            defer { end(.media) }
+            applyDeletedMedia(item, owner: mediaLibrarySessionID, selectionToken: mediaSelectionTokens[mediaItemIdentity(item)])
             return
         }
-        guard let session else { return }
-        do {
-            try await session.deleteMedia(item)
-            guard generation == sessionGeneration else { return }
-            applyDeletedMedia(item)
-            lastError = nil
-        } catch {
-            guard generation == sessionGeneration else { return }
-            record(error)
+        guard let draft = makeMediaDeleteDraft(items: [item], displayed: [item], owner: mediaLibrarySessionID),
+              startMediaDelete(draft, confirmed: true) else { return }
+        await mediaDeleteTask?.value
+    }
+
+    func cancelMediaDelete() {
+        guard let token = mediaDeleteToken, let index = mediaDeleteRuns.firstIndex(where: { $0.id == token }) else { return }
+        mediaDeleteRuns[index].cancellationRequested = true
+        mediaDeleteAttempt?.cancel()
+        // Do not discard an ACK racing cancellation. Await this sole invocation;
+        // only remaining, not-yet-dispatched rows are stopped.
+        for row in mediaDeleteRuns[index].rows.indices where mediaDeleteRuns[index].rows[row].status == .notStarted && !mediaDeleteRuns[index].rows[row].applying {
+            mediaDeleteRuns[index].rows[row].reason = .cancelled
         }
+    }
+
+    private func retireMediaDelete() {
+        for index in mediaDeleteRuns.indices { mediaDeleteRuns[index].ownerRetired = true }
+        guard let token = mediaDeleteToken, let index = mediaDeleteRuns.firstIndex(where: { $0.id == token }) else { return }
+        mediaDeleteAttempt?.cancel()
+        mediaDeleteTask?.cancel()
+        for row in mediaDeleteRuns[index].rows.indices {
+            if mediaDeleteRuns[index].rows[row].applying {
+                mediaDeleteRuns[index].rows[row].status = mediaDeleteAttempt?.outcome ?? .notSent
+                mediaDeleteRuns[index].rows[row].applying = false
+                mediaDeleteRuns[index].rows[row].reason = mediaDeleteRuns[index].rows[row].status == .confirmed ? nil : .ownerChanged
+            } else if mediaDeleteRuns[index].rows[row].status == .notStarted {
+                mediaDeleteRuns[index].rows[row].reason = .ownerChanged
+            }
+        }
+        mediaDeleteRuns[index].running = false
+        mediaDeleteToken = nil; mediaDeleteAttempt = nil; mediaDeleteTask = nil
+        end(.media)
+    }
+
+    private func performMediaDelete(_ draft: MediaDeleteDraft, session: CameraSession) async {
+        func owns() -> Bool {
+            mediaDeleteToken == draft.id && draft.owner == mediaLibrarySessionID && draft.generation == sessionGeneration
+        }
+        guard owns(), let batch = mediaDeleteRuns.firstIndex(where: { $0.id == draft.id }) else { return }
+        defer {
+            if owns() {
+                mediaDeleteRuns[batch].running = false
+                mediaDeleteToken = nil; mediaDeleteAttempt = nil; mediaDeleteTask = nil
+                end(.media, generation: draft.generation)
+            }
+        }
+        for (index, row) in draft.rows.enumerated() {
+            mediaDeleteBeforeItem?(index)
+            guard owns() else { return }
+            guard !Task.isCancelled, !mediaDeleteRuns[batch].cancellationRequested, applicationActive else {
+                for rest in mediaDeleteRuns[batch].rows.indices where rest >= index { mediaDeleteRuns[batch].rows[rest].reason = .cancelled }
+                return
+            }
+            let current = row.loadedAtConfirmation ? currentDeleteItem(row.item.id) : nil
+            let currentSource = current.map { MediaDeleteSource.resolve($0, usesBridge: session.mediaDeleteUsesBridge, bridgeEngine: mediaDeleteBridgeEngine) } ?? .unknown
+            if let reason = row.skipReason ?? MediaDeleteEligibility.reason(snapshot: row.item, current: current,
+                source: row.source, currentSource: currentSource, supported: supports(.mediaDelete)) {
+                mediaDeleteRuns[batch].rows[index].status = .skipped
+                mediaDeleteRuns[batch].rows[index].reason = reason
+                continue
+            }
+            guard !shutterReleaseRequired else {
+                for rest in mediaDeleteRuns[batch].rows.indices where rest >= index { mediaDeleteRuns[batch].rows[rest].reason = .blocked }
+                return
+            }
+            let attempt = CameraMediaDeleteAttempt()
+            mediaDeleteAttempt = attempt
+            mediaDeleteRuns[batch].rows[index].applying = true
+            mediaDeleteRuns[batch].rows[index].attemptID = attempt.id
+            mediaDeleteBeforeDispatch?(index, attempt)
+            do { try await session.deleteMedia(row.item, attempt: attempt) } catch { /* Evidence, not generic error type, decides outcome. */ }
+            await mediaDeleteAfterResponse?()
+            // Receipt storage is not a current-session side effect. A retired
+            // owner may settle only this exact retained row/attempt, never resume.
+            settleMediaDeleteReceipt(draft: draft, row: row, attempt: attempt)
+            guard owns() else { return }
+            let outcome = attempt.outcome
+            if outcome == .confirmed { applyDeletedMedia(row.item, owner: draft.owner, selectionToken: row.selectionToken) }
+            mediaDeleteAttempt = nil
+            if outcome == .uncertain || outcome == .notSent {
+                for rest in mediaDeleteRuns[batch].rows.indices where rest > index { mediaDeleteRuns[batch].rows[rest].reason = outcome == .uncertain ? .uncertain : .notSent }
+                return // No retry, unprotect, compensation or implicit continuation.
+            }
+            await Task.yield()
+        }
+    }
+
+    private func settleMediaDeleteReceipt(draft: MediaDeleteDraft, row: MediaDeleteRow, attempt: CameraMediaDeleteAttempt) {
+        guard let batch = mediaDeleteRuns.firstIndex(where: { $0.id == draft.id && $0.owner == draft.owner }),
+              let index = mediaDeleteRuns[batch].rows.firstIndex(where: {
+                  $0.id == row.id && $0.item.id.utf8.elementsEqual(row.item.id.utf8) && $0.attemptID == attempt.id
+              }), !mediaDeleteRuns[batch].rows[index].receiptSettled else { return }
+        // No append here: a late receipt cannot resurrect explicitly cleared history.
+        let outcome = attempt.outcome
+        mediaDeleteRuns[batch].rows[index].applying = false
+        mediaDeleteRuns[batch].rows[index].receiptSettled = true
+        mediaDeleteRuns[batch].rows[index].status = outcome
+        mediaDeleteRuns[batch].rows[index].reason = outcome == .confirmed ? nil : outcome == .rejected ? .rejected : outcome == .notSent ? .notSent : .uncertain
+    }
+
+    var canClearMediaDeleteHistory: Bool { !mediaDeleteRuns.contains { $0.running } }
+    @discardableResult
+    func clearMediaDeleteHistory(_ id: UUID, confirmed: Bool) -> Bool {
+        guard confirmed, canClearMediaDeleteHistory, let index = mediaDeleteRuns.firstIndex(where: { $0.id == id }) else { return false }
+        mediaDeleteRuns.remove(at: index)
+        mediaDeleteHistoryEpoch = UUID()
+        mediaDeleteRejection = nil
+        return true
+    }
+
+    func canInspectMediaDelete(_ run: MediaDeleteRun) -> Bool {
+        !run.ownerRetired && run.owner == mediaLibrarySessionID && !run.running && canPrepareMediaDelete && supports(.mediaBrowser)
+    }
+    func inspectMediaDelete(_ id: UUID) {
+        guard let index = mediaDeleteRuns.firstIndex(where: { $0.id == id }), canInspectMediaDelete(mediaDeleteRuns[index]) else { return }
+        mediaDeleteRuns[index].inspected = true
+        screen = .media
+        startMediaLibraryLoad() // Explicit current-scope read; no full-card scan, no outcome promotion.
     }
 
     func diagnosticReport() async throws -> CameraSessionExport {
@@ -4374,12 +4599,13 @@ final class CameraAppState: ObservableObject {
         end(.mediaLibrary)
     }
 
-    private func applyDeletedMedia(_ item: CameraMediaItem) {
+    private func applyDeletedMedia(_ item: CameraMediaItem, owner: UUID, selectionToken: UUID?) {
         let identity = mediaItemIdentity(item)
-        selectedMediaItems.removeAll { mediaItemIdentity($0) == identity }
-        if downloadedMediaID.map({ Data($0.utf8) }) == identity {
-            removeDownloadedFile()
+        if CameraMediaDeletePolicy.consumesSelection(operationOwner: owner, currentOwner: mediaLibrarySessionID,
+            operationToken: selectionToken, currentToken: mediaSelectionTokens[identity]) {
+            selectedMediaItems.removeAll { mediaItemIdentity($0) == identity }
         }
+        // Deleting a source does not delete an already downloaded/delivered copy.
         mediaItems.removeAll { mediaItemIdentity($0) == identity }
         mediaThumbnailCache.removeValue(for: item.id)
         mediaThumbnails = mediaThumbnailCache.values

@@ -906,6 +906,7 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
         if let operation {
             let plan = take(operation)
             try await finish(plan)
+            if operation == .delete { return CameraHTTPResponse(statusCode: 204) }
             if operation == .thumbnail || operation == .preview {
                 return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: Self.imageBytes)
             }

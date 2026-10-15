@@ -468,11 +468,28 @@ enum CameraSession: Sendable {
         }
     }
 
-    func deleteMedia(_ item: CameraMediaItem) async throws {
+    func deleteMedia(_ item: CameraMediaItem, attempt: CameraMediaDeleteAttempt) async throws {
         switch self {
-        case let .ccapi(client): try await client.deleteMedia(item)
-        case let .desktopBridge(client): try await client.deleteMedia(item)
+        case let .ccapi(client): try await client.deleteMedia(item, attempt: attempt)
+        case let .desktopBridge(client): try await client.deleteMedia(item, attempt: attempt)
         }
+    }
+
+    func mediaDeleteBridgeEndpoint() async -> String? {
+        if case let .desktopBridge(client) = self { return await client.sanitizedBaseURL().absoluteString }
+        return nil
+    }
+
+    func mediaDeleteEngine() async -> String? {
+        switch self {
+        case .ccapi: return nil
+        case let .desktopBridge(client): return await client.mediaDeleteEngine()
+        }
+    }
+
+    var mediaDeleteUsesBridge: Bool {
+        if case .desktopBridge = self { return true }
+        return false
     }
 
     func diagnosticReport(

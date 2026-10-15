@@ -41,6 +41,7 @@ struct MediaBatchPanel: View {
                 }
             }
             MediaMetadataBatchPanel(displayedItems: displayedItems, showsControls: showsSelectionControls)
+            MediaDeletePanel(displayedItems: displayedItems, showsControls: showsSelectionControls)
             if camera.mediaBatchState == .running {
                 ProgressView().tint(Color.cameraAccent)
                 if let progress = camera.mediaBatchProgress {
