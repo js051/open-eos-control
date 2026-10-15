@@ -679,8 +679,15 @@ class UrllibCcapiTransport:
         timeout: float = 15.0,
         max_bytes: int = MAX_JSON_BYTES,
     ) -> CcapiResponse:
+        resource_path = urlsplit(url).path
+        configuration_resource = (
+            resource_path.endswith((DIRECTORY_CREATE_PATH_SUFFIX, DIRECTORY_SELECTION_PATH_SUFFIX))
+            or any(resource_path.endswith(suffix) for suffix, _ in FILE_NAMING_ENDPOINTS.values())
+        )
+        deadline = time.monotonic() + timeout if configuration_resource else None
         response = self._open(
-            method, url, body=body, headers=headers, timeout=timeout, follow_redirects=method != "DELETE"
+            method, url, body=body, headers=headers, timeout=timeout,
+            follow_redirects=method != "DELETE" and not configuration_resource,
         )
         try:
             if method != "DELETE" and not 200 <= response.status < 300:
@@ -688,11 +695,31 @@ class UrllibCcapiTransport:
                 # diagnostic body must not turn that evidence into an unknown
                 # command result when it is oversized, truncated, or unreadable.
                 payload = b""
-                with suppress(OSError, HTTPException):
-                    payload = response.body.read(min(max_bytes, MAX_ERROR_BYTES))
+                if not configuration_resource:
+                    with suppress(OSError, HTTPException):
+                        payload = response.body.read(min(max_bytes, MAX_ERROR_BYTES))
                 return CcapiResponse(response.status, response.headers, payload)
             try:
-                payload = response.body.read(max_bytes + 1)
+                if deadline is None:
+                    payload = response.body.read(max_bytes + 1)
+                else:
+                    # Cooperative wall budget between single buffered reads. urllib
+                    # DNS/header setup and a blocking socket read cannot be forcibly
+                    # cancelled here; reject late bytes instead of publishing them.
+                    chunks = []
+                    total = 0
+                    reader = getattr(response.body, "read1", response.body.read)
+                    while total <= max_bytes:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("Configuration response deadline elapsed")
+                        chunk = reader(min(4096, max_bytes + 1 - total))
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("Configuration response deadline elapsed")
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        total += len(chunk)
+                    payload = b"".join(chunks)
             except (OSError, HTTPException) as error:
                 raise BridgeError(
                     "CCAPI_UNREACHABLE",
@@ -1652,7 +1679,7 @@ class CcapiSession:
                     self.engine_name,
                     "The camera did not advertise the complete Canon directory-control endpoint group.",
                 )
-            response = self._request_json(
+            response = self._request_capture_configuration_json(
                 operations.create.method,
                 operations.create.path,
                 {"directoryname": name},
@@ -1667,9 +1694,126 @@ class CcapiSession:
                     engine=self.engine_name,
                 )
             self._settings_cache = None
-            self._load_settings(force=True)
+            try:
+                self.read_capture_configuration("create-directory")
+            except Exception as error:
+                raise self._capture_configuration_readback_error(
+                    "create-directory", name, created,
+                ) from error
             self._observed.add(CameraFeature.DIRECTORY_CONTROL)
             return created
+
+    def _capture_configuration_readback_error(
+        self, operation: str, requested: str, acknowledged: str, field: FileNamingField | None = None,
+    ) -> BridgeError:
+        receipt: dict[str, object] = {
+            "version": 1, "operation": operation, "stage": "acknowledged",
+            "requestedValue": requested, "acknowledgedValue": acknowledged,
+        }
+        if field is not None:
+            receipt["field"] = field.value
+        feature = (CameraFeature.DIRECTORY_CONTROL if operation == "create-directory"
+                   else CameraFeature.FILE_NAMING_CONTROL)
+        return BridgeError(
+            "CAPTURE_CONFIG_READBACK_FAILED",
+            "Camera acknowledged the configuration write; complete readback is unavailable. Do not repeat the write.",
+            status_code=502, feature=feature.value, engine=self.engine_name,
+            capture_config_receipt=receipt,
+        )
+
+    def _request_capture_configuration_json(
+        self, method: str, path: str, payload: dict[str, object] | None = None, *, timeout: float = 15.0,
+    ) -> object:
+        response = self._request(method, path, payload, timeout=timeout, max_bytes=65536,
+                                 headers={"Cache-Control": "no-cache, no-store", "Accept": "application/json"})
+        length = response.headers.get("content-length")
+        encoding = response.headers.get("transfer-encoding")
+        if (length is not None and (not re.fullmatch(r"0|[1-9][0-9]*", length)
+                                   or int(length) != len(response.body) or encoding is not None)):
+            raise BridgeError("INVALID_CCAPI_RESPONSE", "Ambiguous configuration response framing.",
+                              status_code=502, engine=self.engine_name)
+
+        def unique_object(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError("Duplicate configuration field")
+                value[key] = item
+            return value
+
+        try:
+            def reject_constant(_):
+                raise ValueError("Non-JSON numeric constant")
+
+            value = json.loads(response.body, object_pairs_hook=unique_object, parse_constant=reject_constant)
+            pending = [value]
+            while pending:
+                item = pending.pop()
+                if isinstance(item, str) and re.search(r"[\ud800-\udfff]", item):
+                    raise ValueError("Unpaired configuration surrogate")
+                if isinstance(item, dict):
+                    pending.extend(item.keys())
+                    pending.extend(item.values())
+                elif isinstance(item, list):
+                    pending.extend(item)
+            return value
+        except (UnicodeDecodeError, ValueError, RecursionError) as error:
+            raise BridgeError("INVALID_CCAPI_RESPONSE", "Invalid complete configuration JSON response.",
+                              status_code=502, engine=self.engine_name) from error
+
+    def read_capture_configuration(self, operation: str) -> dict[str, object]:
+        """Fresh, bounded reads only; never replay an earlier configuration write."""
+        deadline = time.monotonic() + 15.0
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("CAPTURE_CONFIG_READBACK_TIMEOUT", "Configuration readback lock timed out.",
+                              status_code=504, engine=self.engine_name)
+        try:
+            self._require_open()
+            if not self._initialized:
+                raise BridgeError("SESSION_NOT_INITIALIZED", "Connect before reading configuration.", status_code=409)
+
+            def read(path: str) -> object:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise BridgeError("CAPTURE_CONFIG_READBACK_TIMEOUT", "Configuration readback timed out.",
+                                      status_code=504, engine=self.engine_name)
+                result = self._request_capture_configuration_json("GET", path, timeout=remaining)
+                if time.monotonic() >= deadline:
+                    raise BridgeError("CAPTURE_CONFIG_READBACK_TIMEOUT", "Configuration readback timed out.",
+                                      status_code=504, engine=self.engine_name)
+                return result
+
+            if operation == "create-directory":
+                operations = self._directory_operations()
+                if operations is None:
+                    raise unsupported(CameraFeature.DIRECTORY_CONTROL.value, self.engine_name)
+                selection = _validated_directory_selection_setting(read(operations.read.path))
+                if selection is None:
+                    raise BridgeError("INVALID_CCAPI_RESPONSE", "Invalid fresh directory-selection state.",
+                                      status_code=502, engine=self.engine_name)
+                if self._settings_cache is not None:
+                    self._settings_cache[DIRECTORY_SELECTION_SETTING_KEY] = selection
+                self._setting_paths[DIRECTORY_SELECTION_SETTING_KEY] = operations.write.path
+                self._observed.add(CameraFeature.DIRECTORY_CONTROL)
+                return {"operation": operation, "directorySelection": selection}
+            if operation == "set-file-naming":
+                naming_operations = self._file_naming_operations()
+                if naming_operations is None:
+                    raise unsupported(CameraFeature.FILE_NAMING_CONTROL.value, self.engine_name)
+                self._file_naming_cache = None
+                responses = {field: read(operations[0].path)
+                             for field, operations in naming_operations.values.items()}
+                state = _validated_file_naming_state(responses)
+                if state is None:
+                    raise BridgeError("INVALID_CCAPI_RESPONSE", "Invalid fresh complete file-naming state.",
+                                      status_code=502, engine=self.engine_name)
+                self._file_naming_cache = state
+                self._observed.add(CameraFeature.FILE_NAMING_CONTROL)
+                return {"operation": operation, "fileNaming": state.model_dump(mode="json", by_alias=True)}
+            raise BridgeError("UNSUPPORTED_CAPTURE_CONFIGURATION_READBACK", "Unknown configuration operation.",
+                              status_code=409, engine=self.engine_name)
+        finally:
+            self._lock.release()
 
     def set_file_naming(self, field: FileNamingField, value: str) -> FileNamingState:
         with self._lock:
@@ -1697,8 +1841,11 @@ class CcapiSession:
                 FileNamingField.MOVIE_REEL_NUMBER,
                 FileNamingField.MOVIE_CLIP_NUMBER,
             } else value
-            response = self._request_json(operation.method, operation.path, {response_key: request_value})
-            if not isinstance(response, dict) or response.get(response_key) != request_value:
+            response = self._request_capture_configuration_json(
+                operation.method, operation.path, {response_key: request_value},
+            )
+            if (not isinstance(response, dict) or type(response.get(response_key)) is not type(request_value)
+                    or response.get(response_key) != request_value):
                 raise BridgeError(
                     "INVALID_CCAPI_RESPONSE",
                     "Canon file-naming control returned an invalid update response.",
@@ -1707,15 +1854,15 @@ class CcapiSession:
                     engine=self.engine_name,
                 )
             self._file_naming_cache = None
-            updated = self._load_file_naming(force=True)
-            if updated is None or _file_naming_value(updated, field) != value:
-                raise BridgeError(
-                    "INVALID_CCAPI_RESPONSE",
-                    "Canon file-naming control did not return the requested value on refresh.",
-                    status_code=502,
-                    feature=CameraFeature.FILE_NAMING_CONTROL.value,
-                    engine=self.engine_name,
-                )
+            try:
+                result = self.read_capture_configuration("set-file-naming")
+                updated = FileNamingState.model_validate(result["fileNaming"])
+                if _file_naming_value(updated, field) != value:
+                    raise self._capture_configuration_readback_error("set-file-naming", value, value, field)
+            except Exception as error:
+                if isinstance(error, BridgeError) and error.code == "CAPTURE_CONFIG_READBACK_FAILED":
+                    raise
+                raise self._capture_configuration_readback_error("set-file-naming", value, value, field) from error
             self._observed.add(CameraFeature.FILE_NAMING_CONTROL)
             return updated
 
@@ -3848,6 +3995,8 @@ class CcapiSession:
             prefix = path.removesuffix("/shooting/settings")
             for raw_key, setting in value.items():
                 key = SETTING_ALIASES.get(raw_key, raw_key)
+                if key == DIRECTORY_SELECTION_SETTING_KEY:
+                    continue
                 if key not in merged:
                     merged[key] = setting
                     setting_path = f"{prefix}/shooting/settings/{raw_key}"

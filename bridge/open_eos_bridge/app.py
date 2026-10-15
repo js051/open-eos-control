@@ -490,6 +490,13 @@ def create_app(
                     if error.code == "CCAPI_DISCOVERY_FAILED" and error.status_code == 502 and error.engine == "ccapi"
                     else None
                 ),
+                capture_config_receipt=(
+                    error.capture_config_receipt
+                    if error.code == "CAPTURE_CONFIG_READBACK_FAILED"
+                    and error.status_code == 502 and error.engine == "ccapi"
+                    and error.feature in {"DIRECTORY_CONTROL", "FILE_NAMING_CONTROL"}
+                    else None
+                ),
             )
         )
         return JSONResponse(
@@ -587,6 +594,16 @@ def create_app(
     @router.post("/session/{session_id}/directories", response_model=DirectoryCreateResult)
     def create_camera_directory(session_id: str, payload: DirectoryCreateRequest) -> DirectoryCreateResult:
         return DirectoryCreateResult(name=manager.get(session_id).create_directory(payload.name))
+
+    @router.get("/session/{session_id}/capture-configuration/{operation}")
+    def read_capture_configuration(session_id: str, operation: str, response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        session = manager.get(session_id)
+        reader = getattr(session, "read_capture_configuration", None)
+        if operation not in {"create-directory", "set-file-naming"} or not callable(reader):
+            raise BridgeError("UNSUPPORTED_CAPTURE_CONFIGURATION_READBACK",
+                              "Fresh capture-configuration readback is unavailable.", status_code=409)
+        return reader(operation)
 
     @router.put(
         "/session/{session_id}/file-naming/{field}",

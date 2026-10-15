@@ -26,6 +26,7 @@ class BridgeError(Exception):
         feature: str | None = None,
         engine: str | None = None,
         connection_reason: ConnectionFailureReason | None = None,
+        capture_config_receipt: dict[str, object] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -34,6 +35,7 @@ class BridgeError(Exception):
         self.feature = feature
         self.engine = engine
         self.connection_reason = connection_reason if isinstance(connection_reason, ConnectionFailureReason) else None
+        self.capture_config_receipt = capture_config_receipt
 
 
 def unsupported(feature: str, engine: str, message: str | None = None) -> BridgeError:

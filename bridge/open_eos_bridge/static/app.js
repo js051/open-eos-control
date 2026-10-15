@@ -18,6 +18,7 @@
   const mediaTransfer = globalThis.OpenEOSMediaTransfer;
   if (!mediaTransfer) throw new Error("Open EOS media transfer module is unavailable.");
   const mediaUpload = globalThis.OpenEOSMediaUpload;
+  const captureConfiguration = globalThis.OpenEOSCaptureConfiguration;
   if (!mediaUpload) throw new Error("Open EOS media upload module is unavailable.");
   const mediaListing = globalThis.OpenEOSMediaListing;
   if (!mediaListing) throw new Error("Open EOS media listing module is unavailable.");
@@ -267,6 +268,21 @@
       fileNamingRule: "Use Canon's exact uppercase ASCII length and range.",
       apply: "Apply",
       fileNamingUpdated: "File naming updated",
+      "captureConfigurationHistory": "Capture configuration receipts",
+      "configWrite_not-sent": "Write not sent",
+      "configWrite_unknown": "Write result unknown; do not repeat blindly",
+      "configWrite_acknowledged": "Camera write acknowledgment retained",
+      "configRead_not-read": "No fresh readback",
+      "configRead_unavailable": "Readback unavailable",
+      "configRead_mismatch": "Current value differs from request",
+      "configRead_matched": "Current value matches request",
+      "configRead_refreshed": "Current directory choices refreshed",
+      "configAcknowledgedValue": "Acknowledged value",
+      "configObservedValue": "Current observation",
+      "configCancelled": "Cancelled waiting; camera result may still arrive",
+      "configReadOnlyRecovery": "Read current settings only",
+      "configPrepareAnother": "Prepare a new operation",
+      "configEvidenceBoundary": "Readback does not prove an unknown write succeeded. A directory suffix does not identify a numbered folder or card. Another operation requires a new explicit intent.",
       ownername: "Owner name",
       artist: "Artist",
       copyright: "Copyright",
@@ -778,6 +794,21 @@
       fileNamingRule: "請使用 Canon 規定長度與範圍的大寫 ASCII 字元。",
       apply: "套用",
       fileNamingUpdated: "已更新檔名設定",
+      "captureConfigurationHistory": "拍前設定收據",
+      "configWrite_not-sent": "尚未送出寫入",
+      "configWrite_unknown": "寫入結果未知，請勿盲目重送",
+      "configWrite_acknowledged": "已保留相機寫入回應",
+      "configRead_not-read": "尚未新讀回",
+      "configRead_unavailable": "讀回未完成",
+      "configRead_mismatch": "目前值與原要求不同",
+      "configRead_matched": "目前值與原要求相符",
+      "configRead_refreshed": "已讀回目前資料夾選項",
+      "configAcknowledgedValue": "相機回應值",
+      "configObservedValue": "目前觀察值",
+      "configCancelled": "已取消等待，相機結果仍可能稍後抵達",
+      "configReadOnlyRecovery": "只讀目前設定",
+      "configPrepareAnother": "準備另一筆操作",
+      "configEvidenceBoundary": "讀回相符不能證明先前未知寫入成功；資料夾字尾不能辨識精確編號資料夾或記憶卡。另一筆操作需要新的明確意圖。",
       ownername: "擁有者名稱",
       artist: "藝術家",
       copyright: "著作權",
@@ -1600,6 +1631,12 @@
     focusInfoNextAt: 0,
     focusInfoExpiry: null,
     fileNamingDrafts: {},
+    captureDirectoryDraft: "",
+    captureConfigurationDraftRevisions: {},
+    captureConfigurationConsumedDrafts: {},
+    captureConfigurationSequence: 0,
+    captureConfigurationHistory: [],
+    captureConfigurationOwner: null,
     settingDrafts: {},
     operatorConfirmedFeatures: new Set(),
     lastClockSyncAt: null,
@@ -2636,6 +2673,11 @@
     state.recordingCommandOwner = null;
     state.capabilities = null;
     state.shutterAutofocus = true;
+    if (typeof cancelCaptureConfiguration === "function") cancelCaptureConfiguration({ retire: true });
+    state.captureConfigurationOwner = null;
+    state.captureDirectoryDraft = "";
+    state.captureConfigurationDraftRevisions = {};
+    state.captureConfigurationConsumedDrafts = {};
     state.fileNamingDrafts = {};
     state.settingDrafts = {};
     state.operatorConfirmedFeatures.clear();
@@ -3047,8 +3089,6 @@
   function renderAdvancedSettings() {
     const focusedControl = document.activeElement;
     if (focusedControl && ui.advancedSettings.contains(focusedControl)) {
-      const fileNamingField = focusedControl.dataset?.fileNamingField;
-      if (fileNamingField) state.fileNamingDrafts[fileNamingField] = focusedControl.value;
       const settingKey = focusedControl.dataset?.settingKey;
       if (settingKey && focusedControl.matches('input[type="text"]')) {
         state.settingDrafts[settingKey] = focusedControl.value;
@@ -3105,12 +3145,14 @@
       const input = document.createElement("input");
       input.type = "text";
       input.maxLength = 5;
+      input.value = state.captureDirectoryDraft;
       input.pattern = "[A-Z0-9_]{5}";
       input.placeholder = t("directoryNamePlaceholder");
       input.setAttribute("aria-label", t("createCaptureDirectory"));
       input.addEventListener("input", () => {
         input.value = input.value.toUpperCase().replace(/[^A-Z0-9_]/g, "").slice(0, 5);
-        button.disabled = cameraInteractionBusy() || (input.value.length > 0 && input.value.length !== 5);
+        editCaptureConfigurationDraft("directory", input.value);
+        button.disabled = cameraInteractionBusy() || !captureConfigurationDraftAvailable("directory") || (input.value.length > 0 && input.value.length !== 5);
       });
       const button = document.createElement("button");
       button.type = "button";
@@ -3118,12 +3160,14 @@
       button.dataset.cameraCommand = "directory";
       button.textContent = t("create");
       button.disabled = cameraInteractionBusy();
+      button.disabled ||= !captureConfigurationDraftAvailable("directory");
       button.addEventListener("click", () => createCaptureDirectory(button, input.value));
       actions.append(input, button);
       row.append(copy, actions);
       ui.advancedSettings.append(row);
     }
     if (fileNamingSupported) renderFileNamingSettings();
+    renderCaptureConfigurationHistory();
     if (sensorCleaningSupported) {
       const row = document.createElement("div");
       row.className = "settings-command";
@@ -3317,7 +3361,10 @@
         select.append(element);
       });
       select.disabled = cameraInteractionBusy();
-      select.addEventListener("change", () => updateFileNaming("still-filename-mode", select.value, select));
+      select.addEventListener("change", () => {
+        editCaptureConfigurationDraft("still-filename-mode", select.value);
+        updateFileNaming("still-filename-mode", select.value, select);
+      });
       modeRow.actions.append(select);
       ui.advancedSettings.append(modeRow.row);
       appendFileNamingInput("still-user-setting-1", "stillUserSetting1", naming.stillUserSetting1, 4, true);
@@ -3366,15 +3413,15 @@
     button.className = "button secondary";
     button.textContent = t("apply");
     button.dataset.cameraCommand = "file-naming";
-    const refresh = () => {
+    const refresh = (edited = false) => {
       if (!numeric) {
         const allowed = allowUnderscore ? /[^A-Z0-9_]/g : /[^A-Z0-9]/g;
         input.value = input.value.toUpperCase().replace(allowed, "").slice(0, maximumLength);
       }
-      state.fileNamingDrafts[field] = input.value;
-      button.disabled = cameraInteractionBusy() || !fileNamingValueValid(field, input.value);
+      if (edited) editCaptureConfigurationDraft(field, input.value);
+      button.disabled = cameraInteractionBusy() || !captureConfigurationDraftAvailable(field) || !fileNamingValueValid(field, input.value);
     };
-    input.addEventListener("input", refresh);
+    input.addEventListener("input", () => refresh(true));
     button.addEventListener("click", () => updateFileNaming(field, input.value, button));
     refresh();
     control.actions.append(input, button);
@@ -3383,6 +3430,7 @@
 
   function fileNamingValueValid(field, value) {
     const naming = state.capabilities?.fileNaming;
+    if (!captureConfiguration.validFieldValue(field, value)) return false;
     if (!naming) return false;
     if (field === "still-filename-mode") return naming.stillFilenameModeOptions.includes(value);
     if (field === "still-user-setting-1") return /^[A-Z0-9][A-Z0-9_]{3}$/.test(value);
@@ -3437,64 +3485,246 @@
     }
   }
 
-  async function createCaptureDirectory(source, name) {
-    if (!state.session || cameraInteractionBusy() || !featureSupported(FEATURES.DIRECTORY_CONTROL)) return;
-    if (name && !/^[A-Z0-9_]{5}$/.test(name)) {
-      showToast(t("createCaptureDirectoryHint"), true);
-      return;
+  function editCaptureConfigurationDraft(key, value, { edited = true } = {}) {
+    if (edited) state.captureConfigurationDraftRevisions[key] =
+      (state.captureConfigurationDraftRevisions[key] || 0) + 1;
+    if (key === "directory") state.captureDirectoryDraft = value;
+    else state.fileNamingDrafts[key] = value;
+  }
+
+  function captureConfigurationCurrent(record) {
+    return state.session === record.owner && state.refreshGeneration === record.generation &&
+      state.captureConfigurationOwner === record && !record.retired;
+  }
+
+  function captureConfigurationDraftAvailable(key) {
+    return state.captureConfigurationConsumedDrafts[key] !== (state.captureConfigurationDraftRevisions[key] || 0);
+  }
+
+  function cancelCaptureConfiguration({ retire = false } = {}) {
+    const record = state.captureConfigurationOwner;
+    if (!record) return;
+    record.cancelled = true;
+    record.retired ||= retire;
+    record.controller.abort();
+    if (!retire) renderAdvancedSettings();
+  }
+
+  function renderCaptureConfigurationHistory() {
+    if (!state.captureConfigurationHistory.length) return;
+    const section = document.createElement("section");
+    section.dataset.captureConfigurationHistory = "true";
+    const title = document.createElement("h3");
+    title.textContent = t("captureConfigurationHistory");
+    section.append(title);
+    for (const record of [...state.captureConfigurationHistory].reverse()) {
+      const row = document.createElement("div");
+      row.className = "settings-command";
+      const copy = document.createElement("span");
+      const heading = document.createElement("strong");
+      heading.textContent = `${record.field || t("createCaptureDirectory")}: ${JSON.stringify(record.requestedValue)}`;
+      const proof = captureConfiguration.outcome(record);
+      const detail = document.createElement("small");
+      detail.textContent = `${record.origin} · ${t(`configWrite_${proof.writeEvidence}`)} · ${t(`configRead_${proof.readbackEvidence}`)}` +
+        (record.acknowledgedValue === null ? "" : ` · ${t("configAcknowledgedValue")}: ${JSON.stringify(record.acknowledgedValue)}`) +
+        (record.observedValue === null || record.readStatus !== "success" ? "" : ` · ${t("configObservedValue")}: ${JSON.stringify(record.observedValue)}`) +
+        (record.cancelled ? ` · ${t("configCancelled")}` : "");
+      copy.append(heading, detail);
+      const actions = document.createElement("div");
+      actions.className = "settings-command-actions";
+      if (state.captureConfigurationOwner === record) {
+        const cancel = document.createElement("button");
+        cancel.type = "button"; cancel.textContent = t("cancel");
+        cancel.disabled = record.controller.signal.aborted;
+        cancel.dataset.captureConfigurationAction = "cancel";
+        cancel.dataset.captureConfigurationId = String(record.id);
+        cancel.addEventListener("click", () => cancelCaptureConfiguration());
+        actions.append(cancel);
+      } else {
+        const read = document.createElement("button");
+        read.type = "button"; read.textContent = t("configReadOnlyRecovery");
+        read.dataset.captureConfigurationRecovery = String(record.id);
+        read.dataset.captureConfigurationAction = "recover";
+        read.dataset.captureConfigurationId = String(record.id);
+        read.disabled = cameraInteractionBusy() || record.owner !== state.session || record.retired;
+        read.addEventListener("click", () => recoverCaptureConfiguration(record));
+        const prepare = document.createElement("button");
+        prepare.type = "button"; prepare.textContent = t("configPrepareAnother");
+        prepare.dataset.captureConfigurationAction = "prepare";
+        prepare.dataset.captureConfigurationId = String(record.id);
+        prepare.disabled = cameraInteractionBusy() || record.owner !== state.session || record.retired;
+        prepare.addEventListener("click", () => {
+          if (cameraInteractionBusy() || record.owner !== state.session || record.retired) return;
+          state.captureConfigurationDraftRevisions[record.key] =
+            (state.captureConfigurationDraftRevisions[record.key] || 0) + 1;
+          renderAdvancedSettings();
+        });
+        actions.append(read, prepare);
+      }
+      row.append(copy, actions); section.append(row);
     }
+    const warning = document.createElement("small");
+    warning.textContent = t("configEvidenceBoundary");
+    section.append(warning); ui.advancedSettings.append(section);
+  }
+
+  function renderCaptureConfigurationButtonAvailability(button, interactionBusy, bulbActive) {
+    const action = button.dataset.captureConfigurationAction;
+    if (action) {
+      const record = state.captureConfigurationHistory.find((row) => String(row.id) === button.dataset.captureConfigurationId);
+      const sameOwner = record && record.owner === state.session && !record.retired;
+      button.disabled = action === "cancel"
+        ? !sameOwner || state.captureConfigurationOwner !== record || record.controller.signal.aborted
+        : !sameOwner || interactionBusy || bulbActive || Boolean(state.captureConfigurationOwner);
+      return true;
+    }
+    const command = button.dataset.cameraCommand;
+    if (command === "directory") {
+      const value = button.parentElement?.querySelector('input[type="text"]')?.value ?? state.captureDirectoryDraft;
+      button.disabled = interactionBusy || bulbActive || !featureSupported(FEATURES.DIRECTORY_CONTROL) ||
+        !captureConfigurationDraftAvailable("directory") || !captureConfiguration.whole(/^(?:[A-Z0-9_]{5})?$/, value);
+      return true;
+    }
+    if (command === "file-naming") {
+      const input = button.parentElement?.querySelector('input[data-file-naming-field]');
+      const field = input?.dataset.fileNamingField;
+      button.disabled = interactionBusy || bulbActive || !featureSupported(FEATURES.FILE_NAMING_CONTROL) ||
+        !field || !captureConfigurationDraftAvailable(field) || !fileNamingValueValid(field, input.value);
+      return true;
+    }
+    return false;
+  }
+
+  function publishCaptureConfiguration(record, naming = null, selection = null) {
+    if (!captureConfigurationCurrent(record) || record.controller.signal.aborted) return;
+    if (naming && state.capabilities) state.capabilities.fileNaming = naming;
+    if (selection && state.capabilities) {
+      state.capabilities.settings ||= [];
+      const setting = state.capabilities.settings.find((item) => item.key === "directoryselection");
+      if (setting) { setting.value = selection.value; setting.values = [...selection.ability]; }
+      else state.capabilities.settings.push({ key: "directoryselection", label: "Directory",
+        value: selection.value, values: [...selection.ability] });
+    }
+    if (record.operation === "create-directory" && record.validAcknowledgment &&
+        state.captureConfigurationHistory.at(-1) === record) {
+      state.lastCreatedDirectoryName = record.acknowledgedValue;
+    }
+    const permission = captureConfiguration.ownership({ sameOwner: true, sameAttempt: true, retired: record.retired,
+      sameDraftRevision: record.draftRevision === (state.captureConfigurationDraftRevisions[record.key] || 0),
+      validAcknowledgment: record.validAcknowledgment, readbackMatched: record.readStatus === "success" && record.readbackMatches,
+      cancelled: record.cancelled });
+    if (permission.canConsumeDraft && record.field) delete state.fileNamingDrafts[record.field];
+    renderAdvancedSettings();
+  }
+
+  async function runCaptureConfiguration(operation, requestedValue, field = null) {
+    const key = field || "directory";
+    if (!state.session || cameraInteractionBusy() || !captureConfigurationDraftAvailable(key)) return;
+    if (operation === "create-directory" ? !featureSupported(FEATURES.DIRECTORY_CONTROL) ||
+        !captureConfiguration.whole(/^(?:[A-Z0-9_]{5})?$/, requestedValue) : !featureSupported(FEATURES.FILE_NAMING_CONTROL) ||
+        !fileNamingValueValid(field, requestedValue)) return;
+    const owner = state.session;
     beginCameraInteraction();
-    source.disabled = true;
-    setOperationState(t("busy"));
-    renderAvailability();
+    const record = { id: ++state.captureConfigurationSequence, owner, generation: state.refreshGeneration,
+      operation, requestedValue, field, key, origin: `${window.location.origin} · ${state.info?.model || "Camera"} · ${owner.id}`,
+      draftRevision: state.captureConfigurationDraftRevisions[key] || 0,
+      dispatched: false, validAcknowledgment: false, acknowledgedValue: null, observedValue: null,
+      readStatus: "not-read", readbackMatches: false, cancelled: false, retired: false,
+      controller: new AbortController() };
+    state.captureConfigurationConsumedDrafts[key] = record.draftRevision;
+    state.captureConfigurationHistory.push(record);
+    while (state.captureConfigurationHistory.length > 20) state.captureConfigurationHistory.shift();
+    state.captureConfigurationOwner = record;
+    const token = state.token;
+    const deadline = setTimeout(() => record.controller.abort(), 30000);
+    renderAvailability(); renderAdvancedSettings();
     try {
-      const result = await api(`/v1/session/${encodeURIComponent(state.session.id)}/directories`, {
-        method: "POST",
-        json: { name },
-      });
-      state.lastCreatedDirectoryName = result.name;
-      await refreshCapabilityEvidence();
-      setOperationState(t("ready"));
-      showToast(t("directoryCreated", { name: result.name }));
-    } catch (error) {
-      const normalized = captureError(error);
-      setOperationState(normalized.message, true);
-      showToast(normalized.message, true);
+      if (!captureConfigurationCurrent(record) || record.cancelled) return;
+      record.dispatched = true;
+      const path = `/v1/session/${encodeURIComponent(owner.id)}/` + (field ? `file-naming/${encodeURIComponent(field)}` : "directories");
+      const response = await captureConfiguration.transfer(path, { method: field ? "PUT" : "POST",
+        payload: field ? { value: requestedValue } : { name: requestedValue }, token, signal: record.controller.signal });
+      if (response.status === 200 && !field && captureConfiguration.whole(/^[A-Z0-9_]{5}$/, response.body?.name)) {
+        record.validAcknowledgment = true; record.acknowledgedValue = response.body.name;
+        publishCaptureConfiguration(record);
+        if (captureConfigurationCurrent(record) && !record.controller.signal.aborted) {
+          record.readStatus = "unavailable";
+          const readback = await captureConfiguration.transfer(
+            `/v1/session/${encodeURIComponent(owner.id)}/capture-configuration/create-directory`,
+            { token, signal: record.controller.signal });
+          if (readback.status !== 200 || readback.body?.operation !== operation ||
+              !captureConfiguration.validSelection(readback.body.directorySelection)) throw new TypeError("Directory readback unavailable");
+          record.readStatus = "success"; record.observedValue = readback.body.directorySelection.value;
+          publishCaptureConfiguration(record, null, readback.body.directorySelection);
+        }
+      } else if (response.status === 200 && field && captureConfiguration.validNaming(response.body) &&
+          captureConfiguration.valueFor(response.body, field) === requestedValue) {
+        record.validAcknowledgment = true; record.acknowledgedValue = requestedValue;
+        record.readStatus = "success"; record.readbackMatches = true; record.observedValue = requestedValue;
+        publishCaptureConfiguration(record, response.body);
+      } else {
+        const error = response.body?.error || {};
+        if (owner.engine === "ccapi" && captureConfiguration.validReceipt({ ...error, status: response.status,
+          operation, field, requestedValue, receipt: error.captureConfigReceipt })) {
+          record.validAcknowledgment = true; record.acknowledgedValue = error.captureConfigReceipt.acknowledgedValue;
+        }
+        record.readStatus = "unavailable";
+      }
+      publishCaptureConfiguration(record);
+    } catch (_) {
+      record.readStatus = "unavailable";
     } finally {
-      state.busy = false;
-      renderSession();
+      clearTimeout(deadline);
+      if (captureConfigurationCurrent(record)) {
+        state.captureConfigurationOwner = null; state.busy = false;
+        setOperationState(t(record.validAcknowledgment ? "configWrite_acknowledged" : record.dispatched ? "configWrite_unknown" : "configWrite_not-sent"));
+        renderSession();
+      }
     }
   }
 
-  async function updateFileNaming(field, value, source) {
-    if (
-      !state.session ||
-      cameraInteractionBusy() ||
-      !featureSupported(FEATURES.FILE_NAMING_CONTROL) ||
-      !fileNamingValueValid(field, value)
-    ) return;
+  async function recoverCaptureConfiguration(record) {
+    if (!captureConfiguration.canRecover({ sameOwner: record.owner === state.session && !record.retired,
+      writeActive: cameraInteractionBusy(), readActive: Boolean(state.captureConfigurationOwner),
+      hasRecord: state.captureConfigurationHistory.includes(record) })) return;
     beginCameraInteraction();
-    state.lastError = null;
-    source.disabled = true;
-    setOperationState(t("busy"));
-    renderAvailability();
+    record.generation = state.refreshGeneration;
+    record.controller = new AbortController();
+    state.captureConfigurationOwner = record;
+    const deadline = setTimeout(() => record.controller.abort(), 15000);
+    const token = state.token;
+    renderAvailability(); renderAdvancedSettings();
     try {
-      state.capabilities.fileNaming = await api(
-        `/v1/session/${encodeURIComponent(state.session.id)}/file-naming/${encodeURIComponent(field)}`,
-        { method: "PUT", json: { value } },
-      );
-      delete state.fileNamingDrafts[field];
-      await refreshCapabilityEvidence();
-      setOperationState(t("ready"));
-      showToast(t("fileNamingUpdated"));
-    } catch (error) {
-      const normalized = captureError(error);
-      setOperationState(normalized.message, true);
-      showToast(normalized.message, true);
-    } finally {
-      state.busy = false;
-      renderSession();
+      const response = await captureConfiguration.transfer(`/v1/session/${encodeURIComponent(record.owner.id)}/capture-configuration/${record.operation}`,
+        { token, signal: record.controller.signal });
+      if (response.status !== 200 || response.body?.operation !== record.operation) throw new TypeError("Readback unavailable");
+      if (record.operation === "create-directory") {
+        if (!captureConfiguration.validSelection(response.body.directorySelection)) throw new TypeError("Invalid directory readback");
+        record.readStatus = "success"; record.observedValue = response.body.directorySelection.value;
+        publishCaptureConfiguration(record, null, response.body.directorySelection);
+      } else {
+        if (!captureConfiguration.validNaming(response.body.fileNaming)) throw new TypeError("Invalid naming readback");
+        record.readStatus = "success";
+        record.observedValue = captureConfiguration.valueFor(response.body.fileNaming, record.field);
+        record.readbackMatches = record.observedValue === record.requestedValue;
+        publishCaptureConfiguration(record, response.body.fileNaming);
+      }
+    } catch (_) { record.readStatus = "unavailable"; }
+    finally {
+      clearTimeout(deadline);
+      if (captureConfigurationCurrent(record)) {
+        state.captureConfigurationOwner = null; state.busy = false; renderSession();
+      }
     }
+  }
+
+  async function createCaptureDirectory(source, name) {
+    if (state.captureDirectoryDraft !== name) editCaptureConfigurationDraft("directory", name);
+    return runCaptureConfiguration("create-directory", name);
+  }
+
+  async function updateFileNaming(field, value, source) {
+    return runCaptureConfiguration("set-file-naming", value, field);
   }
 
   async function sleepCamera(source) {
@@ -5951,6 +6181,8 @@
       control.disabled = interactionBusy || bulbActive;
     });
     document.querySelectorAll("#advanced-settings .settings-command button").forEach((button) => {
+      if ((button.dataset.captureConfigurationAction || ["directory", "file-naming"].includes(button.dataset.cameraCommand)) &&
+          renderCaptureConfigurationButtonAvailability(button, interactionBusy, bulbActive)) return;
       const command = button.dataset.cameraCommand;
       if (command === "setting") {
         const setting = settingByKey(button.dataset.settingKey);
