@@ -284,8 +284,10 @@ actor MediaDeliveryStore {
     /// Atomically admit the entire inert roster before the caller issues its
     /// first original GET. Capacity reserves queued rows, never truncates or
     /// evicts history, and does not promise retained space for unknown sizes.
-    func beginPlannedBatch(filenames: [String]) throws -> MediaDeliveryPlannedBatch {
+    func beginPlannedBatch(filenames: [String], expectedHistory: MediaDeliveryTicket? = nil) throws -> MediaDeliveryPlannedBatch {
+        try Task.checkCancellation()
         try load()
+        if let expectedHistory { try validate(expectedHistory) }
         guard !filenames.isEmpty else { throw MediaDeliveryStoreError.invalidReceipt }
         guard filenames.count <= limits.maximumRecords - reservedRecordCount(manifest!) else {
             throw MediaDeliveryStoreError.recordLimit
@@ -295,7 +297,7 @@ actor MediaDeliveryStore {
         let rows = filenames.map { PlannedRow(id: UUID(), filename: deliveryFilename($0), origin: nil) }
         var next = manifest!
         next.plannedBatches.append(PlannedBatch(id: ticket.batchID, createdAt: Date(), rows: rows))
-        try commit(next)
+        try commit(next, requireUncancelled: true)
         return MediaDeliveryPlannedBatch(ticket: ticket, rowIDs: rows.map(\.id))
     }
 
@@ -345,6 +347,7 @@ actor MediaDeliveryStore {
     /// neither filenames nor a restored roster grant permission to retry I/O.
     func beginPlannedItem(_ ticket: MediaDeliveryTicket, rowID: UUID,
                           expectedBytes: Int64? = nil) throws -> UUID {
+        try Task.checkCancellation()
         try validate(ticket)
         guard let batch = manifest!.plannedBatches.first(where: { $0.id == ticket.batchID }),
               let row = batch.rows.first(where: { $0.id == rowID }),
@@ -358,7 +361,7 @@ actor MediaDeliveryStore {
         var next = manifest!
         next.receipts.append(Receipt(id: row.id, batchID: batch.id,
             filename: row.filename, startedAt: Date(), status: .started))
-        try commit(next)
+        try commit(next, requireUncancelled: true)
         return row.id
     }
 
@@ -1003,7 +1006,7 @@ actor MediaDeliveryStore {
         if Darwin.fstatat(rootFD, Self.manifestName, &target, AT_SYMLINK_NOFOLLOW) == 0 {
             guard isRegular(target), target.st_nlink == 1 else { throw MediaDeliveryStoreError.unsafeFilesystem }
         } else if errno != ENOENT { throw MediaDeliveryStoreError.storageUnavailable }
-        // Continuation admission is cancellable until its atomic replacement.
+        // Planned admission is cancellable until its atomic replacement.
         // Other callers retain their existing terminal-receipt semantics.
         if requireUncancelled { try Task.checkCancellation() }
         guard Darwin.renameat(rootFD, name, rootFD, Self.manifestName) == 0 else {
