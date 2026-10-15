@@ -476,6 +476,7 @@
       nextMediaPage: "Next media page",
       mediaPageStatus: "{start}-{end} of {total}",
       mediaUnknownDate: "Unknown date",
+      mediaTimeZoneUnknown: "Time zone unknown",
       mediaFolderFilter: "Camera folder filter",
       mediaFolderClear: "Clear folder filter",
       mediaFolderAll: "All loaded folders",
@@ -1080,6 +1081,7 @@
       nextMediaPage: "下一頁媒體",
       mediaPageStatus: "第 {start}-{end} 個，共 {total} 個",
       mediaUnknownDate: "日期不明",
+      mediaTimeZoneUnknown: "時區未知",
       mediaFolderFilter: "相機資料夾篩選",
       mediaFolderClear: "清除資料夾篩選",
       mediaFolderAll: "全部已載入資料夾",
@@ -1550,6 +1552,7 @@
     mediaHasMore: false,
     mediaFilter: "all",
     mediaDateRange: null,
+    mediaDisplayZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     mediaDateDialogSession: null,
     mediaFolderFilter: { kind: "all" },
     mediaFolderDialogSession: null,
@@ -3962,16 +3965,9 @@
   }
 
   function latestMediaFrom(items, knownIds = new Set(), photosOnly = false, videosOnly = false) {
-    return mediaLibrary.itemsForDisplay(
-      (Array.isArray(items) ? items : []).filter((item) =>
-        !knownIds.has(item.id) && (!photosOnly || !mediaIsVideo(item)) && (!videosOnly || mediaIsVideo(item)),
-      ),
-      "all",
-      // The bounded camera response is already ordered by the camera. Keep that
-      // order because fresh captures may not have a timestamp yet.
-      "camera",
-      resolvedLanguage(),
-    )[0] || null;
+    if (photosOnly && videosOnly) return null;
+    // New visibility is not capture provenance. Keep ID/type guards and camera order.
+    return mediaLibrary.selectReviewItem(items, knownIds, photosOnly ? "photo" : videosOnly ? "video" : "recent");
   }
 
   function retryLatestMedia() {
@@ -5898,6 +5894,13 @@
 
   function renderMedia() {
     if (!ui.mediaList) return;
+    const nextDisplayZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    if (state.mediaDisplayZone !== nextDisplayZone) {
+      state.mediaDisplayZone = nextDisplayZone;
+      state.mediaPage = 0;
+      renderMediaDetails();
+      if (state.mediaPreviewItem) renderMediaPreviewNavigation();
+    }
     state.mediaSelection.replaceLoaded(state.media);
     mediaThumbnailObserver?.disconnect();
     const visibleItems = displayedMedia();
@@ -6836,6 +6839,7 @@
       state.mediaDateRange,
       state.mediaRatingFilter,
       state.mediaFolderFilter,
+      state.mediaDisplayZone,
     );
   }
 
@@ -6879,7 +6883,17 @@
   }
 
   function mediaDisplayTimeZone() {
-    return new Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    return state.mediaDisplayZone || new Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  }
+
+  function refreshMediaDateZone() {
+    const next = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    if (state.mediaDisplayZone === next) return;
+    state.mediaDisplayZone = next;
+    state.mediaPage = 0;
+    renderMedia();
+    renderMediaDetails();
+    if (state.mediaPreviewItem) renderMediaPreviewNavigation();
   }
 
   function renderMediaDateFilter(visibleItems = displayedMedia()) {
@@ -6893,7 +6907,7 @@
     if (range) {
       ui.mediaDateSummary.textContent = t("mediaDateActive", {
         start: range.start, end: range.end, matched: visibleItems.length,
-        total: state.media.length, unknown: mediaLibrary.countUnknownDates(state.media),
+        total: state.media.length, unknown: mediaLibrary.countUnknownDates(state.media, state.mediaDisplayZone),
       }) + " " + t("mediaDateZone", { zone: mediaDisplayTimeZone() });
     }
   }
@@ -7064,7 +7078,7 @@
 
   function previewableMedia() {
     const source = state.mediaLoaded || state.media.length ? state.media : [];
-    const items = mediaLibrary.itemsForDisplay(source, state.mediaFilter, state.mediaSort, resolvedLanguage(), state.mediaDateRange, state.mediaRatingFilter, state.mediaFolderFilter)
+    const items = mediaLibrary.itemsForDisplay(source, state.mediaFilter, state.mediaSort, resolvedLanguage(), state.mediaDateRange, state.mediaRatingFilter, state.mediaFolderFilter, state.mediaDisplayZone)
       .filter((item) => mediaIsVideo(item)
         ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
         : item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
@@ -7088,17 +7102,18 @@
     if (state.mediaSort === "name") {
       return String(item.name || "#").trim().charAt(0).toLocaleUpperCase(resolvedLanguage()) || "#";
     }
-    const parsed = mediaLibrary.mediaDateForItem(item);
+    const parsed = mediaLibrary.mediaDateForItem(item, state.mediaDisplayZone);
     if (!parsed) return t("mediaUnknownDate");
     return new Intl.DateTimeFormat(resolvedLanguage(), {
-      dateStyle: "long", ...(!parsed.hasTime ? { timeZone: "UTC" } : {}),
+      dateStyle: "long", timeZone: parsed.formatZone,
     }).format(parsed.date);
   }
 
   function formatMediaTime(value) {
-    const parsed = mediaLibrary.parseMediaDate(value);
+    const parsed = mediaLibrary.parseMediaDate(value, state.mediaDisplayZone);
     if (!parsed?.hasTime) return "";
-    return new Intl.DateTimeFormat(resolvedLanguage(), { timeStyle: "short" }).format(parsed.date);
+    const time = new Intl.DateTimeFormat(resolvedLanguage(), { timeStyle: "short", timeZone: parsed.formatZone }).format(parsed.date);
+    return parsed.kind === "floating" ? `${time} · ${t("mediaTimeZoneUnknown")}` : time;
   }
 
   function renderMediaThumbnail(container, item, url = null) {
@@ -8243,11 +8258,12 @@
   }
 
   function formatDate(value) {
-    const parsed = mediaLibrary.parseMediaDate(value);
+    const parsed = mediaLibrary.parseMediaDate(value, state.mediaDisplayZone);
     if (!parsed) return "";
-    return new Intl.DateTimeFormat(resolvedLanguage(), {
-      dateStyle: "medium", ...(parsed.hasTime ? { timeStyle: "short" } : { timeZone: "UTC" }),
+    const label = new Intl.DateTimeFormat(resolvedLanguage(), {
+      dateStyle: "medium", ...(parsed.hasTime ? { timeStyle: "short" } : {}), timeZone: parsed.formatZone,
     }).format(parsed.date);
+    return parsed.kind === "floating" ? `${label} · ${t("mediaTimeZoneUnknown")}` : label;
   }
 
   function sleep(milliseconds) {
@@ -8461,6 +8477,7 @@
         cancelCameraFocusInfo();
       }
       else {
+        refreshMediaDateZone();
         renderAvailability();
         renderMediaAutoImport();
       }
@@ -8470,7 +8487,9 @@
       releaseHeldAutofocusForLifecycle();
       cancelCameraFocusInfo();
     });
+    window.addEventListener("focus", refreshMediaDateZone);
     window.addEventListener("pageshow", () => {
+      refreshMediaDateZone();
       renderAvailability();
       renderMediaAutoImport();
     });

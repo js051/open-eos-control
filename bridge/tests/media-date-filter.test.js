@@ -189,3 +189,83 @@ test("date-only card/group/details share literal day without a fabricated time",
   assert.match(s.mediaDateGroup(item("BAD.JPG", "2026-02-29")), /mediaUnknownDate/);
   assert.equal(s.formatDate("2026-02-29"), "");
 });
+
+test("one explicit viewer-zone snapshot drives filter, grouping, and detail while floating time stays literal", () => {
+  const s = fixture();
+  s.state.mediaDisplayZone = "America/Los_Angeles";
+  const instant = item("OFFSET.JPG", "2026-08-14T00:30:00+08:00");
+  const floating = item("FLOAT.JPG", "2026-08-14 00:30:00");
+  s.state.media = [instant, floating, item("DATE.JPG", "2026-08-14")];
+  s.state.mediaDateRange = { start: "2026-08-13", end: "2026-08-13" };
+  assert.deepEqual(ids(s), ["OFFSET.JPG"]);
+  assert.match(s.mediaDateGroup(instant), /August 13, 2026/);
+  assert.match(s.formatDate(instant.captureTime), /Aug 13, 2026/);
+  assert.match(s.mediaDateGroup(floating), /August 14, 2026/);
+  assert.match(s.formatDate(floating.captureTime), /Aug 14, 2026/);
+  assert.match(s.formatDate(floating.captureTime), /mediaTimeZoneUnknown/);
+  assert.match(s.formatMediaTime("2026-03-08T02:30:00"), /2:30.*mediaTimeZoneUnknown/);
+  assert.equal(s.formatMediaTime("2026-08-14"), "");
+});
+
+test("zone refresh invalidates the whole presentation without changing selection, range, or transfer owner", () => {
+  const s = fixture();
+  const next = "Asia/Taipei";
+  const native = Intl.DateTimeFormat;
+  s.Intl = { DateTimeFormat: function (...args) {
+    return args.length ? new native(...args) : { resolvedOptions: () => ({ timeZone: next }) };
+  } };
+  s.state.mediaDisplayZone = "UTC";
+  const selection = new Set(["A.JPG"]);
+  const range = { start: "2026-10-01", end: "2026-10-01" };
+  const owner = { id: "synthetic-transfer" };
+  s.state.mediaSelection = selection;
+  s.state.mediaDateRange = range;
+  s.state.mediaDownload = owner;
+  s.state.mediaPreviewItem = s.state.media[0];
+  const updates = [];
+  s.renderMedia = () => updates.push(["gallery", s.state.mediaDisplayZone]);
+  s.renderMediaDetails = () => updates.push(["details", s.state.mediaDisplayZone]);
+  s.renderMediaPreviewNavigation = () => updates.push(["preview", s.state.mediaDisplayZone]);
+  vm.runInContext(extract("refreshMediaDateZone"), s);
+  s.refreshMediaDateZone();
+  assert.deepEqual(updates, [["gallery", next], ["details", next], ["preview", next]]);
+  assert.equal(s.state.mediaSelection, selection);
+  assert.equal(s.state.mediaDateRange, range);
+  assert.equal(s.state.mediaDownload, owner);
+  assert.equal(s.state.mediaPage, 0);
+  s.refreshMediaDateZone();
+  assert.equal(updates.length, 3, "unchanged zone causes no redundant rerender");
+  assert.match(source, /window\.addEventListener\("focus", refreshMediaDateZone\)/);
+  assert.match(source, /mediaTimeZoneUnknown: "Time zone unknown"/);
+  assert.match(source, /mediaTimeZoneUnknown: "時區未知"/);
+});
+
+test("an ordinary gallery render detects zone changes and refreshes open details before drawing", () => {
+  const s = fixture();
+  const next = "Asia/Taipei";
+  const native = Intl.DateTimeFormat;
+  s.Intl = { DateTimeFormat: function (...args) {
+    return args.length ? new native(...args) : { resolvedOptions: () => ({ timeZone: next }) };
+  } };
+  s.state.mediaDisplayZone = "UTC";
+  s.state.media = [];
+  s.state.mediaSelection = { replaceLoaded() {} };
+  s.state.mediaPreviewItem = item("REVIEW.JPG", "2026-10-01");
+  s.mediaThumbnailObserver = null;
+  s.MEDIA_PAGE_SIZE = 60;
+  s.renderMediaSelection = () => {};
+  s.ui.mediaScopeControl.querySelectorAll = () => [];
+  s.ui.mediaFilterControl.querySelectorAll = () => [];
+  s.ui.mediaList.replaceChildren = () => {};
+  s.ui.mediaList.append = () => {};
+  s.document = { createElement: () => ({}) };
+  const updates = [];
+  s.renderMediaDetails = () => updates.push(["details", s.state.mediaDisplayZone]);
+  s.renderMediaPreviewNavigation = () => updates.push(["preview", s.state.mediaDisplayZone]);
+  vm.runInContext(extract("renderMedia"), s);
+  s.renderMedia();
+  assert.deepEqual(updates, [["details", next], ["preview", next]]);
+  assert.equal(s.state.mediaPage, 0);
+  s.renderMedia();
+  assert.equal(updates.length, 2);
+});
