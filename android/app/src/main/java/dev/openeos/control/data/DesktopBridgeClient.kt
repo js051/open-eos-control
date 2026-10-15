@@ -1243,6 +1243,7 @@ class DesktopBridgeClient(
         sizeBytes: Long,
         contentType: String?,
         source: InputStream,
+        evidence: MediaUploadEvidence = MediaUploadEvidence(),
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaUploadResult = withContext(Dispatchers.IO) {
         require(sizeBytes in 1L..MAX_MEDIA_UPLOAD_BYTES) {
@@ -1250,6 +1251,7 @@ class DesktopBridgeClient(
         }
         val mediaType = (contentType ?: "application/octet-stream").substringBefore(';').trim().toMediaType()
         val uploadUrl = sessionEndpoint("media").newBuilder().addQueryParameter("filename", name).build()
+        val uploadContext = currentCoroutineContext()
         var bytesTransferred = 0L
         val body = object : RequestBody() {
             override fun contentType() = mediaType
@@ -1259,12 +1261,14 @@ class DesktopBridgeClient(
                 val buffer = ByteArray(TRANSFER_BUFFER_BYTES)
                 onProgress(CameraMediaTransferProgress(0L, sizeBytes))
                 while (bytesTransferred < sizeBytes) {
+                    uploadContext.ensureActive()
                     val requested = minOf(buffer.size.toLong(), sizeBytes - bytesTransferred).toInt()
                     val count = source.read(buffer, 0, requested)
                     check(count >= 0) {
                         "Upload source ended after $bytesTransferred of $sizeBytes bytes."
                     }
                     if (count == 0) continue
+                    uploadContext.ensureActive()
                     sink.write(buffer, 0, count)
                     bytesTransferred += count
                     onProgress(CameraMediaTransferProgress(bytesTransferred, sizeBytes))
@@ -1286,6 +1290,8 @@ class DesktopBridgeClient(
         }
         try {
             val response = try {
+                currentCoroutineContext().ensureActive()
+                evidence.beforeDispatch()
                 call.execute()
             } catch (exception: CancellationException) {
                 throw exception
@@ -1295,17 +1301,27 @@ class DesktopBridgeClient(
             }
             response.use {
                 session?.let(::requireCurrentSession)
-                val responseBody = response.body?.readBoundedUtf8(MAX_UPLOAD_RESPONSE_BYTES).orEmpty()
+                val responseBody = response.body?.let { readStrictMediaJsonText(it.byteStream(), it.contentLength(), MAX_UPLOAD_RESPONSE_BYTES) }.orEmpty()
                 if (!response.isSuccessful) throw bridgeError(response.code, responseBody, "Media upload", session, revision)
                 check(bytesTransferred == sizeBytes) {
                     "Desktop Bridge upload completed after $bytesTransferred of $sizeBytes bytes."
                 }
-                val item = parseMediaItem(JSONObject(responseBody))
-                    ?: error("Desktop Bridge returned invalid uploaded media information.")
-                check(item.name.equals(name, ignoreCase = true) && item.sizeBytes == sizeBytes) {
+                val strictReceipt = StrictMediaJson(responseBody).also { it.validate() }
+                val receipt = JSONObject(responseBody)
+                check(validUploadReceipt(response.code, name, sizeBytes, bytesTransferred,
+                    receipt.opt("id"), receipt.opt("name"), receipt.opt("sizeBytes"), receipt.opt("kind"), strictReceipt.topLevelToken("sizeBytes"))) {
+                    "Upload has no valid operation-specific completion receipt."
+                }
+                val item = CameraMediaItem(
+                    id = receipt.getString("id"), name = receipt.getString("name"), kind = receipt.getString("kind"),
+                    sizeBytes = sizeBytes, contentType = receipt.cameraMediaContentType(),
+                )
+                check(uploadReceiptNameMatches(name, item.name) && item.sizeBytes == sizeBytes) {
                     "Desktop Bridge did not verify the uploaded filename and size."
                 }
+                session?.let(::requireCurrentSession)
                 CameraMediaUploadResult(item, bytesTransferred).also {
+                    evidence.onConfirmed(it)
                     observedFeatures.add(CameraFeature.MEDIA_UPLOAD)
                 }
             }

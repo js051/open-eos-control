@@ -142,6 +142,7 @@ interface CameraControlBackend {
         sizeBytes: Long,
         contentType: String?,
         source: InputStream,
+        evidence: MediaUploadEvidence = MediaUploadEvidence(),
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaUploadResult = unsupported(CameraFeature.MEDIA_UPLOAD)
     suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = unsupported(CameraFeature.MEDIA_BROWSER)
@@ -297,8 +298,9 @@ class CcapiCameraBackend(
         sizeBytes: Long,
         contentType: String?,
         source: InputStream,
+        evidence: MediaUploadEvidence,
         onProgress: (CameraMediaTransferProgress) -> Unit,
-    ): CameraMediaUploadResult = client.uploadMedia(name, sizeBytes, contentType, source, onProgress)
+    ): CameraMediaUploadResult = client.uploadMedia(name, sizeBytes, contentType, source, evidence, onProgress)
 
     override suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = client.mediaInfo(item)
 
@@ -442,8 +444,9 @@ class DesktopBridgeCameraBackend(
         sizeBytes: Long,
         contentType: String?,
         source: InputStream,
+        evidence: MediaUploadEvidence,
         onProgress: (CameraMediaTransferProgress) -> Unit,
-    ): CameraMediaUploadResult = client.uploadMedia(name, sizeBytes, contentType, source, onProgress)
+    ): CameraMediaUploadResult = client.uploadMedia(name, sizeBytes, contentType, source, evidence, onProgress)
 
     override suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = client.mediaInfo(item)
 

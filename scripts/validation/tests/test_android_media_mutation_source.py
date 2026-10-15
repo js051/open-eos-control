@@ -68,7 +68,8 @@ class AndroidMediaMutationSourceTests(unittest.TestCase):
             self.assertIn('readStrictMediaJsonText(input, it.contentLength(), strictMediaJsonLimit)', source)
             self.assertIn('if (strictMediaJsonLimit != null) StrictMediaJson(body).validate()', source)
         self.assertIn('StrictMediaJson(text).validate()', (DATA / 'BridgeMediaListingDecoder.kt').read_text())
-        self.assertIn('keys.add(string())', (DATA / 'StrictMediaJson.kt').read_text())
+        self.assertIn('val key = string()', (DATA / 'StrictMediaJson.kt').read_text())
+        self.assertIn('check(keys.add(key))', (DATA / 'StrictMediaJson.kt').read_text())
 
     def test_mutation_only_merges_confirmed_field_preserving_writable_veto(self):
         vm = (UI / 'CameraViewModel.kt').read_text()

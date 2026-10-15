@@ -998,4 +998,10 @@
     <string name="media_metadata_reason_readback">Exact target readback was not confirmed</string>
     <string name="media_metadata_previous_session">Previous camera connection. These historical results do not describe the current camera.</string>
     <string name="media_metadata_selection_unloaded">%1$d selected items are no longer loaded. Metadata keeps these rows unstarted; reselect available items for transfer or delete.</string>
+    <string name="preparing_media_upload">Preparing %1$s locally</string>
+    <string name="media_upload_not_sent">Upload stopped before sending. Nothing was sent by this attempt. Choose the file again when you are ready.</string>
+    <string name="media_upload_uncertain">Upload result unknown. The camera may have saved the file. Refresh and inspect the camera before choosing to upload again. A matching filename does not confirm this attempt.</string>
+    <string name="media_upload_usb_uncertain">USB upload result unknown. Reconnect and refresh the camera to inspect its files before deciding whether to upload again. Nothing will be resent or deleted automatically.</string>
+    <string name="media_upload_refresh_failed">The upload was confirmed, but the media list could not be refreshed. Refresh to inspect the current camera files.</string>
+    <string name="media_upload_inspect">Refresh to inspect files</string>
 </resources>

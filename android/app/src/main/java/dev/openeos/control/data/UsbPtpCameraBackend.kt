@@ -1056,6 +1056,7 @@ class UsbPtpCameraBackend(
         sizeBytes: Long,
         contentType: String?,
         source: InputStream,
+        evidence: MediaUploadEvidence,
         onProgress: (CameraMediaTransferProgress) -> Unit,
     ): CameraMediaUploadResult {
         val info = requireDeviceInfo()
@@ -1105,19 +1106,22 @@ class UsbPtpCameraBackend(
             modificationDate = "",
             keywords = "",
         )
+        var dispatchStarted = false
         val sent = try {
             ptp.uploadObject(
                 storageId = target.storageId,
                 parentObject = PTP_ROOT_OBJECT_HANDLE,
                 objectInfo = outgoing,
                 source = source,
+                beforeDispatch = { evidence.beforeDispatch(); dispatchStarted = true },
             ) { transferred, total ->
                 onProgress(CameraMediaTransferProgress(transferred, total))
             }
         } catch (exception: CancellationException) {
-            abortUploadSession(ptp)
+            if (dispatchStarted) abortUploadSession(ptp)
             throw exception
         } catch (exception: Exception) {
+            if (!dispatchStarted) throw exception
             abortUploadSession(ptp)
             throw PtpProtocolException(
                 "USB PTP upload failed after SendObjectInfo; reconnect the camera before another command.",
@@ -1137,13 +1141,17 @@ class UsbPtpCameraBackend(
             )
         }
         rememberMediaInfo(context, readback)
-        refreshStorageSnapshot(info)
         val item = readback.toMediaItem(
             streamAvailable = requireDeviceInfo().supports(PtpOperationCode.GET_PARTIAL_OBJECT),
             folder = observedMediaFolder(context, readback),
         )
         observedFeatures.addAll(setOf(CameraFeature.MEDIA_UPLOAD, CameraFeature.MEDIA_BROWSER))
-        return CameraMediaUploadResult(item = item, bytesTransferred = sizeBytes)
+        val result = CameraMediaUploadResult(item = item, bytesTransferred = sizeBytes).also(evidence.onConfirmed)
+        // A later storage refresh cannot erase this operation's verified handle/readback.
+        withContext(NonCancellable) {
+            try { refreshStorageSnapshot(info) } catch (_: Exception) { /* Optional freshness only. */ }
+        }
+        return result
     }
 
     private suspend fun abortUploadSession(ptp: PtpSession) {

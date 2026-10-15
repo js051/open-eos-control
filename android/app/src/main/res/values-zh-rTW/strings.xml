@@ -761,4 +761,10 @@
     <string name="media_metadata_reason_readback">未讀回確認要求的值</string>
     <string name="media_metadata_previous_session">上一個相機連線的歷史結果，不代表目前相機狀態。</string>
     <string name="media_metadata_selection_unloaded">%1$d 個已選項目已不在載入清單。整理操作會保留為未開始；傳輸或刪除前請重新選取可用項目。</string>
+    <string name="preparing_media_upload">正在本機準備 %1$s</string>
+    <string name="media_upload_not_sent">上傳已在送出前停止。這次操作沒有送出檔案。準備好後請重新選取檔案。</string>
+    <string name="media_upload_uncertain">上傳結果不明。相機可能已儲存檔案。請先重新整理並檢查相機，再決定是否重新上傳。同名檔案不能證明這次上傳成功。</string>
+    <string name="media_upload_usb_uncertain">USB 上傳結果不明。請重新連線並重新整理，檢查相機檔案後再決定是否重新上傳。不會自動重送或刪除檔案。</string>
+    <string name="media_upload_refresh_failed">已確認上傳成功，但無法更新媒體清單。請重新整理以查看相機目前的檔案。</string>
+    <string name="media_upload_inspect">重新整理並檢查檔案</string>
 </resources>

@@ -1,5 +1,7 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.ByteArrayOutputStream
@@ -642,6 +644,7 @@ class PtpSession(
         parentObject: Long,
         objectInfo: PtpObjectInfo,
         source: InputStream,
+        beforeDispatch: () -> Unit = {},
         onProgress: (bytesTransferred: Long, totalBytes: Long) -> Unit = { _, _ -> },
     ): PtpSendObjectInfoResult = mutex.withLock {
         requireOpen()
@@ -656,6 +659,8 @@ class PtpSession(
             throw PtpProtocolException("SendObjectInfo command and dataset destinations must match.")
         }
 
+        currentCoroutineContext().ensureActive()
+        beforeDispatch()
         val infoTransactionId = takeTransactionId()
         transport.send(
             PtpCodec.command(

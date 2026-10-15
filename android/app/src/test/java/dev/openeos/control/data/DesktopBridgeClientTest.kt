@@ -1,5 +1,9 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -425,6 +429,73 @@ class DesktopBridgeClientTest {
     }
 
     @Test
+    fun mediaUploadCancellationBeforeDispatchSendsNoPost() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
+        val client = DesktopBridgeClient(server.url("/").toString())
+        client.initialize()
+        val attempt = MediaUploadAttempt().also { it.cancel() }
+        val failure = runCatching {
+            client.uploadMedia("SAME.JPG", 1, "image/jpeg", ByteArrayInputStream(byteArrayOf(7)),
+                evidence = MediaUploadEvidence(attempt::beforeDispatch, attempt::confirm))
+        }.exceptionOrNull()
+        assertTrue(failure is CancellationException)
+        assertEquals(MediaUploadStatus.NOT_SENT, attempt.finish())
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun mediaUploadReceiptIsRecordedBeforeCancelledIoReturn() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
+        server.enqueue(jsonResponse("""{"id":"exact/receipt","name":"SAME.JPG","kind":"image","sizeBytes":1}""", 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        val attempt = MediaUploadAttempt()
+        val upload = launch {
+            val owner = currentCoroutineContext().job
+            client.uploadMedia("SAME.JPG", 1, "image/jpeg", ByteArrayInputStream(byteArrayOf(7)),
+                evidence = MediaUploadEvidence(attempt::beforeDispatch, { attempt.confirm(it); owner.cancel() }))
+        }
+        upload.join()
+        attempt.cancel()
+        assertEquals(MediaUploadStatus.CONFIRMED, attempt.finish())
+        assertEquals("exact/receipt", attempt.confirmedResult()?.item?.id)
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun mediaUploadLostAcknowledgementIsUnknownAndDoesNotReplay() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
+        server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        val attempt = MediaUploadAttempt()
+        runCatching {
+            client.uploadMedia("SAME.JPG", 1, "image/jpeg", ByteArrayInputStream(byteArrayOf(7)),
+                evidence = MediaUploadEvidence(attempt::beforeDispatch, attempt::confirm))
+        }
+        assertEquals(MediaUploadStatus.UNCERTAIN, attempt.finish())
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun mediaUploadActualHttpDecoderRejectsInvalidSharedReceiptsWithoutRetry() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        val cases = dev.openeos.control.ui.loadMediaUploadFixture().receipts
+            .filter { it.size == 1234L && it.bound && it.status != 204 }
+        for (row in cases) {
+            server.enqueue(jsonResponse(row.raw, row.status))
+            val attempt = MediaUploadAttempt()
+            runCatching {
+                client.uploadMedia(row.name, row.size, "image/jpeg", ByteArrayInputStream(ByteArray(1234)),
+                    evidence = MediaUploadEvidence(attempt::beforeDispatch, attempt::confirm))
+            }
+            assertEquals(row.id, row.expected, attempt.confirmedResult() != null)
+            assertEquals(row.id, if (row.expected) MediaUploadStatus.CONFIRMED else MediaUploadStatus.UNCERTAIN,
+                attempt.finish())
+        }
+        assertEquals(2 + cases.size, server.requestCount)
+    }
+
+    @Test
     fun mediaUploadStreamsExactBytesAndReportsProgress() = runTest {
         val bytes = ByteArray(192 * 1024 + 17) { (it % 251).toByte() }
         server.enqueue(jsonResponse(HEALTH_JSON))
@@ -605,7 +676,7 @@ class DesktopBridgeClientTest {
         }.exceptionOrNull()
 
         assertTrue(failure is IllegalStateException)
-        assertTrue(failure?.message.orEmpty().contains("response exceeded 32768 bytes"))
+        assertTrue(failure?.message.orEmpty().contains("byte limit"))
         assertFalse(CameraFeature.MEDIA_UPLOAD in client.observedFeatureSnapshot())
     }
 
