@@ -8,6 +8,205 @@ import XCTest
 /// exact owner task's completion, rather than treating a delay as evidence.
 @MainActor
 final class MediaResponseOwnershipTests: XCTestCase {
+    func testBridgeThumbnailsWaitForCompletionAndExplicitPreviewRetiresListing() async throws {
+        let peer = MediaOwnershipPeer()
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectAndLoad(state)
+        let item = try XCTUnwrap(state.mediaItems.first)
+        await peer.enqueue(.listing, gate: "listing")
+        state.startMediaLibraryLoad()
+        try await waitForGate("listing", peer: peer)
+        let before = await peer.count(.thumbnail)
+        XCTAssertTrue(state.mediaListingDefersThumbnails)
+        await state.loadMediaThumbnail(item)
+        let during = await peer.count(.thumbnail)
+        XCTAssertEqual(during, before)
+        await state.openMediaPreview(item)
+        XCTAssertEqual(state.mediaLibraryLoadStatus, .cancelled)
+        XCTAssertTrue(state.mediaListingDefersThumbnails)
+        XCTAssertNotNil(state.mediaPreviewData)
+        await peer.release("listing")
+        // A late cancelled listing must not enable automatic thumbnail demand.
+        state.closeMediaPreview()
+        state.startMediaLibraryLoad()
+        try await waitUntil { state.mediaLibraryLoadStatus == .complete && !state.mediaLibraryLoading }
+        XCTAssertFalse(state.mediaListingDefersThumbnails)
+        await state.loadMediaThumbnail(item)
+        let after = await peer.count(.thumbnail)
+        XCTAssertEqual(after, before + 1)
+    }
+
+    func testBridgeCancelConsumesQueuedContentsHintButAllowsANewEvent() async throws {
+        let peer = MediaOwnershipPeer(events: true)
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectAndLoad(state)
+        state.screen = .media
+        try await waitUntil { await peer.eventWaiting() }
+        await peer.enqueue(.listing, gate: "manual-listing")
+        state.startMediaLibraryLoad()
+        try await waitForGate("manual-listing", peer: peer)
+        let polls = await peer.eventPolls()
+        let before = await peer.count(.listing)
+        await peer.emitContents()
+        state.cancelMediaLibraryLoad()
+        await peer.release("manual-listing")
+        try await waitUntil { await peer.eventPolls() > polls }
+        let afterCancel = await peer.count(.listing)
+        XCTAssertEqual(afterCancel, before, "Old hint must not restart latest or gallery listing")
+        XCTAssertEqual(state.mediaLibraryLoadStatus, .cancelled)
+        await peer.emitContents()
+        try await waitUntil { state.mediaLibraryLoadStatus == .complete && !state.mediaLibraryLoading }
+        let afterNewEvent = await peer.count(.listing)
+        XCTAssertEqual(afterNewEvent, before + 1, "A new event has one gallery traversal")
+    }
+
+    func testBridgeFailedEventListingIsConsumedWithoutRetryingTraversal() async throws {
+        let peer = MediaOwnershipPeer(events: true)
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectAndLoad(state)
+        state.screen = .media
+        try await waitUntil { await peer.eventWaiting() }
+        let before = await peer.count(.listing)
+        let polls = await peer.eventPolls()
+        await peer.enqueue(.listing, error: .networkConnectionLost)
+        await peer.emitContents()
+        try await waitUntil { await peer.eventPolls() > polls }
+        let after = await peer.count(.listing)
+        XCTAssertEqual(after, before + 1)
+        XCTAssertEqual(state.mediaLibraryLoadStatus, .failed)
+        XCTAssertTrue(state.mediaListingDefersThumbnails)
+    }
+
+    func testDateFilterAndClearPreserveAnActuallySelectedPreview() async throws {
+        for bridge in [false, true] {
+            let peer = MediaOwnershipPeer()
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            let item = try XCTUnwrap(state.latestMediaItem)
+            await state.openMediaPreview(item)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewItem).id, item.id)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewData), MediaOwnershipPeer.imageBytes)
+            let owner = state.mediaLibrarySessionID
+            let media = state.mediaItems
+            let loadStatus = state.mediaLibraryLoadStatus
+            let listingCount = await peer.count(.listing)
+            let previewCount = await peer.count(.preview)
+            let date = Date(timeIntervalSince1970: 1_786_752_000)
+            let range = try XCTUnwrap(MediaDateRange(startDate: date, endDate: date,
+                                                   timeZone: TimeZone(secondsFromGMT: 0)!))
+            XCTAssertTrue(state.setMediaDateRange(range, owner: owner))
+            // The selected fixture has an unknown capture date and is excluded from the list.
+            XCTAssertTrue(mediaItemsForDisplay(media, filter: .all, sort: .camera, dateRange: range).isEmpty)
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            XCTAssertEqual(state.mediaItems, media)
+            XCTAssertEqual(state.mediaLibraryLoadStatus, loadStatus)
+            XCTAssertTrue(state.setMediaDateRange(nil, owner: owner))
+            XCTAssertEqual(mediaItemsForDisplay(state.mediaItems, filter: .all, sort: .camera), media)
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            let afterListingCount = await peer.count(.listing)
+            let afterPreviewCount = await peer.count(.preview)
+            XCTAssertEqual(afterListingCount, listingCount)
+            XCTAssertEqual(afterPreviewCount, previewCount)
+        }
+    }
+
+    func testRatingFilterAndClearPreserveAnActuallySelectedPreviewWithoutRequests() async throws {
+        for bridge in [false, true] {
+            let peer = MediaOwnershipPeer()
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            let item = try XCTUnwrap(state.latestMediaItem)
+            await state.openMediaPreview(item)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewItem).id, item.id)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewData), MediaOwnershipPeer.imageBytes)
+            let items = state.mediaItems
+            let status = state.mediaLibraryLoadStatus
+            let owner = state.mediaLibrarySessionID
+            let listingCount = await peer.count(.listing)
+            let previewCount = await peer.count(.preview)
+            let infoCount = await peer.count(.info)
+            let mutations = await peer.mutationOperations()
+            // Choose a valid filter that excludes the selected item, regardless of fixture rating.
+            let excluded: MediaRatingFilter = item.rating == 5 ? .unrated : .five
+            XCTAssertTrue(state.setMediaRatingFilter(excluded, owner: owner))
+            XCTAssertFalse(mediaItemsForDisplay(items, filter: .all, sort: .ratingHigh,
+                ratingFilter: excluded).contains { $0.id == item.id })
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            XCTAssertEqual(state.mediaItems, items)
+            XCTAssertEqual(state.mediaLibraryLoadStatus, status)
+            XCTAssertTrue(state.setMediaRatingFilter(.all, owner: owner))
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            let afterListing = await peer.count(.listing)
+            let afterPreview = await peer.count(.preview)
+            XCTAssertEqual(afterListing, listingCount)
+            XCTAssertEqual(afterPreview, previewCount)
+            let afterInfo = await peer.count(.info)
+            let afterMutations = await peer.mutationOperations()
+            XCTAssertEqual(afterInfo, infoCount)
+            XCTAssertEqual(afterMutations, mutations)
+        }
+    }
+
+    func testFolderFilterAndClearPreserveSelectedPreviewAndDownloadWithoutRequests() async throws {
+        for bridge in [false, true] {
+            let peer = MediaOwnershipPeer()
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            let item = try XCTUnwrap(state.latestMediaItem)
+            await state.openMediaPreview(item)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewItem).id, item.id)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewData), MediaOwnershipPeer.imageBytes)
+            state.startMediaDownload(item)
+            let download = try XCTUnwrap(state.mediaDownloadTask)
+            await download.value
+            let downloadedFile = try XCTUnwrap(state.downloadedFile(for: item))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: downloadedFile.path))
+            XCTAssertEqual(try Data(contentsOf: downloadedFile), MediaOwnershipPeer.imageBytes)
+            let owner = state.mediaLibrarySessionID
+            let items = state.mediaItems
+            XCTAssertTrue(items.contains { $0.id == item.id })
+            let scope = state.mediaLibraryScope
+            let status = state.mediaLibraryLoadStatus
+            let hasMore = state.mediaLibraryHasMore
+            let requests = await peer.requestOperations()
+            let limits = await peer.listLimits()
+            let excluded = try XCTUnwrap(CameraMediaFolder(id: "synthetic:not-loaded", label: "Not loaded"))
+            XCTAssertFalse(items.contains { $0.folder.map { mediaFolderIdentity($0) } == mediaFolderIdentity(excluded) })
+            XCTAssertTrue(state.setMediaFolderFilter(.folder(excluded), owner: owner))
+            XCTAssertTrue(mediaItemsForDisplay(items, filter: .all, sort: .camera,
+                folderFilter: state.mediaFolderFilter).isEmpty)
+            XCTAssertEqual(state.mediaFolderFilter, .folder(excluded))
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            XCTAssertEqual(state.downloadedFile(for: item), downloadedFile)
+            XCTAssertTrue(state.setMediaFolderFilter(.all, owner: owner))
+            XCTAssertEqual(mediaItemsForDisplay(state.mediaItems, filter: .all, sort: .camera,
+                folderFilter: state.mediaFolderFilter), items)
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            XCTAssertEqual(state.downloadedFile(for: item), downloadedFile)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: downloadedFile.path))
+            XCTAssertEqual(state.mediaItems, items)
+            XCTAssertEqual(state.mediaLibraryScope, scope)
+            XCTAssertEqual(state.mediaLibraryLoadStatus, status)
+            XCTAssertEqual(state.mediaLibraryHasMore, hasMore)
+            let afterRequests = await peer.requestOperations()
+            let afterLimits = await peer.listLimits()
+            XCTAssertEqual(afterRequests, requests, "Folder selection cannot list, preview, download, or mutate media")
+            XCTAssertEqual(afterLimits, limits, "Folder selection cannot request full-card enumeration")
+        }
+    }
+
     func testRetiredInfoAndEveryMetadataResponseCannotOwnReplacementSession() async throws {
         for bridge in [false, true] {
             for operation in OwnershipOperation.metadataAndInfo {
@@ -391,8 +590,12 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
     private var limits: [String?] = []
     private var item: CameraMediaItem
     private var uploaded: [CameraMediaItem] = []
+    private let events: Bool
+    private var eventContinuation: CheckedContinuation<CameraHTTPResponse, Never>?
+    private var eventPollCount = 0
 
-    init(rating: Int = 0) {
+    init(rating: Int = 0, events: Bool = false) {
+        self.events = events
         item = CameraMediaItem(id: "collision", name: "COLLISION.JPG", kind: "image",
             sizeBytes: Int64(Self.imageBytes.count), previewAvailable: true,
             protected: false, rating: rating, rotationDegrees: 0, archived: false,
@@ -403,6 +606,7 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
         plans[operation, default: []].append(Plan(gate: gate, error: error))
     }
     func currentItem() -> CameraMediaItem { item }
+    func requestOperations() -> [OwnershipOperation] { operations }
     func count(_ operation: OwnershipOperation) -> Int { operations.filter { $0 == operation }.count }
     func listLimits() -> [String?] { limits }
     func mutationOperations() -> [OwnershipOperation] {
@@ -410,7 +614,18 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
     }
     func waiting(_ gate: String) -> Bool { gates[gate] != nil }
     func release(_ gate: String) { gates.removeValue(forKey: gate)?.resume() }
+    func eventWaiting() -> Bool { eventContinuation != nil }
+    func eventPolls() -> Int { eventPollCount }
+    func emitContents() {
+        let pending = eventContinuation
+        eventContinuation = nil
+        pending?.resume(returning: CameraHTTPResponse(statusCode: 200,
+            body: Data("{\"changedKeys\":[\"contents\"]}".utf8)))
+    }
     func releaseAll() {
+        eventContinuation?.resume(returning: CameraHTTPResponse(statusCode: 200,
+            body: Data("{\"changedKeys\":[]}".utf8)))
+        eventContinuation = nil
         let pending = gates
         gates.removeAll()
         for continuation in pending.values { continuation.resume() }
@@ -433,7 +648,17 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
         let simulator = path.hasPrefix("/ccapi")
         var operation: OwnershipOperation?
         var object: [String: Any] = [:]
-        if path.hasSuffix("/events") { throw CancellationError() }
+        if path.hasSuffix("/events") {
+            guard events else { throw CancellationError() }
+            if method == "DELETE" {
+                eventContinuation?.resume(returning: CameraHTTPResponse(statusCode: 200,
+                    body: Data("{\"changedKeys\":[]}".utf8)))
+                eventContinuation = nil
+                return CameraHTTPResponse(statusCode: 200)
+            }
+            eventPollCount += 1
+            return await withCheckedContinuation { eventContinuation = $0 }
+        }
         if path == "/health" {
             object = ["ok": true, "service": "open-eos-control-bridge", "version": "0.13.0"]
         } else if path == "/v1/session" {
@@ -475,7 +700,7 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
             object = ["connected": true, "model": "Synthetic media owner", "serial": "SYNTHETIC-OWNER", "api": "fixture"]
         } else if path.hasSuffix("/capabilities") {
             object = simulator ? [:] : ["supported": ["MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_PREVIEW",
-                "MEDIA_DOWNLOAD", "MEDIA_UPLOAD", "MEDIA_DELETE", "MEDIA_PROTECT", "MEDIA_RATING", "MEDIA_ROTATE", "MEDIA_ARCHIVE"]]
+                "MEDIA_DOWNLOAD", "MEDIA_UPLOAD", "MEDIA_DELETE", "MEDIA_PROTECT", "MEDIA_RATING", "MEDIA_ROTATE", "MEDIA_ARCHIVE"] + (events ? ["EVENT_POLLING"] : [])]
         } else if path.hasSuffix("/status") {
             object = ["connected": true, "recording": false, "mode": "Manual",
                 "battery": [String: Any](), "media": [String: Any](), "exposure": [String: Any]()]

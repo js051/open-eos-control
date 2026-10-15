@@ -10,6 +10,36 @@ enum CameraSession: Sendable {
     case ccapi(CCAPIClient)
     case desktopBridge(DesktopBridgeClient)
 
+    func foregroundMediaReadsAvailable() async -> Bool {
+        switch self {
+        case let .ccapi(client): return await client.foregroundMediaReadsAvailable()
+        case .desktopBridge: return false
+        }
+    }
+
+    func foregroundMediaInventory() async throws -> [CameraMediaItem] {
+        switch self {
+        case let .ccapi(client): return try await client.foregroundMediaInventory()
+        case .desktopBridge: throw CameraForegroundMediaError.unsupported
+        }
+    }
+
+    func foregroundMediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {
+        switch self {
+        case let .ccapi(client): return try await client.foregroundMediaInfo(item)
+        case .desktopBridge: throw CameraForegroundMediaError.unsupported
+        }
+    }
+
+    func downloadForegroundOriginal(_ item: CameraMediaItem, expectedBytes: Int64, to destination: URL,
+                                    progress: @escaping CameraMediaProgressHandler) async throws -> CameraMediaDownload {
+        switch self {
+        case let .ccapi(client):
+            return try await client.downloadForegroundOriginal(item, expectedBytes: expectedBytes, to: destination, progress: progress)
+        case .desktopBridge: throw CameraForegroundMediaError.unsupported
+        }
+    }
+
     func connectSnapshot() async throws -> CameraSnapshot {
         switch self {
         case let .ccapi(client): return try await client.connectSnapshot()
@@ -145,6 +175,27 @@ enum CameraSession: Sendable {
         }
     }
 
+    func startHeldAutofocus(owner: UUID) async throws {
+        switch self {
+        case let .ccapi(client): try await client.startHeldAutofocus(owner: owner)
+        case let .desktopBridge(client): try await client.startHeldAutofocus(owner: owner)
+        }
+    }
+
+    func stopHeldAutofocus(owner: UUID) async throws {
+        switch self {
+        case let .ccapi(client): try await client.stopHeldAutofocus(owner: owner)
+        case let .desktopBridge(client): try await client.stopHeldAutofocus(owner: owner)
+        }
+    }
+
+    func liveViewFocusInfo() async throws -> CameraFocusInfo? {
+        switch self {
+        case let .ccapi(client): return try await client.liveViewFocusInfo()
+        case let .desktopBridge(client): return try await client.liveViewFocusInfo()
+        }
+    }
+
     func autofocus() async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.autofocus()
@@ -156,6 +207,13 @@ enum CameraSession: Sendable {
         switch self {
         case let .ccapi(client): return try await client.halfPressShutter()
         case let .desktopBridge(client): return try await client.halfPressShutter()
+        }
+    }
+
+    func recordingCommandEvidence() async -> CameraRecordingCommandEvidence? {
+        switch self {
+        case let .ccapi(client): return await client.recordingCommandEvidence
+        case let .desktopBridge(client): return await client.recordingCommandEvidence
         }
     }
 
@@ -218,6 +276,20 @@ enum CameraSession: Sendable {
         switch self {
         case let .ccapi(client): await client.stopLiveView()
         case let .desktopBridge(client): await client.stopLiveView()
+        }
+    }
+
+    func liveViewStopState() async -> CameraLiveViewStopState {
+        switch self {
+        case let .ccapi(client): return await client.liveViewStopState()
+        case let .desktopBridge(client): return await client.liveViewStopState()
+        }
+    }
+
+    func retryLiveViewStop() async throws {
+        switch self {
+        case let .ccapi(client): try await client.retryLiveViewStop()
+        case let .desktopBridge(client): try await client.retryLiveViewStop()
         }
     }
 
@@ -286,6 +358,7 @@ enum CameraSession: Sendable {
     }
 
     func beginMediaPlayback(_ item: CameraMediaItem) async throws -> CameraMediaPlaybackStream {
+        guard CameraMediaType.classify(item) == .video else { throw URLError(.unsupportedURL) }
         let playbackItem: CameraMediaItem
         if item.sizeBytes?.isPositive == true {
             playbackItem = item
@@ -294,10 +367,20 @@ enum CameraSession: Sendable {
                 playbackItem = try await mediaInfo(item)
             } catch is CancellationError {
                 throw CancellationError()
+            } catch let error as CameraMediaMetadataError {
+                throw error
+            } catch let error as DesktopBridgeError {
+                // A malformed/mismatched metadata reply must not silently turn
+                // into a playback allocation using stale listing evidence.
+                if case .invalidResponse = error { throw error }
+                playbackItem = item
             } catch {
                 playbackItem = item
             }
         }
+        guard item.id.utf8.elementsEqual(playbackItem.id.utf8),
+              item.name.utf8.elementsEqual(playbackItem.name.utf8),
+              CameraMediaType.classify(playbackItem) == .video else { throw URLError(.unsupportedURL) }
         switch self {
         case let .ccapi(client):
             return CameraMediaPlaybackStream(item: playbackItem, backend: .ccapi(client))

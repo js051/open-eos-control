@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import OpenEOSCore
 import XCTest
@@ -7,6 +8,618 @@ import XCTest
 /// Gates record cancellation but ignore it deliberately: late completions must not own newer UI state.
 @MainActor
 final class CaptureMediaJourneyTests: XCTestCase {
+    #if DEBUG
+    func testDownloadStageTraceRequiresExactOptInAndRetainsOnlySixteenAllowlistedStages() {
+        let allowed = ["request", "rejected-unsupported", "rejected-busy", "started", "history",
+                       "request-original", "reply-original", "validated", "published", "cancelled", "failed"]
+        XCTAssertEqual(Set(MediaDownloadStageTrace.Stage.allCases.map(\.rawValue)), Set(allowed))
+        for environment in [[:], ["OEC_MEDIA_DOWNLOAD_TRACE": "0"], ["OEC_MEDIA_DOWNLOAD_TRACE": "true"]] {
+            var disabled = MediaDownloadStageTrace(environment: environment)
+            disabled.record(.request)
+            XCTAssertFalse(disabled.enabled)
+            XCTAssertTrue(disabled.entries.isEmpty)
+            XCTAssertNil(disabled.accessibilityValue)
+        }
+        var trace = MediaDownloadStageTrace(environment: ["OEC_MEDIA_DOWNLOAD_TRACE": "1"])
+        let stages = (0..<40).map { MediaDownloadStageTrace.Stage.allCases[$0 % allowed.count] }
+        for stage in stages { trace.record(stage) }
+        XCTAssertEqual(trace.entries.count, 16)
+        XCTAssertEqual(trace.entries, Array(stages.suffix(16)))
+        XCTAssertEqual(trace.accessibilityValue, stages.suffix(16).map(\.rawValue).joined(separator: "|"))
+        XCTAssertTrue(trace.entries.allSatisfy { allowed.contains($0.rawValue) })
+    }
+    #endif
+
+    func testManualRecordingOriginalPublishesMatchingIDBytesAndExportPayload() async throws {
+        let peer = CaptureMediaPeer(recording: true)
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        await peer.queueListings([.items([.newVideo])])
+        await state.toggleRecording()
+        await state.latestMediaTask?.value
+        let video = try XCTUnwrap(state.latestMediaItem)
+        XCTAssertEqual(video.id, "NEW-VIDEO")
+        XCTAssertTrue(mediaIsVideo(video))
+        // Exercise the manual original through the real DesktopBridgeClient,
+        // without an AVPlayer fallback being able to stand in for that request.
+        await peer.holdNext("original")
+        state.startMediaDownload(video)
+        let download = try XCTUnwrap(state.mediaDownloadTask)
+        try await waitForGate(peer, "original")
+        XCTAssertEqual(state.activeMediaDownloadID, video.id)
+        XCTAssertTrue(state.isBusy(.media))
+        XCTAssertNil(state.downloadedFile(for: video))
+        XCTAssertNil(state.makeMediaDownloadExportPayload(for: video))
+        await peer.release("original")
+        await download.value
+        let original = try XCTUnwrap(state.downloadedFile(for: video))
+        XCTAssertTrue(state.isMediaDownloaded(video))
+        XCTAssertEqual(try Data(contentsOf: original), try CaptureMediaPeer.videoOriginalBytes())
+        XCTAssertEqual(state.downloadedFileName, video.name)
+        XCTAssertNil(state.activeMediaDownloadID)
+        XCTAssertFalse(state.isBusy(.media))
+        XCTAssertNil(state.lastError)
+        let export = try XCTUnwrap(state.makeMediaDownloadExportPayload(for: video))
+        XCTAssertEqual(export.fileURLs, [original])
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(export.fileURLs.first)), try CaptureMediaPeer.videoOriginalBytes())
+        let originals = await peer.count("original")
+        let stops = await peer.count("recording-stop")
+        let starts = await peer.count("recording-start")
+        XCTAssertEqual(originals, 1)
+        XCTAssertEqual(stops, 1)
+        XCTAssertEqual(starts, 0)
+    }
+
+    func testConfirmedRecordingStopFindsDelayedVideoWithoutSelectingOldPhotosOrKnownVideo() async throws {
+        let peer = CaptureMediaPeer(recording: true)
+        await peer.queueListings([.items([.a, .b, .oldVideo])])
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        XCTAssertTrue(state.recording)
+        XCTAssertEqual(state.latestMediaItem?.id, "A")
+        let before = await peer.listCount()
+        await peer.queueListings([.items([.a, .new, .oldVideo]), .items([.a, .new, .oldVideo, .newVideo])])
+        await peer.holdNext("recording-stop")
+        let stop = Task { await state.toggleRecording() }
+        try await waitForGate(peer, "recording-stop")
+        let beforeStopResponse = await peer.listCount()
+        XCTAssertEqual(beforeStopResponse, before, "STOP must not wait for a pre-command card scan")
+        XCTAssertEqual(state.captureReviewKind, .video)
+        XCTAssertEqual(state.captureReviewState, .capturing)
+        XCTAssertTrue(state.latestMediaIsPrevious)
+        await peer.release("recording-stop")
+        await stop.value
+        await state.latestMediaTask?.value
+        XCTAssertFalse(state.recording)
+        XCTAssertFalse(state.isBusy(.recording))
+        XCTAssertEqual(state.captureReviewState, .available)
+        XCTAssertEqual(state.latestMediaItem?.id, "NEW-VIDEO")
+        XCTAssertFalse(state.latestMediaIsPrevious)
+        XCTAssertTrue(state.canOpenLatestMedia)
+        XCTAssertNil(state.lastError)
+        let after = await peer.listCount()
+        let stops = await peer.count("recording-stop")
+        let limits = await peer.listLimits()
+        let requests = await peer.requestsSinceRecording()
+        XCTAssertEqual(after - before, 2)
+        XCTAssertEqual(stops, 1)
+        XCTAssertTrue(limits.allSatisfy { $0 == "8" })
+        XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") })
+    }
+
+    func testRecordingStartAndUnconfirmedStopsDoNotStartVideoReview() async throws {
+        for outcome in CaptureRecordingStopOutcome.allCases where outcome != .stopped {
+            let peer = CaptureMediaPeer(recording: true)
+            let state = makeState(peer)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            await state.connect()
+            await state.latestMediaTask?.value
+            await peer.setRecordingStopOutcome(outcome)
+            await peer.queueListings([.items([.newVideo])])
+            let before = await peer.listCount()
+            await state.toggleRecording()
+            await state.latestMediaTask?.value
+            let after = await peer.listCount()
+            let stops = await peer.count("recording-stop")
+            XCTAssertEqual(after, before, "An unconfirmed \(outcome) response must not start media review")
+            XCTAssertEqual(stops, 1)
+            XCTAssertEqual(state.captureReviewState, .idle)
+            XCTAssertFalse(state.canRetryCaptureMediaReview)
+            XCTAssertEqual(state.latestMediaItem?.id, "A")
+            XCTAssertFalse(state.isBusy(.recording))
+            if outcome == .rejected || outcome == .responseLost { XCTAssertNotNil(state.lastError) }
+            if outcome == .unknown { XCTAssertNil(state.status?.recording) }
+            if outcome == .active { XCTAssertTrue(state.recording) }
+        }
+
+        let peer = CaptureMediaPeer()
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        let before = await peer.listCount()
+        await state.toggleRecording()
+        await state.latestMediaTask?.value
+        let after = await peer.listCount()
+        let starts = await peer.count("recording-start")
+        let stops = await peer.count("recording-stop")
+        XCTAssertTrue(state.recording)
+        XCTAssertEqual(starts, 1)
+        XCTAssertEqual(stops, 0)
+        XCTAssertEqual(after, before)
+        XCTAssertEqual(state.captureReviewState, .idle)
+    }
+
+    func testConfirmedStopWithoutMediaBrowserDoesNotInventAReview() async throws {
+        let peer = CaptureMediaPeer(mediaSupported: false, recording: true)
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.toggleRecording()
+        let stops = await peer.count("recording-stop")
+        let lists = await peer.listCount()
+        XCTAssertEqual(stops, 1)
+        XCTAssertEqual(lists, 0)
+        XCTAssertFalse(state.recording)
+        XCTAssertEqual(state.captureReviewState, .idle)
+        XCTAssertNil(state.latestMediaTask)
+    }
+
+    func testRecordingReviewExhaustsKnownVideosAndRetryNeverReplaysRecording() async throws {
+        let peer = CaptureMediaPeer(recording: true)
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        await peer.queueListings([.items([.oldVideo])])
+        state.startMediaLibraryLoad()
+        try await waitUntil { state.mediaLibraryLoadStatus == .complete }
+        await peer.queueListings(Array(repeating: .items([.oldVideo, .new]), count: 4))
+        let before = await peer.listCount()
+        await state.toggleRecording()
+        await state.latestMediaTask?.value
+        let exhausted = await peer.listCount()
+        XCTAssertEqual(exhausted - before, 4)
+        XCTAssertEqual(state.captureReviewKind, .video)
+        XCTAssertEqual(state.captureReviewState, .notReady)
+        XCTAssertTrue(state.latestMediaIsPrevious)
+        XCTAssertEqual(state.latestMediaItem?.id, "A")
+        XCTAssertTrue(state.canRetryCaptureMediaReview)
+        await peer.queueListings([.items([.oldVideo, .new, .newVideo])])
+        state.retryCaptureMediaReview()
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.latestMediaItem?.id, "NEW-VIDEO")
+        XCTAssertEqual(state.captureReviewState, .available)
+        XCTAssertEqual(state.captureReviewKind, .video)
+        let stops = await peer.count("recording-stop")
+        let starts = await peer.count("recording-start")
+        let choices = await peer.captureChoices()
+        let requests = await peer.requestsSinceRecording()
+        XCTAssertEqual(stops, 1)
+        XCTAssertEqual(starts, 0)
+        XCTAssertTrue(choices.isEmpty)
+        XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") })
+    }
+
+    func testRecordingReviewReadFailureAndRetryRespectMediaBusyWithoutClearingOtherErrors() async throws {
+        let peer = CaptureMediaPeer(recording: true)
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        await peer.queueListings([.failure, .failure, .failure, .failure])
+        await state.toggleRecording()
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.captureReviewState, .readFailed)
+        XCTAssertNil(state.lastError, "A review read failure is not a failed STOP")
+        state.reportCubeLutRenderFailure()
+        let otherError = state.lastError
+        let item = try XCTUnwrap(state.latestMediaItem)
+        await peer.holdNext("original")
+        let before = await peer.listCount()
+        state.retryCaptureMediaReview()
+        let interrupted = try XCTUnwrap(state.latestMediaTask)
+        state.startMediaDownload(item)
+        await interrupted.value
+        XCTAssertEqual(state.captureReviewState, .readFailed)
+        XCTAssertEqual(state.captureReviewKind, .video)
+        XCTAssertFalse(state.canRetryCaptureMediaReview)
+        let after = await peer.listCount()
+        XCTAssertEqual(after, before)
+        try await waitForGate(peer, "original")
+        let beforeBusyRetry = await peer.requestCount()
+        state.retryCaptureMediaReview()
+        let afterBusyRetry = await peer.requestCount()
+        XCTAssertEqual(afterBusyRetry, beforeBusyRetry)
+        let download = try XCTUnwrap(state.mediaDownloadTask)
+        await peer.release("original")
+        await download.value
+        // The download owns its own success/error. Set a newer unrelated alert now.
+        state.reportCubeLutRenderFailure()
+        XCTAssertEqual(state.lastError, otherError)
+        await peer.queueListings([.items([.a, .newVideo])])
+        state.retryCaptureMediaReview()
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.captureReviewState, .available)
+        XCTAssertEqual(state.latestMediaItem?.id, "NEW-VIDEO")
+        XCTAssertEqual(state.lastError, otherError, "A background review must not clear another owner's alert")
+        let stops = await peer.count("recording-stop")
+        XCTAssertEqual(stops, 1)
+    }
+
+    func testRecordingStopRetiresOldListingAndThumbnailBeforeItsResponse() async throws {
+        for operation in ["listing", "thumbnail"] {
+            let peer = CaptureMediaPeer(recording: true)
+            await peer.holdNext(operation)
+            let state = makeState(peer)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            await state.connect()
+            try await waitForGate(peer, operation)
+            let retired = try XCTUnwrap(state.latestMediaTask)
+            let previousID = state.latestMediaItem?.id
+            await peer.holdNext("recording-stop")
+            let stop = Task { await state.toggleRecording() }
+            try await waitForGate(peer, "recording-stop")
+            try await waitForCancellation(peer, operation)
+            await peer.release(operation)
+            await retired.value
+            XCTAssertEqual(state.captureReviewState, .capturing)
+            XCTAssertEqual(state.captureReviewKind, .video)
+            XCTAssertEqual(state.latestMediaItem?.id, previousID)
+            XCTAssertNil(state.latestMediaThumbnail)
+            await peer.queueListings([.items([.newVideo])])
+            await peer.release("recording-stop")
+            await stop.value
+            await state.latestMediaTask?.value
+            XCTAssertEqual(state.captureReviewState, .available)
+            XCTAssertEqual(state.latestMediaItem?.id, "NEW-VIDEO")
+        }
+    }
+
+    func testRetiredStopSuccessAndFailureCannotStartReviewOrClearNewCaptureOwner() async throws {
+        for outcome in [CaptureRecordingStopOutcome.stopped, .rejected] {
+            let oldPeer = CaptureMediaPeer(recording: true)
+            let newPeer = CaptureMediaPeer()
+            let state = makeState([oldPeer, newPeer])
+            defer { state.requestDisconnect(); Task { await oldPeer.releaseAll(); await newPeer.releaseAll() } }
+            await state.connect()
+            await state.latestMediaTask?.value
+            await oldPeer.setRecordingStopOutcome(outcome)
+            await oldPeer.holdNext("recording-stop")
+            let oldStop = Task { await state.toggleRecording() }
+            try await waitForGate(oldPeer, "recording-stop")
+            await state.disconnect()
+            await state.connect()
+            await state.latestMediaTask?.value
+            await state.setCaptureMode(.photo)
+            XCTAssertEqual(state.captureMode, .photo)
+            await newPeer.holdNext("capture")
+            let capture = Task { await state.captureStill() }
+            try await waitForGate(newPeer, "capture")
+            state.reportCubeLutRenderFailure()
+            let currentError = state.lastError
+            let before = await oldPeer.listCount()
+            await oldPeer.release("recording-stop")
+            await oldStop.value
+            let after = await oldPeer.listCount()
+            XCTAssertEqual(after, before)
+            XCTAssertEqual(state.captureReviewKind, .photo)
+            XCTAssertEqual(state.captureReviewState, .capturing)
+            XCTAssertTrue(state.isBusy(.capture))
+            XCTAssertEqual(state.lastError, currentError)
+            XCTAssertNil(state.latestMediaTask)
+            await newPeer.queueListings([.items([.newVideo, .new])])
+            await newPeer.release("capture")
+            await capture.value
+            await state.latestMediaTask?.value
+            XCTAssertEqual(state.captureReviewState, .available)
+            XCTAssertEqual(state.latestMediaItem?.id, "N", "The new still owner keeps its photo selector")
+        }
+    }
+
+    func testNewStillCaptureRetiresHeldVideoReviewAndRestoresPhotoSelection() async throws {
+        let peer = CaptureMediaPeer(recording: true)
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        await peer.queueListings([.items([.newVideo])])
+        await peer.holdNext("listing")
+        await state.toggleRecording()
+        try await waitForGate(peer, "listing")
+        let oldReview = try XCTUnwrap(state.latestMediaTask)
+        await state.setCaptureMode(.photo)
+        XCTAssertEqual(state.captureMode, .photo)
+        await peer.holdNext("capture")
+        let capture = Task { await state.captureStill() }
+        try await waitForGate(peer, "capture")
+        await peer.release("listing")
+        await oldReview.value
+        XCTAssertEqual(state.captureReviewKind, .photo)
+        XCTAssertEqual(state.captureReviewState, .capturing)
+        XCTAssertEqual(state.latestMediaItem?.id, "A")
+        await peer.queueListings([.items([.newVideo, .new])])
+        await peer.release("capture")
+        await capture.value
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.latestMediaItem?.id, "N")
+        XCTAssertEqual(state.captureReviewState, .available)
+    }
+
+    func testRecordingStopRetiresPendingStillReviewAndSwitchesToVideoSelection() async throws {
+        let peer = CaptureMediaPeer()
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        await peer.queueListings([.items([.new])])
+        await peer.holdNext("listing")
+        await state.captureStill()
+        try await waitForGate(peer, "listing")
+        let oldReview = try XCTUnwrap(state.latestMediaTask)
+        XCTAssertEqual(state.captureReviewKind, .photo)
+        await state.toggleRecording()
+        XCTAssertTrue(state.recording)
+        await peer.holdNext("recording-stop")
+        let stop = Task { await state.toggleRecording() }
+        try await waitForGate(peer, "recording-stop")
+        try await waitForCancellation(peer, "listing")
+        await peer.release("listing")
+        await oldReview.value
+        XCTAssertEqual(state.captureReviewKind, .video)
+        XCTAssertEqual(state.captureReviewState, .capturing)
+        XCTAssertEqual(state.latestMediaItem?.id, "A")
+        await peer.queueListings([.items([.new, .newVideo])])
+        await peer.release("recording-stop")
+        await stop.value
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.latestMediaItem?.id, "NEW-VIDEO")
+        XCTAssertEqual(state.captureReviewState, .available)
+        let starts = await peer.count("recording-start")
+        let stops = await peer.count("recording-stop")
+        let choices = await peer.captureChoices()
+        XCTAssertEqual(starts, 1)
+        XCTAssertEqual(stops, 1)
+        XCTAssertEqual(choices.count, 1)
+    }
+
+    func testRecordingReviewContentEventPreservesPendingVideoSelectorUntilReadOnlyRetry() async throws {
+        let peer = CaptureMediaPeer(eventPolling: true, recording: true)
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        try await waitForGate(peer, "event")
+        await state.toggleRecording()
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.captureReviewState, .notReady)
+        let before = await peer.listCount()
+        await peer.queueListings([.items([.new, .newVideo])])
+        await peer.release("event")
+        try await waitForEventPoll(peer, count: 2)
+        let after = await peer.listCount()
+        XCTAssertEqual(after, before)
+        XCTAssertEqual(state.captureReviewState, .notReady)
+        XCTAssertEqual(state.captureReviewKind, .video)
+        state.retryCaptureMediaReview()
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.latestMediaItem?.id, "NEW-VIDEO")
+        XCTAssertEqual(state.captureReviewState, .available)
+        await peer.release("event")
+        try await waitForEventPoll(peer, count: 3)
+        XCTAssertEqual(state.latestMediaItem?.id, "NEW-VIDEO", "An unopened video candidate survives a content event")
+    }
+
+    func testRecordingReviewOpensExistingVideoPlaybackAndKeepsOriginalDownloadSeparate() async throws {
+        let peer = CaptureMediaPeer(recording: true)
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        await peer.queueListings([.items([.newVideo])])
+        await state.toggleRecording()
+        await state.latestMediaTask?.value
+        let video = try XCTUnwrap(state.latestMediaItem)
+        await state.openLatestMedia()
+        XCTAssertEqual(state.screen, .media)
+        XCTAssertEqual(state.mediaPreviewItem?.id, video.id)
+        XCTAssertNotNil(state.mediaVideoPlayback)
+        XCTAssertNil(state.mediaPreviewData)
+        XCTAssertEqual(state.captureReviewState, .idle)
+        XCTAssertFalse(state.canRetryMediaPreview, "Video uses the existing playback flow, not JPEG retry")
+        let playback = try XCTUnwrap(state.mediaVideoPlayback)
+        try await waitUntil { playback.player.currentItem?.status == .readyToPlay }
+        let allocations = await peer.count("playback")
+        let streamReads = await peer.count("playback-GET")
+        let photoPreviews = await peer.count("preview")
+        let originalsBefore = await peer.count("original")
+        XCTAssertEqual(allocations, 1)
+        XCTAssertGreaterThan(streamReads, 0)
+        XCTAssertEqual(photoPreviews, 0)
+        XCTAssertEqual(originalsBefore, 0)
+        XCTAssertNil(playback.failure)
+        XCTAssertFalse(playback.isPreparingFallback)
+        state.closeMediaPreview()
+        state.startMediaDownload(video)
+        await state.mediaDownloadTask?.value
+        let original = try XCTUnwrap(state.downloadedFile(for: video))
+        XCTAssertEqual(try Data(contentsOf: original), try CaptureMediaPeer.videoOriginalBytes())
+        XCTAssertEqual(state.downloadedFileName, "NEW-VIDEO.MP4")
+        let originalsAfter = await peer.count("original")
+        let stops = await peer.count("recording-stop")
+        XCTAssertEqual(originalsAfter, 1)
+        XCTAssertEqual(stops, 1)
+    }
+
+    func testClosingVideoBeforeScheduledFallbackRunsDoesNotRequestOriginal() async throws {
+        let peer = CaptureMediaPeer()
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        let playback = try await openFixtureVideo(state, peer: peer)
+
+        // There is no suspension between scheduling and closing on MainActor, so
+        // this exercises a cancelled task that has not entered prepareFallback yet.
+        playback.handlePlaybackFailure(URLError(.networkConnectionLost))
+        let fallback = try XCTUnwrap(playback.fallbackTask)
+        XCTAssertTrue(playback.isPreparingFallback)
+        state.closeMediaPreview()
+        try await waitForPlaybackFallback(fallback)
+
+        let originals = await peer.count("original")
+        XCTAssertEqual(originals, 0, "A closed playback must not start a queued original download")
+        XCTAssertNil(playback.player.currentItem)
+        XCTAssertNil(playback.failure)
+        XCTAssertFalse(playback.isPreparingFallback)
+        XCTAssertNil(playback.fallbackTask)
+        XCTAssertTrue(try playbackTemporaryDirectories().isEmpty)
+    }
+
+    func testCurrentVideoFallbackPublishesOnceAndCloseRemovesItsPrivateFile() async throws {
+        let peer = CaptureMediaPeer()
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        let playback = try await openFixtureVideo(state, peer: peer)
+        let video = try XCTUnwrap(state.mediaPreviewItem)
+        await peer.holdNext("original")
+        playback.handlePlaybackFailure(URLError(.networkConnectionLost))
+        let fallback = try XCTUnwrap(playback.fallbackTask)
+        try await waitForGate(peer, "original")
+        XCTAssertTrue(playback.isPreparingFallback)
+        playback.handlePlaybackFailure(URLError(.networkConnectionLost))
+        await peer.release("original")
+        try await waitForPlaybackFallback(fallback)
+
+        let asset = try XCTUnwrap(playback.player.currentItem?.asset as? AVURLAsset)
+        XCTAssertTrue(asset.url.isFileURL)
+        XCTAssertEqual(try Data(contentsOf: asset.url), try CaptureMediaPeer.videoOriginalBytes())
+        XCTAssertNil(playback.failure)
+        XCTAssertFalse(playback.isPreparingFallback)
+        XCTAssertNil(playback.fallbackTask)
+        XCTAssertNil(state.downloadedFile(for: video), "Playback fallback is not a manual original download")
+        let originals = await peer.count("original")
+        XCTAssertEqual(originals, 1, "Repeated failure callbacks must share one fallback")
+
+        state.closeMediaPreview()
+        XCTAssertNil(playback.player.currentItem)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: asset.url.deletingLastPathComponent().path))
+        playback.handlePlaybackFailure(URLError(.networkConnectionLost))
+        XCTAssertNil(playback.fallbackTask, "A late failure callback must not reopen closed playback")
+    }
+
+    func testClosingVideoDuringFallbackDiscardsLateDownloadAndTemporaryFiles() async throws {
+        for failOriginal in [false, true] {
+            let peer = CaptureMediaPeer()
+            let state = makeState(peer)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            let playback = try await openFixtureVideo(state, peer: peer)
+            let video = try XCTUnwrap(state.mediaPreviewItem)
+            await peer.holdNext("original")
+            if failOriginal { await peer.failNext("original") }
+            playback.handlePlaybackFailure(URLError(.networkConnectionLost))
+            let fallback = try XCTUnwrap(playback.fallbackTask)
+            try await waitForGate(peer, "original")
+            let directories = try playbackTemporaryDirectories()
+            XCTAssertEqual(directories.count, 1)
+
+            state.closeMediaPreview()
+            try await waitForCancellation(peer, "original")
+            let stillHeld = await peer.waiting("original")
+            XCTAssertTrue(stillHeld, "Close must cancel without waiting for an uncooperative download")
+            XCTAssertNil(playback.player.currentItem)
+            XCTAssertFalse(playback.isPreparingFallback)
+            await peer.release("original")
+            try await waitForPlaybackFallback(fallback)
+
+            let originals = await peer.count("original")
+            let temporaryFiles = await peer.originalTemporaryFiles()
+            XCTAssertEqual(originals, 1)
+            XCTAssertEqual(temporaryFiles.count, 1, "The cancelled transport still returns its late result")
+            XCTAssertTrue((directories + temporaryFiles).allSatisfy {
+                !FileManager.default.fileExists(atPath: $0.path)
+            })
+            XCTAssertNil(playback.player.currentItem, "A late result must not replace the closed player")
+            XCTAssertNil(playback.failure, "A retired fallback must not publish a late failure")
+            XCTAssertNil(playback.fallbackTask)
+            XCTAssertNil(state.mediaVideoPlayback)
+            XCTAssertNil(state.downloadedFile(for: video))
+        }
+    }
+
+    func testRecordingReviewResourcesDescribeVideosWithoutClaimingCaptureProvenance() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        for (language, video, older) in [("en", "video", "older file"), ("zh-Hant", "影片", "舊檔")] {
+            let source = try String(contentsOf: root.appendingPathComponent("App/Resources/\(language).lproj/Localizable.strings"), encoding: .utf8)
+            func line(_ key: String) throws -> String {
+                let matches = source.split(separator: "\n").filter { $0.hasPrefix("\"\(key)\" = ") }
+                XCTAssertEqual(matches.count, 1)
+                return String(try XCTUnwrap(matches.first))
+            }
+            for status in [CaptureReviewState.searching, .notReady, .readFailed, .available] {
+                XCTAssertTrue(try line(CaptureReviewKind.video.localizationKey(for: status)).contains(video))
+                XCTAssertEqual(CaptureReviewKind.photo.localizationKey(for: status), status.localizationKey)
+            }
+            XCTAssertTrue(try line("recording_review_limited_list").contains(older))
+            for suffix in ["capturing", "limited_list", "retry", "previous_badge"] {
+                let videoKey = CaptureReviewKind.video.localizationKey(suffix: suffix)
+                let photoKey = CaptureReviewKind.photo.localizationKey(suffix: suffix)
+                XCTAssertEqual(videoKey, "recording_review_\(suffix)")
+                XCTAssertEqual(photoKey, "capture_review_\(suffix)")
+                _ = try line(videoKey)
+                _ = try line(photoKey)
+            }
+            for key in ["open_previous_video_named", "open_visible_video_named"] {
+                XCTAssertTrue(try line(key).contains(video))
+            }
+        }
+    }
+
+    func testPhotoReviewKeepsFirstUnknownDatePhotoAheadOfFutureVideoAndLaterDatedPhoto() async throws {
+        let peer = CaptureMediaPeer()
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        state.setShutterAutofocus(false)
+        let undated = CaptureFixtureItem(id: "UNDATED", date: "")
+        let futureVideo = CaptureFixtureItem(id: "FUTURE-VIDEO", date: "2099-01-01T00:00:00Z", video: true)
+        await peer.queueListings([.items([.a, futureVideo, undated, .new, .b])])
+        let before = await peer.listCount()
+        await state.captureStill()
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.latestMediaItem?.id, "UNDATED")
+        XCTAssertEqual(state.captureReviewKind, .photo)
+        XCTAssertEqual(state.captureReviewState, .available)
+        XCTAssertFalse(state.latestMediaIsPrevious)
+        let after = await peer.listCount()
+        let choices = await peer.captureChoices()
+        let requests = await peer.requestsSinceCapture()
+        let limits = await peer.listLimits()
+        XCTAssertEqual(after - before, 1)
+        XCTAssertEqual(choices, [false], "Review must not replay the shutter")
+        XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") })
+        XCTAssertTrue(limits.allSatisfy { $0 == "8" })
+    }
+
+    func testRecentReviewRetainsFirstUnknownDateRegardlessOfFutureCameraMetadata() async throws {
+        let peer = CaptureMediaPeer()
+        await peer.queueListings([.items([CaptureFixtureItem(id: "UNDATED", date: ""), .a, .newVideo])])
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.latestMediaItem?.id, "UNDATED")
+        let choices = await peer.captureChoices()
+        let starts = await peer.count("recording-start")
+        let stops = await peer.count("recording-stop")
+        XCTAssertTrue(choices.isEmpty)
+        XCTAssertEqual(starts, 0)
+        XCTAssertEqual(stops, 0)
+    }
+
     func testOnlyAcknowledgedBridgeReadbackErrorStartsReviewWithoutInventingCaptureSuccess() async throws {
         for code in ["CAPTURE_STATUS_READBACK_FAILED", "CCAPI_UNREACHABLE", "CAPTURE_FAILED", "SHUTTER_RELEASE_UNCONFIRMED"] {
             let peer = CaptureMediaPeer()
@@ -961,11 +1574,568 @@ final class CaptureMediaJourneyTests: XCTestCase {
         XCTAssertEqual(originalGets, 0)
     }
 
+    func testAll106FixedReviewEvidenceVectorsThroughProductionCameraAppState() async throws {
+        let fixture = try CaptureReviewEvidenceContract.load()
+        var checked = 0
+        for vector in fixture.cases {
+            let video = vector.intent == "video"
+            let peer = CaptureMediaPeer(recording: video)
+            let delay = CaptureReviewDelayProbe()
+            let state = makeState([peer], reviewDelay: { try await delay.sleep($0) })
+            defer { state.requestDisconnect(); Task { await peer.releaseAll(); await delay.release() } }
+            await peer.queueListings([try evidenceListing("known-only", video: video)])
+            await state.connect()
+            await state.latestMediaTask?.value
+            let previous = try XCTUnwrap(state.latestMediaItem)
+            let previousThumbnail = state.latestMediaThumbnail
+            let before = await peer.listCount()
+            await peer.queueListings(try vector.reads.map { try evidenceListing($0, video: video) })
+            if video { await state.toggleRecording() } else { await state.captureStill() }
+            await state.latestMediaTask?.value
+            assertReviewEvidence(state, expected: vector.expected, context: vector.id)
+            let count = await peer.listCount()
+            let delays = await delay.values()
+            let limits = await peer.listLimits()
+            XCTAssertEqual(count - before, vector.reads.count, vector.id)
+            XCTAssertLessThanOrEqual(count - before, fixture.maximumReads, vector.id)
+            XCTAssertEqual(delays, Array(fixture.retryDelaysMillis.prefix(vector.reads.count - 1)).map { $0 * 1_000_000 }, vector.id)
+            XCTAssertTrue(limits.allSatisfy { $0 == "8" }, vector.id)
+            if vector.expected.candidateId == nil {
+                XCTAssertEqual(state.latestMediaItem, previous, vector.id)
+                XCTAssertEqual(state.latestMediaThumbnail, previousThumbnail, vector.id)
+                XCTAssertTrue(state.latestMediaIsPrevious, vector.id)
+                XCTAssertTrue(state.canRetryCaptureMediaReview, vector.id)
+            } else {
+                XCTAssertFalse(state.latestMediaIsPrevious, vector.id)
+                XCTAssertFalse(state.canRetryCaptureMediaReview, vector.id)
+            }
+            XCTAssertEqual(state.captureReviewKind, video ? .video : .photo, vector.id)
+            XCTAssertNil(state.lastError, vector.id)
+            XCTAssertNil(state.latestMediaTask, vector.id)
+            let choices = await peer.captureChoices()
+            let starts = await peer.count("recording-start")
+            let stops = await peer.count("recording-stop")
+            let requests: [String]
+            if video { requests = await peer.requestsSinceRecording() }
+            else { requests = await peer.requestsSinceCapture() }
+            XCTAssertEqual(choices, video ? [] : [true], vector.id)
+            XCTAssertEqual(starts, 0, vector.id)
+            XCTAssertEqual(stops, video ? 1 : 0, vector.id)
+            XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") }, vector.id)
+            checked += 1
+        }
+        XCTAssertEqual(checked, 106)
+    }
+
+    func testFixedFreshRetryVectorsDoNotReusePreviousInvocationEvidence() async throws {
+        let fixture = try CaptureReviewEvidenceContract.load()
+        var checked = 0
+        for vector in fixture.retryCases {
+            for video in [false, true] {
+                let peer = CaptureMediaPeer(recording: video)
+                let delay = CaptureReviewDelayProbe()
+                let state = makeState([peer], reviewDelay: { try await delay.sleep($0) })
+                defer { state.requestDisconnect(); Task { await peer.releaseAll(); await delay.release() } }
+                await peer.queueListings([try evidenceListing("known-only", video: video)])
+                await state.connect()
+                await state.latestMediaTask?.value
+                let previous = try XCTUnwrap(state.latestMediaItem)
+                await peer.queueListings(try vector.first.map { try evidenceListing($0, video: video) })
+                if video { await state.toggleRecording() } else { await state.captureStill() }
+                await state.latestMediaTask?.value
+                let before = await peer.listCount()
+                await peer.queueListings(try vector.second.map { try evidenceListing($0, video: video) })
+                state.retryCaptureMediaReview()
+                await state.latestMediaTask?.value
+                assertReviewEvidence(state, expected: vector.expected, context: vector.id)
+                let after = await peer.listCount()
+                XCTAssertEqual(after - before, fixture.maximumReads, vector.id)
+                XCTAssertEqual(state.latestMediaItem, previous, vector.id)
+                let choices = await peer.captureChoices()
+                let stops = await peer.count("recording-stop")
+                let starts = await peer.count("recording-start")
+                let requests: [String]
+                if video { requests = await peer.requestsSinceRecording() }
+                else { requests = await peer.requestsSinceCapture() }
+                XCTAssertEqual(choices, video ? [] : [true], vector.id)
+                XCTAssertEqual(stops, video ? 1 : 0, vector.id)
+                XCTAssertEqual(starts, 0, vector.id)
+                XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") }, vector.id)
+                checked += 1
+            }
+        }
+        XCTAssertEqual(checked, 4)
+    }
+
+    func testFreshReviewPreemptedBeforeFirstReadDoesNotFabricateFailure() async throws {
+        let peer = CaptureMediaPeer()
+        let delay = CaptureReviewDelayProbe()
+        let state = makeState([peer], reviewDelay: { try await delay.sleep($0) })
+        defer { state.requestDisconnect(); Task { await peer.releaseAll(); await delay.release() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        let previous = try XCTUnwrap(state.latestMediaItem)
+        await peer.holdNext("capture")
+        let capture = Task { await state.captureStill() }
+        try await waitForGate(peer, "capture")
+        // Use the delay-independent synchronous busy admission while the shutter
+        // response is held; the subsequent review must not start a listing.
+        await peer.holdNext("original")
+        state.startMediaDownload(previous)
+        let before = await peer.listCount()
+        await peer.release("capture")
+        await capture.value
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.captureReviewOutcome, CaptureReviewOutcome())
+        XCTAssertEqual(state.captureReviewState, .notReady)
+        XCTAssertEqual(state.captureReviewKind.localizationKey(for: state.captureReviewState, outcome: state.captureReviewOutcome),
+                       "capture_review_not_checked")
+        let after = await peer.listCount()
+        XCTAssertEqual(after, before)
+        let download = try XCTUnwrap(state.mediaDownloadTask)
+        await peer.release("original")
+        await download.value
+    }
+
+    private func evidenceListing(_ token: String, video: Bool) throws -> CaptureFixtureListing {
+        func photo(_ id: String, date: String = "2020-01-01T00:00:00Z") -> CaptureFixtureItem {
+            CaptureFixtureItem(id: id, date: date, kind: "jpeg")
+        }
+        func movie(_ id: String, date: String = "2099-01-01T00:00:00Z") -> CaptureFixtureItem {
+            CaptureFixtureItem(id: id, date: date, video: true, kind: "video")
+        }
+        switch token {
+        case "failure": return .failure
+        case "malformed": return .malformed
+        case "empty": return .items([])
+        case "known-only": return .items([photo("OLD_A", date: "2040-01-01T00:00:00Z"), photo("OLD_B")])
+        case "wrong-kind": return .items([video ? photo("NEW_PHOTO") : movie("NEW_VIDEO")])
+        case "found": return .items([
+            photo("OLD_A", date: "2040-01-01T00:00:00Z"), photo("NEW_PHOTO"), movie("NEW_VIDEO"),
+            photo("NEW_PHOTO_2", date: "2050-01-01T00:00:00Z"), movie("NEW_VIDEO_2", date: "2100-01-01T00:00:00Z"),
+        ])
+        default:
+            XCTFail("Unknown fixed review-evidence read token: \(token)")
+            throw URLError(.cannotParseResponse)
+        }
+    }
+
+    private func assertReviewEvidence(
+        _ state: CameraAppState,
+        expected: CaptureReviewEvidenceContract.Expected,
+        context: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let outcome = state.captureReviewOutcome
+        XCTAssertEqual(outcome.observation.rawValue, expected.observation, context, file: file, line: line)
+        XCTAssertEqual(outcome.readEvidence.successfulReads, expected.successfulReads, context, file: file, line: line)
+        XCTAssertEqual(outcome.readEvidence.failedReads, expected.failedReads, context, file: file, line: line)
+        XCTAssertEqual(outcome.readEvidence.completedReads, expected.successfulReads + expected.failedReads, context, file: file, line: line)
+        XCTAssertEqual(outcome.readEvidence.lastCompletedRead?.rawValue, expected.lastCompletedRead, context, file: file, line: line)
+        XCTAssertEqual(state.captureReviewState, outcome.terminalState, context, file: file, line: line)
+        XCTAssertEqual(outcome.showsLastReadFailureWarning,
+                       expected.observation == "no-candidate-observed" && expected.lastCompletedRead == "failure", context, file: file, line: line)
+        if let candidateID = expected.candidateId {
+            XCTAssertEqual(state.latestMediaItem?.id, candidateID, context, file: file, line: line)
+        }
+    }
+
+    func testReviewRetryStartsFreshEvidenceAfterSuccessfulChecks() async throws {
+        let peer = CaptureMediaPeer()
+        let delay = CaptureReviewDelayProbe()
+        let state = makeState([peer], reviewDelay: { try await delay.sleep($0) })
+        defer { state.requestDisconnect(); Task { await peer.releaseAll(); await delay.release() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        let previous = try XCTUnwrap(state.latestMediaItem)
+        await peer.queueListings([.items([]), .failure, .items([.a]), .failure])
+        await state.captureStill()
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.captureReviewState, .notReady)
+        XCTAssertEqual(state.captureReviewOutcome.observation, .noCandidateObserved)
+        XCTAssertTrue(state.captureReviewOutcome.showsLastReadFailureWarning)
+        XCTAssertEqual(state.captureReviewOutcome.readEvidence.successfulReads, 2)
+        await peer.queueListings(Array(repeating: .failure, count: 4))
+        state.retryCaptureMediaReview()
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.captureReviewState, .readFailed)
+        XCTAssertEqual(state.captureReviewOutcome.observation, .unread)
+        XCTAssertEqual(state.captureReviewOutcome.readEvidence.successfulReads, 0)
+        XCTAssertEqual(state.captureReviewOutcome.readEvidence.failedReads, 4)
+        XCTAssertEqual(state.captureReviewOutcome.readEvidence.lastCompletedRead, .failure)
+        XCTAssertFalse(state.captureReviewOutcome.showsLastReadFailureWarning)
+        XCTAssertEqual(state.latestMediaItem, previous, "Preserve the complete previous-media value")
+        XCTAssertNil(state.lastError)
+        let choices = await peer.captureChoices()
+        let requests = await peer.requestsSinceCapture()
+        XCTAssertEqual(choices, [true])
+        XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") })
+    }
+
+    func testZeroCompletedReadRetryPreservesEveryPreviousTerminalOutcomeAndEvidence() async throws {
+        let histories: [[CaptureFixtureListing]] = [
+            [.failure, .failure, .failure, .failure],
+            [.items([]), .failure, .failure, .failure],
+            [.failure, .failure, .failure, .items([])],
+        ]
+        for reads in histories {
+            let peer = CaptureMediaPeer()
+            let delay = CaptureReviewDelayProbe()
+            let state = makeState([peer], reviewDelay: { try await delay.sleep($0) })
+            defer { state.requestDisconnect(); Task { await peer.releaseAll(); await delay.release() } }
+            await state.connect()
+            await state.latestMediaTask?.value
+            let previous = try XCTUnwrap(state.latestMediaItem)
+            await peer.queueListings(reads)
+            await state.captureStill()
+            await state.latestMediaTask?.value
+            let outcome = state.captureReviewOutcome
+            let terminal = state.captureReviewState
+            let before = await peer.listCount()
+            await peer.holdNext("original")
+            state.retryCaptureMediaReview()
+            let retry = try XCTUnwrap(state.latestMediaTask)
+            state.startMediaDownload(previous)
+            await retry.value
+            let after = await peer.listCount()
+            XCTAssertEqual(after, before)
+            XCTAssertEqual(state.captureReviewState, terminal)
+            XCTAssertEqual(state.captureReviewOutcome, outcome)
+            XCTAssertEqual(state.latestMediaItem, previous)
+            try await waitForGate(peer, "original")
+            let download = try XCTUnwrap(state.mediaDownloadTask)
+            await peer.release("original")
+            await download.value
+            let choices = await peer.captureChoices()
+            XCTAssertEqual(choices, [true])
+        }
+    }
+
+    func testCancelledReviewInflightSuccessFailureAndCancelledErrorPublishNoOutcome() async throws {
+        for response in [CaptureFixtureListing.items([.new]), .failure, .cancelled] {
+            let peer = CaptureMediaPeer()
+            let delay = CaptureReviewDelayProbe()
+            let state = makeState([peer], reviewDelay: { try await delay.sleep($0) })
+            defer { state.requestDisconnect(); Task { await peer.releaseAll(); await delay.release() } }
+            await state.connect()
+            await state.latestMediaTask?.value
+            let previous = try XCTUnwrap(state.latestMediaItem)
+            await peer.queueListings([response])
+            await peer.holdNext("listing", gate: "cancelled-review")
+            let before = await peer.listCount()
+            await state.captureStill()
+            try await waitForGate(peer, "cancelled-review")
+            let task = try XCTUnwrap(state.latestMediaTask)
+            let outcome = state.captureReviewOutcome
+            task.cancel()
+            try await waitForCancellation(peer, "cancelled-review")
+            await peer.release("cancelled-review")
+            await task.value
+            XCTAssertEqual(state.captureReviewOutcome, outcome)
+            XCTAssertEqual(state.captureReviewState, .notReady, "Cancellation restores retry without publishing partial evidence")
+            XCTAssertTrue(state.canRetryCaptureMediaReview)
+            XCTAssertEqual(state.latestMediaItem, previous)
+            XCTAssertNil(state.latestMediaTask)
+            XCTAssertNil(state.lastError)
+            let after = await peer.listCount()
+            let choices = await peer.captureChoices()
+            let requests = await peer.requestsSinceCapture()
+            XCTAssertEqual(after - before, 1)
+            XCTAssertEqual(choices, [true])
+            XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") })
+        }
+    }
+
+    func testReviewTransportCancellationWithoutTaskCancellationDoesNotBecomeReadFailure() async throws {
+        let peer = CaptureMediaPeer()
+        let delay = CaptureReviewDelayProbe()
+        let state = makeState([peer], reviewDelay: { try await delay.sleep($0) })
+        defer { state.requestDisconnect(); Task { await peer.releaseAll(); await delay.release() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        await peer.queueListings([.cancelled])
+        await state.captureStill()
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.captureReviewOutcome, CaptureReviewOutcome())
+        XCTAssertEqual(state.captureReviewState, .notReady)
+        XCTAssertTrue(state.canRetryCaptureMediaReview)
+        let delays = await delay.values()
+        XCTAssertTrue(delays.isEmpty)
+    }
+
+    func testCancelledOrReplacedReviewDuringBackoffCannotPublishCompletedLocalReads() async throws {
+        for replaceOwner in [false, true] {
+            let peer = CaptureMediaPeer()
+            let delay = CaptureReviewDelayProbe(holdFirst: true)
+            let state = makeState([peer], reviewDelay: { try await delay.sleep($0) })
+            defer { state.requestDisconnect(); Task { await peer.releaseAll(); await delay.release() } }
+            await state.connect()
+            await state.latestMediaTask?.value
+            let previous = try XCTUnwrap(state.latestMediaItem)
+            await peer.queueListings([.items([])])
+            await state.captureStill()
+            let old = try XCTUnwrap(state.latestMediaTask)
+            try await waitForReviewDelay(delay)
+            XCTAssertEqual(state.captureReviewOutcome, CaptureReviewOutcome())
+            if replaceOwner {
+                await peer.queueListings([.items([.new])])
+                await state.captureStill()
+                await state.latestMediaTask?.value
+                XCTAssertEqual(state.captureReviewOutcome.observation, .found)
+            } else {
+                old.cancel()
+            }
+            let outcome = state.captureReviewOutcome
+            let terminal = state.captureReviewState
+            let selected = state.latestMediaItem
+            await delay.release()
+            await old.value
+            XCTAssertEqual(state.captureReviewOutcome, outcome)
+            XCTAssertEqual(state.captureReviewState, replaceOwner ? terminal : .notReady)
+            XCTAssertEqual(state.canRetryCaptureMediaReview, !replaceOwner)
+            XCTAssertEqual(state.latestMediaItem, selected)
+            XCTAssertEqual(selected?.id, replaceOwner ? "N" : previous.id)
+            let choices = await peer.captureChoices()
+            XCTAssertEqual(choices, Array(repeating: true, count: replaceOwner ? 2 : 1))
+        }
+    }
+
+    func testCancelledRetryInFlightOrBackoffRestoresPriorMixedTerminalOutcome() async throws {
+        for duringDelay in [false, true] {
+            let peer = CaptureMediaPeer()
+            let delay = CaptureReviewDelayProbe()
+            let state = makeState([peer], reviewDelay: { try await delay.sleep($0) })
+            defer { state.requestDisconnect(); Task { await peer.releaseAll(); await delay.release() } }
+            await state.connect()
+            await state.latestMediaTask?.value
+            let previous = try XCTUnwrap(state.latestMediaItem)
+            await peer.queueListings([.items([]), .failure, .failure, .failure])
+            await state.captureStill()
+            await state.latestMediaTask?.value
+            let outcome = state.captureReviewOutcome
+            XCTAssertTrue(outcome.showsLastReadFailureWarning)
+            await peer.queueListings([.items([])])
+            if duringDelay { await delay.holdNext() }
+            else { await peer.holdNext("listing", gate: "cancelled-retry") }
+            let before = await peer.listCount()
+            state.retryCaptureMediaReview()
+            let retry = try XCTUnwrap(state.latestMediaTask)
+            if duringDelay { try await waitForReviewDelay(delay) }
+            else { try await waitForGate(peer, "cancelled-retry") }
+            retry.cancel()
+            if duringDelay { await delay.release() }
+            else { await peer.release("cancelled-retry") }
+            await retry.value
+            let after = await peer.listCount()
+            XCTAssertEqual(after - before, 1)
+            XCTAssertEqual(state.captureReviewOutcome, outcome)
+            XCTAssertEqual(state.captureReviewState, .notReady)
+            XCTAssertEqual(state.latestMediaItem, previous)
+            XCTAssertTrue(state.canRetryCaptureMediaReview)
+            XCTAssertNil(state.latestMediaTask)
+            let choices = await peer.captureChoices()
+            let requests = await peer.requestsSinceCapture()
+            XCTAssertEqual(choices, [true])
+            XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") })
+        }
+    }
+
+    func testMediaBusyAfterOneCompletedRetryReadPreservesPreviousTerminalEvidence() async throws {
+        let histories: [[CaptureFixtureListing]] = [
+            [.failure, .failure, .failure, .failure],
+            [.items([]), .failure, .failure, .failure],
+        ]
+        for reads in histories {
+            let peer = CaptureMediaPeer()
+            let delay = CaptureReviewDelayProbe()
+            let state = makeState([peer], reviewDelay: { try await delay.sleep($0) })
+            defer { state.requestDisconnect(); Task { await peer.releaseAll(); await delay.release() } }
+            await state.connect()
+            await state.latestMediaTask?.value
+            let previous = try XCTUnwrap(state.latestMediaItem)
+            await peer.queueListings(reads)
+            await state.captureStill()
+            await state.latestMediaTask?.value
+            let outcome = state.captureReviewOutcome
+            let terminal = state.captureReviewState
+            await delay.holdNext()
+            await peer.queueListings([.items([]), .items([.new])])
+            let before = await peer.listCount()
+            state.retryCaptureMediaReview()
+            let retry = try XCTUnwrap(state.latestMediaTask)
+            try await waitForReviewDelay(delay)
+            await peer.holdNext("original")
+            state.startMediaDownload(previous)
+            try await waitForGate(peer, "original")
+            await delay.release()
+            await retry.value
+            let after = await peer.listCount()
+            XCTAssertEqual(after - before, 1, "Media ownership preempts before a second listing")
+            XCTAssertEqual(state.captureReviewOutcome, outcome, "The partial successful retry must not erase previous evidence")
+            XCTAssertEqual(state.captureReviewState, terminal)
+            XCTAssertEqual(state.latestMediaItem, previous)
+            XCTAssertFalse(state.canRetryCaptureMediaReview)
+            let download = try XCTUnwrap(state.mediaDownloadTask)
+            await peer.release("original")
+            await download.value
+            XCTAssertTrue(state.canRetryCaptureMediaReview)
+            let choices = await peer.captureChoices()
+            let requests = await peer.requestsSinceCapture()
+            XCTAssertEqual(choices, [true])
+            XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") })
+        }
+    }
+
+    func testReplacedReviewOwnerRetiresLateSuccessAndFailureEvidence() async throws {
+        for response in [CaptureFixtureListing.items([.new]), .failure] {
+            let peer = CaptureMediaPeer()
+            let delay = CaptureReviewDelayProbe()
+            let state = makeState([peer], reviewDelay: { try await delay.sleep($0) })
+            defer { state.requestDisconnect(); Task { await peer.releaseAll(); await delay.release() } }
+            await state.connect()
+            await state.latestMediaTask?.value
+            let previous = try XCTUnwrap(state.latestMediaItem)
+            await peer.queueListings([response])
+            await peer.holdNext("listing", gate: "retired-review")
+            await state.captureStill()
+            try await waitForGate(peer, "retired-review")
+            let old = try XCTUnwrap(state.latestMediaTask)
+            await peer.holdNext("capture", gate: "replacement-capture")
+            let capture = Task { await state.captureStill() }
+            try await waitForGate(peer, "replacement-capture")
+            await peer.release("retired-review")
+            await old.value
+            XCTAssertEqual(state.captureReviewState, .capturing)
+            XCTAssertEqual(state.captureReviewOutcome, CaptureReviewOutcome())
+            XCTAssertEqual(state.latestMediaItem, previous)
+            await peer.queueListings([.items([.new])])
+            await peer.release("replacement-capture")
+            await capture.value
+            await state.latestMediaTask?.value
+            XCTAssertEqual(state.captureReviewOutcome.observation, .found)
+            XCTAssertEqual(state.captureReviewOutcome.readEvidence.completedReads, 1)
+            XCTAssertEqual(state.captureReviewOutcome.readEvidence.failedReads, 0)
+            let choices = await peer.captureChoices()
+            XCTAssertEqual(choices, [true, true])
+        }
+    }
+
+    func testReplacedSessionReviewCannotChangeNewSessionOutcomeOrPreviousMedia() async throws {
+        for response in [CaptureFixtureListing.items([.new]), .failure] {
+            let oldPeer = CaptureMediaPeer()
+            let newPeer = CaptureMediaPeer()
+            let delay = CaptureReviewDelayProbe()
+            let state = makeState([oldPeer, newPeer], reviewDelay: { try await delay.sleep($0) })
+            defer { state.requestDisconnect(); Task { await oldPeer.releaseAll(); await newPeer.releaseAll(); await delay.release() } }
+            await state.connect()
+            await state.latestMediaTask?.value
+            await oldPeer.queueListings([response])
+            await oldPeer.holdNext("listing", gate: "old-session-review")
+            await state.captureStill()
+            try await waitForGate(oldPeer, "old-session-review")
+            let old = try XCTUnwrap(state.latestMediaTask)
+            await state.disconnect()
+            await state.connect()
+            await state.latestMediaTask?.value
+            await newPeer.queueListings([.items([]), .failure, .failure, .failure])
+            await state.captureStill()
+            await state.latestMediaTask?.value
+            let outcome = state.captureReviewOutcome
+            let previous = state.latestMediaItem
+            XCTAssertEqual(outcome.observation, .noCandidateObserved)
+            XCTAssertTrue(outcome.showsLastReadFailureWarning)
+            await oldPeer.release("old-session-review")
+            await old.value
+            XCTAssertEqual(state.captureReviewOutcome, outcome)
+            XCTAssertEqual(state.captureReviewState, .notReady)
+            XCTAssertEqual(state.latestMediaItem, previous)
+            XCTAssertNil(state.lastError)
+            let oldChoices = await oldPeer.captureChoices()
+            let newChoices = await newPeer.captureChoices()
+            XCTAssertEqual(oldChoices, [true])
+            XCTAssertEqual(newChoices, [true])
+        }
+    }
+
+    func testBridgeMalformedItemsNeverBecomeSuccessfulEmptyReviewReads() async throws {
+        for body in [#"{}"#, #"{"items":null}"#, #"{"items":[null]}"#, #"{"items":[1]}"#,
+                     #"{"items":[{}]}"#, #"{"items":[{"id":"","name":"SYNTHETIC.JPG"}]}"#,
+                     #"{"items":[{"id":1,"name":"SYNTHETIC.JPG"}]}"#,
+                     #"{"items":[{"id":"SYNTHETIC","name":"  "}]}"#,
+                     #"{"items":[{"id":"SYNTHETIC","name":1}]}"#,
+                     #"{"items":[{"id":"A","name":"A.JPG"},null]}"#] {
+            let peer = CaptureMediaPeer()
+            let delay = CaptureReviewDelayProbe()
+            let state = makeState([peer], reviewDelay: { try await delay.sleep($0) })
+            defer { state.requestDisconnect(); Task { await peer.releaseAll(); await delay.release() } }
+            await state.connect()
+            await state.latestMediaTask?.value
+            let previous = try XCTUnwrap(state.latestMediaItem)
+            await peer.queueListings(Array(repeating: .rawListing(body), count: 4))
+            let before = await peer.listCount()
+            await state.captureStill()
+            await state.latestMediaTask?.value
+            let after = await peer.listCount()
+            XCTAssertEqual(after - before, 4)
+            XCTAssertEqual(state.captureReviewState, .readFailed)
+            XCTAssertEqual(state.captureReviewOutcome.observation, .unread)
+            XCTAssertEqual(state.captureReviewOutcome.readEvidence.successfulReads, 0)
+            XCTAssertEqual(state.captureReviewOutcome.readEvidence.failedReads, 4)
+            XCTAssertEqual(state.latestMediaItem, previous)
+            XCTAssertNil(state.lastError)
+            let choices = await peer.captureChoices()
+            let requests = await peer.requestsSinceCapture()
+            XCTAssertEqual(choices, [true])
+            XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") })
+        }
+    }
+
+    func testHTTP200MalformedListingIsFailedReadEvidence() async throws {
+        let peer = CaptureMediaPeer()
+        let delay = CaptureReviewDelayProbe()
+        let state = makeState([peer], reviewDelay: { try await delay.sleep($0) })
+        defer { state.requestDisconnect(); Task { await peer.releaseAll(); await delay.release() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        await peer.queueListings(Array(repeating: .malformed, count: 4))
+        let before = await peer.listCount()
+        await state.captureStill()
+        await state.latestMediaTask?.value
+        let after = await peer.listCount()
+        XCTAssertEqual(after - before, 4)
+        XCTAssertEqual(state.captureReviewOutcome.observation, .unread)
+        XCTAssertEqual(state.captureReviewOutcome.readEvidence.successfulReads, 0)
+        XCTAssertEqual(state.captureReviewOutcome.readEvidence.failedReads, 4)
+        XCTAssertEqual(state.captureReviewOutcome.readEvidence.lastCompletedRead, .failure)
+        XCTAssertEqual(state.captureReviewState, .readFailed)
+        XCTAssertNil(state.lastError)
+    }
+
+    private func waitForReviewDelay(_ delay: CaptureReviewDelayProbe) async throws {
+        for _ in 0..<500 {
+            if await delay.waiting() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Timed out waiting for the controlled review delay")
+        throw URLError(.timedOut)
+    }
+
     private func makeState(_ peer: CaptureMediaPeer) -> CameraAppState {
+        makeState([peer])
+    }
+
+    private func makeState(
+        _ peers: [CaptureMediaPeer],
+        reviewDelay: (@Sendable (UInt64) async throws -> Void)? = nil
+    ) -> CameraAppState {
         let defaults = UserDefaults(suiteName: "CaptureMediaJourneyTests.\(UUID().uuidString)")!
+        var nextPeer = 0
         let state = CameraAppState(defaults: defaults, sessionFactory: {
-            .desktopBridge(try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: peer))
-        })
+            let peer = peers[min(nextPeer, peers.count - 1)]
+            nextPeer += 1
+            return .desktopBridge(try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: peer))
+        }, latestMediaReviewDelay: reviewDelay)
         state.autoRefresh = false
         return state
     }
@@ -1010,6 +2180,38 @@ final class CaptureMediaJourneyTests: XCTestCase {
         throw URLError(.timedOut)
     }
 
+    private func openFixtureVideo(_ state: CameraAppState, peer: CaptureMediaPeer) async throws -> CameraMediaPlayback {
+        await peer.queueListings([.items([.newVideo])])
+        await state.connect()
+        await state.latestMediaTask?.value
+        let video = try XCTUnwrap(state.latestMediaItem)
+        XCTAssertEqual(video.id, "NEW-VIDEO")
+        await state.openMediaPreview(video)
+        let playback = try XCTUnwrap(state.mediaVideoPlayback)
+        try await waitUntil { playback.player.currentItem?.status == .readyToPlay }
+        return playback
+    }
+
+    private func waitForPlaybackFallback(_ fallback: Task<Void, Never>) async throws {
+        var finished = false
+        let observer = Task {
+            await fallback.value
+            finished = true
+        }
+        defer { observer.cancel() }
+        // Do not await an uncooperative task directly from the test. A failure
+        // remains bounded and teardown releases every fixture continuation.
+        try await waitUntil { finished }
+    }
+
+    private func playbackTemporaryDirectories() throws -> [URL] {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OpenEOSControl", isDirectory: true)
+            .appendingPathComponent("VideoPlayback", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+    }
+
     private func waitForEventPoll(_ peer: CaptureMediaPeer, count: Int) async throws {
         for _ in 0..<500 {
             if await peer.count("event") == count { return }
@@ -1041,18 +2243,51 @@ final class CaptureMediaJourneyTests: XCTestCase {
 private struct CaptureFixtureItem: Sendable {
     let id: String
     let date: String
+    var video = false
+    var kind: String? = nil
     static let a = Self(id: "A", date: "2030-01-01T00:00:00Z")
     static let b = Self(id: "B", date: "2029-01-01T00:00:00Z")
     static let new = Self(id: "N", date: "2020-01-01T00:00:00Z")
     static let libraryOnly = Self(id: "LIBRARY", date: "2040-01-01T00:00:00Z")
+    static let oldVideo = Self(id: "OLD-VIDEO", date: "2028-01-01T00:00:00Z", video: true)
+    static let newVideo = Self(id: "NEW-VIDEO", date: "2020-01-01T00:00:00Z", video: true)
     var json: [String: Any] {
-        ["id": id, "name": "\(id).JPG", "kind": "photo", "captureTime": date, "previewAvailable": true]
+        var result: [String: Any] = ["id": id, "name": "\(id).\(video ? "MP4" : "JPG")", "kind": kind ?? (video ? "video" : "photo"),
+                                   "captureTime": date, "previewAvailable": !video]
+        if kind != nil { result["contentType"] = video ? "video/mp4" : "image/jpeg" }
+        return result
     }
 }
 
 private enum CaptureFixtureListing: Sendable {
     case items([CaptureFixtureItem])
-    case failure
+    case failure, malformed, cancelled
+    case rawListing(String)
+}
+
+/// Test-only delay seam records the production intervals without wall-clock waits.
+/// A held delay ignores cancellation until released, exposing late-owner bugs.
+private actor CaptureReviewDelayProbe {
+    private var durations: [UInt64] = []
+    private var holdFirst: Bool
+    private var gate: CheckedContinuation<Void, Never>?
+    init(holdFirst: Bool = false) { self.holdFirst = holdFirst }
+    func sleep(_ nanoseconds: UInt64) async throws {
+        durations.append(nanoseconds)
+        if holdFirst {
+            holdFirst = false
+            await withCheckedContinuation { gate = $0 }
+        }
+        try Task.checkCancellation()
+    }
+    func holdNext() { holdFirst = true }
+    func values() -> [UInt64] { durations }
+    func waiting() -> Bool { gate != nil }
+    func release() { let pending = gate; gate = nil; pending?.resume() }
+}
+
+private enum CaptureRecordingStopOutcome: Sendable, CaseIterable, Equatable {
+    case stopped, active, unknown, rejected, responseLost
 }
 
 /// A cancellation handler cannot await the fixture actor; record synchronously for exact ownership assertions.
@@ -1078,35 +2313,57 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
     static let thumbnailBytes = Data([0xFF, 0xD8, 0xFF, 0xE0, 1, 0xFF, 0xD9])
     static let displayBytes = Data([0xFF, 0xD8, 0xFF, 0xE0, 2, 0xFF, 0xD9])
     static let originalBytes = Data([0xFF, 0xD8, 0xFF, 0xE0, 3, 4, 5, 0xFF, 0xD9])
+    static func videoOriginalBytes() throws -> Data {
+        guard let url = Bundle(for: CaptureMediaJourneyTests.self)
+            .url(forResource: "valid-h264-baseline", withExtension: "mp4") else {
+            throw URLError(.fileDoesNotExist)
+        }
+        return try Data(contentsOf: url)
+    }
     private var requests: [String] = []
     private var choices: [Bool] = []
     private var counts: [String: Int] = [:]
+    private var downloadTemporaryFiles: [URL] = []
     private var listings: [CaptureFixtureListing] = []
+    private var listingLimits: [String?] = []
     private var holds: [String: String] = [:]
     private var gates: [String: CheckedContinuation<Void, Never>] = [:]
     private let cancellations = CaptureRequestCancellations()
     private var failures = Set<String>()
     private var captureRequestEnd = 0
+    private var recordingRequestEnd = 0
+    private var recording: Bool?
+    private var recordingStopOutcome = CaptureRecordingStopOutcome.stopped
     private let eventPolling: Bool
     private let mediaSupported: Bool
     private var captureErrorCode: String?
-    init(eventPolling: Bool = false, mediaSupported: Bool = true) {
+    init(eventPolling: Bool = false, mediaSupported: Bool = true, recording: Bool = false) {
         self.eventPolling = eventPolling
         self.mediaSupported = mediaSupported
+        self.recording = recording
     }
     func setCaptureError(_ code: String?) { captureErrorCode = code }
+    func setRecordingStopOutcome(_ outcome: CaptureRecordingStopOutcome) { recordingStopOutcome = outcome }
     func listCount() -> Int { counts["listing", default: 0] }
+    func listLimits() -> [String?] { listingLimits }
     func requestCount() -> Int { requests.count }
     func count(_ operation: String) -> Int { counts[operation, default: 0] }
+    func originalTemporaryFiles() -> [URL] { downloadTemporaryFiles }
     func cancellationCount(_ gate: String) -> Int { cancellations.count(gate) }
     func captureChoices() -> [Bool] { choices }
     func requestsSinceCapture() -> [String] { Array(requests.dropFirst(captureRequestEnd)) }
+    func requestsSinceRecording() -> [String] { Array(requests.dropFirst(recordingRequestEnd)) }
     func queueListings(_ values: [CaptureFixtureListing]) { listings = values }
     func failNext(_ operation: String) { failures.insert(operation) }
     func holdNext(_ operation: String, gate: String? = nil) { holds[operation] = gate ?? operation }
     func waiting(_ gate: String) -> Bool { gates[gate] != nil }
     func release(_ gate: String) { gates.removeValue(forKey: gate)?.resume() }
-    func releaseAll() { let pending = gates; gates.removeAll(); for continuation in pending.values { continuation.resume() } }
+    func releaseAll() {
+        holds.removeAll()
+        let pending = gates
+        gates.removeAll()
+        for continuation in pending.values { continuation.resume() }
+    }
 
     private func waitIfHeld(_ operation: String) async {
         if let gate = holds.removeValue(forKey: operation) {
@@ -1125,10 +2382,18 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
         counts["original", default: 0] += 1
         let failure = failures.remove("original") != nil
         await waitIfHeld("original")
+        let video = request.url!.path.contains("NEW-VIDEO")
+        let bytes: Data
+        if video {
+            bytes = try Self.videoOriginalBytes()
+        } else {
+            bytes = Self.originalBytes
+        }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try Self.originalBytes.write(to: url)
+        try bytes.write(to: url)
+        downloadTemporaryFiles.append(url)
         return CameraHTTPDownloadResponse(statusCode: failure ? 503 : 200,
-            headers: ["content-type": "image/jpeg", "content-length": "\(Self.originalBytes.count)"], temporaryFileURL: url)
+            headers: ["content-type": video ? "video/mp4" : "image/jpeg", "content-length": "\(bytes.count)"], temporaryFileURL: url)
     }
 
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
@@ -1139,10 +2404,14 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
             object = ["ok": true, "service": "open-eos-control-bridge", "version": "0.13.0"]
         } else if path == "/v1/session" {
             object = ["id": "capture-review", "engine": "ccapi"]
+        } else if path.hasSuffix("/media/NEW-VIDEO/info") {
+            var info = CaptureFixtureItem.newVideo.json
+            info["sizeBytes"] = try Self.videoOriginalBytes().count
+            object = info
         } else if path.hasSuffix("/info") {
             object = ["connected": true, "model": "Synthetic capture review", "serial": "TEST-CAPTURE-REVIEW", "api": "desktop-bridge/v1"]
         } else if path.hasSuffix("/capabilities") {
-            let supported = ["STILL_CAPTURE"]
+            let supported = ["STILL_CAPTURE", "VIDEO_RECORDING"]
                 + (mediaSupported ? ["MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_PREVIEW", "MEDIA_DOWNLOAD", "MEDIA_DELETE"] : [])
                 + (eventPolling ? ["EVENT_POLLING"] : [])
             object = ["supported": supported, "shutterAutofocusSupported": true]
@@ -1167,13 +2436,40 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
                 return CameraHTTPResponse(statusCode: 502, body: try JSONSerialization.data(withJSONObject: error))
             }
             object = ["connected": true, "recording": false, "mode": "Manual"]
+        } else if path.hasSuffix("/recording/start") {
+            counts["recording-start", default: 0] += 1
+            recordingRequestEnd = requests.count
+            await waitIfHeld("recording-start")
+            recording = true
+            object = statusJSON()
+        } else if path.hasSuffix("/recording/stop") {
+            counts["recording-stop", default: 0] += 1
+            recordingRequestEnd = requests.count
+            let outcome = recordingStopOutcome
+            await waitIfHeld("recording-stop")
+            switch outcome {
+            case .rejected:
+                let error = ["error": ["code": "RECORDING_STOP_FAILED", "message": "Synthetic stop rejected",
+                                       "feature": "VIDEO_RECORDING", "engine": "ccapi"]]
+                return CameraHTTPResponse(statusCode: 503, body: try JSONSerialization.data(withJSONObject: error))
+            case .responseLost: throw URLError(.networkConnectionLost)
+            case .stopped: recording = false
+            case .active: recording = true
+            case .unknown: recording = nil
+            }
+            object = statusJSON()
         } else if path.hasSuffix("/media") {
             counts["listing", default: 0] += 1
+            listingLimits.append(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "limit" }?.value)
             let response = listings.isEmpty ? .items([.a, .b]) : listings.removeFirst()
             await waitIfHeld("listing")
             switch response {
             case let .items(items): object = ["items": items.map(\.json)]
             case .failure: return CameraHTTPResponse(statusCode: 503, body: Data("{}".utf8))
+            case .malformed: return CameraHTTPResponse(statusCode: 200, body: Data(#"{"items":{}}"#.utf8))
+            case .cancelled: throw URLError(.cancelled)
+            case let .rawListing(body): return CameraHTTPResponse(statusCode: 200, body: Data(body.utf8))
             }
         } else if path.hasSuffix("/playback"), request.httpMethod == "POST" {
             counts["playback", default: 0] += 1
@@ -1181,7 +2477,9 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
             object = ["url": "/v1/media-playback/capture_review_ticket", "expiresInSeconds": 900]
         } else if path == "/v1/media-playback/capture_review_ticket" {
             counts["playback-\(request.httpMethod ?? "GET")", default: 0] += 1
-            return CameraHTTPResponse(statusCode: request.httpMethod == "DELETE" ? 204 : 503, body: Data())
+            if request.httpMethod == "DELETE" { return CameraHTTPResponse(statusCode: 204) }
+            if failures.remove("playback-GET") != nil { return CameraHTTPResponse(statusCode: 503) }
+            return try playbackResponse(request)
         } else if path.hasSuffix("/thumbnail") || path.hasSuffix("/preview") {
             let operation = path.hasSuffix("/thumbnail") ? "thumbnail" : "preview"
             counts[operation, default: 0] += 1
@@ -1190,8 +2488,35 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
             return CameraHTTPResponse(statusCode: failure ? 503 : 200, headers: ["content-type": "image/jpeg"],
                 body: operation == "thumbnail" ? Self.thumbnailBytes : Self.displayBytes)
         } else {
-            object = ["connected": true, "recording": false, "mode": "Manual"]
+            object = statusJSON()
         }
         return CameraHTTPResponse(statusCode: 200, body: try JSONSerialization.data(withJSONObject: object))
+    }
+
+    private func playbackResponse(_ request: URLRequest) throws -> CameraHTTPResponse {
+        let bytes = try Self.videoOriginalBytes()
+        let headers = ["content-type": "video/mp4", "accept-ranges": "bytes"]
+        guard let range = request.value(forHTTPHeaderField: "Range"), range.hasPrefix("bytes=") else {
+            return CameraHTTPResponse(statusCode: 200,
+                headers: headers.merging(["content-length": "\(bytes.count)"]) { _, new in new }, body: bytes)
+        }
+        let bounds = range.dropFirst(6).split(separator: "-", omittingEmptySubsequences: false)
+        guard bounds.count == 2, let start = Int(bounds[0]), start >= 0, start < bytes.count,
+              bounds[1].isEmpty || Int(bounds[1]) != nil else {
+            return CameraHTTPResponse(statusCode: 416, headers: ["content-range": "bytes */\(bytes.count)"])
+        }
+        let end = min(Int(bounds[1]) ?? bytes.count - 1, bytes.count - 1)
+        guard end >= start else { return CameraHTTPResponse(statusCode: 416) }
+        let payload = Data(bytes[start...end])
+        return CameraHTTPResponse(statusCode: 206,
+            headers: headers.merging([
+                "content-length": "\(payload.count)", "content-range": "bytes \(start)-\(end)/\(bytes.count)",
+            ]) { _, new in new }, body: payload)
+    }
+
+    private func statusJSON() -> [String: Any] {
+        var status: [String: Any] = ["connected": true, "mode": "Manual"]
+        if let recording { status["recording"] = recording }
+        return status
     }
 }

@@ -15,7 +15,8 @@ final class CameraMediaPlayback: ObservableObject {
     private let playbackStream: CameraMediaPlaybackStream
     private let resourceLoader: CameraMediaResourceLoader
     private var itemCancellables = Set<AnyCancellable>()
-    private var fallbackTask: Task<Void, Never>?
+    // Internal read access lets ownership tests observe completion without driving AVPlayer timing.
+    private(set) var fallbackTask: Task<Void, Never>?
     private var fallbackFileURL: URL?
     private var hasStartedFallback = false
     private var isClosed = false
@@ -56,6 +57,7 @@ final class CameraMediaPlayback: ObservableObject {
         isClosed = true
         fallbackTask?.cancel()
         fallbackTask = nil
+        isPreparingFallback = false
         itemCancellables.removeAll()
         resourceLoader.invalidate()
         player.pause()
@@ -94,7 +96,7 @@ final class CameraMediaPlayback: ObservableObject {
         .store(in: &itemCancellables)
     }
 
-    private func handlePlaybackFailure(_ error: Error?) {
+    func handlePlaybackFailure(_ error: Error?) {
         guard !isClosed, !CameraMediaPlaybackValidation.isCancellation(error) else { return }
         let classifiedFailure = CameraMediaPlaybackValidation.failure(for: error)
         if fallbackFileURL != nil {
@@ -115,6 +117,10 @@ final class CameraMediaPlayback: ObservableObject {
     }
 
     private func prepareFallback() async {
+        defer { fallbackTask = nil }
+        // close() can cancel this task before its first MainActor turn. Do not create
+        // temporary files or request an original for an already retired playback.
+        guard !isClosed, !Task.isCancelled else { return }
         var retainedDirectory = false
         var directory: URL?
         defer {
@@ -162,7 +168,6 @@ final class CameraMediaPlayback: ObservableObject {
                 failure = CameraMediaPlaybackValidation.failure(for: error)
             }
         }
-        fallbackTask = nil
     }
 
     private func replacePlayer(with url: URL) {

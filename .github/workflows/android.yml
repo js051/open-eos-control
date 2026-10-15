@@ -538,6 +538,7 @@ jobs:
   ios-app:
     needs: secret-scan
     if: needs.secret-scan.outputs.ios_app == 'true'
+    timeout-minutes: 55
     runs-on: macos-15
     defaults:
       run:
@@ -621,6 +622,7 @@ jobs:
           xcrun simctl bootstatus "$DEVICE_ID" -b
 
       - name: Test iOS app and UI
+        timeout-minutes: 45
         run: |
           rm -rf TestResults.xcresult
           xcodebuild \

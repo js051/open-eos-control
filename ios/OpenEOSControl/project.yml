@@ -36,7 +36,27 @@ targets:
           - Fixtures
       - path: Tests/Fixtures
         buildPhase: resources
+      # External files must stay relative to this project, without shared ancestor groups.
+      - path: ../../contracts/media-delivery/v1/outcome-vectors.json
+        createIntermediateGroups: false
+        buildPhase: resources
+      - path: ../../contracts/live-view-lut/v1/numeric-vectors.json
+        createIntermediateGroups: false
+        buildPhase: resources
+      - path: ../../contracts/media-date-review/v1/date-review-vectors.json
+        createIntermediateGroups: false
+        buildPhase: resources
+      - path: ../../contracts/capture-review-evidence/v1/review-evidence-vectors.json
+        createIntermediateGroups: false
+        buildPhase: resources
+      - path: ../../contracts/media-type/v1/media-type-vectors.json
+        createIntermediateGroups: false
+        buildPhase: resources
+      - path: ../../contracts/jpeg-original/v1/jpeg-original-vectors.json
+        createIntermediateGroups: false
+        buildPhase: resources
       - path: ../OpenEOSCore/Tests/OpenEOSCoreTests/URLSessionPendingBulbStopTests.swift
+        createIntermediateGroups: false
     dependencies:
       - target: OpenEOSControl
     settings:
@@ -49,6 +69,8 @@ targets:
     platform: iOS
     sources:
       - path: UITests
+      - path: Tests/Fixtures/valid-h264-baseline.mp4
+        buildPhase: resources
     dependencies:
       - target: OpenEOSControl
     settings:

@@ -166,6 +166,31 @@ final class ShutterAutofocusTests: XCTestCase {
         }
     }
 
+    func testBridgeCaptureReadbackCodeRequiresTheBackend502Contract() async throws {
+        for status in [401, 403, 409, 500, 503] {
+            let transport = ShutterAutofocusTransport(
+                bridgeCapability: "true",
+                bridgeCaptureFailure: .http(code: "CAPTURE_STATUS_READBACK_FAILED", status: status)
+            )
+            let client = try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: transport)
+            try await client.initialize()
+            _ = try await client.capabilities()
+            do { _ = try await client.captureStill(autofocus: false); XCTFail("Rejection must fail") }
+            catch let error as DesktopBridgeError {
+                XCTAssertEqual(error, .http(
+                    statusCode: status, method: "POST",
+                    url: "http://127.0.0.1:18181/v1/session/af-session/capture/still",
+                    code: "CAPTURE_STATUS_READBACK_FAILED", message: "Synthetic bridge failure.",
+                    feature: nil, engine: nil
+                ))
+            }
+            let requests = await transport.requests()
+            try assertSingleBridgeCapture(requests)
+            let release = await client.shutterReleaseState()
+            XCTAssertEqual(release, .idle)
+        }
+    }
+
     func testBridgeCaptureNetworkFailureIsNotAcknowledgedOrReplayed() async throws {
         let transport = ShutterAutofocusTransport(
             bridgeCapability: "true", bridgeCaptureFailure: .network
@@ -253,7 +278,7 @@ final class ShutterAutofocusTests: XCTestCase {
 
 private actor ShutterAutofocusTransport: CameraHTTPTransport {
     enum BridgeCaptureFailure: Sendable {
-        case http(code: String?)
+        case http(code: String?, status: Int = 502)
         case network
     }
 
@@ -289,8 +314,8 @@ private actor ShutterAutofocusTransport: CameraHTTPTransport {
         recorded.append(record)
         if record.path == "/v1/session/af-session/capture/still", let failure = bridgeCaptureFailure {
             switch failure {
-            case let .http(code):
-                return try bridgeHTTPFailure(code: code)
+            case let .http(code, status):
+                return try bridgeHTTPFailure(code: code, status: status)
             case .network:
                 throw URLError(.networkConnectionLost)
             }
@@ -317,11 +342,11 @@ private actor ShutterAutofocusTransport: CameraHTTPTransport {
         return CameraHTTPResponse(statusCode: 200, body: Data(body.utf8))
     }
 
-    private func bridgeHTTPFailure(code: String?) throws -> CameraHTTPResponse {
+    private func bridgeHTTPFailure(code: String?, status: Int = 502) throws -> CameraHTTPResponse {
         var detail = ["message": "Synthetic bridge failure."]
         if let code { detail["code"] = code }
         return CameraHTTPResponse(
-            statusCode: 502, body: try JSONSerialization.data(withJSONObject: ["error": detail])
+            statusCode: status, body: try JSONSerialization.data(withJSONObject: ["error": detail])
         )
     }
 }

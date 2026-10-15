@@ -22,8 +22,11 @@ public enum DesktopBridgeError: Error, Equatable, Sendable {
     case invalidBaseURL(String)
     case notInitialized
     case sessionChanged
+    case liveViewStopUnconfirmed
     case shutterReleaseUnconfirmed
     case captureStatusReadbackFailed
+    case recordingStatusReadbackFailed(starting: Bool)
+    case recordingCommandUnconfirmed(starting: Bool)
     case invalidResponse(String)
     case http(
         statusCode: Int,
@@ -46,10 +49,16 @@ extension DesktopBridgeError: LocalizedError {
             "The Desktop Bridge session has not been initialized."
         case .sessionChanged:
             "The Desktop Bridge session changed or is closing. Connect again before using the camera."
+        case .liveViewStopUnconfirmed:
+            "Live View stop is not confirmed. Retry Stop before starting Live View again."
         case .shutterReleaseUnconfirmed:
             "Camera shutter or autofocus stop is not confirmed. Retry Stop before starting another camera operation."
         case .captureStatusReadbackFailed:
             "The shutter command was acknowledged, but camera status could not be read. Check recent media without taking another photo."
+        case .recordingCommandUnconfirmed:
+            "The recording command result is unknown. Check the camera and explicitly stop recording; refreshing cached status cannot confirm it stopped."
+        case .recordingStatusReadbackFailed:
+            "The recording command was acknowledged, but its status could not be read. Refresh status or explicitly stop recording."
         case let .invalidResponse(message):
             message
         case let .http(statusCode, method, url, code, message, feature, engine):
@@ -65,6 +74,45 @@ extension DesktopBridgeError: LocalizedError {
             "The media destination already exists: \(value)"
         }
     }
+}
+
+/// Closed, optional Bridge wire evidence about its connection to a CCAPI camera.
+public enum DesktopBridgeCameraConnectionReason: String, CaseIterable, Equatable, Sendable {
+    case authenticationRejected = "AUTHENTICATION_REJECTED"
+    case tlsError = "TLS_ERROR"
+    case hostNotFound = "HOST_NOT_FOUND"
+    case timeout = "TIMEOUT"
+    case unreachable = "UNREACHABLE"
+    case httpError = "HTTP_ERROR"
+    case discoveryFailed = "DISCOVERY_FAILED"
+    case endpointNotFound = "ENDPOINT_NOT_FOUND"
+
+    public var failureReason: CameraConnectionFailureReason {
+        switch self {
+        case .authenticationRejected: .authenticationRejected
+        case .tlsError: .tlsError
+        case .hostNotFound: .hostNotFound
+        case .timeout: .timeout
+        case .unreachable: .unreachable
+        case .httpError: .httpError
+        case .discoveryFailed: .discoveryFailed
+        case .endpointNotFound: .endpointNotFound
+        }
+    }
+}
+
+/// Only scan/session creation may produce this supplemental connection error.
+/// Keeps the existing seven-value HTTP error and its diagnostics available intact.
+public struct DesktopBridgeCameraConnectionError: Error, Equatable, Sendable, LocalizedError {
+    public let httpError: DesktopBridgeError
+    public let reason: DesktopBridgeCameraConnectionReason
+
+    fileprivate init(httpError: DesktopBridgeError, reason: DesktopBridgeCameraConnectionReason) {
+        self.httpError = httpError
+        self.reason = reason
+    }
+
+    public var errorDescription: String? { httpError.errorDescription }
 }
 
 public actor DesktopBridgeClient {
@@ -109,7 +157,10 @@ public actor DesktopBridgeClient {
         var stopAttemptCompleted = false
     }
 
+    public private(set) var recordingCommandEvidence: CameraRecordingCommandEvidence?
     private var sessionGeneration = UUID()
+    private var mediaListingOwner: UUID?
+    private var mediaListingStream: CameraHTTPStreamResponse?
     private var initializationToken: UUID?
     private var initializationCancelled = false
     private var isClosing = false
@@ -123,11 +174,36 @@ public actor DesktopBridgeClient {
     private var ownsShutterStatus = false
     private var releaseRevision = UUID()
     private var shutterAutofocusSupported = false
+    private var heldAutofocusSupported = false
+    private var focusInfoSupported = false
+    private struct FocusHold: Sendable {
+        let owner: UUID
+        let generation: UUID
+        let stopURL: URL
+        var unconfirmed = true
+    }
+    private var focusHold: FocusHold?
+    private var focusStartTask: Task<Void, Error>?
+    private var focusStopTask: Task<Void, Error>?
+    private var ordinaryMutationCount = 0
     private var sessionID: String?
     private var sessionEngine: String?
     private var bridgeVersion: String?
     private var eventPollingSupported = false
     private var liveViewMagnifications: [LiveViewMagnification] = []
+    private struct LiveViewStopObligation: Sendable {
+        let id = UUID()
+        let generation: UUID
+        let request: URLRequest
+        var acceptsLegacyStop = false
+    }
+    private var liveViewStop: LiveViewStopObligation?
+    private var liveViewStopUnconfirmed = false
+    private var liveViewRevision = UUID()
+    private var liveViewMaintenanceID: UUID?
+    private var liveViewStartTask: Task<Void, Error>?
+    private var liveViewStopTask: Task<Void, Error>?
+    private var liveViewReleaseTask: Task<Void, Error>?
 
     public init(
         baseURL: String,
@@ -171,7 +247,9 @@ public actor DesktopBridgeClient {
 
     public func discoverCameras() async throws -> [DesktopBridgeCamera] {
         try await validateService()
-        let body = try await getJSON(endpoint(["v1", "cameras"]))
+        let body = try await requestJSON(
+            url: endpoint(["v1", "cameras"]), method: "GET", payload: nil, connectionGuidance: true
+        )
         return body.array("cameras").compactMap { value in
             guard
                 let camera = value as? BridgeJSON,
@@ -201,13 +279,17 @@ public actor DesktopBridgeClient {
             if initializationToken == token { initializationToken = nil }
         }
         shutterAutofocusSupported = false
+        heldAutofocusSupported = false
+        focusInfoSupported = false
         liveViewMagnifications = []
         try await validateService()
         guard initializationToken == token, !initializationCancelled, !isClosing else { throw DesktopBridgeError.sessionChanged }
         var payload: BridgeJSON = ["engine": cameraEngine ?? "auto"]
         if let cameraID { payload["cameraId"] = cameraID }
         if let profileHint { payload["profileHint"] = profileHint }
-        let body = try await postJSON(endpoint(["v1", "session"]), payload: payload)
+        let body = try await requestJSON(
+            url: endpoint(["v1", "session"]), method: "POST", payload: payload, connectionGuidance: true
+        )
         guard let id = body.nonEmptyString("id") else {
             throw DesktopBridgeError.invalidResponse("Desktop Bridge did not return a session ID.")
         }
@@ -218,6 +300,11 @@ public actor DesktopBridgeClient {
             throw DesktopBridgeError.sessionChanged
         }
         sessionGeneration = UUID()
+        liveViewStop = nil
+        liveViewStopUnconfirmed = false
+        liveViewRevision = UUID()
+        liveViewMaintenanceID = nil
+        recordingCommandEvidence = nil
         completedCloseState = .idle
         releaseRevision = UUID()
         shutterRelease = nil
@@ -227,6 +314,10 @@ public actor DesktopBridgeClient {
     }
 
     public func shutterReleaseState() -> CameraShutterReleaseState {
+        if let focusHold {
+            return CameraShutterReleaseState(releaseRequired: true, releaseUnconfirmed: focusHold.unconfirmed,
+                bulbExposureActive: false)
+        }
         guard let shutterRelease else { return .idle }
         return CameraShutterReleaseState(
             releaseRequired: true,
@@ -246,6 +337,12 @@ public actor DesktopBridgeClient {
         initializationCancelled = true
         guard let id = sessionID else { return completedCloseState }
         isClosing = true
+        mediaListingOwner = nil
+        mediaListingStream?.cancel()
+        mediaListingStream = nil
+        focusStartTask?.cancel()
+        if let start = focusStartTask { _ = await start.result }
+        if let hold = focusHold { try? await releaseFocusHold(hold) }
         // Cancel only our pending Start. A transport may ignore cancellation,
         // so settlement must still precede the original session's DELETE.
         // Stop can be reserved while it awaits Start, before it sets the wire
@@ -255,8 +352,14 @@ public actor DesktopBridgeClient {
         pendingStart?.cancel()
         if let pendingStart { _ = await pendingStart.result }
         if let pendingStop { _ = await pendingStop.result }
+        if let start = liveViewStartTask {
+            start.cancel()
+            _ = await start.result
+        }
+        if let stop = liveViewStopTask { _ = await stop.result }
+        try? await releasePendingLiveView()
         await stopEventPolling()
-        var result = CameraShutterReleaseState.idle
+        var result = CameraShutterReleaseState(releaseUnconfirmed: focusHold != nil, bulbExposureActive: focusHold == nil ? false : nil)
         do {
             // Unstructured cleanup does not inherit the caller's cancellation.
             // Still await its result before retiring the session or close waiters.
@@ -265,7 +368,8 @@ public actor DesktopBridgeClient {
             }
             try await deletion.value
         } catch {
-            if shutterRelease != nil || Self.isShutterReleaseError(error) {
+            if liveViewStop != nil || Self.isLiveViewStopError(error) { liveViewStopUnconfirmed = true }
+            if shutterRelease != nil || focusHold != nil || Self.isShutterReleaseError(error) {
                 // DELETE can remove the server session even when cleanup fails.
                 // The caller presents this as a previous-connection warning only.
                 result = CameraShutterReleaseState(
@@ -273,6 +377,8 @@ public actor DesktopBridgeClient {
                 )
             }
         }
+        liveViewStop = nil
+        liveViewRevision = UUID()
         sessionID = nil
         sessionEngine = nil
         sessionGeneration = UUID()
@@ -282,6 +388,11 @@ public actor DesktopBridgeClient {
         eventPollingSupported = false
         shutterAutofocusSupported = false
         liveViewMagnifications = []
+        focusHold = nil
+        focusStartTask = nil
+        focusStopTask = nil
+        heldAutofocusSupported = false
+        focusInfoSupported = false
         completedCloseState = result
         isClosing = false
         let waiters = closeWaiters
@@ -313,6 +424,9 @@ public actor DesktopBridgeClient {
 
     public func status() async throws -> CameraStatus {
         let body = try await getJSON(sessionEndpoint(["status"]))
+        guard Self.hasValidRecordingField(body) else {
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge recording status must be Boolean, null, or absent.")
+        }
         return parseStatus(body)
     }
 
@@ -355,6 +469,10 @@ public actor DesktopBridgeClient {
         eventPollingSupported = supported.contains(.eventPolling)
         shutterAutofocusSupported = Self.strictBool(body["shutterAutofocusSupported"]) == true
             && supported.contains(.stillCapture)
+        heldAutofocusSupported = Self.strictBool(body["heldAutofocusSupported"]) == true
+            && supported.contains(.autofocus)
+        focusInfoSupported = Self.strictBool(body["focusInfoSupported"]) == true
+            && supported.contains(.liveView)
         let reasons = body.dictionary("reasons").reduce(into: [CameraFeature: String]()) { result, entry in
             guard let feature = CameraFeature(rawValue: entry.key), let reason = entry.value as? String else { return }
             result[feature] = reason
@@ -467,11 +585,13 @@ public actor DesktopBridgeClient {
                 magnifications: liveViewMagnifications,
                 currentMagnification: currentMagnification,
                 minimumFPS: minimumFPS,
-                maximumFPS: maximumFPS
+                maximumFPS: maximumFPS,
+                focusInfoSupported: focusInfoSupported
             ),
             profile: profile,
             evidence: evidence,
-            shutterAutofocusSupported: shutterAutofocusSupported
+            shutterAutofocusSupported: shutterAutofocusSupported,
+            heldAutofocusSupported: heldAutofocusSupported
         )
     }
 
@@ -523,15 +643,26 @@ public actor DesktopBridgeClient {
     }
 
     public func cleanSensor(autoPowerOff: Bool) async throws {
-        try await requestOK(
-            sessionEndpoint(["maintenance", "sensor-cleaning"]),
-            method: "POST",
-            payload: ["autoPowerOff": autoPowerOff]
-        )
+        try await performLiveViewMaintenance(path: ["maintenance", "sensor-cleaning"],
+                                             payload: ["autoPowerOff": autoPowerOff])
     }
 
     public func sleepCamera() async throws {
-        try await requestOK(sessionEndpoint(["power", "sleep"]), method: "POST")
+        try await performLiveViewMaintenance(path: ["power", "sleep"], payload: nil)
+    }
+
+    private func performLiveViewMaintenance(path: [String], payload: BridgeJSON?) async throws {
+        let url = try sessionEndpoint(path)
+        try validateMutation(url: url, method: "POST")
+        guard liveViewMaintenanceID == nil else { throw DesktopBridgeError.sessionChanged }
+        let id = UUID()
+        liveViewMaintenanceID = id
+        defer { if liveViewMaintenanceID == id { liveViewMaintenanceID = nil } }
+        let generation = sessionGeneration
+        try await retryLiveViewStop()
+        try Task.checkCancellation()
+        guard generation == sessionGeneration, !isClosing else { throw DesktopBridgeError.sessionChanged }
+        try await requestOK(url, method: "POST", payload: payload)
     }
 
     public func captureStill(autofocus: Bool = true) async throws -> CameraStatus {
@@ -542,7 +673,7 @@ public actor DesktopBridgeClient {
         do {
             body = try await postJSON(sessionEndpoint(["capture", "still"]), payload: ["af": autofocus])
         } catch let error as DesktopBridgeError {
-            if case .http(_, _, _, "CAPTURE_STATUS_READBACK_FAILED", _, _, _) = error {
+            if case .http(502, _, _, "CAPTURE_STATUS_READBACK_FAILED", _, _, _) = error {
                 throw DesktopBridgeError.captureStatusReadbackFailed
             }
             throw error
@@ -553,7 +684,7 @@ public actor DesktopBridgeClient {
     public func startBulbExposure() async throws -> CameraStatus {
         try Task.checkCancellation()
         guard !isClosing else { throw DesktopBridgeError.sessionChanged }
-        guard shutterRelease == nil, !bulbOperationInFlight, bulbStopTask == nil else {
+        guard shutterRelease == nil, focusHold == nil, !bulbOperationInFlight, bulbStopTask == nil else {
             throw DesktopBridgeError.shutterReleaseUnconfirmed
         }
         let startURL = try sessionEndpoint(["bulb", "start"])
@@ -691,6 +822,7 @@ public actor DesktopBridgeClient {
     }
 
     public func retryShutterRelease() async throws {
+        if let hold = focusHold { try await stopHeldAutofocus(owner: hold.owner); return }
         guard shutterRelease != nil else { return }
         let generation = sessionGeneration
         do {
@@ -715,6 +847,101 @@ public actor DesktopBridgeClient {
         }
     }
 
+    public func startHeldAutofocus(owner: UUID) async throws {
+        try Task.checkCancellation()
+        guard heldAutofocusSupported, !isClosing, focusHold == nil, focusStartTask == nil, focusStopTask == nil,
+              shutterRelease == nil, !bulbOperationInFlight, bulbStopTask == nil,
+              ordinaryMutationCount == 0, liveViewStartTask == nil, liveViewMaintenanceID == nil else {
+            throw DesktopBridgeError.invalidResponse("Held autofocus is unavailable or another release is pending.")
+        }
+        let hold = FocusHold(owner: owner, generation: sessionGeneration,
+            stopURL: try sessionEndpoint(["focus", "auto", "stop"]))
+        let startURL = try sessionEndpoint(["focus", "auto", "start"])
+        focusHold = hold
+        ownsShutterStatus = true
+        releaseRevision = UUID()
+        let task = Task { try await self.performFocusStart(hold, url: startURL) }
+        focusStartTask = task
+        try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+    }
+
+    private func performFocusStart(_ hold: FocusHold, url: URL) async throws {
+        defer { if focusHold?.owner == hold.owner || sessionGeneration == hold.generation { focusStartTask = nil } }
+        var dispatched = false
+        do {
+            try Task.checkCancellation()
+            guard !isClosing, sessionGeneration == hold.generation, focusHold?.owner == hold.owner else {
+                throw DesktopBridgeError.sessionChanged
+            }
+            dispatched = true
+            let body = try await requestJSON(url: url, method: "POST", payload: ["ownerId": hold.owner.uuidString], shutterOperation: true)
+            try Task.checkCancellation()
+            guard !isClosing, sessionGeneration == hold.generation, focusHold?.owner == hold.owner else {
+                throw DesktopBridgeError.sessionChanged
+            }
+            guard body["ownerId"] as? String == hold.owner.uuidString,
+                  Self.strictBool(body["active"]) == true, Self.strictBool(body["stopUnconfirmed"]) == false else {
+                throw DesktopBridgeError.shutterReleaseUnconfirmed
+            }
+            focusHold?.unconfirmed = false
+            releaseRevision = UUID()
+        } catch {
+            let primary = error
+            if dispatched { try await releaseFocusHold(hold) }
+            else if focusHold?.owner == hold.owner, sessionGeneration == hold.generation {
+                focusHold = nil
+                releaseRevision = UUID()
+            }
+            throw primary
+        }
+    }
+
+    public func stopHeldAutofocus(owner: UUID) async throws {
+        guard let hold = focusHold, hold.owner == owner else { return }
+        if let start = focusStartTask {
+            start.cancel()
+            let result = await start.result
+            if case let .failure(error) = result, focusHold?.owner == owner { throw error }
+        }
+        guard focusHold?.owner == owner, sessionGeneration == hold.generation else { return }
+        try await releaseFocusHold(hold)
+    }
+
+    private func releaseFocusHold(_ hold: FocusHold) async throws {
+        guard focusHold?.owner == hold.owner, sessionGeneration == hold.generation else { return }
+        if let task = focusStopTask { try await task.value; return }
+        let task = Task.detached(priority: .userInitiated) { try await self.performFocusStop(hold) }
+        focusStopTask = task
+        defer { if sessionGeneration == hold.generation { focusStopTask = nil } }
+        try await task.value
+    }
+
+    private func performFocusStop(_ hold: FocusHold) async throws {
+        guard focusHold?.owner == hold.owner, sessionGeneration == hold.generation else { return }
+        focusHold?.unconfirmed = true
+        releaseRevision = UUID()
+        let body = try await requestJSON(url: hold.stopURL, method: "POST", payload: ["ownerId": hold.owner.uuidString], shutterOperation: true)
+        guard focusHold?.owner == hold.owner, sessionGeneration == hold.generation else { return }
+        guard body["ownerId"] as? String == hold.owner.uuidString,
+              Self.strictBool(body["active"]) == false, Self.strictBool(body["stopUnconfirmed"]) == false else {
+            throw DesktopBridgeError.shutterReleaseUnconfirmed
+        }
+        focusHold = nil
+        releaseRevision = UUID()
+    }
+
+    public func liveViewFocusInfo() async throws -> CameraFocusInfo? {
+        guard focusInfoSupported, !isClosing, liveViewStop != nil, !liveViewStopUnconfirmed else { return nil }
+        let generation = sessionGeneration
+        let revision = liveViewRevision
+        var request = makeRequest(url: try sessionEndpoint(["liveview", "focus-info"]), method: "GET",
+            accept: "application/json", timeoutInterval: 2)
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let data = try await CameraFocusMetadata.boundedRead(request, transport: transport)
+        guard !isClosing, generation == sessionGeneration, revision == liveViewRevision else { return nil }
+        return try CameraFocusMetadata.bridgePacket(data)
+    }
+
     public func autofocus() async throws -> CameraStatus {
         let body = try await postJSON(sessionEndpoint(["focus", "auto"]), payload: [:])
         return parseStatus(body)
@@ -726,13 +953,38 @@ public actor DesktopBridgeClient {
     }
 
     public func startRecording() async throws -> CameraStatus {
-        let body = try await postJSON(sessionEndpoint(["recording", "start"]), payload: [:])
-        return parseStatus(body)
+        try await setRecording(true)
     }
 
     public func stopRecording() async throws -> CameraStatus {
-        let body = try await postJSON(sessionEndpoint(["recording", "stop"]), payload: [:])
-        return parseStatus(body)
+        try await setRecording(false)
+    }
+
+    private func setRecording(_ enabled: Bool) async throws -> CameraStatus {
+        try Task.checkCancellation()
+        do {
+            let body = try await requestJSON(
+                url: sessionEndpoint(["recording", enabled ? "start" : "stop"]),
+                method: "POST", payload: [:], recordingCommand: enabled
+            )
+            if !Self.hasValidRecordingField(body) {
+                // REC may already have been applied. A numeric/string flag is not
+                // a stopped observation and must never permit another Start.
+                throw DesktopBridgeError.recordingCommandUnconfirmed(starting: enabled)
+            }
+            let status = parseStatus(body)
+            recordingCommandEvidence = status.recording == false ? nil : .acknowledged(starting: enabled)
+            return status
+        } catch let error as DesktopBridgeError {
+            if case .http(502, _, _, "RECORDING_STATUS_READBACK_FAILED", _, _, _) = error {
+                recordingCommandEvidence = .acknowledged(starting: enabled)
+                throw DesktopBridgeError.recordingStatusReadbackFailed(starting: enabled)
+            }
+            if Self.isRecordingCommandUnconfirmed(error) {
+                throw DesktopBridgeError.recordingCommandUnconfirmed(starting: enabled)
+            }
+            throw error
+        }
     }
 
     public func tapFocus(x: Double, y: Double) async throws -> FocusResult {
@@ -789,19 +1041,155 @@ public actor DesktopBridgeClient {
     }
 
     public func startLiveView(_ request: LiveViewRequest = LiveViewRequest()) async throws {
-        _ = try await postJSON(
-            sessionEndpoint(["liveview", "start"]),
-            payload: [
-                "fps": request.fps,
-                "size": request.size.rawValue.uppercased(),
-                "source": Self.bridgeValue(request.source),
-            ]
-        )
+        try Task.checkCancellation()
+        guard !isClosing else { throw DesktopBridgeError.sessionChanged }
+        let startURL = try sessionEndpoint(["liveview", "start"])
+        try validateMutation(url: startURL, method: "POST")
+        guard liveViewMaintenanceID == nil, liveViewStartTask == nil, liveViewStopTask == nil, liveViewStop == nil else {
+            throw DesktopBridgeError.liveViewStopUnconfirmed
+        }
+        var start = makeRequest(url: startURL, method: "POST", accept: "application/json")
+        let payload: BridgeJSON = [
+            "fps": request.fps, "size": request.size.rawValue.uppercased(),
+            "source": Self.bridgeValue(request.source),
+        ]
+        start.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        start.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        let stop = try makeLiveViewStop()
+        // Both requests are valid before Start becomes responsible for cleanup.
+        let startRequest = start
+        let task = Task { try await self.performLiveViewStart(startRequest, stop: stop) }
+        liveViewStartTask = task
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: { task.cancel() }
     }
 
-    public func stopLiveView() async {
-        guard sessionID != nil else { return }
-        _ = try? await postJSON(sessionEndpoint(["liveview", "stop"]), payload: [:])
+    private func performLiveViewStart(_ start: URLRequest, stop: LiveViewStopObligation) async throws {
+        defer { liveViewStartTask = nil }
+        try Task.checkCancellation()
+        guard stop.generation == sessionGeneration, !isClosing else { throw DesktopBridgeError.sessionChanged }
+        try validateMutation(url: start.url!, method: "POST")
+        // Actor admission and this owned task run in separate turns. A status
+        // reply or maintenance/Stop admission may have arrived in between.
+        guard liveViewStopTask == nil else { throw CancellationError() }
+        guard liveViewMaintenanceID == nil, liveViewStop == nil, !liveViewStopUnconfirmed else {
+            throw DesktopBridgeError.liveViewStopUnconfirmed
+        }
+        liveViewStop = stop
+        liveViewRevision = UUID()
+        do {
+            let response = try await transport.send(start)
+            let body = try validateLiveViewResponse(response, request: start)
+            // Only a complete acknowledged Start permits the legacy first Stop contract.
+            // An ambiguous Start or any failed Stop requires explicit cleanup proof.
+            guard Self.strictBool(body["active"]) == true else {
+                throw DesktopBridgeError.invalidResponse("Desktop Bridge did not acknowledge Live View Start.")
+            }
+            liveViewStop?.acceptsLegacyStop = !liveViewStopUnconfirmed
+            try Task.checkCancellation()
+            guard stop.generation == sessionGeneration, !isClosing else { throw DesktopBridgeError.sessionChanged }
+        } catch {
+            let primary = error
+            do { try await releasePendingLiveView() }
+            catch {
+                if CameraConnectionFailureReason.isCancellation(primary) { throw primary }
+                try Task.checkCancellation()
+                throw DesktopBridgeError.liveViewStopUnconfirmed
+            }
+            if CameraConnectionFailureReason.isCancellation(primary) { throw primary }
+            try Task.checkCancellation()
+            throw primary
+        }
+    }
+
+    public func liveViewStopState() -> CameraLiveViewStopState {
+        CameraLiveViewStopState(stopRequired: liveViewStop != nil,
+            stopUnconfirmed: liveViewStopUnconfirmed,
+            source: liveViewStop != nil || liveViewStopUnconfirmed ? .desktopBridgeStream : nil)
+    }
+
+    public func stopLiveView() async { try? await retryLiveViewStop() }
+
+    public func retryLiveViewStop() async throws {
+        if let task = liveViewStopTask { return try await task.value }
+        let task = Task.detached { try await self.performLiveViewStop() }
+        liveViewStopTask = task
+        defer { liveViewStopTask = nil }
+        try await task.value
+    }
+
+    private func performLiveViewStop() async throws {
+        if let start = liveViewStartTask {
+            start.cancel()
+            _ = await start.result
+            if liveViewStopUnconfirmed { throw DesktopBridgeError.liveViewStopUnconfirmed }
+        }
+        try await releasePendingLiveView()
+    }
+
+    private func makeLiveViewStop() throws -> LiveViewStopObligation {
+        let url = try sessionEndpoint(["liveview", "stop"])
+        try validateMutation(url: url, method: "POST")
+        var request = makeRequest(url: url, method: "POST", accept: "application/json")
+        request.httpBody = Data("{}".utf8)
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        return LiveViewStopObligation(generation: sessionGeneration, request: request)
+    }
+
+    private func releasePendingLiveView() async throws {
+        if let task = liveViewReleaseTask { return try await task.value }
+        guard let stop = liveViewStop else { return }
+        let task = Task.detached { try await self.sendLiveViewStop(stop) }
+        liveViewReleaseTask = task
+        defer { liveViewReleaseTask = nil }
+        try await task.value
+    }
+
+    private func sendLiveViewStop(_ stop: LiveViewStopObligation) async throws {
+        do {
+            let response = try await transport.send(stop.request)
+            let body = try validateLiveViewResponse(response, request: stop.request)
+            guard stop.generation == sessionGeneration, let current = liveViewStop,
+                  current.id == stop.id else { throw DesktopBridgeError.sessionChanged }
+            let proof = Self.strictBool(body["liveViewStopUnconfirmed"])
+            // A status reply during the wire await may revoke legacy eligibility.
+            // Consume the current owner's evidence, never the pre-await snapshot.
+            guard Self.strictBool(body["active"]) == false,
+                  proof == false || (current.acceptsLegacyStop && !liveViewStopUnconfirmed &&
+                    (body["liveViewStopUnconfirmed"] == nil || body["liveViewStopUnconfirmed"] is NSNull)) else {
+                throw DesktopBridgeError.liveViewStopUnconfirmed
+            }
+            guard stop.generation == sessionGeneration else { throw DesktopBridgeError.sessionChanged }
+            liveViewStop = nil
+            liveViewStopUnconfirmed = false
+            liveViewRevision = UUID()
+        } catch {
+            if stop.generation == sessionGeneration, liveViewStop?.id == stop.id {
+                liveViewStopUnconfirmed = true
+                liveViewStop?.acceptsLegacyStop = false
+            }
+            throw DesktopBridgeError.liveViewStopUnconfirmed
+        }
+    }
+
+    private func validateLiveViewResponse(_ response: CameraHTTPResponse, request: URLRequest) throws -> BridgeJSON {
+        guard (200..<300).contains(response.statusCode) else {
+            throw Self.httpError(response: response, method: request.httpMethod ?? "POST", url: request.url!)
+        }
+        guard let body = try JSONSerialization.jsonObject(with: response.body) as? BridgeJSON else {
+            throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid Live View JSON.")
+        }
+        if Self.strictBool(body["liveViewStopUnconfirmed"]) == true {
+            throw DesktopBridgeError.liveViewStopUnconfirmed
+        }
+        return body
+    }
+
+    private static func isLiveViewStopError(_ error: Error) -> Bool {
+        guard let error = error as? DesktopBridgeError else { return false }
+        if case .http(_, _, _, let code, _, _, _) = error { return code == "LIVE_VIEW_STOP_UNCONFIRMED" }
+        return error == .liveViewStopUnconfirmed
     }
 
     public func liveViewFrame(cacheKey: Int64) async throws -> LiveViewFrame {
@@ -830,17 +1218,91 @@ public actor DesktopBridgeClient {
         guard maximumItems.map({ (1...1_000).contains($0) }) ?? true else {
             throw DesktopBridgeError.invalidResponse("maximumItems must be from 1 through 1000.")
         }
+        try Task.checkCancellation()
+        guard let sessionID, !isClosing else { throw DesktopBridgeError.notInitialized }
+        let generation = sessionGeneration
+        let owner = UUID()
+        mediaListingOwner = owner
+        mediaListingStream?.cancel()
+        mediaListingStream = nil
+        defer {
+            if mediaListingOwner == owner {
+                mediaListingOwner = nil
+                mediaListingStream = nil
+            }
+        }
         let queryItems = maximumItems.map { [URLQueryItem(name: "limit", value: String($0))] } ?? []
-        let body = try await getJSON(sessionEndpoint(["media"], queryItems: queryItems))
-        let items = body.array("items").compactMap { ($0 as? BridgeJSON).flatMap(Self.parseMediaItem) }
-        let boundedItems = maximumItems.map { Array(items.prefix($0)) } ?? items
-        await onProgress(boundedItems)
-        return boundedItems
+        let url = try sessionEndpoint(["media"], queryItems: queryItems)
+        var request = makeRequest(url: url, method: "GET", accept: BridgeMediaListingDecoder.mediaType)
+        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+        let response = try await transport.openStream(request)
+        defer { response.cancel() }
+        try requireMediaListingOwner(owner, generation: generation)
+        mediaListingStream = response
+        return try await withTaskCancellationHandler {
+            let mediaType = response.header("content-type")?.split(separator: ";", maxSplits: 1)
+                .first?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if response.statusCode == 200, mediaType == BridgeMediaListingDecoder.mediaType {
+                var decoder = BridgeMediaListingDecoder(sessionID: sessionID, limit: maximumItems)
+                for try await chunk in response.chunks {
+                    try requireMediaListingOwner(owner, generation: generation)
+                    for byte in chunk {
+                        if let snapshot = try decoder.consume(byte, parseItem: Self.parseMediaItem) {
+                            try requireMediaListingOwner(owner, generation: generation)
+                            await onProgress(snapshot)
+                            try requireMediaListingOwner(owner, generation: generation)
+                        }
+                    }
+                }
+                try requireMediaListingOwner(owner, generation: generation)
+                return try decoder.finish()
+            }
+            // Compatibility is parsed from this same response. Never replay a traversal.
+            var data = Data()
+            let maximumBytes = (200..<300).contains(response.statusCode)
+                ? BridgeMediaListingDecoder.maximumSnapshotBytes : Self.maximumErrorBodyBytes
+            for try await chunk in response.chunks {
+                try requireMediaListingOwner(owner, generation: generation)
+                guard chunk.count <= maximumBytes - data.count else {
+                    throw DesktopBridgeError.invalidResponse("Desktop Bridge listing response exceeded its byte limit.")
+                }
+                data.append(chunk)
+            }
+            try requireMediaListingOwner(owner, generation: generation)
+            let buffered = CameraHTTPResponse(statusCode: response.statusCode, headers: response.headers, body: data)
+            guard (200..<300).contains(response.statusCode) else {
+                throw Self.httpError(response: buffered, method: "GET", url: url)
+            }
+            guard mediaType == nil || mediaType == "application/json",
+                  let body = try JSONSerialization.jsonObject(with: data) as? BridgeJSON,
+                  let raw = body["items"] as? [Any] else {
+                throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid media JSON.")
+            }
+            let items = try raw.map { value -> CameraMediaItem in
+                guard let object = value as? BridgeJSON, let item = Self.parseMediaItem(object) else {
+                    throw DesktopBridgeError.invalidResponse("Desktop Bridge listing contains an invalid media item.")
+                }
+                return item
+            }
+            let boundedItems = maximumItems.map { Array(items.prefix($0)) } ?? items
+            await onProgress(boundedItems)
+            try requireMediaListingOwner(owner, generation: generation)
+            return boundedItems
+        } onCancel: {
+            response.cancel()
+        }
+    }
+
+    private func requireMediaListingOwner(_ owner: UUID, generation: UUID) throws {
+        try Task.checkCancellation()
+        guard !isClosing, sessionGeneration == generation, mediaListingOwner == owner else {
+            throw DesktopBridgeError.sessionChanged
+        }
     }
 
     public func mediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {
         let body = try await getJSON(sessionEndpoint(["media", item.id, "info"]))
-        guard let updated = Self.parseMediaItem(body) else {
+        guard let updated = Self.parseMediaItem(body), updated.id.utf8.elementsEqual(item.id.utf8) else {
             throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid media information.")
         }
         return updated
@@ -878,7 +1340,7 @@ public actor DesktopBridgeClient {
             method: "PUT",
             payload: payload
         )
-        guard let updated = Self.parseMediaItem(body) else {
+        guard let updated = Self.parseMediaItem(body), updated.id.utf8.elementsEqual(item.id.utf8) else {
             throw DesktopBridgeError.invalidResponse(
                 "Desktop Bridge returned invalid media information after updating \(item.name)."
             )
@@ -887,6 +1349,9 @@ public actor DesktopBridgeClient {
     }
 
     public func mediaThumbnail(_ item: CameraMediaItem) async throws -> CameraMediaThumbnail {
+        guard [.photo, .video].contains(CameraMediaType.classify(item)) else {
+            throw CameraMediaMetadataError.invalidMetadata
+        }
         let response = try await mediaImageRepresentation(
             item,
             endpoint: "thumbnail",
@@ -897,7 +1362,7 @@ public actor DesktopBridgeClient {
     }
 
     public func mediaPreview(_ item: CameraMediaItem) async throws -> CameraMediaPreview {
-        guard item.previewAvailable else {
+        guard CameraMediaType.classify(item) == .photo, item.previewAvailable else {
             throw DesktopBridgeError.invalidResponse("Display preview is unavailable for this media item.")
         }
         let response = try await mediaImageRepresentation(
@@ -953,9 +1418,10 @@ public actor DesktopBridgeClient {
                 )
             }
         )
+        defer { try? FileManager.default.removeItem(at: response.temporaryFileURL) }
+        try Task.checkCancellation()
         guard (200..<300).contains(response.statusCode) else {
-            let body = Self.readPrefix(response.temporaryFileURL, limit: Self.maximumErrorBodyBytes)
-            try? FileManager.default.removeItem(at: response.temporaryFileURL)
+            let body = (try? response.readPrefix(limit: Self.maximumErrorBodyBytes)) ?? Data()
             throw Self.httpError(
                 statusCode: response.statusCode,
                 body: body,
@@ -963,28 +1429,30 @@ public actor DesktopBridgeClient {
                 url: url
             )
         }
+        let size: Int64
         do {
-            try FileManager.default.moveItem(at: response.temporaryFileURL, to: destination)
-        } catch {
-            try? FileManager.default.removeItem(at: response.temporaryFileURL)
-            throw error
+            size = try CameraHTTPResponseIntegrity.validateOriginalMedia(response)
+        } catch CCAPIError.invalidResponse(let message) {
+            throw DesktopBridgeError.invalidResponse(message)
         }
-        let size = try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        try Task.checkCancellation()
+        try FileManager.default.moveItem(at: response.temporaryFileURL, to: destination)
         progress(
             CameraMediaTransferProgress(
-                bytesTransferred: Int64(size ?? 0),
-                totalBytes: Int64(size ?? 0)
+                bytesTransferred: size,
+                totalBytes: size
             )
         )
         return CameraMediaDownload(
             item: item,
             fileURL: destination,
-            bytesTransferred: Int64(size ?? 0),
+            bytesTransferred: size,
             contentType: response.header("content-type")
         )
     }
 
     public func beginMediaPlayback(_ item: CameraMediaItem) async throws -> DesktopBridgeMediaPlayback {
+        guard CameraMediaType.classify(item) == .video else { throw CameraMediaMetadataError.invalidMetadata }
         let endpoint = try sessionEndpoint(["media", item.id, "playback"])
         let ticket = try await requestJSON(
             url: endpoint,
@@ -1027,6 +1495,7 @@ public actor DesktopBridgeClient {
         offset: Int64,
         length: Int64? = nil
     ) async throws -> CameraMediaStreamResponse {
+        guard CameraMediaType.classify(item) == .video else { throw CameraMediaMetadataError.invalidMetadata }
         guard offset >= 0, length.map({ $0 > 0 }) ?? true else {
             throw DesktopBridgeError.invalidResponse("Media byte range must be positive.")
         }
@@ -1183,9 +1652,10 @@ public actor DesktopBridgeClient {
             connected: body.optionalBool("connected") ?? true,
             batteryLevel: battery.int("level"),
             batteryStatus: battery.string("status") ?? "unknown",
-            recording: body.optionalBool("recording"),
+            recording: Self.strictBool(body["recording"]),
             bulbExposureActive: Self.strictBool(body["bulbExposureActive"]),
             shutterReleaseUnconfirmed: Self.strictBool(body["shutterReleaseUnconfirmed"]),
+            liveViewStopUnconfirmed: Self.strictBool(body["liveViewStopUnconfirmed"]) ?? false,
             mode: body.string("mode") ?? "unknown",
             mediaAvailable: media.optionalBool("available"),
             remainingMinutes: nil,
@@ -1207,7 +1677,7 @@ public actor DesktopBridgeClient {
             lens: lens,
             temperature: body.string("temperature").flatMap(CameraTemperatureStatus.init(rawValue:))
         )
-        return ownsShutterStatus ? status.withShutterReleaseState(shutterReleaseState()) : status
+        return ownsShutterStatus || focusHold != nil ? status.withShutterReleaseState(shutterReleaseState()) : status
     }
 
     private func finishBulbOperation() {
@@ -1224,6 +1694,13 @@ public actor DesktopBridgeClient {
     }
 
     private func adoptShutterRelease(unconfirmed: Bool, acceptsLegacyStop: Bool) throws {
+        if focusHold != nil {
+            // The Bridge shares its unresolved-release flag. Preserve the known AF
+            // owner rather than fabricating a bulb stop for that same warning.
+            focusHold?.unconfirmed = true
+            releaseRevision = UUID()
+            return
+        }
         ownsShutterStatus = true
         if shutterRelease == nil {
             shutterRelease = ShutterReleaseObligation(stopURL: try sessionEndpoint(["bulb", "stop"]))
@@ -1255,6 +1732,11 @@ public actor DesktopBridgeClient {
     private static func provesShutterReleased(_ body: BridgeJSON) -> Bool {
         strictBool(body["shutterReleaseUnconfirmed"]) == false
             && strictBool(body["bulbExposureActive"]) == false
+    }
+
+    private static func hasValidRecordingField(_ body: BridgeJSON) -> Bool {
+        guard let value = body["recording"], !(value is NSNull) else { return true }
+        return strictBool(value) != nil
     }
 
     private static func strictBool(_ value: Any?) -> Bool? {
@@ -1290,7 +1772,7 @@ public actor DesktopBridgeClient {
         guard sessionID != nil else { return false }
         if method == "DELETE", url == (try sessionEndpoint(["events"])) { return true }
         guard method == "POST" else { return false }
-        for path in [["bulb", "stop"], ["recording", "stop"], ["liveview", "stop"]] {
+        for path in [["bulb", "stop"], ["recording", "stop"], ["liveview", "stop"], ["focus", "auto", "stop"]] {
             if url == (try sessionEndpoint(path)) { return true }
         }
         return false
@@ -1300,9 +1782,30 @@ public actor DesktopBridgeClient {
         guard !["GET", "HEAD", "OPTIONS"].contains(method) else { return }
         let recovery = try isRecoveryMutation(url: url, method: method)
         guard !isClosing || recovery else { throw DesktopBridgeError.sessionChanged }
-        guard shutterRelease == nil || shutterOperation || recovery else {
+        guard (shutterRelease == nil && focusHold == nil) || shutterOperation || recovery else {
             throw DesktopBridgeError.shutterReleaseUnconfirmed
         }
+    }
+
+    private static func isRecordingCommandUnconfirmed(_ error: DesktopBridgeError) -> Bool {
+        if case .http(502, "POST", _, "RECORDING_COMMAND_UNCONFIRMED", _, .some("VIDEO_RECORDING"), .some("ccapi")) = error {
+            return true
+        }
+        return false
+    }
+
+    private static func isRecordingResponseUnconfirmed(_ response: CameraHTTPResponse, error: DesktopBridgeError) -> Bool {
+        if isRecordingCommandUnconfirmed(error) { return true }
+        guard response.statusCode == 502 else { return false }
+        // A gateway status alone does not say whether the camera applied REC.
+        // Require an intact Bridge error envelope before calling it a rejection.
+        guard let object = (try? JSONSerialization.jsonObject(
+                with: Data(response.body.prefix(maximumErrorBodyBytes))
+              )) as? BridgeJSON,
+              let detail = object["error"] as? BridgeJSON,
+              detail.nonEmptyString("code") != nil,
+              detail.nonEmptyString("message") != nil else { return true }
+        return false
     }
 
     private func getJSON(_ url: URL) async throws -> BridgeJSON {
@@ -1319,11 +1822,17 @@ public actor DesktopBridgeClient {
         payload: BridgeJSON?,
         timeoutInterval: TimeInterval = 10,
         maximumBytes: Int? = nil,
-        shutterOperation: Bool = false
+        shutterOperation: Bool = false,
+        connectionGuidance: Bool = false,
+        recordingCommand: Bool? = nil
     ) async throws -> BridgeJSON {
         try validateMutation(url: url, method: method, shutterOperation: shutterOperation)
+        let ordinaryMutation = !["GET", "HEAD", "OPTIONS"].contains(method) && !shutterOperation
+        if ordinaryMutation { ordinaryMutationCount += 1 }
+        defer { if ordinaryMutation { ordinaryMutationCount -= 1 } }
         let generation = sessionGeneration
         let revision = releaseRevision
+        let liveViewStatusRevision = liveViewRevision
         let scopedToSession = try isCurrentSessionURL(url)
         var request = makeRequest(
             url: url,
@@ -1339,18 +1848,68 @@ public actor DesktopBridgeClient {
             request.cachePolicy = .reloadIgnoringLocalCacheData
             request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         }
-        let response = try await transport.send(request)
+        if let recordingCommand {
+            try Task.checkCancellation()
+            recordingCommandEvidence = .unconfirmed(starting: recordingCommand)
+        }
+        let response: CameraHTTPResponse
+        var recordingBodyComplete = true
+        var recordingResponseCancelled = false
+        do {
+            if recordingCommand != nil {
+                let exchange = try await transport.sendRecordingCommand(request)
+                response = exchange.response
+                recordingBodyComplete = exchange.bodyComplete
+                recordingResponseCancelled = exchange.cancelled
+            } else {
+                response = try await transport.send(request)
+            }
+        } catch {
+            // This boundary follows all request construction and session checks.
+            // A thrown transport error cannot establish that REC was rejected.
+            if let recordingCommand, generation == sessionGeneration,
+               !(error is CancellationError), (error as? URLError)?.code != .cancelled {
+                throw DesktopBridgeError.recordingCommandUnconfirmed(starting: recordingCommand)
+            }
+            throw error
+        }
+        let responseError = (200..<300).contains(response.statusCode)
+            ? nil : Self.httpError(response: response, method: method, url: url, preservingProtocolStrings: recordingCommand != nil)
+        if recordingCommand != nil, generation == sessionGeneration, !isClosing,
+           let error = responseError, response.statusCode != 502 || recordingBodyComplete,
+           !Self.isRecordingResponseUnconfirmed(response, error: error) {
+            // Consume known rejection evidence before preserving cancellation's
+            // thrown error. An intact rejection cannot become an unknown Start.
+            if case .http(502, _, _, "RECORDING_STATUS_READBACK_FAILED", _, _, _) = error {
+                // ACK consumption retains the existing cancellation contract.
+            } else {
+                recordingCommandEvidence = nil
+            }
+        }
+        if recordingResponseCancelled { throw CancellationError() }
         if scopedToSession {
             try Task.checkCancellation()
             guard generation == sessionGeneration, !isClosing || shutterOperation else {
                 throw DesktopBridgeError.sessionChanged
             }
         }
-        guard (200..<300).contains(response.statusCode) else {
-            let error = Self.httpError(response: response, method: method, url: url)
+        if let recordingCommand, !recordingBodyComplete,
+           responseError == nil || response.statusCode == 502 {
+            throw DesktopBridgeError.recordingCommandUnconfirmed(starting: recordingCommand)
+        }
+        if let error = responseError {
+            if let recordingCommand, Self.isRecordingResponseUnconfirmed(response, error: error) {
+                throw DesktopBridgeError.recordingCommandUnconfirmed(starting: recordingCommand)
+            }
             if scopedToSession, revision == releaseRevision, !shutterOperation,
                Self.isShutterReleaseError(error) {
                 try adoptShutterRelease(unconfirmed: true, acceptsLegacyStop: false)
+            }
+            if connectionGuidance {
+                try Task.checkCancellation()
+                if let cameraError = Self.cameraConnectionError(response: response, httpError: error) {
+                    throw cameraError
+                }
             }
             throw error
         }
@@ -1363,9 +1922,18 @@ public actor DesktopBridgeClient {
             let value = try? JSONSerialization.jsonObject(with: response.body),
             let object = value as? BridgeJSON
         else {
+            if let recordingCommand {
+                throw DesktopBridgeError.recordingCommandUnconfirmed(starting: recordingCommand)
+            }
             throw DesktopBridgeError.invalidResponse(
                 "Desktop Bridge returned invalid JSON for \(url.path)."
             )
+        }
+        if scopedToSession, liveViewStatusRevision == liveViewRevision,
+           Self.strictBool(object["liveViewStopUnconfirmed"]) == true {
+            if liveViewStop == nil { liveViewStop = try makeLiveViewStop() }
+            liveViewStopUnconfirmed = true
+            liveViewStop?.acceptsLegacyStop = false
         }
         if scopedToSession, !shutterOperation, revision == releaseRevision, !bulbOperationInFlight {
             let isFreshStatus = method == "GET" && url == (try? sessionEndpoint(["status"]))
@@ -1381,6 +1949,9 @@ public actor DesktopBridgeClient {
         timeoutInterval: TimeInterval = 10
     ) async throws {
         try validateMutation(url: url, method: method)
+        let ordinaryMutation = !["GET", "HEAD", "OPTIONS"].contains(method)
+        if ordinaryMutation { ordinaryMutationCount += 1 }
+        defer { if ordinaryMutation { ordinaryMutationCount -= 1 } }
         let generation = sessionGeneration
         let revision = releaseRevision
         let scopedToSession = try isCurrentSessionURL(url)
@@ -1571,10 +2142,20 @@ public actor DesktopBridgeClient {
     }
 
     private static func parseMediaItem(_ item: BridgeJSON) -> CameraMediaItem? {
-        guard let id = item.nonEmptyString("id"), let name = item.nonEmptyString("name") else { return nil }
+        guard let id = item["id"] as? String, !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let name = item["name"] as? String, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let contentType: String?
+        do { contentType = try CameraMediaType.declaredMIME(in: item) }
+        catch { return nil }
         let rating = item.int("rating").flatMap { (0...5).contains($0) ? $0 : nil }
         let rotation = item.int("rotationDegrees").flatMap { mediaRotations.contains($0) ? $0 : nil }
         let archived = item.optionalBool("archived")
+        let folder: CameraMediaFolder?
+        if let id = item.string("folderId"), let label = item.string("folderLabel") {
+            folder = CameraMediaFolder(id: id, label: label)
+        } else {
+            folder = nil
+        }
         return CameraMediaItem(
             id: id,
             name: name,
@@ -1586,9 +2167,10 @@ public actor DesktopBridgeClient {
             rating: rating,
             rotationDegrees: rotation,
             archived: archived,
-            contentType: item.nonEmptyString("contentType"),
+            contentType: contentType,
             widthPixels: item.int("widthPixels").flatMap { $0 > 0 ? $0 : nil },
-            heightPixels: item.int("heightPixels").flatMap { $0 > 0 ? $0 : nil }
+            heightPixels: item.int("heightPixels").flatMap { $0 > 0 ? $0 : nil },
+            folder: folder
         )
     }
 
@@ -1737,19 +2319,33 @@ public actor DesktopBridgeClient {
         return text
     }
 
-    private static func readPrefix(_ url: URL, limit: Int) -> Data {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return Data() }
-        defer { try? handle.close() }
-        return (try? handle.read(upToCount: limit)) ?? Data()
-    }
-
-    private static func httpError(response: CameraHTTPResponse, method: String, url: URL) -> DesktopBridgeError {
+    private static func httpError(
+        response: CameraHTTPResponse, method: String, url: URL, preservingProtocolStrings: Bool = false
+    ) -> DesktopBridgeError {
         httpError(
             statusCode: response.statusCode,
             body: response.body,
             method: method,
-            url: url
+            url: url,
+            preservingProtocolStrings: preservingProtocolStrings
         )
+    }
+
+    private static func cameraConnectionError(
+        response: CameraHTTPResponse, httpError: DesktopBridgeError
+    ) -> DesktopBridgeCameraConnectionError? {
+        // Never infer camera evidence from a Bridge token failure or diagnostic text.
+        // Use exact wire strings, without trimming/coercion or accepting future values.
+        guard response.statusCode == 502,
+              let object = (try? JSONSerialization.jsonObject(
+                with: Data(response.body.prefix(maximumErrorBodyBytes))
+              )) as? BridgeJSON,
+              let detail = object["error"] as? BridgeJSON,
+              detail["code"] as? String == "CCAPI_DISCOVERY_FAILED",
+              detail["engine"] as? String == "ccapi",
+              let rawReason = detail["connectionReason"] as? String,
+              let reason = DesktopBridgeCameraConnectionReason(rawValue: rawReason) else { return nil }
+        return DesktopBridgeCameraConnectionError(httpError: httpError, reason: reason)
     }
 
     private static func playbackHTTPError(statusCode: Int) -> DesktopBridgeError {
@@ -1768,20 +2364,25 @@ public actor DesktopBridgeClient {
         statusCode: Int,
         body: Data,
         method: String,
-        url: URL
+        url: URL,
+        preservingProtocolStrings: Bool = false
     ) -> DesktopBridgeError {
         let boundedBody = Data(body.prefix(maximumErrorBodyBytes))
         let object = (try? JSONSerialization.jsonObject(with: boundedBody)) as? BridgeJSON
         let detail = object?.dictionary("error") ?? [:]
         let fallback = String(data: boundedBody, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        func protocolString(_ key: String) -> String? {
+            guard let value = detail[key] as? String, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return preservingProtocolStrings ? value : detail.nonEmptyString(key)
+        }
         return .http(
             statusCode: statusCode,
             method: method,
             url: url.absoluteString,
-            code: detail.nonEmptyString("code") ?? "HTTP_\(statusCode)",
+            code: protocolString("code") ?? "HTTP_\(statusCode)",
             message: detail.nonEmptyString("message") ?? fallback?.nilIfEmpty ?? "Desktop Bridge returned HTTP \(statusCode).",
-            feature: detail.nonEmptyString("feature"),
-            engine: detail.nonEmptyString("engine")
+            feature: protocolString("feature"),
+            engine: protocolString("engine")
         )
     }
 }

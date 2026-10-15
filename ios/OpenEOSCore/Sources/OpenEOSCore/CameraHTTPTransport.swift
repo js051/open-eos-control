@@ -22,13 +22,30 @@ public struct CameraHTTPResponse: Sendable {
     }
 }
 
+/// REC-only transport evidence. A received HTTP status survives a failed body,
+/// while callers must never treat an incomplete success body as a command ACK.
+public struct CameraHTTPRecordingResponse: Sendable {
+    public let response: CameraHTTPResponse
+    public let bodyComplete: Bool
+    public let cancelled: Bool
+
+    public init(response: CameraHTTPResponse, bodyComplete: Bool = true, cancelled: Bool = false) {
+        self.response = response
+        self.bodyComplete = bodyComplete
+        self.cancelled = cancelled
+    }
+}
+
 public struct CameraHTTPDownloadResponse: Sendable {
     public let statusCode: Int
     public let headers: [String: String]
     public let temporaryFileURL: URL
+    // Capture every exposed declaration before case-insensitive lookup collapses keys.
+    let contentTypeValues: [String]
 
     public init(statusCode: Int, headers: [String: String] = [:], temporaryFileURL: URL) {
         self.statusCode = statusCode
+        contentTypeValues = headers.filter { $0.key.lowercased() == "content-type" }.map(\.value)
         self.headers = headers.reduce(into: [:]) { result, entry in
             result[entry.key.lowercased()] = entry.value
         }
@@ -37,6 +54,13 @@ public struct CameraHTTPDownloadResponse: Sendable {
 
     public func header(_ name: String) -> String? {
         headers[name.lowercased()]
+    }
+
+    func readPrefix(limit: Int) throws -> Data {
+        guard limit > 0 else { return Data() }
+        let handle = try FileHandle(forReadingFrom: temporaryFileURL)
+        defer { try? handle.close() }
+        return try handle.read(upToCount: limit) ?? Data()
     }
 }
 
@@ -89,6 +113,7 @@ public struct CameraHTTPStreamResponse: Sendable {
 
 public protocol CameraHTTPTransport: Sendable {
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse
+    func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse
     func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse
     func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse
     func download(
@@ -103,6 +128,12 @@ public protocol CameraHTTPTransport: Sendable {
 }
 
 public extension CameraHTTPTransport {
+    func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse {
+        // Existing custom transports retain their send/cancellation contract.
+        // There is exactly one invocation, never a fallback after failure.
+        CameraHTTPRecordingResponse(response: try await send(request))
+    }
+
     func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
         let response = try await send(request)
         let chunks = AsyncThrowingStream<Data, Error> { continuation in
@@ -154,19 +185,59 @@ struct CameraHTTPResponseBodyAccumulator {
 /// Encoded/transfer-decoded responses still rely on URLSession's framing validation.
 enum CameraHTTPResponseIntegrity {
     static func validate(_ response: CameraHTTPResponse, requestMethod: String) throws {
+        try validate(
+            statusCode: response.statusCode, headers: response.headers,
+            decodedBodyBytes: Int64(response.body.count), requestMethod: requestMethod
+        )
+    }
+
+    @discardableResult
+    static func validate(_ response: CameraHTTPDownloadResponse, requestMethod: String) throws -> Int64 {
+        let values = try response.temporaryFileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true, let size = values.fileSize, size >= 0 else {
+            throw CCAPIError.invalidResponse("Camera download did not return a regular file with a known size.")
+        }
+        try validate(
+            statusCode: response.statusCode, headers: response.headers,
+            decodedBodyBytes: Int64(size), requestMethod: requestMethod
+        )
+        return Int64(size)
+    }
+
+    static func validateOriginalMedia(_ response: CameraHTTPDownloadResponse) throws -> Int64 {
+        // Original downloads never request a byte range. Even a 200 carrying
+        // Content-Range cannot establish that this is the complete representation.
+        guard response.statusCode == 200, response.header("content-range") == nil else {
+            throw CCAPIError.invalidResponse("Original media download requires HTTP 200 without Content-Range.")
+        }
+        let size = try validate(response, requestMethod: "GET")
+        guard size > 0 else {
+            throw CCAPIError.invalidResponse("Original media download returned an empty file.")
+        }
+        // CameraMediaItem.sizeBytes comes from unversioned listing metadata. It is
+        // a progress hint, not an authoritative length or a content checksum.
+        return size
+    }
+
+    private static func validate(
+        statusCode: Int,
+        headers: [String: String],
+        decodedBodyBytes: Int64,
+        requestMethod: String
+    ) throws {
         let method = requestMethod.uppercased()
         // RFC 9112 §6.3: these responses have no HTTP message body to compare.
-        guard method != "HEAD", !(100..<200).contains(response.statusCode),
-              response.statusCode != 204, response.statusCode != 304,
-              !(method == "CONNECT" && (200..<300).contains(response.statusCode)) else { return }
+        guard method != "HEAD", !(100..<200).contains(statusCode),
+              statusCode != 204, statusCode != 304,
+              !(method == "CONNECT" && (200..<300).contains(statusCode)) else { return }
         // Transfer-Encoding takes precedence over Content-Length. URLSession removes
         // transfer framing and may decompress content before returning Data, so neither
         // of those wire lengths can safely be compared with the decoded body's count.
-        guard response.header("transfer-encoding") == nil else { return }
+        guard headers["transfer-encoding"] == nil else { return }
         let optionalWhitespace = CharacterSet(charactersIn: " \t")
-        if let encoding = response.header("content-encoding"),
+        if let encoding = headers["content-encoding"],
            encoding.trimmingCharacters(in: optionalWhitespace).lowercased() != "identity" { return }
-        guard let field = response.header("content-length") else { return }
+        guard let field = headers["content-length"] else { return }
 
         // RFC 9110 §8.6 permits normalization of identical, combined length values.
         // Reject signs, empty/conflicting values and overflow rather than losing precision.
@@ -179,7 +250,7 @@ enum CameraHTTPResponseIntegrity {
             }
             expected = length
         }
-        guard let expected, expected == Int64(response.body.count) else {
+        guard let expected, expected == decodedBodyBytes else {
             throw CCAPIError.invalidResponse("Camera HTTP response body did not match Content-Length.")
         }
     }
@@ -210,8 +281,58 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
         return result
     }
 
+    public func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse {
+        try await sendRecordingCommand(request, onResponseHeaders: nil)
+    }
+
+    // Read-only observation for deterministic wire tests. It neither changes the
+    // request nor provides an alternate send path or response-body implementation.
+    func sendRecordingCommand(
+        _ request: URLRequest, onResponseHeaders: (@Sendable (Int) -> Void)?
+    ) async throws -> CameraHTTPRecordingResponse {
+        try Task.checkCancellation()
+        let handle = CameraHTTPStreamTaskHandle(
+            configuration: streamConfiguration, maximumBytes: CameraHTTPResponseBodyAccumulator.maximumBytes
+        )
+        let stream = try await withTaskCancellationHandler {
+            try await handle.start(request)
+        } onCancel: {
+            handle.cancel()
+        }
+        defer { stream.cancel() }
+        onResponseHeaders?(stream.statusCode)
+        return await withTaskCancellationHandler {
+            var body = CameraHTTPResponseBodyAccumulator()
+            do {
+                for try await chunk in stream.chunks {
+                    guard body.append(chunk) else {
+                        throw CCAPIError.invalidResponse("Recording response exceeded the 32 KiB limit.")
+                    }
+                }
+                let response = CameraHTTPResponse(statusCode: stream.statusCode, headers: stream.headers, body: body.data)
+                try CameraHTTPResponseIntegrity.validate(response, requestMethod: request.httpMethod ?? "GET")
+                return CameraHTTPRecordingResponse(
+                    response: response,
+                    bodyComplete: handle.recordingBodyCompleted(collectedBytes: body.data.count),
+                    cancelled: Task.isCancelled
+                )
+            } catch {
+                return CameraHTTPRecordingResponse(
+                    response: CameraHTTPResponse(statusCode: stream.statusCode, headers: stream.headers, body: body.data),
+                    bodyComplete: false,
+                    cancelled: Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
+                )
+            }
+        } onCancel: {
+            stream.cancel()
+        }
+    }
+
     public func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
-        let handle = CameraHTTPStreamTaskHandle(configuration: streamConfiguration)
+        let handle = CameraHTTPStreamTaskHandle(
+            configuration: streamConfiguration,
+            boundedListing: request.value(forHTTPHeaderField: "Accept") == BridgeMediaListingDecoder.mediaType
+        )
         return try await withTaskCancellationHandler {
             try await handle.start(request)
         } onCancel: {
@@ -251,12 +372,15 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
 
                     do {
                         let http = try Self.httpResponse(response)
+                        let size = try CameraHTTPResponseIntegrity.validate(
+                            CameraHTTPDownloadResponse(
+                                statusCode: http.statusCode, headers: Self.headers(http), temporaryFileURL: url
+                            ),
+                            requestMethod: request.httpMethod ?? "GET"
+                        )
                         let retainedURL = FileManager.default.temporaryDirectory
                             .appendingPathComponent("open-eos-download-\(UUID().uuidString)")
                         try FileManager.default.moveItem(at: url, to: retainedURL)
-                        let size = Int64(
-                            (try? retainedURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-                        )
                         let expected = response.expectedContentLength > 0
                             ? response.expectedContentLength
                             : size
@@ -326,6 +450,33 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
     }
 }
 
+extension URLSessionCameraHTTPTransport: CameraForegroundHTTPTransport {
+    public func sendForeground(
+        _ request: URLRequest,
+        maximumResponseBytes: Int
+    ) async throws -> CameraHTTPResponse {
+        let response = try await CameraForegroundHTTPTask(
+            configuration: streamConfiguration, maximumBytes: Int64(maximumResponseBytes), progress: { _ in }
+        ).run(request)
+        defer { try? FileManager.default.removeItem(at: response.temporaryFileURL) }
+        try Task.checkCancellation()
+        return CameraHTTPResponse(
+            statusCode: response.statusCode, headers: response.headers,
+            body: try Data(contentsOf: response.temporaryFileURL)
+        )
+    }
+
+    public func downloadForeground(
+        _ request: URLRequest,
+        maximumBytes: Int64,
+        progress: @escaping CameraMediaProgressHandler
+    ) async throws -> CameraHTTPDownloadResponse {
+        try await CameraForegroundHTTPTask(
+            configuration: streamConfiguration, maximumBytes: maximumBytes, progress: progress
+        ).run(request)
+    }
+}
+
 private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let configuration: URLSessionConfiguration
     private let lock = NSLock()
@@ -335,10 +486,20 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
     private var session: URLSession?
     private var task: URLSessionDataTask?
     private var responseDelivered = false
+    private var cancellationRequested = false
+    private let maximumBytes: Int?
+    private let boundedListing: Bool
+    private var receivedBytes = 0
+    private var terminalResultRecorded = false
+    private var completedNormally = false
 
-    init(configuration: URLSessionConfiguration) {
+    init(configuration: URLSessionConfiguration, maximumBytes: Int? = nil, boundedListing: Bool = false) {
+        self.maximumBytes = maximumBytes
+        self.boundedListing = boundedListing
         self.configuration = configuration.copy() as! URLSessionConfiguration
-        let pair = AsyncThrowingStream<Data, Error>.makeStream()
+        let pair = AsyncThrowingStream<Data, Error>.makeStream(
+            bufferingPolicy: boundedListing ? .bufferingOldest(64) : .unbounded
+        )
         chunks = pair.stream
         chunksContinuation = pair.continuation
         super.init()
@@ -352,13 +513,23 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
             let task = session.dataTask(with: request)
             self.session = session
             self.task = task
+            let shouldCancel = cancellationRequested
             lock.unlock()
-            task.resume()
+            if shouldCancel { task.cancel() } else { task.resume() }
         }
+    }
+
+    func recordingBodyCompleted(collectedBytes: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        // AsyncThrowingStream iteration can end early on task cancellation.
+        // Require the producer's terminal success and every delivered body byte.
+        return terminalResultRecorded && completedNormally && receivedBytes == collectedBytes
     }
 
     func cancel() {
         lock.lock()
+        cancellationRequested = true
         let task = task
         let session = session
         lock.unlock()
@@ -396,19 +567,61 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
         completionHandler(.allow)
     }
 
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(boundedListing ? nil : request)
+    }
+
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        chunksContinuation.yield(data)
+        lock.lock()
+        let exceedsLimit = maximumBytes.map { data.count > $0 - receivedBytes } ?? false
+        if maximumBytes != nil, !exceedsLimit { receivedBytes += data.count }
+        lock.unlock()
+        guard !exceedsLimit else {
+            finish(error: CCAPIError.invalidResponse("Recording response exceeded the 32 KiB limit."), cancelTask: true)
+            return
+        }
+        if boundedListing {
+            guard data.count <= 1024 * 1024 else {
+                finish(error: DesktopBridgeError.invalidResponse("Listing transport chunk exceeded its byte limit."), cancelTask: true)
+                return
+            }
+            // Bound queued storage to 64 × 64 KiB. Overflow is a failure, never loss.
+            var start = data.startIndex
+            while start < data.endIndex {
+                let end = data.index(start, offsetBy: min(65_536, data.distance(from: start, to: data.endIndex)))
+                switch chunksContinuation.yield(Data(data[start..<end])) {
+                case .enqueued: break
+                case .dropped:
+                    finish(error: DesktopBridgeError.invalidResponse("Listing reader fell behind its bounded buffer."), cancelTask: true)
+                    return
+                case .terminated: return
+                @unknown default: return
+                }
+                start = end
+            }
+        } else {
+            chunksContinuation.yield(data)
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         finish(error: error)
     }
 
-    private func finish(error: Error?) {
+    private func finish(error: Error?, cancelTask: Bool = false) {
         lock.lock()
         let continuation = responseContinuation
         responseContinuation = nil
         let delivered = responseDelivered
+        if !terminalResultRecorded {
+            terminalResultRecorded = true
+            completedNormally = delivered && error == nil
+        }
+        let activeTask = task
         task = nil
         let session = session
         self.session = nil
@@ -422,7 +635,12 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
         } else {
             chunksContinuation.finish()
         }
-        session?.finishTasksAndInvalidate()
+        if cancelTask {
+            activeTask?.cancel()
+            session?.invalidateAndCancel()
+        } else {
+            session?.finishTasksAndInvalidate()
+        }
     }
 }
 

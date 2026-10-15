@@ -546,7 +546,7 @@ private actor ShutterRecoveryTransport: CameraHTTPTransport {
     func failNextStatusRead() { failStatus = true }
 }
 
-private final class ShutterRecoveryGate: @unchecked Sendable {
+final class ShutterRecoveryGate: @unchecked Sendable {
     let entered: XCTestExpectation
     private let lock = NSLock()
     private var isOpen = false
