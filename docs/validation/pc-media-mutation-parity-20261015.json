@@ -1,0 +1,232 @@
+{
+  "checkedAtUTC": "2026-10-15T07:42:51.334892+00:00",
+  "baseCandidate": "e88970b9daca59b9904c2ce848a76a188ecea892",
+  "deliveryState": "implemented",
+  "status": "local verification passed; coordinator review pending; uncommitted and unpushed",
+  "scope": "PC multi-select protection/rating/rotation/archive plus strict readback evidence",
+  "validation": [
+    {
+      "command": "taskset -c 8 npm --prefix bridge run test:modules",
+      "result": "PASS",
+      "modulePrograms": 38,
+      "formalNodeTests": 1385,
+      "failed": 0,
+      "skipped": 0,
+      "counting": "28 node:test programs report counts; 10 legacy assertion programs also passed; new179 module and22 owner cases are included, not additive",
+      "log": "node-final-browser-authoring.log",
+      "sourceNote": "JavaScript and package source hashes unchanged since this full Node run; later review changes only Python code/tests and validation documentation."
+    },
+    {
+      "command": "taskset -c 8 env PYTHONPATH=bridge <existing-venv>/bin/python -m pytest bridge/tests -r fE",
+      "result": "PASS",
+      "passed": 1566,
+      "warnings": 2,
+      "seconds": 75.35,
+      "log": "python-constant-review-final.log",
+      "sourceNote": "Full final Python run after nonstandard-constant review fix; supersedes the prior1503-pass Python source."
+    },
+    {
+      "command": "taskset -c 8 env PYTHONPATH=simulator <existing-venv>/bin/python -m pytest simulator -q",
+      "result": "PASS",
+      "passed": 62,
+      "warnings": 1,
+      "seconds": 2.23,
+      "log": "simulator-final.log"
+    },
+    {
+      "command": "taskset -c 8 <existing-venv>/bin/python -m pytest scripts/contracts/tests/test_media_mutation_contract.py -q",
+      "result": "PASS",
+      "passed": 9,
+      "log": "contract-integrity-final.log"
+    },
+    {
+      "command": "taskset -c 8 <existing-venv>/bin/python -m ruff check bridge/open_eos_bridge bridge/tests",
+      "result": "PASS",
+      "log": "ruff-constant-review-final.log"
+    },
+    {
+      "command": "node --check bridge/open_eos_bridge/static/app.js; node --check bridge/open_eos_bridge/static/media-mutations.js; node --check bridge/tests/media-mutation.browser.test.js; git diff --check",
+      "result": "PASS",
+      "log": "syntax-diff-final.log"
+    },
+    {
+      "command": "taskset -c 8 env PYTHONPATH=bridge <existing-venv>/bin/python -m pytest bridge/tests/test_static_ui.py -q",
+      "result": "PASS",
+      "passed": 6,
+      "log": "static-ui-final.log"
+    }
+  ],
+  "sharedCoverage": {
+    "metadata": {
+      "Python": 200,
+      "JavaScriptNormalized": 101,
+      "CanonSubsetInPython": 99
+    },
+    "readback": {
+      "PythonCanon": 33,
+      "JavaScriptNormalized": 33
+    },
+    "JavaScriptBatch": 10,
+    "JavaScriptRoster": 3,
+    "JavaScriptEligibility": 25,
+    "JavaScriptCurrentLoadedSnapshots": 2,
+    "counting": "Coverage within final suites, not additional test totals. Shared fixture integrity alone does not establish platform behavior.",
+    "wireEvidence": "JavaScript actual app API callback consumes raw synthetic HTTP Response text for 3.0/3e0/precision-losing fractional evidence; Python production media models and Canon transport decoder tested independently."
+  },
+  "reviewFix": {
+    "issue": "Nonstandard JSON constants could be accepted in unrelated metadata fields",
+    "scope": "Only ordinary Canon media-info and bounded fresh media/inventory JSON decoding",
+    "rawWireNegativeCases": 60,
+    "validQuotedStringControls": 3,
+    "focusedRegression": {
+      "passed": 973,
+      "warnings": 1,
+      "seconds": 5.51,
+      "log": "constant-review-focused-final.log"
+    },
+    "previousFreezePreserved": "*-pre-constant-review.*",
+    "replay": "None; raw malformed post-PUT readback fails at the first GET"
+  },
+  "priorDiagnosticRuns": [
+    {
+      "log": "constant-review-focused.log",
+      "passed": 961,
+      "failed": 12,
+      "failure": "New fresh tests initially expected the wrong error code label; actual production rejection was CCAPI_INVENTORY_INCOMPLETE. Corrected tests to the existing code; new focused973-pass and full run supersede this diagnostic."
+    },
+    {
+      "log": "backend/full-python.log",
+      "passed": 1498,
+      "failed": 1,
+      "failure": "Old static source assertion expected { method: \"PUT\", json }; replaced with stronger new-route/raw-parser wiring checks and backed by production owner regressions. Superseded by the separate full1503-pass run."
+    },
+    {
+      "log": "node-first.log",
+      "result": "FAIL",
+      "reason": "History event extraction accidentally included new metadata event bindings; moved bindings after existing batch boundary. Full final38-program run passed."
+    }
+  ],
+  "browser": {
+    "status": "NOT_RUN",
+    "reason": "Installed Playwright Chromium executable absent; no install or alternate download attempted.",
+    "statusReceipt": "browser-status.json",
+    "authoredSuite": "bridge/tests/media-mutation.browser.test.js",
+    "requiredCommand": "npm --prefix bridge run test:browser",
+    "syntaxCheck": "PASS",
+    "authoredCoverage": [
+      "all14 operations in English and zh-TW",
+      "frozen hidden/unloaded roster",
+      "same-ID requested-field readback",
+      "first uncertain stops remaining",
+      "cancel remaining preserves confirmations",
+      "disconnect fences old roster before teardown",
+      "390px/200percent layout screenshots when executable"
+    ],
+    "runtimeResult": "NOT_RUN; authored checks are not execution evidence"
+  },
+  "physicalCamera": "NOT_RUN",
+  "packageRebuild": "NOT_RUN; source-only task, no wheel/standalone rebuild",
+  "releaseAssessment": {
+    "publishedBaseline": "Development Preview v0.12.0",
+    "publishedBaselineVerifiedAtUTC": "2026-10-15T03:54:34Z",
+    "checkoutVersion": "0.13.0",
+    "newLiveReleaseLookup": false,
+    "impact": "minor",
+    "safetyFixOnlyImpact": "patch",
+    "reason": "New selected-file metadata capability; strict readback/owner fixes are patch repairs independently.",
+    "versionChanged": false,
+    "unresolvedGates": [
+      "coordinator review",
+      "exact-source PR CI",
+      "browser visual/accessibility acceptance not run",
+      "physical-camera evidence not run"
+    ],
+    "distribution": "No release prepared or published"
+  },
+  "constraints": {
+    "maximumUniqueItems": 1000,
+    "maximumConcurrentWrites": 1,
+    "maximumWritesPerItem": 1,
+    "maximumCanonReadbacksPerItem": 3,
+    "metadataPreflightFanout": false,
+    "automaticReplay": false,
+    "newTransports": false,
+    "deleteAdded": false,
+    "pushed": false,
+    "committed": false
+  },
+  "sourceChecksums": [
+    {
+      "path": "bridge/open_eos_bridge/ccapi.py",
+      "sha256": "e69b22bb102205ee35095c2d41bbaa1122db8715d7b372e8dca0b6ee4ead84bc"
+    },
+    {
+      "path": "bridge/open_eos_bridge/models.py",
+      "sha256": "5d6de9aa5bdd7b500eb57b7394f35a6c4d6331a6a47586bc958f1c1d7e857755"
+    },
+    {
+      "path": "bridge/open_eos_bridge/static/app.js",
+      "sha256": "e0fcd8662d899c574140dd33f3abc3e9acf11795d06dd699a4f2d7b70691ef32"
+    },
+    {
+      "path": "bridge/open_eos_bridge/static/index.html",
+      "sha256": "a01876266008a13ba1bcc46685aaa4173181b414604e50a18454be190f64fe4c"
+    },
+    {
+      "path": "bridge/open_eos_bridge/static/styles.css",
+      "sha256": "e004e064f0a744d962256a83783db0a33ce81cb7d919b009d95d087a8b4885e5"
+    },
+    {
+      "path": "bridge/open_eos_bridge/static/media-mutations.js",
+      "sha256": "f5bd50448c9aa3afbe5eef7b91d9462ad6c81cf8c6789daca1ea411337a3db90"
+    },
+    {
+      "path": "bridge/package.json",
+      "sha256": "f6a3c688925d17d3fd11aaa967d755d366db7145bcea43a1d3295df0742146b8"
+    },
+    {
+      "path": "bridge/tests/media-auto-import-owner.test.js",
+      "sha256": "a47db1882459f1c1626e8f73852a78159c25b0d8127f2970636078823360d63c"
+    },
+    {
+      "path": "bridge/tests/test_static_ui.py",
+      "sha256": "c6f7bfcc03bf310f03d9b6b8bcdb31bdcf4018f3a41469056ccba5bf81aed662"
+    },
+    {
+      "path": "bridge/tests/media-mutations.test.js",
+      "sha256": "08462ea6878dfde538b4a867a6cf58ef0b15465a5ddb7728eb21952e9661f3c4"
+    },
+    {
+      "path": "bridge/tests/media-mutation-owner.test.js",
+      "sha256": "c931c20a850d662e07f7a9b4e14a2c95961462b3f6e4c88a395cdc09095fff5e"
+    },
+    {
+      "path": "bridge/tests/test_media_mutation_readback.py",
+      "sha256": "b18bc928b1c809f1b758bd52e88af8434db7eeb02d67569613eb1df1c6b3715b"
+    },
+    {
+      "path": "bridge/tests/media-mutation.browser.test.js",
+      "sha256": "450ddf550047714545d015397c51a584def22be1f30f0fabfb175115d2ac216e"
+    },
+    {
+      "path": "docs/validation/pc-media-mutation-parity-20261015.md",
+      "sha256": "ab4938a3b2aaf1d069d2209588a6373defe2686b3e67c01f10ac72966bc26a3b"
+    },
+    {
+      "path": "contracts/media-mutation/v1/media-mutation-vectors.json",
+      "sha256": "2d30173f8abb0538f1aa320cfce24e2fb0e01f86ef6fc54db93a052ed2fdd401"
+    },
+    {
+      "path": "contracts/media-mutation/v1/media-mutation-eligibility-vectors.json",
+      "sha256": "c7c6e27e7455ff12989cea4fab48f97fd103344ff442987a37cc4a32e3f99a1d"
+    },
+    {
+      "path": "contracts/media-mutation/v1/README.md",
+      "sha256": "8586310dedbbccdd76aa975961a6a50844d24eaeebd6bb550c48ae933fb3c5be"
+    },
+    {
+      "path": "scripts/contracts/tests/test_media_mutation_contract.py",
+      "sha256": "de86a88231f31715383ee6a6e0f3ae321e6658f4fee21445f1451c8d75d900ff"
+    }
+  ]
+}

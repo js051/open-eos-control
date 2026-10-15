@@ -392,6 +392,27 @@
             <button class="button secondary" type="button" data-open-media-history data-i18n="mediaHistoryOpen">Saving history</button>
             <button id="media-batch-start" class="button primary" type="button" data-i18n="mediaBatchStart">Save selected originals to folder…</button>
           </div>
+          <div id="media-mutation-controls" class="media-selection-actions">
+            <label for="media-mutation-operation" data-i18n="mediaMutationChoose">Change selected files</label>
+            <select id="media-mutation-operation" aria-describedby="media-mutation-help">
+              <option value="protection:true" data-i18n="mediaMutationProtect">Protect</option>
+              <option value="protection:false" data-i18n="mediaMutationUnprotect">Unprotect</option>
+              <option value="rating:0" data-i18n="mediaMutationRating0">Rating: 0</option>
+              <option value="rating:1" data-i18n="mediaMutationRating1">Rating: 1</option>
+              <option value="rating:2" data-i18n="mediaMutationRating2">Rating: 2</option>
+              <option value="rating:3" data-i18n="mediaMutationRating3">Rating: 3</option>
+              <option value="rating:4" data-i18n="mediaMutationRating4">Rating: 4</option>
+              <option value="rating:5" data-i18n="mediaMutationRating5">Rating: 5</option>
+              <option value="rotation:0" data-i18n="mediaMutationRotation0">Rotation: 0°</option>
+              <option value="rotation:90" data-i18n="mediaMutationRotation90">Rotation: 90°</option>
+              <option value="rotation:180" data-i18n="mediaMutationRotation180">Rotation: 180°</option>
+              <option value="rotation:270" data-i18n="mediaMutationRotation270">Rotation: 270°</option>
+              <option value="archive:true" data-i18n="mediaMutationArchive">Archive</option>
+              <option value="archive:false" data-i18n="mediaMutationUnarchive">Unarchive</option>
+            </select>
+            <button id="media-mutation-start" class="button secondary" type="button" data-i18n="mediaMutationStart">Apply to selected files</button>
+            <p id="media-mutation-help" class="supporting" data-i18n="mediaMutationHelp"></p>
+          </div>
           <p id="media-selection-help" class="supporting" data-i18n="mediaSelectionHelp">Selects loaded matches across pages, not unseen files on the card. Selection is kept when filters or scope change. Hidden and no-longer-loaded selections are included in the batch.</p>
           <p id="media-batch-unavailable" class="supporting" data-i18n="mediaBatchUnavailable" hidden>Batch saving needs a browser with folder access. You can still download originals individually.</p>
         </section>
@@ -417,6 +438,16 @@
           </details>
           <p id="media-auto-import-notice" class="supporting" data-i18n="mediaAutoImportNotice"></p>
           <ol id="media-auto-list" class="media-batch-list"></ol>
+        </section>
+        <section id="media-mutation-panel" class="media-batch-panel" aria-labelledby="media-mutation-title" hidden>
+          <div class="media-batch-heading">
+            <h3 id="media-mutation-title" data-i18n="mediaMutationTitle">Media metadata changes</h3>
+            <button id="media-mutation-cancel" class="button secondary" type="button" data-i18n="mediaBatchCancel">Cancel remaining files</button>
+          </div>
+          <p id="media-mutation-requested" class="supporting"></p>
+          <p id="media-mutation-summary" role="status"></p>
+          <p id="media-mutation-notice" class="supporting"></p>
+          <ol id="media-mutation-list" class="media-batch-list"></ol>
         </section>
         <section id="media-batch-panel" class="media-batch-panel" aria-labelledby="media-batch-title" hidden>
           <div class="media-batch-heading">
@@ -762,6 +793,7 @@
   <script src="/app/media-library.js"></script>
   <script src="/app/media-listing.js"></script>
   <script src="/app/media-batch.js"></script>
+  <script src="/app/media-mutations.js"></script>
   <script src="/app/media-batch-destination.js"></script>
   <script src="/app/media-transfer-history.js"></script>
   <script src="/app/media-auto-import.js"></script>
