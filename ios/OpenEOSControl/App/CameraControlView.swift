@@ -463,10 +463,18 @@ private struct CaptureBar: View {
 
             if camera.captureReviewState != .idle {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(LocalizedStringKey(camera.captureReviewKind.localizationKey(for: camera.captureReviewState)))
+                    Text(LocalizedStringKey(camera.captureReviewKind.localizationKey(for: camera.captureReviewState, outcome: camera.captureReviewOutcome)))
                         .font(.caption)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("capture-review-status")
+                    if camera.captureReviewState == .notReady,
+                       camera.captureReviewOutcome.showsLastReadFailureWarning {
+                        Text(LocalizedStringKey(camera.captureReviewKind.localizationKey(suffix: "last_read_failed")))
+                            .font(.caption)
+                            .foregroundStyle(Color.cameraWarning)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("capture-review-last-read-failed")
+                    }
                     if camera.captureReviewState != .capturing {
                         Text(LocalizedStringKey(camera.captureReviewKind.localizationKey(suffix: "limited_list")))
                             .accessibilityIdentifier("capture-review-limit")

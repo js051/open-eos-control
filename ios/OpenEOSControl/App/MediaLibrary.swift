@@ -27,6 +27,52 @@ enum CaptureReviewState: String {
     var localizationKey: String { "capture_review_\(rawValue)" }
 }
 
+/// Observation and read reliability describe different facts. Neither proves
+/// capture provenance, absence from the card, nor failure of the shutter/STOP.
+enum CaptureReviewObservation: String {
+    case found
+    case noCandidateObserved = "no-candidate-observed"
+    case unread
+}
+
+struct CaptureReviewReadEvidence: Equatable {
+    enum CompletedRead: String { case success, failure }
+    private(set) var successfulReads = 0
+    private(set) var failedReads = 0
+    private(set) var lastCompletedRead: CompletedRead?
+    var completedReads: Int { successfulReads + failedReads }
+
+    mutating func record(_ read: CompletedRead) {
+        switch read {
+        case .success: successfulReads += 1
+        case .failure: failedReads += 1
+        }
+        lastCompletedRead = read
+    }
+}
+
+struct CaptureReviewOutcome: Equatable {
+    let observation: CaptureReviewObservation
+    let readEvidence: CaptureReviewReadEvidence
+
+    init(readEvidence: CaptureReviewReadEvidence = .init(), found: Bool = false) {
+        self.readEvidence = readEvidence
+        observation = found ? .found : readEvidence.successfulReads > 0 ? .noCandidateObserved : .unread
+    }
+
+    var terminalState: CaptureReviewState {
+        switch observation {
+        case .found: .available
+        case .noCandidateObserved: .notReady
+        case .unread: readEvidence.completedReads == 0 ? .notReady : .readFailed
+        }
+    }
+
+    var showsLastReadFailureWarning: Bool {
+        observation == .noCandidateObserved && readEvidence.lastCompletedRead == .failure
+    }
+}
+
 enum CaptureReviewKind: Equatable {
     case photo, video
 
@@ -34,6 +80,13 @@ enum CaptureReviewKind: Equatable {
 
     func localizationKey(for state: CaptureReviewState) -> String {
         localizationKey(suffix: state.rawValue)
+    }
+
+    func localizationKey(for state: CaptureReviewState, outcome: CaptureReviewOutcome) -> String {
+        if state == .notReady, outcome.observation == .unread, outcome.readEvidence.completedReads == 0 {
+            return localizationKey(suffix: "not_checked")
+        }
+        return localizationKey(for: state)
     }
 
     func localizationKey(suffix: String) -> String {

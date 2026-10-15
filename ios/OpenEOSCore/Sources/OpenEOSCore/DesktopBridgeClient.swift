@@ -1278,7 +1278,12 @@ public actor DesktopBridgeClient {
                   let raw = body["items"] as? [Any] else {
                 throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid media JSON.")
             }
-            let items = raw.compactMap { ($0 as? BridgeJSON).flatMap(Self.parseMediaItem) }
+            let items = try raw.map { value -> CameraMediaItem in
+                guard let object = value as? BridgeJSON, let item = Self.parseMediaItem(object) else {
+                    throw DesktopBridgeError.invalidResponse("Desktop Bridge listing contains an invalid media item.")
+                }
+                return item
+            }
             let boundedItems = maximumItems.map { Array(items.prefix($0)) } ?? items
             await onProgress(boundedItems)
             try requireMediaListingOwner(owner, generation: generation)

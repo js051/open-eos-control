@@ -479,6 +479,10 @@
 "capture_without_autofocus" = "Capture photo without requesting autofocus";
 
 // Bounded still-capture review and read-only recovery.
+"capture_review_not_checked" = "Shot accepted. No photo-list check completed. Check again when the camera is ready.";
+"recording_review_not_checked" = "Recording stopped. No video-list check completed. Check again when the camera is ready.";
+"capture_review_last_read_failed" = "The last photo-list read failed. Check again when the camera is ready.";
+"recording_review_last_read_failed" = "The last video-list read failed. Check again when the camera is ready.";
 "capture_review_capturing" = "Waiting for the shutter response…";
 "capture_review_searching" = "Shot accepted. Looking for a newly visible photo…";
 "capture_review_notReady" = "Shot accepted. No newly visible photo found yet.";

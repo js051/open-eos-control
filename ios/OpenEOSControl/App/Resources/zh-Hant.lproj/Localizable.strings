@@ -479,6 +479,10 @@
 "capture_without_autofocus" = "拍照，不要求自動對焦";
 
 // Bounded still-capture review and read-only recovery.
+"capture_review_not_checked" = "快門已接受，尚未完成照片清單查詢。請在相機就緒後重新查找。";
+"recording_review_not_checked" = "錄影已停止，尚未完成影片清單查詢。請在相機就緒後重新查找。";
+"capture_review_last_read_failed" = "最後一次照片清單讀取失敗。請在相機就緒後重新查找。";
+"recording_review_last_read_failed" = "最後一次影片清單讀取失敗。請在相機就緒後重新查找。";
 "capture_review_capturing" = "等待快門回應…";
 "capture_review_searching" = "快門已接受。正在尋找新出現的照片…";
 "capture_review_notReady" = "快門已接受。尚未找到新出現的照片。";
