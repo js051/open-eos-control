@@ -1963,3 +1963,21 @@ for (const completedBeforeAbort of [0, 1]) {
     assert.equal(writes(subject).length, 1);
   });
 }
+
+
+for (const language of ["en", "zh-TW"]) {
+  test(`recording browser journey waits for current exact observation text: ${language}`, () => {
+    const dictionarySource = source.slice(source.indexOf("  const messages = {"),
+      source.indexOf("  const commonSettingValueKeys = {"));
+    const dictionaries = vm.runInNewContext(`${dictionarySource}\nmessages;`);
+    const browserSource = fs.readFileSync(path.join(__dirname, "ccapi.browser.test.js"), "utf8");
+    const start = browserSource.indexOf("async function verifyRecordingReviewJourneys(");
+    const end = browserSource.indexOf("async function verifyConnectionRecoveryJourneys(", start);
+    const journey = browserSource.slice(start, end);
+    assert.ok(journey.includes(JSON.stringify(dictionaries[language].latestVideoNotReady)));
+    assert.ok(journey.includes('textContent === text &&'));
+    assert.ok(journey.includes('retry && !retry.hidden && !retry.disabled'));
+    assert.ok(journey.includes('state.record_stop_count === 1'));
+    assert.ok(journey.includes('state.record_start_count === 1'));
+  });
+}

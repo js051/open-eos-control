@@ -679,9 +679,11 @@ class UrllibCcapiTransport:
         timeout: float = 15.0,
         max_bytes: int = MAX_JSON_BYTES,
     ) -> CcapiResponse:
-        response = self._open(method, url, body=body, headers=headers, timeout=timeout)
+        response = self._open(
+            method, url, body=body, headers=headers, timeout=timeout, follow_redirects=method != "DELETE"
+        )
         try:
-            if not 200 <= response.status < 300:
+            if method != "DELETE" and not 200 <= response.status < 300:
                 # The received status already proves rejection. An optional
                 # diagnostic body must not turn that evidence into an unknown
                 # command result when it is oversized, truncated, or unreadable.
@@ -3317,7 +3319,37 @@ class CcapiSession:
             if not self._supports_media_delete():
                 raise unsupported(CameraFeature.MEDIA_DELETE.value, self.engine_name)
             path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
-            self._request_ok("DELETE", path)
+            self._require_open()
+            response = self.transport.request("DELETE", self._url(path), max_bytes=64 * 1024)
+            length = response.headers.get("content-length")
+            encoding = response.headers.get("transfer-encoding")
+            framing_valid = (
+                length is None or (length.isdigit() and int(length) == len(response.body))
+            ) and not (length is not None and encoding is not None)
+            if framing_valid and response.status in {400, 401, 403, 404, 405, 409, 412, 413, 415, 422, 429}:
+                # Only this DELETE invocation's complete refusal is preserved.
+                # Other commands retain their existing error mapping.
+                raise BridgeError(
+                    "MEDIA_DELETE_REJECTED",
+                    f"Camera explicitly refused deletion (HTTP {response.status}).",
+                    status_code=response.status,
+                    feature=CameraFeature.MEDIA_DELETE.value,
+                    engine=self.engine_name,
+                )
+            if (
+                response.status != 204
+                or not framing_valid
+                or response.body
+                or (length is not None and length != "0")
+                or encoding is not None
+            ):
+                raise BridgeError(
+                    "INVALID_CCAPI_RESPONSE",
+                    "Camera deletion returned no unambiguous empty HTTP 204 receipt; inspect before another attempt.",
+                    status_code=502,
+                    feature=CameraFeature.MEDIA_DELETE.value,
+                    engine=self.engine_name,
+                )
             self._media_cache.pop(media_id, None)
             self._observed.add(CameraFeature.MEDIA_DELETE)
 

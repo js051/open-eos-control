@@ -25,6 +25,8 @@
   if (!mediaLibrary) throw new Error("Open EOS media library module is unavailable.");
   const mediaBatch = globalThis.OpenEOSMediaBatch;
   if (!mediaBatch) throw new Error("Open EOS media batch module is unavailable.");
+  const mediaDelete = globalThis.OpenEOSMediaDelete;
+  if (!mediaDelete) throw new Error("Open EOS media deletion module is unavailable.");
   const mediaMutations = globalThis.OpenEOSMediaMutations;
   if (!mediaMutations) throw new Error("Open EOS media mutations module is unavailable.");
   const mediaBatchDestination = globalThis.OpenEOSMediaBatchDestination;
@@ -700,6 +702,32 @@
       uploadReviewFiles: "Review current camera files",
       uploadReviewNotice: "Review uses the selected listing scope. A matching file in a listing cannot confirm this upload. Nothing is resent or deleted.",
       delete: "Delete",
+      mediaDeleteStart: "Review permanent deletion…",
+      mediaDeleteTitle: "Deletion results in this window",
+      mediaDeleteEndpointUnknown: "Bridge endpoint unavailable",
+      mediaDeletePending: "Deletion in progress; result not yet known",
+      mediaDeleteHelp: "Exact receipt confirms deletion. Unknown results are never retried automatically. Cancellation stops remaining requests; it cannot restore deleted files. History is kept for up to 20 batches / 2,000 rows while this window stays open.",
+      mediaDeleteCancel: "Stop remaining deletions",
+      mediaDeleteInspect: "Read current listing only",
+      mediaDeleteConfirmHeader: "Permanently delete the eligible files listed below from each stated location? This cannot be undone. Protected, unavailable and unknown-source files will be skipped. No downloaded copies at other locations will be deleted.",
+      mediaDeleteQualificationUnknown: "Protection or write status unknown; server must enforce it",
+      mediaDeletePreviousCamera: "Previous connection",
+      mediaDeleteInvalid: "Select 1–1,000 unique, exact file IDs.",
+      mediaDeleteSource_camera: "Camera storage",
+      "mediaDeleteSource_desktop-host": "Connected desktop capture files",
+      "mediaDeleteSource_android-host": "Android capture files",
+      mediaDeleteSource_unknown: "Unknown location; skipped",
+      mediaDeleteStatus_confirmed: "Deletion confirmed",
+      mediaDeleteStatus_rejected: "Explicitly refused",
+      mediaDeleteStatus_uncertain: "Result uncertain; inspect before another confirmed attempt",
+      "mediaDeleteStatus_not-sent": "Not sent",
+      "mediaDeleteStatus_not-started": "Not started",
+      mediaDeleteStatus_skipped: "Skipped",
+      "mediaDeleteSkip_not-loaded": "Not currently loaded",
+      "mediaDeleteSkip_no-capability": "Deletion unsupported",
+      "mediaDeleteSkip_unknown-source": "Unknown location",
+      mediaDeleteSkip_protected: "Protected",
+      "mediaDeleteSkip_not-writable": "Not writable",
       deleteConfirm: "Permanently delete {name} from the camera card? This cannot be undone.",
       deleted: "Deleted {name}",
       copied: "Diagnostic report copied",
@@ -1346,6 +1374,32 @@
       uploadReviewFiles: "檢查目前相機檔案",
       uploadReviewNotice: "檢查沿用目前的清單範圍。同名清單項目不能確認這次上傳；不會重新上傳或刪除檔案。",
       delete: "刪除",
+      mediaDeleteStart: "檢視永久刪除清單…",
+      mediaDeleteTitle: "本視窗的刪除結果",
+      mediaDeleteEndpointUnknown: "Bridge端點無法辨識",
+      mediaDeletePending: "刪除處理中，結果尚未確定",
+      mediaDeleteHelp: "僅明確回覆代表已刪除；不確定結果不會自動重試。取消只停止後續請求，無法復原已刪檔案。本視窗保留最多20批／2,000列紀錄。",
+      mediaDeleteCancel: "停止後續刪除",
+      mediaDeleteInspect: "僅讀取目前清單",
+      mediaDeleteConfirmHeader: "確定要從下列各自位置永久刪除符合資格的檔案嗎？無法復原。受保護、未載入或來源不明的檔案將略過，不會刪除其他位置的已下載副本。",
+      mediaDeleteQualificationUnknown: "保護或可寫狀態未知，由伺服器確認資格",
+      mediaDeletePreviousCamera: "先前連線",
+      mediaDeleteInvalid: "請選擇1至1,000個不重複的精確檔案ID。",
+      mediaDeleteSource_camera: "相機儲存空間",
+      "mediaDeleteSource_desktop-host": "已連線的桌面拍攝檔案",
+      "mediaDeleteSource_android-host": "Android拍攝檔案",
+      mediaDeleteSource_unknown: "位置未知，略過",
+      mediaDeleteStatus_confirmed: "已確認刪除",
+      mediaDeleteStatus_rejected: "明確拒絕",
+      mediaDeleteStatus_uncertain: "結果不確定，另次確認前先檢查",
+      "mediaDeleteStatus_not-sent": "未送出",
+      "mediaDeleteStatus_not-started": "未開始",
+      mediaDeleteStatus_skipped: "已略過",
+      "mediaDeleteSkip_not-loaded": "目前未載入",
+      "mediaDeleteSkip_no-capability": "不支援刪除",
+      "mediaDeleteSkip_unknown-source": "來源位置未知",
+      mediaDeleteSkip_protected: "受保護",
+      "mediaDeleteSkip_not-writable": "無法寫入",
       deleteConfirm: "確定要從相機儲存卡永久刪除「{name}」嗎？此操作無法復原。",
       deleted: "已刪除 {name}",
       copied: "已複製診斷報告",
@@ -1622,6 +1676,8 @@
     tapAction: "focus",
     media: [],
     mediaSelection: mediaBatch.createSelection(),
+    mediaDeleteOwner: null,
+    mediaDeleteHistory: [],
     mediaMutationOwner: null,
     mediaMutation: null,
     mediaBatchOwner: null,
@@ -1866,6 +1922,11 @@
     mediaSelectionSummary: byId("media-selection-summary"),
     mediaMutationControls: byId("media-mutation-controls"),
     mediaMutationOperation: byId("media-mutation-operation"),
+    mediaDeleteStart: byId("media-delete-start"),
+    mediaDeletePanel: byId("media-delete-panel"),
+    mediaDeleteList: byId("media-delete-list"),
+    mediaDeleteCancel: byId("media-delete-cancel"),
+    mediaDeleteInspect: byId("media-delete-inspect"),
     mediaMutationStart: byId("media-mutation-start"),
     mediaMutationPanel: byId("media-mutation-panel"),
     mediaMutationSummary: byId("media-mutation-summary"),
@@ -2583,6 +2644,10 @@
     state.media = [];
     state.mediaSelection?.clear();
     state.mediaSelection?.replaceLoaded([]);
+    if (state.mediaDeleteOwner) {
+      state.mediaDeleteOwner.controller.abort();
+      state.mediaDeleteOwner = null;
+    }
     state.mediaBatchOwner = null;
     state.mediaBatch = null;
     state.mediaMutationOwner = null;
@@ -6116,7 +6181,7 @@
       card.className = "media-card";
       const selection = document.createElement("label");
       selection.className = "media-select";
-      selection.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD) && !mediaMetadataSupported();
+      selection.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD) && !mediaMetadataSupported() && !featureSupported(FEATURES.MEDIA_DELETE);
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.className = "media-select-checkbox";
@@ -6199,7 +6264,12 @@
     const metadataSupported = typeof mediaMetadataSupported === "function" && mediaMetadataSupported();
     const folderAvailable = typeof window.showDirectoryPicker === "function";
     const busy = cameraInteractionBusy();
-    ui.mediaSelection.hidden = !supported && !metadataSupported;
+    ui.mediaSelection.hidden = !supported && !metadataSupported && !featureSupported(FEATURES.MEDIA_DELETE);
+    if (ui.mediaDeleteStart) {
+      ui.mediaDeleteStart.hidden = !featureSupported(FEATURES.MEDIA_DELETE);
+      ui.mediaDeleteStart.disabled = !state.session || busy || Boolean(state.mediaDeleteOwner) || !selection.length;
+    }
+    if (typeof renderMediaDeleteHistory === "function") renderMediaDeleteHistory();
     ui.mediaSelectionSummary.textContent = t("mediaSelectionSummary", {
       selected: selection.length,
       hidden: selection.filter((entry) => entry.loaded && entry.hidden).length,
@@ -7743,7 +7813,7 @@
     ui.mediaDetailsDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
     ui.mediaDetailsDownload.disabled = disabled || !featureSupported(FEATURES.MEDIA_DOWNLOAD);
     ui.mediaDetailsDelete.hidden = !featureSupported(FEATURES.MEDIA_DELETE);
-    ui.mediaDetailsDelete.disabled = disabled || !featureSupported(FEATURES.MEDIA_DELETE);
+    ui.mediaDetailsDelete.disabled = disabled || Boolean(state.mediaDeleteOwner) || !featureSupported(FEATURES.MEDIA_DELETE);
   }
 
   function clearMediaDetails() {
@@ -8308,36 +8378,144 @@
     else cancelMediaDownload();
   }
 
-  async function deleteMedia(item, button) {
-    const session = state.session;
-    if (!session || !featureSupported(FEATURES.MEDIA_DELETE) || cameraInteractionBusy()) return;
-    if (!window.confirm(t("deleteConfirm", { name: item.name }))) return;
-    state.mediaListingOwner?.cancel({ silent: true });
-    button.disabled = true;
-    try {
-      await api(
-        `/v1/session/${encodeURIComponent(session.id)}/media/${encodeURIComponent(item.id)}`,
-        { method: "DELETE" },
-      );
-      // A replacement connection can reuse both the session ID and the media ID.
-      if (state.session !== session) return;
-      state.media = state.media.filter((candidate) => candidate.id !== item.id);
-      state.mediaSelection?.remove(item.id);
-      const thumbnailUrl = state.mediaThumbnailUrls.get(item.id);
-      state.mediaThumbnailUrls.delete(item.id);
-      state.mediaThumbnailLoads.delete(item.id);
-      state.mediaThumbnailFailures.delete(item.id);
-      if (state.mediaPreviewItem?.id === item.id) closeMediaPreview();
-      if (state.mediaDetailsItem?.id === item.id) closeMediaDetails();
-      renderMedia();
-      releaseObjectUrl(thumbnailUrl);
-      showToast(t("deleted", { name: item.name }));
-    } catch (error) {
-      if (state.session !== session) return;
-      const normalized = captureError(error);
-      showToast(normalized.message, true);
-      button.disabled = false;
+  function mediaDeleteRows(entries, session) {
+    const engine = session.engine;
+    return entries.map(({ item, loaded = true, hidden = false }) => {
+      const source = mediaDelete.sourceFor(item, engine);
+      const qualification = mediaDelete.eligibility({ loaded, source,
+        capability: featureSupported(FEATURES.MEDIA_DELETE), protected: item.protected, writable: item.writable });
+      return Object.freeze({ id: item.id, name: item.name || item.id, source, loaded, hidden,
+        location: item.folderLabel || item.folder || "", eligible: qualification.allowed,
+        reason: qualification.reason, qualificationUnknown: qualification.qualificationUnknown,
+        selectionToken: state.mediaSelection?.token(item.id) ?? null });
+    });
+  }
+
+  function mediaDeleteOwnerDescription(session) {
+    // Browser origin has no username, password, path or query string.
+    const origin = window.location?.origin || t("mediaDeleteEndpointUnknown");
+    return [origin, session?.engine, session?.camera?.model, session?.id]
+      .filter((value) => typeof value === "string" && value.length).map((value) => JSON.stringify(value)).join(" · ");
+  }
+
+  function mediaDeleteConfirmation(rows) {
+    return t("mediaDeleteConfirmHeader") + "\n" + mediaDeleteOwnerDescription(state.session) + "\n\n" + rows.map((row) =>
+      `${JSON.stringify(row.name)}\n${JSON.stringify(row.id)}\n${t("mediaDeleteSource_" + row.source)}${row.location ? " · " + row.location : ""}` +
+      (row.hidden ? " · " + t("mediaMutationHidden") : "") +
+      (!row.eligible ? " · " + t("mediaDeleteSkip_" + row.reason) :
+        row.qualificationUnknown ? " · " + t("mediaDeleteQualificationUnknown") : "")
+    ).join("\n\n");
+  }
+
+  function renderMediaDeleteHistory() {
+    if (!ui.mediaDeletePanel) return;
+    const history = state.mediaDeleteHistory || [];
+    ui.mediaDeletePanel.hidden = !history.length;
+    ui.mediaDeleteCancel.hidden = !state.mediaDeleteOwner;
+    ui.mediaDeleteCancel.disabled = !state.mediaDeleteOwner || state.mediaDeleteOwner.controller.signal.aborted;
+    ui.mediaDeleteInspect.disabled = !state.session || Boolean(state.mediaDeleteOwner) || cameraInteractionBusy();
+    ui.mediaDeleteList.replaceChildren();
+    for (const batch of [...history].reverse()) {
+      for (const result of batch.results) {
+        const row = document.createElement("li");
+        row.dataset.mediaId = result.id;
+        row.dataset.outcome = result.status;
+        row.textContent = `${result.name} · ${result.id} · ${batch.ownerDescription} · ${t("mediaDeleteSource_" + result.source)} · ` +
+          t(!batch.finished && ["not-sent", "uncertain"].includes(result.status) ? "mediaDeletePending" : "mediaDeleteStatus_" + result.status) +
+          (batch.session !== state.session ? " · " + t("mediaDeletePreviousCamera") : "") +
+          (result.status === "skipped" ? " · " + t("mediaDeleteSkip_" + result.reason) : "");
+        ui.mediaDeleteList.append(row);
+      }
     }
+  }
+
+  function cancelMediaDelete() {
+    state.mediaDeleteOwner?.controller.abort();
+    renderMediaDeleteHistory();
+  }
+
+  function applyConfirmedMediaDelete(owner, result) {
+    if (state.session !== owner.session || state.mediaDeleteOwner !== owner || owner.applied.has(result.id)) return;
+    owner.applied.add(result.id);
+    state.media = state.media.filter((candidate) => candidate.id !== result.id);
+    state.mediaSelection?.consumeIfToken(result.id, result.selectionToken);
+    const thumbnailUrl = state.mediaThumbnailUrls.get(result.id);
+    state.mediaThumbnailUrls.delete(result.id);
+    state.mediaThumbnailLoads.delete(result.id);
+    state.mediaThumbnailFailures.delete(result.id);
+    if (state.mediaPreviewItem?.id === result.id) closeMediaPreview();
+    if (state.mediaDetailsItem?.id === result.id) closeMediaDetails();
+    releaseObjectUrl(thumbnailUrl);
+  }
+
+  function sendMediaDelete(row, owner, headers, options) {
+    return mediaDelete.transferHttp(
+      `/v1/session/${encodeURIComponent(owner.session.id)}/media/${encodeURIComponent(row.id)}`, {
+        ...options, headers,
+        beforeDispatch: () => {
+          if (state.session !== owner.session || state.mediaDeleteOwner !== owner) return false;
+          const current = state.media.find((item) => item.id === row.id);
+          const source = mediaDelete.sourceFor(current, owner.session.engine);
+          const qualification = mediaDelete.eligibility({ loaded: Boolean(current),
+            capability: featureSupported(FEATURES.MEDIA_DELETE),
+            source: source === row.source ? source : "unknown", protected: current?.protected, writable: current?.writable });
+          if (!qualification.allowed) { options.attempt.skip(qualification.reason); return false; }
+          return options.beforeDispatch();
+        },
+      });
+  }
+
+  async function runMediaDelete(entries, button = null) {
+    const session = state.session;
+    if (!session || !featureSupported(FEATURES.MEDIA_DELETE) || cameraInteractionBusy() || state.mediaDeleteOwner) return;
+    const roster = mediaDelete.roster(entries.map(({ item }) => item.id));
+    if (!roster.allowed) { showToast(t("mediaDeleteInvalid"), true); return; }
+    const byId = new Map();
+    for (const entry of entries) if (!byId.has(entry.item.id)) byId.set(entry.item.id, entry);
+    const rows = mediaDeleteRows([...byId.values()], session);
+    if (!window.confirm(mediaDeleteConfirmation(rows))) return;
+    // The confirmation is single-use and bound to this exact connection object.
+    if (!mediaDelete.admission({ openingOwner: session, currentOwner: state.session,
+      confirmed: true, consumed: false, busy: cameraInteractionBusy() || Boolean(state.mediaDeleteOwner) }).allowed) return;
+    const owner = { session, controller: new AbortController(), applied: new Set() };
+    const batch = { session, ownerDescription: mediaDeleteOwnerDescription(session), createdAt: Date.now(), results: rows.map((row) => ({ ...row, status: "not-started" })) };
+    state.mediaDeleteOwner = owner;
+    state.mediaDeleteHistory = mediaDelete.boundedHistory([...(state.mediaDeleteHistory || []), batch]);
+    state.mediaListingOwner?.cancel({ silent: true });
+    if (button) button.disabled = true;
+    const headers = new Headers();
+    if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
+    try {
+      await mediaDelete.runBatch(rows, { signal: owner.controller.signal,
+        isCurrent: () => state.session === session && state.mediaDeleteOwner === owner,
+        transfer: (row, options) => sendMediaDelete(row, owner, headers, options),
+        onUpdate: (snapshot) => {
+          batch.results = snapshot.results;
+          batch.finished = snapshot.finished;
+          batch.stopped = snapshot.stopped;
+          if (state.session !== session || state.mediaDeleteOwner !== owner) return;
+          for (const result of snapshot.results) if (result.status === "confirmed") applyConfirmedMediaDelete(owner, result);
+          renderMediaDeleteHistory();
+        },
+      });
+    } finally {
+      if (state.session === session && state.mediaDeleteOwner === owner) {
+        state.mediaDeleteOwner = null;
+        renderMedia();
+        renderMediaDetails();
+        renderMediaDeleteHistory();
+        if (button) button.disabled = cameraInteractionBusy();
+      }
+    }
+  }
+
+  async function deleteMedia(item, button) {
+    const current = state.media.find((candidate) => candidate.id === item.id);
+    return runMediaDelete([{ item: current || item, loaded: Boolean(current), hidden: false }], button);
+  }
+
+  async function deleteSelectedMedia() {
+    return runMediaDelete(state.mediaSelection.snapshot(displayedMedia().map((item) => item.id)));
   }
 
   function diagnosticCapabilities() {
@@ -8832,6 +9010,12 @@
     ui.mediaHistoryConfirmYes.addEventListener("click", clearMediaHistory);
     ui.mediaBatchStart.addEventListener("click", downloadSelectedMedia);
     ui.mediaBatchCancel.addEventListener("click", () => cancelMediaBatch());
+    ui.mediaDeleteStart.addEventListener("click", () => void deleteSelectedMedia());
+    ui.mediaDeleteCancel.addEventListener("click", cancelMediaDelete);
+    ui.mediaDeleteInspect.addEventListener("click", () => {
+      if (!state.session || state.mediaDeleteOwner || cameraInteractionBusy()) return;
+      void refreshMedia();
+    });
     ui.mediaMutationStart.addEventListener("click", () => void updateSelectedMediaMetadata());
     ui.mediaMutationCancel.addEventListener("click", cancelMediaMutation);
     ui.mediaMutationOperation.addEventListener("change", () => renderMediaSelection());

@@ -390,6 +390,7 @@
             <button id="media-select-filtered" class="button secondary" type="button" data-i18n="mediaSelectFiltered">Select all loaded matches</button>
             <button id="media-selection-clear" class="button secondary" type="button" data-i18n="mediaSelectionClear">Clear selection</button>
             <button class="button secondary" type="button" data-open-media-history data-i18n="mediaHistoryOpen">Saving history</button>
+            <button id="media-delete-start" class="button secondary" type="button" data-i18n="mediaDeleteStart">Review permanent deletion…</button>
             <button id="media-batch-start" class="button primary" type="button" data-i18n="mediaBatchStart">Save selected originals to folder…</button>
           </div>
           <div id="media-mutation-controls" class="media-selection-actions">
@@ -415,6 +416,13 @@
           </div>
           <p id="media-selection-help" class="supporting" data-i18n="mediaSelectionHelp">Selects loaded matches across pages, not unseen files on the card. Selection is kept when filters or scope change. Hidden and no-longer-loaded selections are included in the batch.</p>
           <p id="media-batch-unavailable" class="supporting" data-i18n="mediaBatchUnavailable" hidden>Batch saving needs a browser with folder access. You can still download originals individually.</p>
+        </section>
+        <section id="media-delete-panel" class="media-selection" hidden aria-labelledby="media-delete-title">
+          <h3 id="media-delete-title" data-i18n="mediaDeleteTitle">Deletion results in this window</h3>
+          <p class="supporting" data-i18n="mediaDeleteHelp"></p>
+          <button id="media-delete-cancel" class="button secondary" type="button" data-i18n="mediaDeleteCancel">Stop remaining deletions</button>
+          <button id="media-delete-inspect" class="button secondary" type="button" data-i18n="mediaDeleteInspect">Read current listing only</button>
+          <ol id="media-delete-list" aria-live="polite"></ol>
         </section>
         <p class="supporting" data-media-history-warning hidden role="status"></p>
         <section id="media-auto-panel" class="media-auto-panel" aria-labelledby="media-auto-import-title" aria-describedby="media-auto-import-purpose media-auto-import-notice">
@@ -802,6 +810,7 @@
   <script src="/app/media-listing.js"></script>
   <script src="/app/media-batch.js"></script>
   <script src="/app/media-mutations.js"></script>
+  <script src="/app/media-delete.js"></script>
   <script src="/app/media-batch-destination.js"></script>
   <script src="/app/media-transfer-history.js"></script>
   <script src="/app/media-auto-import.js"></script>
