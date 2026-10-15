@@ -153,6 +153,8 @@ data class CameraUiState(
     val lastDeletedMediaName: String? = null,
     val mediaBatchProgress: MediaBatchProgress? = null,
     val lastMediaBatchResult: MediaBatchResult? = null,
+    val mediaMetadataBatch: MediaMetadataBatchResult? = null,
+    val previousMediaMetadataBatch: MediaMetadataBatchResult? = null,
     val cameraImportPreparing: Boolean = false,
     val pendingCameraImportHandoff: CameraImportHandoffSession? = null,
     val lastCameraImportReceiptSummary: CameraImportReceiptSummary? = null,

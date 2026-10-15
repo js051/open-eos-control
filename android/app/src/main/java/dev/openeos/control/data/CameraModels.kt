@@ -605,6 +605,9 @@ data class CameraMediaItem(
     val widthPixels: Int? = null,
     val heightPixels: Int? = null,
     val folder: CameraMediaFolder? = null,
+    val protectionWritable: Boolean? = null,
+    val archiveWritable: Boolean? = null,
+    val rotationWritable: Boolean? = null,
 )
 
 /**

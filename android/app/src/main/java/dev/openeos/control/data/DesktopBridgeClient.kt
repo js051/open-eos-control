@@ -959,7 +959,9 @@ class DesktopBridgeClient(
                 } else {
                     // Old Bridge replies are consumed from this one response, never retried.
                     check(mediaType == null || mediaType == "application/json") { "Unexpected listing content type." }
-                    val json = JSONObject(body.readBoundedUtf8(BridgeMediaListingDecoder.MAX_SNAPSHOT_BYTES, strictUtf8 = true))
+                    val text = body.readBoundedUtf8(BridgeMediaListingDecoder.MAX_SNAPSHOT_BYTES, strictUtf8 = true)
+                    StrictMediaJson(text).validate()
+                    val json = JSONObject(text)
                     checkOwner()
                     val raw = json.opt("items") as? JSONArray ?: error("Invalid media listing JSON.")
                     val legacy = raw.objects().mapNotNull(::parseMediaItem).let {
@@ -986,7 +988,7 @@ class DesktopBridgeClient(
     }
 
     suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem =
-        parseMediaItem(getJson(sessionEndpoint("media", item.id, "info")))
+        parseMediaItem(getJson(sessionEndpoint("media", item.id, "info"), strictMediaJsonLimit = MAX_MEDIA_METADATA_JSON_BYTES))
             ?.also { updated ->
                 check(updated.id == item.id) {
                     "Desktop Bridge media response does not belong to the requested item ${item.name}."
@@ -1000,6 +1002,7 @@ class DesktopBridgeClient(
             endpoint = "protection",
             payload = JSONObject().put("enabled", enabled),
             feature = CameraFeature.MEDIA_PROTECT,
+            target = MediaMetadataTarget(MediaMetadataField.PROTECTION, if (enabled) 1 else 0),
         )
 
     suspend fun setMediaArchived(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
@@ -1008,6 +1011,7 @@ class DesktopBridgeClient(
             endpoint = "archive",
             payload = JSONObject().put("enabled", enabled),
             feature = CameraFeature.MEDIA_ARCHIVE,
+            target = MediaMetadataTarget(MediaMetadataField.ARCHIVE, if (enabled) 1 else 0),
         )
 
     suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem {
@@ -1017,7 +1021,7 @@ class DesktopBridgeClient(
             endpoint = "rating",
             payload = JSONObject().put("value", rating),
             feature = CameraFeature.MEDIA_RATING,
-            expectedRating = rating,
+            target = MediaMetadataTarget(MediaMetadataField.RATING, rating),
         )
     }
 
@@ -1028,6 +1032,7 @@ class DesktopBridgeClient(
             endpoint = "rotation",
             payload = JSONObject().put("degrees", degrees),
             feature = CameraFeature.MEDIA_ROTATE,
+            target = MediaMetadataTarget(MediaMetadataField.ROTATION, degrees),
         )
     }
 
@@ -1036,15 +1041,16 @@ class DesktopBridgeClient(
         endpoint: String,
         payload: JSONObject,
         feature: CameraFeature,
-        expectedRating: Int? = null,
+        target: MediaMetadataTarget,
     ): CameraMediaItem = parseMediaItem(
-        putJson(sessionEndpoint("media", item.id, endpoint), payload),
+        putJson(sessionEndpoint("media", item.id, endpoint), payload, strictMediaJsonLimit = MAX_MEDIA_METADATA_JSON_BYTES),
     )?.also { updated ->
         check(updated.id == item.id) {
             "Desktop Bridge media response does not belong to the requested item ${item.name}."
         }
-        check(expectedRating == null || updated.rating == expectedRating) {
-            "Desktop Bridge media response did not confirm the requested rating $expectedRating for ${item.name}."
+        check(target.matches(item.id, MediaMetadataReadback(updated.id, updated.protected, updated.archived,
+            updated.rating, updated.rotationDegrees))) {
+            "Desktop Bridge media response did not confirm the requested ${if (target.field == MediaMetadataField.RATING) "rating" else endpoint} ${target.value} for ${item.name}."
         }
         observedFeatures.add(feature)
     }
@@ -1369,10 +1375,14 @@ class DesktopBridgeClient(
             sizeBytes = item.optNullableLong("sizeBytes"),
             captureTime = item.optNullableString("captureTime"),
             previewAvailable = item.optBoolean("previewAvailable", false),
-            protected = item.optNullableBoolean("protected"),
-            archived = item.optNullableBoolean("archived"),
+            protected = normalizedMediaMetadataBoolean(item.opt("protected")),
+            archived = normalizedMediaMetadataBoolean(item.opt("archived")),
             rating = item.normalizedMediaRating(),
-            rotationDegrees = item.optNullableInt("rotationDegrees")?.takeIf { it in MEDIA_ROTATIONS },
+            rotationDegrees = normalizedMediaMetadataInteger(item.opt("rotationDegrees"), MEDIA_ROTATIONS),
+            ratingWritable = normalizedMediaMetadataBoolean(item.opt("ratingWritable")),
+            protectionWritable = normalizedMediaMetadataBoolean(item.opt("protectionWritable")),
+            archiveWritable = normalizedMediaMetadataBoolean(item.opt("archiveWritable")),
+            rotationWritable = normalizedMediaMetadataBoolean(item.opt("rotationWritable")),
             streamAvailable = cameraMediaHasVideoTransportHint(kind, name) && cameraMediaIsVideo(kind, name, contentType),
             contentType = contentType,
             widthPixels = item.optNullableInt("widthPixels")?.takeIf { it > 0 },
@@ -1456,8 +1466,8 @@ class DesktopBridgeClient(
             .get().build(), observeStatus = false, recoveryRead = recoveryRead),
     )
 
-    private suspend fun getJson(url: HttpUrl, cameraDiscovery: Boolean = false): JSONObject = requestJson(
-        Request.Builder().url(url).get().build(), cameraDiscovery = cameraDiscovery,
+    private suspend fun getJson(url: HttpUrl, cameraDiscovery: Boolean = false, strictMediaJsonLimit: Int? = null): JSONObject = requestJson(
+        Request.Builder().url(url).get().build(), cameraDiscovery = cameraDiscovery, strictMediaJsonLimit = strictMediaJsonLimit,
     )
 
     private suspend fun postJson(
@@ -1478,11 +1488,11 @@ class DesktopBridgeClient(
             .build(),
     )
 
-    private suspend fun putJson(url: HttpUrl, payload: JSONObject): JSONObject = requestJson(
+    private suspend fun putJson(url: HttpUrl, payload: JSONObject, strictMediaJsonLimit: Int? = null): JSONObject = requestJson(
         Request.Builder()
             .url(url)
             .put(payload.toString().toRequestBody(jsonMediaType))
-            .build(),
+            .build(), strictMediaJsonLimit = strictMediaJsonLimit,
     )
 
     private suspend fun requestJson(
@@ -1492,6 +1502,7 @@ class DesktopBridgeClient(
         cameraDiscovery: Boolean = false,
         recordingEvidence: RecordingRequestEvidence? = null,
         maxResponseBytes: Int? = null,
+        strictMediaJsonLimit: Int? = null,
     ): JSONObject = withContext(Dispatchers.IO) {
         val session = sessionForRequest(request)
         val revision = session?.revision
@@ -1518,7 +1529,10 @@ class DesktopBridgeClient(
                 // Non-502 rejection headers remain evidence even if the error body is lost.
                 // A 502 may instead carry an acknowledged or unknown camera outcome.
                 if (!response.isSuccessful && response.code != 502) recordingEvidence?.rejected = true
-                val body = response.body?.let { if (maxResponseBytes == null) it.string() else it.readBoundedUtf8(maxResponseBytes) }.orEmpty()
+                val body = response.body?.let {
+                    if (strictMediaJsonLimit != null) it.byteStream().use { input -> readStrictMediaJsonText(input, it.contentLength(), strictMediaJsonLimit) }
+                    else if (maxResponseBytes == null) it.string() else it.readBoundedUtf8(maxResponseBytes)
+                }.orEmpty()
                 if (recordingEvidence == null) session?.let(::requireCurrentSession)
                 if (!response.isSuccessful) {
                     val failure = bridgeError(response.code, body, request.url.encodedPath, session, revision,
@@ -1542,6 +1556,7 @@ class DesktopBridgeClient(
                     throw failure
                 }
                 session?.let(::requireCurrentSession)
+                if (strictMediaJsonLimit != null) StrictMediaJson(body).validate()
                 val parsed = runCatching { JSONObject(body) }.getOrElse {
                     // Classify at the REC response boundary: coroutine stack recovery can
                     // wrap an IllegalStateException and change the immediate cause later.

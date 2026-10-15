@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -29,6 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.R
+import dev.openeos.control.data.MediaMetadataField
 
 @Composable
 internal fun RowScope.MediaSelectionTopBar(
@@ -119,6 +121,10 @@ internal fun MediaBatchMetadataSheet(
     onRotate: (Int) -> Unit,
     downloadSupported: Boolean = false,
     onSaveToFolder: () -> Unit = {},
+    hiddenCount: Int = 0,
+    unloadedCount: Int = 0,
+    receipt: MediaMetadataBatchResult? = null,
+    onCancel: () -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -138,6 +144,8 @@ internal fun MediaBatchMetadataSheet(
                 color = AppText,
                 fontWeight = FontWeight.Bold,
             )
+            Text(stringResource(R.string.media_metadata_frozen_scope, itemCount, hiddenCount, unloadedCount), color = AppSubtleText)
+            if (receipt != null) MediaMetadataBatchReceipt(receipt, onCancel)
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = AppAccent)
 
             if (downloadSupported) {
@@ -248,5 +256,61 @@ private fun BatchMediaActionButton(
         )
         Spacer(Modifier.size(8.dp))
         Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+internal fun MediaMetadataBatchReceipt(receipt: MediaMetadataBatchResult, onCancel: () -> Unit, rowTagPrefix: String = "media-metadata-row") {
+    Text(
+        stringResource(R.string.media_metadata_summary, receipt.confirmed, receipt.uncertain, receipt.failedNotSent, receipt.notStarted, receipt.inFlight),
+        modifier = Modifier.testTag("media-metadata-receipt"),
+        color = if (receipt.uncertain > 0 || receipt.failedNotSent > 0 || receipt.notStarted > 0) AppWarning else AppSuccess,
+    )
+    if (receipt.running) {
+        TextButton(onClick = onCancel, modifier = Modifier.testTag("media-metadata-cancel")) {
+            Text(stringResource(R.string.media_metadata_cancel))
+        }
+    }
+    if (receipt.uncertain > 0) Text(stringResource(R.string.media_metadata_uncertain_help), color = AppWarning)
+    receipt.rows.firstOrNull()?.request?.target?.let { target ->
+        val label = stringResource(when (target.field) {
+            MediaMetadataField.PROTECTION -> R.string.media_protection
+            MediaMetadataField.ARCHIVE -> R.string.media_archive
+            MediaMetadataField.RATING -> R.string.media_rating
+            MediaMetadataField.ROTATION -> R.string.media_rotation
+        })
+        val value = when (target.field) {
+            MediaMetadataField.PROTECTION, MediaMetadataField.ARCHIVE ->
+                stringResource(if (target.value == 1) R.string.media_metadata_enabled else R.string.media_metadata_disabled)
+            MediaMetadataField.ROTATION -> stringResource(R.string.rotation_degrees_short, target.value)
+            MediaMetadataField.RATING -> target.value.toString()
+        }
+        Text(stringResource(R.string.media_metadata_target, label, value), color = AppSubtleText)
+    }
+    Column(Modifier.fillMaxWidth().heightIn(max = 200.dp).verticalScroll(rememberScrollState())) {
+        receipt.rows.forEach { row ->
+            val status = stringResource(when (row.outcome) {
+                MediaMetadataOutcome.IN_FLIGHT -> R.string.media_metadata_in_flight
+                MediaMetadataOutcome.NOT_STARTED -> R.string.media_metadata_not_started
+                MediaMetadataOutcome.CONFIRMED -> R.string.media_metadata_confirmed
+                MediaMetadataOutcome.UNCERTAIN -> R.string.media_metadata_uncertain
+                MediaMetadataOutcome.FAILED_NOT_SENT -> R.string.media_metadata_not_sent
+            })
+            val reason = when (row.reason) {
+                MediaMetadataReason.NONE -> null
+                MediaMetadataReason.UNLOADED -> R.string.media_metadata_reason_unloaded
+                MediaMetadataReason.UNKNOWN_METADATA -> R.string.media_metadata_reason_unknown
+                MediaMetadataReason.NOT_WRITABLE -> R.string.media_metadata_reason_not_writable
+                MediaMetadataReason.UNSUPPORTED -> R.string.media_metadata_reason_unsupported
+                MediaMetadataReason.CANCELLED -> R.string.media_metadata_reason_cancelled
+                MediaMetadataReason.OWNER_CHANGED -> R.string.media_metadata_reason_owner
+                MediaMetadataReason.READBACK_UNCONFIRMED -> R.string.media_metadata_reason_readback
+            }
+            val detail = if (reason == null || row.outcome == MediaMetadataOutcome.IN_FLIGHT) status
+                else "$status · ${stringResource(reason)}"
+            Text(stringResource(R.string.media_metadata_row, row.request.name, row.request.id, detail),
+                color = if (row.outcome == MediaMetadataOutcome.UNCERTAIN) AppWarning else AppSubtleText,
+                modifier = Modifier.testTag("$rowTagPrefix-${row.request.id}"))
+        }
     }
 }
