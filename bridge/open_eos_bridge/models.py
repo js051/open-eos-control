@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
+from .errors import ConnectionFailureReason
 from .media_folders import MAX_FOLDER_ID_LENGTH, MAX_FOLDER_LABEL_LENGTH, optional_folder_value
 
 
@@ -201,6 +202,11 @@ class CameraStatus(ApiModel):
     bulb_exposure_active: bool | None = None
     # Stop-only responsibility, not evidence that the camera is currently exposing.
     shutter_release_unconfirmed: bool = False
+    # Optional for older/non-reporting engines. True is an acknowledged AF start;
+    # null with shutter_release_unconfirmed means stop-only recovery is required.
+    held_autofocus_active: bool | None = None
+    # Local receiver teardown is not proof that camera Live View stopped.
+    live_view_stop_unconfirmed: bool = False
     mode: str = "unknown"
     media: StorageStatus
     exposure: ExposureState
@@ -403,6 +409,8 @@ class CameraCapabilities(ApiModel):
     file_naming: FileNamingState | None = None
     evidence: CapabilityEvidence = Field(default_factory=CapabilityEvidence)
     shutter_autofocus_supported: bool = False
+    held_autofocus_supported: bool = False
+    focus_info_supported: bool = False
 
 
 class StillCaptureRequest(ApiModel):
@@ -437,6 +445,8 @@ class LiveViewStartRequest(ApiModel):
 
 class LiveViewState(ApiModel):
     active: bool
+    # Missing on legacy/non-reporting engines; false is affirmative stop evidence.
+    live_view_stop_unconfirmed: bool | None = None
     requested_fps: int | None = None
     source: str | None = None
     size: str | None = None
@@ -469,13 +479,44 @@ class FocusResult(ApiModel):
     y: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
+class HeldAutofocusRequest(ApiModel):
+    owner_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
+
+
+class HeldAutofocusState(ApiModel):
+    owner_id: str
+    active: bool | None
+    stop_unconfirmed: bool
+
+
+class CameraFocusFrame(ApiModel):
+    left: float = Field(ge=0.0, le=1.0)
+    top: float = Field(ge=0.0, le=1.0)
+    right: float = Field(ge=0.0, le=1.0)
+    bottom: float = Field(ge=0.0, le=1.0)
+    status: Literal["STANDBY", "FOCUSED", "UNFOCUSED", "SERVO_OFF", "FOCUSING", "UNKNOWN"]
+    kind: Literal["GENERIC", "NORMAL", "FACE", "TRACKING", "UNKNOWN"]
+
+    @model_validator(mode="after")
+    def validate_rectangle(self) -> CameraFocusFrame:
+        if self.right <= self.left or self.bottom <= self.top:
+            raise ValueError("Focus rectangles must have positive width and height.")
+        return self
+
+
+class CameraFocusInfo(ApiModel):
+    frames: list[CameraFocusFrame] = Field(max_length=512)
+    magnification: int = Field(gt=0, le=2147483647)
+    image_aspect_ratio: float = Field(gt=0, allow_inf_nan=False)
+
+
 class MediaItem(ApiModel):
     id: str
     name: str
     kind: str
     size_bytes: int = Field(default=0, ge=0)
     capture_time: str | None = None
-    content_type: str = "application/octet-stream"
+    content_type: str | None = "application/octet-stream"
     width_pixels: int | None = Field(default=None, gt=0)
     height_pixels: int | None = Field(default=None, gt=0)
     preview_available: bool = False
@@ -534,6 +575,7 @@ class ErrorDetail(ApiModel):
     message: str
     feature: str | None = None
     engine: str | None = None
+    connection_reason: ConnectionFailureReason | None = None
 
 
 class ErrorResponse(ApiModel):

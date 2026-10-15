@@ -1,0 +1,113 @@
+{
+  "checkedAtUTC": "2026-10-15T06:05:06.025229+00:00",
+  "baseCandidate": "deb4f3e92c5511ff74ce6c995a129309ee0be77e",
+  "status": "local-verification-passed; unpushed; browser/native/physical NOT_RUN",
+  "explicitNodeReportedTests": 1181,
+  "customExplicitTests": 60,
+  "explicitJavaScriptTotal": 1241,
+  "newFixedTypeContractTestsIncluded": 107,
+  "pytest": 586,
+  "pytestWarnings": 2,
+  "actualCIRuff": "PASS",
+  "sdistAndWheel": "PASS",
+  "wheelSourceVerification": {
+    "checkedAtUTC": "2026-10-15T06:05:06.017869+00:00",
+    "wheelSha256": "c774ab1e700b6904b97660e1d6d8023313ee2a6a67a61e0cb03e79f92cbf5e07",
+    "identicalSourceFiles": [
+      "open_eos_bridge/static/app.js",
+      "open_eos_bridge/static/media-library.js",
+      "open_eos_bridge/static/media-auto-import.js",
+      "open_eos_bridge/static/index.html",
+      "open_eos_bridge/media_metadata.py",
+      "open_eos_bridge/ccapi.py",
+      "open_eos_bridge/models.py",
+      "open_eos_bridge/app.py"
+    ]
+  },
+  "sharedContract": {
+    "classification": 71,
+    "freshMetadata": 15,
+    "selection": 4,
+    "rawMimeAliases": 19,
+    "sha256": "d24efab5bb73d5edc1d222395322f4295c4c31a3ae180d8b3d9293ce4e4b7d14",
+    "counting": "vector cases included, not additive"
+  },
+  "sourceChecksums": [
+    {
+      "path": "bridge/open_eos_bridge/app.py",
+      "sha256": "3fcb5c19253224f81d986c71156f9b88467cff27442a4cd1f2b8fe23cba9afe7"
+    },
+    {
+      "path": "bridge/open_eos_bridge/ccapi.py",
+      "sha256": "b7c82f61d42d930ababe50ce27911521fa3555596eb3e54c78851bc6477237c8"
+    },
+    {
+      "path": "bridge/open_eos_bridge/media_metadata.py",
+      "sha256": "8ccdbbc683512875079e26b597a9082d6a7c841509f9bf0ac77616a25ba9abff"
+    },
+    {
+      "path": "bridge/open_eos_bridge/models.py",
+      "sha256": "bbb94ea7d5b3f175167ab70f824276b5cf66af0385fe31263e67735c170de06d"
+    },
+    {
+      "path": "bridge/open_eos_bridge/static/app.js",
+      "sha256": "4a5f93bb75c70814c9bccf8ac434e48d714900127f978e9201d151a02835ba50"
+    },
+    {
+      "path": "bridge/open_eos_bridge/static/media-auto-import.js",
+      "sha256": "ad4c5f2840764586b0accdfaeba4e1e1d65e1863dbb46658fbcdf68665f69391"
+    },
+    {
+      "path": "bridge/open_eos_bridge/static/media-library.js",
+      "sha256": "b10828cb6ec6d3e29ade03625c9691bc7858e6818dbeba4a005815229f485d25"
+    },
+    {
+      "path": "bridge/package.json",
+      "sha256": "cce65ce14933f129431befdf3319f9a899709efceb88d67276ccc707c963f73d"
+    },
+    {
+      "path": "bridge/tests/media-auto-import-owner.test.js",
+      "sha256": "05f008cdbf367970e3d3b372b4cf5aa9f33570d9f08cb560ec76a7ac33e3e1be"
+    },
+    {
+      "path": "bridge/tests/media-library.test.js",
+      "sha256": "259326124b6dd6b80d29cc621652771744a386d2ab67e4d95939c704bb33c7b7"
+    },
+    {
+      "path": "bridge/tests/media-refresh-preview.test.js",
+      "sha256": "919dcb62269e2fc3ccb5d9a6cc7f2eb20920c86d94c046ca74fc5ba93a86a720"
+    },
+    {
+      "path": "bridge/tests/media-type-contract.test.js",
+      "sha256": "dd478b2115ecf9845d15768afceee2e53ef1cc80ac43275d7a695929b07c0bbb"
+    },
+    {
+      "path": "bridge/tests/test_ccapi_strict_media.py",
+      "sha256": "5b5f208a2e28488a76ce8783f4d2d72cb3512ecd64d8c175b14f4907c2b75d8e"
+    },
+    {
+      "path": "bridge/tests/test_media_metadata.py",
+      "sha256": "4e74cc8716331db16207ad7a2058227564e8b7bb2b9174b3d463b02c07a13fcf"
+    },
+    {
+      "path": "contracts/media-type/v1/README.md",
+      "sha256": "5fa86ccad7d3bdbfe7cdedb24e2325521dfe12190b89e363071097473ddef9c2"
+    },
+    {
+      "path": "contracts/media-type/v1/media-type-vectors.json",
+      "sha256": "d24efab5bb73d5edc1d222395322f4295c4c31a3ae180d8b3d9293ce4e4b7d14"
+    }
+  ],
+  "releaseAssessment": {
+    "baseline": "v0.12.0 Development Preview",
+    "baselineVerifiedAt": "2026-10-15T03:54:34Z",
+    "cohortImpact": "patch",
+    "cumulativeBranchImpact": "minor",
+    "releaseAuthorized": false
+  },
+  "limitations": [
+    "Existing original transfer validates HTTP/size/nontext but not actual JPEG byte identity; metadata eligibility is not a JPEG decoder proof.",
+    "Browser validation remains NOT_RUN; native/physical camera evidence separate.",
+    "The approved04:30 cohort is running CI; laterdate/review/type changes remain local."
+  ]
+}

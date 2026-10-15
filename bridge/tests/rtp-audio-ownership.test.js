@@ -18,14 +18,14 @@ function extract(name) {
   return app.slice(match.index, ending + 4);
 }
 const realFunctions = [
-  "api", "connectCamera", "disconnectCamera", "resetSession", "refreshSession",
+  "recordingRecoveryActive", "api", "connectCamera", "disconnectCamera", "resetSession", "refreshSession",
   "featureSupported", "cancelEventLoop", "stopEventLoop", "mediaTransferActive",
   "cameraInteractionBusy", "beginCameraInteraction", "settingByKey", "isBulbMode",
   "captureModeFromCamera", "shutterReleaseUnconfirmed", "bulbControlLocked",
   "localPreviewSelected", "previewActive", "changePreviewInput", "clampFps", "toggleLiveView", "startLiveView", "stopLiveView",
   "stopLiveLoop", "changeLiveSource", "currentRtpAudioStatus", "refreshRtpAudioStatus",
   "renderRtpAudio", "toggleRtpAudio", "pollRtpAudio", "stopRtpAudioSources", "stopRtpAudio",
-  "renderAvailability", "setOperationState",
+  "adoptCameraStatus", "liveViewStopRequired", "renderAvailability", "setOperationState",
 ];
 const stateStart = app.indexOf("  const state = {");
 const stateEnd = app.indexOf("\n  };", stateStart);
@@ -80,6 +80,7 @@ function harness() {
     shutterAFSupported: () => true, canChangeShutterAF: () => true,
     effectiveTapAction: () => null, validCcapiUrl: () => true,
     liveCapabilities: () => sandbox.state.capabilities?.liveView || {},
+    mediaBatch: require("../open_eos_bridge/static/media-batch.js"),
     rtpAudio: {readPcmResponse: () => {throw new Error("Audio fixture must stay pending");}},
     renderLiveState: () => sandbox.renderRtpAudio(),
     fetch: async (url, options) => {
@@ -96,19 +97,20 @@ function harness() {
         body = currentStatus;
       } else if (url.endsWith("/info")) body = {model: "synthetic-camera"};
       else if (url.endsWith("/capabilities")) body = caps;
-      else if (url.endsWith("/liveview/start")) body = {source: liveSource, requestedFps: 15};
+      else if (url.endsWith("/liveview/start")) body = {active: true, source: liveSource, requestedFps: 15};
       else if (url.includes("/liveview/audio?")) {
         return new Promise((_, reject) => {
           const abort = () => {const error = new Error("synthetic abort"); error.name = "AbortError"; reject(error);};
           if (options.signal?.aborted) abort();
           else options.signal?.addEventListener("abort", abort, {once: true});
         });
-      } else if (options.method === "DELETE" || url.endsWith("/liveview/stop")) body = null;
+      } else if (url.endsWith("/liveview/stop")) body = {active: false, liveViewStopUnconfirmed: false};
+      else if (options.method === "DELETE") body = null;
       else throw new Error(`Unexpected mocked request: ${url}`);
       return response(body);
     },
   };
-  for (const name of ["clearConnectionError", "renderSession", "startEventLoop", "refreshLatestMedia",
+  for (const name of ["renderHeldAutofocus", "cameraFocusInfoEligible", "cancelCameraFocusInfo", "releaseHeldAutofocusForLifecycle", "clearConnectionError", "renderSession", "startEventLoop", "refreshLatestMedia",
     "writeCameraPreference", "showConnectionError", "renderHealth", "cancelMediaDownload",
     "cancelMediaUpload", "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh",
     "closeMediaPreview", "closeMediaDetails", "releaseObjectUrl", "clearBulbTimer", "stopLocalVideo",

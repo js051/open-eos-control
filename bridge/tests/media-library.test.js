@@ -19,7 +19,8 @@ function runDateContract() {
   const dateOnly = parse("2024-02-29");
   assert.equal(dateOnly.dateKey, "2024-02-29");
   assert.equal(dateOnly.hasTime, false);
-  assert.equal(dateOnly.timestamp, Date.UTC(2024, 1, 29));
+  assert.equal(dateOnly.timestamp, null, "a literal day has no absolute timestamp");
+  assert.equal(dateOnly.kind, "date-only");
   assert.equal(dateOnly.date.toISOString(), "2024-02-29T00:00:00.000Z");
   assert.equal(parse("0001-01-01").date.toISOString(), "0001-01-01T00:00:00.000Z");
   assert.equal(parse("0099-12-31").date.toISOString(), "0099-12-31T00:00:00.000Z");
@@ -40,11 +41,13 @@ function runDateContract() {
   assert.equal(parse("2024-02-29T23:59Z").timestamp, Date.UTC(2024, 1, 29, 23, 59));
   for (const raw of ["20240229T120345", "2024-02-29T12:03:45", "2024-02-29 12:03:45"]) {
     const parsed = parse(raw);
-    assert.equal(parsed.timestamp, new Date(2024, 1, 29, 12, 3, 45).getTime(), raw);
+    assert.equal(parsed.timestamp, null, raw);
+    assert.equal(parsed.kind, "floating", raw);
+    assert.equal(parsed.timeKey, "12:03:45.000", raw);
     assert.equal(parsed.dateKey, "2024-02-29", raw);
     assert.equal(parsed.hasTime, true, raw);
   }
-  assert.equal(parse("2024-02-29 12:03:45.25").timestamp, new Date(2024, 1, 29, 12, 3, 45, 250).getTime());
+  assert.equal(parse("2024-02-29 12:03:45.25").timeKey, "12:03:45.250");
   assert.equal(parse(" 2024-02-29T12:03:45Z ").timestamp, Date.UTC(2024, 1, 29, 12, 3, 45));
 
   const invalid = [
@@ -56,7 +59,7 @@ function runDateContract() {
     "2024-02-29T12:00:00+24:00", "2024-02-29T12:00:00-24:00", "2024-02-29T12:00:00+08:60",
     "2024-02-29T12:00:00+8:00", "2024-02-29T12:00:00+08", "2024-02-29T12:00:00.Z",
     "2024-02-29T12:00:00.1234567890Z", "2024-02-29T12:00:00Zjunk",
-    "2024-02-29T12:00:00+08:00[Asia/Taipei]",
+    "2024-02-29T12:00:00+08:00[UTC]",
   ];
   for (const raw of invalid) {
     assert.equal(parse(raw), null, String(raw));
@@ -88,12 +91,13 @@ function runDateContract() {
     assert.deepEqual(mediaLibrary.itemsForDisplay(mixedDays, "all", "newest", "en").map((entry) => entry.id),
       ["later", "literal", "previous"], "Newest keeps each displayed day contiguous with date-only values");
     assert.deepEqual(mediaLibrary.itemsForDisplay(mixedDays, "all", "oldest", "en").map((entry) => entry.id),
-      ["previous", "literal", "later"], "Oldest orders displayed days before within-day timestamps");
+      ["previous", "later", "literal"], "Oldest keeps precise and date-only buckets distinct within the displayed day");
     assert.equal(parse("2026-03-08T09:59:59Z").date.getHours(), 1);
     assert.equal(parse("2026-03-08T10:00:00Z").date.getHours(), 3);
     assert.equal(parse("2026-11-01T08:30:00Z").date.getHours(), 1);
     assert.equal(parse("2026-11-01T09:30:00Z").date.getHours(), 1);
-    assert.equal(parse("2026-03-08T02:30:00").timestamp, new Date(2026, 2, 8, 2, 30).getTime());
+    assert.equal(parse("2026-03-08T02:30:00").timestamp, null);
+    assert.equal(parse("2026-03-08T02:30:00").timeKey, "02:30:00.000", "floating camera time is not DST-normalized");
   }
 
   const oneDay = { start: "2024-02-29", end: "2024-02-29" };
@@ -123,12 +127,12 @@ function runDateContract() {
     item("before", "IMG_1.JPG", "2024-02-28"),
     item("raw", "IMG_2.CR3", "2024-02-29T12:00:00"),
     item("jpeg", "IMG_2.JPG", "2024-02-29T12:00:00"),
-    item("video", "CLIP.MP4", "2024-02-29T23:59:59.999"),
+    item("video", "CLIP.MP4", "2024-02-29T23:59:59.999", "video"),
     item("date-only", "IMG_3.JPG", "2024-02-29"),
     item("after", "IMG_4.JPG", "2024-03-01"),
     item("unknown", "IMG_5.JPG"),
     item("invalid", "IMG_6.JPG", "2024-04-31"),
-    item("unknown-video", "CLIP_2.MOV"),
+    item("unknown-video", "CLIP_2.MOV", null, "video"),
   ];
   const snapshot = JSON.stringify(rangeItems);
   const filtered = mediaLibrary.itemsForDisplay(rangeItems, "all", "camera", "en-US", oneDay);
@@ -196,14 +200,14 @@ function run() {
   );
   assert.deepEqual(
     mediaLibrary.itemsForDisplay(cameraOrdered, "all", "oldest", "en-US").map(({ id }) => id),
-    ["raw", "jpeg", "unknown-9", "unknown-10"],
+    ["raw", "jpeg", "unknown-10", "unknown-9"],
   );
 
   const videos = [
     item("photo", "IMG_1.JPG"),
     item("kind", "CLIP.bin", null, "video"),
     item("mime", "CLIP.data", null, "other", "video/mp4"),
-    item("extension", "CLIP.MP4"),
+    item("extension", "CLIP.MP4", null, "unknown"),
   ];
   assert.deepEqual(
     mediaLibrary.itemsForDisplay(videos, "video", "name", "en-US").map(({ id }) => id),
@@ -269,3 +273,5 @@ function run() {
 
 run();
 runDateContract();
+
+require("./media-date-review-contract.test.js");

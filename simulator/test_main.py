@@ -1,10 +1,14 @@
 import asyncio
+import json
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from main import (
     CANON_DISCOVERY,
+    CANON_LIVE_VIEW_GEOMETRY,
     app,
     canon_live_view_multipart,
     canon_start_live_view,
@@ -455,6 +459,67 @@ def test_canonical_ccapi_discovery_settings_and_live_view_contract() -> None:
         "event_delete_count": 0,
         "event_active_requests": 0,
     }
+
+
+def test_canonical_ccapi_focus_info_is_one_metadata_packet_without_jpeg_or_state_mutation() -> None:
+    started = client.post("/ccapi/ver100/shooting/liveview", json={"cameradisplay": "on"})
+    assert started.status_code == 204
+    before = deepcopy(state)
+    with patch("main.camera_frame_jpeg", side_effect=AssertionError("An info request must not generate JPEG")) as jpeg:
+        response = client.get("/ccapi/ver100/shooting/liveview/flipdetail?kind=info")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/octet-stream"
+    body = response.content
+    assert body[:3] == b"\xff\x00\x01" and body[-2:] == b"\xff\xff"
+    assert int.from_bytes(body[3:7], "big") == len(body) - 9
+    assert b"\xff\xd8" not in body and b"\xff\xd9" not in body
+    assert json.loads(body[7:-2].decode("utf-8")) == {"liveviewdata": {
+        "image": CANON_LIVE_VIEW_GEOMETRY,
+        "zoom": {"magnification": 1},
+        "afframe": [],
+    }}
+    jpeg.assert_not_called()
+    assert state == before
+
+
+def test_canonical_ccapi_focus_info_reads_current_integer_magnification_without_inventing_frames() -> None:
+    assert client.post("/ccapi/ver100/shooting/liveview", json={"cameradisplay": "on"}).status_code == 204
+    for magnification in (1, 5, 10):
+        changed = client.put("/ccapi/ver100/shooting/settings/lvzoom", json={"value": str(magnification)})
+        assert changed.status_code == 200
+        before = deepcopy(state)
+        response = client.get("/ccapi/ver100/shooting/liveview/flipdetail?kind=info")
+        assert response.status_code == 200
+        info = json.loads(response.content[7:-2].decode("utf-8"))["liveviewdata"]
+        assert type(info["zoom"]["magnification"]) is int
+        assert info["zoom"]["magnification"] == magnification
+        assert info["image"] == CANON_LIVE_VIEW_GEOMETRY
+        assert info["afframe"] == []
+        assert state == before
+
+
+def test_canonical_ccapi_focus_info_preserves_inactive_gate_and_existing_kinds() -> None:
+    endpoint = "/ccapi/ver100/shooting/liveview/flipdetail"
+    before = deepcopy(state)
+    for kind in ("image", "both", "info", "unknown"):
+        assert client.get(f"{endpoint}?kind={kind}").status_code == 409
+    assert state == before
+    assert client.post("/ccapi/ver100/shooting/liveview", json={"cameradisplay": "on"}).status_code == 204
+    before = deepcopy(state)
+    for query in ("", "?kind=image"):
+        image = client.get(f"{endpoint}{query}")
+        assert image.status_code == 200 and image.headers["content-type"] == "image/jpeg"
+        assert image.content.startswith(b"\xff\xd8") and image.content.endswith(b"\xff\xd9")
+    both = client.get(f"{endpoint}?kind=both")
+    assert both.status_code == 200 and both.headers["content-type"] == "application/octet-stream"
+    assert both.content.startswith(b"\xff\x00\x00")
+    assert b"positionwidth" in both.content and b"\xff\xd8" in both.content and b"\xff\xd9" in both.content
+    assert client.get(f"{endpoint}?kind=unknown").status_code == 422
+    assert state == before
+    assert client.delete("/ccapi/ver100/shooting/liveview").status_code == 204
+    before = deepcopy(state)
+    assert client.get(f"{endpoint}?kind=info").status_code == 409
+    assert state == before
 
 
 def test_canonical_ccapi_live_view_magnification_uses_string_values_and_empty_put_body() -> None:

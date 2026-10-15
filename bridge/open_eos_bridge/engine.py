@@ -9,15 +9,27 @@ from .models import (
     CameraCapabilities,
     CameraDescriptor,
     CameraEvent,
+    CameraFocusInfo,
     CameraInfo,
     CameraStatus,
     FileNamingField,
     FileNamingState,
     FocusResult,
+    HeldAutofocusState,
     LiveViewMagnificationResult,
     LiveViewStartRequest,
     MediaItem,
 )
+
+
+class OptionalFocusSession(Protocol):
+    """Capability-gated extension; legacy/local providers need not implement it."""
+
+    def start_autofocus(self, owner_id: str) -> HeldAutofocusState: ...
+
+    def stop_autofocus(self, owner_id: str) -> HeldAutofocusState: ...
+
+    def live_view_focus_info(self) -> CameraFocusInfo | None: ...
 
 
 class CameraEngineSession(Protocol):
