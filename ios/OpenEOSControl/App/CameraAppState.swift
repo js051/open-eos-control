@@ -277,6 +277,13 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var deletedMediaName: String?
     @Published private(set) var lastClockSyncAt: Date?
     @Published private(set) var lastCreatedDirectoryName: String?
+    @Published private(set) var captureConfigurationHistory: [CaptureConfigurationRecord] = []
+    @Published private(set) var captureConfigurationCurrentID: UUID?
+    @Published private(set) var captureConfigurationDraftRevision = UUID()
+    private var captureConfigurationActiveID: UUID?
+    private var captureConfigurationTask: Task<String?, Never>?
+    private var captureConfigurationAttempt: CameraCaptureConfigurationAttempt?
+    private var captureConfigurationAttempts: [UUID: CameraCaptureConfigurationAttempt] = [:]
     @Published private(set) var operatorConfirmedFeatures = Set<CameraFeature>()
     @Published private(set) var lastError: String?
     @Published private(set) var busyOperations = Set<CameraOperation>()
@@ -291,6 +298,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaFolderFilter = MediaFolderFilter.all
     private var session: CameraSession? {
         didSet {
+            retireCaptureConfiguration()
             singleMediaMetadataAttempt?.cancel()
             singleMediaMetadataAttempt = nil
             retireMediaMetadataBatch()
@@ -599,6 +607,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func invalidateConnectionGuidance() {
+        retireCaptureConfiguration()
         connectionConfigurationOwner = UUID()
         connectionRecovery = nil
     }
@@ -1333,53 +1342,177 @@ final class CameraAppState: ObservableObject {
         }
     }
 
-    func createDirectory(name: String) async {
-        guard !isPreview, supports(.directoryControl), begin(.directory) else { return }
-        let generation = sessionGeneration
-        defer { end(.directory, generation: generation) }
-        guard let session else { return }
-        do {
-            let directoryName = try await session.createDirectory(name: name)
-            guard generation == sessionGeneration else { return }
-            lastCreatedDirectoryName = directoryName
-            let capabilities = try await session.capabilities()
-            guard generation == sessionGeneration else { return }
-            if let snapshot {
-                self.snapshot = CameraSnapshot(info: snapshot.info, status: snapshot.status, capabilities: capabilities)
-            }
-            lastError = nil
-        } catch {
-            guard generation == sessionGeneration else { return }
-            record(error)
+    var captureConfigurationRecord: CaptureConfigurationRecord? {
+        captureConfigurationHistory.first { $0.id == captureConfigurationCurrentID }
+    }
+
+    var canStartCaptureConfiguration: Bool {
+        captureConfigurationTask == nil && !isBusy(.directory) && !isBusy(.setting)
+            && (captureConfigurationRecord?.outcome.writeEvidence ?? .notSent) == .notSent
+    }
+
+    var canRecoverCaptureConfiguration: Bool {
+        guard let id = captureConfigurationCurrentID else { return false }
+        return canRecoverCaptureConfiguration(id)
+    }
+
+    var canPrepareCaptureConfigurationDraft: Bool { captureConfigurationTask == nil }
+
+    func canRecoverCaptureConfiguration(_ id: UUID) -> Bool {
+        guard let record = captureConfigurationHistory.first(where: { $0.id == id }) else { return false }
+        return CameraCaptureConfigurationPolicy.canRecover(
+            sameOwner: record.owner == sessionGeneration && record.configurationOwner == connectionConfigurationOwner && !record.retired,
+            writeActive: captureConfigurationTask != nil && !record.reading,
+            readActive: captureConfigurationTask != nil && record.reading,
+            hasRecord: captureConfigurationAttempts[record.id] != nil)
+    }
+
+    func reviseCaptureConfigurationDraft() { captureConfigurationDraftRevision = UUID() }
+
+    func newCaptureConfigurationDraft() {
+        guard captureConfigurationTask == nil else { return }
+        captureConfigurationCurrentID = nil
+        reviseCaptureConfigurationDraft()
+    }
+
+    func cancelCaptureConfiguration() {
+        guard let id = captureConfigurationActiveID else { return }
+        captureConfigurationAttempt?.cancel()
+        captureConfigurationTask?.cancel()
+        if let index = captureConfigurationHistory.firstIndex(where: { $0.id == id }) {
+            captureConfigurationHistory[index].cancelled = true
         }
     }
 
-    func setFileNaming(field: CameraFileNamingField, value: String) async {
-        guard
-            !isPreview,
-            supports(.fileNamingControl),
-            snapshot?.capabilities.fileNaming?.accepts(field, value: value) == true,
-            begin(.setting)
-        else { return }
+    private func retireCaptureConfiguration() {
+        if let activeID = captureConfigurationActiveID,
+           let record = captureConfigurationHistory.first(where: { $0.id == activeID }) {
+            busyOperations.remove(record.outcome.operation == .createDirectory ? .directory : .setting)
+        }
+        cancelCaptureConfiguration()
+        for index in captureConfigurationHistory.indices { captureConfigurationHistory[index].retired = true }
+        captureConfigurationActiveID = nil
+        captureConfigurationCurrentID = nil
+        captureConfigurationTask = nil
+        captureConfigurationAttempt = nil
+        reviseCaptureConfigurationDraft()
+    }
+
+    func createDirectory(name: String, draftRevision: UUID? = nil) async {
+        guard !isPreview, supports(.directoryControl), canStartCaptureConfiguration,
+              let session, begin(.directory) else { return }
+        await performCaptureConfiguration(session: session, operation: .createDirectory,
+            field: nil, value: name, draftRevision: draftRevision ?? captureConfigurationDraftRevision)
+    }
+
+    func setFileNaming(field: CameraFileNamingField, value: String, draftRevision: UUID? = nil) async {
+        guard !isPreview, supports(.fileNamingControl), canStartCaptureConfiguration,
+              snapshot?.capabilities.fileNaming?.accepts(field, value: value) == true,
+              let session, begin(.setting) else { return }
+        await performCaptureConfiguration(session: session, operation: .setFileNaming,
+            field: field, value: value, draftRevision: draftRevision ?? captureConfigurationDraftRevision)
+    }
+
+    private func performCaptureConfiguration(session: CameraSession, operation: CameraCaptureConfigurationOperation,
+        field: CameraFileNamingField?, value: String, draftRevision: UUID) async {
         let generation = sessionGeneration
-        defer { end(.setting, generation: generation) }
-        guard let session else { return }
-        do {
-            _ = try await session.setFileNaming(field: field, value: value)
-            guard generation == sessionGeneration else { return }
-            let capabilities = try await session.capabilities()
-            guard generation == sessionGeneration else { return }
-            if let snapshot {
-                self.snapshot = CameraSnapshot(
-                    info: snapshot.info,
-                    status: snapshot.status,
-                    capabilities: capabilities
-                )
-            }
-            lastError = nil
-        } catch {
-            guard generation == sessionGeneration else { return }
-            record(error)
+        let configurationOwner = connectionConfigurationOwner
+        let attempt = CameraCaptureConfigurationAttempt(operation: operation, requestedValue: value, field: field)
+        let record = CaptureConfigurationRecord(owner: generation, configurationOwner: configurationOwner,
+            draftRevision: draftRevision, targetSelection: snapshot?.capabilities.setting("directoryselection")?.value,
+            outcome: attempt.snapshot)
+        captureConfigurationHistory.append(record)
+        if captureConfigurationHistory.count > 20 {
+            let removed = captureConfigurationHistory.removeFirst()
+            captureConfigurationAttempts.removeValue(forKey: removed.id)
+        }
+        captureConfigurationAttempts[record.id] = attempt
+        captureConfigurationCurrentID = record.id
+        captureConfigurationActiveID = record.id
+        captureConfigurationAttempt = attempt
+        let task = Task<String?, Never> { [weak self] in
+            do {
+                if operation == .createDirectory {
+                    _ = try await session.createDirectory(name: value, attempt: attempt)
+                    // Direct camera creation already performed its strict settings read.
+                    // Bridge/simulator need one fresh scoped read, never cached capabilities.
+                    if attempt.snapshot.readbackEvidence == .notRead {
+                        guard let self, generation == self.sessionGeneration,
+                              configurationOwner == self.connectionConfigurationOwner,
+                              self.captureConfigurationActiveID == record.id else { return nil }
+                        attempt.readbackUnavailable()
+                        try Task.checkCancellation()
+                        try await session.refreshCaptureConfiguration(attempt)
+                    }
+                } else if let field {
+                    _ = try await session.setFileNaming(field: field, value: value, attempt: attempt)
+                }
+                return nil
+            } catch { return error.localizedDescription }
+        }
+        captureConfigurationTask = task
+        let failure = await withTaskCancellationHandler(operation: { await task.value }, onCancel: {
+            attempt.cancel(); task.cancel()
+        })
+        finishCaptureConfiguration(record: record, attempt: attempt, failed: failure != nil, cancelled: task.isCancelled)
+    }
+
+    func recoverCaptureConfiguration(_ requestedID: UUID? = nil) async {
+        guard let id = requestedID ?? captureConfigurationCurrentID,
+              canRecoverCaptureConfiguration(id), let session,
+              let record = captureConfigurationHistory.first(where: { $0.id == id }),
+              let attempt = captureConfigurationAttempts[record.id],
+              begin(record.outcome.operation == .createDirectory ? .directory : .setting) else { return }
+        captureConfigurationActiveID = record.id
+        captureConfigurationAttempt = attempt
+        if let index = captureConfigurationHistory.firstIndex(where: { $0.id == record.id }) {
+            captureConfigurationHistory[index].reading = true
+            captureConfigurationHistory[index].running = true
+        }
+        let task = Task<String?, Never> {
+            do { try await session.refreshCaptureConfiguration(attempt); return nil }
+            catch { return error.localizedDescription }
+        }
+        captureConfigurationTask = task
+        let failure = await withTaskCancellationHandler(operation: { await task.value }, onCancel: { task.cancel() })
+        finishCaptureConfiguration(record: record, attempt: attempt, failed: failure != nil, cancelled: task.isCancelled, recovering: true)
+    }
+
+    private func finishCaptureConfiguration(record: CaptureConfigurationRecord,
+        attempt: CameraCaptureConfigurationAttempt, failed: Bool, cancelled: Bool, recovering: Bool = false) {
+        // Never resurrect an evicted receipt. Late proof belongs only to its
+        // existing bounded original record, not the replacement owner or draft.
+        guard let index = captureConfigurationHistory.firstIndex(where: { $0.id == record.id }) else { return }
+        captureConfigurationHistory[index].outcome = attempt.snapshot
+        captureConfigurationHistory[index].cancelled = captureConfigurationHistory[index].cancelled || cancelled
+        captureConfigurationHistory[index].running = false
+        captureConfigurationHistory[index].reading = false
+        let current = captureConfigurationHistory[index]
+        guard CameraCaptureConfigurationPolicy.canPublish(
+            sameOwner: record.owner == sessionGeneration && record.configurationOwner == connectionConfigurationOwner,
+            sameAttempt: captureConfigurationActiveID == record.id
+                && (recovering || captureConfigurationCurrentID == record.id),
+            retired: current.retired) else { return }
+        captureConfigurationTask = nil
+        captureConfigurationAttempt = nil
+        captureConfigurationActiveID = nil
+        end(record.outcome.operation == .createDirectory ? .directory : .setting, generation: record.owner)
+        // Cancellation suppresses this invocation's live-state publication, not
+        // its retained ACK. A later uncancelled read-only recovery may publish.
+        if !cancelled, let snapshot {
+            self.snapshot = CameraSnapshot(info: snapshot.info, status: snapshot.status,
+                capabilities: snapshot.capabilities.applyingCaptureConfiguration(current.outcome))
+        }
+        if !cancelled, !recovering, current.outcome.operation == .createDirectory,
+           current.outcome.writeEvidence == .acknowledged {
+            lastCreatedDirectoryName = current.outcome.acknowledgedValue
+        }
+        // A valid ACK plus a failed read is not a failed write. The panel keeps
+        // both facts, and refresh can never turn an unknown write into success.
+        let complete = current.outcome.writeEvidence == .acknowledged
+            && [CameraCaptureConfigurationReadbackEvidence.matched, .refreshed].contains(current.outcome.readbackEvidence)
+        if !cancelled, captureConfigurationCurrentID == record.id {
+            lastError = failed && !complete ? NSLocalizedString(current.statusKey, comment: "") : nil
         }
     }
 
@@ -4114,6 +4247,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func begin(_ operation: CameraOperation) -> Bool {
+        if captureConfigurationTask != nil, operation == .directory || operation == .setting { return false }
         if foregroundMediaIOOwner != nil { return false }
         if heldAutofocusOwner != nil, operation != .refresh { return false }
         if shutterControlIsBusy(operation) { return false }

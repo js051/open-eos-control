@@ -3033,7 +3033,6 @@ final class CCAPIClientTests: XCTestCase {
             path: "/ccapi/ver100/functions/directory/createdirectory",
             body: #"{"directoryname":"ABCDE"}"#
         )
-        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
         await transport.enqueueJSON(
             path: "/ccapi/ver100/functions/directory/directoryselection",
             body: #"{"value":"101ABCDE","ability":["100EOSXX","101ABCDE"]}"#

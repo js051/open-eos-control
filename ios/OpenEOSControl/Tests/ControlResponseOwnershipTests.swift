@@ -21,7 +21,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
 
     func testRetiredCapabilityAndSensorSnapshotReadbacksCannotPublishOrRecoverReplacement() async throws {
         let boundaries: [(ControlOwnerAction, ControlOwnerWire)] = [
-            (.directory, .capabilities), (.naming, .capabilities), (.setting, .capabilities),
+            (.directory, .capabilities), (.naming, .namingReadback), (.setting, .capabilities),
             (.clean, .info), (.clean, .status), (.clean, .capabilities),
         ]
         for bridge in [false, true] {
@@ -177,7 +177,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
 
     func testCurrentOwnerReadbackFailuresAreReportedWithoutReplayingTheirCommand() async throws {
         let boundaries: [(ControlOwnerAction, ControlOwnerWire)] = [
-            (.directory, .capabilities), (.naming, .capabilities), (.setting, .capabilities),
+            (.directory, .capabilities), (.naming, .namingReadback), (.setting, .capabilities),
             (.clean, .info), (.clean, .status), (.clean, .capabilities),
         ]
         for bridge in [false, true] {
@@ -194,7 +194,8 @@ final class ControlResponseOwnershipTests: XCTestCase {
                 await peer.enqueue(action.wire(bridge: bridge), gate: "command")
                 let operation = Task { await perform(action, state: state) }
                 try await waitForGate("command", peer: peer)
-                await peer.enqueue(boundary, error: .networkConnectionLost)
+                let readback = action == .directory && bridge ? ControlOwnerWire.directoryReadback : boundary
+                await peer.enqueue(readback, error: .networkConnectionLost)
                 await peer.release("command")
                 await operation.value
 
@@ -332,6 +333,202 @@ final class ControlResponseOwnershipTests: XCTestCase {
         }
     }
 
+    func testCaptureNamingConsumesReturnedStateWithoutRedundantCapabilityRead() async throws {
+        for bridge in [false, true] {
+            let peer = ControlOwnerPeer(owner: "naming")
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndPrepare(state)
+            let before = await peer.count(.capabilities)
+            await state.setFileNaming(field: .stillUserSetting1, value: "NEW_")
+            let reads = await peer.count(.capabilities)
+            XCTAssertEqual(reads - before, 1, "Only the client's existing preflight; no app follow-up GET")
+            XCTAssertEqual(state.captureConfigurationRecord?.outcome.writeEvidence, .acknowledged)
+            XCTAssertEqual(state.captureConfigurationRecord?.outcome.readbackEvidence, .matched)
+            XCTAssertEqual(state.capabilities?.fileNaming?.stillUserSetting1, "NEW_")
+            let writes = await peer.count(.naming)
+            XCTAssertEqual(writes, 1)
+            await state.setFileNaming(field: .stillUserSetting1, value: "NEW_")
+            let repeated = await peer.count(.naming)
+            XCTAssertEqual(repeated, 1, "Repeated Apply requires an explicit new request")
+        }
+    }
+
+    func testUnknownDirectoryWriteStaysUnknownAfterReadOnlyRecoveryAndCannotAutoRetry() async throws {
+        for bridge in [false, true] {
+            let peer = ControlOwnerPeer(owner: "unknown")
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndPrepare(state)
+            await peer.enqueue(.directory, error: .networkConnectionLost)
+            await state.createDirectory(name: "ABCDE")
+            let original = try XCTUnwrap(state.captureConfigurationRecord)
+            XCTAssertEqual(original.outcome.writeEvidence, .unknown)
+            XCTAssertEqual(original.outcome.requestedValue, "ABCDE")
+            await state.createDirectory(name: "ABCDE")
+            await state.recoverCaptureConfiguration()
+            XCTAssertEqual(state.captureConfigurationRecord?.id, original.id)
+            XCTAssertEqual(state.captureConfigurationRecord?.outcome.writeEvidence, .unknown)
+            XCTAssertEqual(state.captureConfigurationRecord?.outcome.readbackEvidence, .refreshed)
+            XCTAssertNil(state.lastCreatedDirectoryName, "Observation cannot invent an ACK")
+            let writes = await peer.count(.directory)
+            XCTAssertEqual(writes, 1)
+            let readbacks = await peer.count(.directoryReadback)
+            if bridge { XCTAssertEqual(readbacks, 1) }
+        }
+    }
+
+    func testDirectoryAcknowledgmentSurvivesCancellationAndPreservesFrozenDraft() async throws {
+        for bridge in [false, true] {
+            let peer = ControlOwnerPeer(owner: "cancel")
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndPrepare(state)
+            let revision = state.captureConfigurationDraftRevision
+            await peer.enqueue(.directory, gate: "write")
+            let task = Task { await state.createDirectory(name: "ABCDE", draftRevision: revision) }
+            try await waitForGate("write", peer: peer)
+            state.reviseCaptureConfigurationDraft()
+            let replacementRevision = state.captureConfigurationDraftRevision
+            state.cancelCaptureConfiguration()
+            await peer.release("write")
+            await task.value
+            let record = try XCTUnwrap(state.captureConfigurationRecord)
+            XCTAssertEqual(record.draftRevision, revision)
+            XCTAssertEqual(state.captureConfigurationDraftRevision, replacementRevision)
+            XCTAssertEqual(record.outcome.requestedValue, "ABCDE")
+            XCTAssertEqual(record.outcome.writeEvidence, .acknowledged)
+            XCTAssertTrue(record.cancelled)
+            XCTAssertFalse(record.running)
+            XCTAssertFalse(state.isBusy(.directory))
+            XCTAssertTrue(state.canRecoverCaptureConfiguration)
+            await state.recoverCaptureConfiguration()
+            XCTAssertEqual(state.captureConfigurationRecord?.outcome.writeEvidence, .acknowledged)
+            XCTAssertEqual(state.captureConfigurationRecord?.outcome.readbackEvidence, .refreshed)
+            let writes = await peer.count(.directory)
+            XCTAssertEqual(writes, 1)
+        }
+    }
+
+    func testCancelledLateNamingSuccessRetainsACKWithoutMergingUntilFreshRecovery() async throws {
+        for bridge in [false, true] {
+            let peer = ControlOwnerPeer(owner: "cancel-naming")
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndPrepare(state)
+            let before = state.snapshot
+            await peer.enqueue(.naming, gate: "late-success")
+            let task = Task { await state.setFileNaming(field: .stillUserSetting1, value: "NEW_") }
+            try await waitForGate("late-success", peer: peer)
+            state.cancelCaptureConfiguration()
+            await peer.release("late-success")
+            await task.value
+            XCTAssertEqual(state.captureConfigurationRecord?.outcome.writeEvidence, .acknowledged)
+            XCTAssertEqual(state.captureConfigurationRecord?.outcome.readbackEvidence, .matched)
+            XCTAssertEqual(state.snapshot, before, "Cancelled invocation must not merge its late observation")
+            XCTAssertFalse(state.isBusy(.setting), "Settlement still releases its own lock")
+            XCTAssertTrue(state.captureConfigurationRecord?.cancelled == true)
+            await state.recoverCaptureConfiguration()
+            XCTAssertEqual(state.capabilities?.fileNaming?.stillUserSetting1, "NEW_",
+                           "Fresh noncancelled recovery can publish despite historical cancellation")
+            XCTAssertTrue(state.captureConfigurationRecord?.cancelled == true)
+            XCTAssertEqual(state.captureConfigurationRecord?.outcome.writeEvidence, .acknowledged)
+            let writes = await peer.count(.naming)
+            XCTAssertEqual(writes, 1)
+        }
+    }
+
+    func testOldCaptureACKOnlySettlesOriginalBoundedRecord() async throws {
+        for bridge in [false, true] {
+            let oldPeer = ControlOwnerPeer(owner: "old-config")
+            let newPeer = ControlOwnerPeer(owner: "new-config")
+            let state = makeState([oldPeer, newPeer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await oldPeer.releaseAll(); await newPeer.releaseAll() } }
+            try await connectAndPrepare(state)
+            await oldPeer.enqueue(.directory, gate: "old")
+            let oldTask = Task { await state.createDirectory(name: "ABCDE") }
+            try await waitForGate("old", peer: oldPeer)
+            let originalID = try XCTUnwrap(state.captureConfigurationRecord?.id)
+            await state.disconnect()
+            try await connectAndPrepare(state)
+            await newPeer.enqueue(.directory, gate: "new")
+            let newTask = Task { await state.createDirectory(name: "ABCDE") }
+            try await waitForGate("new", peer: newPeer)
+            let currentID = state.captureConfigurationCurrentID
+            let revision = state.captureConfigurationDraftRevision
+            await oldPeer.release("old")
+            await oldTask.value
+            XCTAssertEqual(state.captureConfigurationCurrentID, currentID)
+            XCTAssertEqual(state.captureConfigurationDraftRevision, revision)
+            XCTAssertTrue(state.isBusy(.directory))
+            XCTAssertNil(state.lastCreatedDirectoryName)
+            let original = try XCTUnwrap(state.captureConfigurationHistory.first { $0.id == originalID })
+            XCTAssertTrue(original.retired)
+            XCTAssertEqual(original.outcome.writeEvidence, .acknowledged)
+            await newPeer.release("new")
+            await newTask.value
+            XCTAssertEqual(state.captureConfigurationHistory.count, 2)
+            XCTAssertFalse(state.isBusy(.directory))
+        }
+    }
+
+    func testOlderHistoryRecoveryPreservesNewestRequestDraftAndCreationSuffix() async throws {
+        for bridge in [false, true] {
+            let peer = ControlOwnerPeer(owner: "history")
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndPrepare(state)
+            await state.createDirectory(name: "ABCDE")
+            let originalID = try XCTUnwrap(state.captureConfigurationCurrentID)
+            state.newCaptureConfigurationDraft()
+            await state.createDirectory(name: "OTHER")
+            let newestID = state.captureConfigurationCurrentID
+            state.reviseCaptureConfigurationDraft()
+            let revision = state.captureConfigurationDraftRevision
+            let order = state.captureConfigurationHistory.map(\.id)
+            XCTAssertEqual(state.lastCreatedDirectoryName, "OTHER")
+            await peer.enqueue(bridge ? .directoryReadback : .capabilities, gate: "older-read")
+            let recovery = Task { await state.recoverCaptureConfiguration(originalID) }
+            try await waitForGate("older-read", peer: peer)
+            XCTAssertFalse(state.canRecoverCaptureConfiguration(originalID), "Global single flight")
+            XCTAssertFalse(state.canPrepareCaptureConfigurationDraft)
+            await peer.release("older-read")
+            await recovery.value
+            XCTAssertEqual(state.captureConfigurationCurrentID, newestID)
+            XCTAssertEqual(state.captureConfigurationDraftRevision, revision)
+            XCTAssertEqual(state.captureConfigurationHistory.map(\.id), order)
+            XCTAssertEqual(state.lastCreatedDirectoryName, "OTHER", "Older ACK cannot replace newer creation evidence")
+            XCTAssertEqual(state.capabilities?.setting("directoryselection")?.value, "101OTHER")
+            let original = try XCTUnwrap(state.captureConfigurationHistory.first { $0.id == originalID })
+            XCTAssertEqual(original.outcome.acknowledgedValue, "ABCDE")
+            XCTAssertEqual(original.outcome.directorySelection?.value, "101OTHER")
+            let writes = await peer.count(.directory)
+            XCTAssertEqual(writes, 2, "History recovery never repeats either creation")
+            await state.disconnect()
+            XCTAssertFalse(state.canRecoverCaptureConfiguration(originalID), "Retired history is read-only evidence only")
+            await state.recoverCaptureConfiguration(originalID)
+            let afterRetirement = await peer.count(.directory)
+            XCTAssertEqual(afterRetirement, 2)
+        }
+    }
+
+    func testCaptureConfigurationHistoryHasTwentyRecordBoundAndNewRequestIsExplicit() async throws {
+        let peer = ControlOwnerPeer(owner: "bounded")
+        let state = makeState([peer], bridge: false)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectAndPrepare(state)
+        var first: UUID?
+        for index in 0..<21 {
+            if index > 0 { state.newCaptureConfigurationDraft() }
+            await state.createDirectory(name: "ABCDE")
+            if index == 0 { first = state.captureConfigurationRecord?.id }
+        }
+        XCTAssertEqual(state.captureConfigurationHistory.count, 20)
+        XCTAssertFalse(state.captureConfigurationHistory.contains { $0.id == first })
+        let writes = await peer.count(.directory)
+        XCTAssertEqual(writes, 21)
+    }
+
     private func assertRetired(_ action: ControlOwnerAction, bridge: Bool, fails: Bool,
                                readback: ControlOwnerWire? = nil) async throws {
         let oldPeer = ControlOwnerPeer(owner: "A", recording: action == .recordingStop)
@@ -345,11 +542,12 @@ final class ControlResponseOwnershipTests: XCTestCase {
         let old = Task { await perform(action, state: state) }
         try await waitForGate("old-command", peer: oldPeer)
         if let readback = readback ?? (shortControl ? .status : nil) {
-            // File naming performs its own capability preflight. Arm only after
-            // the mutation has entered so this is the app's later readback.
+            // Naming's complete state is now inside its one write response.
+            // Gate that response's readback phase rather than adding a second GET.
             // Short presses now settle their exact release before Close returns;
             // gate their later status read to exercise a genuinely retired reply.
-            await oldPeer.enqueue(readback, gate: "old-readback", error: fails ? .networkConnectionLost : nil)
+            let boundary = action == .directory && bridge ? ControlOwnerWire.directoryReadback : readback
+            await oldPeer.enqueue(boundary, gate: "old-readback", error: fails ? .networkConnectionLost : nil)
             await oldPeer.release("old-command")
             try await waitForGate("old-readback", peer: oldPeer)
         }
@@ -529,7 +727,7 @@ private enum ControlOwnerAction: CaseIterable {
 
 private enum ControlOwnerWire: Hashable, Sendable {
     case health, open, close, info, status, capabilities, events, stopEvents, media, liveViewStart, liveViewStop
-    case clock, directory, naming, sleep, clean, autofocus, halfPress, shutterRelease
+    case clock, directory, naming, directoryReadback, namingReadback, sleep, clean, autofocus, halfPress, shutterRelease
     case recordingStart, recordingStop, tap, whiteBalance, drive, magnification, setting
 }
 
@@ -595,6 +793,10 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             object = statusJSON()
         case .capabilities:
             object = capabilitiesJSON(simulator: simulator)
+        case .directoryReadback:
+            object = ["operation": "create-directory", "directorySelection": ["value": directory, "ability": directoryOptions()]]
+        case .namingReadback:
+            object = ["operation": "set-file-naming", "fileNaming": namingJSON()]
         case .events:
             guard events, !drained, plan.gate != nil else { throw CancellationError() }
             object = ["changedKeys": ["mode"], "keys": ["mode"], "sequence": count(.events)]
@@ -604,8 +806,11 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             mode = "\(owner) command"
             object = statusJSON()
         case .directory:
-            directory = "101ABCDE"
-            object = ["name": "ABCDE", "directoryname": "ABCDE"]
+            let payload = (request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any]
+            let requested = (payload?[simulator ? "directoryname" : "name"] as? String) ?? "ABCDE"
+            let suffix = requested.isEmpty ? "ABCDE" : requested
+            directory = "101" + suffix
+            object = ["name": suffix, "directoryname": suffix]
         case .naming:
             naming = "NEW_"
             object = namingJSON()
@@ -636,6 +841,12 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         }
         if let gate = plan.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
         if let error = plan.error { throw URLError(error) }
+        // A synthetic response-phase gate, not an additional network request.
+        if wire == .naming, plans[.namingReadback]?.isEmpty == false {
+            let readback = plans[.namingReadback]!.removeFirst()
+            if let gate = readback.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
+            if let error = readback.error { throw URLError(error) }
+        }
         return CameraHTTPResponse(statusCode: 200, body: try JSONSerialization.data(withJSONObject: object))
     }
 
@@ -654,6 +865,8 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case ("GET", "/info"): return .info
         case ("GET", "/status"): return .status
         case ("GET", "/capabilities"): return .capabilities
+        case ("GET", "/capture-configuration/create-directory"): return .directoryReadback
+        case ("GET", "/capture-configuration/set-file-naming"): return .namingReadback
         case ("GET", "/events"): return .events
         case ("DELETE", "/events"): return .stopEvents
         case ("GET", "/media"): return .media
@@ -693,13 +906,17 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
          "movieUserDefined": "EOS01"]
     }
 
+    private func directoryOptions() -> [String] {
+        Array(Set(["100EOSXX", "101ABCDE", directory])).sorted()
+    }
+
     private func capabilitiesJSON(simulator: Bool) -> [String: Any] {
         let liveView: [String: Any] = ["sources": ["DESKTOP_BRIDGE_STREAM"], "defaultSource": "DESKTOP_BRIDGE_STREAM",
             "sizes": ["MEDIUM"], "defaultSize": "MEDIUM", "magnifications": [1, 5, 10],
             "currentMagnification": magnification, "minFps": 1, "maxFps": 12]
         if simulator {
             return ["iso": ["100", "800"], "shutter": ["1/100"], "aperture": ["4.0"], "white_balance": ["auto", "click"],
-                    "directoryselection": ["value": directory, "ability": ["100EOSXX", "101ABCDE"]],
+                    "directoryselection": ["value": directory, "ability": directoryOptions()],
                     "autopoweroff": ["value": "60", "ability": ["60", "disable", "immediately"]],
                     "fileNaming": namingJSON(), "liveView": liveView]
         }
@@ -709,6 +926,6 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         if events { supported.append(.eventPolling) }
         return ["supported": supported.map(\.rawValue), "fileNaming": namingJSON(), "liveView": liveView,
                 "settings": [["key": "iso", "value": iso, "values": ["100", "800"]],
-                             ["key": "directoryselection", "value": directory, "values": ["100EOSXX", "101ABCDE"]]]]
+                             ["key": "directoryselection", "value": directory, "values": directoryOptions()]]]
     }
 }

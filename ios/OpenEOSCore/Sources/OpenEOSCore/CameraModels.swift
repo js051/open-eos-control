@@ -428,17 +428,17 @@ public struct CameraFileNaming: Equatable, Sendable {
         case .stillFilenameMode:
             stillFilenameModeOptions.contains(value)
         case .stillUserSetting1:
-            value.range(of: #"^[A-Z0-9][A-Z0-9_]{3}$"#, options: .regularExpression) != nil
+            CameraCaptureConfigurationValue.exactPattern(value, #"^[A-Z0-9][A-Z0-9_]{3}$"#)
         case .stillUserSetting2:
-            value.range(of: #"^[A-Z0-9][A-Z0-9_]{2}$"#, options: .regularExpression) != nil
+            CameraCaptureConfigurationValue.exactPattern(value, #"^[A-Z0-9][A-Z0-9_]{2}$"#)
         case .movieIndex:
-            value.range(of: #"^[A-Z0-9][A-Z0-9_]$"#, options: .regularExpression) != nil
+            CameraCaptureConfigurationValue.exactPattern(value, #"^[A-Z0-9][A-Z0-9_]$"#)
         case .movieReelNumber:
             movieReelRange.accepts(value)
         case .movieClipNumber:
             movieClipRange.accepts(value)
         case .movieUserDefined:
-            value.range(of: #"^[A-Z0-9]{5}$"#, options: .regularExpression) != nil
+            CameraCaptureConfigurationValue.exactPattern(value, #"^[A-Z0-9]{5}$"#)
         }
     }
 }

@@ -188,6 +188,8 @@ public actor DesktopBridgeClient {
     private var ordinaryMutationCount = 0
     private var sessionID: String?
     private var sessionEngine: String?
+    // Exact SessionCreated value for capture receipts; never infer from requested auto.
+    private var captureConfigurationSessionEngine: String?
     private var bridgeVersion: String?
     private var eventPollingSupported = false
     private var liveViewMagnifications: [LiveViewMagnification] = []
@@ -313,6 +315,7 @@ public actor DesktopBridgeClient {
         ownsShutterStatus = false
         sessionID = id
         sessionEngine = body.nonEmptyString("engine")
+        captureConfigurationSessionEngine = body["engine"] as? String
     }
 
     public func shutterReleaseState() -> CameraShutterReleaseState {
@@ -383,6 +386,7 @@ public actor DesktopBridgeClient {
         liveViewRevision = UUID()
         sessionID = nil
         sessionEngine = nil
+        captureConfigurationSessionEngine = nil
         sessionGeneration = UUID()
         releaseRevision = UUID()
         shutterRelease = nil
@@ -602,15 +606,19 @@ public actor DesktopBridgeClient {
         return parseStatus(body)
     }
 
-    public func createDirectory(name: String) async throws -> String {
-        guard name.range(of: #"^(?:[A-Z0-9_]{5})?$"#, options: .regularExpression) != nil else {
+    public func createDirectory(name: String, attempt: CameraCaptureConfigurationAttempt? = nil) async throws -> String {
+        let attempt = attempt ?? CameraCaptureConfigurationAttempt(operation: .createDirectory, requestedValue: name)
+        try attempt.validate(operation: .createDirectory, value: name)
+        guard CameraCaptureConfigurationValue.directorySuffix(name, allowEmpty: true) else {
             throw DesktopBridgeError.invalidResponse(
                 "Directory name must be empty or exactly five uppercase letters, numbers, or underscores."
             )
         }
-        let body = try await postJSON(sessionEndpoint(["directories"]), payload: ["name": name])
+        let url = try sessionEndpoint(["directories"])
+        let body = try await requestJSON(url: url, method: "POST", payload: ["name": name],
+                                         captureConfigurationAttempt: attempt)
         guard let created = body.string("name"),
-              created.range(of: #"^[A-Z0-9_]{5}$"#, options: .regularExpression) != nil else {
+              CameraCaptureConfigurationValue.directorySuffix(created) else {
             throw DesktopBridgeError.invalidResponse("Desktop Bridge returned an invalid created directory name.")
         }
         return created
@@ -618,8 +626,13 @@ public actor DesktopBridgeClient {
 
     public func setFileNaming(
         field: CameraFileNamingField,
-        value: String
+        value: String,
+        attempt: CameraCaptureConfigurationAttempt? = nil
     ) async throws -> CameraFileNaming {
+        let attempt = attempt ?? CameraCaptureConfigurationAttempt(operation: .setFileNaming, requestedValue: value, field: field)
+        try attempt.validate(operation: .setFileNaming, value: value, field: field)
+        let generation = sessionGeneration
+        let url = try sessionEndpoint(["file-naming", field.rawValue])
         guard let current = try await capabilities().fileNaming else {
             throw DesktopBridgeError.invalidResponse("Desktop Bridge did not advertise Canon file-naming control.")
         }
@@ -628,15 +641,79 @@ public actor DesktopBridgeClient {
                 "Value '\(value)' is not valid for Canon file-naming field \(field.rawValue)."
             )
         }
+        guard generation == sessionGeneration, !isClosing else { throw DesktopBridgeError.sessionChanged }
         let body = try await requestJSON(
-            url: sessionEndpoint(["file-naming", field.rawValue]),
+            url: url,
             method: "PUT",
-            payload: ["value": value]
+            payload: ["value": value],
+            captureConfigurationAttempt: attempt
         )
         guard let updated = Self.parseFileNaming(body), updated.value(for: field) == value else {
             throw DesktopBridgeError.invalidResponse("Desktop Bridge returned an invalid file-naming state.")
         }
         return updated
+    }
+
+    /// This fresh, bounded endpoint is deliberately distinct from cached capabilities.
+    /// An older Bridge returning 404 remains unavailable; never fall back to its cache.
+    public func refreshCaptureConfiguration(_ attempt: CameraCaptureConfigurationAttempt) async throws {
+        try Task.checkCancellation()
+        let outcome = attempt.snapshot
+        let url = try sessionEndpoint(["capture-configuration", outcome.operation.rawValue])
+        attempt.readbackUnavailable()
+        let body = try await requestJSON(url: url, method: "GET", payload: nil,
+                                         timeoutInterval: 15, maximumBytes: 64 * 1024, captureConfigurationRead: true)
+        guard body["operation"] as? String == outcome.operation.rawValue else {
+            throw DesktopBridgeError.invalidResponse("Capture configuration readback returned the wrong operation.")
+        }
+        if outcome.operation == .setFileNaming {
+            guard let raw = body["fileNaming"] as? BridgeJSON, let naming = Self.parseFileNaming(raw) else {
+                throw DesktopBridgeError.invalidResponse("Capture configuration readback returned invalid file naming.")
+            }
+            attempt.observe(naming)
+        } else {
+            guard let raw = body["directorySelection"] as? BridgeJSON,
+                  let selection = Self.captureDirectorySelection(raw) else {
+                throw DesktopBridgeError.invalidResponse("Capture configuration readback returned an invalid directory selection.")
+            }
+            attempt.observe(selection)
+        }
+    }
+
+    private static func captureDirectorySelection(_ raw: BridgeJSON) -> CameraSetting? {
+        guard let current = raw["value"] as? String, let ability = raw["ability"] as? [Any] else { return nil }
+        let values = ability.compactMap { $0 as? String }
+        guard (1...256).contains(values.count), values.count == ability.count,
+              Set(values).count == values.count, values.contains(current),
+              values.allSatisfy(CameraCaptureConfigurationValue.directorySelection) else { return nil }
+        return CameraSetting(key: "directoryselection", label: "Capture directory", value: current, values: values)
+    }
+
+    /// Consume only same-invocation proof, before cancellation/retirement checks.
+    /// This updates its bounded evidence object, never the replacement session UI.
+    private static func observeCaptureConfigurationResponse(_ response: CameraHTTPResponse,
+                                                            connectedEngine: String?,
+                                                            attempt: CameraCaptureConfigurationAttempt) {
+        let invocation = attempt.snapshot
+        guard response.body.count <= 64 * 1024,
+              let object = try? decodeForegroundJSONObject(response.body) else { return }
+        if (200..<300).contains(response.statusCode) {
+            if invocation.operation == .createDirectory {
+                guard let suffix = object["name"] as? String,
+                      CameraCaptureConfigurationValue.directorySuffix(suffix) else { return }
+                attempt.acknowledge(suffix)
+            } else if let naming = parseFileNaming(object), let field = invocation.field,
+                      naming.value(for: field) == invocation.requestedValue {
+                attempt.acknowledge(invocation.requestedValue)
+                attempt.observe(naming)
+            }
+        } else if connectedEngine == "ccapi",
+                  let detail = object["error"] as? BridgeJSON,
+                  let suffix = CameraCaptureConfigurationReceipt.validate(
+                    status: response.statusCode, detail: detail, invocation: invocation) {
+            attempt.acknowledge(suffix)
+            attempt.readbackUnavailable()
+        }
     }
 
     public func syncCameraClock() async throws -> CameraStatus {
@@ -1846,13 +1923,16 @@ public actor DesktopBridgeClient {
         connectionGuidance: Bool = false,
         recordingCommand: Bool? = nil,
         mediaMetadata: Bool = false,
-        mediaMutationAttempt: CameraMediaMutationAttempt? = nil
+        mediaMutationAttempt: CameraMediaMutationAttempt? = nil,
+        captureConfigurationAttempt: CameraCaptureConfigurationAttempt? = nil,
+        captureConfigurationRead: Bool = false
     ) async throws -> BridgeJSON {
         try validateMutation(url: url, method: method, shutterOperation: shutterOperation)
         let ordinaryMutation = !["GET", "HEAD", "OPTIONS"].contains(method) && !shutterOperation
         if ordinaryMutation { ordinaryMutationCount += 1 }
         defer { if ordinaryMutation { ordinaryMutationCount -= 1 } }
         let generation = sessionGeneration
+        let captureConfigurationEngine = captureConfigurationSessionEngine
         let revision = releaseRevision
         let liveViewStatusRevision = liveViewRevision
         let scopedToSession = try isCurrentSessionURL(url)
@@ -1866,7 +1946,8 @@ public actor DesktopBridgeClient {
             request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
             request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         }
-        if method == "GET", scopedToSession, url == (try? sessionEndpoint(["status"])) {
+        if method == "GET", scopedToSession,
+           url == (try? sessionEndpoint(["status"])) || url.path.contains("/capture-configuration/") {
             request.cachePolicy = .reloadIgnoringLocalCacheData
             request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         }
@@ -1874,6 +1955,7 @@ public actor DesktopBridgeClient {
             try Task.checkCancellation()
             recordingCommandEvidence = .unconfirmed(starting: recordingCommand)
         }
+        let readDeadline = captureConfigurationRead ? ContinuousClock.now.advanced(by: .seconds(timeoutInterval)) : nil
         let response: CameraHTTPResponse
         var recordingBodyComplete = true
         var recordingResponseCancelled = false
@@ -1886,7 +1968,12 @@ public actor DesktopBridgeClient {
             } else {
                 if mediaMetadata { try Task.checkCancellation() }
                 try mediaMutationAttempt?.markDispatched()
-                response = try await transport.send(request)
+                try captureConfigurationAttempt?.markDispatched()
+                if captureConfigurationAttempt != nil || captureConfigurationRead {
+                    response = try await transport.sendCaptureConfiguration(request)
+                } else {
+                    response = try await transport.send(request)
+                }
             }
         } catch {
             // This boundary follows all request construction and session checks.
@@ -1896,6 +1983,22 @@ public actor DesktopBridgeClient {
                 throw DesktopBridgeError.recordingCommandUnconfirmed(starting: recordingCommand)
             }
             throw error
+        }
+        if let readDeadline, ContinuousClock.now >= readDeadline {
+            throw DesktopBridgeError.invalidResponse("Capture configuration readback exceeded its bounded deadline.")
+        }
+        if captureConfigurationAttempt != nil || captureConfigurationRead {
+            guard response.body.count <= 64 * 1024 else {
+                throw DesktopBridgeError.invalidResponse("Capture configuration response exceeded 64 KiB.")
+            }
+            try CameraHTTPResponseIntegrity.validate(response, requestMethod: method)
+            guard response.statusCode != 206, response.header("content-range") == nil else {
+                throw DesktopBridgeError.invalidResponse("Capture configuration requires a complete response.")
+            }
+        }
+        if let captureConfigurationAttempt {
+            Self.observeCaptureConfigurationResponse(response, connectedEngine: captureConfigurationEngine,
+                                                     attempt: captureConfigurationAttempt)
         }
         let responseError = (200..<300).contains(response.statusCode)
             ? nil : Self.httpError(response: response, method: method, url: url, preservingProtocolStrings: recordingCommand != nil)
@@ -1937,14 +2040,23 @@ public actor DesktopBridgeClient {
             }
             throw error
         }
+        if captureConfigurationAttempt != nil, response.body.count > 64 * 1024 {
+            throw DesktopBridgeError.invalidResponse("Capture configuration acknowledgment exceeded its size limit.")
+        }
         if let maximumBytes, response.body.count > maximumBytes {
             throw DesktopBridgeError.invalidResponse(
                 "Desktop Bridge response at \(url.path) exceeded \(maximumBytes) bytes."
             )
         }
-        guard
-            let value = try? (mediaMetadata ? CameraMediaMetadataJSON.decode(response.body) : JSONSerialization.jsonObject(with: response.body)),
-            let object = value as? BridgeJSON
+        let decoded: Any?
+        if captureConfigurationAttempt != nil || captureConfigurationRead {
+            decoded = try? decodeForegroundJSONObject(response.body)
+        } else if mediaMetadata {
+            decoded = try? CameraMediaMetadataJSON.decode(response.body)
+        } else {
+            decoded = try? JSONSerialization.jsonObject(with: response.body)
+        }
+        guard let object = decoded as? BridgeJSON
         else {
             if let recordingCommand {
                 throw DesktopBridgeError.recordingCommandUnconfirmed(starting: recordingCommand)
@@ -2115,9 +2227,9 @@ public actor DesktopBridgeClient {
               let stillUserSetting1 = body.string("stillUserSetting1"),
               let stillUserSetting2 = body.string("stillUserSetting2"),
               let movieIndex = body.string("movieIndex"),
-              let movieReelNumber = strictInt(body["movieReelNumber"]),
+              let movieReelNumber = strictFileNamingInt(body["movieReelNumber"]),
               let movieReelRange = parseFileNamingRange(body.dictionary("movieReelRange"), maximum: 9999),
-              let movieClipNumber = strictInt(body["movieClipNumber"]),
+              let movieClipNumber = strictFileNamingInt(body["movieClipNumber"]),
               let movieClipRange = parseFileNamingRange(body.dictionary("movieClipRange"), maximum: 999),
               let movieUserDefined = body.string("movieUserDefined") else { return nil }
         let options = rawOptions.compactMap { $0 as? String }
@@ -2149,14 +2261,20 @@ public actor DesktopBridgeClient {
         _ body: BridgeJSON,
         maximum: Int
     ) -> CameraIntegerRange? {
-        guard let minimum = strictInt(body["minimum"]),
-              let upper = strictInt(body["maximum"]),
-              let step = strictInt(body["step"]),
+        guard let minimum = strictFileNamingInt(body["minimum"]),
+              let upper = strictFileNamingInt(body["maximum"]),
+              let step = strictFileNamingInt(body["step"]),
               minimum >= 1,
               upper <= maximum,
               minimum <= upper,
               step > 0 else { return nil }
         return CameraIntegerRange(minimum: minimum, maximum: upper, step: step)
+    }
+
+    private static func strictFileNamingInt(_ value: Any?) -> Int? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+              ["c", "s", "i", "l", "q", "C", "S", "I", "L", "Q"].contains(String(cString: number.objCType)) else { return nil }
+        return Int(number.stringValue)
     }
 
     private static func strictInt(_ value: Any?) -> Int? {

@@ -764,6 +764,12 @@ private struct MoreSettingsView: View {
                         fileNamingRow
                         Divider().overlay(Color.cameraBorder)
                     }
+                    // Retired receipts remain inspectable even if the replacement
+                    // camera advertises neither capture-configuration capability.
+                    if !camera.supports(.directoryControl), !camera.captureConfigurationHistory.isEmpty {
+                        CaptureConfigurationPanel().padding(.vertical, 14)
+                        Divider().overlay(Color.cameraBorder)
+                    }
                     if camera.supports(.sensorCleaning) {
                         sensorCleaningRow
                         Divider().overlay(Color.cameraBorder)
@@ -912,15 +918,15 @@ private struct MoreSettingsView: View {
             Text("create_capture_directory")
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(Color.cameraText)
-            Text(camera.lastCreatedDirectoryName.map { language.format("directory_created", $0) }
-                 ?? language.string("create_capture_directory_hint"))
+            Text("create_capture_directory_hint")
                 .font(.caption)
-                .foregroundStyle(camera.lastCreatedDirectoryName == nil ? Color.cameraSecondaryText : Color.cameraStatus)
+                .foregroundStyle(Color.cameraSecondaryText)
             HStack(spacing: 8) {
                 TextField("directory_name_placeholder", text: $directoryName)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
                     .onChange(of: directoryName) { _, value in
+                        camera.reviseCaptureConfigurationDraft()
                         directoryName = String(
                             value.uppercased()
                                 .filter { "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_".contains($0) }
@@ -931,25 +937,26 @@ private struct MoreSettingsView: View {
                     .accessibilityIdentifier("directory-name")
                 Button("create") {
                     let name = directoryName
-                    directoryName = ""
-                    Task { await camera.createDirectory(name: name) }
+                    let revision = camera.captureConfigurationDraftRevision
+                    Task { await camera.createDirectory(name: name, draftRevision: revision) }
                 }
                 .buttonStyle(.bordered)
                 .tint(Color.cameraAccent)
                 .disabled(
                     camera.isPreview ||
                         (!directoryName.isEmpty && directoryName.count != 5) ||
-                        camera.isBusy(.directory)
+                        !camera.canStartCaptureConfiguration
                 )
                 .accessibilityIdentifier("create-directory")
             }
+            CaptureConfigurationPanel()
         }
         .padding(.vertical, 14)
     }
 
     private var fileNamingRow: some View {
         NavigationLink {
-            FileNamingEditorView()
+            FileNamingEditorView().id(camera.mediaLibrarySessionID)
         } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -1217,6 +1224,8 @@ private struct MoreSettingsView: View {
 
 private struct FileNamingEditorView: View {
     @EnvironmentObject private var camera: CameraAppState
+    @State private var loadedOwner: UUID?
+    @State private var stillFilenameMode = ""
     @State private var stillUserSetting1 = ""
     @State private var stillUserSetting2 = ""
     @State private var movieIndex = ""
@@ -1235,7 +1244,7 @@ private struct FileNamingEditorView: View {
                             }
                         }
                         .pickerStyle(.segmented)
-                        .disabled(camera.isBusy(.setting) || camera.isPreview)
+                        .disabled(!camera.canStartCaptureConfiguration || camera.isPreview)
                         fileNamingField(
                             "still_user_setting_1",
                             value: $stillUserSetting1,
@@ -1292,6 +1301,7 @@ private struct FileNamingEditorView: View {
                 } else {
                     ContentUnavailableView("file_naming_unavailable", systemImage: "textformat")
                 }
+                CaptureConfigurationPanel()
             }
             .padding(18)
         }
@@ -1299,13 +1309,20 @@ private struct FileNamingEditorView: View {
         .navigationTitle(Text("file_naming"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: loadCurrentValues)
-        .onChange(of: camera.capabilities?.fileNaming) { _, _ in loadCurrentValues() }
+        .onChange(of: camera.capabilities?.fileNaming) { _, _ in
+            if loadedOwner != camera.mediaLibrarySessionID { loadCurrentValues() }
+        }
     }
 
     private func stillModeBinding(_ naming: CameraFileNaming) -> Binding<String> {
         Binding(
-            get: { naming.stillFilenameMode },
-            set: { value in Task { await camera.setFileNaming(field: .stillFilenameMode, value: value) } }
+            get: { stillFilenameMode },
+            set: { value in
+                stillFilenameMode = value
+                camera.reviseCaptureConfigurationDraft()
+                let revision = camera.captureConfigurationDraftRevision
+                Task { await camera.setFileNaming(field: .stillFilenameMode, value: value, draftRevision: revision) }
+            }
         )
     }
 
@@ -1325,6 +1342,7 @@ private struct FileNamingEditorView: View {
                 .keyboardType(numeric ? .numberPad : .asciiCapable)
                 .autocorrectionDisabled()
                 .onChange(of: value.wrappedValue) { _, raw in
+                    camera.reviseCaptureConfigurationDraft()
                     let filtered = numeric
                         ? raw.filter(\.isNumber)
                         : raw.uppercased().filter {
@@ -1335,17 +1353,21 @@ private struct FileNamingEditorView: View {
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier(field.rawValue)
             Button("apply") {
-                Task { await camera.setFileNaming(field: field, value: value.wrappedValue) }
+                let requested = value.wrappedValue
+                let revision = camera.captureConfigurationDraftRevision
+                Task { await camera.setFileNaming(field: field, value: requested, draftRevision: revision) }
             }
             .buttonStyle(.bordered)
             .tint(Color.cameraAccent)
-            .disabled(camera.isPreview || camera.isBusy(.setting) || !naming.accepts(field, value: value.wrappedValue))
+            .disabled(camera.isPreview || !camera.canStartCaptureConfiguration || !naming.accepts(field, value: value.wrappedValue))
             .accessibilityIdentifier("\(field.rawValue)-apply")
         }
     }
 
     private func loadCurrentValues() {
-        guard let naming = camera.capabilities?.fileNaming else { return }
+        guard loadedOwner != camera.mediaLibrarySessionID, let naming = camera.capabilities?.fileNaming else { return }
+        loadedOwner = camera.mediaLibrarySessionID
+        stillFilenameMode = naming.stillFilenameMode
         stillUserSetting1 = naming.stillUserSetting1
         stillUserSetting2 = naming.stillUserSetting2
         movieIndex = naming.movieIndex
