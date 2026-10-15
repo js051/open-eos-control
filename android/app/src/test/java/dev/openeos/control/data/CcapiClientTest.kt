@@ -4209,6 +4209,91 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realMagnificationRetiresDetailedGeometryBeforeBothCoordinateActions() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver140":[
+            {"path":"/shooting/liveview","post":true,"delete":true},
+            {"path":"/shooting/liveview/flipdetail","get":true},
+            {"path":"/shooting/liveview/afframeposition","put":true},
+            {"path":"/shooting/liveview/clickwb","post":true},
+            {"path":"/shooting/settings","get":true},
+            {"path":"/shooting/settings/lvzoom","get":true,"put":true}
+        ]}"""))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"value":"1","ability":["1","5","10"]}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 0xFF.toByte(), 0xD9.toByte())
+        fun detail(x: Int, y: Int, w: Int, h: Int) = binaryResponse(detailedLiveView(jpeg,
+            """{"liveview":{"image":{"positionx":$x,"positiony":$y,"positionwidth":$w,"positionheight":$h}}}"""), "application/octet-stream")
+        server.enqueue(detail(100, 200, 6000, 4000))
+        client.initialize(); client.capabilities(); client.startLiveView()
+        repeat(5) { server.takeRequest() }
+        // Seed geometry after source admission, then retire it for each 1 -> 5 -> 10 -> 1 step.
+        server.enqueue(detail(100, 200, 6000, 4000)); client.liveViewFrame(cacheKey = 1)
+        // The first startup image is cached; the next read acquires detail for the admitted source.
+        client.liveViewFrame(cacheKey = 2); server.takeRequest()
+        for (zoom in listOf(LiveViewMagnification.X5, LiveViewMagnification.X10, LiveViewMagnification.X1)) {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+            server.enqueue(jsonResponse("""{"value":"${zoom.value}","ability":["1","5","10"]}"""))
+            client.setLiveViewMagnification(zoom)
+            assertEquals("PUT", server.takeRequest().method); server.takeRequest()
+            server.enqueue(detail(1000 + zoom.value, 1500 + zoom.value, 1200, 800))
+            server.enqueue(MockResponse().setResponseCode(204))
+            client.tapFocus(0.5, 0.5)
+            assertTrue(server.takeRequest().path.orEmpty().contains("flipdetail?kind=both"))
+            val point = JSONObject(server.takeRequest().body.readUtf8())
+            assertEquals(1600 + zoom.value, point.getInt("positionx")); assertEquals(1900 + zoom.value, point.getInt("positiony"))
+            server.enqueue(MockResponse().setResponseCode(204)); enqueueRealStatus()
+            server.enqueue(jsonResponse("""{"value":"${zoom.value}","ability":["1","5","10"]}"""))
+            client.clickWhiteBalance(0.5, 0.5)
+            val wb = JSONObject(server.takeRequest().body.readUtf8())
+            assertEquals(point.toString(), wb.toString()); repeat(4) { server.takeRequest() }
+        }
+    }
+
+    @Test
+    fun realDetailedGeometryPrefixWithTruncatedTailNeverAuthorizesTouchAf() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[
+            {"path":"/shooting/liveview","post":true,"delete":true},
+            {"path":"/shooting/liveview/afframeposition","put":true},
+            {"path":"/shooting/liveview/flipdetail","get":true}
+        ]}"""))
+        client.initialize(); server.takeRequest()
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 0xFF.toByte(), 0xD9.toByte())
+        val prefix = detailedLiveView(jpeg, """{"liveview":{"image":{"positionx":100,"positiony":200,"positionwidth":1000,"positionheight":800}}}""")
+        for (tail in listOf(byteArrayOf(1), detailedPacket(0, jpeg).dropLast(1).toByteArray())) {
+            server.enqueue(binaryResponse(prefix + tail, "application/octet-stream"))
+            assertTrue(runCatching { client.tapFocus(0.5, 0.5) }.isFailure)
+            assertEquals("GET", server.takeRequest().method)
+        }
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun realMalformedDetailedRectangleNeverDispatchesTouchAf() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[
+            {"path":"/shooting/liveview","post":true,"delete":true},
+            {"path":"/shooting/liveview/afframeposition","put":true},
+            {"path":"/shooting/liveview/flipdetail","get":true}
+        ]}"""))
+        client.initialize(); server.takeRequest()
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 0xFF.toByte(), 0xD9.toByte())
+        for (rectangle in listOf(
+            """{"positionx":-1,"positiony":0,"positionwidth":100,"positionheight":100}""",
+            """{"positionx":"0","positiony":0,"positionwidth":100,"positionheight":100}""",
+            """{"positionx":0,"positiony":0,"positionwidth":0,"positionheight":100}""",
+            """{"positionx":2147483647,"positiony":0,"positionwidth":100,"positionheight":100}""",
+        )) {
+            server.enqueue(binaryResponse(detailedLiveView(jpeg, """{"liveview":{"image":$rectangle}}"""), "application/octet-stream"))
+            assertTrue(runCatching { client.tapFocus(0.5, 0.5) }.isFailure)
+            assertEquals("GET", server.takeRequest().method)
+        }
+        assertEquals(5, server.requestCount)
+    }
+
+    @Test
     fun realLiveViewMagnificationUsesAdvertisedStringValueAndReadback() = runTest {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(

@@ -247,8 +247,12 @@ class CcapiClient(
     private var liveViewSizeControlSupported = true
     private val rejectedLiveViewSizes = mutableSetOf<LiveViewSize>()
     private var activeLiveViewSize = LiveViewSize.MEDIUM
-    private var latestLiveViewGeometry: CcapiLiveViewGeometry? = null
+    private val liveViewGeometry = LiveViewGeometryState<CcapiLiveViewGeometry>()
     private var activeLiveViewSource: LiveViewSource? = null
+        set(value) {
+            if (field != value) liveViewGeometry.reset()
+            field = value
+        }
     private var activeJpegLiveViewOperations: CcapiJpegLiveViewOperations? = null
     private var activeMultipartLiveViewOperations: CcapiMultipartOperations? = null
     private var multipartLiveViewSession: CcapiMultipartLiveViewSession? = null
@@ -279,16 +283,18 @@ class CcapiClient(
 
     fun retireLiveViewLocally() {
         firstLiveViewFrame = null
-        latestLiveViewGeometry = null
+        liveViewGeometry.retire()
         multipartLiveViewSession?.close()
         multipartLiveViewSession = null
         nativeLiveViewSession?.close()
         nativeLiveViewSession = null
         activeLiveViewSource = null
+        liveViewGeometry.retire()
         // pendingLiveViewStop retains its original remote routes/session until acknowledgement.
     }
 
     suspend fun retireMaintenanceLocally() {
+        liveViewGeometry.retire()
         firstLiveViewFrame = null
         activeEventCall.getAndSet(null)?.cancel()
         pendingLiveViewLocalClose?.invoke()
@@ -307,6 +313,7 @@ class CcapiClient(
         stop = { maintenanceStopRecoveryScope { stopLiveView() } }, retireLocal = { retireMaintenanceLocally() })
 
     suspend fun close() {
+        liveViewGeometry.retire()
         if (maintenanceSessionOwned) {
             check(!closeMaintenanceSession()) { "Live View Stop remains unconfirmed after local retirement." }
             return
@@ -318,6 +325,7 @@ class CcapiClient(
     }
 
     suspend fun initialize() {
+        liveViewGeometry.reset()
         discoveryTrace.clear()
         discoveryTraceTruncated = false
         val isLocalOrSim = try {
@@ -1889,7 +1897,9 @@ class CcapiClient(
         check(activeLiveViewSource != null) {
             "Canon Live View magnification requires an active Live View session."
         }
+        val owner = liveViewGeometry.owner()
         if (!settingsLoaded) loadShootingSettings()
+        liveViewGeometry.requireOwner(owner)
         val operations = liveViewMagnificationOperations()
             ?: error("Camera did not advertise same-version GET and PUT Canon Live View magnification control.")
         val setting = liveViewMagnificationSetting
@@ -1898,18 +1908,32 @@ class CcapiClient(
             "${magnification.value}x Live View magnification is not advertised by this camera."
         }
 
-        putOk(
-            operations.second.path,
-            JSONObject().put("value", magnification.value.toString()),
-        )
-        val readback = getJson(operations.first.path).toValidatedLiveViewMagnificationSetting()
-            ?: error("Camera returned an invalid Live View magnification readback.")
-        check(readback.current == magnification) {
-            "Camera accepted Live View magnification but reported ${readback.current.value}x instead of ${magnification.value}x."
+        // Retire before dispatch, including lost/failed acknowledgements. Reads begun during
+        // the mutation are not eligible for the post-command geometry revision.
+        val change = liveViewGeometry.beginMutation(owner)
+        val multipart = multipartLiveViewSession
+        multipart?.discardPendingFrames()
+        firstLiveViewFrame = null
+        try {
+            putOk(
+                operations.second.path,
+                JSONObject().put("value", magnification.value.toString()),
+                checkOwner = { liveViewGeometry.requireRevision(change) },
+            )
+            liveViewGeometry.requireRevision(change)
+            val readback = getJson(operations.first.path, fresh = true).toValidatedLiveViewMagnificationSetting()
+                ?: error("Camera returned an invalid Live View magnification readback.")
+            liveViewGeometry.requireRevision(change)
+            check(readback.current == magnification) {
+                "Camera accepted Live View magnification but reported ${readback.current.value}x instead of ${magnification.value}x."
+            }
+            liveViewMagnificationSetting = readback
+            observedFeatures.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+            return LiveViewMagnificationResult(ok = true, magnification = readback.current)
+        } finally {
+            multipart?.discardPendingFrames()
+            liveViewGeometry.finishMutation(change)
         }
-        liveViewMagnificationSetting = readback
-        observedFeatures.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
-        return LiveViewMagnificationResult(ok = true, magnification = readback.current)
     }
 
     suspend fun listMedia(
@@ -2335,8 +2359,8 @@ class CcapiClient(
         check(pendingLiveViewStop == null) { "Live View must be stopped before starting again." }
         refreshTemperatureStatusForRestrictedCommand()
         requireLiveViewAllowed()
+        liveViewGeometry.reset()
         if (isRealCamera) {
-            latestLiveViewGeometry = null
             check(currentCoroutineContext()[MaintenanceIoContext] == null || request.source != LiveViewSource.AUTO) {
                 "Maintenance restoration requires the frozen active Live View source."
             }
@@ -2395,7 +2419,7 @@ class CcapiClient(
 
     private suspend fun stopLiveViewOwned() {
         firstLiveViewFrame = null
-        latestLiveViewGeometry = null
+        liveViewGeometry.retire()
         val stop = pendingLiveViewStop ?: return
         try {
             stop()
@@ -2407,6 +2431,7 @@ class CcapiClient(
         pendingLiveViewLocalClose = null
         pendingLiveViewMaintenanceOwned = false
         activeLiveViewSource = null
+        liveViewGeometry.retire()
         activeJpegLiveViewOperations = null
         activeMultipartLiveViewOperations = null
     }
@@ -2444,7 +2469,7 @@ class CcapiClient(
             if (enforceAdvertisedOperations && !supportsCoordinateTapFocus()) {
                 error("Camera did not advertise Canon Live View AF frame position control with detailed Live View metadata.")
             }
-            val (positionX, positionY) = cameraLiveViewPosition(x, y, CameraFeature.TAP_FOCUS)
+            val (positionX, positionY, geometryOwner) = cameraLiveViewPosition(x, y, CameraFeature.TAP_FOCUS)
             val payload = JSONObject()
                 .put("positionx", positionX)
                 .put("positiony", positionY)
@@ -2452,7 +2477,8 @@ class CcapiClient(
                 method = "PUT",
                 path = apiPath("PUT", "/shooting/liveview/afframeposition"),
             )
-            commandOk("/shooting/liveview/afframeposition", payload, selectedOperation)
+            commandOk("/shooting/liveview/afframeposition", payload, selectedOperation,
+                checkOwner = { liveViewGeometry.requireSnapshot(geometryOwner) })
             observedFeatures.add(CameraFeature.TAP_FOCUS)
             FocusResult(ok = true, x = x, y = y)
         } else {
@@ -2479,7 +2505,7 @@ class CcapiClient(
         if (enforceAdvertisedOperations && !supportsCoordinateClickWhiteBalance()) {
             error("Camera did not advertise Canon Click WB control with detailed Live View metadata.")
         }
-        val (positionX, positionY) = cameraLiveViewPosition(x, y, CameraFeature.CLICK_WHITE_BALANCE)
+        val (positionX, positionY, geometryOwner) = cameraLiveViewPosition(x, y, CameraFeature.CLICK_WHITE_BALANCE)
         val selectedOperation = operation ?: CcapiApiOperation(
             method = "POST",
             path = apiPath("POST", "/shooting/liveview/clickwb"),
@@ -2488,6 +2514,7 @@ class CcapiClient(
             "/shooting/liveview/clickwb",
             JSONObject().put("positionx", positionX).put("positiony", positionY),
             selectedOperation,
+            checkOwner = { liveViewGeometry.requireSnapshot(geometryOwner) },
         )
         observedFeatures.add(CameraFeature.CLICK_WHITE_BALANCE)
         return status()
@@ -2498,6 +2525,7 @@ class CcapiClient(
 
     suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): LiveViewFrame {
         currentCoroutineContext().ensureActive()
+        val frameOwner = liveViewGeometry.owner()
         if (activeLiveViewSource != null) firstLiveViewFrame?.let { frame ->
             if (activeLiveViewSource == LiveViewSource.CCAPI_MULTIPART) {
                 checkNotNull(multipartLiveViewSession).checkUsable()
@@ -2516,6 +2544,7 @@ class CcapiClient(
                 checkNotNull(multipartLiveViewSession) { "Canon multipart Live View session is not active." }
                     .nextFrame()
             }.also {
+                liveViewGeometry.requireOwner(frameOwner)
                 observedFeatures.add(CameraFeature.LIVE_VIEW)
                 observedFeatures.add(CameraFeature.LIVE_VIEW_MULTIPART)
             }
@@ -2525,6 +2554,7 @@ class CcapiClient(
         for (attempt in 0..JPEG_FRAME_BUSY_RETRY_DELAYS_MILLIS.size) {
             var transientBusy = false
             for (sourceUrl in sourceUrls) {
+                liveViewGeometry.requireOwner(frameOwner)
                 val frameRequest = Request.Builder()
                     .url(sourceUrl)
                     .get()
@@ -2536,6 +2566,7 @@ class CcapiClient(
 
                 try {
                     return requestLiveViewFrame(frameRequest, sourceUrl).also {
+                        liveViewGeometry.requireOwner(frameOwner)
                         observedFeatures.add(CameraFeature.LIVE_VIEW)
                         observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
                     }
@@ -3305,6 +3336,7 @@ class CcapiClient(
         payload: JSONObject,
         operation: CcapiApiOperation? = null,
         recordingEvidence: RecordingRequestEvidence? = null,
+        checkOwner: (() -> Unit)? = null,
     ) {
         val selected = operation ?: if (!enforceAdvertisedOperations) {
             CcapiApiOperation(method = "POST", path = "$apiVersionPrefix$pathSuffix")
@@ -3318,7 +3350,7 @@ class CcapiClient(
             "POST" -> builder.post(requestBody).build()
             else -> error("Unsupported CCAPI command method ${selected.method} for ${selected.path}")
         }
-        requestOk(request, recordingEvidence = recordingEvidence)
+        requestOk(request, recordingEvidence = recordingEvidence, checkOwner = checkOwner)
     }
 
     private suspend fun withRecoverableFocusRelease(
@@ -4529,12 +4561,14 @@ class CcapiClient(
         path: String,
         payload: JSONObject,
         expectedStatusCode: Int? = null,
+        checkOwner: (() -> Unit)? = null,
     ): Unit = requestOk(
         Request.Builder()
             .url("$baseUrl$path")
             .put(payload.toString().toRequestBody(jsonMediaType))
             .build(),
         expectedStatusCode = expectedStatusCode,
+        checkOwner = checkOwner,
     )
 
     private suspend fun deleteOk(path: String): Unit = requestOk(
@@ -4662,7 +4696,10 @@ class CcapiClient(
         request: Request,
         expectedStatusCode: Int? = null,
         recordingEvidence: RecordingRequestEvidence? = null,
+        checkOwner: (() -> Unit)? = null,
     ): Unit = withContext(Dispatchers.IO) {
+        currentCoroutineContext().ensureActive()
+        checkOwner?.invoke()
         if (currentCoroutineContext()[MaintenanceIoContext] != null) {
             maintenanceJson(request, expectedStatusCode ?: 204, empty = true)
             return@withContext
@@ -4675,10 +4712,13 @@ class CcapiClient(
         shootingEvidence?.let { currentCoroutineContext().ensureActive(); it.beforeDispatch() }
         val recordingIo = currentCoroutineContext()[RecordingIoContext] != null || recordingEvidence != null
         val call = newCameraCall(request.newBuilder().tag(RecordingRequestEvidence::class.java, recordingEvidence).build(), shootingEvidence != null || recordingIo)
-        val watcher = if (shootingEvidence != null || recordingIo) launch(start = CoroutineStart.UNDISPATCHED) {
+        val watcher = if (shootingEvidence != null || recordingIo || checkOwner != null) launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { call.cancel() }
         } else null
-        try { call.execute().use { response ->
+        try {
+            currentCoroutineContext().ensureActive()
+            checkOwner?.invoke()
+            call.execute().use { response ->
             recordingEvidence?.rejected = !response.isSuccessful
             val body = response.body?.let { body -> if (shootingEvidence == null && !recordingIo) body.string() else
                 body.byteStream().use { readShootingSettingResponseText(it, body.contentLength()) }
@@ -4713,12 +4753,12 @@ class CcapiClient(
         } } finally { watcher?.cancel() }
     }
 
-    private suspend fun requestLiveViewFrame(request: Request, sourceUrl: String): LiveViewFrame =
-        withContext(Dispatchers.IO) {
-            val isDetailedFrame = sourceUrl.contains("/shooting/liveview/flipdetail") && sourceUrl.contains("kind=both")
-            if (isDetailedFrame) {
-                latestLiveViewGeometry = null
-            }
+    private suspend fun requestLiveViewFrame(request: Request, sourceUrl: String): LiveViewFrame {
+        val owner = liveViewGeometry.owner()
+        val isDetailedFrame = sourceUrl.contains("/shooting/liveview/flipdetail") && sourceUrl.contains("kind=both")
+        val geometryRead = if (isDetailedFrame) liveViewGeometry.beginRead(owner) else null
+        return withContext(Dispatchers.IO) {
+            liveViewGeometry.requireOwner(owner)
             val maintenance = currentCoroutineContext()[MaintenanceIoContext]
             maintenance?.requireActive?.invoke()
             val call = newCameraCall(request, captureConfiguration = maintenance != null)
@@ -4774,11 +4814,7 @@ class CcapiClient(
                     } else {
                         null
                     }
-                    if (detailed?.geometry != null) {
-                        latestLiveViewGeometry = detailed.geometry
-                    }
-
-                    LiveViewFrame(
+                    val frame = LiveViewFrame(
                         bytes = when {
                             detailed?.image != null -> detailed.image
                             detailed != null -> error("Detailed Live View response did not contain an image packet.")
@@ -4787,6 +4823,10 @@ class CcapiClient(
                         contentType = contentType,
                         sourceUrl = sourceUrl,
                     )
+                    currentCoroutineContext().ensureActive()
+                    liveViewGeometry.requireOwner(owner)
+                    if (geometryRead != null) liveViewGeometry.publish(geometryRead, detailed?.geometry)
+                    frame
                 }
             } catch (exception: Exception) {
                 currentCoroutineContext().ensureActive()
@@ -4797,6 +4837,7 @@ class CcapiClient(
                 ownerWatchers.forEach { it.cancel() }
             }
         }
+    }
 
     private fun parseDetailedLiveView(payload: ByteArray): CcapiDetailedLiveView {
         var offset = 0
@@ -4823,6 +4864,7 @@ class CcapiClient(
             offset = dataEnd + CCAPI_DETAIL_FOOTER_BYTES
         }
 
+        check(offset == payload.size) { "Detailed Live View response contained a truncated or malformed packet." }
         if (image == null && geometry == null) {
             error("Detailed Live View response did not contain a valid Canon image or info packet.")
         }
@@ -4838,12 +4880,15 @@ class CcapiClient(
             if (image != null) {
                 val keys = listOf("positionx", "positiony", "positionwidth", "positionheight")
                 if (keys.all(image::has)) {
-                    val width = image.optInt("positionwidth", 0)
-                    val height = image.optInt("positionheight", 0)
-                    if (width > 0 && height > 0) {
+                    val x = image.opt("positionx").toExactJsonInt() ?: return null
+                    val y = image.opt("positiony").toExactJsonInt() ?: return null
+                    val width = image.opt("positionwidth").toExactJsonInt() ?: return null
+                    val height = image.opt("positionheight").toExactJsonInt() ?: return null
+                    if (x >= 0 && y >= 0 && width > 0 && height > 0 &&
+                        x.toLong() + width <= Int.MAX_VALUE && y.toLong() + height <= Int.MAX_VALUE) {
                         return CcapiLiveViewGeometry(
-                            positionX = image.optInt("positionx"),
-                            positionY = image.optInt("positiony"),
+                            positionX = x,
+                            positionY = y,
                             positionWidth = width,
                             positionHeight = height,
                         )
@@ -4865,25 +4910,28 @@ class CcapiClient(
         x: Double,
         y: Double,
         feature: CameraFeature,
-    ): Pair<Int, Int> {
+    ): Triple<Int, Int, LiveViewGeometryState.Snapshot<CcapiLiveViewGeometry>> {
         require(x in 0.0..1.0 && y in 0.0..1.0) {
             "${feature.label} coordinates must be normalized from 0 through 1."
         }
-        if (latestLiveViewGeometry == null) {
+        val owner = liveViewGeometry.owner()
+        if (liveViewGeometry.snapshot() == null) {
             detailedLiveViewOperation()?.let { operation ->
                 val sourceUrl = "$baseUrl${operation.path}?kind=both"
                 val request = Request.Builder()
                     .url(sourceUrl)
                     .get()
                     .header("Accept", "image/jpeg,image/*,*/*")
-                    .header("Cache-Control", "no-cache")
+                    .header("Cache-Control", "no-cache, no-store")
                     .build()
                 requestLiveViewFrame(request, sourceUrl)
             }
         }
-        val geometry = latestLiveViewGeometry
+        liveViewGeometry.requireOwner(owner)
+        val geometry = liveViewGeometry.snapshot()
             ?: error("${feature.label} needs Canon detailed Live View position metadata, but the camera returned none.")
-        return geometry.cameraPosition(x, y)
+        val (positionX, positionY) = geometry.value.cameraPosition(x, y)
+        return Triple(positionX, positionY, geometry)
     }
 
     private fun InputStream.readBoundedBytes(maxBytes: Int): ByteArray {

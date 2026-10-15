@@ -149,6 +149,7 @@ internal class CcapiMultipartLiveViewSession(
     private var latestFrame: ByteArray? = null
     private var producedGeneration = 0L
     private var consumedGeneration = 0L
+    private var frameEpoch = 0L
     private var terminalError: Throwable? = null
     @Volatile private var closed = false
     private val worker = Thread({ drain(boundary) }, "ccapi-multipart-live-view").apply {
@@ -174,6 +175,13 @@ internal class CcapiMultipartLiveViewSession(
         }
     }
 
+    fun discardPendingFrames() = synchronized(monitor) {
+        frameEpoch += 1
+        latestFrame = null
+        consumedGeneration = producedGeneration
+        monitor.notifyAll()
+    }
+
     fun checkUsable() = synchronized(monitor) {
         terminalError?.let { throw IllegalStateException("Canon multipart Live View stream failed.", it) }
         check(!closed) { "Canon multipart Live View stream is closed." }
@@ -184,11 +192,14 @@ internal class CcapiMultipartLiveViewSession(
             val body = response.body ?: error("Canon multipart Live View returned an empty response body.")
             val reader = CcapiMultipartFrameReader(body.byteStream(), boundary)
             while (!closed) {
+                val epoch = synchronized(monitor) { frameEpoch }
                 val frame = reader.nextFrame() ?: error("Canon multipart Live View stream ended unexpectedly.")
                 synchronized(monitor) {
-                    latestFrame = frame
-                    producedGeneration += 1
-                    monitor.notifyAll()
+                    if (!closed && epoch == frameEpoch) {
+                        latestFrame = frame
+                        producedGeneration += 1
+                        monitor.notifyAll()
+                    }
                 }
             }
         } catch (exception: Throwable) {

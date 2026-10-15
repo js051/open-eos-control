@@ -65,3 +65,8 @@ internal class NativeRtpCodecTimeline {
         return maxOf(previous + 1, mediaTimeUs).also { previous = it }
     }
 }
+
+/** Capture at local RTP ingress and retain through codec output; never stamp a new owner at dequeue. */
+internal data class NativeRtpInputIdentity(val frameId: Long, val renderingGeneration: Long) {
+    fun ownsRendering(currentGeneration: Long): Boolean = renderingGeneration == currentGeneration
+}
