@@ -17,7 +17,8 @@ public protocol CameraForegroundMediaReading: Sendable {
     func foregroundMediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem
     /// The caller supplies filesize from foregroundMediaInfo immediately before
     /// this attempt. Exactly one canonical original request, with no redirects,
-    /// fallback variants, or retries. Only an exact byte count is published.
+    /// fallback variants, or retries. Exact size, response MIME, bounded JPEG
+    /// structure and native decode must pass before original bytes are published.
     func downloadForegroundOriginal(
         _ item: CameraMediaItem,
         expectedBytes: Int64,

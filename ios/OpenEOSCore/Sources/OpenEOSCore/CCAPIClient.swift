@@ -2388,6 +2388,9 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         guard expectedBytes > 0, item.sizeBytes == expectedBytes else {
             throw CameraForegroundMediaError.freshSizeUnavailable
         }
+        guard expectedBytes <= Int64(CameraOriginalJPEG.maximumBytes) else {
+            throw CameraOriginalJPEG.Failure.resourceLimit
+        }
         guard !FileManager.default.fileExists(atPath: destination.path) else {
             throw CCAPIError.destinationExists(destination.path)
         }
@@ -2405,10 +2408,8 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         let size = try CameraHTTPResponseIntegrity.validateOriginalMedia(response)
         guard size == expectedBytes else { throw CameraForegroundMediaError.originalSizeMismatch }
         let contentType = response.header("content-type")
-        let prefix = try response.readPrefix(limit: Self.maximumErrorBodyCharacters)
-        guard !Self.isTextContentType(contentType), !Self.looksLikeTextPayload(prefix) else {
-            throw CCAPIError.invalidResponse("The canonical original returned text instead of media bytes.")
-        }
+        try CameraOriginalJPEG.validate(fileURL: response.temporaryFileURL, expectedBytes: expectedBytes,
+                                        contentTypeValues: response.contentTypeValues)
         _ = try budget.remaining()
         try FileManager.default.moveItem(at: response.temporaryFileURL, to: destination)
         return CameraMediaDownload(item: item, fileURL: destination, bytesTransferred: size, contentType: contentType)

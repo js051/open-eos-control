@@ -2752,6 +2752,9 @@ final class CameraAppState: ObservableObject {
             if !validOriginal {
                 let cancelled = Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
                 try? await mediaDeliveryStore.finishFailure(ticket, receiptID: receipt, cancelled: cancelled)
+                if foregroundMediaOwner == owner, sessionGeneration == generation {
+                    await refreshMediaDeliveryHistory()
+                }
             }
             // finishPrepared already records an honest prepared-but-not-retained
             // fact on failure. Do not replace that true fact with downloadFailed.

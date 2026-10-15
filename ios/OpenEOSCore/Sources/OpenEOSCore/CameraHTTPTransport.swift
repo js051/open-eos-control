@@ -40,9 +40,12 @@ public struct CameraHTTPDownloadResponse: Sendable {
     public let statusCode: Int
     public let headers: [String: String]
     public let temporaryFileURL: URL
+    // Capture every exposed declaration before case-insensitive lookup collapses keys.
+    let contentTypeValues: [String]
 
     public init(statusCode: Int, headers: [String: String] = [:], temporaryFileURL: URL) {
         self.statusCode = statusCode
+        contentTypeValues = headers.filter { $0.key.lowercased() == "content-type" }.map(\.value)
         self.headers = headers.reduce(into: [:]) { result, entry in
             result[entry.key.lowercased()] = entry.value
         }

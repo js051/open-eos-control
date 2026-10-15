@@ -10,7 +10,8 @@ import FoundationNetworking
 final class ForegroundMediaReadTests: XCTestCase {
     private let root = "/ccapi/ver140/contents"
     private var itemPath: String { "\(root)/card1/100CANON/IMG_TEST.JPG" }
-    private let original = Data([0xFF, 0xD8, 0xFF, 0xD9])
+    // Fixed synthetic one-pixel vector from the shared JPEG contract.
+    private let original = Data(base64Encoded: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD4yooooA//2Q==")!
 
     func testOnlyExplicitStrictTransportsOnInitializedDirectCamerasAreAvailable() async throws {
         let legacy = MockCameraHTTPTransport()
@@ -235,16 +236,16 @@ final class ForegroundMediaReadTests: XCTestCase {
     }
 
     func testOriginalIsOneCanonicalGETWithExactFreshByteCount() async throws {
-        for size in [3, 4, 5] {
+        for size in [original.count - 1, original.count, original.count + 1] {
             let (client, transport) = try await makeClient()
             let directory = try makeDirectory()
             defer { try? FileManager.default.removeItem(at: directory) }
             let destination = directory.appendingPathComponent("original.JPG")
             let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: Int64(size))
             await transport.base.enqueueDownload(path: itemPath, body: original)
-            if size == 4 {
-                let result = try await client.downloadForegroundOriginal(item, expectedBytes: 4, to: destination)
-                XCTAssertEqual(result.bytesTransferred, 4)
+            if size == original.count {
+                let result = try await client.downloadForegroundOriginal(item, expectedBytes: Int64(original.count), to: destination)
+                XCTAssertEqual(result.bytesTransferred, Int64(original.count))
                 XCTAssertEqual(try Data(contentsOf: destination), original)
             } else {
                 await assertFailure(.originalSizeMismatch) {
@@ -324,9 +325,9 @@ final class ForegroundMediaReadTests: XCTestCase {
             let directory = try makeDirectory()
             defer { try? FileManager.default.removeItem(at: directory) }
             let destination = directory.appendingPathComponent("original.JPG")
-            let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: 4)
+            let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: Int64(original.count))
             await transport.base.enqueueDownload(path: itemPath, status: status, headers: headers, body: body)
-            await assertFailure { try await client.downloadForegroundOriginal(item, expectedBytes: 4, to: destination) }
+            await assertFailure { try await client.downloadForegroundOriginal(item, expectedBytes: Int64(original.count), to: destination) }
             XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
             let requests = await transport.base.requests()
             XCTAssertEqual(requests.count, 2)
@@ -339,10 +340,10 @@ final class ForegroundMediaReadTests: XCTestCase {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let destination = directory.appendingPathComponent("original.JPG")
-        let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: 4)
+        let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: Int64(original.count))
         await transport.base.enqueueDownload(path: itemPath, body: original)
         let task = Task {
-            try await client.downloadForegroundOriginal(item, expectedBytes: 4, to: destination) { _ in
+            try await client.downloadForegroundOriginal(item, expectedBytes: Int64(original.count), to: destination) { _ in
                 withUnsafeCurrentTask { $0?.cancel() }
             }
         }
@@ -354,7 +355,7 @@ final class ForegroundMediaReadTests: XCTestCase {
         await assertNoTemporaryFiles(transport)
         let existing = Data("existing file".utf8)
         try existing.write(to: destination)
-        await assertFailure { try await client.downloadForegroundOriginal(item, expectedBytes: 4, to: destination) }
+        await assertFailure { try await client.downloadForegroundOriginal(item, expectedBytes: Int64(original.count), to: destination) }
         XCTAssertEqual(try Data(contentsOf: destination), existing)
         let requests = await transport.base.requests()
         XCTAssertEqual(requests.count, 2)
@@ -366,11 +367,11 @@ final class ForegroundMediaReadTests: XCTestCase {
             let directory = try makeDirectory()
             defer { try? FileManager.default.removeItem(at: directory) }
             let destination = directory.appendingPathComponent(collision ? "original.JPG" : "missing/original.JPG")
-            let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: 4)
+            let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: Int64(original.count))
             let otherFile = Data("other owner".utf8)
             await transport.base.enqueueDownload(path: itemPath, body: original)
             await assertFailure {
-                try await client.downloadForegroundOriginal(item, expectedBytes: 4, to: destination) { _ in
+                try await client.downloadForegroundOriginal(item, expectedBytes: Int64(original.count), to: destination) { _ in
                     if collision { try? otherFile.write(to: destination) }
                 }
             }
@@ -378,6 +379,45 @@ final class ForegroundMediaReadTests: XCTestCase {
             else { XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path)) }
             await assertNoTemporaryFiles(transport)
         }
+    }
+
+    func testResponseMIMEIsIndependentOfFreshMetadataAndCannotPublishOrRetry() async throws {
+        let headers: [[String: String]] = [[:], ["Content-Type": "image/jpeg"],
+            ["Content-Type": "application/octet-stream"], ["Content-Type": " IMAGE/JPEG ; note=synthetic "],
+            ["Content-Type": ""], ["Content-Type": " "], ["Content-Type": "image/png"],
+            ["Content-Type": "image/jpeg", "content-type": "image/jpeg"],
+            ["Content-Type": "image/jpeg, image/jpeg"], ["Content-Type": "image/jpeg; broken"]]
+        for (index, fields) in headers.enumerated() {
+            let (client, transport) = try await makeClient()
+            let directory = try makeDirectory()
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let destination = directory.appendingPathComponent("original.JPG")
+            let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image",
+                                       sizeBytes: Int64(original.count), contentType: "image/jpeg")
+            await transport.base.enqueueDownload(path: itemPath, headers: fields, body: original)
+            if index < 4 {
+                _ = try await client.downloadForegroundOriginal(item, expectedBytes: Int64(original.count), to: destination)
+                XCTAssertEqual(try Data(contentsOf: destination), original)
+            } else {
+                await assertFailure { try await client.downloadForegroundOriginal(item, expectedBytes: Int64(original.count), to: destination) }
+                XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+            }
+            let requests = await transport.base.requests()
+            XCTAssertEqual(requests.map(\.path), ["/ccapi", itemPath])
+            await assertNoTemporaryFiles(transport)
+        }
+    }
+
+    func testOriginalEncodedLimitRejectsBeforeCameraGET() async throws {
+        let (client, transport) = try await makeClient()
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let size = Int64(CameraOriginalJPEG.maximumBytes) + 1
+        let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: size)
+        await assertFailure { try await client.downloadForegroundOriginal(item, expectedBytes: size,
+            to: directory.appendingPathComponent("original.JPG")) }
+        let requests = await transport.base.requests()
+        XCTAssertEqual(requests.map(\.path), ["/ccapi"])
     }
 
     private func makeClient() async throws -> (CCAPIClient, StrictForegroundFixtureTransport) {
