@@ -2166,3 +2166,5 @@ button.media-thumbnail:focus-visible {
 #media-mutation-help { flex-basis: 100%; }
 #media-mutation-list li[data-status="confirmed"] { border-color: var(--accent); }
 #media-mutation-list li[data-status="uncertain"], #media-mutation-list li[data-status="failed-not-sent"] { border-color: var(--danger); }
+
+#media-upload-outcome .button { max-width: 100%; min-height: 44px; white-space: normal; overflow-wrap: anywhere; }

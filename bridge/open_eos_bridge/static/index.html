@@ -470,6 +470,13 @@
             <span class="icon" data-icon="x" aria-hidden="true"></span>
           </button>
         </section>
+        <section id="media-upload-outcome" class="media-batch-panel" aria-labelledby="media-upload-outcome-title" hidden>
+          <h3 id="media-upload-outcome-title" data-i18n="uploadOutcomeTitle">Latest upload result</h3>
+          <p id="media-upload-outcome-message" role="status"></p>
+          <p id="media-upload-previous-camera" class="supporting" data-i18n="uploadPreviousCamera" hidden></p>
+          <p class="supporting" data-i18n="uploadReviewNotice"></p>
+          <button id="media-upload-review" class="button secondary" type="button" data-i18n="uploadReviewFiles">Review current camera files</button>
+        </section>
         <div id="media-list" class="media-list"></div>
       </main>
 
@@ -790,6 +797,7 @@
   <script src="/app/local-video.js"></script>
   <script src="/app/rtp-audio.js"></script>
   <script src="/app/media-transfer.js"></script>
+  <script src="/app/media-upload.js"></script>
   <script src="/app/media-library.js"></script>
   <script src="/app/media-listing.js"></script>
   <script src="/app/media-batch.js"></script>
