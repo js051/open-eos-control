@@ -64,6 +64,21 @@ final class RTPNativeLutRenderingTests: XCTestCase {
         }
     }
 
+    func testDecodeOnlyReadinessProducesActualDecoderOutputWithoutSurfaceLutOrMetalProcessing() async throws {
+        let pipeline = IOSRTPVideoProcessor()
+        defer { pipeline.invalidate() }
+        let (sample, format) = try input()
+        let box = ResultBox()
+        let done = expectation(description: "Actual VideoToolbox decode-only output")
+        XCTAssertTrue(pipeline.submit(sample, format: format, lut: nil, sps: sps, decodeOnly: true) {
+            box.value = $0; done.fulfill()
+        })
+        await fulfillment(of: [done], timeout: 5)
+        guard case .decoded = try XCTUnwrap(box.value) else {
+            return XCTFail("A submitted access unit is not decoded readiness")
+        }
+    }
+
     func testRealH264DecodeAndGpuLutPreserveQuadrantRowsAndSwapChannels() async throws {
         let pipeline = IOSRTPVideoProcessor()
         defer { pipeline.invalidate() }

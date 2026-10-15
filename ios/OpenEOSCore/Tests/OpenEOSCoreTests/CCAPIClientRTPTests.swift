@@ -92,6 +92,8 @@ final class CCAPIClientRTPTests: XCTestCase {
             status: 204,
             body: Data()
         )
+        await transport.enqueue(path: "/ccapi/ver130/shooting/liveview/flip?t=0",
+            headers: ["content-type": "image/jpeg"], body: Data([0xff, 0xd8, 1, 0xff, 0xd9]))
         let client = try CCAPIClient(
             baseURL: "http://192.168.1.2:8080",
             mode: .camera,
@@ -113,6 +115,7 @@ final class CCAPIClientRTPTests: XCTestCase {
                 "GET /ccapi",
                 "GET /ccapi/ver130/shooting/liveview/rtpsessiondesc",
                 "POST /ccapi/ver130/shooting/liveview",
+                "GET /ccapi/ver130/shooting/liveview/flip?t=0",
             ]
         )
     }
@@ -145,6 +148,8 @@ final class CCAPIClientRTPTests: XCTestCase {
             status: 204,
             body: Data()
         )
+        await transport.enqueue(path: "/ccapi/ver130/shooting/liveview/flip?t=0",
+            headers: ["content-type": "image/jpeg"], body: Data([0xff, 0xd8, 1, 0xff, 0xd9]))
         let client = try CCAPIClient(
             baseURL: "http://192.168.1.2:8080",
             mode: .camera,
@@ -166,6 +171,7 @@ final class CCAPIClientRTPTests: XCTestCase {
             "POST /ccapi/ver130/shooting/liveview/rtp",
             "POST /ccapi/ver130/shooting/liveview/rtp",
             "POST /ccapi/ver130/shooting/liveview",
+            "GET /ccapi/ver130/shooting/liveview/flip?t=0",
         ])
         let rtpCommands = try requests
             .filter { $0.path.hasSuffix("/shooting/liveview/rtp") }
@@ -197,11 +203,10 @@ final class CCAPIClientRTPTests: XCTestCase {
         )
         await transport.enqueue(method: "POST", path: "/ccapi/ver130/shooting/liveview/rtp", status: 204, body: Data())
         await transport.enqueue(method: "POST", path: "/ccapi/ver130/shooting/liveview", status: 204, body: Data())
-        await transport.enqueue(
-            method: "GET",
+        await transport.enqueueLiveStream(
             path: "/ccapi/ver130/shooting/liveview/multipart",
             headers: ["content-type": "multipart/x-mixed-replace;boundary=canon"],
-            body: multipart(boundary: "canon", frame: jpeg)
+            body: multipart(boundary: "canon", frame: jpeg, openEnded: true)
         )
         await transport.enqueue(
             method: "DELETE",
@@ -319,6 +324,8 @@ final class CCAPIClientRTPTests: XCTestCase {
             started = true
         }
 
+        func waitUntilReady() async throws { try Task.checkCancellation() }
+
         func setTargetFPS(_ fps: Int) async {
             targetFPS = fps
         }
@@ -413,12 +420,12 @@ final class CCAPIClientRTPTests: XCTestCase {
         return detailPacket(type: 0x00, payload: jpeg) + detailPacket(type: 0x01, payload: info)
     }
 
-    private func multipart(boundary: String, frame: Data) -> Data {
+    private func multipart(boundary: String, frame: Data, openEnded: Bool = false) -> Data {
         var value = Data(
             "--\(boundary)\nContent-Type: image/jpeg\nContent-Length: \(frame.count)\n\n".utf8
         )
         value.append(frame)
-        value.append(Data("\n--\(boundary)--\n".utf8))
+        if !openEnded { value.append(Data("\n--\(boundary)--\n".utf8)) }
         return value
     }
 

@@ -30,6 +30,61 @@ final class MaintenanceControlTests: XCTestCase {
             }
             let state = await client.stopState()
             XCTAssertTrue(state.stopRequired); XCTAssertFalse(state.stopUnconfirmed)
+            if direct {
+                let reads = await peer.frameReads()
+                XCTAssertEqual(reads.count, 2, "Ordinary Start and maintenance restore each validate one first JPEG")
+                let initialRead = try XCTUnwrap(reads.first)
+                let restoredRead = try XCTUnwrap(reads.dropFirst().first)
+                XCTAssertFalse(initialRead.strict)
+                XCTAssertFalse(initialRead.dedicatedFrameRead)
+                XCTAssertTrue(restoredRead.strict)
+                XCTAssertTrue(restoredRead.dedicatedFrameRead, "Restore JPEG must use the bounded strict frame transport")
+                XCTAssertEqual(reads.map(\.query), ["t=0", "t=0"])
+                XCTAssertTrue(reads.allSatisfy { $0.method == "GET" && $0.timeout == 5 })
+                let beforeRetainedRead = await peer.requests()
+                if case let .direct(directClient) = client {
+                    let frame = try await directClient.liveViewFrame(cacheKey: 88)
+                    XCTAssertEqual(frame.data, CCAPILiveViewTestFixture.jpeg)
+                }
+                let afterRetainedRead = await peer.requests()
+                XCTAssertEqual(afterRetainedRead, beforeRetainedRead, "Restore retains the first JPEG without a duplicate ordinary GET")
+            }
+        }
+    }
+
+    func testDirectRestoreFirstFrameFailureHasOneStrictAttemptAndNoEndpointSizeOrSourceFallback() async throws {
+        let failures: [(Int, Data)] = [
+            (307, Data()), (308, Data()), (401, Data()),
+            (503, Data(#"{"message":"Device busy"}"#.utf8)),
+            (503, Data(#"{"message":"Mode not supported"}"#.utf8)),
+            (200, Data("not a JPEG".utf8)),
+        ]
+        for (status, body) in failures {
+            let peer = MaintenanceControlPeer(direct: true, multipleFrameEndpoints: true)
+            let client = try await makeClient(peer, direct: true)
+            try await client.start()
+            let attempt = CameraMaintenanceAttempt(operation: .sensorCleaning)
+            try await client.perform(attempt); try await client.observe(attempt); attempt.restore(.pending)
+            await peer.failFrame(status: status, body: body)
+            let beforeReads = await peer.frameReads()
+            do { try await client.restore(attempt); XCTFail("First-frame failure cannot publish a restored source") } catch {}
+            let reads = await peer.frameReads(), controls = await peer.controls(), state = await client.stopState()
+            let restoreReads = Array(reads.dropFirst(beforeReads.count))
+            XCTAssertEqual(restoreReads.count, 1, "Strict maintenance must not retry busy, switch endpoint, downgrade size, or change source")
+            XCTAssertTrue(restoreReads.allSatisfy { $0.strict && $0.dedicatedFrameRead && $0.method == "GET" && $0.query == "t=0" && $0.timeout == 5 })
+            XCTAssertEqual(controls.map(\.action), ["stop", "start"], "Failed restore must not automatically compensate or restart")
+            XCTAssertTrue(controls.allSatisfy { $0.strict && $0.timeout == 15 })
+            XCTAssertTrue(state.stopRequired); XCTAssertTrue(state.stopUnconfirmed)
+            XCTAssertEqual(attempt.snapshot.commandEvidence, .responded)
+            if case let .direct(directClient) = client {
+                let source = await directClient.currentLiveViewSource()
+                XCTAssertNil(source)
+            }
+            try await client.retryStop()
+            let recovered = await peer.controls(), afterRetryReads = await peer.frameReads()
+            XCTAssertEqual(recovered.map(\.action), ["stop", "start", "stop"])
+            XCTAssertTrue(recovered.allSatisfy(\.strict))
+            XCTAssertEqual(afterRetryReads.count, reads.count, "Explicit Stop recovery must not refetch a frame")
         }
     }
 
@@ -341,7 +396,14 @@ private actor MaintenanceControlPeer: CameraHTTPTransport {
         let strict: Bool, timeout: TimeInterval, body: Data?
         var cancelledAfterGate = false
     }
+    struct FrameRead: Sendable {
+        let method: String, path: String, query: String?
+        let strict: Bool, dedicatedFrameRead: Bool, timeout: TimeInterval
+    }
     let direct: Bool
+    private let multipleFrameEndpoints: Bool
+    private var frameLog: [FrameRead] = []
+    private var frameFailure: (Int, Data)?
     private var held: String?, gate: CheckedContinuation<Void, Never>?
     private var failure: (String, Int)?
     private var warning = false
@@ -354,7 +416,11 @@ private actor MaintenanceControlPeer: CameraHTTPTransport {
     private var omitStartStopProof = false
     private var log: [Control] = []
     var waiting: Bool { gate != nil }
-    init(direct: Bool) { self.direct = direct }
+    init(direct: Bool, multipleFrameEndpoints: Bool = false) {
+        self.direct = direct; self.multipleFrameEndpoints = multipleFrameEndpoints
+    }
+    func frameReads() -> [FrameRead] { frameLog }
+    func failFrame(status: Int, body: Data) { frameFailure = (status, body) }
     func hold(_ action: String) { held = action }
     func fail(_ action: String, status: Int) { failure = (action, status) }
     func reportWarning() { warning = true }
@@ -368,10 +434,23 @@ private actor MaintenanceControlPeer: CameraHTTPTransport {
     func controls() -> [Control] { log }
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse { try await route(request, strict: false) }
     func sendMaintenance(_ request: URLRequest) async throws -> CameraHTTPResponse { try await route(request, strict: true) }
+    func sendMaintenanceLiveViewFrame(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        try await route(request, strict: true, dedicatedFrameRead: true)
+    }
     func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse { throw URLError(.unsupportedURL) }
-    private func route(_ request: URLRequest, strict: Bool) async throws -> CameraHTTPResponse {
+    private func route(_ request: URLRequest, strict: Bool, dedicatedFrameRead: Bool = false) async throws -> CameraHTTPResponse {
         let path = request.url!.path, method = request.httpMethod ?? "GET"
         trace.append((strict ? "strict " : "ordinary ") + method + " " + path)
+        if method == "GET", path.hasSuffix("/shooting/liveview") || path.hasSuffix("/shooting/liveview/flip") {
+            frameLog.append(FrameRead(method: method, path: path, query: request.url?.query,
+                strict: strict, dedicatedFrameRead: dedicatedFrameRead, timeout: request.timeoutInterval))
+            if let failure = frameFailure {
+                frameFailure = nil
+                return CameraHTTPResponse(statusCode: failure.0,
+                    headers: ["location": "/never-follow", "www-authenticate": "Basic realm=fixture"], body: failure.1)
+            }
+            return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: CCAPILiveViewTestFixture.jpeg)
+        }
         let action: String? = path.hasSuffix("/liveview/stop") || path.hasSuffix("/shooting/liveview") && method == "DELETE" ? "stop"
             : path.hasSuffix("/liveview/start") || path.hasSuffix("/shooting/liveview") && method == "POST" ? "start" : nil
         if let action, strict {
@@ -391,13 +470,15 @@ private actor MaintenanceControlPeer: CameraHTTPTransport {
         }
         var object: [String: Any] = [:], status = 200
         if path == "/ccapi" {
-            object = ["ver100": [
+            var operations: [[String: Any]] = [
                 ["path": "/shooting/liveview", "get": true, "post": true, "delete": true],
                 ["path": "/functions/sensorcleaning", "post": true],
                 ["path": "/shooting/control/shutterbutton/manual", "put": true],
                 ["path": "/shooting/control/af", "post": true],
                 ["path": "/functions/autopoweroff", "get": true, "put": true],
-                ["path": "/deviceinformation", "get": true]]]
+                ["path": "/deviceinformation", "get": true]]
+            if multipleFrameEndpoints { operations.append(["path": "/shooting/liveview/flip", "get": true]) }
+            object = ["ver100": operations]
         } else if path.hasSuffix("/deviceinformation") { object = ["productname": "Synthetic maintenance control camera"] }
         else if path == "/health" { object = ["ok": true, "service": "open-eos-control-bridge", "version": "0.13.0"] }
         else if path == "/v1/session" { object = ["id": "synthetic", "engine": "ccapi"] }

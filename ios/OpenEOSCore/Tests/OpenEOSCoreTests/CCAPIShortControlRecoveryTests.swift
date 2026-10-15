@@ -8,6 +8,55 @@ import FoundationNetworking
 /// Counterexamples use the production client and the existing explicit response gates.
 /// These sources require a Swift host; source inspection is not runtime red/green evidence.
 final class CCAPIShortControlRecoveryTests: XCTestCase {
+    func testLiveViewStartAwaitingFirstFrameBlocksCaptureAFShutterAndModeMutations() async throws {
+        for gateAtFirstFrame in [false, true] {
+            let gate = ShutterRecoveryGate(gateAtFirstFrame
+                ? "Live View Start acknowledged; first JPEG is still pending"
+                : "Live View Start body dispatched; ACK is still pending")
+            defer { gate.open() }
+            let peer = LiveViewStartupMutationPeer(gate: gate, gateAtFirstFrame: gateAtFirstFrame)
+            let client = try CCAPIClient(baseURL: "http://127.0.0.1:18080", mode: .camera, transport: peer)
+            try await client.initialize()
+            let start = Task { try await client.startLiveView(.init(source: .ccapiJPEGPolling)) }
+            await fulfillment(of: [gate.entered], timeout: 3)
+            let before = await peer.requests()
+            XCTAssertEqual(before.filter(\.isMutation).map(\.path), ["/ccapi/ver130/shooting/liveview"])
+            XCTAssertEqual(before.last?.path, gateAtFirstFrame
+                ? "/ccapi/ver130/shooting/liveview/flip?t=0" : "/ccapi/ver130/shooting/liveview")
+            let beforeReady = await client.currentLiveViewSource()
+            XCTAssertNil(beforeReady, "Start ACK alone cannot publish an input-ready source")
+
+            await fails { try await client.captureStill() }
+            await fails { try await client.captureStill(autofocus: false) }
+            await fails { try await client.autofocus() }
+            await fails { try await client.halfPressShutter() }
+            await fails { try await client.startHeldAutofocus(owner: UUID()) }
+            await fails { try await client.startBulbExposure() }
+            await fails { try await client.setSetting(key: "iso", value: "800") }
+            await fails { try await client.setSetting(key: "moviemode", value: "on") }
+            await fails { try await client.startLiveView() }
+            let blocked = await peer.requests()
+            XCTAssertEqual(blocked, before, "A pending first frame owns the camera mutation boundary, including mode writes and status reads")
+
+            gate.open()
+            try await start.value
+            let afterReady = await peer.requests()
+            XCTAssertEqual(afterReady.filter { $0.method == "GET" && $0.path.contains("/shooting/liveview/") }.map(\.path),
+                ["/ccapi/ver130/shooting/liveview/flip?t=0"])
+            let frame = try await client.liveViewFrame(cacheKey: 77)
+            XCTAssertEqual(frame.data, CCAPILiveViewTestFixture.jpeg)
+            let afterRetainedRead = await peer.requests()
+            XCTAssertEqual(afterRetainedRead, afterReady, "First UI read must consume the retained JPEG without another GET")
+            let ready = await client.currentLiveViewSource()
+            XCTAssertEqual(ready, .ccapiJPEGPolling)
+            await client.stopLiveView()
+            let stopped = await peer.requests()
+            XCTAssertEqual(stopped.filter(\.isMutation).map { "\($0.method) \($0.path)" }, [
+                "POST /ccapi/ver130/shooting/liveview", "DELETE /ccapi/ver130/shooting/liveview",
+            ])
+        }
+    }
+
     func testHeldAFKeepsPressUntilExactReleaseAndNeverRepresses() async throws {
         let peer = ShortControlPeer(.af)
         let client = try peer.client()
@@ -101,6 +150,7 @@ final class CCAPIShortControlRecoveryTests: XCTestCase {
                 await fails { try await client.startLiveView() }
                 let blocked = await peer.requests()
                 XCTAssertEqual(blocked.filter(\.isMutation), before.filter(\.isMutation))
+                XCTAssertEqual(blocked, before, "Unresolved shutter ownership must block Live View before startup or first-frame GET")
                 await fails { try await client.retryShutterRelease() }
                 await unknown(client)
                 try await client.retryShutterRelease()
@@ -464,6 +514,50 @@ private actor SimulatorShortControlPeer: CameraHTTPTransport {
             await gate?.wait()
         }
         return CameraHTTPResponse(statusCode: 200, body: Data(body.utf8))
+    }
+    func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse { throw URLError(.unsupportedURL) }
+}
+
+private actor LiveViewStartupMutationPeer: CameraHTTPTransport {
+    private let gate: ShutterRecoveryGate
+    private let gateAtFirstFrame: Bool
+    private var recorded: [ShutterRecoveryRequest] = []
+    init(gate: ShutterRecoveryGate, gateAtFirstFrame: Bool) {
+        self.gate = gate; self.gateAtFirstFrame = gateAtFirstFrame
+    }
+    func requests() -> [ShutterRecoveryRequest] { recorded }
+    func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        let url = try XCTUnwrap(request.url), method = request.httpMethod ?? "GET"
+        recorded.append(ShutterRecoveryRequest(method: method,
+            path: url.path + (url.query.map { "?" + $0 } ?? ""),
+            body: request.httpBody ?? Data(), taskWasCancelled: Task.isCancelled))
+        if method == "POST", url.path.hasSuffix("/shooting/liveview"), !gateAtFirstFrame { await gate.wait() }
+        if method == "GET", url.path.hasSuffix("/shooting/liveview/flip") {
+            if gateAtFirstFrame { await gate.wait() }
+            return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: CCAPILiveViewTestFixture.jpeg)
+        }
+        if method != "GET" { return CameraHTTPResponse(statusCode: 204) }
+        let body: String
+        switch url.path {
+        case "/ccapi", "/ccapi/":
+            body = """
+            {"ver130":[
+              {"path":"/shooting/liveview","post":true,"delete":true},
+              {"path":"/shooting/liveview/flip","get":true},
+              {"path":"/shooting/control/shutterbutton","post":true},
+              {"path":"/shooting/control/shutterbutton/manual","put":true},
+              {"path":"/shooting/control/af","post":true},
+              {"path":"/shooting/control/moviemode","get":true,"post":true},
+              {"path":"/shooting/settings","get":true},
+              {"path":"/shooting/settings/iso","put":true}
+            ]}
+            """
+        case "/ccapi/ver130/shooting/settings":
+            body = #"{"iso":{"value":"100","ability":["100","800"]},"tv":{"value":"bulb","ability":["bulb"]}}"#
+        case "/ccapi/ver130/shooting/control/moviemode": body = #"{"status":"off"}"#
+        default: body = "{}"
+        }
+        return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "application/json"], body: Data(body.utf8))
     }
     func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse { throw URLError(.unsupportedURL) }
 }

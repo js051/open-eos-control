@@ -1,6 +1,7 @@
 import Foundation
 import OpenEOSCore
 import XCTest
+import UIKit
 @testable import OpenEOSControl
 
 @MainActor
@@ -152,6 +153,115 @@ final class LiveViewStopRecoveryTests: XCTestCase {
         XCTAssertEqual(actions, ["start", "stop", "start"], "Restart must wait for App busy ownership, not only Core settlement")
     }
 
+    func testBackgroundRetiresSourceAndForegroundRequiresNewExplicitStart() async throws {
+        let peer = AppLiveViewPeer(), state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect(); await state.startLiveView()
+        state.setApplicationActive(false)
+        try await wait { !state.liveViewRetiring }
+        XCTAssertNil(state.activeLiveViewSource); XCTAssertNil(state.liveViewData)
+        XCTAssertNil(state.lastFrameAt); XCTAssertTrue(state.liveViewNeedsRestart)
+        state.setApplicationActive(true)
+        let retired = await peer.actions(); XCTAssertEqual(retired, ["start", "stop"])
+        XCTAssertTrue(state.canResumeRetiredLiveView)
+        await state.startLiveView()
+        let restarted = await peer.actions(); XCTAssertEqual(restarted, ["start", "stop", "start"])
+    }
+
+    func testBackgroundDuringObservedRecordingRetiresLocallyAndDefersCameraStop() async throws {
+        let peer = AppLiveViewPeer(), state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect(); await state.startLiveView()
+        await peer.setRecording(true); await state.refresh()
+        XCTAssertTrue(state.recordingStopRequired)
+        state.setApplicationActive(false)
+        try await wait { !state.liveViewRetiring }
+        XCTAssertNil(state.activeLiveViewSource); XCTAssertNil(state.liveViewData)
+        XCTAssertTrue(state.liveViewStopState.stopRequired)
+        XCTAssertFalse(state.canRetryLiveViewStop)
+        let deferred = await peer.actions(); XCTAssertEqual(deferred, ["start"])
+        state.setApplicationActive(true)
+        await state.startLiveView()
+        let noRestart = await peer.actions(); XCTAssertEqual(noRestart, deferred)
+        await peer.setRecording(false); await state.refresh()
+        XCTAssertFalse(state.recordingStopRequired)
+        XCTAssertTrue(state.canRetryLiveViewStop)
+        await state.retryLiveViewStop()
+        let stopped = await peer.actions(); XCTAssertEqual(stopped, ["start", "stop"])
+        XCTAssertNil(state.activeLiveViewSource)
+    }
+
+    func testBackgroundDuringPendingStartCannotPublishLateReadyOrRepeatFailedStop() async throws {
+        let peer = AppLiveViewPeer(), state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect(); await peer.holdNextStart(); await peer.failNextStop()
+        let start = Task { await state.startLiveView() }
+        try await wait { await peer.waiting }
+        state.setApplicationActive(false); state.setApplicationActive(true)
+        await peer.releaseAll(); await start.value
+        try await wait { !state.liveViewRetiring }
+        XCTAssertNil(state.activeLiveViewSource); XCTAssertTrue(state.liveViewStopState.stopUnconfirmed)
+        let actions = await peer.actions(); XCTAssertEqual(actions, ["start", "stop"])
+        await state.retryLiveViewStop()
+        let retry = await peer.actions(); XCTAssertEqual(retry, ["start", "stop", "stop"])
+        XCTAssertNil(state.activeLiveViewSource)
+    }
+
+    func testRuntimeLossClearsLastImageStopsOnceAndDoesNotLoopTerminalReader() async throws {
+        let peer = AppLiveViewPeer(), state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
+        await peer.setFrame(try XCTUnwrap(image.jpegData(compressionQuality: 1)))
+        await state.connect(); await state.startLiveView(); await state.setAutoRefresh(true)
+        try await wait { state.lastFrameAt != nil }
+        await peer.failFrames()
+        try await wait { state.liveViewNeedsRestart && !state.liveViewRetiring }
+        XCTAssertNil(state.activeLiveViewSource); XCTAssertNil(state.liveViewData)
+        XCTAssertNil(state.lastFrameAt); XCTAssertEqual(state.frameBytes, 0)
+        let actions = await peer.actions(); XCTAssertEqual(actions, ["start", "stop"])
+        let reads = await peer.frameReads
+        for _ in 0..<20 { await Task.yield() }
+        let after = await peer.frameReads; XCTAssertEqual(after, reads)
+    }
+
+    func testLateFrameFromRetiredReaderCannotOverwriteReplacementInSameCameraSession() async throws {
+        let peer = AppLiveViewPeer(), state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        func jpeg(_ color: UIColor) throws -> Data {
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+                color.setFill(); context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+            }
+            return try XCTUnwrap(image.jpegData(compressionQuality: 1))
+        }
+        let old = try jpeg(.red), replacement = try jpeg(.blue)
+        await peer.setFrame(old); await peer.holdNextFrame()
+        await state.connect(); await state.startLiveView(); await state.setAutoRefresh(true)
+        try await wait { await peer.waiting }
+        state.setApplicationActive(false)
+        try await wait { !state.liveViewRetiring }
+        await peer.setFrame(replacement)
+        state.setApplicationActive(true); await state.startLiveView()
+        try await wait { state.liveViewData == replacement }
+        await peer.releaseAll()
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(state.liveViewData, replacement)
+        XCTAssertEqual(state.activeLiveViewSource, .desktopBridgeStream)
+        let actions = await peer.actions(); XCTAssertEqual(actions, ["start", "stop", "start"])
+    }
+
+    func testCompleteJPEGEnvelopeWithoutDecodedImageIsRetiredWithVisibleStopRecovery() async throws {
+        let peer = AppLiveViewPeer(), state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await peer.setFrame(Data([0xff, 0xd8, 0xff, 0xd9])); await peer.failNextStop()
+        await state.connect(); await state.startLiveView(); await state.setAutoRefresh(true)
+        try await wait { state.liveViewStopState.stopUnconfirmed }
+        XCTAssertNil(state.liveViewData); XCTAssertNil(state.lastFrameAt)
+        XCTAssertTrue(state.canRetryLiveViewStop)
+        let actions = await peer.actions(); XCTAssertEqual(actions, ["start", "stop"])
+    }
+
     private func wait(_ predicate: () async -> Bool) async throws {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(3))
@@ -182,6 +292,15 @@ private actor AppLiveViewPeer: CameraHTTPTransport {
     private func noteStartCancellation() { startCancelled = true }
     private var gate: CheckedContinuation<Void, Never>?
     private var recorded: [String] = []
+    private var frameData: Data?
+    private var frameFailure = false
+    private var observedRecording = false
+    func setRecording(_ value: Bool) { observedRecording = value }
+    private var holdFrame = false
+    func holdNextFrame() { holdFrame = true }
+    private(set) var frameReads = 0
+    func setFrame(_ value: Data) { frameData = value; frameFailure = false }
+    func failFrames() { frameFailure = true }
     var waiting: Bool { gate != nil }
     init(owner: String = "synthetic") { self.owner = owner }
     func failNextStop() { stopFailures += 1 }
@@ -192,13 +311,19 @@ private actor AppLiveViewPeer: CameraHTTPTransport {
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
         let path = request.url!.path
         let method = request.httpMethod ?? "GET"
+        if path.hasSuffix("/liveview/frame") {
+            frameReads += 1
+            guard !frameFailure, let frameData else { throw URLError(.networkConnectionLost) }
+            if holdFrame { holdFrame = false; await withCheckedContinuation { gate = $0 } }
+            return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: frameData)
+        }
         let body: [String: Any]
         var status = 200
         if path == "/health" { body = ["ok": true, "service": "open-eos-control-bridge", "version": "0.13.0"] }
         else if path == "/v1/session" { body = ["id": owner, "engine": "ccapi"] }
         else if path == "/v1/session/\(owner)", method == "DELETE" { body = [:] }
         else if path.hasSuffix("/info") { body = ["connected": true, "model": "Synthetic Live View camera", "serial": "SYNTHETIC", "api": "fixture"] }
-        else if path.hasSuffix("/status") { body = ["connected": true, "recording": false, "liveViewStopUnconfirmed": false] }
+        else if path.hasSuffix("/status") { body = ["connected": true, "recording": observedRecording, "liveViewStopUnconfirmed": false] }
         else if path.hasSuffix("/capabilities") {
             body = ["supported": [CameraFeature.liveView.rawValue, CameraFeature.cameraSleep.rawValue, CameraFeature.sensorCleaning.rawValue], "settings": [],
                     "liveView": ["sources": ["DESKTOP_BRIDGE_STREAM"], "sizes": ["MEDIUM"], "minFps": 1, "maxFps": 30]]

@@ -186,11 +186,13 @@ final class CameraAppState: ObservableObject {
     }
     @Published private(set) var previousShutterReleaseWarnings = Set<UUID>()
     @Published private(set) var previousRecordingWarnings = Set<UUID>()
+    @Published private(set) var liveViewNeedsRestart = false
+    @Published private(set) var liveViewRetiring = false
     @Published private(set) var liveViewStopState = CameraLiveViewStopState.idle
     @Published private(set) var previousLiveViewWarnings = Set<UUID>()
     @Published private(set) var previousMaintenanceRetirementWarnings = Set<UUID>()
     private var acknowledgedPreviousLiveViewWarnings = Set<UUID>()
-    var canRetryLiveViewStop: Bool { session != nil && liveViewStopState.stopUnconfirmed && !isBusy(.liveView) && foregroundLiveViewRestartOwner == nil && foregroundMediaIOOwner == nil }
+    var canRetryLiveViewStop: Bool { !liveViewRetiring && session != nil && (liveViewStopState.stopUnconfirmed || (liveViewNeedsRestart && liveViewStopState.stopRequired && !automaticLiveViewStopBlocked)) && !isBusy(.liveView) && foregroundLiveViewRestartOwner == nil && foregroundMediaIOOwner == nil }
     private var acknowledgedPreviousRecordingWarnings = Set<UUID>()
     @Published private(set) var focusMarker: FocusMarker?
     @Published private(set) var heldAutofocusPressed = false
@@ -372,6 +374,10 @@ final class CameraAppState: ObservableObject {
     private var liveViewTask: Task<Void, Never>?
     private var pendingLiveViewStartTask: Task<Void, Never>?
     private var pendingLiveViewStartID: UUID?
+    private var liveViewLifetime = UUID()
+    private var liveViewReaderID = UUID()
+    private var liveViewRetirementTask: Task<Void, Never>?
+    private var liveViewRenderWatchTask: Task<Void, Never>?
     private var liveViewFPSUpdateTask: Task<Void, Never>?
     private var liveViewFPSUpdateRevision: UInt64 = 0
     private var eventTask: Task<Void, Never>?
@@ -736,7 +742,8 @@ final class CameraAppState: ObservableObject {
                             username: username,
                             password: password,
                             rtpDestinationAddress: rtpAddress,
-                            rtpSessionFactory: rtpAddress == nil ? nil : rtpController
+                            rtpSessionFactory: rtpAddress == nil ? nil : rtpController,
+                            decodedJPEGValidator: { IOSLiveViewJPEGDecoder.validates($0) }
                         )
                     )
                 case .desktopBridge:
@@ -974,6 +981,11 @@ final class CameraAppState: ObservableObject {
         recordingStopReviewOwner = nil
         recordingObservation = .unavailable
         recordingOutcomes = []
+        liveViewLifetime = UUID()
+        liveViewRetirementTask = nil // Captured old-session cleanup continues without touching replacement UI.
+        liveViewRetiring = false
+        liveViewNeedsRestart = false
+        liveViewRenderWatchTask?.cancel(); liveViewRenderWatchTask = nil
         pendingLiveViewStartTask?.cancel()
         pendingLiveViewStartTask = nil
         pendingLiveViewStartID = nil
@@ -1164,11 +1176,13 @@ final class CameraAppState: ObservableObject {
 
     func setAutoRefresh(_ enabled: Bool) async {
         autoRefresh = enabled
+        liveViewRenderWatchTask?.cancel(); liveViewRenderWatchTask = nil
         if !enabled { invalidateCameraFocusInfo() }
         let mayRender = enabled && applicationActive && !shutterReleaseRequired && !maintenanceControlsPaused
         rtpController.setRenderingEnabled(mayRender)
         if mayRender {
             if activeLiveViewSource == .ccapiRTP {
+                beginLiveViewRenderWatch()
                 return
             }
             if let session, activeLiveViewSource != nil {
@@ -1203,17 +1217,20 @@ final class CameraAppState: ObservableObject {
             cancelMaintenance()
             foregroundMedia.stop(reason: .background)
             stopLiveViewLoop()
-        } else if let session {
-            resumeLiveViewAfterBulb(session: session, generation: sessionGeneration)
+            retireLiveView(reason: nil)
         }
+        // Foreground never resumes a potentially terminal reader. The visible Start
+        // action is enabled only after this exact source's Stop has settled.
     }
 
     func startLiveView() async {
-        guard !maintenanceControlsPaused, applicationActive, let session, supports(.liveView), liveViewTemperatureAllowed,
-              !liveViewStopState.stopUnconfirmed, begin(.liveView) else { return }
+        guard !maintenanceControlsPaused, applicationActive, !liveViewRetiring, activeLiveViewSource == nil,
+              let session, supports(.liveView), liveViewTemperatureAllowed,
+              !liveViewStopState.stopRequired, !liveViewStopState.stopUnconfirmed, begin(.liveView) else { return }
         let generation = sessionGeneration
         let id = UUID()
         pendingLiveViewStartID = id
+        liveViewLifetime = id
         let task = Task { await self.performLiveViewStart(session: session, generation: generation, id: id) }
         pendingLiveViewStartTask = task
         await withTaskCancellationHandler {
@@ -1238,7 +1255,10 @@ final class CameraAppState: ObservableObject {
             let nativeURL = await session.currentNativeLiveViewSourceURL()
             let stopState = await session.liveViewStopState()
             guard generation == sessionGeneration else { return }
-            if Task.isCancelled {
+            if Task.isCancelled || !applicationActive || liveViewLifetime != id || pendingLiveViewStartID != id {
+                // Retirement owns cleanup when present; never hide its failed Stop
+                // by sending a second retry from this cancelled App start.
+                if liveViewRetiring || liveViewLifetime != id { return }
                 await session.stopLiveView()
                 let cancelledState = await session.liveViewStopState()
                 guard generation == sessionGeneration else { return }
@@ -1248,6 +1268,11 @@ final class CameraAppState: ObservableObject {
             }
             guard !shutterReleaseRequired else { return }
             activeLiveViewSource = source
+            if source == .ccapiRTP, let failure = rtpController.currentVideoFailure() {
+                retireLiveView(reason: failure)
+                return
+            }
+            liveViewNeedsRestart = false
             startCameraFocusInfoLoop(session: session)
             liveViewStopState = stopState
             if let activeSize {
@@ -1262,6 +1287,7 @@ final class CameraAppState: ObservableObject {
                 frameContentType = "video/H264"
                 frameSourceURL = nativeURL
                 rtpController.setRenderingEnabled(autoRefresh && applicationActive)
+                beginLiveViewRenderWatch()
             } else {
                 rtpAudioRequested = false
                 rtpAudioStatus = .inactive
@@ -1270,16 +1296,17 @@ final class CameraAppState: ObservableObject {
             }
         } catch {
             let stopState = await session.liveViewStopState()
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration, liveViewLifetime == id else { return }
             liveViewStopState = stopState
-            if stopState.stopUnconfirmed { activeLiveViewSource = nil; stopLiveViewLoop() }
-            record(error)
+            clearLiveViewPresentation()
+            liveViewNeedsRestart = true
+            if !CameraConnectionFailureReason.isCancellation(error) { record(error) }
         }
     }
 
     func restartLiveView() async {
-        guard !maintenanceControlsPaused else { return }
-        if liveViewStopState.stopUnconfirmed { await retryLiveViewStop(); return }
+        guard !maintenanceControlsPaused, !liveViewRetiring else { return }
+        if liveViewStopState.stopUnconfirmed || (liveViewNeedsRestart && liveViewStopState.stopRequired) { await retryLiveViewStop(); return }
         guard !shutterReleaseRequired, foregroundMediaIOOwner == nil,
               foregroundLiveViewRestartOwner == nil else { return }
         let restartOwner = UUID()
@@ -1291,7 +1318,8 @@ final class CameraAppState: ObservableObject {
         let pendingStart = pendingLiveViewStartTask
         // Own the interval before this App task reaches the Core client, too.
         pendingStart?.cancel()
-        stopLiveViewLoop()
+        liveViewLifetime = UUID()
+        clearLiveViewPresentation()
         if let session {
             do {
                 try await session.retryLiveViewStop()
@@ -1320,7 +1348,7 @@ final class CameraAppState: ObservableObject {
         operationRevision &+= 1
         let generation = sessionGeneration
         defer { end(.liveView, generation: generation) }
-        stopLiveViewLoop()
+        clearLiveViewPresentation()
         do {
             try await session.retryLiveViewStop()
             let stopState = await session.liveViewStopState()
@@ -1328,12 +1356,89 @@ final class CameraAppState: ObservableObject {
             liveViewStopState = stopState
             activeLiveViewSource = nil
             nativeLiveViewSize = nil
+            liveViewNeedsRestart = true
             lastError = nil
         } catch {
             let stopState = await session.liveViewStopState()
             guard generation == sessionGeneration else { return }
             liveViewStopState = stopState
             record(error)
+        }
+    }
+
+    var canResumeRetiredLiveView: Bool {
+        liveViewNeedsRestart && !liveViewRetiring && !liveViewStopState.stopRequired && !liveViewStopState.stopUnconfirmed
+            && applicationActive && !maintenanceControlsPaused && !shutterReleaseRequired
+            && busyOperations.isEmpty && foregroundMediaIOOwner == nil && foregroundLiveViewRestartOwner == nil
+            && liveViewTemperatureAllowed && session != nil
+    }
+
+    private func clearLiveViewPresentation() {
+        stopLiveViewLoop()
+        liveViewRenderWatchTask?.cancel(); liveViewRenderWatchTask = nil
+        stopCameraFocusInfoLoop()
+        rtpController.setRenderingEnabled(false)
+        rtpController.retireDelivery()
+        rtpAudioRequested = false; rtpAudioStatus = .inactive
+        activeLiveViewSource = nil; nativeLiveViewSize = nil; liveViewData = nil
+        resetLiveViewMetrics()
+    }
+
+    private var automaticLiveViewStopBlocked: Bool {
+        shutterReleaseRequired || heldAutofocusOwner != nil || maintenanceTask != nil
+            || maintenanceControlsPaused || foregroundMediaIOOwner != nil
+            || recordingStopRequired || busyOperations.contains(.recording) || recordingActiveAttemptID != nil
+    }
+
+    /// Failure/background ends this view. Local retirement is immediate; physical
+    /// shutter/AF/maintenance ownership still precedes any automatic camera Stop.
+    private func retireLiveView(reason: String?) {
+        guard let session, !liveViewRetiring,
+              activeLiveViewSource != nil || pendingLiveViewStartTask != nil else { return }
+        let generation = sessionGeneration
+        let retirement = UUID()
+        liveViewLifetime = retirement
+        let pendingStart = pendingLiveViewStartTask
+        let deferStop = automaticLiveViewStopBlocked
+        pendingStart?.cancel()
+        liveViewRetiring = true
+        liveViewNeedsRestart = true
+        clearLiveViewPresentation()
+        if let reason { lastError = reason }
+        liveViewRetirementTask = Task { [weak self] in
+            await session.retireLiveViewReader()
+            if !deferStop {
+                do { try await session.retryLiveViewStop() } catch { /* Core retains exact Stop responsibility. */ }
+            }
+            await pendingStart?.value
+            let stop = await session.liveViewStopState()
+            guard let self, self.sessionGeneration == generation, self.liveViewLifetime == retirement else { return }
+            self.liveViewStopState = stop
+            self.liveViewRetiring = false
+            self.liveViewRetirementTask = nil
+        }
+    }
+
+    // Detect absent/unavailable output, not freshness of retained renderer pixels.
+    // Input inactivity and decoder/listener failures are independently bounded.
+    private func beginLiveViewRenderWatch() {
+        liveViewRenderWatchTask?.cancel()
+        guard autoRefresh, applicationActive, activeLiveViewSource == .ccapiRTP else { return }
+        let generation = sessionGeneration, lifetime = liveViewLifetime
+        liveViewRenderWatchTask = Task { [weak self] in
+            var lastProgress = ContinuousClock.now
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 500_000_000) } catch { return }
+                guard let self, self.sessionGeneration == generation, self.liveViewLifetime == lifetime,
+                      self.applicationActive, self.autoRefresh, self.activeLiveViewSource == .ccapiRTP,
+                      !self.maintenanceControlsPaused, !self.shutterReleaseRequired || self.heldAutofocusPressed else { return }
+                if let at = self.lastFrameAt, Date().timeIntervalSince(at) < 5,
+                   self.rtpController.hasUsableRendererOutput() { lastProgress = .now }
+                if ContinuousClock.now - lastProgress >= .seconds(5) {
+                    self.retireLiveView(reason: NSLocalizedString("live_view_render_stalled", comment: ""))
+                    return
+                }
+            }
         }
     }
 
@@ -4543,6 +4648,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func begin(_ operation: CameraOperation) -> Bool {
+        if liveViewRetiring, operation != .refresh { return false }
         if maintenanceTask != nil && !(operation == .liveView && maintenanceRestoreOwner == maintenanceActiveID) { return false }
         if maintenanceControlsPaused && ![.refresh, .liveView, .maintenance, .power].contains(operation) { return false }
         if shootingSettingTask != nil, operation == .directory || operation == .setting || operation == .refresh { return false }
@@ -4634,8 +4740,9 @@ final class CameraAppState: ObservableObject {
 
     private func beginLiveViewLoop(session: CameraSession) {
         guard !maintenanceControlsPaused, applicationActive, !shutterReleaseRequired || heldAutofocusPressed else { return }
-        let generation = sessionGeneration
+        let generation = sessionGeneration, lifetime = liveViewLifetime
         stopLiveViewLoop()
+        let reader = liveViewReaderID
         resetLiveViewMetrics()
         liveViewTask = Task { [weak self] in
             guard let self else { return }
@@ -4644,15 +4751,27 @@ final class CameraAppState: ObservableObject {
                 let started = Date().timeIntervalSinceReferenceDate
                 do {
                     let frame = try await session.liveViewFrame(cacheKey: cacheKey)
-                    guard generation == sessionGeneration, !Task.isCancelled,
-                          applicationActive, !shutterReleaseRequired || heldAutofocusPressed else { break }
+                    guard generation == sessionGeneration, lifetime == liveViewLifetime, reader == liveViewReaderID,
+                          !Task.isCancelled, applicationActive, !shutterReleaseRequired || heldAutofocusPressed else { break }
+                    guard IOSLiveViewJPEGDecoder.validates(frame.data) else {
+                        throw CCAPIError.invalidResponse("Live View JPEG could not be decoded.")
+                    }
+                    let policy = CameraLiveViewLifecyclePolicy.evaluate([
+                        "sameOwner": generation == sessionGeneration, "sameAttempt": lifetime == liveViewLifetime && reader == liveViewReaderID,
+                        "cancelled": Task.isCancelled, "retired": liveViewRetiring,
+                        "foregroundRequired": true, "foreground": applicationActive,
+                        "startAdmitted": true, "startAcknowledged": activeLiveViewSource != nil,
+                        "stopEvidence": liveViewStopState.stopUnconfirmed ? "unconfirmed" : "pending",
+                        "sourceMode": "explicit", "terminal": false, "frameEvidence": "decoded-frame"])
+                    guard policy["canPublishDecoded"] == true else { break }
                     cacheKey &+= 1
                     liveViewData = frame.data
                     frameBytes = frame.data.count
                     frameContentType = frame.contentType
                     frameSourceURL = frame.sourceURL
                     let activeSize = await session.currentLiveViewSize()
-                    guard generation == sessionGeneration, !Task.isCancelled else { break }
+                    guard generation == sessionGeneration, lifetime == liveViewLifetime, reader == liveViewReaderID,
+                          !Task.isCancelled else { break }
                     if let activeSize, activeSize != liveViewSize {
                         liveViewSize = activeSize
                         defaults.set(activeSize.rawValue, forKey: DefaultsKey.liveViewSize)
@@ -4662,12 +4781,9 @@ final class CameraAppState: ObservableObject {
                     observedFPS = rateTracker.record(now.timeIntervalSinceReferenceDate)
                     if lastError?.contains("Live View") == true { lastError = nil }
                 } catch {
-                    if Task.isCancelled || generation != sessionGeneration { break }
-                    let stopState = await session.liveViewStopState()
-                    guard generation == sessionGeneration else { break }
-                    liveViewStopState = stopState
-                    record(error)
-                    if stopState.stopUnconfirmed { activeLiveViewSource = nil; break }
+                    if Task.isCancelled || generation != sessionGeneration || lifetime != liveViewLifetime || reader != liveViewReaderID { break }
+                    retireLiveView(reason: error.localizedDescription)
+                    break // Terminal reader errors never silently loop/reopen the same session.
                 }
 
                 let elapsed = Date().timeIntervalSinceReferenceDate - started
@@ -4683,6 +4799,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func stopLiveViewLoop() {
+        liveViewReaderID = UUID()
         invalidateCameraFocusInfo()
         liveViewTask?.cancel()
         liveViewTask = nil
@@ -4874,6 +4991,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func pauseLiveViewForBulb() {
+        liveViewRenderWatchTask?.cancel(); liveViewRenderWatchTask = nil
         cancelLiveViewFPSUpdate()
         stopLiveViewLoop()
         rtpController.setRenderingEnabled(false)
@@ -4886,7 +5004,7 @@ final class CameraAppState: ObservableObject {
         guard autoRefresh, activeLiveViewSource != nil else { return }
         if activeLiveViewSource != .ccapiRTP {
             beginLiveViewLoop(session: session)
-        }
+        } else { beginLiveViewRenderWatch() }
     }
 
     private func resetLiveViewMetrics() {
@@ -4914,7 +5032,7 @@ final class CameraAppState: ObservableObject {
             nativeLiveViewSize = CGSize(width: CGFloat(width), height: CGFloat(height))
         case let .failed(message):
             guard activeLiveViewSource == .ccapiRTP else { return }
-            lastError = message
+            retireLiveView(reason: message)
         }
     }
 

@@ -350,6 +350,11 @@ enum CameraSession: Sendable {
         }
     }
 
+    /// Local receiver teardown only. Never changes the original camera Stop duty.
+    func retireLiveViewReader() async {
+        if case let .ccapi(client) = self { await client.retireLiveViewReader() }
+    }
+
     func retryLiveViewStop() async throws {
         switch self {
         case let .ccapi(client): try await client.retryLiveViewStop()

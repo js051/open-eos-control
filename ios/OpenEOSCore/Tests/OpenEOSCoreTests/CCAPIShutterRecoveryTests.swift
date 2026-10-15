@@ -50,6 +50,7 @@ final class CCAPIShutterRecoveryTests: XCTestCase {
 
         let after = await transport.requests()
         XCTAssertEqual(after.filter(\.isMutation), before.filter(\.isMutation))
+        XCTAssertEqual(after, before, "Unconfirmed release must block Live View before startup or first-frame GET")
         await assertUnknown(client)
         let status = try await client.status()
         XCTAssertEqual(status.shutterReleaseUnconfirmed, true)

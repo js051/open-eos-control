@@ -117,6 +117,8 @@ public protocol CameraHTTPTransport: Sendable {
     func sendShootingSetting(_ request: URLRequest) async throws -> CameraHTTPResponse
     func sendCaptureConfiguration(_ request: URLRequest) async throws -> CameraHTTPResponse
     func sendMaintenance(_ request: URLRequest) async throws -> CameraHTTPResponse
+    func sendMaintenanceLiveViewFrame(_ request: URLRequest) async throws -> CameraHTTPResponse
+    func sendLiveViewFrame(_ request: URLRequest) async throws -> CameraHTTPResponse
     func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse
     func sendRecordingStatus(_ request: URLRequest) async throws -> CameraHTTPResponse
     func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse
@@ -154,6 +156,16 @@ public extension CameraHTTPTransport {
     /// One bounded maintenance exchange; never replay a command after failure.
     func sendMaintenance(_ request: URLRequest) async throws -> CameraHTTPResponse {
         try await send(request)
+    }
+
+    func sendLiveViewFrame(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        guard request.httpMethod == "GET", request.httpBody == nil else { throw CCAPIError.invalidResponse("Live View frames must be read-only.") }
+        return try await send(request)
+    }
+
+    func sendMaintenanceLiveViewFrame(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        guard request.httpMethod == "GET", request.httpBody == nil else { throw CCAPIError.invalidResponse("Live View readiness must be read-only.") }
+        return try await sendMaintenance(request)
     }
 
     func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse {
@@ -332,6 +344,19 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
 
     public func sendMaintenance(_ request: URLRequest) async throws -> CameraHTTPResponse {
         try await CameraHTTPMaintenanceTask(configuration: streamConfiguration).run(request)
+    }
+
+    public func sendLiveViewFrame(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        guard request.httpMethod == "GET", request.httpBody == nil else { throw CCAPIError.invalidResponse("Live View frames must be read-only.") }
+        // Reuse the existing one-request/no-replay reader with a frame-sized wire cap.
+        return try await CameraHTTPMaintenanceTask(configuration: streamConfiguration,
+            maximumResponseBytes: CCAPIMultipartLiveView.maximumFrameBytes).run(request)
+    }
+
+    public func sendMaintenanceLiveViewFrame(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        guard request.httpMethod == "GET", request.httpBody == nil else { throw CCAPIError.invalidResponse("Live View readiness must be read-only.") }
+        return try await CameraHTTPMaintenanceTask(configuration: streamConfiguration,
+            maximumResponseBytes: CCAPIMultipartLiveView.maximumFrameBytes).run(request)
     }
 
     public func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse {

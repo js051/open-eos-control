@@ -101,7 +101,7 @@ private struct ShutterReleaseRecoveryView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     var body: some View {
-        if camera.shutterReleaseRequired || camera.previousShutterReleaseUnconfirmed || !camera.previousRecordingWarnings.isEmpty || camera.liveViewStopState.stopUnconfirmed || !camera.previousLiveViewWarnings.isEmpty || !camera.previousMaintenanceRetirementWarnings.isEmpty {
+        if camera.liveViewNeedsRestart || camera.shutterReleaseRequired || camera.previousShutterReleaseUnconfirmed || !camera.previousRecordingWarnings.isEmpty || camera.liveViewStopState.stopUnconfirmed || !camera.previousLiveViewWarnings.isEmpty || !camera.previousMaintenanceRetirementWarnings.isEmpty {
             VStack(spacing: 8) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
@@ -114,8 +114,13 @@ private struct ShutterReleaseRecoveryView: View {
                                     .font(.subheadline)
                             }
                         }
-                        if camera.liveViewStopState.stopUnconfirmed {
-                            Text("live_view_stop_unconfirmed")
+                        if camera.liveViewNeedsRestart && !camera.liveViewStopState.stopRequired && !camera.liveViewStopState.stopUnconfirmed {
+                            Text(camera.liveViewRetiring ? "live_view_retiring" : "live_view_restart_required")
+                                .font(.subheadline)
+                                .accessibilityIdentifier("live-view-restart-required")
+                        }
+                        if camera.liveViewStopState.stopUnconfirmed || (camera.liveViewNeedsRestart && camera.liveViewStopState.stopRequired) {
+                            Text(camera.liveViewStopState.stopUnconfirmed ? "live_view_stop_unconfirmed" : "live_view_stop_pending")
                                 .font(.headline)
                                 .accessibilityIdentifier("live-view-stop-warning")
                         }
@@ -158,11 +163,17 @@ private struct ShutterReleaseRecoveryView: View {
                 }
                 .frame(maxHeight: verticalSizeClass == .compact ? 72 : 130)
                 .accessibilityIdentifier("shutter-recovery-details")
-                if camera.liveViewStopState.stopUnconfirmed {
+                if camera.liveViewStopState.stopUnconfirmed || (camera.liveViewNeedsRestart && camera.liveViewStopState.stopRequired) {
                     Button("retry_live_view_stop") { Task { await camera.retryLiveViewStop() } }
                         .buttonStyle(.borderedProminent)
                         .disabled(!camera.canRetryLiveViewStop)
                         .accessibilityIdentifier("retry-live-view-stop-button")
+                }
+                if camera.liveViewNeedsRestart && !camera.liveViewStopState.stopRequired && !camera.liveViewStopState.stopUnconfirmed {
+                    Button("live_view_start_again") { Task { await camera.startLiveView() } }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!camera.canResumeRetiredLiveView)
+                        .accessibilityIdentifier("live-view-start-again-button")
                 }
                 if camera.shutterReleaseRequired {
                     Button {

@@ -1018,3 +1018,9 @@
 "recording_observed_active" = "即時觀測為錄影中";
 "recording_observed_stopped" = "即時觀測為已停止";
 "recording_observed_unavailable" = "無法取得";
+
+"live_view_retiring" = "已停止本機即時影像，正在等待相機確認 Stop。";
+"live_view_restart_required" = "即時影像已結束，準備好後請重新開始。";
+"live_view_start_again" = "重新開始即時影像";
+"live_view_render_stalled" = "即時影像未產生可用的顯示輸出，請確認 Stop 後再重新開始。";
+"live_view_stop_pending" = "即時影像仍需清理。請先釋放使用中的相機控制，再重試 Stop。";

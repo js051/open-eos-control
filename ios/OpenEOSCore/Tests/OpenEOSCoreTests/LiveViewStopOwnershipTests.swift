@@ -28,7 +28,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
             try await client.retryLiveViewStop()
             let after = await client.liveViewStopState()
             XCTAssertEqual(after, .idle)
-            let requests = await peer.requests()
+            let requests = await peer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
             XCTAssertEqual(requests.map { $0.httpMethod! }, ["GET", "POST", delete ? "DELETE" : "POST", delete ? "DELETE" : "POST"])
             XCTAssertEqual(requests[2].url, requests[3].url)
             XCTAssertEqual(requests[2].httpBody, requests[3].httpBody)
@@ -55,7 +55,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
         await peer.plan("DELETE", root + "/multipart", status: 503)
         await peer.plan("DELETE", root)
         try await client.retryLiveViewStop()
-        let requests = await peer.requests()
+        let requests = await peer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
         XCTAssertEqual(requests.filter { $0.httpMethod == "POST" }.count, 1, "No JPEG fallback or replay")
         let final = await client.liveViewStopState()
         XCTAssertEqual(final, .idle, "Authoritative general stop succeeds despite reader 503")
@@ -75,7 +75,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
         XCTAssertTrue(closed)
         await peer.plan("POST", root + "/rtp")
         try await client.retryLiveViewStop()
-        let requests = await peer.requests()
+        let requests = await peer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
         XCTAssertEqual(requests.count, 5)
         let payloads = try requests.suffix(2).map { try JSONSerialization.jsonObject(with: XCTUnwrap($0.httpBody)) as? [String: String] }
         XCTAssertEqual(payloads, [["action": "stop", "ipaddress": ""], ["action": "stop", "ipaddress": ""]])
@@ -98,7 +98,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
             let state = await client.liveViewStopState()
             XCTAssertTrue(state.stopRequired)
             XCTAssertTrue(state.stopUnconfirmed)
-            let requests = await peer.requests()
+            let requests = await peer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
             XCTAssertEqual(requests.count, 3)
         }
     }
@@ -125,7 +125,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
         try await stop.value
         try await secondStop.value
         _ = await start.result
-        let requests = await peer.requests()
+        let requests = await peer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
         XCTAssertEqual(requests.filter { $0.httpMethod == "DELETE" }.count, 1)
         let state = await client.liveViewStopState()
         XCTAssertEqual(state, .idle)
@@ -146,7 +146,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
         do { try await start.value; XCTFail("Late allocation must be retired") } catch { XCTAssertTrue(error is CancellationError) }
         let closed = await native.closed
         let state = await client.liveViewStopState()
-        let requests = await peer.requests()
+        let requests = await peer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
         XCTAssertTrue(closed)
         XCTAssertEqual(state, .idle)
         XCTAssertEqual(requests.count, 2, "No camera Start was dispatched, so there is no camera Stop")
@@ -172,7 +172,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
         let replacement = try direct(replacementPeer)
         try await replacement.startLiveView(.init(source: .ccapiJPEGPolling))
         await client.stopLiveView()
-        let replacementRequests = await replacementPeer.requests()
+        let replacementRequests = await replacementPeer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
         XCTAssertEqual(replacementRequests.count, 2)
         let replacementSource = await replacement.currentLiveViewSource()
         XCTAssertEqual(replacementSource, .ccapiJPEGPolling)
@@ -195,7 +195,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
         catch { XCTAssertEqual(error as? DesktopBridgeError, .liveViewStopUnconfirmed) }
         await peer.plan("POST", stopPath, body: #"{"active":false,"liveViewStopUnconfirmed":false}"#)
         try await client.retryLiveViewStop()
-        let requests = await peer.requests()
+        let requests = await peer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
         XCTAssertEqual(requests.suffix(2).map { $0.url!.path }, [stopPath, stopPath])
         XCTAssertEqual(requests.filter { $0.url!.path == startPath }.count, 1)
         let final = await client.liveViewStopState()
@@ -221,7 +221,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
         await peer.release("start")
         await close.value
         do { try await start.value; XCTFail("Closing Start cannot install") } catch {}
-        let requests = await peer.requests()
+        let requests = await peer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
         XCTAssertEqual(requests.suffix(2).map { $0.url!.path }, ["/v1/session/synthetic-old/liveview/stop", "/v1/session/synthetic-old"])
         await bridgeOpen(peer, id: "synthetic-new")
         try await client.initialize()
@@ -278,7 +278,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
         try await client.startLiveView(.init(source: .auto))
         let source = await client.currentLiveViewSource()
         XCTAssertEqual(source, .ccapiJPEGPolling)
-        let requests = await peer.requests()
+        let requests = await peer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
         XCTAssertEqual(requests.map { $0.httpMethod! }, ["GET", "POST", "GET", "DELETE", "DELETE", "POST"])
     }
 
@@ -311,7 +311,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
                         XCTFail("Maintenance must require confirmed Stop")
                     } catch { XCTAssertEqual(error as? CCAPIError, .liveViewStopUnconfirmed) }
                 }
-                let requests = await peer.requests()
+                let requests = await peer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
                 XCTAssertFalse(requests.contains { $0.url!.path.contains("sensorcleaning") || $0.url!.path.contains("sensor-cleaning") || $0.url!.path.contains("power/sleep") || $0.url!.path.contains("autopoweroff") })
             }
         }
@@ -343,7 +343,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
                 try await client.cleanSensor(autoPowerOff: false)
                 try await client.startLiveView(.init(source: .ccapiJPEGPolling))
             }
-            let requests = await peer.requests()
+            let requests = await peer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
             XCTAssertEqual(requests.suffix(3).map { $0.httpMethod! }, bridge ? ["POST", "POST", "POST"] : ["DELETE", "POST", "POST"])
         }
     }
@@ -413,7 +413,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
                 XCTAssertTrue(state.stopUnconfirmed)
                 do { try await client.startLiveView(); XCTFail("Status-adopted responsibility cannot be overwritten by Start") }
                 catch { XCTAssertEqual(error as? DesktopBridgeError, .liveViewStopUnconfirmed) }
-                let requests = await peer.requests()
+                let requests = await peer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
                 XCTAssertFalse(requests.contains { $0.url!.path.hasSuffix("/liveview/start") })
             }
         }
@@ -486,6 +486,10 @@ private actor LiveViewOwnershipPeer: CameraHTTPTransport {
     func releaseAll() { drained = true; let pending = gates; gates.removeAll(); pending.values.forEach { $0.resume() } }
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
         recorded.append(request)
+        if request.httpMethod == "GET", request.url?.path.hasSuffix("/liveview/flip") == true {
+            return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"],
+                body: Data([0xff, 0xd8, 1, 0xff, 0xd9]))
+        }
         guard !steps.isEmpty else { throw URLError(.unsupportedURL) }
         let step = steps.removeFirst()
         guard request.httpMethod == step.method, request.url?.path == step.path else {
@@ -502,6 +506,7 @@ private actor OwnershipRTPSession: CCAPIRTPSession {
     nonisolated let sourceURL = URL(string: "rtp://192.0.2.2:12000")!
     private(set) var closed = false
     func start() async throws {}
+    func waitUntilReady() async throws { try Task.checkCancellation() }
     func setTargetFPS(_ fps: Int) async {}
     func close() async { closed = true }
 }
