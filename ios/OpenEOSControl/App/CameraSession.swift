@@ -358,6 +358,7 @@ enum CameraSession: Sendable {
     }
 
     func beginMediaPlayback(_ item: CameraMediaItem) async throws -> CameraMediaPlaybackStream {
+        guard CameraMediaType.classify(item) == .video else { throw URLError(.unsupportedURL) }
         let playbackItem: CameraMediaItem
         if item.sizeBytes?.isPositive == true {
             playbackItem = item
@@ -366,10 +367,20 @@ enum CameraSession: Sendable {
                 playbackItem = try await mediaInfo(item)
             } catch is CancellationError {
                 throw CancellationError()
+            } catch let error as CameraMediaMetadataError {
+                throw error
+            } catch let error as DesktopBridgeError {
+                // A malformed/mismatched metadata reply must not silently turn
+                // into a playback allocation using stale listing evidence.
+                if case .invalidResponse = error { throw error }
+                playbackItem = item
             } catch {
                 playbackItem = item
             }
         }
+        guard item.id.utf8.elementsEqual(playbackItem.id.utf8),
+              item.name.utf8.elementsEqual(playbackItem.name.utf8),
+              CameraMediaType.classify(playbackItem) == .video else { throw URLError(.unsupportedURL) }
         switch self {
         case let .ccapi(client):
             return CameraMediaPlaybackStream(item: playbackItem, backend: .ccapi(client))

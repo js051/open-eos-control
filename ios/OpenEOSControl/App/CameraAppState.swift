@@ -339,7 +339,7 @@ final class CameraAppState: ObservableObject {
     var canOpenLatestMedia: Bool {
         guard let item = latestMediaItem, !isPreview else { return false }
         if mediaIsVideo(item) { return supports(.mediaDownload) }
-        return item.previewAvailable && supports(.mediaPreview)
+        return mediaIsPhoto(item) && item.previewAvailable && supports(.mediaPreview)
     }
     var latestMediaIsPrevious: Bool { latestMediaItem != nil && pendingCaptureReview != nil }
     var canRetryCaptureMediaReview: Bool {
@@ -349,7 +349,7 @@ final class CameraAppState: ObservableObject {
     }
     var canRetryMediaPreview: Bool {
         guard let item = mediaPreviewItem else { return false }
-        return !mediaIsVideo(item) && item.previewAvailable && supports(.mediaPreview)
+        return mediaIsPhoto(item) && item.previewAvailable && supports(.mediaPreview)
             && !isPreview && !mediaPreviewLoading && !isBusy(.media) && !shutterReleaseRequired
     }
 
@@ -2136,12 +2136,16 @@ final class CameraAppState: ObservableObject {
         guard generation == latestMediaGeneration, !Task.isCancelled else { return }
         latestMediaItem = item
         latestMediaThumbnail = nil
-        latestMediaThumbnailLoading = supports(.mediaThumbnail)
-        guard supports(.mediaThumbnail) else { return }
+        let visual = mediaIsPhoto(item) || mediaIsVideo(item)
+        latestMediaThumbnailLoading = visual && supports(.mediaThumbnail)
+        guard visual, supports(.mediaThumbnail) else { return }
         do {
             let thumbnail = try await session.mediaThumbnail(item)
             guard generation == latestMediaGeneration, !Task.isCancelled else { return }
-            latestMediaThumbnail = thumbnail.data.isEmpty ? nil : thumbnail.data
+            if let current = latestMediaItem, mediaItemIdentity(current) == mediaItemIdentity(item),
+               mediaIsPhoto(current) || mediaIsVideo(current) {
+                latestMediaThumbnail = thumbnail.data.isEmpty ? nil : thumbnail.data
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -2259,6 +2263,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func loadMediaThumbnail(_ item: CameraMediaItem) async {
+        guard mediaIsPhoto(item) || mediaIsVideo(item) else { return }
         if mediaThumbnailCache.touch(item.id) {
             mediaThumbnails = mediaThumbnailCache.values
             return
@@ -2284,7 +2289,7 @@ final class CameraAppState: ObservableObject {
             let thumbnail = try await session.mediaThumbnail(item)
             guard
                 generation == mediaThumbnailGeneration,
-                mediaItems.contains(where: { $0.id == item.id })
+                mediaItems.contains(where: { $0.id == item.id && (mediaIsPhoto($0) || mediaIsVideo($0)) })
             else { return }
             guard !thumbnail.data.isEmpty else {
                 unavailableMediaThumbnailIDs.insert(item.id)
@@ -2304,7 +2309,7 @@ final class CameraAppState: ObservableObject {
     func openMediaPreview(_ item: CameraMediaItem) async {
         let video = mediaIsVideo(item)
         guard !isPreview, let session,
-              video ? supports(.mediaDownload) : item.previewAvailable && supports(.mediaPreview),
+              video ? supports(.mediaDownload) : mediaIsPhoto(item) && item.previewAvailable && supports(.mediaPreview),
               begin(.media) else { return }
         if case .desktopBridge = session, mediaLibraryLoading {
             invalidateMediaLibraryLoad(status: .cancelled)
@@ -2350,7 +2355,8 @@ final class CameraAppState: ObservableObject {
                     imageTask.cancel()
                 }
                 try Task.checkCancellation()
-                guard generation == sessionGeneration, mediaPreviewToken == token else { return }
+                guard generation == sessionGeneration, mediaPreviewToken == token,
+                      let current = mediaPreviewItem, mediaIsPhoto(current) else { return }
                 mediaPreviewData = preview.data
             }
             lastError = nil
@@ -4180,8 +4186,25 @@ final class CameraAppState: ObservableObject {
         let identity = mediaItemIdentity(item)
         refreshSelectedMediaMetadata(from: [item])
         mediaItems = mediaItems.map { mediaItemIdentity($0) == identity ? item : $0 }
-        if latestMediaItem.map(mediaItemIdentity) == identity { latestMediaItem = item }
-        if mediaPreviewItem.map(mediaItemIdentity) == identity { mediaPreviewItem = item }
+        if !mediaIsPhoto(item) && !mediaIsVideo(item) {
+            mediaThumbnailCache.removeValue(for: item.id)
+            mediaThumbnails = mediaThumbnailCache.values
+        }
+        if latestMediaItem.map(mediaItemIdentity) == identity {
+            latestMediaItem = item
+            if !mediaIsPhoto(item) && !mediaIsVideo(item) { latestMediaThumbnail = nil }
+        }
+        if mediaPreviewItem.map(mediaItemIdentity) == identity {
+            mediaPreviewItem = item
+            if !mediaIsPhoto(item) {
+                mediaPreviewData = nil
+                mediaPreviewImageTask?.cancel()
+            }
+            if !mediaIsVideo(item) {
+                mediaVideoPlayback?.close()
+                mediaVideoPlayback = nil
+            }
+        }
     }
 
     private func resetMediaThumbnails() {

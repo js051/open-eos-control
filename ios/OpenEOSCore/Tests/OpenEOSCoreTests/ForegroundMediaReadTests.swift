@@ -119,7 +119,7 @@ final class ForegroundMediaReadTests: XCTestCase {
         let requests = await transport.base.requests()
         XCTAssertEqual(requests.map(\.path), ["/ccapi", "\(root)?kind=number", "\(root)?page=1"])
 
-        let item = CameraMediaItem(id: itemPath, name: "IMG.JPG", kind: "image", sizeBytes: 999)
+        let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: 999, contentType: "image/jpeg")
         await transport.base.enqueueJSON(path: "\(itemPath)?kind=info", body: #"{"filesize":9,"filesize":4}"#)
         await assertFailure(.invalidInventory) { try await client.foregroundMediaInfo(item) }
         let metadataRequests = await transport.base.requests()
@@ -216,7 +216,7 @@ final class ForegroundMediaReadTests: XCTestCase {
 
     func testFreshSizeNeverFallsBackToListedMetadata() async throws {
         let (client, transport) = try await makeClient()
-        let item = CameraMediaItem(id: itemPath, name: "IMG.JPG", kind: "image", sizeBytes: 999)
+        let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: 999, contentType: "image/jpeg")
         for body in ["{}", #"{"filesize":0}"#, #"{"filesize":-1}"#, #"{"filesize":true}"#,
                      #"{"filesize":"4 bytes"}"#, #"{"filesize":"4"}"#, #"{"filesize":4.5}"#,
                      #"{"filesize":9223372036854775808}"#] {
@@ -226,6 +226,7 @@ final class ForegroundMediaReadTests: XCTestCase {
         await transport.base.enqueueJSON(path: "\(itemPath)?kind=info", body: #"{"filesize":4}"#)
         let fresh = try await client.foregroundMediaInfo(item)
         XCTAssertEqual(fresh.sizeBytes, 4)
+        XCTAssertNil(fresh.contentType, "No MIME declaration in fresh info must not reuse the listing value")
         XCTAssertEqual(Data(fresh.id.utf8), Data(item.id.utf8))
         // The ordinary metadata path keeps its historical fallback behavior.
         await transport.base.enqueueJSON(path: "\(itemPath)?kind=info", body: "{}")
@@ -239,7 +240,7 @@ final class ForegroundMediaReadTests: XCTestCase {
             let directory = try makeDirectory()
             defer { try? FileManager.default.removeItem(at: directory) }
             let destination = directory.appendingPathComponent("original.JPG")
-            let item = CameraMediaItem(id: itemPath, name: "IMG.JPG", kind: "image", sizeBytes: Int64(size))
+            let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: Int64(size))
             await transport.base.enqueueDownload(path: itemPath, body: original)
             if size == 4 {
                 let result = try await client.downloadForegroundOriginal(item, expectedBytes: 4, to: destination)
@@ -258,6 +259,60 @@ final class ForegroundMediaReadTests: XCTestCase {
         }
     }
 
+    func testFreshMetadataCannotHideChangedIdentityNameKindOrMIME() async throws {
+        let (client, transport) = try await makeClient()
+        let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: 999, contentType: "image/jpeg")
+        let bodies = [
+            #"{"filesize":4,"id":"other"}"#, #"{"filesize":4,"name":"OTHER.JPG"}"#,
+            #"{"filesize":4,"filename":"img.jpg"}"#, #"{"filesize":4,"kind":"video"}"#,
+            #"{"filesize":4,"kind":"raw"}"#, #"{"filesize":4,"kind":"IMAGE"}"#,
+            #"{"filesize":4,"contenttype":"video/mp4"}"#, #"{"filesize":4,"contentType":"image/jpg"}"#,
+            #"{"filesize":4,"mimetype":" "}"#, #"{"filesize":4,"mimeType":"image/"}"#,
+            #"{"filesize":4,"contentType":1}"#,
+            #"{"filesize":4,"contentType":"image/jpeg","contenttype":"video/mp4"}"#,
+            #"{"filesize":4,"name":"IMG.JPG","filename":"OTHER.JPG"}"#,
+        ]
+        for body in bodies {
+            await transport.base.enqueueJSON(path: "\(itemPath)?kind=info", body: body)
+            do {
+                _ = try await client.foregroundMediaInfo(item)
+                XCTFail("Fresh contradiction was hidden: \(body)")
+            } catch {
+                XCTAssertEqual(error as? CameraMediaMetadataError, .invalidMetadata)
+            }
+        }
+        for body in [#"{"filesize":4,"contenttype":" IMAGE/JPEG ; quality=90"}"#,
+                     #"{"filesize":4,"contenttype":""}"#, #"{"filesize":4,"contenttype":null}"#] {
+            await transport.base.enqueueJSON(path: "\(itemPath)?kind=info", body: body)
+            let metadata = try await client.foregroundMediaInfo(item)
+            XCTAssertTrue(CameraMediaType.admitsFreshAutomaticJPEG(original: item, metadata: metadata, fresh: true))
+            XCTAssertEqual(metadata.sizeBytes, 4)
+        }
+        let requests = await transport.base.requests()
+        XCTAssertEqual(requests.count, 1 + bodies.count + 3, "Only discovery plus one GET per explicit fresh-info call")
+        XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+        XCTAssertTrue(requests.dropFirst().allSatisfy { $0.path == "\(itemPath)?kind=info" })
+    }
+
+    func testStrictOriginalEntryPointRejectsNonJPEGWithoutGETOrFile() async throws {
+        let (client, transport) = try await makeClient()
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appendingPathComponent("original.JPG")
+        for mime in ["image/jpg", " ", "application/octet-stream", "video/mp4"] {
+            let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: 4, contentType: mime)
+            do {
+                _ = try await client.downloadForegroundOriginal(item, expectedBytes: 4, to: destination)
+                XCTFail("Ineligible MIME reached original transfer")
+            } catch {
+                XCTAssertEqual(error as? CameraMediaMetadataError, .invalidMetadata)
+            }
+        }
+        let requests = await transport.base.requests()
+        XCTAssertEqual(requests.map(\.path), ["/ccapi"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
     func testOriginalHTTPTextAndPartialFailuresNeverTryVariants() async throws {
         let cases: [(Int, [String: String], Data)] = [
             (302, ["Location": "\(itemPath)?kind=main"], original), (404, [:], original),
@@ -269,7 +324,7 @@ final class ForegroundMediaReadTests: XCTestCase {
             let directory = try makeDirectory()
             defer { try? FileManager.default.removeItem(at: directory) }
             let destination = directory.appendingPathComponent("original.JPG")
-            let item = CameraMediaItem(id: itemPath, name: "IMG.JPG", kind: "image", sizeBytes: 4)
+            let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: 4)
             await transport.base.enqueueDownload(path: itemPath, status: status, headers: headers, body: body)
             await assertFailure { try await client.downloadForegroundOriginal(item, expectedBytes: 4, to: destination) }
             XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
@@ -284,7 +339,7 @@ final class ForegroundMediaReadTests: XCTestCase {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let destination = directory.appendingPathComponent("original.JPG")
-        let item = CameraMediaItem(id: itemPath, name: "IMG.JPG", kind: "image", sizeBytes: 4)
+        let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: 4)
         await transport.base.enqueueDownload(path: itemPath, body: original)
         let task = Task {
             try await client.downloadForegroundOriginal(item, expectedBytes: 4, to: destination) { _ in
@@ -311,7 +366,7 @@ final class ForegroundMediaReadTests: XCTestCase {
             let directory = try makeDirectory()
             defer { try? FileManager.default.removeItem(at: directory) }
             let destination = directory.appendingPathComponent(collision ? "original.JPG" : "missing/original.JPG")
-            let item = CameraMediaItem(id: itemPath, name: "IMG.JPG", kind: "image", sizeBytes: 4)
+            let item = CameraMediaItem(id: itemPath, name: "IMG_TEST.JPG", kind: "image", sizeBytes: 4)
             let otherFile = Data("other owner".utf8)
             await transport.base.enqueueDownload(path: itemPath, body: original)
             await assertFailure {

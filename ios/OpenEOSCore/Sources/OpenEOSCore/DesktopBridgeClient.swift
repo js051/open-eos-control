@@ -1349,6 +1349,9 @@ public actor DesktopBridgeClient {
     }
 
     public func mediaThumbnail(_ item: CameraMediaItem) async throws -> CameraMediaThumbnail {
+        guard [.photo, .video].contains(CameraMediaType.classify(item)) else {
+            throw CameraMediaMetadataError.invalidMetadata
+        }
         let response = try await mediaImageRepresentation(
             item,
             endpoint: "thumbnail",
@@ -1359,7 +1362,7 @@ public actor DesktopBridgeClient {
     }
 
     public func mediaPreview(_ item: CameraMediaItem) async throws -> CameraMediaPreview {
-        guard item.previewAvailable else {
+        guard CameraMediaType.classify(item) == .photo, item.previewAvailable else {
             throw DesktopBridgeError.invalidResponse("Display preview is unavailable for this media item.")
         }
         let response = try await mediaImageRepresentation(
@@ -1449,6 +1452,7 @@ public actor DesktopBridgeClient {
     }
 
     public func beginMediaPlayback(_ item: CameraMediaItem) async throws -> DesktopBridgeMediaPlayback {
+        guard CameraMediaType.classify(item) == .video else { throw CameraMediaMetadataError.invalidMetadata }
         let endpoint = try sessionEndpoint(["media", item.id, "playback"])
         let ticket = try await requestJSON(
             url: endpoint,
@@ -1491,6 +1495,7 @@ public actor DesktopBridgeClient {
         offset: Int64,
         length: Int64? = nil
     ) async throws -> CameraMediaStreamResponse {
+        guard CameraMediaType.classify(item) == .video else { throw CameraMediaMetadataError.invalidMetadata }
         guard offset >= 0, length.map({ $0 > 0 }) ?? true else {
             throw DesktopBridgeError.invalidResponse("Media byte range must be positive.")
         }
@@ -2139,6 +2144,9 @@ public actor DesktopBridgeClient {
     private static func parseMediaItem(_ item: BridgeJSON) -> CameraMediaItem? {
         guard let id = item["id"] as? String, !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let name = item["name"] as? String, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let contentType: String?
+        do { contentType = try CameraMediaType.declaredMIME(in: item) }
+        catch { return nil }
         let rating = item.int("rating").flatMap { (0...5).contains($0) ? $0 : nil }
         let rotation = item.int("rotationDegrees").flatMap { mediaRotations.contains($0) ? $0 : nil }
         let archived = item.optionalBool("archived")
@@ -2159,7 +2167,7 @@ public actor DesktopBridgeClient {
             rating: rating,
             rotationDegrees: rotation,
             archived: archived,
-            contentType: item.nonEmptyString("contentType"),
+            contentType: contentType,
             widthPixels: item.int("widthPixels").flatMap { $0 > 0 ? $0 : nil },
             heightPixels: item.int("heightPixels").flatMap { $0 > 0 ? $0 : nil },
             folder: folder

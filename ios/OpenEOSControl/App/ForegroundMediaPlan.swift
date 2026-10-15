@@ -77,8 +77,8 @@ struct ForegroundMediaPlan {
     mutating func observeFresh(_ item: CameraMediaItem, at now: TimeInterval) throws -> Int64? {
         try checkPendingAge(at: now)
         guard !pending.isEmpty,
-              mediaItemIdentity(item) == mediaItemIdentity(pending[0].item),
-              Self.isJPEG(item), let size = item.sizeBytes, size > 0 else {
+              CameraMediaType.admitsFreshAutomaticJPEG(original: pending[0].item, metadata: item, fresh: true),
+              let size = item.sizeBytes, size > 0 else {
             throw Failure.invalidMetadata
         }
         if pending[0].firstSize == size, let firstAt = pending[0].firstObservedAt,
@@ -93,8 +93,18 @@ struct ForegroundMediaPlan {
         return nil
     }
 
+    /// Explicitly unready size is a bounded observation, not a failed-request
+    /// retry. It breaks stability, so later positive size must settle anew.
+    mutating func observeUnreadySize(at now: TimeInterval) throws {
+        try checkPendingAge(at: now)
+        guard !pending.isEmpty else { throw Failure.invalidMetadata }
+        pending[0].firstSize = nil
+        pending[0].firstObservedAt = nil
+    }
+
     mutating func recordPrepared(_ item: CameraMediaItem) throws {
-        guard let first = pending.first, mediaItemIdentity(first.item) == mediaItemIdentity(item) else {
+        guard let first = pending.first, mediaItemIdentity(first.item) == mediaItemIdentity(item),
+              item.name.utf8.elementsEqual(first.item.name.utf8), Self.isJPEG(item) else {
             throw Failure.invalidMetadata
         }
         guard preparedCount < Self.resultLimit else { throw Failure.resultLimit }
@@ -103,13 +113,6 @@ struct ForegroundMediaPlan {
     }
 
     static func isJPEG(_ item: CameraMediaItem) -> Bool {
-        let suffix = (item.name as NSString).pathExtension.lowercased()
-        guard suffix == "jpg" || suffix == "jpeg" else { return false }
-        let kind = item.kind.lowercased()
-        guard !["video", "movie", "raw", "audio"].contains(kind) else { return false }
-        if let contentType = item.contentType?.split(separator: ";", maxSplits: 1).first?
-            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-           contentType != "image/jpeg" && contentType != "image/jpg" { return false }
-        return true
+        CameraMediaType.isAutomaticJPEG(item)
     }
 }

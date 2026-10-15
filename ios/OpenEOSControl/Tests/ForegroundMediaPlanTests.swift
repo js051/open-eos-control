@@ -86,11 +86,57 @@ final class ForegroundMediaPlanTests: XCTestCase {
         }
     }
 
+    func testUnreadySizeBreaksStabilityAndKeepsOriginalPendingDeadline() throws {
+        var plan = try baseline([])
+        let value = item("new")
+        try plan.observeInventory([value], at: 5)
+        XCTAssertNil(try plan.observeFresh(value, at: 5))
+        try plan.observeUnreadySize(at: 6)
+        XCTAssertNil(plan.pending.first?.firstSize)
+        XCTAssertNil(plan.pending.first?.firstObservedAt)
+        XCTAssertNil(try plan.observeFresh(value, at: 7))
+        XCTAssertEqual(try plan.observeFresh(value, at: 8), 4)
+        XCTAssertThrowsError(try plan.observeUnreadySize(at: 36)) {
+            XCTAssertEqual($0 as? ForegroundMediaPlan.Failure, .expiredItem)
+        }
+        XCTAssertEqual(plan.preparedCount, 0)
+    }
+
     func testNonJPEGOrConflictingTypeNeverBecomesAutomaticOriginal() {
         XCTAssertTrue(ForegroundMediaPlan.isJPEG(item("j", name: "A.JPEG")))
         for value in [item("r", name: "A.CR3"), item("v", name: "A.JPG", kind: "video"),
-                      item("t", name: "A.JPG", contentType: "text/html"), item("n", name: "no-extension")] {
+                      item("t", name: "A.JPG", contentType: "text/html"), item("n", name: "no-extension"),
+                      item("alias", contentType: "image/jpg"), item("blank", contentType: " \t\n"),
+                      item("case", kind: "IMAGE"), item("space", kind: " image "),
+                      item("unknown", kind: "unknown"), item("raw", kind: "raw"),
+                      item("movie", kind: "movie"), item("audio", kind: "audio")] {
             XCTAssertFalse(ForegroundMediaPlan.isJPEG(value))
+        }
+        for mime in [nil, "", " IMAGE/JPEG ; charset=binary"] as [String?] {
+            XCTAssertTrue(ForegroundMediaPlan.isJPEG(item("jpeg", name: "A.jPeG", contentType: mime)))
+        }
+    }
+
+    func testFreshMetadataMustKeepExactNameIdentityAndJPEGQualification() throws {
+        let original = item("caf\u{00e9}", name: "caf\u{00e9}.JPG")
+        let invalid = [
+            item("cafe\u{0301}", name: original.name),
+            item(original.id, name: "cafe\u{0301}.JPG"),
+            item(original.id, name: "RENAMED.JPG"),
+            item(original.id, name: original.name, kind: "raw"),
+            item(original.id, name: original.name, contentType: "image/jpg"),
+            item(original.id, name: original.name, contentType: "video/mp4"),
+        ]
+        for changed in invalid {
+            var plan = try baseline([])
+            try plan.observeInventory([original], at: 5)
+            XCTAssertNil(try plan.observeFresh(original, at: 5))
+            XCTAssertThrowsError(try plan.observeFresh(changed, at: 6)) {
+                XCTAssertEqual($0 as? ForegroundMediaPlan.Failure, .invalidMetadata)
+            }
+            XCTAssertThrowsError(try plan.recordPrepared(changed))
+            XCTAssertEqual(plan.preparedCount, 0)
+            XCTAssertEqual(plan.pending.count, 1)
         }
     }
 

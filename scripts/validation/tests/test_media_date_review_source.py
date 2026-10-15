@@ -152,7 +152,9 @@ class MediaDateReviewSourceTests(unittest.TestCase):
         recent = source.split("func selectLatestMediaItem(_ items:", 1)[1].split("\n}", 1)[0]
         self.assertIn("items.first", recent)
         after = source.split("func selectLatestMediaItem(\n", 1)[1].split("\n}", 1)[0]
-        self.assertIn("!previousIDs.contains($0.id) && mediaIsVideo($0) == (kind == .video)", after)
+        self.assertIn("!previousIDs.contains($0.id) && CameraMediaType.classify($0) "
+                      "== (kind == .video ? .video : .photo)",
+                      after)
         for forbidden in ("mediaCaptureDate", ".max", "mediaItemsForDisplay", "sort:", ".captureTime", ".name"):
             self.assertNotIn(forbidden, recent + after)
         state = (APP / "CameraAppState.swift").read_text()

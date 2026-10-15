@@ -201,6 +201,28 @@ final class ForegroundMediaControllerTests: XCTestCase {
         }
     }
 
+    func testSecondFreshReadRejectsChangedTypeOrNameBeforePreparation() async throws {
+        let changed = [
+            CameraMediaItem(id: "new", name: "RENAMED.JPG", kind: "image", sizeBytes: 4),
+            CameraMediaItem(id: "new", name: "NEW.JPG", kind: "raw", sizeBytes: 4),
+            CameraMediaItem(id: "new", name: "NEW.JPG", kind: "image", sizeBytes: 4, contentType: "video/mp4"),
+            CameraMediaItem(id: "new", name: "NEW.JPG", kind: "image", sizeBytes: 4, contentType: "image/jpg"),
+        ]
+        for metadata in changed {
+            try await withFixture { fixture in
+                let source = fixture.source("metadata-drift")
+                let original = item("new", name: "NEW.JPG", size: 4)
+                let task = try await holdStableFresh(fixture, source: source, listed: original, fresh: original,
+                                                     secondFresh: metadata)
+                await source.fresh.release(source.gate("fresh-stable"))
+                await task.value
+                assertFinished(fixture.controller, state: .failed, reason: .metadata)
+                XCTAssertEqual(fixture.controller.preparedCount, 0)
+                await assertRequests(source, inventories: 3, fresh: 2, preparations: 0)
+            }
+        }
+    }
+
     func testStopDuringNoncooperativeInventoryCannotAdmitMetadataOrAnotherRun() async throws {
         try await withFixture { fixture in
             let source = fixture.source("stop-inventory")
@@ -391,7 +413,8 @@ final class ForegroundMediaControllerTests: XCTestCase {
 
     private func holdStableFresh(_ fixture: ForegroundControllerFixture, source: ForegroundControllerSource,
                                 listed: CameraMediaItem, fresh: CameraMediaItem,
-                                additional: [CameraMediaItem] = [], fails: Bool = false) async throws -> Task<Void, Never> {
+                                additional: [CameraMediaItem] = [], fails: Bool = false,
+                                secondFresh: CameraMediaItem? = nil) async throws -> Task<Void, Never> {
         let task = try await holdFirstFresh(fixture, source: source, listed: listed,
                                            additional: additional, outcome: .success(fresh))
         await fixture.delay.enqueue(source.gate("fresh-observation"), outcome: .success(()))
@@ -400,7 +423,7 @@ final class ForegroundMediaControllerTests: XCTestCase {
         XCTAssertEqual(fixture.controller.preparedCount, 0)
         await assertRequests(source, inventories: 3, fresh: 1, preparations: 0)
 
-        await source.fresh.enqueue(source.gate("fresh-stable"), outcome: fails ? .failure(.request) : .success(fresh))
+        await source.fresh.enqueue(source.gate("fresh-stable"), outcome: fails ? .failure(.request) : .success(secondFresh ?? fresh))
         fixture.clock.instant += 1
         await fixture.delay.release(source.gate("fresh-observation"))
         try await waitForGate(source.gate("fresh-stable"), in: source.fresh)

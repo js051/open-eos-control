@@ -44,6 +44,8 @@ targets:
         buildPhase: resources
       - path: ../../contracts/capture-review-evidence/v1/review-evidence-vectors.json
         buildPhase: resources
+      - path: ../../contracts/media-type/v1/media-type-vectors.json
+        buildPhase: resources
       - path: ../OpenEOSCore/Tests/OpenEOSCoreTests/URLSessionPendingBulbStopTests.swift
     dependencies:
       - target: OpenEOSControl
