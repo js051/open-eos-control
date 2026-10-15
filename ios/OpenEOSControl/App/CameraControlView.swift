@@ -468,6 +468,24 @@ private struct CaptureBar: View {
                 .padding(.bottom, 6)
             }
 
+            if let outcome = camera.recordingOutcomes.last {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(format: NSLocalizedString("recording_original_response", comment: ""),
+                        NSLocalizedString(outcome.starting ? "start_recording" : "stop_recording", comment: ""),
+                        NSLocalizedString("recording_response_" + outcome.responseEvidence.rawValue, comment: "")))
+                        .accessibilityIdentifier("recording-original-response")
+                    Text(String(format: NSLocalizedString("recording_current_observation", comment: ""),
+                        NSLocalizedString(camera.recordingObservation.observedRecording.map {
+                            $0 ? "recording_observed_active" : "recording_observed_stopped"
+                        } ?? "recording_observed_unavailable", comment: "")))
+                        .accessibilityIdentifier("recording-current-observation")
+                }
+                .font(.caption2)
+                .foregroundStyle(Color.secondary)
+                .padding(.horizontal, compact ? 8 : 18)
+                .padding(.bottom, 6)
+            }
+
             if let recovery = camera.recordingRecovery {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(LocalizedStringKey(camera.recordingCommandRecovery != nil
@@ -478,7 +496,7 @@ private struct CaptureBar: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("recording-readback-status")
                     Button {
-                        Task { await camera.refresh() }
+                        Task { await camera.refreshRecordingObservation() }
                     } label: {
                         Label("refresh", systemImage: "arrow.clockwise")
                             .frame(minWidth: 44, minHeight: 44)
@@ -612,7 +630,7 @@ private struct CaptureBar: View {
 
     private var captureSupported: Bool {
         if camera.shutterReleaseRequired { return true }
-        if camera.captureMode == .video && camera.recordingStopRequired { return true }
+        if camera.recordingStopRequired { return true }
         if camera.captureMode == .photo && !camera.bulbMode && !camera.shutterAutofocusAllowed { return false }
         return camera.supports(
             camera.bulbMode ? .bulbExposure : camera.captureMode == .photo ? .stillCapture : .videoRecording
@@ -621,7 +639,7 @@ private struct CaptureBar: View {
 
     private var captureTemperatureAllowed: Bool {
         if camera.shutterReleaseRequired { return true }
-        if camera.captureMode == .video && camera.recordingStopRequired { return true }
+        if camera.recordingStopRequired { return true }
         return camera.captureMode == .photo
             ? camera.stillCaptureTemperatureAllowed
             : camera.movieRecordingTemperatureAllowed
@@ -630,19 +648,7 @@ private struct CaptureBar: View {
     @ViewBuilder
     private var captureButton: some View {
         Button {
-            Task {
-                if camera.shutterReleaseRequired {
-                    await camera.retryShutterRelease()
-                } else if camera.captureMode == .photo {
-                    if camera.bulbMode {
-                        await camera.toggleBulbExposure()
-                    } else {
-                        await camera.captureStill()
-                    }
-                } else {
-                    await camera.toggleRecording()
-                }
-            }
+            Task { await camera.performCaptureButtonAction() }
         } label: {
             RotatingControl(degrees: controlRotation) {
                 ZStack {
@@ -653,7 +659,7 @@ private struct CaptureBar: View {
                         RoundedRectangle(cornerRadius: 5)
                             .fill(Color.cameraWarning)
                             .frame(width: 40, height: 40)
-                    } else if camera.captureMode == .video {
+                    } else if camera.recordingStopRequired || camera.captureMode == .video {
                         RoundedRectangle(cornerRadius: camera.recordingStopRequired ? 5 : 25)
                             .fill(camera.recordingRecovery != nil ? Color.cameraWarning : Color.cameraRecording)
                             .frame(width: camera.recordingStopRequired ? 28 : 54, height: camera.recordingStopRequired ? 28 : 54)
@@ -667,7 +673,7 @@ private struct CaptureBar: View {
                         }
                         .frame(width: compact ? 49 : 58, height: compact ? 49 : 58)
                     }
-                    if camera.busyOperations.contains(camera.shutterReleaseRequired || camera.captureMode == .photo ? .capture : .recording) {
+                    if camera.busyOperations.contains(camera.shutterReleaseRequired || (!camera.recordingStopRequired && camera.captureMode == .photo) ? .capture : .recording) {
                         ProgressView().tint(camera.captureMode == .photo ? Color.cameraBackground : Color.cameraText)
                     }
                 }
@@ -676,6 +682,7 @@ private struct CaptureBar: View {
                         LocalizedStringKey(
                             camera.shutterReleaseRequired
                                 ? camera.shutterReleaseUnconfirmed ? "release_shutter_now" : "stop_bulb_exposure"
+                                : camera.recordingStopRequired ? "stop_recording"
                                 : camera.bulbMode
                                 ? "start_bulb_exposure"
                                 : camera.captureMode == .photo
@@ -691,9 +698,9 @@ private struct CaptureBar: View {
             !captureSupported || !captureTemperatureAllowed ||
                 (camera.shutterReleaseRequired
                     ? !camera.canRetryShutterRelease
-                    : camera.isBusy(camera.captureMode == .photo ? .capture : .recording))
+                    : camera.isBusy(!camera.recordingStopRequired && camera.captureMode == .photo ? .capture : .recording))
         )
         .opacity(captureSupported && captureTemperatureAllowed ? 1 : 0.38)
-        .accessibilityIdentifier(camera.captureMode == .photo ? "shutter-button" : "record-button")
+        .accessibilityIdentifier(!camera.recordingStopRequired && camera.captureMode == .photo ? "shutter-button" : "record-button")
     }
 }

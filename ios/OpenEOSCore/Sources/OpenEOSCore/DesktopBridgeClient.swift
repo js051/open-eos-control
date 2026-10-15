@@ -159,6 +159,9 @@ public actor DesktopBridgeClient {
 
     public private(set) var recordingCommandEvidence: CameraRecordingCommandEvidence?
     private var sessionGeneration = UUID()
+    private var recordingAttemptID: UUID?
+    private var recordingRevision = UUID()
+    private var recordingLifecycleOwned = false
     private var mediaListingOwner: UUID?
     private var mediaListingStream: CameraHTTPStreamResponse?
     private var initializationToken: UUID?
@@ -319,6 +322,9 @@ public actor DesktopBridgeClient {
         liveViewRevision = UUID()
         liveViewMaintenanceID = nil
         recordingCommandEvidence = nil
+        recordingAttemptID = nil
+        recordingRevision = UUID()
+        recordingLifecycleOwned = false
         completedCloseState = .idle
         releaseRevision = UUID()
         shutterRelease = nil
@@ -1342,6 +1348,100 @@ public actor DesktopBridgeClient {
         try await setRecording(false)
     }
 
+    public func recordingOutcome(starting: Bool, attempt: CameraRecordingAttempt) async throws -> CameraRecordingOutcome {
+        try Task.checkCancellation()
+        guard !isClosing, recordingAttemptID == nil else { throw DesktopBridgeError.sessionChanged }
+        let url = try sessionEndpoint(["recording", starting ? "start" : "stop", "outcome"])
+        try validateMutation(url: url, method: "POST")
+        if starting, recordingCommandEvidence != nil || (!recordingLifecycleOwned && maintenanceRecordingObservation == true) {
+            throw DesktopBridgeError.invalidResponse("Stop the current recording before another Start.")
+        }
+        let generation = sessionGeneration
+        let engine = captureConfigurationSessionEngine
+        try attempt.admit(owner: generation, starting: starting)
+        let id = attempt.snapshot.id
+        recordingAttemptID = id
+        ordinaryMutationCount += 1
+        defer {
+            ordinaryMutationCount -= 1
+            if recordingAttemptID == id { recordingAttemptID = nil }
+            attempt.complete()
+        }
+        var request = makeRequest(url: url, method: "POST", accept: "application/json", timeoutInterval: 10)
+        request.httpBody = Data("{}".utf8)
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let previous = recordingCommandEvidence ?? (!recordingLifecycleOwned && maintenanceRecordingObservation == true
+            ? .unconfirmed(starting: true) : nil)
+        try attempt.markDispatched()
+        recordingLifecycleOwned = true
+        recordingRevision = UUID()
+        recordingCommandEvidence = .unconfirmed(starting: starting)
+        let exchange: CameraHTTPRecordingResponse
+        do { exchange = try await transport.sendRecordingCommand(request) }
+        catch {
+            attempt.complete()
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
+            throw DesktopBridgeError.recordingCommandUnconfirmed(starting: starting)
+        }
+        let response = exchange.response
+        if exchange.bodyComplete, response.statusCode == 200, response.header("content-range") == nil,
+           (try? CameraHTTPResponseIntegrity.validate(response, requestMethod: "POST")) != nil,
+           let body = try? CameraRecordingWire.decode(response.body),
+           let (responseEvidence, observation) = CameraRecordingWire.outcome(body, engine: engine, starting: starting) {
+            attempt.recordResponse(responseEvidence)
+            attempt.complete(observation)
+        } else if [400, 401, 403, 404, 405, 409, 410, 422, 429].contains(response.statusCode) {
+            attempt.recordResponse(.rejected)
+            attempt.complete()
+        } else { attempt.complete() }
+        // Retired owners keep their conservative admitted-command warning. No
+        // late Stop success or stale false can erase a newer owner's responsibility.
+        guard generation == sessionGeneration, !isClosing else { throw DesktopBridgeError.sessionChanged }
+        let outcome = attempt.snapshot
+        if exchange.cancelled || Task.isCancelled {
+            if outcome.responseEvidence == .notSent || outcome.responseEvidence == .rejected { recordingCommandEvidence = previous }
+            throw CancellationError()
+        }
+        let needsStop = CameraRecordingPolicy.stopRequired(previous: previous != nil, starting: starting,
+            response: outcome.responseEvidence, observation: outcome.observation)
+        if needsStop {
+            recordingCommandEvidence = outcome.responseEvidence == .responseReceived
+                ? .acknowledged(starting: starting) : (previous ?? .unconfirmed(starting: starting))
+        } else { recordingCommandEvidence = nil }
+        if outcome.responseEvidence == .unconfirmed { throw DesktopBridgeError.recordingCommandUnconfirmed(starting: starting) }
+        return outcome
+    }
+
+    public func recordingObservation() async throws -> CameraRecordingObservation {
+        try Task.checkCancellation()
+        guard !isClosing else { throw DesktopBridgeError.sessionChanged }
+        let generation = sessionGeneration, revision = recordingRevision
+        let engine = captureConfigurationSessionEngine
+        var request = makeRequest(url: try sessionEndpoint(["recording", "observation"]), method: "GET",
+            accept: "application/json", timeoutInterval: 10)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let response = try await transport.sendRecordingStatus(request)
+        try Task.checkCancellation()
+        guard generation == sessionGeneration, revision == recordingRevision, !isClosing else {
+            throw DesktopBridgeError.sessionChanged
+        }
+        guard response.statusCode == 200, response.header("content-range") == nil else {
+            throw DesktopBridgeError.invalidResponse("Recording observation requires complete HTTP 200.")
+        }
+        try CameraHTTPResponseIntegrity.validate(response, requestMethod: "GET")
+        guard let observation = CameraRecordingWire.observation(try CameraRecordingWire.decode(response.body), engine: engine) else {
+            throw DesktopBridgeError.invalidResponse("Invalid recording observation envelope.")
+        }
+        if observation.observedRecording != nil { recordingLifecycleOwned = true }
+        if observation.observedRecording == false { recordingCommandEvidence = nil }
+        else if observation.observedRecording == true, recordingCommandEvidence == nil {
+            recordingCommandEvidence = .unconfirmed(starting: true)
+        }
+        return observation
+    }
+
     private func setRecording(_ enabled: Bool) async throws -> CameraStatus {
         try Task.checkCancellation()
         do {
@@ -2182,7 +2282,7 @@ public actor DesktopBridgeClient {
         guard sessionID != nil else { return false }
         if method == "DELETE", url == (try sessionEndpoint(["events"])) { return true }
         guard method == "POST" else { return false }
-        for path in [["bulb", "stop"], ["recording", "stop"], ["liveview", "stop"], ["focus", "auto", "stop"]] {
+        for path in [["bulb", "stop"], ["recording", "stop"], ["recording", "stop", "outcome"], ["liveview", "stop"], ["focus", "auto", "stop"]] {
             if url == (try sessionEndpoint(path)) { return true }
         }
         return false

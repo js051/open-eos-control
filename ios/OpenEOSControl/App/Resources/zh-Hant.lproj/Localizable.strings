@@ -692,10 +692,10 @@
 "connection_bridge_empty" = "掃描完成，但未找到相機。請確認相機電源、USB 線材，以及電腦上的 Desktop Bridge 是否能偵測相機，再重新掃描。";
 
 "recording_start_status_unknown" = "相機已接受開始指令，但錄影狀態不明。請重新整理狀態，或明確停止錄影。";
-"recording_stop_status_unknown" = "相機已接受停止指令，但尚未確認停止狀態。請重新整理狀態，或明確停止錄影。";
+"recording_stop_status_unknown" = "已收到停止回覆，目前錄影狀態仍未知。請重新整理取得即時狀態後再檢視影片；可自行開始新的錄影。";
 "recording_start_not_confirmed" = "相機回報目前未錄影，尚未確認開始錄影。";
 
-"recording_command_unconfirmed" = "錄影指令結果未知，相機可能仍在錄影。重新整理可能只讀到快取，無法確認已停止；請檢查相機並按下停止。";
+"recording_command_unconfirmed" = "錄影指令結果未知，相機可能仍在錄影。重新整理僅讀取即時證據，不會重送指令；仍可按下停止。";
 "previous_recording_warning" = "尚未確認上一台相機已停止錄影，請直接檢查該相機。連接其他相機不會停止上一台相機。";
 "confirm_previous_recording_stopped" = "我已檢查上一台相機";
 "previous_recording_physically_verified" = "上一台相機已停止錄影";
@@ -1007,3 +1007,14 @@
 "maintenance_observation_not-applicable" = "不適用";
 "maintenance_retirement_unconfirmed" = "未能確認上一個 Bridge 工作階段已在伺服器本機退役。未自動重試或另送相機操作；相機停止證據另行保留。";
 "maintenance_retirement_dismiss" = "關閉退役通知";
+
+"recording_command_rejected" = "錄影指令遭拒絕，先前的錄影停止責任維持不變。";
+"recording_original_response" = "原始「%@」回覆：%@";
+"recording_current_observation" = "目前錄影狀態：%@";
+"recording_response_not-sent" = "未送出";
+"recording_response_unconfirmed" = "未確認";
+"recording_response_rejected" = "遭拒絕";
+"recording_response_response-received" = "已收到回覆";
+"recording_observed_active" = "即時觀測為錄影中";
+"recording_observed_stopped" = "即時觀測為已停止";
+"recording_observed_unavailable" = "無法取得";

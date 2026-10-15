@@ -692,10 +692,10 @@
 "connection_bridge_empty" = "Scan completed with no cameras. Check the camera’s power, USB cable, and availability in Desktop Bridge on the computer, then scan again.";
 
 "recording_start_status_unknown" = "Start was acknowledged, but recording status is unknown. Refresh status or explicitly stop recording.";
-"recording_stop_status_unknown" = "Stop was acknowledged, but stopped status is not confirmed. Refresh status or explicitly stop recording.";
+"recording_stop_status_unknown" = "Stop response received. Current recording state is unavailable. Refresh for fresh status before reviewing the video. A deliberate new Start is available.";
 "recording_start_not_confirmed" = "The camera reports that recording is stopped. Start was not confirmed.";
 
-"recording_command_unconfirmed" = "Recording command result unknown. The camera may still be recording. Refresh cannot confirm a cached status; check the camera and press Stop.";
+"recording_command_unconfirmed" = "Recording command result is unknown. The camera may still be recording. Refresh reads fresh evidence without replaying the command; Stop remains available.";
 "previous_recording_warning" = "Recording on the previous camera was not confirmed stopped. Check that camera directly. Connecting another camera does not stop the previous one.";
 "confirm_previous_recording_stopped" = "I checked the previous camera";
 "previous_recording_physically_verified" = "Recording is stopped on the previous camera";
@@ -1007,3 +1007,14 @@
 "maintenance_observation_not-applicable" = "not applicable";
 "maintenance_retirement_unconfirmed" = "The previous Bridge session’s local retirement was not confirmed. No automatic retry or camera action was sent. Camera Stop evidence remains separate.";
 "maintenance_retirement_dismiss" = "Dismiss retirement notice";
+
+"recording_command_rejected" = "The recording command was rejected. The previous recording responsibility is unchanged.";
+"recording_original_response" = "Original %@ response: %@";
+"recording_current_observation" = "Current recording state: %@";
+"recording_response_not-sent" = "not sent";
+"recording_response_unconfirmed" = "unconfirmed";
+"recording_response_rejected" = "rejected";
+"recording_response_response-received" = "response received";
+"recording_observed_active" = "freshly observed recording";
+"recording_observed_stopped" = "freshly observed stopped";
+"recording_observed_unavailable" = "unavailable";

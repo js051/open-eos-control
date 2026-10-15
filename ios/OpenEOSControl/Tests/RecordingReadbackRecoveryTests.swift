@@ -42,7 +42,7 @@ final class RecordingReadbackRecoveryTests: XCTestCase {
         let initialReads = await peer.count("media")
         await peer.plan("stop", .acknowledgedReadback)
         await state.toggleRecording()
-        XCTAssertEqual(state.status?.recording, true)
+        XCTAssertNil(state.status?.recording)
         XCTAssertEqual(state.recordingReadbackRecovery?.starting, false)
         XCTAssertEqual(state.captureReviewState, .idle)
         let readsBeforeRefresh = await peer.count("media")
@@ -65,43 +65,43 @@ final class RecordingReadbackRecoveryTests: XCTestCase {
         let state = makeState([peer])
         defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
         try await connect(state)
-        await peer.plan("stop", .status(nil))
+        await peer.plan("stop", .lostResponse)
         await state.toggleRecording()
-        XCTAssertNil(state.status?.recording)
-        XCTAssertEqual(state.recordingReadbackRecovery?.starting, false)
-        let originalRecovery = state.recordingReadbackRecovery
+        XCTAssertEqual(state.status?.recording, true)
+        XCTAssertEqual(state.recordingCommandRecovery?.starting, false)
+        let originalRecovery = state.recordingCommandRecovery
         await peer.plan("status", .status(nil))
         await state.refresh()
-        XCTAssertEqual(state.recordingReadbackRecovery, originalRecovery)
+        XCTAssertEqual(state.recordingCommandRecovery, originalRecovery)
         await peer.plan("status", .lostResponse)
         await state.refresh()
-        XCTAssertEqual(state.recordingReadbackRecovery, originalRecovery)
+        XCTAssertEqual(state.recordingCommandRecovery, originalRecovery)
         await peer.setItems([.newPhoto, .oldVideo, .newVideo])
         await state.toggleRecording()
         await state.latestMediaTask?.value
-        XCTAssertNil(state.recordingReadbackRecovery)
+        XCTAssertNil(state.recordingCommandRecovery)
         XCTAssertEqual(state.latestMediaItem?.id, "NEW-VIDEO")
         let actions = await peer.actions()
         XCTAssertEqual(actions, ["stop", "stop"])
     }
 
-    func testRejectedExplicitStopPreservesEarlierAcknowledgementAndVideoBoundary() async throws {
+    func testRejectedExplicitStopPreservesEarlierUncertaintyAndVideoBoundary() async throws {
         let peer = RecordingRecoveryPeer(recording: true, mediaSupported: true)
         await peer.setItems([.oldVideo, .oldPhoto])
         let state = makeState([peer])
         defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
         try await connect(state)
-        await peer.plan("stop", .acknowledgedReadback)
+        await peer.plan("stop", .lostResponse)
         await state.toggleRecording()
-        let recovery = try XCTUnwrap(state.recordingReadbackRecovery)
+        let recovery = try XCTUnwrap(state.recordingCommandRecovery)
         await peer.plan("stop", .rejected)
         await state.toggleRecording()
-        XCTAssertEqual(state.recordingReadbackRecovery, recovery)
+        XCTAssertEqual(state.recordingCommandRecovery, recovery)
         XCTAssertNotNil(state.lastError)
         await peer.setItems([.oldVideo, .newPhoto, .newVideo])
         await state.refresh()
         await state.latestMediaTask?.value
-        XCTAssertNil(state.recordingReadbackRecovery)
+        XCTAssertNil(state.recordingCommandRecovery)
         XCTAssertEqual(state.latestMediaItem?.id, "NEW-VIDEO")
         let actions = await peer.actions()
         XCTAssertEqual(actions, ["stop", "stop"])
@@ -135,7 +135,7 @@ final class RecordingReadbackRecoveryTests: XCTestCase {
             try await connect(state)
             await peer.plan("start", .status(value))
             await state.toggleRecording()
-            XCTAssertEqual(state.status?.recording, value)
+            XCTAssertEqual(state.status?.recording, value ?? false)
             XCTAssertFalse(state.recording)
             if value == nil {
                 XCTAssertEqual(state.recordingReadbackRecovery?.starting, true)
@@ -387,7 +387,7 @@ final class RecordingReadbackRecoveryTests: XCTestCase {
         let state = makeState([peer])
         defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
         try await connect(state)
-        await peer.plan("stop", .acknowledgedReadback)
+        await peer.plan("stop", .lostResponse)
         await state.toggleRecording()
         await peer.plan("status", .status(nil))
         await state.refresh()
@@ -415,13 +415,13 @@ final class RecordingReadbackRecoveryTests: XCTestCase {
             let recovery = try XCTUnwrap(state.recordingCommandRecovery)
             let before = await peer.requestRoutes()
             await peer.restrictMovieStart()
-            await peer.plan("status", .status(false))
+            await peer.plan("status", .cachedFalse)
             await state.refresh()
             let after = await peer.requestRoutes()
             XCTAssertEqual(Array(after.dropFirst(before.count)), ["status"])
             XCTAssertEqual(state.recordingCommandRecovery, recovery)
             XCTAssertEqual(state.status?.recording, false)
-            XCTAssertFalse(state.movieRecordingTemperatureAllowed)
+            XCTAssertTrue(state.movieRecordingTemperatureAllowed, "Observation recovery does not fetch temperature or capabilities")
             XCTAssertTrue(state.recordingStopRequired)
             XCTAssertEqual(state.captureMode, .video)
             await state.setCaptureMode(.photo)
@@ -450,7 +450,7 @@ final class RecordingReadbackRecoveryTests: XCTestCase {
             XCTAssertEqual(physicalRecording, true)
             XCTAssertEqual(state.recordingCommandRecovery?.starting, true)
             XCTAssertNil(state.recordingReadbackRecovery)
-            await peer.plan("status", .status(false))
+            await peer.plan("status", .cachedFalse)
             await state.refresh()
             XCTAssertEqual(state.status?.recording, false)
             XCTAssertTrue(state.recordingStopRequired)
@@ -502,7 +502,7 @@ final class RecordingReadbackRecoveryTests: XCTestCase {
             XCTAssertEqual(state.status?.recording, false)
             XCTAssertEqual(state.recordingCommandRecovery?.starting, true)
             XCTAssertNil(state.recordingReadbackRecovery)
-            await peer.plan("status", .status(false))
+            await peer.plan("status", .cachedFalse)
             await state.refresh()
             XCTAssertTrue(state.recordingStopRequired)
             await state.toggleRecording()
@@ -576,7 +576,7 @@ final class RecordingReadbackRecoveryTests: XCTestCase {
         XCTAssertFalse(original.starting)
         XCTAssertNil(state.recordingReadbackRecovery)
         let before = await peer.count("media")
-        await peer.plan("status", .status(false))
+        await peer.plan("status", .cachedFalse)
         await state.refresh()
         let after = await peer.count("media")
         XCTAssertEqual(before, after)
@@ -628,7 +628,7 @@ final class RecordingReadbackRecoveryTests: XCTestCase {
             XCTAssertNil(state.recordingReadbackRecovery)
             XCTAssertEqual(state.recordingCommandRecovery?.starting, true)
             XCTAssertEqual(state.status?.recording, false)
-            await peer.plan("status", .status(false))
+            await peer.plan("status", .cachedFalse)
             await state.refresh()
             XCTAssertTrue(state.recordingStopRequired)
             await state.toggleRecording()
@@ -667,7 +667,7 @@ final class RecordingReadbackRecoveryTests: XCTestCase {
         await state.toggleRecording()
         let recovery = try XCTUnwrap(state.recordingCommandRecovery)
         let before = await peer.count("status")
-        await peer.plan("status", .status(false))
+        await peer.plan("status", .cachedFalse)
         await peer.release("unknown-event")
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(5))
@@ -730,6 +730,168 @@ final class RecordingReadbackRecoveryTests: XCTestCase {
         XCTAssertNil(state.recordingCommandRecovery)
     }
 
+    func testFreshFalseAfterLostStartResolvesDutyWithoutChangingOriginalOrReplaying() async throws {
+        for bridge in [true, false] {
+            let peer = RecordingRecoveryPeer()
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connect(state)
+            await peer.plan("start", .lostResponse)
+            await state.toggleRecording()
+            let original = try XCTUnwrap(state.recordingOutcomes.last)
+            XCTAssertEqual(original.responseEvidence, .unconfirmed)
+            await peer.plan("status", .status(false))
+            await state.refreshRecordingObservation()
+            XCTAssertEqual(state.recordingObservation.observedRecording, false)
+            XCTAssertFalse(state.recordingStopRequired)
+            XCTAssertNil(state.recordingRecovery)
+            XCTAssertEqual(state.recordingOutcomes.last, original)
+            let actions = await peer.actions()
+            XCTAssertEqual(actions, ["start"])
+        }
+    }
+
+    func testStopAckUnavailablePermitsNewStartWithoutReviewingOrCallingItStopped() async throws {
+        let peer = RecordingRecoveryPeer(recording: true, mediaSupported: true)
+        await peer.setItems([.oldVideo])
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connect(state)
+        let listsBefore = await peer.count("media")
+        await peer.plan("stop", .acknowledgedReadback)
+        await state.toggleRecording()
+        let stopped = try XCTUnwrap(state.recordingOutcomes.last)
+        XCTAssertEqual(stopped.responseEvidence, .responseReceived)
+        XCTAssertNil(state.recordingObservation.observedRecording)
+        XCTAssertFalse(state.recordingStopRequired)
+        XCTAssertFalse(state.recording)
+        XCTAssertEqual(state.captureReviewState, .idle)
+        await peer.setItems([.oldVideo, .newVideo])
+        await state.toggleRecording()
+        XCTAssertTrue(state.recording)
+        XCTAssertEqual(state.captureReviewState, .idle)
+        XCTAssertEqual(state.recordingOutcomes.first, stopped)
+        let actions = await peer.actions(), listsAfter = await peer.count("media")
+        XCTAssertEqual(actions, ["stop", "start"])
+        XCTAssertEqual(listsAfter, listsBefore, "A new Start retires the previous Stop review boundary")
+    }
+
+    func testGlobalRefreshContinuesReadOnlyStatusAfterStopAckButDedicatedRecoveryStaysOneRead() async throws {
+        let peer = RecordingRecoveryPeer(recording: true)
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connect(state)
+        await peer.plan("stop", .acknowledgedReadback)
+        await state.toggleRecording()
+        await peer.plan("status", .cachedFalse)
+        let before = await peer.wireRequests()
+        await state.refreshRecordingObservation()
+        let dedicated = await peer.wireRequests()
+        XCTAssertEqual(Array(dedicated.dropFirst(before.count)), ["GET /v1/session/synthetic/recording/observation"])
+        await peer.plan("status", .cachedFalse)
+        await peer.plan("status", .status(true)) // Ordinary status is deliberately cached true.
+        await state.refresh()
+        let global = await peer.wireRequests()
+        XCTAssertEqual(Array(global.dropFirst(dedicated.count)),
+            ["GET /v1/session/synthetic/recording/observation", "GET /v1/session/synthetic/status"])
+        XCTAssertNil(state.recordingObservation.observedRecording)
+        XCTAssertNil(state.status?.recording)
+        XCTAssertFalse(state.recording)
+        XCTAssertFalse(state.recordingStopRequired)
+        XCTAssertEqual(state.captureReviewState, .idle)
+    }
+
+    func testActiveRecordingKeepsStopAheadOfPhotoCapabilityAndTemperatureGates() async throws {
+        let peer = RecordingRecoveryPeer()
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connect(state)
+        await state.toggleRecording()
+        XCTAssertTrue(state.recording)
+        await peer.restrictMovieStart()
+        await peer.showPhotoModeCapability()
+        await state.refresh()
+        XCTAssertFalse(state.supports(.videoRecording))
+        XCTAssertFalse(state.movieRecordingTemperatureAllowed)
+        XCTAssertEqual(state.captureMode, .video)
+        XCTAssertTrue(state.recordingStopRequired)
+        // Even a delayed/local picker assignment cannot redirect the retained
+        // Stop button into Photo capture.
+        state.captureMode = .photo
+        await state.performCaptureButtonAction()
+        let actions = await peer.actions(), captures = await peer.count("capture")
+        XCTAssertEqual(actions, ["start", "stop"])
+        XCTAssertEqual(captures, 0)
+        XCTAssertFalse(state.recordingStopRequired)
+    }
+
+    func testPendingStartCannotRacePhotoCaptureBeforeItsOutcome() async throws {
+        let peer = RecordingRecoveryPeer()
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connect(state)
+        await peer.plan("start", .lostResponse, gate: "pending-start-photo")
+        let command = Task { await state.toggleRecording() }
+        try await waitForGate("pending-start-photo", peer: peer)
+        state.captureMode = .photo
+        await state.captureStill()
+        let captures = await peer.count("capture")
+        XCTAssertEqual(captures, 0)
+        await peer.release("pending-start-photo")
+        await command.value
+        XCTAssertTrue(state.recordingStopRequired)
+        XCTAssertEqual(state.captureMode, .video)
+    }
+
+    func testStopActiveThenUnavailableThenFreshFalseCompletesOriginalReviewWithoutReplay() async throws {
+        for first in [RecordingRecoveryPeer.Outcome.status(true), .lostResponse] {
+            let peer = RecordingRecoveryPeer(recording: true, mediaSupported: true)
+            await peer.setItems([.oldVideo])
+            let state = makeState([peer])
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connect(state)
+            await peer.plan("stop", first)
+            await state.toggleRecording()
+            let original = state.recordingOutcomes
+            if state.recordingRecovery != nil {
+                await peer.plan("status", .status(true))
+                await state.refreshRecordingObservation()
+            }
+            XCTAssertNil(state.recordingRecovery)
+            XCTAssertTrue(state.recordingStopRequired)
+            await peer.plan("status", .cachedFalse)
+            await state.refresh()
+            XCTAssertNil(state.recordingObservation.observedRecording)
+            XCTAssertEqual(state.captureReviewState, .idle)
+            await peer.setItems([.oldVideo, .newVideo, .newPhoto])
+            await peer.plan("status", .status(false))
+            await state.refresh()
+            await state.latestMediaTask?.value
+            XCTAssertEqual(state.latestMediaItem?.id, "NEW-VIDEO")
+            XCTAssertEqual(state.captureReviewState, .available)
+            XCTAssertFalse(state.recordingStopRequired)
+            XCTAssertEqual(state.recordingOutcomes, original)
+            let actions = await peer.actions()
+            XCTAssertEqual(actions, ["stop"])
+        }
+    }
+
+    func testRecordingHistoryIsBoundedAndRecoveryCannotRewriteIt() async throws {
+        let peer = RecordingRecoveryPeer()
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connect(state)
+        for _ in 0..<23 { await state.toggleRecording() }
+        XCTAssertEqual(state.recordingOutcomes.count, 20)
+        XCTAssertEqual(Set(state.recordingOutcomes.map(\.id)).count, 20)
+        let original = state.recordingOutcomes
+        await state.refresh()
+        XCTAssertEqual(state.recordingOutcomes, original)
+        let actions = await peer.actions()
+        XCTAssertEqual(actions.count, 23)
+        XCTAssertEqual(actions.enumerated().map { $0.offset.isMultiple(of: 2) ? "start" : "stop" }, actions)
+    }
+
     private func makeState(_ peers: [RecordingRecoveryPeer], bridge: Bool = true) -> CameraAppState {
         var remaining = peers
         let suite = "RecordingReadbackRecoveryTests.\(UUID().uuidString)"
@@ -788,7 +950,7 @@ private struct RecordingRecoveryItem: Sendable {
 /// deliberately permit late replies, so correctness cannot depend on cancel().
 private actor RecordingRecoveryPeer: CameraHTTPTransport {
     enum Outcome: Sendable {
-        case normal, acknowledgedReadback, unconfirmed, rejected, lostResponse, cancelled, emptyGateway, malformedGateway, partialGateway, rawRecording(String), status(Bool?)
+        case normal, acknowledgedReadback, unconfirmed, rejected, lostResponse, cancelled, emptyGateway, malformedGateway, partialGateway, cachedFalse, rawRecording(String), status(Bool?)
     }
     private struct Plan { let outcome: Outcome; let gate: String? }
     private let owner: String
@@ -796,10 +958,12 @@ private actor RecordingRecoveryPeer: CameraHTTPTransport {
     private let events: Bool
     private var recording: Bool?
     private var movieRestricted = false
+    private var photoModeCapability = false
     private var items: [RecordingRecoveryItem] = []
     private var plans: [String: [Plan]] = [:]
     private var gates: [String: CheckedContinuation<Void, Never>] = [:]
     private var requests: [String] = []
+    private var sentWireRequests: [String] = []
     private var drained = false
 
     init(owner: String = "synthetic", recording: Bool = false, mediaSupported: Bool = false, movieRestricted: Bool = false, events: Bool = false) {
@@ -814,9 +978,11 @@ private actor RecordingRecoveryPeer: CameraHTTPTransport {
     }
     func setItems(_ values: [RecordingRecoveryItem]) { items = values }
     func restrictMovieStart() { movieRestricted = true }
+    func showPhotoModeCapability() { photoModeCapability = true }
     func actions() -> [String] { requests.filter { $0 == "start" || $0 == "stop" } }
     func cameraRecording() -> Bool? { recording }
     func requestRoutes() -> [String] { requests }
+    func wireRequests() -> [String] { sentWireRequests }
     func count(_ route: String) -> Int { requests.filter { $0 == route }.count }
     func waiting(_ gate: String) -> Bool { gates[gate] != nil }
     func release(_ gate: String) { gates.removeValue(forKey: gate)?.resume() }
@@ -830,6 +996,7 @@ private actor RecordingRecoveryPeer: CameraHTTPTransport {
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
         let path = request.url!.path
         let method = request.httpMethod ?? "GET"
+        sentWireRequests.append("\(method) \(path)")
         let simulator = path.hasPrefix("/ccapi/")
         let route: String
         if path == "/health" { route = "health" }
@@ -837,9 +1004,11 @@ private actor RecordingRecoveryPeer: CameraHTTPTransport {
         else if method == "DELETE" { route = "close" }
         else if path.hasSuffix("/capture/still") || path.hasSuffix("/shoot") { route = "capture" }
         else if path.hasSuffix("/liveview/stop") { route = "close" }
+        else if path.hasSuffix("/recording/observation") { route = "status" }
+        else if path.hasSuffix("/outcome") { route = request.url!.deletingLastPathComponent().lastPathComponent }
         else { route = request.url!.lastPathComponent }
         if route == "start" || route == "stop" {
-            let expected = simulator ? "/ccapi/record/\(route)" : "/v1/session/\(owner)/recording/\(route)"
+            let expected = simulator ? "/ccapi/record/\(route)" : "/v1/session/\(owner)/recording/\(route)/outcome"
             guard method == "POST", path == expected else { throw URLError(.unsupportedURL) }
         }
         requests.append(route)
@@ -858,7 +1027,9 @@ private actor RecordingRecoveryPeer: CameraHTTPTransport {
                 if !movieRestricted { features.append(.videoRecording) }
                 if mediaSupported { features.append(.mediaBrowser) }
                 if events { features.append(.eventPolling) }
-                body = ["supported": features.map(\.rawValue), "settings": []]
+                let settings: [[String: Any]] = photoModeCapability
+                    ? [["key": "moviemode", "label": "Movie mode", "value": "off", "values": ["off", "on"]]] : []
+                body = ["supported": features.map(\.rawValue), "settings": settings]
             }
         case "start", "stop":
             switch plan.outcome {
@@ -879,6 +1050,24 @@ private actor RecordingRecoveryPeer: CameraHTTPTransport {
             body = status()
             body["recording"] = value.map { $0 as Any } ?? NSNull()
         }
+        if case .cachedFalse = plan.outcome { body["recording"] = NSNull() }
+        if !simulator, path.hasSuffix("/outcome") || path.hasSuffix("/recording/observation") {
+            var value = body["recording"] as? Bool
+            var responseEvidence = "response-received"
+            var observationEvidence = value == nil ? "unavailable" : "observed"
+            switch plan.outcome {
+            case .acknowledgedReadback: value = nil; observationEvidence = "read-failed"
+            case .unconfirmed: value = nil; observationEvidence = "unavailable"; responseEvidence = "unconfirmed"
+            case .rejected: value = nil; observationEvidence = "unavailable"; responseEvidence = "rejected"
+            case .cachedFalse: value = nil; observationEvidence = "unavailable"
+            default: break
+            }
+            let observation: [String: Any] = ["version": 1, "engine": "ccapi", "observationEvidence": observationEvidence,
+                "recording": value.map { $0 as Any } ?? NSNull(), "source": value == nil ? NSNull() : "ccapi-simulator" as Any]
+            body = path.hasSuffix("/outcome")
+                ? ["version": 1, "engine": "ccapi", "operation": route, "responseEvidence": responseEvidence, "observation": observation]
+                : observation
+        }
         // Capture the response before suspension to model a truly stale snapshot.
         let response = try JSONSerialization.data(withJSONObject: body)
         if let gate = plan.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
@@ -891,15 +1080,17 @@ private actor RecordingRecoveryPeer: CameraHTTPTransport {
         case .partialGateway:
             return CameraHTTPResponse(statusCode: 502, body: try JSONSerialization.data(withJSONObject: ["error": ["code": "CCAPI_HTTP_ERROR"]]))
         case .unconfirmed:
+            if !simulator { return CameraHTTPResponse(statusCode: 200, body: response) }
             return CameraHTTPResponse(statusCode: 502, body: try JSONSerialization.data(withJSONObject: ["error": [
                 "code": "RECORDING_COMMAND_UNCONFIRMED", "message": "Synthetic lost camera response",
                 "feature": "VIDEO_RECORDING", "engine": "ccapi"]]))
         case .rejected, .acknowledgedReadback:
+            if !simulator { return CameraHTTPResponse(statusCode: 200, body: response) }
             let code: String
             if case .acknowledgedReadback = plan.outcome { code = "RECORDING_STATUS_READBACK_FAILED" }
             else { code = "COMMAND_REJECTED" }
             return CameraHTTPResponse(statusCode: 502, body: try JSONSerialization.data(withJSONObject: ["error": ["code": code, "message": "Synthetic failure"]]))
-        case .normal, .status:
+        case .normal, .status, .cachedFalse:
             return CameraHTTPResponse(statusCode: 200, body: response)
         }
     }

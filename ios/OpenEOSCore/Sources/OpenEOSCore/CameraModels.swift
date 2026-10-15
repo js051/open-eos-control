@@ -255,6 +255,17 @@ public struct CameraStatus: Equatable, Sendable {
         self.temperature = temperature
     }
 
+    public func withRecordingObservation(_ observation: CameraRecordingObservation) -> CameraStatus {
+        CameraStatus(connected: connected, batteryLevel: batteryLevel, batteryStatus: batteryStatus,
+            recording: observation.observedRecording, bulbExposureActive: bulbExposureActive,
+            shutterReleaseUnconfirmed: shutterReleaseUnconfirmed, liveViewStopUnconfirmed: liveViewStopUnconfirmed,
+            mode: mode, mediaAvailable: mediaAvailable, remainingMinutes: remainingMinutes, exposure: exposure,
+            storageTotalBytes: storageTotalBytes, storageFreeBytes: storageFreeBytes, storageFreeImages: storageFreeImages,
+            storageDeviceCount: storageDeviceCount, recordableShots: recordableShots,
+            remainingRecordingSeconds: remainingRecordingSeconds, rawBatteryJSON: rawBatteryJSON,
+            rawStorageJSON: rawStorageJSON, rawRecordableJSON: rawRecordableJSON, lens: lens, temperature: temperature)
+    }
+
     public func withBulbExposureActive(_ active: Bool?) -> CameraStatus {
         replacingShutterState(active: active, unconfirmed: shutterReleaseUnconfirmed)
     }

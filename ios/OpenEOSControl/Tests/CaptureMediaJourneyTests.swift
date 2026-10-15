@@ -2438,28 +2438,29 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
                 return CameraHTTPResponse(statusCode: 502, body: try JSONSerialization.data(withJSONObject: error))
             }
             object = ["connected": true, "recording": false, "mode": "Manual"]
-        } else if path.hasSuffix("/recording/start") {
+        } else if path.hasSuffix("/recording/start/outcome") {
             counts["recording-start", default: 0] += 1
             recordingRequestEnd = requests.count
             await waitIfHeld("recording-start")
             recording = true
-            object = statusJSON()
-        } else if path.hasSuffix("/recording/stop") {
+            object = recordingOutcomeJSON(starting: true)
+        } else if path.hasSuffix("/recording/stop/outcome") {
             counts["recording-stop", default: 0] += 1
             recordingRequestEnd = requests.count
             let outcome = recordingStopOutcome
             await waitIfHeld("recording-stop")
             switch outcome {
             case .rejected:
-                let error = ["error": ["code": "RECORDING_STOP_FAILED", "message": "Synthetic stop rejected",
-                                       "feature": "VIDEO_RECORDING", "engine": "ccapi"]]
-                return CameraHTTPResponse(statusCode: 503, body: try JSONSerialization.data(withJSONObject: error))
+                return CameraHTTPResponse(statusCode: 200, body: try JSONSerialization.data(
+                    withJSONObject: recordingOutcomeJSON(starting: false, response: "rejected", observe: false)))
             case .responseLost: throw URLError(.networkConnectionLost)
             case .stopped: recording = false
             case .active: recording = true
             case .unknown: recording = nil
             }
-            object = statusJSON()
+            object = recordingOutcomeJSON(starting: false)
+        } else if path.hasSuffix("/recording/observation") {
+            object = recordingObservationJSON()
         } else if path.hasSuffix("/media") {
             counts["listing", default: 0] += 1
             listingLimits.append(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
@@ -2514,6 +2515,16 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
             headers: headers.merging([
                 "content-length": "\(payload.count)", "content-range": "bytes \(start)-\(end)/\(bytes.count)",
             ]) { _, new in new }, body: payload)
+    }
+
+    private func recordingObservationJSON(observe: Bool = true) -> [String: Any] {
+        let value = observe ? recording : nil
+        return ["version": 1, "engine": "ccapi", "observationEvidence": value == nil ? "unavailable" : "observed",
+            "recording": value.map { $0 as Any } ?? NSNull(), "source": value == nil ? NSNull() : "ccapi-simulator" as Any]
+    }
+    private func recordingOutcomeJSON(starting: Bool, response: String = "response-received", observe: Bool = true) -> [String: Any] {
+        ["version": 1, "engine": "ccapi", "operation": starting ? "start" : "stop", "responseEvidence": response,
+         "observation": recordingObservationJSON(observe: observe)]
     }
 
     private func statusJSON() -> [String: Any] {
