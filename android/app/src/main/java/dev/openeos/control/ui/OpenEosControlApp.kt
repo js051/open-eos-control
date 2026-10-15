@@ -65,6 +65,7 @@ fun OpenEosControlApp(
     var launchedHandoffToken by rememberSaveable { mutableStateOf<Long?>(null) }
     val context = LocalContext.current
     val mediaPickers = rememberCameraMediaPickerLaunchers(viewModel)
+    val loadCubeLut = rememberCubeLutPickerLauncher(viewModel)
     val sereinLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -144,9 +145,9 @@ fun OpenEosControlApp(
         setFrameGuide = viewModel::setFrameGuide,
         setSafeAreaVisible = viewModel::setSafeAreaVisible,
         setDesqueeze = viewModel::setDesqueeze,
-        importCubeLut = viewModel::importCubeLut,
+        loadCubeLut = loadCubeLut,
         clearCubeLut = viewModel::clearCubeLut,
-        reportCubeLutError = viewModel::reportCubeLutError,
+        cancelCubeLutImport = viewModel::cancelCubeLutImport,
         setLiveViewTapAction = viewModel::setLiveViewTapAction,
         openPicker = viewModel::openSettingPicker,
         closePicker = viewModel::closeSettingPicker,
@@ -445,9 +446,9 @@ data class CameraActions(
     val setFrameGuide: (LiveViewFrameGuide) -> Unit = {},
     val setSafeAreaVisible: (Boolean) -> Unit = {},
     val setDesqueeze: (LiveViewDesqueeze) -> Unit = {},
-    val importCubeLut: (String, String) -> Unit = { _, _ -> },
+    val loadCubeLut: () -> Unit = {},
     val clearCubeLut: () -> Unit = {},
-    val reportCubeLutError: (String) -> Unit = {},
+    val cancelCubeLutImport: () -> Unit = {},
     val setLiveViewTapAction: (LiveViewTapAction) -> Unit,
     val openPicker: (SettingPicker) -> Unit,
     val closePicker: () -> Unit,

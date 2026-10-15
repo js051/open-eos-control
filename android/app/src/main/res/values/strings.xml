@@ -1109,4 +1109,9 @@
     <string name="rtp_audio_pipeline_state">Audio pipeline state / evidence</string>
     <string name="rtp_audio_queued_units">AAC units queued to decoder</string>
     <string name="rtp_audio_submitted_frames">PCM frames submitted to output</string>
+    <string name="cube_lut_import_loading">Loading LUT…</string>
+    <string name="cube_lut_import_waiting">Waiting for the previous LUT import to stop…</string>
+    <string name="cube_lut_import_stopping">Import cancelled. Waiting for its background work to stop…</string>
+    <string name="cancel_cube_lut_import">Cancel LUT import</string>
+    <string name="cube_lut_picker_recovery">Waiting for an earlier file picker. Finish or cancel it to choose again. If it is gone, remove this app from Recent apps and reopen. The earlier selection will not be imported.</string>
 </resources>

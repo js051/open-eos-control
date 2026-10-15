@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "maximumBytes": 16777216,
+  "encoding": "strict UTF-8; remove one leading UTF-8 BOM, reject a second leading BOM; no alternate encoding conversion",
+  "scope": "Byte decoding contract only; accepted text must still pass existing cube parser and renderer setup before application",
+  "vectors": [
+    {
+      "id": "ascii",
+      "base64": "TFVUXzNEX1NJWkUgMgowIDAgMAoxIDAgMAowIDEgMAoxIDEgMAowIDAgMQoxIDAgMQowIDEgMQoxIDEgMQo=",
+      "accepted": true,
+      "normalizedText": "LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n"
+    },
+    {
+      "id": "unicode-title",
+      "base64": "VElUTEUgIua4rOippiDwn46lIgpMVVRfM0RfU0laRSAyCjAgMCAwCjEgMCAwCjAgMSAwCjEgMSAwCjAgMCAxCjEgMCAxCjAgMSAxCjEgMSAxCg==",
+      "accepted": true,
+      "normalizedText": "TITLE \"測試 🎥\"\nLUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n"
+    },
+    {
+      "id": "single-utf8-bom",
+      "base64": "77u/TFVUXzNEX1NJWkUgMgowIDAgMAoxIDAgMAowIDEgMAoxIDEgMAowIDAgMQoxIDAgMQowIDEgMQoxIDEgMQo=",
+      "accepted": true,
+      "normalizedText": "LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n"
+    },
+    {
+      "id": "double-leading-utf8-bom",
+      "base64": "77u/77u/TFVUXzNEX1NJWkUgMgowIDAgMAoxIDAgMAowIDEgMAoxIDEgMAowIDAgMQoxIDAgMQowIDEgMQoxIDEgMQo=",
+      "accepted": false,
+      "reason": "duplicate-leading-bom"
+    },
+    {
+      "id": "crlf",
+      "base64": "TFVUXzNEX1NJWkUgMg0KMCAwIDANCjEgMCAwDQowIDEgMA0KMSAxIDANCjAgMCAxDQoxIDAgMQ0KMCAxIDENCjEgMSAxDQo=",
+      "accepted": true,
+      "normalizedText": "LUT_3D_SIZE 2\r\n0 0 0\r\n1 0 0\r\n0 1 0\r\n1 1 0\r\n0 0 1\r\n1 0 1\r\n0 1 1\r\n1 1 1\r\n"
+    },
+    {
+      "id": "bad-continuation-in-comment",
+      "base64": "IyDDKApMVVRfM0RfU0laRSAyCjAgMCAwCjEgMCAwCjAgMSAwCjEgMSAwCjAgMCAxCjEgMCAxCjAgMSAxCjEgMSAxCg==",
+      "accepted": false,
+      "reason": "invalid-utf8"
+    },
+    {
+      "id": "lone-continuation-in-comment",
+      "base64": "IyCACkxVVF8zRF9TSVpFIDIKMCAwIDAKMSAwIDAKMCAxIDAKMSAxIDAKMCAwIDEKMSAwIDEKMCAxIDEKMSAxIDEK",
+      "accepted": false,
+      "reason": "invalid-utf8"
+    },
+    {
+      "id": "overlong-in-comment",
+      "base64": "IyDArwpMVVRfM0RfU0laRSAyCjAgMCAwCjEgMCAwCjAgMSAwCjEgMSAwCjAgMCAxCjEgMCAxCjAgMSAxCjEgMSAxCg==",
+      "accepted": false,
+      "reason": "invalid-utf8"
+    },
+    {
+      "id": "surrogate-in-comment",
+      "base64": "IyDtoIAKTFVUXzNEX1NJWkUgMgowIDAgMAoxIDAgMAowIDEgMAoxIDEgMAowIDAgMQoxIDAgMQowIDEgMQoxIDEgMQo=",
+      "accepted": false,
+      "reason": "invalid-utf8"
+    },
+    {
+      "id": "truncated-in-comment",
+      "base64": "IyDiggpMVVRfM0RfU0laRSAyCjAgMCAwCjEgMCAwCjAgMSAwCjEgMSAwCjAgMCAxCjEgMCAxCjAgMSAxCjEgMSAxCg==",
+      "accepted": false,
+      "reason": "invalid-utf8"
+    },
+    {
+      "id": "above-unicode-max-in-comment",
+      "base64": "IyD0kICACkxVVF8zRF9TSVpFIDIKMCAwIDAKMSAwIDAKMCAxIDAKMSAxIDAKMCAwIDEKMSAwIDEKMCAxIDEKMSAxIDEK",
+      "accepted": false,
+      "reason": "invalid-utf8"
+    },
+    {
+      "id": "bad-byte-in-title",
+      "base64": "VElUTEUgIlN5bnRoZXRpYyCAIgpMVVRfM0RfU0laRSAyCjAgMCAwCjEgMCAwCjAgMSAwCjEgMSAwCjAgMCAxCjEgMCAxCjAgMSAxCjEgMSAxCg==",
+      "accepted": false,
+      "reason": "invalid-utf8"
+    },
+    {
+      "id": "utf16-le",
+      "base64": "//5MAFUAVABfADMARABfAFMASQBaAEUAIAAyAAoAMAAgADAAIAAwAAoAMQAgADAAIAAwAAoAMAAgADEAIAAwAAoAMQAgADEAIAAwAAoAMAAgADAAIAAxAAoAMQAgADAAIAAxAAoAMAAgADEAIAAxAAoAMQAgADEAIAAxAAoA",
+      "accepted": false,
+      "reason": "invalid-utf8"
+    },
+    {
+      "id": "utf16-be",
+      "base64": "/v8ATABVAFQAXwAzAEQAXwBTAEkAWgBFACAAMgAKADAAIAAwACAAMAAKADEAIAAwACAAMAAKADAAIAAxACAAMAAKADEAIAAxACAAMAAKADAAIAAwACAAMQAKADEAIAAwACAAMQAKADAAIAAxACAAMQAKADEAIAAxACAAMQAK",
+      "accepted": false,
+      "reason": "invalid-utf8"
+    },
+    {
+      "id": "truncated-bom",
+      "base64": "77s=",
+      "accepted": false,
+      "reason": "invalid-utf8"
+    },
+    {
+      "id": "highest-unicode-scalar",
+      "base64": "IyD0j7+/CkxVVF8zRF9TSVpFIDIKMCAwIDAKMSAwIDAKMCAxIDAKMSAxIDAKMCAwIDEKMSAwIDEKMCAxIDEKMSAxIDEK",
+      "accepted": true,
+      "normalizedText": "# 􏿿\nLUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n"
+    }
+  ],
+  "sizeBoundaryCases": [
+    {
+      "bytes": 16777216,
+      "readExpected": "accepted-byte-limit; parser still applies"
+    },
+    {
+      "bytes": 16777217,
+      "readExpected": "reject; do not allocate/read arbitrary remainder"
+    }
+  ]
+}
