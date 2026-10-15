@@ -779,6 +779,7 @@ private struct MoreSettingsView: View {
     @State private var pendingRangeValues: [String: String] = [:]
     @State private var settingDraftRevisions: [String: UUID] = [:]
     @State private var settingEditorOwner = UUID()
+    @State private var maintenanceConfirmation: MaintenanceConfirmation?
     @State private var showSleepConfirmation = false
     @State private var showSensorCleaningConfirmation = false
     @State private var directoryName = ""
@@ -815,6 +816,10 @@ private struct MoreSettingsView: View {
                         sensorCleaningRow
                         Divider().overlay(Color.cameraBorder)
                     }
+                    if !camera.maintenanceHistory.isEmpty {
+                        MaintenancePanel().padding(.vertical, 14)
+                        Divider().overlay(Color.cameraBorder)
+                    }
                     if camera.supports(.cameraSleep) {
                         cameraSleepRow
                         Divider().overlay(Color.cameraBorder)
@@ -849,8 +854,12 @@ private struct MoreSettingsView: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .onDisappear { camera.cancelShootingSetting(); settingEditorOwner = UUID() }
+        .onDisappear { camera.cancelMaintenance() }
         .onChange(of: camera.mediaLibrarySessionID) { _, _ in
             settingEditorOwner = UUID()
+            showSleepConfirmation = false
+            showSensorCleaningConfirmation = false
+            maintenanceConfirmation = nil
             textDrafts.removeAll()
             choiceDrafts.removeAll()
             pendingRangeValues.removeAll()
@@ -859,7 +868,9 @@ private struct MoreSettingsView: View {
         .alert("camera_sleep_confirm_title", isPresented: $showSleepConfirmation) {
             Button("cancel", role: .cancel) {}
             Button("sleep_now", role: .destructive) {
-                Task { await camera.sleepCamera() }
+                guard let confirmation = maintenanceConfirmation else { return }
+                maintenanceConfirmation = nil
+                Task { await camera.sleepCamera(confirmation: confirmation) }
             }
         } message: {
             Text("camera_sleep_confirm_message")
@@ -870,10 +881,14 @@ private struct MoreSettingsView: View {
             titleVisibility: .visible
         ) {
             Button("sensor_cleaning_keep_power") {
-                Task { await camera.cleanSensor(autoPowerOff: false) }
+                guard let confirmation = maintenanceConfirmation else { return }
+                maintenanceConfirmation = nil
+                Task { await camera.cleanSensor(autoPowerOff: false, confirmation: confirmation) }
             }
             Button("sensor_cleaning_power_off", role: .destructive) {
-                Task { await camera.cleanSensor(autoPowerOff: true) }
+                guard let confirmation = maintenanceConfirmation else { return }
+                maintenanceConfirmation = nil
+                Task { await camera.cleanSensor(autoPowerOff: true, confirmation: confirmation) }
             }
             Button("cancel", role: .cancel) {}
         } message: {
@@ -956,7 +971,7 @@ private struct MoreSettingsView: View {
             }
             .buttonStyle(.bordered)
             .tint(Color.cameraAccent)
-            .disabled(camera.isBusy(.clock))
+            .disabled(!camera.canStartMaintenance)
             .accessibilityIdentifier("sync-camera-clock")
         }
         .frame(minHeight: 72)
@@ -1058,18 +1073,14 @@ private struct MoreSettingsView: View {
             }
             Spacer(minLength: 8)
             Button(role: .destructive) {
+                maintenanceConfirmation = camera.maintenanceConfirmation(for: .sleep)
                 showSleepConfirmation = true
             } label: {
                 Label("sleep_now", systemImage: "power")
                     .frame(minHeight: 44)
             }
             .buttonStyle(.bordered)
-            .disabled(
-                camera.isPreview ||
-                camera.recording ||
-                camera.bulbExposureActive ||
-                !camera.busyOperations.isEmpty
-            )
+            .disabled(!camera.canStartMaintenance)
             .accessibilityIdentifier("camera-sleep")
         }
         .frame(minHeight: 72)
@@ -1087,6 +1098,7 @@ private struct MoreSettingsView: View {
             }
             Spacer(minLength: 8)
             Button {
+                maintenanceConfirmation = camera.maintenanceConfirmation(for: .sensorCleaning)
                 showSensorCleaningConfirmation = true
             } label: {
                 Label("clean_now", systemImage: "arrow.triangle.2.circlepath")
@@ -1094,12 +1106,7 @@ private struct MoreSettingsView: View {
             }
             .buttonStyle(.bordered)
             .tint(Color.cameraAccent)
-            .disabled(
-                camera.isPreview ||
-                camera.recording ||
-                camera.bulbExposureActive ||
-                !camera.busyOperations.isEmpty
-            )
+            .disabled(!camera.canStartMaintenance)
             .accessibilityIdentifier("sensor-cleaning")
         }
         .frame(minHeight: 72)

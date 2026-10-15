@@ -116,8 +116,10 @@ public protocol CameraHTTPTransport: Sendable {
     func sendMediaDelete(_ request: URLRequest) async throws -> CameraHTTPResponse
     func sendShootingSetting(_ request: URLRequest) async throws -> CameraHTTPResponse
     func sendCaptureConfiguration(_ request: URLRequest) async throws -> CameraHTTPResponse
+    func sendMaintenance(_ request: URLRequest) async throws -> CameraHTTPResponse
     func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse
     func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse
+    func openMaintenanceStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse
     func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse
     func download(
         _ request: URLRequest,
@@ -148,10 +150,19 @@ public extension CameraHTTPTransport {
         try await send(request)
     }
 
+    /// One bounded maintenance exchange; never replay a command after failure.
+    func sendMaintenance(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        try await send(request)
+    }
+
     func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse {
         // Existing custom transports retain their send/cancellation contract.
         // There is exactly one invocation, never a fallback after failure.
         CameraHTTPRecordingResponse(response: try await send(request))
+    }
+
+    func openMaintenanceStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
+        try await openStream(request)
     }
 
     func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
@@ -313,6 +324,10 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
         try await CameraHTTPCaptureConfigurationTask(configuration: streamConfiguration).run(request)
     }
 
+    public func sendMaintenance(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        try await CameraHTTPMaintenanceTask(configuration: streamConfiguration).run(request)
+    }
+
     public func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse {
         try await sendRecordingCommand(request, onResponseHeaders: nil)
     }
@@ -358,6 +373,15 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
         } onCancel: {
             stream.cancel()
         }
+    }
+
+    public func openMaintenanceStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
+        let handle = CameraHTTPStreamTaskHandle(configuration: streamConfiguration,
+                                                boundedListing: true, maintenanceStream: true)
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await handle.start(request)
+        } onCancel: { handle.cancel() }
     }
 
     public func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
@@ -521,11 +545,14 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
     private var cancellationRequested = false
     private let maximumBytes: Int?
     private let boundedListing: Bool
+    private let maintenanceStream: Bool
+    private var maintenanceHeaderDeadline: Task<Void, Never>?
     private var receivedBytes = 0
     private var terminalResultRecorded = false
     private var completedNormally = false
 
-    init(configuration: URLSessionConfiguration, maximumBytes: Int? = nil, boundedListing: Bool = false) {
+    init(configuration: URLSessionConfiguration, maximumBytes: Int? = nil, boundedListing: Bool = false, maintenanceStream: Bool = false) {
+        self.maintenanceStream = maintenanceStream
         self.maximumBytes = maximumBytes
         self.boundedListing = boundedListing
         self.configuration = configuration.copy() as! URLSessionConfiguration
@@ -541,14 +568,47 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
         try await withCheckedThrowingContinuation { continuation in
             lock.lock()
             responseContinuation = continuation
+            if maintenanceStream {
+                configuration.waitsForConnectivity = false
+                configuration.urlCache = nil
+                configuration.urlCredentialStorage = nil
+                configuration.httpShouldSetCookies = false
+                configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+                configuration.timeoutIntervalForRequest = request.timeoutInterval
+                // Header wait has a wall deadline, independent of idle timeout.
+                // Once headers are delivered, restore owns the remaining first-frame
+                // budget; an established stream keeps its normal long lifetime.
+            }
             let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
             let task = session.dataTask(with: request)
             self.session = session
             self.task = task
+            if maintenanceStream {
+                let seconds = min(max(request.timeoutInterval, 0.001), 15)
+                maintenanceHeaderDeadline = Task { [weak self] in
+                    do { try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+                    catch { return }
+                    self?.expireMaintenanceHeaders()
+                }
+            }
             let shouldCancel = cancellationRequested
             lock.unlock()
             if shouldCancel { task.cancel() } else { task.resume() }
         }
+    }
+
+    private func expireMaintenanceHeaders() {
+        lock.lock()
+        guard maintenanceStream, !responseDelivered, !terminalResultRecorded else { lock.unlock(); return }
+        terminalResultRecorded = true
+        let continuation = responseContinuation; responseContinuation = nil
+        let activeTask = task; task = nil
+        let activeSession = session; session = nil
+        maintenanceHeaderDeadline = nil
+        lock.unlock()
+        activeTask?.cancel(); activeSession?.invalidateAndCancel()
+        continuation?.resume(throwing: URLError(.timedOut))
+        chunksContinuation.finish(throwing: URLError(.timedOut))
     }
 
     func recordingBodyCompleted(collectedBytes: Int) -> Bool {
@@ -584,10 +644,13 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
             result[String(describing: entry.key).lowercased()] = String(describing: entry.value)
         }
         lock.lock()
+        guard !terminalResultRecorded else { lock.unlock(); completionHandler(.cancel); return }
         let continuation = responseContinuation
         responseContinuation = nil
         responseDelivered = true
+        let deadline = maintenanceHeaderDeadline; maintenanceHeaderDeadline = nil
         lock.unlock()
+        deadline?.cancel()
         continuation?.resume(
             returning: CameraHTTPStreamResponse(
                 statusCode: http.statusCode,
@@ -605,6 +668,13 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
         completionHandler(boundedListing ? nil : request)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        if maintenanceStream, challenge.protectionSpace.authenticationMethod != NSURLAuthenticationMethodServerTrust {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+        } else { completionHandler(.performDefaultHandling, nil) }
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
@@ -657,7 +727,9 @@ private final class CameraHTTPStreamTaskHandle: NSObject, URLSessionDataDelegate
         task = nil
         let session = session
         self.session = nil
+        let deadline = maintenanceHeaderDeadline; maintenanceHeaderDeadline = nil
         lock.unlock()
+        deadline?.cancel()
 
         if !delivered {
             continuation?.resume(throwing: error ?? CCAPIError.invalidResponse("Camera stream ended before HTTP headers."))

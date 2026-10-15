@@ -99,51 +99,37 @@ final class LiveViewStopRecoveryTests: XCTestCase {
         XCTAssertEqual(actions, ["start", "stop", "stop"])
     }
 
-    func testMaintenanceStopFailureBlocksCommandAndHealthyCleanRestartsView() async throws {
+    func testMaintenanceStopFailureBlocksCommandAndHealthyCleanNeedsExplicitRestore() async throws {
         for cleaning in [false, true] {
-            let peer = AppLiveViewPeer()
-            let state = makeState([peer])
+            let peer = AppLiveViewPeer(), state = makeState([peer])
             defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
-            await state.connect()
-            await state.startLiveView()
-            await peer.failNextStop()
-            if cleaning { await state.cleanSensor(autoPowerOff: false) }
-            else { await state.sleepCamera() }
+            await state.connect(); await state.startLiveView(); await peer.failNextStop()
+            if cleaning { await state.cleanSensor(autoPowerOff: false) } else { await state.sleepCamera() }
             XCTAssertTrue(state.liveViewStopState.stopUnconfirmed)
-            XCTAssertTrue(state.canRetryLiveViewStop)
-            XCTAssertTrue(state.connected)
+            XCTAssertEqual(state.maintenanceRecord?.outcome.commandEvidence, .notSent)
+            XCTAssertEqual(state.maintenanceRecord?.outcome.stopEvidence, .unknown)
             let failed = await peer.actions()
-            XCTAssertEqual(failed, ["start", "stop"], "No maintenance or automatic Start after failed Stop")
-            await state.retryLiveViewStop()
-            await state.startLiveView()
+            XCTAssertEqual(failed, ["start", "stop"])
             await state.cleanSensor(autoPowerOff: false)
-            XCTAssertEqual(state.activeLiveViewSource, .desktopBridgeStream)
-            XCTAssertFalse(state.liveViewStopState.stopUnconfirmed)
-            let completed = await peer.actions()
-            XCTAssertEqual(Array(completed.suffix(3)), ["stop", "clean", "start"])
+            let blocked = await peer.actions(); XCTAssertEqual(blocked, failed, "Unknown Stop cannot dispatch cleaning")
+            await state.retryLiveViewStop()
+            await state.cleanSensor(autoPowerOff: false)
+            XCTAssertNil(state.activeLiveViewSource)
+            let id = try XCTUnwrap(state.maintenanceRecord?.id)
+            await state.restoreMaintenance(id)
+            XCTAssertFalse(state.maintenanceControlsPaused)
+            XCTAssertNil(state.activeLiveViewSource, "No view was active for the new confirmed cleaning")
         }
-    }
-
-    func testDirectCleaningRetryClearsDischargedStopRecoveryWithoutSeparateStopAction() async throws {
-        let peer = AppLiveViewPeer()
-        let state = makeState([peer])
+        let peer = AppLiveViewPeer(), state = makeState([peer])
         defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
-        await state.connect()
-        await state.startLiveView()
-        await peer.failNextStop()
-        await state.cleanSensor(autoPowerOff: false)
-        XCTAssertTrue(state.liveViewStopState.stopUnconfirmed)
+        await state.connect(); await state.startLiveView(); await state.cleanSensor(autoPowerOff: false)
         XCTAssertNil(state.activeLiveViewSource)
-
-        await state.cleanSensor(autoPowerOff: false)
-
-        XCTAssertEqual(state.liveViewStopState, .idle)
-        XCTAssertFalse(state.canRetryLiveViewStop)
-        XCTAssertNil(state.lastError)
-        let actions = await peer.actions()
-        XCTAssertEqual(actions, ["start", "stop", "stop", "clean"])
-        await state.startLiveView()
+        let id = try XCTUnwrap(state.maintenanceRecord?.id)
+        await state.recoverMaintenance(id)
+        let readOnly = await peer.actions(); XCTAssertEqual(readOnly, ["start", "stop", "clean"])
+        await state.restoreMaintenance(id)
         XCTAssertEqual(state.activeLiveViewSource, .desktopBridgeStream)
+        let restored = await peer.actions(); XCTAssertEqual(restored, ["start", "stop", "clean", "start"])
     }
 
     func testRestartWaitsForHeldStartAppCompletionBeforeAdmittingReplacement() async throws {
@@ -216,7 +202,7 @@ private actor AppLiveViewPeer: CameraHTTPTransport {
         else if path.hasSuffix("/capabilities") {
             body = ["supported": [CameraFeature.liveView.rawValue, CameraFeature.cameraSleep.rawValue, CameraFeature.sensorCleaning.rawValue], "settings": [],
                     "liveView": ["sources": ["DESKTOP_BRIDGE_STREAM"], "sizes": ["MEDIUM"], "minFps": 1, "maxFps": 30]]
-        } else if path == "/v1/session/\(owner)/liveview/start" {
+        } else if path == "/v1/session/\(owner)/liveview/start" || path == "/v1/session/\(owner)/maintenance/control/liveview/start" {
             recorded.append("start")
             if holdStart {
                 holdStart = false
@@ -225,17 +211,22 @@ private actor AppLiveViewPeer: CameraHTTPTransport {
                 } onCancel: { Task { await self.noteStartCancellation() } }
             }
             if loseStart { loseStart = false; throw URLError(.networkConnectionLost) }
-            body = ["active": true]
-        } else if path == "/v1/session/\(owner)/liveview/stop" {
+            body = ["active": true, "source": "CCAPI_JPEG_POLLING", "size": "MEDIUM", "requestedFps": 6]
+        } else if path == "/v1/session/\(owner)/liveview/stop" || path == "/v1/session/\(owner)/maintenance/control/liveview/stop" {
             recorded.append("stop")
             if stopFailures > 0 {
                 stopFailures -= 1; status = 502
                 body = ["code": "LIVE_VIEW_STOP_UNCONFIRMED", "message": "Synthetic stop response lost"]
             } else { body = ["active": false, "liveViewStopUnconfirmed": false] }
-        } else if path == "/v1/session/\(owner)/maintenance/sensor-cleaning" {
-            recorded.append("clean"); body = [:]
-        } else if path == "/v1/session/\(owner)/power/sleep" {
-            recorded.append("sleep"); body = [:]
+        } else if path == "/v1/session/\(owner)/maintenance/sensor-cleaning", method == "GET" {
+            body = ["version": 1, "engine": "ccapi", "operation": "sensor-cleaning", "observationEvidence": "reachable", "clockObservation": NSNull()]
+        } else if path.hasSuffix("/maintenance/sensor-cleaning/outcome") || path.hasSuffix("/maintenance/sleep/outcome") {
+            let cleaning = path.contains("sensor-cleaning")
+            recorded.append(cleaning ? "clean" : "sleep")
+            let payload = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+            body = ["version": 1, "engine": "ccapi", "operation": cleaning ? "sensor-cleaning" : "sleep",
+                "autoPowerOff": payload["autoPowerOff"]!, "responseEvidence": "response-received", "clockReadEvidence": "not-applicable",
+                "clockReference": NSNull(), "clockObservation": NSNull()]
         } else { throw URLError(.unsupportedURL) }
         return CameraHTTPResponse(statusCode: status, headers: ["content-type": "application/json"],
             body: try JSONSerialization.data(withJSONObject: body))

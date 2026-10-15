@@ -101,7 +101,7 @@ private struct ShutterReleaseRecoveryView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     var body: some View {
-        if camera.shutterReleaseRequired || camera.previousShutterReleaseUnconfirmed || !camera.previousRecordingWarnings.isEmpty || camera.liveViewStopState.stopUnconfirmed || !camera.previousLiveViewWarnings.isEmpty {
+        if camera.shutterReleaseRequired || camera.previousShutterReleaseUnconfirmed || !camera.previousRecordingWarnings.isEmpty || camera.liveViewStopState.stopUnconfirmed || !camera.previousLiveViewWarnings.isEmpty || !camera.previousMaintenanceRetirementWarnings.isEmpty {
             VStack(spacing: 8) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
@@ -118,6 +118,13 @@ private struct ShutterReleaseRecoveryView: View {
                             Text("live_view_stop_unconfirmed")
                                 .font(.headline)
                                 .accessibilityIdentifier("live-view-stop-warning")
+                        }
+                        if !camera.previousMaintenanceRetirementWarnings.isEmpty {
+                            Text("maintenance_retirement_unconfirmed")
+                                .font(.subheadline)
+                                .accessibilityIdentifier("maintenance-retirement-warning")
+                            Button("maintenance_retirement_dismiss") { camera.dismissMaintenanceRetirementWarning() }
+                                .buttonStyle(.bordered)
                         }
                         if !camera.previousLiveViewWarnings.isEmpty {
                             Text("previous_live_view_stop_warning")

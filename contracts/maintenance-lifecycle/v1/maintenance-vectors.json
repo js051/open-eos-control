@@ -1,0 +1,2454 @@
+{
+  "version": 1,
+  "clock": [
+    {
+      "name": "exact",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": true,
+      "matched": true
+    },
+    {
+      "name": "offset-seconds--11",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1699999989,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": true,
+      "matched": false
+    },
+    {
+      "name": "offset-seconds--10",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1699999990,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": true,
+      "matched": true
+    },
+    {
+      "name": "offset-seconds--1",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1699999999,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": true,
+      "matched": true
+    },
+    {
+      "name": "offset-seconds-0",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": true,
+      "matched": true
+    },
+    {
+      "name": "offset-seconds-1",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000001,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": true,
+      "matched": true
+    },
+    {
+      "name": "offset-seconds-10",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": true,
+      "matched": true
+    },
+    {
+      "name": "offset-seconds-11",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000011,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": true,
+      "matched": false
+    },
+    {
+      "name": "wrong-zone",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 0,
+        "daylightSaving": false
+      },
+      "valid": true,
+      "matched": false
+    },
+    {
+      "name": "wrong-dst",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": true
+      },
+      "valid": true,
+      "matched": false
+    },
+    {
+      "name": "epoch-only",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": null,
+        "daylightSaving": null
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": null,
+        "daylightSaving": null
+      },
+      "valid": true,
+      "matched": true
+    },
+    {
+      "name": "epoch-observation-cannot-prove-zone",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": null,
+        "daylightSaving": null
+      },
+      "valid": true,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-epochSeconds-True",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": true,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-epochSeconds-1700000000.5",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000.5,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-epochSeconds-1700000000",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": "1700000000",
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-epochSeconds-None",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": null,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-epochSeconds--62135596801",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": -62135596801,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-epochSeconds-253402300800",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 253402300800,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-utcOffsetMinutes-True",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": true,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-utcOffsetMinutes-1440",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 1440,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-utcOffsetMinutes--1440",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": -1440,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-utcOffsetMinutes-1.5",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 1.5,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-utcOffsetMinutes-480",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": "480",
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-utcOffsetMinutes-None",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": null,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-daylightSaving-0",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": 0
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-daylightSaving-false",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": "false"
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-observation-daylightSaving-None",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": null
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-reference-earliestEpochSeconds-True",
+      "reference": {
+        "earliestEpochSeconds": true,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-reference-latestEpochSeconds-1699999989",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1699999989,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-reference-latestEpochSeconds-1700000111",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000111,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-reference-utcOffsetMinutes-None",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": null,
+        "daylightSaving": false
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    },
+    {
+      "name": "invalid-reference-daylightSaving-None",
+      "reference": {
+        "earliestEpochSeconds": 1699999990,
+        "latestEpochSeconds": 1700000010,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": null
+      },
+      "observation": {
+        "epochSeconds": 1700000000,
+        "utcOffsetMinutes": 480,
+        "daylightSaving": false
+      },
+      "valid": false,
+      "matched": false
+    }
+  ],
+  "wire": [
+    {
+      "name": "matched",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": true,
+      "expectedClockRead": "matched"
+    },
+    {
+      "name": "mismatch",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": true
+        },
+        "clockReadEvidence": "mismatch"
+      },
+      "expectedResponse": true,
+      "expectedClockRead": "mismatch"
+    },
+    {
+      "name": "no-observation",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": null,
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": true,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "no-reference",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": null,
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": true,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "missing-read",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        }
+      },
+      "expectedResponse": true,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "contradiction",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "mismatch"
+      },
+      "expectedResponse": true,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "unknown-read",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "reached"
+      },
+      "expectedResponse": true,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "read-failure",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": null,
+        "clockReadEvidence": "unavailable"
+      },
+      "expectedResponse": true,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "invalid-read",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": true,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": true,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "invalid-base-version-True",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": true,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "invalid-base-version-2",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 2,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "invalid-base-engine-gphoto2",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "gphoto2",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "invalid-base-operation-sleep",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "sleep",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "invalid-base-autoPowerOff-True",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": true,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "invalid-base-autoPowerOff-0",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": 0,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "invalid-base-responseEvidence-acknowledged",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "acknowledged",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "invalid-base-responseEvidence-None",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": null,
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "wrong-status-0",
+      "status": 0,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "wrong-status-201",
+      "status": 201,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "wrong-status-204",
+      "status": 204,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "wrong-status-206",
+      "status": 206,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "wrong-status-302",
+      "status": 302,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "wrong-status-401",
+      "status": 401,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "wrong-status-403",
+      "status": 403,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "wrong-status-500",
+      "status": 500,
+      "engine": "ccapi",
+      "operation": "clock-sync",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": {
+          "earliestEpochSeconds": 1699999990,
+          "latestEpochSeconds": 1700000010,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockObservation": {
+          "epochSeconds": 1700000000,
+          "utcOffsetMinutes": 480,
+          "daylightSaving": false
+        },
+        "clockReadEvidence": "matched"
+      },
+      "expectedResponse": false,
+      "expectedClockRead": "unavailable"
+    },
+    {
+      "name": "sensor-cleaning-False",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "sensor-cleaning",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": null,
+        "clockObservation": null,
+        "clockReadEvidence": "not-applicable"
+      },
+      "expectedResponse": true,
+      "expectedClockRead": "not-applicable"
+    },
+    {
+      "name": "sensor-cleaning-True",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "sensor-cleaning",
+      "autoPowerOff": true,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "sensor-cleaning",
+        "autoPowerOff": true,
+        "responseEvidence": "response-received",
+        "clockReference": null,
+        "clockObservation": null,
+        "clockReadEvidence": "not-applicable"
+      },
+      "expectedResponse": true,
+      "expectedClockRead": "not-applicable"
+    },
+    {
+      "name": "sleep-False",
+      "status": 200,
+      "engine": "ccapi",
+      "operation": "sleep",
+      "autoPowerOff": false,
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "operation": "sleep",
+        "autoPowerOff": false,
+        "responseEvidence": "response-received",
+        "clockReference": null,
+        "clockObservation": null,
+        "clockReadEvidence": "not-applicable"
+      },
+      "expectedResponse": true,
+      "expectedClockRead": "not-applicable"
+    }
+  ],
+  "ownership": [
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": true,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": true,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": true,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": true,
+      "canRestore": true
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": false,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": false,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": true,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": false,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sleep",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": true,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "clock-sync",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": true,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": true,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": true,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": false,
+        "freshReachable": true,
+        "safetyClear": true
+      },
+      "canPublish": true,
+      "canRestore": true
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": false,
+        "safetyClear": true
+      },
+      "canPublish": true,
+      "canRestore": false
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "responseReceived": true,
+        "stopConfirmed": true,
+        "operation": "sensor-cleaning",
+        "autoPowerOff": false,
+        "wasLive": true,
+        "freshReachable": true,
+        "safetyClear": false
+      },
+      "canPublish": true,
+      "canRestore": false
+    }
+  ]
+}

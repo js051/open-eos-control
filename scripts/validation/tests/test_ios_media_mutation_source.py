@@ -41,7 +41,15 @@ class IOSMediaMutationSourceTests(unittest.TestCase):
         decoder = (CORE / 'BridgeMediaListingDecoder.swift').read_text()
         self.assertIn('CameraMediaMetadataJSON.decode(data)', decoder)
         self.assertIn('CameraMediaMetadataJSON.decode(data)', bridge)
-        self.assertIn('mediaMetadata ? CameraMediaMetadataJSON.decode(response.body)', bridge)
+        # The Bridge parser now has dedicated setting/configuration branches.
+        # Inspect the scoped metadata branch and its ordinary JSON fallback,
+        # rather than requiring the earlier equivalent ternary spelling.
+        bridge_parser = bridge.split('private func requestJSON(', 1)[1].split('private func requestOK(', 1)[0]
+        metadata_branch = bridge_parser.split('} else if mediaMetadata {', 1)[1].split('guard let object', 1)[0]
+        self.assertIn('decoded = try? CameraMediaMetadataJSON.decode(response.body)', metadata_branch)
+        self.assertIn('} else {\n            decoded = try? JSONSerialization.jsonObject(with: response.body)', metadata_branch)
+        self.assertLess(metadata_branch.index('CameraMediaMetadataJSON.decode(response.body)'),
+                        metadata_branch.index('JSONSerialization.jsonObject(with: response.body)'))
         self.assertIn('mediaMetadata ? CameraMediaMetadataJSON.decode(response.body)', ccapi)
         for source in (bridge, ccapi):
             self.assertIn('CameraMediaMetadataValue.boolean', source)
