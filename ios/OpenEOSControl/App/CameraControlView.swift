@@ -274,25 +274,54 @@ private struct LandscapeControlPanel: View {
 
 private struct CaptureModePicker: View {
     @EnvironmentObject private var camera: CameraAppState
+    @State private var draft: AppCaptureMode?
+    @State private var revision = UUID()
+    @State private var editorOwner = UUID()
 
     var body: some View {
-        Picker("capture_mode", selection: Binding(
-            get: { camera.captureMode },
-            set: { mode in
-                camera.traceCaptureMode(.pickerSelection, requested: mode)
-                Task { await camera.setCaptureMode(mode) }
+        VStack(spacing: 4) {
+            Picker("capture_mode", selection: Binding(
+                get: { draft ?? camera.captureMode },
+                set: { mode in
+                    camera.traceCaptureMode(.pickerSelection, requested: mode)
+                    draft = mode
+                    revision = UUID()
+                }
+            )) {
+                Text("photo").tag(AppCaptureMode.photo)
+                Text("video").tag(AppCaptureMode.video)
             }
-        )) {
-            Text("photo").tag(AppCaptureMode.photo)
-            Text("video").tag(AppCaptureMode.video)
+            .pickerStyle(.segmented)
+            .frame(height: 38)
+            .disabled(camera.recordingStopRequired || camera.bulbExposureActive || !camera.canStartShootingSetting
+                || camera.isBusy(.capture) || camera.isBusy(.recording))
+            .accessibilityIdentifier("capture-mode-picker")
+            if let selected = draft {
+                Button("apply") {
+                    let submittedRevision = revision
+                    let owner = editorOwner
+                    let sessionOwner = camera.mediaLibrarySessionID
+                    Task {
+                        let consumed = await camera.setCaptureMode(selected, draftRevision: submittedRevision)
+                        if consumed, revision == submittedRevision, owner == editorOwner,
+                           sessionOwner == camera.mediaLibrarySessionID { draft = nil }
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!camera.canStartShootingSetting || selected == camera.captureMode
+                    || camera.recordingStopRequired || camera.bulbExposureActive)
+                .accessibilityIdentifier("capture-mode-apply")
+            }
+            if let record = camera.shootingSettingRecord {
+                Button { camera.activeSheet = .more } label: {
+                    Text(LocalizedStringKey(record.running ? "shooting_setting_working" : record.statusKey))
+                        .font(.caption).lineLimit(2)
+                }
+                .accessibilityIdentifier("shooting-setting-open-result")
+            }
         }
-        .pickerStyle(.segmented)
-        .frame(height: 38)
-        .disabled(
-            camera.recordingStopRequired || camera.bulbExposureActive || camera.isBusy(.setting) ||
-                camera.isBusy(.capture) || camera.isBusy(.recording)
-        )
-        .accessibilityIdentifier("capture-mode-picker")
+        .onChange(of: camera.mediaLibrarySessionID) { _, _ in draft = nil; revision = UUID(); editorOwner = UUID() }
+        .onDisappear { editorOwner = UUID(); camera.cancelShootingSetting() }
     }
 }
 

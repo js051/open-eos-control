@@ -1,0 +1,1955 @@
+{
+  "version": 1,
+  "wire": [
+    {
+      "id": "matched",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "matched"
+      }
+    },
+    {
+      "id": "mismatch",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "mismatch",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "400",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "mismatch"
+      }
+    },
+    {
+      "id": "read-unavailable",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "unavailable",
+          "setting": null
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "base-version-True",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": true,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "base-version-1",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": "1",
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "base-version-2",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 2,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "base-engine-libgphoto2",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "libgphoto2",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "base-key-aperture",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "aperture",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "base-requestedValue-400",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "400",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "base-writeEvidence-acknowledged",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "acknowledged",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "wrong-setting-key",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "aperture",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "contradictory-match",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "400",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "contradictory-mismatch",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "mismatch",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "unknown-read-kind",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "cached",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "missing-setting",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": null
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "duplicate-choice",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "800",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "numeric-current",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": 800,
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "unadvertised-current",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "choice-text-bound",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": 255
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "empty-choice",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "newline-value",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800\n",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "oversized-choice",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "oversized-key",
+      "input": {
+        "status": 200,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "status-not-200",
+      "input": {
+        "status": 201,
+        "engine": "ccapi",
+        "key": "iso",
+        "requestedValue": "800",
+        "response": {
+          "version": 1,
+          "engine": "ccapi",
+          "key": "iso",
+          "requestedValue": "800",
+          "writeEvidence": "response-received",
+          "readbackEvidence": "matched",
+          "setting": {
+            "key": "iso",
+            "label": "ISO",
+            "value": "800",
+            "values": [
+              "100",
+              "400",
+              "800"
+            ],
+            "inputKind": "choice",
+            "maxLength": null
+          }
+        }
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    }
+  ],
+  "ownership": [
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": false,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": false,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": true
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": false,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "sameDraftRevision": true,
+        "cancelled": true,
+        "responseReceived": true,
+        "readbackMatched": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    }
+  ],
+  "outcome": [
+    {
+      "input": {
+        "dispatched": false,
+        "responseReceived": false,
+        "readStatus": "not-read",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "input": {
+        "dispatched": false,
+        "responseReceived": false,
+        "readStatus": "not-read",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "input": {
+        "dispatched": false,
+        "responseReceived": false,
+        "readStatus": "unavailable",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "input": {
+        "dispatched": false,
+        "responseReceived": false,
+        "readStatus": "unavailable",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "input": {
+        "dispatched": false,
+        "responseReceived": false,
+        "readStatus": "success",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "mismatch"
+      }
+    },
+    {
+      "input": {
+        "dispatched": false,
+        "responseReceived": false,
+        "readStatus": "success",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "matched"
+      }
+    },
+    {
+      "input": {
+        "dispatched": false,
+        "responseReceived": true,
+        "readStatus": "not-read",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "input": {
+        "dispatched": false,
+        "responseReceived": true,
+        "readStatus": "not-read",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "input": {
+        "dispatched": false,
+        "responseReceived": true,
+        "readStatus": "unavailable",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "input": {
+        "dispatched": false,
+        "responseReceived": true,
+        "readStatus": "unavailable",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "input": {
+        "dispatched": false,
+        "responseReceived": true,
+        "readStatus": "success",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "mismatch"
+      }
+    },
+    {
+      "input": {
+        "dispatched": false,
+        "responseReceived": true,
+        "readStatus": "success",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "matched"
+      }
+    },
+    {
+      "input": {
+        "dispatched": true,
+        "responseReceived": false,
+        "readStatus": "not-read",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "input": {
+        "dispatched": true,
+        "responseReceived": false,
+        "readStatus": "not-read",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "input": {
+        "dispatched": true,
+        "responseReceived": false,
+        "readStatus": "unavailable",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "input": {
+        "dispatched": true,
+        "responseReceived": false,
+        "readStatus": "unavailable",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "input": {
+        "dispatched": true,
+        "responseReceived": false,
+        "readStatus": "success",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "mismatch"
+      }
+    },
+    {
+      "input": {
+        "dispatched": true,
+        "responseReceived": false,
+        "readStatus": "success",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "matched"
+      }
+    },
+    {
+      "input": {
+        "dispatched": true,
+        "responseReceived": true,
+        "readStatus": "not-read",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "input": {
+        "dispatched": true,
+        "responseReceived": true,
+        "readStatus": "not-read",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "input": {
+        "dispatched": true,
+        "responseReceived": true,
+        "readStatus": "unavailable",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "input": {
+        "dispatched": true,
+        "responseReceived": true,
+        "readStatus": "unavailable",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "input": {
+        "dispatched": true,
+        "responseReceived": true,
+        "readStatus": "success",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "mismatch"
+      }
+    },
+    {
+      "input": {
+        "dispatched": true,
+        "responseReceived": true,
+        "readStatus": "success",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "response-received",
+        "readbackEvidence": "matched"
+      }
+    }
+  ]
+}
