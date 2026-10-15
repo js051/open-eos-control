@@ -266,6 +266,13 @@ class CameraViewModel(
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
+    // Local display preferences survive camera-session reset and settings dismissal.
+    private val cubeLutImporter = CubeLutImporter(viewModelScope) { imported ->
+        _uiState.update { current -> current.copy(
+            monitorSettings = current.monitorSettings.copy(cubeLut = imported.lut),
+            cubeLutImport = imported.status,
+        ) }
+    }
     private val _downloadHistoryState = MutableStateFlow(DownloadHistoryState())
     val downloadHistoryState: StateFlow<DownloadHistoryState> = _downloadHistoryState.asStateFlow()
     private val _downloadContinuation = MutableStateFlow<DownloadContinuationDraft?>(null)
@@ -697,38 +704,22 @@ class CameraViewModel(
 
     fun setDesqueeze(desqueeze: LiveViewDesqueeze) = updateMonitorSettings { copy(desqueeze = desqueeze) }
 
-    fun importCubeLut(name: String, text: String) {
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.Default) { runCatching { parseCubeLut(text, name) } }
-            result.fold(
-                onSuccess = { lut ->
-                    _uiState.update {
-                        it.copy(
-                            monitorSettings = it.monitorSettings.copy(cubeLut = lut),
-                            error = null,
-                            errorOperation = null,
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _uiState.update {
-                        it.copy(
-                            error = "3D LUT: ${error.message ?: error::class.java.simpleName}",
-                            errorOperation = CameraOperation.LIVE_VIEW,
-                        )
-                    }
-                },
-            )
-        }
+    fun beginCubeLutPicker(): String? = cubeLutImporter.beginPicker()
+
+    fun restoreCubeLutPicker(ticket: String) = cubeLutImporter.restorePicker(ticket)
+
+    fun importCubeLut(context: Context, ticket: String, uri: Uri?) {
+        val resolver = context.applicationContext.contentResolver
+        cubeLutImporter.completePicker(ticket, uri?.let { selected ->
+            suspend { readCubeLutDocument(resolver, selected) }
+        })
     }
 
-    fun clearCubeLut() = updateMonitorSettings { copy(cubeLut = null) }
+    fun reportCubeLutPickerFailure(ticket: String, message: String) = cubeLutImporter.pickerFailed(ticket, message)
 
-    fun reportCubeLutError(message: String) {
-        _uiState.update {
-            it.copy(error = "3D LUT: $message", errorOperation = CameraOperation.LIVE_VIEW)
-        }
-    }
+    fun cancelCubeLutImport() = cubeLutImporter.cancel()
+
+    fun clearCubeLut() = cubeLutImporter.remove()
 
     private fun updateMonitorSettings(update: LiveViewMonitorSettings.() -> LiveViewMonitorSettings) {
         _uiState.update { it.copy(monitorSettings = it.monitorSettings.update()) }
@@ -4324,6 +4315,7 @@ class CameraViewModel(
     }
 
     override fun onCleared() {
+        cubeLutImporter.close()
         val retireMaintenanceWithoutCommands = repository.maintenanceRetirementAccess(_uiState.value.maintenanceSuspended)
         val handoffCleanup = handoffOwner.cancelUnlaunched()
         foregroundImportPreferences?.unregisterOnSharedPreferenceChangeListener(foregroundImportWarningListener)

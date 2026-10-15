@@ -22,6 +22,7 @@ val unitContractFixtures = listOf(
     "../../contracts/media-date-review/v1/date-review-vectors.json",
     "../../contracts/capture-review-evidence/v1/review-evidence-vectors.json",
     "../../contracts/live-view-lut/v1/numeric-vectors.json",
+    "../../contracts/lut-import/v1/utf8-vectors.json",
     "../../contracts/jpeg-original/v1/jpeg-original-vectors.json",
     "../../contracts/media-mutation/v1/media-mutation-vectors.json",
     "../../contracts/media-mutation/v1/media-mutation-eligibility-vectors.json",
@@ -37,6 +38,7 @@ val unitContractFixtures = listOf(
 )
 val androidContractFixtures = listOf(
     "../../contracts/live-view-lut/v1/numeric-vectors.json",
+    "../../contracts/lut-import/v1/utf8-vectors.json",
     "../../contracts/jpeg-original/v1/jpeg-original-vectors.json",
 )
 fun checkContractFixtures(paths: List<String>) {

@@ -16,12 +16,7 @@ import dev.openeos.control.data.CaptureConfigurationOperation
 import dev.openeos.control.data.CaptureConfigurationRequest
 import dev.openeos.control.data.CaptureConfigurationWriteEvidence
 import dev.openeos.control.data.CaptureConfigurationReadEvidence
-import android.content.Context
-import android.net.Uri
-import android.provider.OpenableColumns
 import android.text.format.DateFormat
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -115,10 +110,7 @@ import dev.openeos.control.data.LiveViewSource
 import java.util.Date
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -990,22 +982,8 @@ private fun MonitoringAssistSheet(state: CameraUiState, actions: CameraActions) 
 @Composable
 private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraActions) {
     val settings = state.monitorSettings
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val pixelAnalysisAvailable = !state.previewMode
     val lutAvailable = pixelAnalysisAvailable
-    val lutLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            scope.launch {
-                runCatching {
-                    withContext(Dispatchers.IO) { readCubeLutDocument(context, uri) }
-                }.fold(
-                    onSuccess = { (name, text) -> actions.importCubeLut(name, text) },
-                    onFailure = { actions.reportCubeLutError(it.message ?: it::class.java.simpleName) },
-                )
-            }
-        }
-    }
     if (!pixelAnalysisAvailable) {
         Text(stringResource(R.string.monitoring_assists_rtp_unavailable), color = AppWarning)
     } else if (state.liveViewSource == LiveViewSource.CCAPI_RTP) {
@@ -1038,11 +1016,9 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Button(
-                onClick = {
-                    lutLauncher.launch(arrayOf("text/plain", "application/octet-stream", "application/x-cube"))
-                },
-                enabled = lutAvailable,
-                modifier = Modifier.height(48.dp),
+                onClick = actions.loadCubeLut,
+                enabled = lutAvailable && !state.cubeLutImport.pickerOpen,
+                modifier = Modifier.height(48.dp).testTag("monitor-lut-load"),
             ) {
                 Icon(
                     painterResource(LucideR.drawable.lucide_ic_download),
@@ -1058,9 +1034,27 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
                     description = stringResource(R.string.remove_cube_lut),
                     onClick = actions.clearCubeLut,
                     enabled = lutAvailable,
-                    modifier = Modifier.size(48.dp),
+                    modifier = Modifier.size(48.dp).testTag("monitor-lut-remove"),
                 )
             }
+        }
+        if (state.cubeLutImport.pickerRecoveryRequired) {
+            Text(stringResource(R.string.cube_lut_picker_recovery), color = AppWarning,
+                modifier = Modifier.testTag("monitor-lut-picker-recovery"))
+        }
+        if (state.cubeLutImport.loading) {
+            Text(stringResource(if (state.cubeLutImport.waitingForPrevious) R.string.cube_lut_import_waiting
+                else R.string.cube_lut_import_loading), color = AppMutedText,
+                modifier = Modifier.testTag("monitor-lut-loading"))
+            TextButton(onClick = actions.cancelCubeLutImport, modifier = Modifier.testTag("monitor-lut-cancel")) {
+                Text(stringResource(R.string.cancel_cube_lut_import))
+            }
+        } else if (state.cubeLutImport.stopping) {
+            Text(stringResource(R.string.cube_lut_import_stopping), color = AppMutedText,
+                modifier = Modifier.testTag("monitor-lut-stopping"))
+        }
+        state.cubeLutImport.error?.let { error ->
+            Text(error, color = AppWarning, modifier = Modifier.testTag("monitor-lut-error"))
         }
     }
     MonitorChoiceRow(
@@ -1105,32 +1099,6 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
         labelFor = { desqueeze -> desqueezeLabel(desqueeze) },
         onSelect = actions.setDesqueeze,
     )
-}
-
-private fun readCubeLutDocument(context: Context, uri: Uri): Pair<String, String> {
-    val name = context.contentResolver.query(
-        uri,
-        arrayOf(OpenableColumns.DISPLAY_NAME),
-        null,
-        null,
-        null,
-    )?.use { cursor ->
-        if (cursor.moveToFirst()) cursor.getString(0) else null
-    }?.takeIf(String::isNotBlank) ?: uri.lastPathSegment ?: "Imported LUT.cube"
-    val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
-        val output = ByteArrayOutputStream()
-        val buffer = ByteArray(16 * 1024)
-        while (true) {
-            val count = input.read(buffer)
-            if (count < 0) break
-            output.write(buffer, 0, count)
-            require(output.size() <= MAX_CUBE_LUT_BYTES) {
-                "3D LUT exceeds the ${MAX_CUBE_LUT_BYTES / (1024 * 1024)} MiB limit."
-            }
-        }
-        output.toByteArray()
-    } ?: error("The selected LUT could not be opened.")
-    return name to bytes.toString(Charsets.UTF_8)
 }
 
 @Composable

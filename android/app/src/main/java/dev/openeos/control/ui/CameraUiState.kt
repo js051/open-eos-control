@@ -188,6 +188,7 @@ data class CameraUiState(
     val hudVisible: Boolean = true,
     val showGrid: Boolean = false,
     val monitorSettings: LiveViewMonitorSettings = LiveViewMonitorSettings(),
+    val cubeLutImport: CubeLutImportStatus = CubeLutImportStatus(),
     val liveViewTapAction: LiveViewTapAction = LiveViewTapAction.FOCUS,
     val activeSettingPicker: SettingPicker? = null,
     val captureFeedback: CaptureFeedback? = null,

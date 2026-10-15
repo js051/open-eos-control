@@ -82,7 +82,8 @@ data class CubeLut(
     }
 }
 
-internal fun parseCubeLut(text: String, fallbackName: String): CubeLut {
+internal fun parseCubeLut(text: String, fallbackName: String, checkActive: () -> Unit = {}): CubeLut {
+    checkActive()
     require(text.toByteArray(Charsets.UTF_8).size <= MAX_CUBE_LUT_BYTES) {
         "3D LUT exceeds the ${MAX_CUBE_LUT_BYTES / (1024 * 1024)} MiB limit."
     }
@@ -95,6 +96,7 @@ internal fun parseCubeLut(text: String, fallbackName: String): CubeLut {
     val values = ArrayList<Float>()
 
     text.lineSequence().forEachIndexed { index, sourceLine ->
+        checkActive()
         val line = sourceLine.substringBefore('#').trim()
         if (line.isEmpty()) return@forEachIndexed
         val tokens = line.split(Regex("\\s+"))
@@ -143,6 +145,7 @@ internal fun parseCubeLut(text: String, fallbackName: String): CubeLut {
         }
     }
 
+    checkActive()
     val cubeSize = requireNotNull(size) { "LUT_3D_SIZE is required." }
     require(domainMin.indices.all { domainMin[it].isFinite() && domainMax[it].isFinite() && domainMin[it] < domainMax[it] }) {
         "Every LUT domain minimum must be lower than its maximum."

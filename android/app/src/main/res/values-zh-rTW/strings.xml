@@ -872,4 +872,9 @@
     <string name="rtp_audio_pipeline_state">音訊管線狀態／證據</string>
     <string name="rtp_audio_queued_units">已送入解碼器 AAC 單元</string>
     <string name="rtp_audio_submitted_frames">已提交音訊輸出的 PCM 幀</string>
+    <string name="cube_lut_import_loading">正在載入 LUT…</string>
+    <string name="cube_lut_import_waiting">正在等待先前的 LUT 匯入停止…</string>
+    <string name="cube_lut_import_stopping">已取消匯入。正在等待先前的讀取或解析結束…</string>
+    <string name="cancel_cube_lut_import">取消 LUT 匯入</string>
+    <string name="cube_lut_picker_recovery">正在等待先前的選檔視窗。請完成或取消選檔，才能再次選擇。若該視窗已消失，請從最近使用的應用程式移除此 App 後重新開啟。先前的選擇不會匯入。</string>
 </resources>
