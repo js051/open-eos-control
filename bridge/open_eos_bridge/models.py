@@ -516,7 +516,7 @@ class MediaItem(ApiModel):
     kind: str
     size_bytes: int = Field(default=0, ge=0)
     capture_time: str | None = None
-    content_type: str = "application/octet-stream"
+    content_type: str | None = "application/octet-stream"
     width_pixels: int | None = Field(default=None, gt=0)
     height_pixels: int | None = Field(default=None, gt=0)
     preview_available: bool = False

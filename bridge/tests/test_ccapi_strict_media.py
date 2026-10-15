@@ -290,6 +290,47 @@ class StrictInventoryTests(unittest.TestCase):
 
 
 class FreshMetadataAndOriginalTests(unittest.TestCase):
+    def test_fresh_absent_mime_is_not_cached_or_guessed_evidence(self) -> None:
+        session, transport = session_for({f"{PHOTO}?kind=info": {"filesize": 128}})
+        media_id = _media_id(PHOTO)
+        session._media_cache[media_id] = MediaItem(
+            id=media_id, name="IMG_0001.JPG", kind="video", size_bytes=256, content_type="image/jpeg",
+        )
+        item = session.media_info(media_id, fresh=True)
+        self.assertEqual((item.id, item.name, item.kind), (media_id, "IMG_0001.JPG", "image"))
+        self.assertIsNone(item.content_type)
+        self.assertEqual(item.size_bytes, 128)
+        self.assertEqual(transport.requests, [f"{PHOTO}?kind=info"])
+
+    def test_fresh_explicit_mime_preserves_all_raw_aliases_without_choosing_a_convenient_value(self) -> None:
+        for alias in ("content_type", "contentType", "contenttype", "mimeType", "mimetype"):
+            for mime in (None, "", " ", "application/octet-stream", "video/mp4", "image/jpg", "image/jpeg; x=\n"):
+                with self.subTest(alias=alias, mime=mime):
+                    session, _ = session_for({f"{PHOTO}?kind=info": {"filesize": 128, alias: mime}})
+                    self.assertEqual(session.media_info(_media_id(PHOTO), fresh=True).content_type, mime)
+
+    def test_fresh_invalid_or_conflicting_raw_declarations_leave_invalidated_cache(self) -> None:
+        for changes in ({"contentType": 42}, {"content_type": False}, {"contentType": {}},
+                        {"content_type": None, "mimeType": "image/jpeg"},
+                        {"content_type": "image/jpeg", "contentType": "IMAGE/JPEG"},
+                        {"id": None}, {"name": 42}, {"kind": None}, {"kind": " "},
+                        {"id": "different"}, {"name": "OTHER.JPG"}):
+            with self.subTest(changes=changes):
+                session, transport = session_for({f"{PHOTO}?kind=info": {"filesize": 128, **changes}})
+                media_id = _media_id(PHOTO)
+                session._media_cache[media_id] = MediaItem(
+                    id=media_id, name="IMG_0001.JPG", kind="image", size_bytes=256, content_type="image/jpeg",
+                )
+                with self.assertRaises(BridgeError):
+                    session.media_info(media_id, fresh=True)
+                self.assertEqual(session._media_cache[media_id].size_bytes, 0)
+                self.assertEqual(session._media_cache[media_id].content_type, "application/octet-stream")
+                self.assertEqual(transport.requests, [f"{PHOTO}?kind=info"])
+
+    def test_fresh_explicit_kind_is_retained_for_caller_to_reject(self) -> None:
+        session, _ = session_for({f"{PHOTO}?kind=info": {"filesize": 128, "kind": "video"}})
+        self.assertEqual(session.media_info(_media_id(PHOTO), fresh=True).kind, "video")
+
     def test_fresh_metadata_lock_wait_is_bounded_and_does_not_issue_camera_reads(self) -> None:
         session, transport = session_for({})
         session._lock = Mock()
@@ -389,6 +430,20 @@ class FreshMetadataAndOriginalTests(unittest.TestCase):
 
 
 class StrictMediaRouteTests(unittest.TestCase):
+    def test_fresh_absence_api_serialization_and_normal_original_header(self) -> None:
+        response = self.client.get(f"{self.item_path}/info?fresh=true")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["contentType"])
+        self.assertEqual(response.headers["x-open-eos-fresh-metadata"], "v1")
+        response = self.client.get(f"{self.item_path}?attempt=single")
+        self.assertEqual(response.content, JPEG)
+        self.assertEqual(response.headers["content-type"], "image/jpeg")
+        response = self.client.head(self.item_path)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"")
+        # HEAD has no new payload MIME evidence; render an honest generic header.
+        self.assertEqual(response.headers["content-type"], "application/octet-stream")
+
     def setUp(self) -> None:
         self.session, self.transport = session_for({
             **unpaged([PHOTO]), f"{PHOTO}?kind=info": {"filesize": len(JPEG)},

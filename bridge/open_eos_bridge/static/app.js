@@ -4120,11 +4120,11 @@
     state.latestMediaItem = item;
     state.latestMediaThumbnailUrl = null;
     state.latestMediaThumbnailLoading = Boolean(
-      item && !mediaIsVideo(item) && featureSupported(FEATURES.MEDIA_THUMBNAIL),
+      item && mediaLibrary.isPhoto(item) && featureSupported(FEATURES.MEDIA_THUMBNAIL),
     );
     if (oldUrl) releaseObjectUrl(oldUrl);
     renderLatestMedia();
-    if (!item || mediaIsVideo(item) || !featureSupported(FEATURES.MEDIA_THUMBNAIL)) return;
+    if (!item || !mediaLibrary.isPhoto(item) || !featureSupported(FEATURES.MEDIA_THUMBNAIL)) return;
     await loadLatestMediaThumbnail(item, generation, rawSessionId, signal);
   }
 
@@ -4132,7 +4132,8 @@
     const session = state.session;
     try {
       if (session?.id !== rawSessionId || generation !== state.latestMediaGeneration ||
-          state.latestMediaItem?.id !== item.id || signal?.aborted) return;
+          state.latestMediaItem?.id !== item.id || state.latestMediaItem?.name !== item.name ||
+          signal?.aborted || !mediaLibrary.isPhoto(item) || !mediaLibrary.isPhoto(state.latestMediaItem)) return;
       if (state.mediaListingOwner) return;
       // Capture review normally owns a busy promise already. If it reaches this
       // stage during an older import read, wait for that reservation, not a timer.
@@ -4143,7 +4144,8 @@
         if (state.session !== session || generation !== state.latestMediaGeneration || signal?.aborted) return;
       }
       if (state.session !== session || generation !== state.latestMediaGeneration ||
-          state.latestMediaItem?.id !== item.id || signal?.aborted || state.mediaListingOwner) return;
+          state.latestMediaItem?.id !== item.id || state.latestMediaItem?.name !== item.name ||
+          !mediaLibrary.isPhoto(state.latestMediaItem) || signal?.aborted || state.mediaListingOwner) return;
       const blob = await api(
         `/v1/session/${encodeURIComponent(rawSessionId)}/media/${encodeURIComponent(item.id)}/thumbnail`,
         { responseType: "blob", signal },
@@ -4154,7 +4156,8 @@
       if (
         generation !== state.latestMediaGeneration ||
         state.session !== session || state.session?.id !== rawSessionId ||
-        state.latestMediaItem?.id !== item.id
+        state.latestMediaItem?.id !== item.id || state.latestMediaItem?.name !== item.name ||
+        !mediaLibrary.isPhoto(state.latestMediaItem)
       ) return;
       state.latestMediaThumbnailUrl = URL.createObjectURL(blob);
     } catch (_) {
@@ -4197,7 +4200,7 @@
       ? t("latestMediaLoading")
       : state.latestMediaItem?.name || t("latestMediaEmpty");
     ui.latestMediaThumbnail.replaceChildren();
-    if (state.latestMediaThumbnailUrl) {
+    if (state.latestMediaThumbnailUrl && mediaLibrary.isPhoto(state.latestMediaItem)) {
       const image = document.createElement("img");
       image.src = state.latestMediaThumbnailUrl;
       image.alt = state.latestMediaItem?.name || t("latestMedia");
@@ -4205,7 +4208,7 @@
     } else {
       const icon = document.createElement("span");
       icon.className = "icon";
-      icon.dataset.icon = mediaIsVideo(state.latestMediaItem) ? "video" : "images";
+      icon.dataset.icon = mediaIsVideo(state.latestMediaItem) ? "video" : mediaLibrary.isPhoto(state.latestMediaItem) ? "images" : "square";
       ui.latestMediaThumbnail.append(icon);
     }
     window.OpenEosIcons?.render(ui.latestMediaThumbnail);
@@ -6026,7 +6029,7 @@
       selection.append(checkbox, selectionText);
       const previewSupported = mediaIsVideo(item)
         ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
-        : item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW);
+        : mediaLibrary.isPhoto(item) && item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW);
       const thumbnail = document.createElement(previewSupported ? "button" : "div");
       thumbnail.className = "media-thumbnail media-card-preview";
       thumbnail.dataset.mediaId = item.id;
@@ -6069,7 +6072,7 @@
       card.append(selection, thumbnail, copy, size, actions);
       ui.mediaList.append(card);
       if (
-        featureSupported(FEATURES.MEDIA_THUMBNAIL) &&
+        featureSupported(FEATURES.MEDIA_THUMBNAIL) && mediaLibrary.canRequestThumbnail(item) &&
         !(mediaIsVideo(item) && String(item.id).startsWith("gphoto2-host:")) &&
         !state.mediaThumbnailUrls.has(item.id)
       ) {
@@ -6648,7 +6651,8 @@
       let writable = null, closed = false, historyReceipt = null;
       try {
         assertMediaAutoImportCurrent(owner);
-        if (!Number.isSafeInteger(expectedBytes) || expectedBytes <= 0 || expectedBytes !== item.sizeBytes) {
+        if (!mediaLibrary.automaticJpegEligible(item) ||
+            !Number.isSafeInteger(expectedBytes) || expectedBytes <= 0 || expectedBytes !== item.sizeBytes) {
           throw new Error(t("mediaAutoImportProtocol"));
         }
         if (!owner.historyStarted) {
@@ -7142,11 +7146,11 @@
     const items = mediaLibrary.itemsForDisplay(source, state.mediaFilter, state.mediaSort, resolvedLanguage(), state.mediaDateRange, state.mediaRatingFilter, state.mediaFolderFilter, state.mediaDisplayZone)
       .filter((item) => mediaIsVideo(item)
         ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
-        : item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
+        : mediaLibrary.isPhoto(item) && item.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
     const latest = state.latestMediaItem;
     const latestPreviewable = latest && (mediaIsVideo(latest)
       ? featureSupported(FEATURES.MEDIA_DOWNLOAD)
-      : latest.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
+      : mediaLibrary.isPhoto(latest) && latest.previewAvailable === true && featureSupported(FEATURES.MEDIA_PREVIEW));
     if (state.mediaDateRange || (state.mediaRatingFilter && state.mediaRatingFilter !== "all")
       || (state.mediaFolderFilter && state.mediaFolderFilter.kind !== "all")
       || state.mediaSort === "rating-highest" || state.mediaSort === "rating-lowest") {
@@ -7180,7 +7184,7 @@
   function renderMediaThumbnail(container, item, url = null) {
     container.replaceChildren();
     container.classList.toggle("loading", state.mediaThumbnailLoads.has(item.id));
-    if (url) {
+    if (url && mediaLibrary.canRequestThumbnail(item)) {
       const image = document.createElement("img");
       image.src = url;
       image.alt = t("mediaThumbnail", { name: item.name });
@@ -7188,7 +7192,7 @@
     } else {
       const icon = document.createElement("span");
       icon.className = "icon";
-      icon.dataset.icon = mediaIsVideo(item) ? "video" : "images";
+      icon.dataset.icon = mediaIsVideo(item) ? "video" : mediaLibrary.isPhoto(item) ? "images" : "square";
       container.append(icon);
     }
     if (mediaIsVideo(item)) {
@@ -7204,7 +7208,7 @@
     if (
       !state.session ||
       Boolean(state.mediaBatchOwner) ||
-      !featureSupported(FEATURES.MEDIA_THUMBNAIL) ||
+      !featureSupported(FEATURES.MEDIA_THUMBNAIL) || !mediaLibrary.canRequestThumbnail(item) ||
       state.mediaThumbnailUrls.has(item.id) ||
       state.mediaThumbnailLoads.has(item.id) ||
       state.mediaThumbnailFailures.has(item.id)
@@ -7217,6 +7221,7 @@
       return;
     }
     const generation = state.mediaGeneration;
+    const session = state.session;
     state.mediaThumbnailLoads.add(item.id);
     updateVisibleMediaThumbnail(item);
     try {
@@ -7228,8 +7233,10 @@
         throw new ApiError("Invalid media thumbnail", { code: "INVALID_MEDIA_THUMBNAIL" });
       }
       if (
-        generation !== state.mediaGeneration ||
-        !state.media.some((candidate) => candidate.id === item.id) ||
+        generation !== state.mediaGeneration || state.session !== session ||
+        !state.media.some((candidate) => candidate.id === item.id && candidate.name === item.name &&
+          mediaLibrary.canRequestThumbnail(candidate) &&
+          mediaLibrary.classifyMedia(candidate) === mediaLibrary.classifyMedia(item)) ||
         !Array.from(ui.mediaList.querySelectorAll(".media-thumbnail"))
           .some((candidate) => candidate.dataset.mediaId === item.id)
       ) return;
@@ -7252,7 +7259,8 @@
     } finally {
       if (generation === state.mediaGeneration) {
         state.mediaThumbnailLoads.delete(item.id);
-        updateVisibleMediaThumbnail(item);
+        const currentItem = state.media.find((candidate) => candidate.id === item.id);
+        if (currentItem) updateVisibleMediaThumbnail(currentItem);
       }
     }
   }
@@ -7571,7 +7579,7 @@
       Boolean(state.mediaAutoImportReading) ||
       Boolean(state.mediaBatchOwner) ||
       (video && !featureSupported(FEATURES.MEDIA_DOWNLOAD)) ||
-      (!video && (item.previewAvailable !== true || !featureSupported(FEATURES.MEDIA_PREVIEW)))
+      (!video && (!mediaLibrary.isPhoto(item) || item.previewAvailable !== true || !featureSupported(FEATURES.MEDIA_PREVIEW)))
     ) return;
     state.mediaListingOwner?.cancel({ silent: true });
     clearMediaPreview();

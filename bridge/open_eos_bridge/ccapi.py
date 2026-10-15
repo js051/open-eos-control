@@ -25,6 +25,7 @@ from .errors import BridgeError, ConnectionFailureReason, unsupported
 from .focus_info import MAX_FOCUS_INFO_BYTES, parse_ccapi_focus_info_packet
 from .media_folders import camera_folder_fields
 from .media_listing import MAX_LIST_SNAPSHOT_ITEMS
+from .media_metadata import MIME_ALIASES, declared_media_mime
 from .models import (
     BatteryStatus,
     CameraCapabilities,
@@ -2996,13 +2997,31 @@ class CcapiSession:
             content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
             preview_available=_supports_ccapi_display_preview(path),
         )
+        size = (_strict_positive_int(value.get("filesize")) or 0
+                if fresh else _positive_int(value.get("filesize")) or base.size_bytes)
+        # Fresh identity is bound to the canonical request, never cached type.
+        identity = {"id": media_id, "name": path.rsplit("/", 1)[-1], "kind": _media_kind(path)}
+        try:
+            mime = declared_media_mime(value)
+            if fresh:
+                for key in identity:
+                    if key in value:
+                        if not isinstance(value[key], str) or not value[key].strip():
+                            raise ValueError("Fresh media identity/type must be a nonblank string")
+                        if key in ("id", "name") and value[key] != identity[key]:
+                            raise ValueError("Fresh media identity changed")
+                        identity[key] = value[key]
+        except ValueError as error:
+            raise self._inventory_incomplete(str(error)) from error
         item = base.model_copy(
             update={
-                "size_bytes": (
-                    _strict_positive_int(value.get("filesize")) or 0
-                    if fresh else _positive_int(value.get("filesize")) or base.size_bytes
-                ),
-                **({"content_type": "application/octet-stream"} if fresh else {}),
+                "size_bytes": size,
+                **(identity if fresh else {}),
+                # Null means the successful response genuinely omitted MIME (or
+                # explicitly declared null). Generic is never converted to null.
+                # Invalid size preserves the former fail-closed invalidation.
+                **({"content_type": mime if size else "application/octet-stream"} if fresh else
+                   {"content_type": mime} if any(key in value for key in MIME_ALIASES) else {}),
                 "capture_time": _optional_string(value.get("lastmodifieddate")) or base.capture_time,
                 "protected": _canon_protection(value.get("protect")),
                 "rating": _canon_rating(value.get("rating")),

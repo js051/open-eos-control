@@ -1,9 +1,12 @@
 (function (root, factory) {
-  const policy = factory();
+  const library = typeof module === "object" && module.exports
+    ? require("./media-library.js") : root.OpenEOSMediaLibrary;
+  const policy = factory(library);
   if (typeof module === "object" && module.exports) module.exports = policy;
   root.OpenEOSMediaAutoImport = policy;
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+})(typeof globalThis !== "undefined" ? globalThis : this, function (mediaLibrary) {
   "use strict";
+  if (!mediaLibrary) throw new Error("Open EOS media classification is unavailable.");
 
   // No timer, picker, persistence or camera command lives in this policy. The
   // foreground owner explicitly schedules step(); repeated calls coalesce.
@@ -105,7 +108,7 @@
             return snapshot();
           }
           const added = [...items.values()].filter((item) => !known.has(item.id));
-          const jpeg = added.filter((item) => /\.jpe?g$/i.test(item.name) && item.kind === "image");
+          const jpeg = added.filter(mediaLibrary.automaticJpegEligible);
           // All identities, including RAW and non-JPEG files, consume the budget.
           if (known.size + added.length > knownLimit) { stop("identity-limit"); return snapshot(); }
           if (pending.length + jpeg.length > queueLimit) { stop("queue-limit"); return snapshot(); }
@@ -120,13 +123,18 @@
         if (!current() || isBusy()) return snapshot();
         const observation = await metadata(entry.item, { signal: controller.signal });
         if (!current()) return snapshot();
+        const freshItem = observation?.item && Object.freeze({ ...observation.item });
         const at = time();
         nextMetadata = at + stableMs;
-        if (observation?.fresh !== true || observation.item?.id !== entry.item.id) {
+        if (observation?.fresh !== true || freshItem?.id !== entry.item.id ||
+            freshItem?.name !== entry.item.name) {
           stop("fresh-metadata-unavailable"); return snapshot();
         }
-        const size = observation.item.sizeBytes;
+        const size = freshItem.sizeBytes;
         if (!Number.isSafeInteger(size) || size <= 0) { entry.size = null; entry.sizeAt = null; return snapshot(); }
+        if (!mediaLibrary.freshAutomaticJpegMetadata(entry.item, freshItem, observation.fresh)) {
+          stop("fresh-metadata-unavailable"); return snapshot();
+        }
         if (entry.size !== size) { entry.size = size; entry.sizeAt = at; return snapshot(); }
         if (at - entry.sizeAt < stableMs || isBusy()) return snapshot();
         if (at - entry.observedAt > pendingMs) { stop("metadata-deadline"); return snapshot(); }
@@ -135,7 +143,7 @@
         const record = { id: entry.item.id, name: entry.item.name, status: "running", bytesTransferred: null };
         append(record);
         try {
-          const receipt = await transfer(Object.freeze({ ...entry.item, sizeBytes: size }), {
+          const receipt = await transfer(Object.freeze({ ...freshItem, sizeBytes: size }), {
             signal: controller.signal, expectedBytes: size,
           });
           // A completed close is factual even after stop/session retirement.

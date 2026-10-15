@@ -6,17 +6,65 @@
   "use strict";
 
   const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "avi", "mkv"]);
+  const PHOTO_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "bmp", "webp", "heic", "heif", "tif", "tiff", "avif", "cr2", "cr3", "crw", "dng"]);
+  const AUDIO_EXTENSIONS = new Set(["wav", "mp3", "aac", "m4a", "flac", "ogg", "opus", "aif", "aiff", "wma"]);
+  const MIME_TYPE = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/;
   const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
   const ISO_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:?\d{2})?$/;
   const PTP_DATE_TIME = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/;
   const FOLDER_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
 
-  function isVideo(item) {
-    if (String(item?.kind || "").toLowerCase() === "video") return true;
-    if (String(item?.contentType || "").toLowerCase().startsWith("video/")) return true;
-    const name = String(item?.name || "");
-    const extension = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
-    return VIDEO_EXTENSIONS.has(extension);
+  function asciiLower(value) { return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase()); }
+
+  function mediaExtension(item) {
+    const name = typeof item?.name === "string" ? item.name : "";
+    return name.includes(".") ? asciiLower(name.split(".").pop()) : "";
+  }
+
+  function normalizedMediaMime(value) {
+    if (value === null || value === undefined) return "";
+    if (typeof value !== "string" || FOLDER_CONTROL_CHARACTERS.test(value)) return null;
+    const mime = asciiLower(value.split(";", 1)[0].trim());
+    return !mime || MIME_TYPE.test(mime) ? mime : null;
+  }
+
+  function classifyMedia(item) {
+    if (typeof item?.name !== "string" || !item.name.trim()) return "unknown";
+    const mime = normalizedMediaMime(item.contentType);
+    if (mime === null) return "unknown";
+    const kind = typeof item.kind === "string" ? asciiLower(item.kind.trim()) : "";
+    const families = new Set();
+    if (["image", "photo", "jpeg", "jpg", "raw"].includes(kind)) families.add("photo");
+    else if (["video", "movie"].includes(kind)) families.add("video");
+    else if (kind === "audio") families.add("audio");
+    else if (["text", "document"].includes(kind)) families.add("other");
+    if (mime && mime !== "application/octet-stream") {
+      families.add(mime.startsWith("image/") ? "photo" : mime.startsWith("video/") ? "video" :
+        mime.startsWith("audio/") ? "audio" : "other");
+    }
+    const extension = mediaExtension(item);
+    if (PHOTO_EXTENSIONS.has(extension)) families.add("photo");
+    else if (VIDEO_EXTENSIONS.has(extension)) families.add("video");
+    else if (AUDIO_EXTENSIONS.has(extension)) families.add("audio");
+    return families.size > 1 ? "conflict" : families.values().next().value || "unknown";
+  }
+
+  function isVideo(item) { return classifyMedia(item) === "video"; }
+  function isPhoto(item) { return classifyMedia(item) === "photo"; }
+  function canRequestThumbnail(item) { return isPhoto(item) || isVideo(item); }
+
+  function automaticJpegEligible(item) {
+    if (typeof item?.id !== "string" || !item.id.trim() || item.kind !== "image" || !isPhoto(item) ||
+        (/[\\/]/.test(item.name) || item.name.lastIndexOf(".") <= 0 || !["jpg", "jpeg"].includes(mediaExtension(item)))) return false;
+    // Deliberately stricter than display normalization: don't enlarge any
+    // platform's former admission with aliases, blank declarations or guesses.
+    return item.contentType === null || item.contentType === undefined || item.contentType === "" ||
+      normalizedMediaMime(item.contentType) === "image/jpeg";
+  }
+
+  function freshAutomaticJpegMetadata(original, returned, fresh) {
+    return fresh === true && automaticJpegEligible(original) && automaticJpegEligible(returned) &&
+      original.id === returned.id && original.name === returned.name;
   }
 
   function validCalendarDate(year, month, day) {
@@ -122,7 +170,7 @@
   function selectReviewItem(items, knownIds = new Set(), kind = "recent") {
     if (!["recent", "photo", "video"].includes(kind)) return null;
     return (Array.isArray(items) ? items : []).find((item) =>
-      !knownIds.has(item.id) && (kind === "recent" || isVideo(item) === (kind === "video")),
+      !knownIds.has(item.id) && (kind === "recent" || (kind === "photo" ? isPhoto(item) : isVideo(item))),
     ) || null;
   }
 
@@ -233,7 +281,7 @@
     const dates = new Map(needsDates ? items.map((item) => [item, mediaDateForItem(item, displayZone)]) : []);
     const filtered = items.filter((item) => {
       if (filter === "video" && !isVideo(item)) return false;
-      if (filter === "photo" && isVideo(item)) return false;
+      if (filter === "photo" && !isPhoto(item)) return false;
       if (!ratingMatchesFilter(item?.rating, ratingFilter)) return false;
       if (!folderMatchesFilter(item, folderFilter)) return false;
       if (activeRange) {
@@ -355,7 +403,7 @@
 
   function videoContainerLabel(filename) {
     const name = String(filename || "");
-    const extension = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+    const extension = name.includes(".") ? asciiLower(name.split(".").pop()) : "";
     if (extension === "mp4") return "MP4";
     if (extension === "mov") return "QuickTime MOV";
     if (extension === "m4v") return "M4V";
@@ -365,7 +413,13 @@
   }
 
   return {
+    classifyMedia,
+    normalizedMediaMime,
     isVideo,
+    isPhoto,
+    canRequestThumbnail,
+    automaticJpegEligible,
+    freshAutomaticJpegMetadata,
     parseMediaDate,
     mediaDateForItem,
     mediaTime,

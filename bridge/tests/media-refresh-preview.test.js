@@ -610,3 +610,16 @@ test("cancelling an original save leaves its independently opened image preview 
     assert.equal(s.ui.mediaPreviewUnavailable.hidden, true);
     assertReadOnly(s);
   });
+
+test("unknown and conflicting media remain visible without opening a photo or video decoder", async (t) => {
+  const s = fixture(t);
+  for (const item of [{ id: "unknown", name: "FILE.bin", kind: "unknown", previewAvailable: true },
+    { id: "conflict", name: "FRAME.JPG", kind: "video", previewAvailable: true },
+    { id: "audio", name: "SOUND.wav", kind: "audio", previewAvailable: true }]) {
+    await s.openMediaPreview(item);
+  }
+  assert.equal(s.requests.length, 0);
+  assert.equal(s.previews.length, 0);
+  assert.equal(s.playbacks.length, 0);
+  assert.equal(s.decodeCalls(), 0);
+});
