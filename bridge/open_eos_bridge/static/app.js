@@ -235,6 +235,7 @@
       manualFocus: "Manual focus",
       liveViewMagnification: "Set Live View magnification to {value}x",
       liveViewMagnificationChanged: "Live View magnification set to {value}x",
+      liveViewMagnificationUnconfirmed: "Live View magnification could not be confirmed.",
       near: "Near",
       far: "Far",
       liveViewSettings: "Live View",
@@ -1027,6 +1028,7 @@
       manualFocus: "手動對焦",
       liveViewMagnification: "將即時預覽對焦放大設為 {value} 倍",
       liveViewMagnificationChanged: "即時預覽對焦放大已設為 {value} 倍",
+      liveViewMagnificationUnconfirmed: "無法確認即時預覽對焦放大結果。",
       near: "近",
       far: "遠",
       liveViewSettings: "即時預覽",
@@ -1817,6 +1819,7 @@
     localVideoError: null,
     localVideoMuted: false,
     liveMagnification: 1,
+    liveMagnificationFramePending: false,
     liveGeneration: 0,
     liveFrameAbortController: null,
     eventGeneration: 0,
@@ -6046,6 +6049,7 @@
     state.frameContentType = null;
     state.activeLiveSource = null;
     state.liveMagnification = 1;
+    state.liveMagnificationFramePending = false;
     state.lastFrameAt = null;
     state.monitorAnalysisError = null;
     ui.liveImage.removeAttribute("src");
@@ -6127,6 +6131,10 @@
         expireLiveFrame(state.liveFrameSample);
         ui.liveImage.hidden = false;
         ui.viewfinderPlaceholder.hidden = true;
+        if (state.liveMagnificationFramePending) {
+          state.liveMagnificationFramePending = false;
+          renderAvailability();
+        }
         previousDecoded?.removeAttribute("src");
         releaseObjectUrl(previous);
         if (state.liveViewFirstFramePending) {
@@ -7132,29 +7140,44 @@
     ) return;
     const target = nextLiveMagnification();
     if (target === null) return;
-    cancelCameraFocusInfo();
+    const session = state.session;
+    const owner = state.liveViewStopOwner;
     beginCameraInteraction();
+    pauseLivePolling();
+    state.liveMagnificationFramePending = true;
+    const generation = state.refreshGeneration;
+    const liveGeneration = state.liveGeneration;
+    const current = () => state.session === session && state.liveViewStopOwner === owner &&
+      state.refreshGeneration === generation && state.liveGeneration === liveGeneration && state.liveActive;
     setOperationState(t("busy"));
     renderAvailability();
     try {
       const result = await api(
-        `/v1/session/${encodeURIComponent(state.session.id)}/liveview/magnification`,
+        `/v1/session/${encodeURIComponent(session.id)}/liveview/magnification`,
         { method: "POST", json: { value: target } },
       );
-      if (result.accepted && liveMagnifications().includes(Number(result.value))) {
-        state.liveMagnification = Number(result.value);
+      if (!current()) return;
+      if (result?.accepted !== true || result.value !== target || !liveMagnifications().includes(result.value)) {
+        throw new ApiError(t("liveViewMagnificationUnconfirmed"), { code: "LIVE_VIEW_MAGNIFICATION_UNCONFIRMED" });
       }
+      state.liveMagnification = result.value;
       const message = t("liveViewMagnificationChanged", { value: state.liveMagnification });
       setOperationState(message);
       showToast(message);
     } catch (error) {
+      if (!current()) return;
       const normalized = captureError(error);
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
     } finally {
-      state.busy = false;
-      renderAvailability();
-      renderLiveMagnification();
+      if (current()) {
+        state.busy = false;
+        renderAvailability();
+        renderLiveMagnification();
+        // Neither ACK nor failure revives the pre-change image. Only a decoded
+        // frame owned by the resumed generation reopens coordinate admission.
+        resumeLivePolling();
+      }
     }
   }
 
@@ -7220,6 +7243,7 @@
     const action = effectiveTapAction();
     if (
       !point || !state.session || cameraInteractionBusy() || !state.liveActive ||
+      state.livePollingSuspended || state.liveMagnificationFramePending ||
       localPreviewSelected() || !action
     ) return;
     const session = state.session;
@@ -7409,7 +7433,7 @@
     });
     const tapAction = effectiveTapAction();
     const tapFocusEnabled = !localPreviewSelected() && Boolean(tapAction) && state.liveActive &&
-      !interactionBusy && !bulbActive;
+      !state.livePollingSuspended && !state.liveMagnificationFramePending && !interactionBusy && !bulbActive;
     ui.viewfinder.classList.toggle("tap-focus-enabled", tapFocusEnabled);
     const tapDescription = tapAction === "whiteBalance" ? t("tapToWhiteBalance") : t("tapToFocus");
     ui.viewfinder.title = tapFocusEnabled ? tapDescription : "";
