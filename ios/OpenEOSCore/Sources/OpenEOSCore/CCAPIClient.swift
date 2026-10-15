@@ -2985,7 +2985,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         return (response.body, contentType)
     }
 
-    public func deleteMedia(_ item: CameraMediaItem) async throws {
+    public func deleteMedia(_ item: CameraMediaItem, attempt: CameraMediaDeleteAttempt = CameraMediaDeleteAttempt()) async throws {
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
         try await ensureInitialized()
@@ -2996,7 +2996,16 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             guard supportsMediaDelete() else { throw CCAPIError.unsupported(.mediaDelete) }
             path = try normalizeCameraResource(item.id).components(separatedBy: "?")[0]
         }
-        try await requestOK(path: path, method: .delete)
+        guard item.protected != true, item.writable != false, !item.id.isEmpty else { throw CameraMediaDeleteError.ineligible }
+        let request = try request(path: path, method: .delete)
+        try Task.checkCancellation()
+        guard !closing else { throw CancellationError() }
+        try attempt.markDispatched()
+        let response = try await transport.sendMediaDelete(request)
+        // Preserve the receipt belonging to this invocation even if its session retired
+        // while awaiting it. Only current-session side effects require ownership.
+        try attempt.record(response)
+        guard !closing else { throw CancellationError() }
         observedFeatures.insert(.mediaDelete)
     }
 

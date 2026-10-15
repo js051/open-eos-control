@@ -11,7 +11,12 @@ struct OpenEOSControlApp: App {
     init() {
         let deliveryStore = Self.makeDeliveryStore()
         #if DEBUG
-        if let scenario = ProcessInfo.processInfo.environment["OEC_UPLOAD_JOURNEY_FIXTURE"],
+        if ProcessInfo.processInfo.environment["OEC_DELETE_JOURNEY_FIXTURE"] == "1" {
+            let transport = BridgeDeleteJourneyFixture()
+            _camera = StateObject(wrappedValue: CameraAppState(sessionFactory: {
+                .desktopBridge(try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: transport))
+            }, mediaDeliveryStore: deliveryStore))
+        } else if let scenario = ProcessInfo.processInfo.environment["OEC_UPLOAD_JOURNEY_FIXTURE"],
            ["success", "cancel", "lost-ack"].contains(scenario) {
             let transport = BridgeUploadJourneyFixture(mode: scenario)
             _ = try? BridgeUploadJourneyFixture.seedPickerFile()

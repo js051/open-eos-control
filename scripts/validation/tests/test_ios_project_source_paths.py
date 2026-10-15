@@ -9,6 +9,7 @@ PROJECT_ROOT = ROOT / "ios/OpenEOSControl"
 PROJECT = PROJECT_ROOT / "project.yml"
 SHARED_SWIFT = "../OpenEOSCore/Tests/OpenEOSCoreTests/URLSessionPendingBulbStopTests.swift"
 CONTRACTS = {
+    "../../contracts/media-delete/v1/delete-outcome-vectors.json",
     "../../contracts/media-upload/v1/upload-outcome-vectors.json",
     "../../contracts/media-delivery/v1/outcome-vectors.json",
     "../../contracts/live-view-lut/v1/numeric-vectors.json",
@@ -33,7 +34,7 @@ class IOSProjectSourcePathTests(unittest.TestCase):
     def test_every_external_source_opts_out_of_intermediate_ancestor_groups(self):
         entries = source_entries("OpenEOSControlTests")
         external = [(path, settings) for path, settings in entries if path.startswith("../")]
-        self.assertEqual(len(external), 10)
+        self.assertEqual(len(external), 11)
         self.assertEqual({path for path, _ in external}, CONTRACTS | {SHARED_SWIFT})
         for path, settings in external:
             with self.subTest(path=path):
@@ -55,7 +56,7 @@ class IOSProjectSourcePathTests(unittest.TestCase):
                     self.assertTrue(resolved.is_relative_to(ROOT))
                     self.assertTrue(resolved.exists())
                     count += 1
-        self.assertEqual(count, 15)
+        self.assertEqual(count, 16)
 
     def test_contract_resources_and_shared_real_swift_test_remain_required(self):
         entries = dict(source_entries("OpenEOSControlTests"))

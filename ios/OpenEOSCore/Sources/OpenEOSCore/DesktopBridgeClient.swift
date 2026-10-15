@@ -241,6 +241,8 @@ public actor DesktopBridgeClient {
         self.transport = transport
     }
 
+    public func mediaDeleteEngine() -> String? { sessionEngine }
+
     public func sanitizedBaseURL() -> URL {
         baseURL
     }
@@ -1604,8 +1606,22 @@ public actor DesktopBridgeClient {
         return item
     }
 
-    public func deleteMedia(_ item: CameraMediaItem) async throws {
-        try await requestOK(sessionEndpoint(["media", item.id]), method: "DELETE")
+    public func deleteMedia(_ item: CameraMediaItem, attempt: CameraMediaDeleteAttempt = CameraMediaDeleteAttempt()) async throws {
+        guard item.protected != true, item.writable != false, !item.id.isEmpty else { throw CameraMediaDeleteError.ineligible }
+        let url = try sessionEndpoint(["media", item.id])
+        try validateMutation(url: url, method: "DELETE")
+        ordinaryMutationCount += 1
+        defer { ordinaryMutationCount -= 1 }
+        let generation = sessionGeneration
+        let request = makeRequest(url: url, method: "DELETE", accept: "application/json")
+        try Task.checkCancellation()
+        guard !isClosing else { throw CancellationError() }
+        try attempt.markDispatched()
+        let response = try await transport.sendMediaDelete(request)
+        // This exact invocation owns its receipt after close as well. The old
+        // session cannot gain any new dispatch authority from that evidence.
+        try attempt.record(response)
+        guard generation == sessionGeneration, !isClosing else { throw DesktopBridgeError.sessionChanged }
     }
 
     public func diagnosticReport(

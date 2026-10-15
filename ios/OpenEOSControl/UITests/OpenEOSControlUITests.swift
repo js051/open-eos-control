@@ -1064,7 +1064,7 @@ final class OpenEOSControlUITests: XCTestCase {
             let delete = app.buttons["delete-media-\(id)"]
             XCTAssertTrue(scrollToInteraction(delete, in: app, timeout: 8))
             delete.tap()
-            let alert = app.alerts["Delete from camera?"]
+            let alert = app.alerts["Remove sample from preview?"]
             XCTAssertTrue(alert.waitForExistence(timeout: 5))
             alert.buttons["Delete"].tap()
             XCTAssertTrue(actions.waitForNonExistence(timeout: 5))
@@ -1111,12 +1111,53 @@ final class OpenEOSControlUITests: XCTestCase {
         XCTAssertTrue(scrollToInteraction(delete, in: app, timeout: 8))
         delete.tap()
 
-        let alert = app.alerts["Delete from camera?"]
+        let alert = app.alerts["Remove sample from preview?"]
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
         XCTAssertTrue(item.exists)
         alert.buttons["Delete"].tap()
         XCTAssertTrue(item.waitForNonExistence(timeout: 3))
         addScreenshot(name: "media-delete-confirmed")
+    }
+
+    func testExactDeletionReviewCancelMixedSourcesLostACKAndRetiredHistoryInBothLanguages() throws {
+        for (language, apple, locale, hostText, unknownText) in [
+            ("english", "en", "en_US", "Source: Desktop Bridge host capture store on the connected desktop", "Dispatched; completion uncertain"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "來源：已連線桌面上的 Desktop Bridge 拍攝檔案儲存區", "已派送；完成狀態不確定")
+        ] {
+            let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
+                environment: ["OEC_DELETE_JOURNEY_FIXTURE": "1"])
+            defer { app.terminate() }
+            XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8)); app.buttons["connect-button"].tap()
+            XCTAssertTrue(app.staticTexts["camera-model-status"].waitForExistence(timeout: 8))
+            openMoreActions(in: app)
+            XCTAssertTrue(tapCameraAction(app.buttons["camera-media-menu-button"], in: app))
+            let select = app.buttons["media-batch-select-visible"]
+            XCTAssertTrue(scrollToInteraction(select, in: app, timeout: 8)); select.tap()
+            let remove = app.buttons["media-delete-selected"]
+            XCTAssertTrue(scrollToInteraction(remove, in: app, timeout: 8)); remove.tap()
+            XCTAssertTrue(app.staticTexts[hostText].waitForExistence(timeout: 8))
+            app.buttons["media-delete-review-cancel"].tap()
+            XCTAssertFalse(app.staticTexts["media-delete-summary"].exists, "Cancelled review does not admit a DELETE")
+            XCTAssertTrue(scrollToInteraction(remove, in: app, timeout: 8)); remove.tap()
+            let confirm = app.buttons["media-delete-confirm"]
+            XCTAssertTrue(confirm.waitForExistence(timeout: 8)); confirm.tap()
+            let results = app.buttons["media-delete-view-results"]
+            XCTAssertTrue(scrollToInteraction(results, in: app, timeout: 8)); results.tap()
+            XCTAssertTrue(app.staticTexts[unknownText].waitForExistence(timeout: 8))
+            addScreenshot(name: "delete-mixed-source-lost-ack-\(apple)")
+            // Dismiss the result sheet, disconnect, then inspect retained records
+            // before connecting a replacement owner. No new DELETE confirmation.
+            app.navigationBars.buttons.firstMatch.tap()
+            app.buttons["media-back-button"].tap()
+            openMoreActions(in: app)
+            XCTAssertTrue(tapCameraAction(app.buttons["disconnect-menu-button"], in: app))
+            XCTAssertTrue(waitForConnectionScreen(in: app, timeout: 8))
+            let history = app.buttons["media-delete-history-banner"]
+            XCTAssertTrue(history.waitForExistence(timeout: 8)); history.tap()
+            XCTAssertTrue(app.staticTexts[unknownText].waitForExistence(timeout: 8))
+            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "media-delete-inspect-")).firstMatch.isEnabled)
+            addScreenshot(name: "delete-previous-owner-history-\(apple)")
+        }
     }
 
     func testRealDocumentPickerCancellationAndReopeningAfterReconnectInBothLanguages() throws {
@@ -1425,9 +1466,9 @@ final class OpenEOSControlUITests: XCTestCase {
         let deleteMedia = app.buttons["delete-media-SIM_0003.PNG"]
         _ = try XCTUnwrap((scrollToInteraction(deleteMedia, in: app, timeout: 8)) ? true : nil)
         try tapForAsyncTest(deleteMedia)
-        let deleteAlert = app.alerts["Delete from camera?"]
-        _ = try XCTUnwrap((deleteAlert.waitForExistence(timeout: 5)) ? true : nil)
-        try tapForAsyncTest(deleteAlert.buttons["Delete"])
+        let deleteConfirm = app.buttons["media-delete-confirm"]
+        _ = try XCTUnwrap((deleteConfirm.waitForExistence(timeout: 5)) ? true : nil)
+        try tapForAsyncTest(deleteConfirm)
         try await waitForSimulatorState { state in
             !(state["media_ids"] as? [String] ?? []).contains("SIM_0003.PNG")
         }

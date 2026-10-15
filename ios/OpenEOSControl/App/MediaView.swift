@@ -11,7 +11,9 @@ struct MediaView: View {
     let controlRotation: Double
     @State private var exportPayload: MediaBatchExportPayload?
     @StateObject private var filesExporter = MediaFilesExportController()
-    @State private var pendingDeletion: CameraMediaItem?
+    @State private var pendingDeletion: MediaDeleteDraft?
+    @State private var pendingMetadataDeletion: MediaDeleteDraft?
+    @State private var pendingPreviewDeletion: CameraMediaItem?
     @State private var metadataPresentation: MediaMetadataPresentation?
     @State private var pendingPreviewMetadataPresentation: MediaMetadataPresentation?
     @State private var uploadSelection: MediaUploadSelection?
@@ -116,6 +118,9 @@ struct MediaView: View {
         .onChange(of: camera.mediaLibrarySessionID) { _, _ in
             uploadSelection = nil
             metadataPresentation = nil
+            pendingDeletion = nil
+            pendingMetadataDeletion = nil
+            pendingPreviewDeletion = nil
             pendingPreviewMetadataPresentation = nil
             isDateFilterPresented = false
             dateFilterOwner = nil
@@ -158,32 +163,28 @@ struct MediaView: View {
                 .environmentObject(camera)
                 .environmentObject(language)
         }
-        .sheet(item: $metadataPresentation) { presentation in
+        .sheet(item: $metadataPresentation, onDismiss: {
+            guard let draft = pendingMetadataDeletion else { return }
+            pendingMetadataDeletion = nil
+            guard draft.owner == camera.mediaLibrarySessionID else { return }
+            pendingDeletion = draft
+        }) { presentation in
             MediaMetadataView(itemID: presentation.itemID, owner: presentation.owner) { item in
                 metadataPresentation = nil
-                pendingDeletion = item
+                if camera.isPreview { pendingPreviewDeletion = item }
+                else { pendingMetadataDeletion = camera.makeMediaDeleteDraft(items: [item], displayed: displayedMedia, owner: presentation.owner) }
             }
             .environmentObject(camera)
             .environmentObject(language)
         }
-        .alert(
-            language.string("delete_media_title"),
-            isPresented: Binding(
-                get: { pendingDeletion != nil },
-                set: { if !$0 { pendingDeletion = nil } }
-            ),
-            presenting: pendingDeletion
-        ) { item in
-            Button(language.string("cancel"), role: .cancel) {
-                pendingDeletion = nil
-            }
+        .sheet(item: $pendingDeletion) { MediaDeleteReview(draft: $0) }
+        .alert(language.string("media_delete_preview_title"), isPresented: Binding(get: { pendingPreviewDeletion != nil }, set: { if !$0 { pendingPreviewDeletion = nil } }), presenting: pendingPreviewDeletion) { item in
+            Button(language.string("cancel"), role: .cancel) { pendingPreviewDeletion = nil }
             Button(language.string("delete"), role: .destructive) {
-                pendingDeletion = nil
-                Task { await camera.deleteMedia(item) }
+                pendingPreviewDeletion = nil
+                if camera.isPreview { Task { await camera.deleteMedia(item) } }
             }
-        } message: { item in
-            Text(language.format("delete_media_confirmation", item.name))
-        }
+        } message: { _ in Text(language.string("media_delete_preview_notice")) }
     }
 
     private var header: some View {
@@ -620,7 +621,7 @@ struct MediaView: View {
                 .accessibilityIdentifier("media-actions-\(item.id)")
             } else if camera.supports(.mediaDelete) {
                 Button {
-                    pendingDeletion = item
+                    pendingDeletion = camera.makeMediaDeleteDraft(items: [item], displayed: displayedMedia, owner: metadataOwner)
                 } label: {
                     Image(systemName: "trash")
                         .frame(width: 48, height: 48)

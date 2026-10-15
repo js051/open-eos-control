@@ -37,6 +37,9 @@ targets:
       - path: Tests/Fixtures
         buildPhase: resources
       # External files must stay relative to this project, without shared ancestor groups.
+      - path: ../../contracts/media-delete/v1/delete-outcome-vectors.json
+        createIntermediateGroups: false
+        buildPhase: resources
       - path: ../../contracts/media-upload/v1/upload-outcome-vectors.json
         createIntermediateGroups: false
         buildPhase: resources

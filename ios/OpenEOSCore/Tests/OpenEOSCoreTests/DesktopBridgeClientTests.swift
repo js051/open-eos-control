@@ -588,7 +588,7 @@ final class DesktopBridgeClientTests: XCTestCase {
             headers: ["content-type": "image/jpeg"],
             body: Data("jpeg!!".utf8)
         )
-        await transport.enqueue(method: "DELETE", path: "/v1/session/session_123/media/gphoto2:YWJj", status: 204)
+        await transport.enqueue(method: "DELETE", path: "/v1/session/session_123/media/gphoto2:YWJj", status: 204, body: Data())
         await transport.enqueueJSON(
             method: "POST",
             path: "/v1/session/session_123/liveview/stop",

@@ -2404,6 +2404,8 @@ private actor CaptureMediaPeer: CameraHTTPTransport {
             object = ["ok": true, "service": "open-eos-control-bridge", "version": "0.13.0"]
         } else if path == "/v1/session" {
             object = ["id": "capture-review", "engine": "ccapi"]
+        } else if request.httpMethod == "DELETE", path.contains("/media/") {
+            return CameraHTTPResponse(statusCode: 204)
         } else if path.hasSuffix("/media/NEW-VIDEO/info") {
             var info = CaptureFixtureItem.newVideo.json
             info["sizeBytes"] = try Self.videoOriginalBytes().count

@@ -25,6 +25,10 @@ struct RootView: View {
             VStack(spacing: 0) {
                 ForegroundMediaBanner(controller: camera.foregroundMedia, delivery: camera.foregroundFiles)
                 ShutterReleaseRecoveryView()
+                if !camera.mediaDeleteRuns.isEmpty && (!camera.connected || camera.screen != .media) {
+                    Button("media_delete_view_results") { camera.activeSheet = .deleteHistory }
+                        .accessibilityIdentifier("media-delete-history-banner")
+                }
             }
         }
         .background(Color.cameraBackground.ignoresSafeArea())

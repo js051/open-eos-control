@@ -258,6 +258,12 @@ final class MediaBatchDeliveryTests: XCTestCase {
             try await waitUntil { state.mediaLibraryLoadStatus == .complete }
             XCTAssertEqual(state.selectedMediaItems.count, 2, "A partial or empty inventory cannot imply deletion")
             await state.deleteMedia(b)
+            XCTAssertEqual(state.selectedMediaItems.map(mediaItemIdentity), [b, a].map(mediaItemIdentity), "Unloaded deletion must skip without consuming selection")
+            XCTAssertEqual(state.mediaDeleteRuns.last?.rows.first?.status, .skipped)
+            await peer.replaceItems([b, freshA])
+            state.startMediaLibraryLoad()
+            try await waitUntil { state.mediaLibraryLoadStatus == .complete }
+            await state.deleteMedia(b)
             XCTAssertEqual(state.selectedMediaItems.map(mediaItemIdentity), [mediaItemIdentity(a)])
             state.requestDisconnect()
             XCTAssertTrue(state.selectedMediaItems.isEmpty)
@@ -2166,6 +2172,7 @@ private actor BatchMediaPeer: CameraHTTPTransport {
             let identity = Data(components[marker + 1].utf8)
             if method == "DELETE" {
                 items.removeAll { Data($0.id.utf8) == identity }
+                return CameraHTTPResponse(statusCode: 204)
             } else if method == "PUT" {
                 guard let index = items.firstIndex(where: { mediaItemIdentity($0) == identity }) else {
                     throw URLError(.resourceUnavailable)

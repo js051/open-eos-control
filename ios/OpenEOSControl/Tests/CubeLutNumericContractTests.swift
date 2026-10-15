@@ -135,7 +135,10 @@ final class CubeLutNumericContractTests: XCTestCase {
     }
 
     private func solidImage(_ rgb: [Int]) throws -> CGImage {
-        let rgba = Array(repeating: rgb.map { UInt8($0) } + [255], count: 8 * 8).flatMap { $0 }
+        // Keep the alpha literal in the same byte type as RGB. Otherwise Swift can
+        // infer the concatenated/repeated array as [Any], which Data cannot accept.
+        let pixel: [UInt8] = rgb.map { UInt8($0) } + [UInt8(255)]
+        let rgba: [UInt8] = Array(repeating: pixel, count: 8 * 8).flatMap { $0 }
         let provider = try XCTUnwrap(CGDataProvider(data: Data(rgba) as CFData))
         return try XCTUnwrap(CGImage(width: 8, height: 8, bitsPerComponent: 8, bitsPerPixel: 32,
             bytesPerRow: 8 * 4, space: cubeLutPreviewOutputColorSpace,
