@@ -26,6 +26,137 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(snapshots, [items])
     }
 
+    func testSimulatorMediaListRejectsMissingOrWrongTypeItemsWithoutPublishingEmptySuccess() async throws {
+        for body in [#"{}"#, #"{"items":null}"#, #"{"items":{}}"#, #"{"items":"invalid"}"#,
+                     #"{"items":true}"#, #"{"items":1}"#] {
+            let transport = MockCameraHTTPTransport()
+            await transport.enqueueJSON(path: "/ccapi/media", body: body)
+            let client = try CCAPIClient(baseURL: "http://127.0.0.1:18080", mode: .simulator, transport: transport)
+            let progress = MediaListProgressRecorder()
+            do {
+                _ = try await client.listMedia(maximumItems: 8) { await progress.record($0) }
+                XCTFail("A malformed HTTP 200 envelope must not become an empty successful listing: \(body)")
+            } catch {
+                XCTAssertEqual(error as? CCAPIError, .invalidResponse("Simulator media response must contain an items array."))
+            }
+            let snapshots = await progress.values()
+            let requests = await transport.requests()
+            XCTAssertTrue(snapshots.isEmpty)
+            XCTAssertEqual(requests.map(\.path), ["/ccapi/media"])
+            XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    func testSimulatorMediaListAcceptsExplicitEmptyItemsArrayAsSuccessfulRead() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi/media", body: #"{"items":[]}"#)
+        let client = try CCAPIClient(baseURL: "http://127.0.0.1:18080", mode: .simulator, transport: transport)
+        let progress = MediaListProgressRecorder()
+        let items = try await client.listMedia(maximumItems: 8) { await progress.record($0) }
+        let snapshots = await progress.values()
+        let requests = await transport.requests()
+        XCTAssertTrue(items.isEmpty)
+        XCTAssertEqual(snapshots, [[]])
+        XCTAssertEqual(requests.map(\.path), ["/ccapi/media"])
+        XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+    }
+
+    func testSimulatorMediaListRejectsMalformedItemsBeforeTruncatingOrPublishing() async throws {
+        for body in [#"{"items":[null]}"#, #"{"items":[1]}"#, #"{"items":["bad"]}"#,
+                     #"{"items":[{}]}"#, #"{"items":[{"id":"","name":"SYNTHETIC.JPG"}]}"#,
+                     #"{"items":[{"id":1,"name":"SYNTHETIC.JPG"}]}"#,
+                     #"{"items":[{"id":"SYNTHETIC","name":"  "}]}"#,
+                     #"{"items":[{"id":"SYNTHETIC","name":1}]}"#,
+                     #"{"items":[{"id":"VALID","name":"SYNTHETIC.JPG"},null]}"#] {
+            let transport = MockCameraHTTPTransport()
+            await transport.enqueueJSON(path: "/ccapi/media", body: body)
+            let client = try CCAPIClient(baseURL: "http://127.0.0.1:18080", mode: .simulator, transport: transport)
+            let progress = MediaListProgressRecorder()
+            do {
+                _ = try await client.listMedia(maximumItems: 1) { await progress.record($0) }
+                XCTFail("An invalid item must not be silently discarded or hidden by the result limit")
+            } catch {
+                XCTAssertEqual(error as? CCAPIError, .invalidResponse("Simulator media response contains an invalid item."))
+            }
+            let snapshots = await progress.values()
+            let requests = await transport.requests()
+            XCTAssertTrue(snapshots.isEmpty)
+            XCTAssertEqual(requests.map(\.path), ["/ccapi/media"])
+            XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    func testRealMediaListRejectsMalformedPathEnvelopesBeforePublishing() async throws {
+        for body in [#"{}"#, #"{"path":null}"#, #"{"path":{}}"#, #"{"path":"invalid"}"#,
+                     #"{"path":[null]}"#, #"{"path":[1]}"#, #"{"path":["  "]}"#] {
+            for paged in [false, true] {
+                let transport = MockCameraHTTPTransport()
+                await transport.enqueueJSON(path: "/ccapi", body: #"{"ver100":[{"path":"/contents","get":true}]}"#)
+                await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number",
+                                            body: paged ? #"{"pagenumber":1}"# : #"{"pagenumber":0}"#)
+                let path = paged ? "/ccapi/ver100/contents?page=1&order=desc" : "/ccapi/ver100/contents"
+                await transport.enqueueJSON(path: path, body: body)
+                let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+                let progress = MediaListProgressRecorder()
+                do {
+                    _ = try await client.listMedia(maximumItems: 8) { await progress.record($0) }
+                    XCTFail("A malformed path envelope cannot become an empty successful listing")
+                } catch {
+                    XCTAssertEqual(error as? CCAPIError, .invalidResponse("Camera media response must contain a valid path array."))
+                }
+                let snapshots = await progress.values()
+                let requests = await transport.requests()
+                XCTAssertTrue(snapshots.isEmpty)
+                XCTAssertEqual(requests.count, 3)
+                XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+            }
+        }
+    }
+
+    func testRealMediaListRejectsMalformedPageCountWithoutInventingZero() async throws {
+        for body in [#"{}"#, #"{"pagenumber":null}"#, #"{"pagenumber":"1"}"#,
+                     #"{"pagenumber":true}"#, #"{"pagenumber":1.5}"#, #"{"pagenumber":-1}"#] {
+            let transport = MockCameraHTTPTransport()
+            await transport.enqueueJSON(path: "/ccapi", body: #"{"ver100":[{"path":"/contents","get":true}]}"#)
+            await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: body)
+            let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+            let progress = MediaListProgressRecorder()
+            do {
+                _ = try await client.listMedia(maximumItems: 8) { await progress.record($0) }
+                XCTFail("Malformed page metadata must not silently become an unpaged successful listing")
+            } catch {
+                guard let ccapiError = error as? CCAPIError, case .invalidResponse = ccapiError else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+            }
+            let snapshots = await progress.values()
+            let requests = await transport.requests()
+            XCTAssertTrue(snapshots.isEmpty)
+            XCTAssertEqual(requests.count, 2)
+            XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    func testRealMediaListKeepsUnsupportedCountAndValidUnpagedResponseFallbacks() async throws {
+        for unsupported in [false, true] {
+            let transport = MockCameraHTTPTransport()
+            await transport.enqueueJSON(path: "/ccapi", body: #"{"ver100":[{"path":"/contents","get":true}]}"#)
+            if unsupported {
+                await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", status: 404, body: #"{}"#)
+                await transport.enqueueJSON(path: "/ccapi/ver100/contents?type=all,kind=number", status: 404, body: #"{}"#)
+            } else {
+                await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: #"{"path":[]}"#)
+            }
+            await transport.enqueueJSON(path: "/ccapi/ver100/contents", body: #"{"path":[]}"#)
+            let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+            let items = try await client.listMedia(maximumItems: 8)
+            let requests = await transport.requests()
+            XCTAssertTrue(items.isEmpty)
+            XCTAssertEqual(requests.count, unsupported ? 4 : 3)
+            XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
     func testSimulatorMediaListHonorsMaximumItems() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(

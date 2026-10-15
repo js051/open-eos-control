@@ -188,6 +188,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var latestMediaThumbnail: Data?
     @Published private(set) var latestMediaThumbnailLoading = false
     @Published private(set) var captureReviewState = CaptureReviewState.idle
+    @Published private(set) var captureReviewOutcome = CaptureReviewOutcome()
     @Published private(set) var captureReviewKind = CaptureReviewKind.photo
     @Published private(set) var mediaLibraryLoading = false
     @Published private(set) var mediaLibraryLoadCancellable = false
@@ -323,6 +324,7 @@ final class CameraAppState: ObservableObject {
     private var latestMediaGeneration = UUID()
     private var observedMediaIDs = Set<String>()
     private var pendingCaptureReview: CaptureReviewAttempt?
+    private let latestMediaReviewDelay: (@Sendable (UInt64) async throws -> Void)?
     private var mediaPreviewToken: UUID?
     private var mediaPreviewImageTask: Task<CameraMediaPreview, Error>?
     private var rateTracker = LiveViewRateTracker()
@@ -448,9 +450,11 @@ final class CameraAppState: ObservableObject {
         mediaDeliveryStore: MediaDeliveryStore? = nil,
         mediaDeliveryReplyDelay: (@Sendable (MediaDeliveryReplyStage) async -> Void)? = nil,
         foregroundMedia: ForegroundMediaController? = nil,
-        foregroundFiles: ForegroundFilesDelivery? = nil
+        foregroundFiles: ForegroundFilesDelivery? = nil,
+        latestMediaReviewDelay: (@Sendable (UInt64) async throws -> Void)? = nil
     ) {
         self.defaults = defaults
+        self.latestMediaReviewDelay = latestMediaReviewDelay
         self.foregroundMedia = foregroundMedia ?? ForegroundMediaController()
         self.foregroundFiles = foregroundFiles ?? ForegroundFilesDelivery()
         self.mediaDeliveryStore = mediaDeliveryStore
@@ -2015,6 +2019,7 @@ final class CameraAppState: ObservableObject {
         pendingCaptureReview = supports(.mediaBrowser)
             ? CaptureReviewAttempt(previousIDs: previousIDs, kind: kind) : nil
         captureReviewKind = kind
+        captureReviewOutcome = CaptureReviewOutcome()
         captureReviewState = pendingCaptureReview == nil ? .idle : .capturing
     }
 
@@ -2026,12 +2031,13 @@ final class CameraAppState: ObservableObject {
               review != nil || (pendingCaptureReview == nil && captureReviewState == .idle) else { return }
         invalidateLatestMedia(clearItem: false)
         let generation = latestMediaGeneration
-        let previousReadFailed = captureReviewState == .readFailed
+        let previousState = captureReviewState
+        let previousOutcome = captureReviewOutcome
         captureReviewState = review == nil ? .idle : .searching
         latestMediaTask = Task { [weak self] in
             await self?.loadLatestMedia(
                 session: session, review: review,
-                previousReadFailed: previousReadFailed, generation: generation
+                previousState: previousState, previousOutcome: previousOutcome, generation: generation
             )
         }
     }
@@ -2039,16 +2045,28 @@ final class CameraAppState: ObservableObject {
     private func loadLatestMedia(
         session: CameraSession,
         review: CaptureReviewAttempt?,
-        previousReadFailed: Bool,
+        previousState: CaptureReviewState,
+        previousOutcome: CaptureReviewOutcome,
         generation: UUID
     ) async {
-        var lastReadFailed = previousReadFailed
+        // Every invocation starts fresh; previous evidence is only a zero-read fallback.
+        var readEvidence = CaptureReviewReadEvidence()
+        var retiredRead = false
         defer {
             if generation == latestMediaGeneration {
                 latestMediaTask = nil
                 latestMediaThumbnailLoading = false
                 if review != nil, captureReviewState == .searching {
-                    captureReviewState = lastReadFailed ? .readFailed : .notReady
+                    if Task.isCancelled || retiredRead || readEvidence.completedReads == 0 {
+                        // Retired work cannot publish partial evidence. Restore the
+                        // previous terminal result and release transient searching.
+                        captureReviewOutcome = previousOutcome
+                        captureReviewState = previousState == .readFailed ? .readFailed : .notReady
+                    } else {
+                        let outcome = CaptureReviewOutcome(readEvidence: readEvidence)
+                        captureReviewOutcome = outcome
+                        captureReviewState = outcome.terminalState
+                    }
                 }
             }
         }
@@ -2056,11 +2074,14 @@ final class CameraAppState: ObservableObject {
         for attempt in 0..<attempts {
             guard generation == latestMediaGeneration, !Task.isCancelled else { return }
             // A later media operation can own the camera while this read is backing off.
-            guard !isBusy(.media), !mediaLibraryLoading else { return }
+            guard !isBusy(.media), !mediaLibraryLoading else {
+                retiredRead = true
+                return
+            }
             do {
                 let items = try await session.listMedia(maximumItems: Self.latestMediaRequestItemCount)
                 guard generation == latestMediaGeneration, !Task.isCancelled else { return }
-                lastReadFailed = false
+                readEvidence.record(.success)
                 observedMediaIDs.formUnion(items.map(\.id))
                 let selected: CameraMediaItem?
                 if let review {
@@ -2073,23 +2094,35 @@ final class CameraAppState: ObservableObject {
                 if let item = selected {
                     if review != nil {
                         pendingCaptureReview = nil
+                        captureReviewOutcome = CaptureReviewOutcome(readEvidence: readEvidence, found: true)
                         captureReviewState = .available
                     }
                     await publishLatestMedia(item, session: session, generation: generation)
                     return
                 }
             } catch is CancellationError {
+                retiredRead = true
                 return
             } catch {
-                // An unread list is different from a successful list with no new item.
-                // Keep this failure local to review; a later successful read clears it.
-                lastReadFailed = true
+                guard generation == latestMediaGeneration, !Task.isCancelled else { return }
+                if (error as? URLError)?.code == .cancelled {
+                    retiredRead = true
+                    return
+                }
+                // Count only a current owner's completed read; keep success and
+                // failure facts independently without replacing another alert.
+                readEvidence.record(.failure)
             }
 
             guard attempt + 1 < attempts else { return }
             do {
-                try await Task.sleep(nanoseconds: Self.latestMediaRetryDelays[attempt])
+                if let latestMediaReviewDelay {
+                    try await latestMediaReviewDelay(Self.latestMediaRetryDelays[attempt])
+                } else {
+                    try await Task.sleep(nanoseconds: Self.latestMediaRetryDelays[attempt])
+                }
             } catch {
+                retiredRead = true
                 return
             }
         }
@@ -2130,6 +2163,7 @@ final class CameraAppState: ObservableObject {
             observedMediaIDs.removeAll()
             pendingCaptureReview = nil
             captureReviewState = .idle
+            captureReviewOutcome = CaptureReviewOutcome()
             captureReviewKind = .photo
         }
     }

@@ -2467,23 +2467,31 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let value = try await requestJSON(path: "/ccapi/media")
-            let allItems = value.array("items")?.objects.map {
-                CameraMediaItem(
-                    id: $0.string("id"),
-                    name: $0.string("name"),
-                    kind: $0.string("kind", default: "other"),
-                    sizeBytes: $0.integer64("size_bytes"),
-                    captureTime: $0.string("capture_time").nilIfEmpty,
-                    previewAvailable: ["image", "raw"].contains($0.string("kind", default: "other").lowercased()),
-                    protected: $0.bool("protect"),
-                    rating: $0.integer("rating").flatMap { (0...5).contains($0) ? $0 : nil },
-                    rotationDegrees: $0.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil },
-                    archived: $0.bool("archive"),
-                    contentType: $0.string("content_type").nilIfEmpty,
-                    widthPixels: $0.integer("width_pixels").flatMap { $0 > 0 ? $0 : nil },
-                    heightPixels: $0.integer("height_pixels").flatMap { $0 > 0 ? $0 : nil }
+            guard let rawItems = value.array("items") else {
+                throw CCAPIError.invalidResponse("Simulator media response must contain an items array.")
+            }
+            let allItems = try rawItems.map { raw -> CameraMediaItem in
+                guard let item = raw as? JSONDictionary,
+                      let id = item["id"] as? String, !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      let name = item["name"] as? String, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw CCAPIError.invalidResponse("Simulator media response contains an invalid item.")
+                }
+                return CameraMediaItem(
+                    id: id,
+                    name: name,
+                    kind: item.string("kind", default: "other"),
+                    sizeBytes: item.integer64("size_bytes"),
+                    captureTime: item.string("capture_time").nilIfEmpty,
+                    previewAvailable: ["image", "raw"].contains(item.string("kind", default: "other").lowercased()),
+                    protected: item.bool("protect"),
+                    rating: item.integer("rating").flatMap { (0...5).contains($0) ? $0 : nil },
+                    rotationDegrees: item.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil },
+                    archived: item.bool("archive"),
+                    contentType: item.string("content_type").nilIfEmpty,
+                    widthPixels: item.integer("width_pixels").flatMap { $0 > 0 ? $0 : nil },
+                    heightPixels: item.integer("height_pixels").flatMap { $0 > 0 ? $0 : nil }
                 )
-            } ?? []
+            }
             let items = maximumItems.map { Array(allItems.prefix($0)) } ?? allItems
             await onProgress(items)
             observedFeatures.insert(.mediaBrowser)
@@ -4812,9 +4820,26 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             paths: ["\(container)?kind=number", "\(container)?type=all,kind=number"],
             required: false
         )
-        let pageCount = pageInfo?.integer("pagenumber") ?? 0
-        guard pageCount >= 0 else {
-            throw CCAPIError.invalidResponse("Camera returned a negative media page count.")
+        let pageCount: Int
+        if let pageInfo {
+            if pageInfo["pagenumber"] == nil {
+                // Some cameras ignore kind=number and return a valid unpaged list.
+                // Missing count alone is never evidence of an empty card.
+                _ = try Self.validatedContentPaths(pageInfo)
+                pageCount = 0
+            } else {
+                guard let count = Self.strictInteger(pageInfo["pagenumber"]) else {
+                    throw CCAPIError.invalidResponse("Camera returned an invalid media page count.")
+                }
+                guard count >= 0 else {
+                    throw CCAPIError.invalidResponse("Camera returned a negative media page count.")
+                }
+                pageCount = count
+            }
+        } else {
+            // The optional count endpoint may be unsupported; the required
+            // fallback listing still has to contain a valid path array.
+            pageCount = 0
         }
         var result: [String] = []
         var seenPaths = Set<String>()
@@ -4839,14 +4864,14 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         if pageCount <= 0 {
             try Task.checkCancellation()
             if let value = try await firstJSON(paths: [container], required: true) {
-                appendUnique(value.array("path")?.strings ?? [])
+                appendUnique(try Self.validatedContentPaths(value))
             }
             try await onPage(boundedResult())
         } else if mediaDescendingOrderSupported == false {
             for page in stride(from: pageCount, through: 1, by: -1) {
                 try Task.checkCancellation()
                 guard let value = try await contentPage(container: container, page: page) else { continue }
-                let paths = value.array("path")?.strings ?? []
+                let paths = try Self.validatedContentPaths(value)
                 appendUnique(paths, reversed: true)
                 try await onPage(boundedResult())
                 if reachedMediaLimit() { return boundedResult() }
@@ -4865,20 +4890,20 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                         }
                         value = response
                     }
-                    let paths = value.array("path")?.strings ?? []
+                    let paths = try Self.validatedContentPaths(value)
                     appendUnique(paths, reversed: true)
                     try await onPage(boundedResult())
                     if reachedMediaLimit() { return boundedResult() }
                 }
             } else {
-                appendUnique(firstPage.array("path")?.strings ?? [])
+                appendUnique(try Self.validatedContentPaths(firstPage))
                 try await onPage(boundedResult())
                 if reachedMediaLimit() { return boundedResult() }
                 if pageCount >= 2 {
                     for page in 2...pageCount {
                         try Task.checkCancellation()
                         if let value = try await contentPage(container: container, page: page) {
-                            appendUnique(value.array("path")?.strings ?? [])
+                            appendUnique(try Self.validatedContentPaths(value))
                             try await onPage(boundedResult())
                             if reachedMediaLimit() { return boundedResult() }
                         }
@@ -4887,6 +4912,14 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             }
         }
         return boundedResult()
+    }
+
+    private static func validatedContentPaths(_ value: JSONDictionary) throws -> [String] {
+        guard let paths = value["path"] as? [String],
+              paths.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            throw CCAPIError.invalidResponse("Camera media response must contain a valid path array.")
+        }
+        return paths
     }
 
     private func contentPage(container: String, page: Int) async throws -> JSONDictionary? {
