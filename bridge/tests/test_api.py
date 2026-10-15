@@ -73,7 +73,8 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
     assert "DIRECTORY_CONTROL" in script.text
     assert "/directories" in script.text
     assert "MEDIA_UPLOAD" in script.text
-    assert "XMLHttpRequest" in script.text
+    assert "async function sendMediaUpload" in script.text
+    assert 'redirect: "error", cache: "no-store", credentials: "omit"' in script.text
     assert "media?filename=" in script.text
     assert media_transfer.status_code == 200
     assert media_transfer.headers["content-type"].startswith(("text/javascript", "application/javascript"))
