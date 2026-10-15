@@ -1419,22 +1419,19 @@ final class CameraAppState: ObservableObject {
         }
     }
 
-    // Detect absent/unavailable output, not freshness of retained renderer pixels.
-    // Input inactivity and decoder/listener failures are independently bounded.
+    // The controller separates continuous decoded output from exact-identity display
+    // progress. Unknown presentation never masquerades as success or packet freshness.
     private func beginLiveViewRenderWatch() {
         liveViewRenderWatchTask?.cancel()
         guard autoRefresh, applicationActive, activeLiveViewSource == .ccapiRTP else { return }
         let generation = sessionGeneration, lifetime = liveViewLifetime
         liveViewRenderWatchTask = Task { [weak self] in
-            var lastProgress = ContinuousClock.now
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 500_000_000) } catch { return }
                 guard let self, self.sessionGeneration == generation, self.liveViewLifetime == lifetime,
                       self.applicationActive, self.autoRefresh, self.activeLiveViewSource == .ccapiRTP,
                       !self.maintenanceControlsPaused, !self.shutterReleaseRequired || self.heldAutofocusPressed else { return }
-                if let at = self.lastFrameAt, Date().timeIntervalSince(at) < 5,
-                   self.rtpController.hasUsableRendererOutput() { lastProgress = .now }
-                if ContinuousClock.now - lastProgress >= .seconds(5) {
+                if self.rtpController.videoProgressFailure() != nil {
                     self.retireLiveView(reason: NSLocalizedString("live_view_render_stalled", comment: ""))
                     return
                 }

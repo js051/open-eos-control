@@ -763,10 +763,10 @@
 "native_monitor_waiting" = "Sampled scopes · waiting for pixels";
 "native_monitor_no_pixels" = "Sampled scopes · image unavailable";
 "native_monitor_failed" = "Sampled scopes · unsupported image or conversion failed";
-"native_monitor_sampled" = "Sampled preview scopes · up to 4 updates/sec";
+"native_monitor_sampled" = "Processed-output scopes · up to 4 samples/sec";
 "native_monitor_stale" = "Sampled scopes · expired";
 "native_monitor_lut_inactive" = "Saved LUT inactive on native RTP";
-"native_monitor_scope_notice" = "Native LUT processing uses supported 8-bit SDR video. Scopes sample the processed image up to 4 times/sec. iOS 17.4+ reads the display; earlier versions analyze the same processed buffer submitted for display. Unsupported formats keep unfiltered native video.";
+"native_monitor_scope_notice" = "Scopes analyze the exact processed output submitted to the native renderer, up to 4 times/sec. Sampled histograms/waveforms are bounded to 1 second. Spatial overlays require the same positively identified displayed frame. Display progress remains unverified when the OS cannot identify it. Supported 8-bit SDR LUT processing never changes camera media.";
 
 "foreground_media_state_copying" = "Copying the retained original to Files…";
 
@@ -1022,5 +1022,10 @@
 "live_view_retiring" = "Live View has ended locally. Waiting for the camera's Stop acknowledgement.";
 "live_view_restart_required" = "Live View ended. Start a new view when you are ready.";
 "live_view_start_again" = "Start Live View again";
-"live_view_render_stalled" = "Live View did not produce usable renderer output. Confirm Stop before starting again.";
+"live_view_render_stalled" = "Live View decoder or confirmed renderer output stopped progressing. Confirm Stop before starting again.";
 "live_view_stop_pending" = "Live View cleanup is still required. Release the active camera control, then retry Stop.";
+"native_lut_processed_unverified" = "LUT processed · display match unverified";
+"native_presentation_waiting" = "Waiting for native output";
+"native_presentation_progressing" = "Display frame progress verified";
+"native_presentation_unknown" = "Decoded output · display progress unverified";
+"native_presentation_stalled" = "Native output stopped progressing";

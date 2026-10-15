@@ -4,8 +4,8 @@ import CoreImage
 import CoreVideo
 import Foundation
 
-/// Bounds acquisition/processing age, not the decoder's presentation timestamp.
-/// AVSampleBufferVideoRenderer does not return a frame timestamp with readback.
+/// Bounds acquisition/processing age. Frame freshness is separately tied to its
+/// exact decoder token; rereading a retained image cannot refresh either deadline.
 struct IOSRTPMonitorLease {
     struct Ticket: Equatable, Sendable {
         let generation: UUID
@@ -52,28 +52,29 @@ enum IOSRTPMonitorStatus: String {
     case stale = "native_monitor_stale"
 }
 
-/// One retained, read-only renderer buffer and one bounded analysis job. The
-/// native decoder/audio remain the presentation path; LUT processing happens upstream.
+/// One exact submitted output and one bounded analysis job. Histogram/waveform
+/// samples may complete after a newer frame; spatial overlays additionally need
+/// the exact currently confirmed presentation token. Never read an unbound image.
 @MainActor
 final class IOSRTPPixelMonitor: ObservableObject {
     @Published private(set) var analysis: LiveViewMonitorAnalysis?
     @Published private(set) var status: IOSRTPMonitorStatus = .off
+    @Published private(set) var analysisFrame: IOSRTPFrameToken?
+    @Published private(set) var presentedFrame: IOSRTPFrameToken?
     private var settings: LiveViewMonitorSettings?
     private var configurationOwner: UUID?
-    private weak var layer: AVSampleBufferDisplayLayer?
-    private var owner: UUID?
-    private var format: CMVideoFormatDescription?
+    private var currentOutput: IOSRTPFrameToken?
+    private var analysisOutputAt: TimeInterval?
     private var lease = IOSRTPMonitorLease()
     private var expiry: Task<Void, Never>?
-    private var lastSubmission: TimeInterval?
     private var publishedAt: TimeInterval?
     private let queue = DispatchQueue(label: "dev.openeos.control.rtp-pixel-monitor", qos: .utility)
-    private let readPixels: (@MainActor (AVSampleBufferDisplayLayer) -> CVPixelBuffer?)?
+    private let isOwnerActive: @MainActor (IOSRTPFrameToken) -> Bool
     private let analyze: @Sendable (IOSRTPPixelSample, LiveViewMonitorSettings) -> LiveViewMonitorAnalysis?
 
-    init(readPixels: (@MainActor (AVSampleBufferDisplayLayer) -> CVPixelBuffer?)? = nil,
+    init(isOwnerActive: @escaping @MainActor (IOSRTPFrameToken) -> Bool = { _ in true },
          analyze: @escaping @Sendable (IOSRTPPixelSample, LiveViewMonitorSettings) -> LiveViewMonitorAnalysis? = analyzeRTPPixelSample) {
-        self.readPixels = readPixels
+        self.isOwnerActive = isOwnerActive
         self.analyze = analyze
     }
 
@@ -85,7 +86,6 @@ final class IOSRTPPixelMonitor: ObservableObject {
     var isProcessing: Bool { lease.inFlight != nil }
 
     func configure(settings requested: LiveViewMonitorSettings?, owner: UUID) {
-        // Analyze the actual processed output once; LUT identity retires obsolete analyses.
         var next = requested
         if next?.needsPixelAnalysis != true { next = nil }
         guard settings != next || configurationOwner != owner else { return }
@@ -96,105 +96,95 @@ final class IOSRTPPixelMonitor: ObservableObject {
 
     func deactivate(owner: UUID) {
         guard configurationOwner == owner else { return }
-        configurationOwner = nil
-        settings = nil
+        configurationOwner = nil; settings = nil
         invalidate()
     }
 
     func invalidate() {
         lease.invalidate()
-        expiry?.cancel()
-        expiry = nil
-        layer = nil
-        owner = nil
-        format = nil
-        lastSubmission = nil
-        publishedAt = nil
-        analysis = nil
+        expiry?.cancel(); expiry = nil
+        currentOutput = nil; analysisOutputAt = nil; analysisFrame = nil; presentedFrame = nil
+        publishedAt = nil; analysis = nil
         status = settings == nil ? .off : .waiting
     }
 
-    func currentAnalysis(settings requested: LiveViewMonitorSettings) -> LiveViewMonitorAnalysis? {
-        guard settings == requested, let publishedAt,
-              ProcessInfo.processInfo.systemUptime - publishedAt < IOSRTPMonitorLease.maximumAge else { return nil }
+    /// Clear before every enqueue. Historical sampled scopes are separate from
+    /// spatial overlays and therefore do not cancel physical work for each frame.
+    func presentationChanged(to frame: IOSRTPFrameToken?) {
+        if presentedFrame != frame { presentedFrame = frame }
+    }
+
+    private func sameConfiguration(_ first: IOSRTPFrameToken, _ second: IOSRTPFrameToken) -> Bool {
+        first.owner == second.owner && first.epoch == second.epoch && first.lutRevision == second.lutRevision
+    }
+
+    func currentAnalysis(settings requested: LiveViewMonitorSettings, owner: UUID) -> LiveViewMonitorAnalysis? {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard configurationOwner == owner, settings == requested,
+              let analysisFrame, let currentOutput, sameConfiguration(analysisFrame, currentOutput), isOwnerActive(analysisFrame),
+              let publishedAt, let analysisOutputAt,
+              now >= publishedAt, now - publishedAt < IOSRTPMonitorLease.maximumAge,
+              now >= analysisOutputAt, now - analysisOutputAt < IOSRTPMonitorLease.maximumAge else { return nil }
         return analysis
     }
 
-    func frameSubmitted(layer nextLayer: AVSampleBufferDisplayLayer, owner nextOwner: UUID,
-                        format nextFormat: CMVideoFormatDescription, suppliedBuffer: CVPixelBuffer? = nil) {
-        guard let settings else { return }
-        if suppliedBuffer == nil && !Self.supported {
-            status = .unsupportedOS
-            return
-        }
-        if layer !== nextLayer || owner != nextOwner || format.map({ !CMFormatDescriptionEqual($0, otherFormatDescription: nextFormat) }) == true {
-            invalidate()
-        }
-        layer = nextLayer
-        owner = nextOwner
-        format = nextFormat
+    func currentOverlayAnalysis(settings requested: LiveViewMonitorSettings,
+                                frame: IOSRTPFrameToken?, owner: UUID) -> LiveViewMonitorAnalysis? {
+        guard let frame, frame == analysisFrame, frame == currentOutput, frame == presentedFrame else { return nil }
+        return currentAnalysis(settings: requested, owner: owner)
+    }
+
+    func frameAvailable(token: IOSRTPFrameToken, format: CMVideoFormatDescription, buffer: CVPixelBuffer,
+                        outputAt: TimeInterval) {
+        guard let settings, let configurationOwner, isOwnerActive(token) else { return }
+        if let currentOutput, !sameConfiguration(currentOutput, token) { invalidate() }
+        // Do not allow a repeated/old token to replace the source's current identity.
+        if let currentOutput, token.sequence <= currentOutput.sequence { return }
+        currentOutput = token
         let now = ProcessInfo.processInfo.systemUptime
-        lastSubmission = now
-        guard let ticket = lease.begin(at: now) else { return }
-        let renderer = nextLayer.sampleBufferRenderer
-        guard renderer.status != .failed, !renderer.requiresFlushToResumeDecoding else {
-            finishFailure(ticket, status: .failed)
-            return
-        }
-        // Swift spelling differs from Objective-C copyDisplayedPixelBuffer.
-        // nil is a supported outcome (not ready/protected/unavailable).
-        let buffer: CVPixelBuffer?
-        if let suppliedBuffer { buffer = suppliedBuffer }
-        else if let readPixels { buffer = readPixels(nextLayer) }
-        else if #available(iOS 17.4, *) { buffer = renderer.displayedPixelBuffer() }
-        else { buffer = nil }
-        guard let buffer else {
-            finishFailure(ticket, status: .unavailable)
-            return
-        }
-        let sample = IOSRTPPixelSample(buffer: buffer, format: nextFormat)
+        guard outputAt.isFinite, now >= outputAt, now - outputAt < IOSRTPMonitorLease.maximumAge,
+              let ticket = lease.begin(at: now) else { return }
+        let sample = IOSRTPPixelSample(buffer: buffer, format: format)
         let analyze = self.analyze
-        let attachmentID = ObjectIdentifier(nextLayer)
-        // Expire even if analysis stalls. Invalidating never frees the busy slot.
-        if analysis == nil { scheduleExpiry(ticket) }
+        // A prior published result keeps its own expiry while newer work runs.
+        if analysis == nil { scheduleExpiry(ticket, outputAt: outputAt) }
         queue.async { [weak self] in
             let result = autoreleasepool { analyze(sample, settings) }
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let completedAt = ProcessInfo.processInfo.systemUptime
-                guard self.lease.complete(ticket, at: completedAt) else { return }
-                guard let layer = self.layer, ObjectIdentifier(layer) == attachmentID, self.owner == nextOwner,
-                      self.lastSubmission.map({ completedAt - $0 < IOSRTPMonitorLease.maximumAge }) == true,
-                      layer.sampleBufferRenderer.status != .failed,
-                      !layer.sampleBufferRenderer.requiresFlushToResumeDecoding else {
-                    self.analysis = nil
-                    self.status = .stale
-                    return
-                }
+                guard self.lease.complete(ticket, at: completedAt),
+                      self.configurationOwner == configurationOwner, self.settings == settings, self.isOwnerActive(token),
+                      let currentOutput = self.currentOutput, self.sameConfiguration(currentOutput, token) else { return }
+                // currentFrame is the exact retained sample evidence record, not
+                // the newest global output. Spatial overlay matching is stricter.
+                let evidence = evaluateRtpMonitorEvidence(IOSRTPMonitorEvidenceInput(
+                    active: true, sameOwner: currentOutput.owner == token.owner,
+                    sameRenderer: currentOutput.epoch == token.epoch,
+                    foregroundRequired: true, foreground: true, terminal: false, stopPending: true,
+                    sampleFrame: Double(token.sequence), currentFrame: Double(token.sequence),
+                    sampleLut: 0, currentLut: currentOutput.lutRevision == token.lutRevision ? 0 : 1,
+                    sampleAgeMs: (completedAt - ticket.acquiredAt) * 1000,
+                    frameAgeMs: (completedAt - outputAt) * 1000,
+                    maxAgeMs: IOSRTPMonitorLease.maximumAge * 1000, evidence: "surface-submitted"))
+                guard evidence.canPublishSubmittedAnalysis else { return }
                 self.analysis = result
+                self.analysisFrame = result == nil ? nil : token
+                self.analysisOutputAt = result == nil ? nil : outputAt
                 self.publishedAt = result == nil ? nil : ticket.acquiredAt
                 self.status = result == nil ? .failed : .sampled
-                self.scheduleExpiry(ticket)
+                self.scheduleExpiry(ticket, outputAt: outputAt)
             }
         }
     }
 
-    private func finishFailure(_ ticket: IOSRTPMonitorLease.Ticket, status: IOSRTPMonitorStatus) {
-        guard lease.complete(ticket, at: ProcessInfo.processInfo.systemUptime) else { return }
-        expiry?.cancel()
-        analysis = nil
-        publishedAt = nil
-        self.status = status
-    }
-
-    private func scheduleExpiry(_ ticket: IOSRTPMonitorLease.Ticket) {
+    private func scheduleExpiry(_ ticket: IOSRTPMonitorLease.Ticket, outputAt: TimeInterval) {
         expiry?.cancel()
         expiry = Task { @MainActor [weak self] in
-            let remaining = max(0, ticket.acquiredAt + IOSRTPMonitorLease.maximumAge - ProcessInfo.processInfo.systemUptime)
+            let remaining = max(0, min(outputAt, ticket.acquiredAt) + IOSRTPMonitorLease.maximumAge - ProcessInfo.processInfo.systemUptime)
             try? await Task.sleep(for: .seconds(remaining))
             guard !Task.isCancelled, let self, self.lease.generation == ticket.generation else { return }
-            self.analysis = nil
-            self.publishedAt = nil
+            self.analysis = nil; self.publishedAt = nil; self.analysisFrame = nil; self.analysisOutputAt = nil
             self.status = .stale
         }
     }
