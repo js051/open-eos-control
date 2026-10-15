@@ -246,7 +246,16 @@
       cameraAudioUnmute: "Unmute camera audio",
       cameraAudioMute: "Mute camera audio",
       cameraAudioUnavailable: "Camera RTP audio is unavailable",
-      cameraAudioStarted: "Camera audio enabled",
+      cameraAudioStarted: "Camera audio requested; waiting for fresh PCM",
+      cameraAudioWaiting: "Waiting for fresh PCM",
+      cameraAudioDecoded: "Fresh PCM; waiting for output progress",
+      cameraAudioOutput: "Output clock progressing",
+      cameraAudioOutputUnknown: "PCM scheduled; output progress unverified",
+      cameraAudioRetry: "Audio stopped; enable again",
+      cameraAudioRetiring: "Audio cleanup pending or unconfirmed; wait or reload this page",
+      cameraAudioStalled: "No fresh decoded audio for 5 seconds. Enable audio again.",
+      cameraAudioOutputStalled: "Audio output progress is unverified or stalled. Enable audio again.",
+      cameraAudioInterrupted: "Audio was interrupted or suspended. Enable audio again.",
       cameraAudioStopped: "Camera audio muted",
       monitoringAssists: "Monitoring assists",
       histogram: "Histogram",
@@ -1021,7 +1030,16 @@
       cameraAudioUnmute: "開啟相機音訊",
       cameraAudioMute: "將相機音訊靜音",
       cameraAudioUnavailable: "相機 RTP 音訊無法使用",
-      cameraAudioStarted: "已開啟相機音訊",
+      cameraAudioStarted: "已請求相機音訊，等待新解碼 PCM",
+      cameraAudioWaiting: "等待新解碼 PCM",
+      cameraAudioDecoded: "PCM 已更新，等待輸出進度",
+      cameraAudioOutput: "輸出時鐘持續前進",
+      cameraAudioOutputUnknown: "PCM 已排程，輸出進度未驗證",
+      cameraAudioRetry: "音訊已停止，請重新開啟",
+      cameraAudioRetiring: "音訊清理待確認，請稍候或重新載入此頁",
+      cameraAudioStalled: "5 秒內未取得新解碼音訊，請重新開啟音訊。",
+      cameraAudioOutputStalled: "音訊輸出進度未驗證或停滯，請重新開啟音訊。",
+      cameraAudioInterrupted: "音訊已中斷或暫停，請重新開啟音訊。",
       cameraAudioStopped: "相機音訊已靜音",
       monitoringAssists: "監看輔助",
       histogram: "直方圖",
@@ -1790,6 +1808,11 @@
     livePollingSuspended: false,
     rtpAudioEnabled: false,
     rtpAudioBusy: false,
+    rtpAudioOwner: null,
+    rtpAudioRetirement: null,
+    rtpAudioWatchdog: null,
+    rtpAudioWatchdogAt: null,
+    rtpAudioProgress: null,
     rtpAudioLoopGeneration: 0,
     rtpAudioAfterGeneration: 0,
     rtpAudioContext: null,
@@ -1956,6 +1979,7 @@
     liveMagnificationButton: byId("live-magnification-button"),
     liveMagnificationLabel: byId("live-magnification-label"),
     rtpAudioButton: byId("rtp-audio-button"),
+    rtpAudioStatus: byId("rtp-audio-status"),
     focusReticle: byId("focus-reticle"),
     captureFlash: byId("capture-flash"),
     exposureStrip: byId("exposure-strip"),
@@ -6115,27 +6139,96 @@
   function renderRtpAudio() {
     const status = currentRtpAudioStatus();
     const rtpActive = state.liveActive && state.activeLiveSource === "CCAPI_RTP" && !localPreviewSelected();
+    const available = status?.decodingAvailable ?? status?.available;
+    const requested = state.rtpAudioEnabled || state.rtpAudioBusy;
+    const progress = state.rtpAudioProgress?.snapshot(performance.now());
+    const phase = state.rtpAudioRetirement ? "cameraAudioRetiring" : requested ? (progress?.outputProgressFresh ? "cameraAudioOutput" :
+      progress?.decodedFresh ? (progress.outputProgressSupported ? "cameraAudioDecoded" : "cameraAudioOutputUnknown") :
+        "cameraAudioWaiting") : state.rtpAudioError ? "cameraAudioRetry" : "cameraAudioStopped";
     ui.rtpAudioButton.hidden = !rtpActive || !status?.advertised;
-    ui.rtpAudioButton.disabled = state.rtpAudioBusy || !status?.available;
-    ui.rtpAudioButton.classList.toggle("active", state.rtpAudioEnabled);
-    ui.rtpAudioButton.setAttribute("aria-pressed", String(state.rtpAudioEnabled));
-    const label = state.rtpAudioEnabled ? t("cameraAudioMute") : t("cameraAudioUnmute");
+    ui.rtpAudioButton.disabled = Boolean(state.rtpAudioRetirement) ||
+      (!requested && (!available || document.visibilityState !== "visible"));
+    ui.rtpAudioButton.classList.toggle("active", requested);
+    ui.rtpAudioButton.setAttribute("aria-pressed", String(requested));
+    const label = requested ? t("cameraAudioMute") : t("cameraAudioUnmute");
     const unavailable = status?.reason || status?.lastError || t("cameraAudioUnavailable");
-    ui.rtpAudioButton.setAttribute("aria-label", status?.available ? label : unavailable);
-    ui.rtpAudioButton.title = status?.available ? label : unavailable;
-    replaceButtonIcon(ui.rtpAudioButton, state.rtpAudioEnabled ? "volume-2" : "volume-x");
+    ui.rtpAudioButton.setAttribute("aria-label", available ? `${label}: ${t(phase)}` : unavailable);
+    ui.rtpAudioButton.title = available ? `${label}: ${t(phase)}` : unavailable;
+    if (ui.rtpAudioStatus) {
+      ui.rtpAudioStatus.hidden = ui.rtpAudioButton.hidden;
+      ui.rtpAudioStatus.textContent = available ? t(phase) : unavailable;
+    }
+    replaceButtonIcon(ui.rtpAudioButton, requested ? "volume-2" : "volume-x");
+  }
+
+  function ownsRtpAudio(owner) {
+    return Boolean(owner && state.rtpAudioOwner === owner &&
+      state.rtpAudioLoopGeneration === owner.generation && state.session === owner.session &&
+      state.liveGeneration === owner.liveGeneration && state.liveActive &&
+      state.activeLiveSource === "CCAPI_RTP" && !localPreviewSelected() &&
+      document.visibilityState === "visible");
+  }
+
+  function armRtpAudioWatchdog(owner) {
+    if (state.rtpAudioOwner !== owner) return;
+    const now = performance.now();
+    const delay = Math.max(0, Math.min(250,
+      ...[...state.rtpAudioSources].map(source => source.rtpAudioExpiresAt - now)));
+    const due = now + delay;
+    // Continuous PCM must never postpone the independent progress deadline.
+    if (state.rtpAudioWatchdog !== null && state.rtpAudioWatchdogAt <= due) return;
+    clearTimeout(state.rtpAudioWatchdog);
+    state.rtpAudioWatchdogAt = due;
+    state.rtpAudioWatchdog = setTimeout(() => checkRtpAudioProgress(owner), delay);
+  }
+
+  function checkRtpAudioProgress(owner) {
+    if (state.rtpAudioOwner !== owner) return;
+    state.rtpAudioWatchdog = null;
+    state.rtpAudioWatchdogAt = null;
+    if (!ownsRtpAudio(owner)) {
+      stopRtpAudio();
+      return;
+    }
+    try {
+      const now = performance.now();
+      // Stop still-pending source nodes before an expired PCM buffer could be
+      // resumed. This controls our WebAudio queue, not downstream speaker buffers.
+      if ([...state.rtpAudioSources].some(source => now >= source.rtpAudioExpiresAt)) {
+        stopRtpAudioSources();
+        owner.progress.clearQueue();
+        state.rtpAudioNextStart = Number.NaN;
+      }
+      const failure = owner.progress.check(now, owner.context, state.rtpAudioEnabled);
+      if (failure) {
+        const key = failure === "decoded-stalled" ? "cameraAudioStalled" :
+          failure === "output-stalled" ? "cameraAudioOutputStalled" : "cameraAudioInterrupted";
+        throw new Error(t(key));
+      }
+      renderRtpAudio();
+      armRtpAudioWatchdog(owner);
+    } catch (error) {
+      if (!ownsRtpAudio(owner)) return;
+      state.rtpAudioError = error instanceof Error ? error.message : String(error);
+      stopRtpAudio();
+      showToast(state.rtpAudioError, true);
+    }
   }
 
   async function toggleRtpAudio() {
-    if (state.rtpAudioEnabled) {
+    if (state.rtpAudioEnabled || state.rtpAudioBusy) {
       stopRtpAudio({ announce: true });
       return;
     }
-    if (state.rtpAudioBusy) return;
+    if (state.rtpAudioRetirement) {
+      showToast(t("cameraAudioRetiring"), true);
+      return;
+    }
     const session = state.session;
     const status = currentRtpAudioStatus();
     if (!session || !state.liveActive || state.activeLiveSource !== "CCAPI_RTP" ||
-      localPreviewSelected() || !status?.available) {
+      localPreviewSelected() || document.visibilityState !== "visible" ||
+      !(status?.decodingAvailable ?? status?.available)) {
       showToast(status?.reason || t("cameraAudioUnavailable"), true);
       return;
     }
@@ -6144,74 +6237,76 @@
       showToast(t("cameraAudioUnavailable"), true);
       return;
     }
-    const liveGeneration = state.liveGeneration;
-    const generation = ++state.rtpAudioLoopGeneration;
-    const ownsStart = () => state.rtpAudioLoopGeneration === generation && state.session === session &&
-      state.liveGeneration === liveGeneration && state.liveActive &&
-      state.activeLiveSource === "CCAPI_RTP" && !localPreviewSelected();
+    const owner = { session, liveGeneration: state.liveGeneration,
+      generation: ++state.rtpAudioLoopGeneration, context: null, progress: null };
+    state.rtpAudioOwner = owner;
     state.rtpAudioBusy = true;
     state.rtpAudioError = null;
     renderRtpAudio();
-    let context = null;
     try {
-      context = new AudioContextClass({ latencyHint: "interactive", sampleRate: 48_000 });
-      // Stop owns cleanup even while resume is pending (and may never settle).
+      const context = new AudioContextClass({ latencyHint: "interactive", sampleRate: 48_000 });
+      owner.context = context;
+      owner.progress = new rtpAudio.PlaybackProgress(performance.now(), typeof context.getOutputTimestamp === "function");
+      state.rtpAudioProgress = owner.progress;
+      // Stop owns cleanup even while resume or a body read never settles.
       state.rtpAudioContext = context;
+      context.onstatechange = () => {
+        if (ownsRtpAudio(owner) && state.rtpAudioEnabled && context.state !== "running") {
+          state.rtpAudioError = t("cameraAudioInterrupted");
+          stopRtpAudio();
+        }
+      };
+      checkRtpAudioProgress(owner);
       await context.resume();
-      if (!ownsStart()) return;
-      state.rtpAudioEnabled = true;
+      if (!ownsRtpAudio(owner)) return;
+      if (context.state !== "running") throw new Error(t("cameraAudioInterrupted"));
+      state.rtpAudioEnabled = true; // User intent and a running context, not output evidence.
       state.rtpAudioAfterGeneration = 0;
       state.rtpAudioNextStart = Number.NaN;
-      void pollRtpAudio(generation);
+      void pollRtpAudio(owner);
       showToast(t("cameraAudioStarted"));
     } catch (error) {
-      if (!ownsStart()) return;
+      if (!ownsRtpAudio(owner)) return;
       state.rtpAudioError = error instanceof Error ? error.message : String(error);
+      stopRtpAudio();
       showToast(state.rtpAudioError, true);
     } finally {
-      // A stopped attempt must not clear a newer start's busy state or context.
-      if (state.rtpAudioLoopGeneration === generation) {
-        if (!state.rtpAudioEnabled && state.rtpAudioContext === context) {
-          state.rtpAudioContext = null;
-          if (context) void context.close().catch(() => {});
-        }
+      if (ownsRtpAudio(owner)) {
         state.rtpAudioBusy = false;
         renderRtpAudio();
       }
     }
   }
 
-  async function pollRtpAudio(generation) {
-    while (
-      state.rtpAudioEnabled && generation === state.rtpAudioLoopGeneration &&
-      state.liveActive && state.activeLiveSource === "CCAPI_RTP" && state.session
-    ) {
+  async function pollRtpAudio(owner) {
+    while (state.rtpAudioEnabled && ownsRtpAudio(owner)) {
       const controller = new AbortController();
       state.rtpAudioAbortController = controller;
+      const requestStartedAt = performance.now();
       try {
         const response = await api(
-          `/v1/session/${encodeURIComponent(state.session.id)}/liveview/audio` +
-            `?after=${state.rtpAudioAfterGeneration}&timeoutMs=1000`,
+          `/v1/session/${encodeURIComponent(owner.session.id)}/liveview/audio` +
+            `?after=${state.rtpAudioAfterGeneration}&timeoutMs=750`,
           { responseType: "response", signal: controller.signal },
         );
-        if (!state.rtpAudioEnabled || generation !== state.rtpAudioLoopGeneration) return;
+        if (!state.rtpAudioEnabled || !ownsRtpAudio(owner)) return;
         const chunk = await rtpAudio.readPcmResponse(response);
-        if (!state.rtpAudioEnabled || generation !== state.rtpAudioLoopGeneration) return;
+        if (!state.rtpAudioEnabled || !ownsRtpAudio(owner)) return;
         if (!chunk) continue;
+        owner.progress.decoded(chunk, performance.now(), requestStartedAt);
+        scheduleRtpAudioChunk(chunk, owner);
         state.rtpAudioAfterGeneration = chunk.generation;
-        scheduleRtpAudioChunk(chunk);
         state.rtpAudioBytes = chunk.byteLength;
         state.rtpAudioSampleRate = chunk.sampleRate;
         state.rtpAudioChannels = chunk.channels;
         state.rtpAudioLastAt = new Date().toISOString();
         state.rtpAudioError = null;
+        renderRtpAudio();
       } catch (error) {
-        if (!state.rtpAudioEnabled || generation !== state.rtpAudioLoopGeneration || error?.name === "AbortError") {
-          return;
-        }
+        if (!state.rtpAudioEnabled || !ownsRtpAudio(owner) || error?.name === "AbortError") return;
         const normalized = captureError(error);
         state.rtpAudioError = normalized.message;
-        stopRtpAudio({ announce: false });
+        stopRtpAudio();
         showToast(normalized.message, true);
         return;
       } finally {
@@ -6220,53 +6315,88 @@
     }
   }
 
-  function scheduleRtpAudioChunk(chunk) {
-    const context = state.rtpAudioContext;
-    if (!context) return;
+  function scheduleRtpAudioChunk(chunk, owner) {
+    if (!ownsRtpAudio(owner) || !state.rtpAudioEnabled) return;
+    const context = owner.context;
+    if (context.state !== "running") throw new Error(t("cameraAudioInterrupted"));
     const duration = chunk.sampleFrames / chunk.sampleRate;
-    const timing = rtpAudio.scheduleTiming(
-      context.currentTime,
-      state.rtpAudioNextStart,
-      duration,
-      chunk.discontinuity,
-    );
+    const timing = rtpAudio.scheduleTiming(context.currentTime, state.rtpAudioNextStart, duration, chunk.discontinuity);
     if (timing.reset) stopRtpAudioSources();
     const buffer = context.createBuffer(chunk.channels, chunk.sampleFrames, chunk.sampleRate);
     chunk.channelData.forEach((samples, channel) => buffer.copyToChannel(samples, channel));
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.connect(context.destination);
-    source.addEventListener("ended", () => state.rtpAudioSources.delete(source), { once: true });
+    source.addEventListener("ended", () => {
+      // Stop also dispatches ended. It is cleanup only, never playback evidence.
+      state.rtpAudioSources.delete(source);
+      source.disconnect();
+    }, { once: true });
+    source.rtpAudioExpiresAt = owner.progress.decodedAt + rtpAudio.FRESH_PCM_MS;
     state.rtpAudioSources.add(source);
+    owner.progress.observeOutput(context, performance.now());
+    owner.progress.scheduled(chunk, timing, performance.now(), context.currentTime);
     source.start(timing.startTime);
     state.rtpAudioNextStart = timing.nextStart;
+    armRtpAudioWatchdog(owner);
   }
 
   function stopRtpAudioSources() {
     state.rtpAudioSources.forEach((source) => {
-      try {
-        source.stop();
-      } catch (_) {
-        // A source that already ended requires no cleanup.
-      }
+      try { source.stop(); } catch (_) { /* Already ended. */ }
+      try { source.disconnect(); } catch (_) { /* Already disconnected. */ }
     });
     state.rtpAudioSources.clear();
   }
 
   function stopRtpAudio({ announce = false } = {}) {
-    const wasEnabled = state.rtpAudioEnabled;
+    const wasRequested = state.rtpAudioEnabled || state.rtpAudioBusy;
     state.rtpAudioEnabled = false;
     state.rtpAudioBusy = false;
+    state.rtpAudioOwner = null;
+    state.rtpAudioProgress = null;
     state.rtpAudioLoopGeneration += 1;
+    clearTimeout(state.rtpAudioWatchdog);
+    state.rtpAudioWatchdog = null;
+    state.rtpAudioWatchdogAt = null;
     state.rtpAudioAbortController?.abort();
     state.rtpAudioAbortController = null;
     stopRtpAudioSources();
     const context = state.rtpAudioContext;
     state.rtpAudioContext = null;
     state.rtpAudioNextStart = Number.NaN;
-    if (context) void context.close().catch(() => {});
+    state.rtpAudioAfterGeneration = 0;
+    state.rtpAudioBytes = 0;
+    state.rtpAudioSampleRate = state.rtpAudioChannels = state.rtpAudioLastAt = null;
+    if (context) {
+      // Logical retirement stops publication immediately. Reserve the output
+      // context until the platform actually confirms closure, including failure.
+      const retirement = { context, failed: false, fulfilled: false };
+      state.rtpAudioRetirement = retirement;
+      const confirmClosed = () => {
+        if (state.rtpAudioRetirement !== retirement || !retirement.fulfilled || context.state !== "closed") return;
+        context.onstatechange = null;
+        state.rtpAudioRetirement = null;
+        renderRtpAudio();
+      };
+      context.onstatechange = confirmClosed;
+      try {
+        const closing = context.close();
+        Promise.resolve(closing).then(() => {
+          retirement.fulfilled = true;
+          confirmClosed();
+        }, () => {
+          retirement.failed = true;
+          confirmClosed();
+          if (state.rtpAudioRetirement === retirement) renderRtpAudio();
+        });
+      } catch (_) {
+        retirement.failed = true;
+        confirmClosed();
+      }
+    }
     renderRtpAudio();
-    if (announce && wasEnabled) showToast(t("cameraAudioStopped"));
+    if (announce && wasRequested) showToast(t("cameraAudioStopped"));
   }
 
   const monitorAnalysisCanvas = document.createElement("canvas");
@@ -9645,14 +9775,20 @@
         cameraDecodedFrameAgeMs: state.liveFrameSample ? Math.max(0, performance.now() - state.liveFrameSample.decodedAt) : null,
         cameraPresentationConfirmed: false,
         rtpAudio: {
-          ...currentRtpAudioStatus(),
+          receiver: currentRtpAudioStatus(),
+          requested: state.rtpAudioEnabled || state.rtpAudioBusy,
           enabled: state.rtpAudioEnabled,
           busy: state.rtpAudioBusy,
-          playbackGeneration: state.rtpAudioAfterGeneration,
+          retirementPending: Boolean(state.rtpAudioRetirement),
+          retirementFailed: state.rtpAudioRetirement?.failed ?? false,
+          playbackEpoch: state.rtpAudioLoopGeneration,
+          ...state.rtpAudioProgress?.snapshot(performance.now()),
+          physicalAudibilityConfirmed: false,
+          receivedGeneration: state.rtpAudioAfterGeneration,
           lastBytes: state.rtpAudioBytes,
           sampleRate: state.rtpAudioSampleRate,
           channels: state.rtpAudioChannels,
-          lastPlayedAt: state.rtpAudioLastAt,
+          lastPcmScheduledAt: state.rtpAudioLastAt,
           playbackError: state.rtpAudioError,
         },
         monitoring: {
@@ -10100,6 +10236,7 @@
     document.addEventListener?.("visibilitychange", () => {
       if (document.visibilityState === "hidden" && typeof cancelRecordingWait === "function") cancelRecordingWait();
       if (document.visibilityState !== "visible") {
+        stopRtpAudio();
         suspendMaintenanceForLifecycle();
         stopMediaAutoImport("backgrounded");
         if (typeof cancelMediaMutation === "function") cancelMediaMutation();
@@ -10113,6 +10250,7 @@
       }
     });
     window.addEventListener("pagehide", () => {
+      stopRtpAudio();
       suspendMaintenanceForLifecycle();
       cancelMediaUpload({ silent: true, retire: true });
       stopMediaAutoImport("backgrounded");

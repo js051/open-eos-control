@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -202,8 +203,25 @@ def test_authenticated_rtp_audio_endpoint_returns_bounded_pcm_and_timeout() -> N
     assert pcm.headers["x-open-eos-audio-channels"] == "2"
     assert pcm.headers["x-open-eos-audio-frames"] == "1"
     assert pcm.headers["x-open-eos-audio-discontinuity"] == "0"
+    assert 0 <= int(pcm.headers["x-open-eos-audio-age-ms"]) < 1000
     assert timeout.status_code == 204
     assert session.reads == [(4, 0.25), (5, 0.0)]
+
+
+def test_audio_endpoint_drops_pcm_that_expired_before_http_publication() -> None:
+    session = _AudioSession()
+    session.live_view_audio = lambda **_kwargs: RtpAudioChunk(
+        bytes(4), 6, 48000, 2, 1, decoded_at_monotonic=time.monotonic() - 1.0
+    )
+    headers = {"Authorization": "Bearer test-token"}
+    app = create_app(engine=GPhoto2Engine(FakeRunner()), ccapi_engine=_AudioEngine(session), token="test-token")
+    with TestClient(app) as client:
+        created = client.post("/v1/session", headers=headers,
+                              json={"engine": "ccapi", "ccapiUrl": "http://192.0.2.1:8080"})
+        response = client.get(f"/v1/session/{created.json()['id']}/liveview/audio", headers=headers)
+    assert response.status_code == 204
+    assert not response.content
+    assert response.headers["cache-control"] == "no-store, max-age=0"
 
 
 class _AudioEngine:

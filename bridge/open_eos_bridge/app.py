@@ -80,6 +80,7 @@ from .models import (
     StillCaptureRequest,
     TapFocusRequest,
 )
+from .rtp import MAX_DECODED_AUDIO_AGE_SECONDS
 from .sessions import SessionManager
 
 LOOPBACK_CLIENTS = {"127.0.0.1", "::1", "testclient"}
@@ -857,11 +858,12 @@ def create_app(
                 "The active camera engine does not provide RTP audio.",
             )
         chunk = reader(after_generation=after, timeout=timeout_ms / 1_000)
-        if chunk is None:
+        if chunk is None or not 0 <= time.monotonic() - chunk.decoded_at_monotonic < MAX_DECODED_AUDIO_AGE_SECONDS:
             return Response(status_code=204, headers={"Cache-Control": "no-store, max-age=0"})
         headers = {
             "Cache-Control": "no-store, max-age=0",
             "X-Open-EOS-Audio-Generation": str(chunk.generation),
+            "X-Open-EOS-Audio-Age-Ms": str(max(0, int((time.monotonic() - chunk.decoded_at_monotonic) * 1000))),
             "X-Open-EOS-Audio-Sample-Rate": str(chunk.sample_rate),
             "X-Open-EOS-Audio-Channels": str(chunk.channels),
             "X-Open-EOS-Audio-Frames": str(chunk.sample_frames),
