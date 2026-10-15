@@ -64,6 +64,7 @@ from .rtp import (
     pyav_decoder_available,
     resolve_local_ipv4,
 )
+from .shooting_settings import exact_setting, observation, require_requested_value, responded, valid_key, valid_string
 
 ENGINE_NAME = "ccapi"
 ENGINE_VERSION = "CCAPI HTTP"
@@ -681,7 +682,9 @@ class UrllibCcapiTransport:
     ) -> CcapiResponse:
         resource_path = urlsplit(url).path
         configuration_resource = (
-            resource_path.endswith((DIRECTORY_CREATE_PATH_SUFFIX, DIRECTORY_SELECTION_PATH_SUFFIX))
+            resource_path.endswith((DIRECTORY_CREATE_PATH_SUFFIX, DIRECTORY_SELECTION_PATH_SUFFIX,
+                                    ZOOM_PATH_SUFFIX, MOVIE_MODE_PATH_SUFFIX))
+            or "/shooting/settings" in resource_path
             or any(resource_path.endswith(suffix) for suffix, _ in FILE_NAMING_ENDPOINTS.values())
         )
         deadline = time.monotonic() + timeout if configuration_resource else None
@@ -795,6 +798,21 @@ class UrllibCcapiTransport:
                 status_code=502,
                 engine=ENGINE_NAME,
             ) from error
+        resource_path = urlsplit(url).path
+        strict_setting = ("/shooting/settings" in resource_path
+                          or resource_path.endswith((ZOOM_PATH_SUFFIX, MOVIE_MODE_PATH_SUFFIX)))
+        if strict_setting:
+            get_all = getattr(response.headers, "get_all", None)
+            ambiguous = callable(get_all) and any(
+                len(get_all(name, [])) > 1 for name in
+                ("Content-Length", "Transfer-Encoding", "Content-Range", "Content-Encoding")
+            )
+            transfer = response.headers.get("Transfer-Encoding")
+            encoding = response.headers.get("Content-Encoding")
+            if ambiguous or transfer not in {None, "chunked"} or encoding not in {None, "identity"}:
+                response.close()
+                raise BridgeError("INVALID_CCAPI_RESPONSE", "Ambiguous setting HTTP framing.",
+                                  status_code=502, engine=ENGINE_NAME)
         response_headers = {key.casefold(): value for key, value in response.headers.items()}
         return CcapiStreamResponse(int(response.status), response_headers, response)
 
@@ -1540,6 +1558,150 @@ class CcapiSession:
                 return
             raise
 
+    def _scoped_setting_data(
+        self, key: str, *, deadline: float | None = None,
+    ) -> tuple[CameraSetting, object, str, str]:
+        """One fresh exact resource (or its advertised settings aggregate), no fallback."""
+        self._require_open()
+        if not self._initialized or not valid_key(key) or SETTING_ALIASES.get(key, key) != key:
+            raise unsupported(CameraFeature.ADVANCED_SETTINGS.value, self.engine_name)
+        structured = _structured_setting_parts(key)
+        base = structured[0] if structured else key
+        path = self._setting_paths.get(base)
+        method = "POST" if key in {ZOOM_SETTING_KEY, MOVIE_MODE_SETTING_KEY} else "PUT"
+        if path is None or CcapiOperation(method, path) not in self._operations:
+            raise unsupported(_feature_for_setting(key).value, self.engine_name)
+        read_path = path
+        aggregate = False
+        if CcapiOperation("GET", read_path) not in self._operations:
+            read_path = path.rsplit("/", 1)[0]
+            aggregate = read_path.endswith("/shooting/settings")
+            if not aggregate or CcapiOperation("GET", read_path) not in self._operations:
+                raise unsupported(_feature_for_setting(key).value, self.engine_name)
+        deadline = min(deadline or float("inf"), time.monotonic() + 15.0)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BridgeError("SETTING_READBACK_TIMEOUT", "Setting readback timed out.", status_code=504)
+        raw = self._request_capture_configuration_json("GET", read_path, timeout=remaining, strict_setting=True)
+        if time.monotonic() >= deadline:
+            raise BridgeError("SETTING_READBACK_TIMEOUT", "Setting readback timed out.", status_code=504)
+        if aggregate:
+            raw = raw.get(path.rsplit("/", 1)[1]) if isinstance(raw, dict) else None
+        # Reuse the existing operation-specific safety validators, not cache data.
+        if key == ZOOM_SETTING_KEY:
+            raw = _validated_zoom_setting(raw)
+        elif key == MOVIE_MODE_SETTING_KEY:
+            raw = _validated_movie_mode_setting(raw)
+        elif key in CARD_SELECTION_ENDPOINTS:
+            raw = _validated_card_selection_setting(raw)
+        elif key in DEVICE_FUNCTION_SETTING_ENDPOINTS:
+            raw = _validated_string_ability_setting(raw, DEVICE_FUNCTION_SETTING_ENDPOINTS[key][1])
+            if key == AUTO_POWER_OFF_SETTING_KEY and isinstance(raw, dict):
+                raw["ability"] = [value for value in raw["ability"] if value != AUTO_POWER_OFF_IMMEDIATELY]
+        elif key in SOUND_RECORDING_ENDPOINTS:
+            raw = _validated_string_ability_setting(raw, SOUND_RECORDING_ENDPOINTS[key][1])
+        elif key in SOUND_RECORDING_LEVEL_SETTING_KEYS:
+            raw = _validated_integer_range_setting(raw)
+        elif key in FOCUS_BRACKETING_STRING_ENDPOINTS:
+            raw = _validated_string_ability_setting(raw, FOCUS_BRACKETING_STRING_ENDPOINTS[key][1])
+        elif key in FOCUS_BRACKETING_INTEGER_ENDPOINTS:
+            raw = _validated_integer_range_setting(raw, maximum_options=MAX_FOCUS_BRACKETING_OPTIONS)
+        elif key in MOVIE_SETTING_ENDPOINTS:
+            raw = _validated_string_ability_setting(raw, MOVIE_SETTING_ENDPOINTS[key][1])
+        elif key == DIRECTORY_SELECTION_SETTING_KEY:
+            raw = _validated_directory_selection_setting(raw)
+        if not isinstance(raw, dict):
+            raise BridgeError("SETTING_READBACK_INVALID", "Missing fresh setting body.", status_code=502)
+        if structured and base == IMAGE_QUALITY_SETTING_KEY:
+            current, abilities = raw.get("value"), raw.get("ability")
+            if (not isinstance(current, dict) or not isinstance(abilities, dict) or not current
+                    or set(current) != set(abilities) or not set(current) <= set(IMAGE_QUALITY_FIELDS)
+                    or any(not isinstance(values, list) or not 1 <= len(values) <= 1024
+                           or not all(valid_string(item) and bool(item) for item in values)
+                           or len(values) != len(set(values)) or current[name] not in values
+                           for name, values in abilities.items())):
+                raise BridgeError("SETTING_READBACK_INVALID", "Invalid fresh image-quality siblings.", status_code=502)
+        elif structured and base == WB_SHIFT_SETTING_KEY:
+            current, abilities = raw.get("value"), raw.get("ability")
+            if (not isinstance(current, dict) or not isinstance(abilities, dict)
+                    or set(current) != set(WB_SHIFT_FIELDS) or set(abilities) != set(WB_SHIFT_FIELDS)
+                    or any(type(current[name]) is not int
+                           or str(current[name]) not in _bounded_integer_range_values(abilities[name])
+                           for name in WB_SHIFT_FIELDS)):
+                raise BridgeError("SETTING_READBACK_INVALID", "Invalid fresh white balance siblings.", status_code=502)
+        elif not structured:
+            values = raw.get("ability")
+            if (not isinstance(raw.get("value"), str) or not isinstance(values, list)
+                    or not all(isinstance(item, str) for item in values) or len(values) != len(set(values))):
+                raise BridgeError("SETTING_READBACK_INVALID", "Invalid exact setting values.", status_code=502)
+        control = next((item for item in self._camera_settings({base: raw}) if item.key == key), None)
+        try:
+            if control is None:
+                raise ValueError("Missing fresh setting")
+            exact_setting(control, key)
+        except ValueError as error:
+            raise BridgeError("SETTING_READBACK_INVALID", "Fresh setting response is incomplete or invalid.",
+                              status_code=502, engine=self.engine_name) from error
+        return control, raw, path, method
+
+    def read_setting(self, key: str) -> dict[str, object]:
+        deadline = time.monotonic() + 15.0
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("SETTING_READBACK_TIMEOUT", "Setting readback lock timed out.", status_code=504)
+        try:
+            return observation(self.engine_name, self._scoped_setting_data(key, deadline=deadline)[0])
+        finally:
+            self._lock.release()
+
+    def apply_setting_outcome(self, key: str, value: str) -> dict[str, object]:
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("SETTING_WRITE_TIMEOUT", "Setting write lock timed out.", status_code=504)
+        try:
+            self._require_shutter_release_confirmed()
+            control, raw, path, method = self._scoped_setting_data(key)
+            require_requested_value(control, value)
+            payload: dict[str, object] = {"value": value}
+            structured = _structured_setting_parts(key)
+            if key == MOVIE_MODE_SETTING_KEY:
+                payload = {"action": value}
+            elif (key == ZOOM_SETTING_KEY or key in SOUND_RECORDING_LEVEL_SETTING_KEYS
+                  or key in FOCUS_BRACKETING_INTEGER_ENDPOINTS):
+                payload = {"value": int(value)}
+            elif structured:
+                base, field = structured
+                current = raw.get("value") if isinstance(raw, dict) else None
+                fields = WB_SHIFT_FIELDS if base == WB_SHIFT_SETTING_KEY else IMAGE_QUALITY_FIELDS
+                ability = raw.get("ability") if isinstance(raw, dict) else None
+                if (not isinstance(current, dict) or not isinstance(ability, dict) or not current
+                        or set(current) != set(ability) or not set(current) <= set(fields) or field not in current
+                        or (base == WB_SHIFT_SETTING_KEY and set(current) != set(fields))):
+                    raise BridgeError("INVALID_SETTING_VALUE", "Complete fresh structured siblings required.",
+                                      status_code=422, engine=self.engine_name)
+                updated = dict(current)
+                updated[field] = int(value) if base == WB_SHIFT_SETTING_KEY else value
+                if base == WB_SHIFT_SETTING_KEY and any(type(updated[item]) is not int for item in fields):
+                    raise BridgeError("INVALID_SETTING_VALUE", "Invalid white balance siblings.", status_code=422)
+                if (base == IMAGE_QUALITY_SETTING_KEY
+                        and all(str(item).casefold() == "none" for item in updated.values())):
+                    raise BridgeError("INVALID_SETTING_VALUE", "At least one still format must remain enabled.",
+                                      status_code=422)
+                payload = {"value": updated}
+            # One frozen route. No status(), aliases, or retry after any exception.
+            response = self._request(method, path, payload, max_bytes=65536)
+            if (response.status not in {200, 204} or "content-range" in response.headers
+                    or len(response.body) > 65536):
+                raise BridgeError("INVALID_CCAPI_RESPONSE", "Incomplete setting transport response.", status_code=502)
+            length = response.headers.get("content-length")
+            if (length is not None and (not re.fullmatch(r"0|[1-9][0-9]*", length)
+                                       or int(length) != len(response.body)
+                                       or "transfer-encoding" in response.headers)):
+                raise BridgeError("INVALID_CCAPI_RESPONSE", "Ambiguous setting response framing.", status_code=502)
+            self._settings_cache = None
+            self._observed.add(_feature_for_setting(key))
+            return responded(self.engine_name, key, value, lambda: self._scoped_setting_data(key)[0])
+        finally:
+            self._lock.release()
+
     def set_setting(self, key: str, value: str) -> CameraStatus:
         with self._lock:
             self._require_shutter_release_confirmed()
@@ -1723,9 +1885,13 @@ class CcapiSession:
 
     def _request_capture_configuration_json(
         self, method: str, path: str, payload: dict[str, object] | None = None, *, timeout: float = 15.0,
+        strict_setting: bool = False,
     ) -> object:
         response = self._request(method, path, payload, timeout=timeout, max_bytes=65536,
                                  headers={"Cache-Control": "no-cache, no-store", "Accept": "application/json"})
+        if strict_setting and (response.status != 200 or "content-range" in response.headers
+                               or len(response.body) > 65536):
+            raise BridgeError("INVALID_CCAPI_RESPONSE", "Incomplete setting read response.", status_code=502)
         length = response.headers.get("content-length")
         encoding = response.headers.get("transfer-encoding")
         if (length is not None and (not re.fullmatch(r"0|[1-9][0-9]*", length)

@@ -216,7 +216,10 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
     assert "settingDrafts" in script
     assert "textSettingValueValid" in script
     assert 'input.className = "text-metadata-input"' in script
-    assert 'method: "POST", json: { value }' in script
+    assert 'method: "POST", payload: { value }' in script
+    assert '/settings/${encodeURIComponent(record.key)}/outcome' in script
+    assert 'shootingSettings.parseOutcome' in script
+    assert 'setting.value = value;' not in script
     assert "function diagnosticCapabilities()" in script
     assert "choiceCount:" in script
     assert "option.value = value" in script

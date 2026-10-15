@@ -161,6 +161,7 @@ async function verifyCapabilityResponseOwnership(browser, origin) {
       if (reconnect) {
         await page.click('.tab[data-view="live"]');
         await page.click("#photo-mode-button");
+    if (await page.locator("#mode-apply-button").isVisible()) await page.click("#mode-apply-button");
         assert.equal(await page.locator("#shutter-button").isDisabled(), true,
           "A-only capture remains disabled when current availability is rendered");
       } else {
@@ -815,6 +816,7 @@ async function verifyRecordingReviewJourneys(browser, bridgeOrigin, simulatorOri
       await page.locator("#control-view .language-select").selectOption(language);
       await page.waitForFunction((name) => document.querySelector("#latest-media-label")?.textContent === name, oldVideo);
       await page.click("#video-mode-button");
+    if (await page.locator("#mode-apply-button").isVisible()) await page.click("#mode-apply-button");
       await waitForSimulatorState(simulatorOrigin, (state) => state.movie_mode === "on", "recording journey movie mode");
       await page.click("#shutter-button");
       await waitForSimulatorState(simulatorOrigin,
@@ -1344,6 +1346,7 @@ async function run() {
     await page.click('.exposure-control[data-setting-key="iso"]');
     await page.waitForSelector("#setting-dialog[open]");
     await page.getByRole("button", { name: "1600", exact: true }).click();
+    await page.locator("#setting-dialog .button.primary").click();
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.exposure.iso === "1600",
@@ -1524,6 +1527,7 @@ async function run() {
     );
 
     await page.click("#video-mode-button");
+    if (await page.locator("#mode-apply-button").isVisible()) await page.click("#mode-apply-button");
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.movie_mode === "on" && state.movie_mode_update_count === 1,
@@ -1557,6 +1561,7 @@ async function run() {
       '#advanced-settings select[data-setting-key="moviequality"]',
       "1920x1080_2997_ipb_standard",
     );
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="moviequality"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.movie_quality.value === "1920x1080_2997_ipb_standard" &&
@@ -1564,12 +1569,14 @@ async function run() {
       "Canon movie quality string write",
     );
     await page.selectOption('#advanced-settings select[data-setting-key="highframerate"]', "enable");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="highframerate"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.high_frame_rate.value === "enable" && state.high_frame_rate.update_count === 1,
       "Canon high frame rate string write",
     );
     await page.selectOption('#advanced-settings select[data-setting-key="moviecropping"]', "enable");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="moviecropping"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.movie_cropping.value === "enable" && state.movie_cropping.update_count === 1,
@@ -1580,6 +1587,7 @@ async function run() {
       ["RAW", "MP4"],
     );
     await page.selectOption('#advanced-settings select[data-setting-key="movieformat"]', "raw");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="movieformat"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.movie_format.value === "raw" && state.movie_format.update_count === 1,
@@ -1600,6 +1608,7 @@ async function run() {
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="soundrecordinglevel"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.sound_recording_level.value === 48 &&
@@ -1621,6 +1630,7 @@ async function run() {
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="soundrecordinglevelintmic"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.sound_recording_level_intmic.value === 41 &&
@@ -1628,6 +1638,7 @@ async function run() {
       "Canon internal microphone level integer write",
     );
     await page.selectOption('#advanced-settings select[data-setting-key="windfilterintmic"]', "disable");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="windfilterintmic"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.wind_filter_intmic.value === "disable" &&
@@ -1635,24 +1646,28 @@ async function run() {
       "Canon internal microphone wind filter write",
     );
     await page.selectOption('#advanced-settings select[data-setting-key="windfilter"]', "enable");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="windfilter"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.wind_filter.value === "enable" && state.wind_filter.update_count === 1,
       "Canon wind filter string write",
     );
     await page.selectOption('#advanced-settings select[data-setting-key="attenuator"]', "manual");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="attenuator"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.attenuator.value === "manual" && state.attenuator.update_count === 1,
       "Canon attenuator string write",
     );
     await page.selectOption('#advanced-settings select[data-setting-key="soundrecording"]', "auto");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="soundrecording"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.sound_recording.value === "auto" && state.sound_recording.update_count === 1,
       "Canon sound recording mode string write",
     );
     await page.selectOption('#advanced-settings select[data-setting-key="cardselectionmovie"]', "card1");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="cardselectionmovie"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.movie_card_selection === "card1" && state.card_selection_update_count === 1,
@@ -1679,6 +1694,7 @@ async function run() {
       ["Enable", "Disable", "Touch sounds off"],
     );
     await page.selectOption('#advanced-settings select[data-setting-key="beep"]', "disabletouch");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="beep"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.beep.value === "disabletouch" && state.beep.update_count === 1,
@@ -1689,6 +1705,7 @@ async function run() {
       ["10 seconds", "20 seconds", "30 seconds", "1 minute", "2 minutes", "3 minutes"],
     );
     await page.selectOption('#advanced-settings select[data-setting-key="displayoff"]', "120");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="displayoff"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.display_off.value === "120" && state.display_off.update_count === 1,
@@ -1699,6 +1716,7 @@ async function run() {
       ["30 seconds", "1 minute", "2 minutes", "3 minutes", "5 minutes", "10 minutes", "Disable"],
     );
     await page.selectOption('#advanced-settings select[data-setting-key="autopoweroff"]', "300");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="autopoweroff"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.auto_power_off.value === "300" && state.auto_power_off.update_count === 1,
@@ -1718,6 +1736,7 @@ async function run() {
       "Canon recording stop",
     );
     await page.click("#photo-mode-button");
+    if (await page.locator("#mode-apply-button").isVisible()) await page.click("#mode-apply-button");
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.movie_mode === "off" && state.movie_mode_update_count === 2,
@@ -1756,6 +1775,7 @@ async function run() {
       "Canon still filename prefix",
     );
     await page.selectOption('#advanced-settings select[data-setting-key="focusbracketing"]', "enable");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="focusbracketing"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.focus_bracketing.value === "enable" &&
@@ -1773,6 +1793,7 @@ async function run() {
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="focusbracketingnumberofshots"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.focus_bracketing_shots.value === 250 &&
@@ -1790,6 +1811,7 @@ async function run() {
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="focusbracketingfocusincrement"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.focus_bracketing_increment.value === 7 &&
@@ -1806,6 +1828,7 @@ async function run() {
       smoothingSelector,
       "enable",
     );
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="focusbracketingexposuresmoothing"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.focus_bracketing_exposure_smoothing.value === "enable" &&
@@ -1813,6 +1836,7 @@ async function run() {
       "Canon focus bracketing exposure smoothing string write",
     );
     await page.selectOption('#advanced-settings select[data-setting-key="cardselectionstillimage"]', "card2");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="cardselectionstillimage"]');
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.still_card_selection === "card2" && state.card_selection_update_count === 2,
@@ -1821,6 +1845,7 @@ async function run() {
     await page.waitForFunction(() => document.querySelector("#storage-value")?.textContent?.includes("2416 shots"));
 
     await page.selectOption('#advanced-settings select[data-setting-key="shootingmode"]', "Bulb");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="shootingmode"]');
     await waitForSimulatorState(simulatorOrigin, (state) => state.mode === "Bulb", "Canon Bulb mode write");
     await page.waitForFunction(() => {
       const shutter = document.querySelector("#shutter-button");

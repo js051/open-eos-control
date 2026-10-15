@@ -46,7 +46,7 @@ function fixture() {
   s.closeMediaPreview = () => { calls.push(["close-preview"]); state.mediaPreviewItem = null; };
   const names = ["displayedMedia", "renderMediaSummary", "mediaDisplayTimeZone", "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel",
     "openMediaDateFilter", "applyMediaDateFilter", "clearMediaDateFilter", "previewableMedia", "mediaDateGroup",
-    "formatMediaTime", "formatDate", "formatMediaSize", "renderMediaPreviewNavigation", "openAdjacentMedia", "resetSession",
+    "formatMediaTime", "formatDate", "formatMediaSize", "renderMediaPreviewNavigation", "openAdjacentMedia", "cancelSetting", "resetSession",
     "deleteMedia", "runMediaDelete", "sendMediaDelete", "mediaDeleteRows", "mediaDeleteConfirmation", "mediaDeleteOwnerDescription", "applyConfirmedMediaDelete"];
   vm.runInContext(names.map(extract).join("\n"), s);
   s.renderMedia = () => { calls.push(["render-media"]); s.renderMediaSummary(); };

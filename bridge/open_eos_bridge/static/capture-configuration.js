@@ -107,12 +107,20 @@
     }
     return value;
   }
-  async function transfer(path, { method = "GET", payload, token = "", signal } = {}) {
+  async function transfer(path, { method = "GET", payload, token = "", signal, strictSettings = false } = {}) {
     const headers = { Accept: "application/json", "Cache-Control": "no-cache, no-store" };
     if (token) headers.Authorization = `Bearer ${token}`;
     if (payload !== undefined) headers["Content-Type"] = "application/json";
     const response = await fetch(path, { method, headers, body: payload === undefined ? undefined : JSON.stringify(payload),
       signal, cache: "no-store", credentials: "omit", redirect: "error" });
+    if (strictSettings && (response.headers.has("content-range") ||
+        ![null, "identity"].includes(response.headers.get("content-encoding")))) {
+      // Reject before reading, but still stop the rejected response transport.
+      // Cancellation is cleanup, not evidence; a non-cooperative stream must not
+      // hold the operation open after its response has already been rejected.
+      try { void response.body?.cancel?.().catch(() => {}); } catch (_) { /* Preserve rejection. */ }
+      throw new TypeError("Ambiguous setting response representation");
+    }
     if (!response.body?.getReader) throw new TypeError("Configuration response stream unavailable");
     const reader = response.body.getReader(), decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0, text = "";
@@ -129,6 +137,11 @@
       try { await reader.cancel(); } catch (_) { /* Retain the original error. */ }
       throw error;
     } finally { reader.releaseLock(); }
+    if (strictSettings) {
+      const length = response.headers.get("content-length");
+      if (length !== null && (!whole(/^(?:0|[1-9][0-9]*)$/, length) || Number(length) !== bytes ||
+          response.headers.has("transfer-encoding"))) throw new TypeError("Ambiguous setting response length");
+    }
     return { status: response.status, body: parseJson(text) };
   }
   return Object.freeze({ validReceipt, validFieldValue, whole, outcome, ownership, canRecover, validNaming, valueFor, validSelection, transfer });

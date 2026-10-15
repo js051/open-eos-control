@@ -1162,7 +1162,7 @@ for (const reason of ['unknown', 'in-flight', 'confirmed-active', 'idle', 'retir
       'clearScheduledMediaTransferRender','clearMediaThumbnails','cancelLatestMediaRefresh','closeMediaPreview',
       'closeMediaDetails','releaseObjectUrl','clearBulbTimer','renderAvailability','renderHealth']) s[name] = () => {};
     for (const name of ['connectionView','controlView','tokenInput','ccapiPasswordInput']) s.ui[name] = {};
-    vm.runInContext(productionFunction('resetSession'), s);
+    vm.runInContext(productionFunction('cancelSetting') + '\n' + productionFunction('resetSession'), s);
     s.resetSession();
     assert.equal(Boolean(s.state.shutterDisconnectWarning), ['unknown','in-flight','confirmed-active'].includes(reason));
     assert.equal(s.state.recordingRecovery, null);

@@ -49,6 +49,7 @@ from .models import (
     StorageStatus,
     camera_profile,
 )
+from .shooting_settings import exact_setting, observation, require_requested_value, responded, valid_key
 
 ENGINE_NAME = "libgphoto2"
 MAX_COMMAND_OUTPUT_BYTES = 32 * 1024 * 1024
@@ -1571,6 +1572,114 @@ class GPhoto2Session:
     def stop_event_polling(self) -> None:
         with self._event_state_lock:
             self._event_generation += 1
+
+    def _ordinary_setting_config(
+        self, key: str, *, deadline: float | None = None,
+    ) -> tuple[GPhotoConfig, CameraSetting]:
+        self._require_open()
+        if not valid_key(key):
+            raise unsupported(CameraFeature.ADVANCED_SETTINGS.value, self.engine_name)
+        spec = next((item for item in CONFIG_SPECS if item.key == key), None)
+        text = next((item for item in TEXT_METADATA_SPECS if item.key == key), None)
+        suffixes = spec.suffixes if spec else (text.suffix,) if text else ()
+        known = self._find_config(suffixes, writable=True) if suffixes else None
+        if known is None:
+            raise unsupported(CameraFeature.ADVANCED_SETTINGS.value, self.engine_name)
+        # Exact already-advertised path, one scoped read. No --list-all-config or
+        # optimistic config.current assignment can stand in for this observation.
+        deadline = min(deadline or float("inf"), time.monotonic() + 15.0)
+
+        def read(arguments):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BridgeError("SETTING_READBACK_TIMEOUT", "Setting readback timed out.", status_code=504)
+            result = self._run(arguments, timeout=remaining)
+            if time.monotonic() >= deadline:
+                raise BridgeError("SETTING_READBACK_TIMEOUT", "Setting readback timed out.", status_code=504)
+            return result
+
+        output = read(["--get-config", known.path]).stdout
+        try:
+            if len(output) > 65536:
+                raise ValueError("Oversized setting output")
+            lines = output.decode("utf-8", errors="strict").splitlines()
+            if any(line.startswith("/") for line in lines):
+                if not lines or lines[0] != known.path:
+                    raise ValueError("Different setting path")
+                lines = lines[1:]
+            if not lines or lines[-1] != "END" or lines.count("END") != 1:
+                raise ValueError("Incomplete setting output")
+            fields = [line.split(":", 1)[0] for line in lines if ":" in line and not line.startswith("Choice:")]
+            if len(fields) != len(set(fields)) or not {"Label", "Readonly", "Type", "Current"} <= set(fields):
+                raise ValueError("Ambiguous setting output")
+            config = parse_config_dump(known.path + "\n" + "\n".join(lines))[known.path]
+            if config.readonly:
+                raise ValueError("Setting is no longer writable")
+            if len(config.choices) != len(set(config.choices)):
+                raise ValueError("Duplicate advertised setting choices")
+            if text:
+                if config.kind != "TEXT":
+                    raise ValueError("Setting kind changed")
+                control = CameraSetting(key=key, label=config.label or text.label, value=config.current,
+                                        values=[], input_kind="text", max_length=TEXT_METADATA_MAX_BYTES)
+            elif key == "capturestorage":
+                storage_output = read(["--storage-info"]).stdout
+                if len(storage_output) > 65536:
+                    raise ValueError("Oversized storage response")
+                storage = parse_storage_info(storage_output.decode("utf-8", errors="strict"))
+                if not storage.devices:
+                    raise ValueError("No fresh camera storage")
+                self._storage = storage
+                targets = self._capture_storage_targets(config)
+                current = next((label for label, identifier in targets
+                                if identifier == _normalize_storage_id(config.current)), None)
+                if current is None:
+                    raise ValueError("Recording card is not freshly advertised")
+                control = CameraSetting(key=key, label=config.label or spec.label, value=current,
+                                        values=[label for label, _ in targets])
+            else:
+                values = self._setting_values(spec, config)
+                current = _case_insensitive_choice(values, config.current)
+                if current is None:
+                    raise ValueError("Current setting is not advertised")
+                control = CameraSetting(key=key, label=config.label or spec.label, value=current, values=values)
+            exact_setting(control, key)
+        except (ValueError, KeyError, UnicodeError) as error:
+            raise BridgeError("SETTING_READBACK_INVALID", "Fresh scoped camera setting is incomplete or invalid.",
+                              status_code=502, engine=self.engine_name) from error
+        # Only a validated camera read may update this cache, never requested data.
+        self._configs[known.path] = config
+        return config, control
+
+    def read_setting(self, key: str) -> dict[str, object]:
+        deadline = time.monotonic() + 15.0
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("SETTING_READBACK_TIMEOUT", "Setting readback lock timed out.", status_code=504)
+        try:
+            return observation(self.engine_name, self._ordinary_setting_config(key, deadline=deadline)[1])
+        finally:
+            self._lock.release()
+
+    def apply_setting_outcome(self, key: str, value: str) -> dict[str, object]:
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("SETTING_WRITE_TIMEOUT", "Setting write lock timed out.", status_code=504)
+        try:
+            advertised_card = (self._advertised_storage_targets.get(value.casefold())
+                               if key == "capturestorage" else None)
+            config, control = self._ordinary_setting_config(key)
+            require_requested_value(control, value)
+            selected = value
+            if key == "capturestorage":
+                fresh_ids = {identifier for _, identifier in self._capture_storage_targets(config)}
+                if advertised_card is None or advertised_card not in fresh_ids:
+                    raise BridgeError("INVALID_SETTING_VALUE", "Recording card is no longer advertised as writable.",
+                                      status_code=409, engine=self.engine_name)
+                selected = advertised_card
+            self._set_config_value(config, selected, refresh=False, update_current=False)
+            self._observed.add(_feature_for_setting(key))
+            return responded(self.engine_name, key, value, lambda: self._ordinary_setting_config(key)[1])
+        finally:
+            self._lock.release()
 
     def set_setting(self, key: str, value: str) -> CameraStatus:
         with self._lock:

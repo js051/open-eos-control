@@ -587,6 +587,26 @@ def create_app(
         manager.get(session_id).stop_event_polling()
         return Response(status_code=204)
 
+    @router.get("/session/{session_id}/settings/{key}")
+    def read_camera_setting(session_id: str, key: str, response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        reader = getattr(manager.get(session_id), "read_setting", None)
+        if not callable(reader):
+            raise BridgeError("UNSUPPORTED_SETTING_READBACK", "Fresh scoped setting readback is unavailable.",
+                              status_code=409)
+        return reader(key)
+
+    @router.post("/session/{session_id}/settings/{key}/outcome")
+    def apply_camera_setting_outcome(session_id: str, key: str, payload: SettingUpdate,
+                                     response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        session = manager.get(session_id)
+        writer = getattr(session, "apply_setting_outcome", None)
+        if not callable(writer):
+            raise BridgeError("UNSUPPORTED_SETTING_OUTCOME", "Scoped setting writes are unavailable for this provider.",
+                              status_code=409)
+        return writer(key, payload.value)
+
     @router.post("/session/{session_id}/settings/{key}", response_model=CameraStatus)
     def set_camera_setting(session_id: str, key: str, payload: SettingUpdate) -> CameraStatus:
         return manager.get(session_id).set_setting(key, payload.value)
