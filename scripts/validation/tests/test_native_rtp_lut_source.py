@@ -40,6 +40,31 @@ class NativeRtpLutSourceTests(unittest.TestCase):
         self.assertIn("NativeVideoLutStatus.UNSUPPORTED_COLOR", session)
         self.assertIn("decodeSurface(targetSurface, generation, null)", session)
 
+    def test_native_fixture_retains_numeric_assertions_and_bounded_failure_evidence(self):
+        fixture = (
+            ROOT / "android/app/src/androidTest/java/dev/openeos/control/data/NativeRtpLutRenderingTest.kt"
+        ).read_text()
+        self.assertIn("kotlin.math.abs(before[channel] - expected[index][channel]) <= 18", fixture)
+        self.assertIn("kotlin.math.abs(after[channel] - before[2 - channel]) <= 3", fixture)
+        self.assertIn("kotlin.math.abs(transformed[channel] - numeric[channel] * 255f) <= 6f", fixture)
+        self.assertIn("positions.joinToString", fixture)
+        self.assertIn("describeFormat(codec.outputFormat)", fixture)
+        self.assertIn("decoder = codec.name.take(96)", fixture)
+        self.assertIn("NATIVE_RTP_LUT ${evidence.joinToString", fixture)
+        self.assertNotIn("format.toString()", fixture)
+        self.assertNotIn("takeScreenshot", fixture)
+
+    def test_native_fixture_retires_prior_captures_when_a_later_phase_fails(self):
+        fixture = (
+            ROOT / "android/app/src/androidTest/java/dev/openeos/control/data/NativeRtpLutRenderingTest.kt"
+        ).read_text()
+        self.assertLess(
+            fixture.index("val captured = mutableListOf<Bitmap>()"), fixture.index('render(target, "identity"')
+        )
+        self.assertIn("captured.forEach(Bitmap::recycle)", fixture)
+        self.assertIn("if (primaryFailure != null || retired.isFailure) captured?.recycle()", fixture)
+        self.assertIn("primaryFailure?.addSuppressed(cleanupFailure) ?: throw cleanupFailure", fixture)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,6 +32,7 @@ import java.util.Base64
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 /** Real decoder/GLES/Surface/PixelCopy evidence; no camera or native API is mocked. */
 @RunWith(AndroidJUnit4::class)
@@ -39,6 +40,7 @@ class NativeRtpLutRenderingTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
     private val fixture = Base64.getDecoder().decode("AAAAAWdkEAqsuI9NQICAUAAAAwAQAAADACBAAAAAAWjuASyyLAAAAAFliIQ6/vOwfmWVcMjc9396sU68Xq2KSZ/Z1yk56ylhRBv1U+mU30I0Mj4UmV3uYf7yU5xO2A99Sa1rES0kusaJZgSJBlnVOP5+YjUvqLBSBdOb96m0lFYjjsqbyoKCtoK2/Ui3FUTivt/uYo03ooGWdmlKBYZOq6rTjaSQ+vk=")
     private data class Target(val surface: Surface, val width: Int, val height: Int)
+    private val positions = arrayOf(16 to 12, 48 to 12, 16 to 36, 48 to 36)
 
     @Test fun realH264ToGpuSurfacePreservesRowsAndPostLutScopes() = runBlocking {
         val ready = CompletableFuture<Target>()
@@ -54,33 +56,47 @@ class NativeRtpLutRenderingTest {
             } }, modifier = Modifier.size(128.dp, 96.dp))
         }
         val target = ready.get(8, TimeUnit.SECONDS)
-        val identity = render(target, swap = false)
-        val swapped = render(target, swap = true)
-        val curvedLut = NativeVideoLut(2, floatArrayOf(-.1f, .05f, -.2f), floatArrayOf(.9f, .85f, 1.1f),
-            (0..1).flatMap { b -> (0..1).flatMap { g -> (0..1).flatMap { r ->
-                listOf(r * g * 1.6f - .2f, g * b * 1.2f, b * r * 1.4f)
-            } } }.toFloatArray())
-        val curved = render(target, swap = false, overrideLut = curvedLut)
-        val expected = arrayOf(intArrayOf(224, 40, 56), intArrayOf(48, 200, 72),
-            intArrayOf(40, 80, 216), intArrayOf(176, 144, 104))
-        val positions = arrayOf(16 to 12, 48 to 12, 16 to 36, 48 to 36)
+        val evidence = mutableListOf<String>() // At most three fixed-size, synthetic frame summaries.
+        val captured = mutableListOf<Bitmap>()
         try {
+            val identity = render(target, "identity", evidence, swap = false).also(captured::add)
+            val swapped = render(target, "swap", evidence, swap = true).also(captured::add)
+            val curvedLut = NativeVideoLut(2, floatArrayOf(-.1f, .05f, -.2f), floatArrayOf(.9f, .85f, 1.1f),
+                (0..1).flatMap { b -> (0..1).flatMap { g -> (0..1).flatMap { r ->
+                    listOf(r * g * 1.6f - .2f, g * b * 1.2f, b * r * 1.4f)
+                } } }.toFloatArray())
+            val curved = render(target, "curved", evidence, swap = false, overrideLut = curvedLut).also(captured::add)
+            val expected = arrayOf(intArrayOf(224, 40, 56), intArrayOf(48, 200, 72),
+                intArrayOf(40, 80, 216), intArrayOf(176, 144, 104))
             for ((index, point) in positions.withIndex()) {
                 val before = channels(identity.getPixel(point.first, point.second))
                 val after = channels(swapped.getPixel(point.first, point.second))
                 val transformed = channels(curved.getPixel(point.first, point.second))
                 val numeric = curvedLut.sample(before[0] / 255f, before[1] / 255f, before[2] / 255f)
                 for (channel in 0..2) {
-                    assertTrue("Decoder SDR conversion or quadrant orientation differs", kotlin.math.abs(before[channel] - expected[index][channel]) <= 18)
-                    assertTrue("LUT must swap red/blue once in native video", kotlin.math.abs(after[channel] - before[2 - channel]) <= 3)
-                    assertTrue("Real GPU domain/interpolation must match the numeric oracle",
+                    val location = "quadrant=$index xy=${point.first},${point.second} channel=$channel"
+                    assertTrue("Decoder SDR conversion or quadrant orientation differs: $location " +
+                        "actual=${before[channel]} expected=${expected[index][channel]} tolerance=18",
+                        kotlin.math.abs(before[channel] - expected[index][channel]) <= 18)
+                    assertTrue("LUT must swap red/blue once in native video: $location " +
+                        "actual=${after[channel]} expected=${before[2 - channel]} tolerance=3",
+                        kotlin.math.abs(after[channel] - before[2 - channel]) <= 3)
+                    assertTrue("Real GPU domain/interpolation must match the numeric oracle: $location " +
+                        "actual=${transformed[channel]} expected=${numeric[channel] * 255f} tolerance=6",
                         kotlin.math.abs(transformed[channel] - numeric[channel] * 255f) <= 6f)
                 }
             }
-        } finally { identity.recycle(); swapped.recycle(); curved.recycle() }
+        } catch (failure: Throwable) {
+            // Keep the original assertion/cause and include actual pixels in the CI failure line.
+            // No screenshots, device identifiers, user frames, or unbounded MediaFormat dumps.
+            throw AssertionError("${failure.message}; NATIVE_RTP_LUT ${evidence.joinToString(" | ")}", failure)
+        } finally {
+            // Earlier captures must also retire if a later decoder/copy/scope phase fails.
+            captured.forEach(Bitmap::recycle)
+        }
     }
 
-    private fun verifyPostLutScopes(target: Target) {
+    private fun verifyPostLutScopes(target: Target, onCase: (Int) -> Unit) {
         // Only notification timing is controlled; every pixel is the actual native GPU output.
         val session = ObservedSurfaceSession(target.surface)
         val lut = CubeLut("Synthetic swap", 2, floatArrayOf(0f, 0f, 0f), floatArrayOf(1f, 1f, 1f), table(true))
@@ -95,6 +111,7 @@ class NativeRtpLutRenderingTest {
         onMain { sampler = NativeRtpMonitorSampler(); sampler.attach(session, target.surface, target.width, target.height) }
         try {
             for ((sequence, settings) in cases.withIndex()) {
+                onCase(sequence)
                 Thread.sleep(270) // Respect the production global 4 Hz cadence, including earlier tests.
                 onMain {
                     sampler.configure(session, true, settings, 0f)
@@ -127,42 +144,99 @@ class NativeRtpLutRenderingTest {
         } finally { onMain { sampler.close() } }
     }
 
-    private suspend fun render(target: Target, swap: Boolean, overrideLut: NativeVideoLut? = null): Bitmap {
+    private suspend fun render(
+        target: Target,
+        label: String,
+        evidence: MutableList<String>,
+        swap: Boolean,
+        overrideLut: NativeVideoLut? = null,
+    ): Bitmap {
         val completed = CountDownLatch(1)
         val failed = CountDownLatch(1)
+        val presentedTimeUs = AtomicLong(Long.MIN_VALUE)
         val lut = overrideLut ?: NativeVideoLut(2, floatArrayOf(0f, 0f, 0f), floatArrayOf(1f, 1f, 1f), table(swap))
-        val renderer = NativeRtpLutRenderer(target.surface, lut, { true }, { completed.countDown() }, { failed.countDown() })
+        val renderer = NativeRtpLutRenderer(target.surface, lut, { true }, {
+            presentedTimeUs.set(it)
+            completed.countDown()
+        }, { failed.countDown() })
         var codec: MediaCodec? = null
+        var phase = "input-surface"
+        var decoder = "unavailable"
+        var outputFormat = "unobserved"
+        var outputCount = 0
+        var lastOutputTimeUs = Long.MIN_VALUE
+        var pixels = "uncopied"
+        var captured: Bitmap? = null
+        var primaryFailure: Throwable? = null
         try {
             val inputSurface = renderer.inputSurface()
+            phase = "decoder-create"
             codec = MediaCodec.createDecoderByType("video/avc")
+            decoder = codec.name.take(96)
+            phase = "decoder-configure"
             codec.configure(MediaFormat.createVideoFormat("video/avc", 64, 48), inputSurface, null, 0)
+            phase = "decoder-start"
             codec.start()
+            phase = "input-dequeue"
             val index = codec.dequeueInputBuffer(TimeUnit.SECONDS.toMicros(2))
             assertTrue(index >= 0)
             requireNotNull(codec.getInputBuffer(index)).put(fixture)
             codec.queueInputBuffer(index, 0, fixture.size, 1_000, 0)
+            phase = "decode-present"
             val info = MediaCodec.BufferInfo()
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(6)
             while (completed.count > 0 && failed.count > 0 && System.nanoTime() < deadline) {
                 val output = codec.dequeueOutputBuffer(info, 10_000)
-                if (output >= 0) codec.releaseOutputBuffer(output, true)
+                if (output == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) outputFormat = describeFormat(codec.outputFormat)
+                if (output >= 0) {
+                    outputCount++
+                    lastOutputTimeUs = info.presentationTimeUs
+                    codec.releaseOutputBuffer(output, true)
+                }
             }
             assertEquals("Real GPU pipeline failed", 1L, failed.count)
             assertEquals("Decoder/GPU did not present fixture", 0L, completed.count)
-            if (swap && overrideLut == null) verifyPostLutScopes(target)
-            return copy(target.surface, 64, 48)
+            if (swap && overrideLut == null) {
+                verifyPostLutScopes(target) { phase = "post-lut-scopes-$it" }
+            }
+            phase = "pixel-copy"
+            return copy(target.surface, 64, 48).also { bitmap ->
+                captured = bitmap
+                pixels = positions.joinToString(";") { (x, y) -> "$x,$y:${channels(bitmap.getPixel(x, y)).joinToString(",")}" }
+                phase = "captured"
+            }
+        } catch (failure: Throwable) {
+            primaryFailure = failure
+            throw failure
         } finally {
-            runCatching { codec?.stop() }; runCatching { codec?.release() }
-            renderer.close()
+            val stopped = runCatching { codec?.stop() }
+            val released = runCatching { codec?.release() }
+            val retired = runCatching { renderer.close() }
+            if (primaryFailure != null || retired.isFailure) captured?.recycle()
+            fun Result<*>.outcome() = exceptionOrNull()?.javaClass?.simpleName ?: "ok"
+            evidence += "$label phase=$phase target=${target.width}x${target.height} decoder=$decoder " +
+                "format=[$outputFormat] outputs=$outputCount outputPts=$lastOutputTimeUs " +
+                "presentedPts=${presentedTimeUs.get()} failed=${failed.count == 0L} rgb=[$pixels] " +
+                "cleanup=${stopped.outcome()}/${released.outcome()}/${retired.outcome()}"
+            retired.exceptionOrNull()?.let { cleanupFailure ->
+                primaryFailure?.addSuppressed(cleanupFailure) ?: throw cleanupFailure
+            }
         }
+    }
+
+    /** Only fixed numeric keys from our synthetic stream; never codec/private/vendor metadata. */
+    private fun describeFormat(format: MediaFormat): String = listOf(
+        MediaFormat.KEY_WIDTH, MediaFormat.KEY_HEIGHT, "crop-left", "crop-top", "crop-right", "crop-bottom",
+        MediaFormat.KEY_COLOR_STANDARD, MediaFormat.KEY_COLOR_RANGE, MediaFormat.KEY_COLOR_TRANSFER, "bit-depth",
+    ).joinToString(",") { key ->
+        "$key=${if (format.containsKey(key)) runCatching { format.getInteger(key).toString() }.getOrDefault("non-integer") else "absent"}"
     }
 
     private fun copy(surface: Surface, width: Int, height: Int): Bitmap {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val done = CompletableFuture<Int>()
         PixelCopy.request(surface, bitmap, { done.complete(it) }, Handler(Looper.getMainLooper()))
-        assertEquals(PixelCopy.SUCCESS, done.get(4, TimeUnit.SECONDS).toInt())
+        assertEquals("PixelCopy ${width}x$height status", PixelCopy.SUCCESS, done.get(4, TimeUnit.SECONDS).toInt())
         return bitmap
     }
 

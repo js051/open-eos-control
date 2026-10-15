@@ -69,8 +69,10 @@ android {
         compose = true
     }
 
-    // One bounded synthetic contract is consumed by all platform tests.
+    // Bounded synthetic contracts are consumed by all platform tests.
     sourceSets.getByName("test").resources.srcDir("../../contracts/media-delivery/v1")
+    sourceSets.getByName("test").resources.srcDir("../../contracts/live-view-lut/v1")
+    sourceSets.getByName("androidTest").assets.srcDir("../../contracts/live-view-lut/v1")
 }
 
 kotlin {
