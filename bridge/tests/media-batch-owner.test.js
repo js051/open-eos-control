@@ -1238,3 +1238,28 @@ test("explicit source picker distinguishes same-name loaded folders without pers
   assert.equal(c.calls.requests.length, 0);
   assert.equal(c.calls.history.some(call => call.operation !== "list"), false);
 });
+
+for (const [destination, outcome, scope, detail] of [
+  ["browser-download", "handoff-requested", "mediaHistoryBrowserDownload", "mediaHistoryHandoff"],
+  ["browser-file", "close-confirmed", "mediaHistoryBrowserFile", "mediaHistoryCloseConfirmed"],
+]) {
+  test(`single-file ${destination} history shows its distinct checkpoint and never offers worklist continuation`, async () => {
+    const c = fixture({ planned: true });
+    const receipt = { receiptId: "synthetic-single-receipt", batchId: "synthetic-single-batch" };
+    c.historyRows.set(receipt, { ...receipt, destination, outcome,
+      filename: "same.JPG", startedAtMillis: 1700000000000, finishedAtMillis: 1700000000001,
+      mayRemain: false, outcomeUnknown: destination === "browser-download" });
+    c.ui.mediaHistoryDialog.open = true;
+    await c.refreshMediaHistory();
+    const rows = c.ui.mediaHistoryList.children;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].dataset.outcome, outcome);
+    assert.equal(rows[0].dataset.worklist, undefined);
+    assert.match(rows[0].children[1].textContent, new RegExp(scope));
+    assert.match(rows[0].children[2].textContent, new RegExp(detail));
+    assert.ok(rows[0].children.every(child => !child.children.length), "No source-mapping selector for a standalone observation");
+    assert.equal(c.ui.mediaContinuationStart.disabled, true);
+    assertNoOriginalIO(c);
+    assert.deepEqual(c.calls.history.map(call => call.operation), ["list"]);
+  });
+}

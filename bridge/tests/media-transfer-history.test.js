@@ -988,7 +988,7 @@ test("continuation capacity refusal never evicts old evidence and v2 upgrades on
   assert.equal((await f.store.beginContinuationBatch({ epoch: before.epoch, rows, acknowledgeUnknown: true })).code, "capacity-exceeded");
   assert.deepEqual(f.indexedDB.persisted(), snapshot);
   await f.store.clear();
-  assert.equal(f.indexedDB.persisted().schemaVersion, 3);
+  assert.equal(f.indexedDB.persisted().schemaVersion, SCHEMA_VERSION);
 });
 
 test("continuation stores only local link IDs and rejects foreign, cyclic or extra link fields", async () => {
@@ -1030,4 +1030,264 @@ test("settled transfer loses only its in-memory active lock when terminal persis
   const request = { epoch: snapshot.epoch, acknowledgeUnknown: true,
     rows: [{ batchId: original.ticket.batchId, rowId: original.ticket.rows[0].rowId, filename: "chosen.jpg" }] };
   assert.equal((await f.store.beginContinuationBatch(request)).ok, true);
+});
+
+const sharedDeliveryVectors = require("../../contracts/media-delivery/v1/outcome-vectors.json");
+const sharedExpected = (id) => {
+  const vector = sharedDeliveryVectors.vectors.find((entry) => entry.id === id);
+  assert.ok(vector?.targets.includes("pc_history"), `Missing PC history vector ${id}`);
+  return vector.expected;
+};
+
+test("shared delivery contract: cold pending and same-name queued rows remain distinct without mutation", async () => {
+  const f = fixture();
+  const plan = await f.store.beginPlannedBatch(["SYNTHETIC.JPG", "SYNTHETIC.JPG"]);
+  await f.store.beginPlannedAttempt(plan.ticket, plan.ticket.rows[0].rowId);
+  const before = f.indexedDB.persisted();
+  const cold = await f.second().list();
+  const [pending, queued] = cold.plans[0].rows;
+  assert.equal(pending.receipt.unconfirmed, sharedExpected("cold_pending").observation === "unconfirmed");
+  assert.equal(queued.outcome === "queued", sharedExpected("cold_queued").observation === "not_started");
+  assert.equal(queued.receipt?.outcome === "completed", sharedExpected("duplicate_filename").secondRowComplete);
+  assert.notEqual(pending.rowId, queued.rowId);
+  assert.deepEqual(f.indexedDB.persisted(), before, "Cold display cannot turn observation into mutation/resumption");
+});
+
+test("shared delivery contract: clear rejects late completion without recreating the old row", async () => {
+  const f = fixture();
+  const plan = await f.store.beginPlannedBatch(["SYNTHETIC.JPG"]);
+  const attempt = await f.store.beginPlannedAttempt(plan.ticket, plan.ticket.rows[0].rowId);
+  assert.equal((await f.store.clear()).ok, true);
+  const settled = await f.store.finishAttempt(attempt.receipt, { outcome: "completed", bytesTransferred: 3 });
+  assert.equal(settled.ok, false);
+  const cold = await f.second().list();
+  assert.equal(cold.entries.length, sharedExpected("clear_late_callback").recordsRecreated);
+  assert.equal(cold.plans.length, 0);
+});
+
+test("shared delivery contract: uncertain continuation needs consent and linked completion blocks ancestors", async () => {
+  const f = fixture();
+  const old = await f.store.beginPlannedBatch(["SYNTHETIC.JPG"]);
+  const attempt = await f.store.beginPlannedAttempt(old.ticket, old.ticket.rows[0].rowId);
+  await f.store.finishAttempt(attempt.receipt, { outcome: "failed", outcomeUnknown: true });
+  const request = { epoch: (await f.store.list()).epoch,
+    rows: [{ batchId: old.ticket.batchId, rowId: old.ticket.rows[0].rowId, filename: "FRESH.JPG" }], acknowledgeUnknown: false };
+  assert.equal((await f.store.beginContinuationBatch(request)).ok,
+    sharedExpected("continuation_unknown_no_ack").observation !== "rejected");
+  const continued = await f.store.beginContinuationBatch({ ...request, acknowledgeUnknown: true });
+  assert.equal(continued.ok, true);
+  const next = await f.store.beginPlannedAttempt(continued.ticket, continued.ticket.rows[0].rowId);
+  await f.store.finishAttempt(next.receipt, { outcome: "completed", bytesTransferred: 3 });
+  const repeated = await f.store.beginContinuationBatch({ ...request, acknowledgeUnknown: true });
+  assert.equal(repeated.ok, sharedExpected("linked_completion").observation !== "rejected");
+  assert.equal(repeated.code, "completed-origin");
+});
+
+for (const [destination, outcome, outcomeUnknown] of [
+  ["browser-download", "handoff-requested", true], ["browser-file", "close-confirmed", false],
+]) {
+  test(`single-file ${destination} keeps its own checkpoint across reopen without a roster`, async () => {
+    const f = fixture();
+    const { ticket } = await f.store.createBatchTicket();
+    const begun = await f.store.startAttempt(ticket, { filename: "synthetic.JPG?secret=omitted", destination });
+    assert.equal(begun.ok, true);
+    assert.equal((await f.store.finishAttempt(begun.receipt, { outcome, outcomeUnknown, bytesTransferred: 42 })).ok, true);
+    const before = f.indexedDB.persisted();
+    const cold = await f.second().list();
+    assert.equal(cold.ok, true);
+    assert.deepEqual(cold.plans, []);
+    assert.equal(cold.entries[0].destination, destination);
+    assert.equal(cold.entries[0].outcome, outcome);
+    assert.equal(cold.entries[0].outcomeUnknown, outcomeUnknown);
+    assert.equal(cold.entries[0].filename, "synthetic.JPG");
+    assert.equal(cold.entries[0].unconfirmed, false);
+    assert.deepEqual(f.indexedDB.persisted(), before);
+    assert.equal(JSON.stringify(before).includes("secret"), false);
+    assert.equal((await f.store.beginContinuationBatch({ epoch: cold.epoch, acknowledgeUnknown: true,
+      rows: [{ batchId: ticket.batchId, rowId: begun.receipt.receiptId, filename: "same.JPG" }] })).code, "invalid-origin");
+  });
+
+  test(`single-file ${destination} cold pending and failed terminal write remain unknown without mutation`, async () => {
+    const f = fixture();
+    const { ticket } = await f.store.createBatchTicket();
+    const { receipt } = await f.store.startAttempt(ticket, { filename: "synthetic.JPG", destination });
+    const pending = f.indexedDB.persisted();
+    f.indexedDB.fault.put = true;
+    assert.equal((await f.store.finishAttempt(receipt, { outcome, outcomeUnknown })).code, "transaction-failed");
+    const cold = await f.second().list();
+    assert.equal(cold.entries[0].destination, destination);
+    assert.equal(cold.entries[0].outcome, "cancelled-or-unknown");
+    assert.equal(cold.entries[0].unconfirmed, true);
+    assert.equal(cold.entries[0].outcomeUnknown, true);
+    assert.deepEqual(cold.plans, []);
+    assert.deepEqual(f.indexedDB.persisted(), pending);
+  });
+
+  test(`single-file ${destination} first terminal wins and clear rejects late settlement or start`, async () => {
+    const f = fixture();
+    const { ticket } = await f.store.createBatchTicket();
+    const { receipt } = await f.store.startAttempt(ticket, { filename: "synthetic.JPG", destination });
+    assert.equal((await f.store.finishAttempt(receipt, { outcome, outcomeUnknown })).updated, true);
+    const terminal = f.indexedDB.persisted();
+    assert.deepEqual(await f.store.finishAttempt(receipt, { outcome: "failed", outcomeUnknown: true }), { ok: true, updated: false });
+    assert.deepEqual(f.indexedDB.persisted(), terminal);
+    assert.equal((await f.second().clear()).ok, true);
+    const cleared = f.indexedDB.persisted();
+    assert.equal((await f.store.finishAttempt(receipt, { outcome, outcomeUnknown })).code, "stale-ticket");
+    assert.equal((await f.store.startAttempt(ticket, { filename: "late.JPG", destination })).code, "stale-ticket");
+    assert.deepEqual(f.indexedDB.persisted(), cleared);
+  });
+
+  test(`single-file ${destination} cannot store capabilities or wrong save checkpoints`, async () => {
+    const f = fixture();
+    const { ticket } = await f.store.createBatchTicket();
+    const { receipt } = await f.store.startAttempt(ticket, { filename: "synthetic.JPG", destination });
+    const pending = f.indexedDB.persisted();
+    for (const invalid of [{ outcome: "completed" },
+      { outcome: destination === "browser-file" ? "handoff-requested" : "close-confirmed", outcomeUnknown: true },
+      { outcome, outcomeUnknown: !outcomeUnknown }, { outcome, outcomeUnknown, mayRemain: true }]) {
+      assert.equal((await f.store.finishAttempt(receipt, invalid)).code, "invalid-input");
+      assert.deepEqual(f.indexedDB.persisted(), pending);
+    }
+    for (const mutate of [entry => { entry.handle = {}; }, entry => { entry.url = "https://synthetic.invalid/file"; },
+      entry => { entry.destination = "browser-directory"; entry.outcome = outcome; entry.finishedAtMillis = 1000; },
+      entry => { entry.outcome = "completed"; entry.finishedAtMillis = 1000; }]) {
+      const corrupt = structuredClone(pending); mutate(corrupt.entries[0]); f.indexedDB.replace(corrupt);
+      assert.equal((await f.second().list()).code, "corrupt");
+    }
+  });
+}
+
+test("v1-v3 snapshots migrate to observation schema only on successful mutation", async () => {
+  for (const version of [1, 2, 3]) {
+    const f = fixture();
+    const { ticket } = await f.store.createBatchTicket();
+    const { receipt } = await start(f.store, ticket);
+    await f.store.finishAttempt(receipt, { outcome: "completed" });
+    const legacy = f.indexedDB.persisted(); legacy.schemaVersion = version;
+    if (version === 1) delete legacy.plans;
+    f.indexedDB.replace(legacy);
+    assert.equal((await f.second().list()).entries[0].outcome, "completed");
+    assert.deepEqual(f.indexedDB.persisted(), legacy);
+    const next = await f.store.createBatchTicket();
+    f.indexedDB.fault.put = true;
+    assert.equal((await f.store.startAttempt(next.ticket, { filename: "new.JPG", destination: "browser-download" })).ok, false);
+    assert.deepEqual(f.indexedDB.persisted(), legacy);
+    assert.equal((await f.store.startAttempt(next.ticket, { filename: "new.JPG", destination: "browser-download" })).ok, true);
+    const migrated = f.indexedDB.persisted();
+    assert.equal(migrated.schemaVersion, 4);
+    assert.deepEqual(migrated.entries[1], legacy.entries[0]);
+  }
+});
+
+test("v3 origin lineage survives schema4 migration and keeps completed-descendant checks", async () => {
+  const f = fixture();
+  const old = await f.store.beginPlannedBatch(["same.JPG"]);
+  const request = { epoch: 0, acknowledgeUnknown: true,
+    rows: [{ batchId: old.ticket.batchId, rowId: old.ticket.rows[0].rowId, filename: "same.JPG" }] };
+  const next = await f.store.beginContinuationBatch(request);
+  const v3 = f.indexedDB.persisted(); v3.schemaVersion = 3; f.indexedDB.replace(v3);
+  assert.equal((await f.second().list()).ok, true);
+  assert.deepEqual(f.indexedDB.persisted(), v3);
+  const { ticket } = await f.store.createBatchTicket();
+  await f.store.startAttempt(ticket, { filename: "observation.JPG", destination: "browser-file" });
+  assert.deepEqual(f.indexedDB.persisted().plans, v3.plans);
+  const { receipt } = await f.store.beginPlannedAttempt(next.ticket, next.ticket.rows[0].rowId);
+  await f.store.finishAttempt(receipt, { outcome: "completed" });
+  assert.equal((await f.second().beginContinuationBatch(request)).code, "completed-origin");
+  const valid = f.indexedDB.persisted();
+  for (const version of [2, 3, 4]) {
+    const bad = structuredClone(valid); bad.schemaVersion = version;
+    // Remove the new observation so this probes lineage rules, not route support.
+    bad.entries = bad.entries.filter(entry => entry.destination === "browser-directory");
+    bad.plans[0].rows[0].origin.rowId = bad.plans[0].rows[0].rowId;
+    f.indexedDB.replace(bad);
+    assert.equal((await f.second().list()).code, "corrupt");
+  }
+});
+
+test("single-file observations share the bound but never evict worklist or pending evidence", async () => {
+  const f = fixture();
+  const plan = await f.store.beginPlannedBatch(Array.from({ length: 99 }, (_, i) => `${i}.JPG`));
+  const { ticket } = await f.store.createBatchTicket();
+  const { receipt } = await f.store.startAttempt(ticket, { filename: "last.JPG", destination: "browser-download" });
+  const full = f.indexedDB.persisted();
+  assert.equal((await f.store.startAttempt(ticket, { filename: "overflow.JPG", destination: "browser-file" })).code, "capacity-exceeded");
+  assert.deepEqual(f.indexedDB.persisted(), full);
+  await f.store.finishAttempt(receipt, { outcome: "handoff-requested", outcomeUnknown: true });
+  assert.equal((await f.store.startAttempt(ticket, { filename: "latest.JPG", destination: "browser-file" })).ok, true);
+  const after = f.indexedDB.persisted();
+  assert.equal(after.entries.length, 1);
+  assert.equal(after.entries[0].filename, "latest.JPG");
+  assert.equal(after.plans[0].rows.length, plan.plan.rows.length);
+  assert.ok(new TextEncoder().encode(JSON.stringify(after)).length <= MAX_SNAPSHOT_LENGTH);
+});
+
+test("single-file checkpoints cannot unlock an active directory continuation family", async () => {
+  const f = fixture();
+  const plan = await f.store.beginPlannedBatch(["synthetic.JPG"]);
+  const { receipt } = await f.store.beginPlannedAttempt(plan.ticket, plan.ticket.rows[0].rowId);
+  const request = { epoch: 0, acknowledgeUnknown: true,
+    rows: [{ batchId: plan.ticket.batchId, rowId: plan.ticket.rows[0].rowId, filename: "explicit.JPG" }] };
+  for (const input of [{ outcome: "close-confirmed" }, { outcome: "handoff-requested", outcomeUnknown: true }]) {
+    assert.equal((await f.store.finishAttempt(receipt, input)).code, "invalid-input");
+    assert.equal((await f.store.beginContinuationBatch(request)).code, "active-origin");
+  }
+});
+
+test("schema4 route observations cannot be smuggled into old schemas or planned rows", async () => {
+  const f = fixture();
+  const { ticket } = await f.store.createBatchTicket();
+  await f.store.startAttempt(ticket, { filename: "standalone.JPG", destination: "browser-file" });
+  const standalone = f.indexedDB.persisted();
+  for (const version of [1, 2, 3]) {
+    const bad = structuredClone(standalone); bad.schemaVersion = version;
+    if (version === 1) delete bad.plans;
+    f.indexedDB.replace(bad);
+    assert.equal((await f.second().list()).code, "corrupt");
+  }
+  f.indexedDB.replace(standalone);
+  const plan = await f.store.beginPlannedBatch(["planned.JPG"]);
+  await f.store.beginPlannedAttempt(plan.ticket, plan.ticket.rows[0].rowId);
+  const bad = f.indexedDB.persisted(); bad.entries[0].destination = "browser-file";
+  f.indexedDB.replace(bad);
+  assert.equal((await f.second().list()).code, "corrupt");
+});
+
+for (const destination of ["browser-download", "browser-file"]) {
+  test(`single-file ${destination} unacknowledged committed admission stays cold-unknown`, async () => {
+    const f = fixture({ timeoutMs: 5 });
+    const { ticket } = await f.store.createBatchTicket();
+    f.indexedDB.fault.holdComplete = true;
+    const result = await f.store.startAttempt(ticket, { filename: "synthetic.JPG", destination });
+    assert.equal(result.code, "transaction-unconfirmed");
+    assert.equal(Object.hasOwn(result, "receipt"), false);
+    f.indexedDB.releaseComplete();
+    await nextTurn();
+    const snapshot = f.indexedDB.persisted();
+    const cold = await f.second().list();
+    assert.equal(cold.entries.length, 1);
+    assert.equal(cold.entries[0].destination, destination);
+    assert.equal(cold.entries[0].unconfirmed, true);
+    assert.deepEqual(f.indexedDB.persisted(), snapshot);
+  });
+}
+
+test("same-name single-file observations stay distinct and a failed first terminal is immutable", async () => {
+  const f = fixture();
+  const attempts = [];
+  for (const destination of ["browser-download", "browser-file"]) {
+    const { ticket } = await f.store.createBatchTicket();
+    const { receipt } = await f.store.startAttempt(ticket, { filename: "same.JPG", destination });
+    attempts.push(receipt);
+    assert.equal((await f.store.finishAttempt(receipt, { outcome: "failed", outcomeUnknown: true })).updated, true);
+    const later = destination === "browser-file" ? { outcome: "close-confirmed" } : { outcome: "handoff-requested", outcomeUnknown: true };
+    assert.equal((await f.store.finishAttempt(receipt, later)).updated, false);
+  }
+  assert.notEqual(attempts[0].receiptId, attempts[1].receiptId);
+  assert.notEqual(attempts[0].batchId, attempts[1].batchId);
+  const cold = await f.second().list();
+  assert.deepEqual(cold.entries.map(entry => entry.filename), ["same.JPG", "same.JPG"]);
+  assert.deepEqual(cold.entries.map(entry => entry.outcome), ["failed", "failed"]);
+  assert.deepEqual(cold.plans, []);
 });

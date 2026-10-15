@@ -1,0 +1,519 @@
+{
+  "contract": "open-eos-media-delivery-observation",
+  "version": 1,
+  "limits": {
+    "maximumVectors": 32,
+    "maximumEventsPerVector": 12,
+    "maximumRows": 100,
+    "maximumJSONBytes": 32768
+  },
+  "invariants": {
+    "cloudSyncConfirmed": false,
+    "currentFileExistenceProvenByHistory": false,
+    "cameraIdentityInferredFromFilename": false,
+    "automaticResumeOnRead": false,
+    "persistDestinationLocator": false,
+    "persistSourceCapability": false
+  },
+  "vectors": [
+    {
+      "id": "pc_blob_handoff",
+      "targets": [
+        "pc_blob"
+      ],
+      "events": [
+        "source_complete",
+        "browser_download_requested"
+      ],
+      "expected": {
+        "observation": "handoff_requested",
+        "checkpoint": "browser_handoff",
+        "continuation": "not_applicable",
+        "saveConfirmed": false
+      }
+    },
+    {
+      "id": "pc_writer_close",
+      "targets": [
+        "pc_writer"
+      ],
+      "events": [
+        "source_complete",
+        "writer_close_confirmed"
+      ],
+      "expected": {
+        "observation": "destination_confirmed",
+        "checkpoint": "stream_close",
+        "continuation": "not_applicable",
+        "saveConfirmed": true
+      }
+    },
+    {
+      "id": "android_saf_close",
+      "targets": [
+        "android_saf"
+      ],
+      "events": [
+        "source_complete",
+        "stream_close_confirmed"
+      ],
+      "expected": {
+        "observation": "destination_confirmed",
+        "checkpoint": "stream_close",
+        "continuation": "not_applicable",
+        "saveConfirmed": true
+      }
+    },
+    {
+      "id": "android_gallery_publish",
+      "targets": [
+        "android_gallery"
+      ],
+      "events": [
+        "source_complete",
+        "stream_close_confirmed",
+        "length_validated",
+        "published_one_row"
+      ],
+      "expected": {
+        "observation": "destination_confirmed",
+        "checkpoint": "gallery_publication",
+        "continuation": "not_applicable",
+        "saveConfirmed": true
+      }
+    },
+    {
+      "id": "ios_private_prepared",
+      "targets": [
+        "ios_private"
+      ],
+      "events": [
+        "source_complete",
+        "private_copy_retained"
+      ],
+      "expected": {
+        "observation": "prepared",
+        "checkpoint": "private_copy",
+        "continuation": "not_applicable",
+        "saveConfirmed": false
+      }
+    },
+    {
+      "id": "ios_picker_full",
+      "targets": [
+        "ios_picker"
+      ],
+      "events": [
+        "sources_validated",
+        "attempt_admitted",
+        "picker_presented",
+        "unique_destinations_reported"
+      ],
+      "expected": {
+        "observation": "provider_reported",
+        "checkpoint": "picker_callback",
+        "continuation": "not_applicable",
+        "expectedCount": 3,
+        "reportedCount": 3,
+        "perFileMappingConfirmed": false,
+        "saveConfirmed": false
+      }
+    },
+    {
+      "id": "ios_picker_partial",
+      "targets": [
+        "ios_picker"
+      ],
+      "events": [
+        "sources_validated",
+        "attempt_admitted",
+        "picker_presented",
+        "partial_destinations_reported"
+      ],
+      "expected": {
+        "observation": "unconfirmed",
+        "checkpoint": "none",
+        "continuation": "not_applicable",
+        "expectedCount": 3,
+        "reportedCount": 2,
+        "perFileMappingConfirmed": false,
+        "saveConfirmed": false
+      }
+    },
+    {
+      "id": "ios_picker_duplicate",
+      "targets": [
+        "ios_picker"
+      ],
+      "events": [
+        "sources_validated",
+        "attempt_admitted",
+        "picker_presented",
+        "duplicate_destinations_reported"
+      ],
+      "expected": {
+        "observation": "unconfirmed",
+        "checkpoint": "none",
+        "continuation": "not_applicable",
+        "expectedCount": 3,
+        "reportedCount": 3,
+        "perFileMappingConfirmed": false,
+        "saveConfirmed": false
+      }
+    },
+    {
+      "id": "ios_picker_cancel",
+      "targets": [
+        "ios_picker"
+      ],
+      "events": [
+        "sources_validated",
+        "attempt_admitted",
+        "picker_presented",
+        "cancel_callback"
+      ],
+      "expected": {
+        "observation": "cancelled",
+        "checkpoint": "none",
+        "continuation": "not_applicable",
+        "saveConfirmed": false,
+        "noExternalCopyProven": false
+      }
+    },
+    {
+      "id": "ios_picker_teardown",
+      "targets": [
+        "ios_picker"
+      ],
+      "events": [
+        "sources_validated",
+        "attempt_admitted",
+        "picker_presented",
+        "teardown_without_callback"
+      ],
+      "expected": {
+        "observation": "unconfirmed",
+        "checkpoint": "none",
+        "continuation": "not_applicable",
+        "saveConfirmed": false
+      }
+    },
+    {
+      "id": "ios_picker_source_unavailable",
+      "targets": [
+        "ios_picker"
+      ],
+      "events": [
+        "source_identity_changed",
+        "begin_requested"
+      ],
+      "expected": {
+        "observation": "source_unavailable",
+        "checkpoint": "none",
+        "continuation": "not_applicable",
+        "saveConfirmed": false,
+        "pickerLaunches": 0
+      }
+    },
+    {
+      "id": "close_after_cancel",
+      "targets": [
+        "pc_writer",
+        "android_saf",
+        "android_gallery"
+      ],
+      "events": [
+        "source_complete",
+        "commit_requested",
+        "cancel_requested",
+        "commit_confirmed"
+      ],
+      "expected": {
+        "observation": "destination_confirmed",
+        "checkpoint": "route_commit",
+        "continuation": "not_applicable",
+        "saveConfirmed": true,
+        "deleteCompletedOutput": false
+      }
+    },
+    {
+      "id": "pc_close_rejected_abort_succeeded",
+      "targets": [
+        "pc_writer"
+      ],
+      "events": [
+        "source_complete",
+        "writer_close_requested",
+        "writer_close_rejected",
+        "abort_confirmed"
+      ],
+      "expected": {
+        "observation": "unconfirmed",
+        "checkpoint": "none",
+        "continuation": "not_applicable",
+        "saveConfirmed": false,
+        "inspectDestination": true
+      }
+    },
+    {
+      "id": "cleanup_failed",
+      "targets": [
+        "pc_writer",
+        "android_saf",
+        "android_gallery"
+      ],
+      "events": [
+        "output_created",
+        "transfer_interrupted",
+        "cleanup_rejected"
+      ],
+      "expected": {
+        "observation": "incomplete_output_possible",
+        "checkpoint": "none",
+        "continuation": "not_applicable",
+        "saveConfirmed": false,
+        "inspectDestination": true
+      }
+    },
+    {
+      "id": "cold_pending",
+      "targets": [
+        "pc_history",
+        "android_history",
+        "ios_private_history"
+      ],
+      "events": [
+        "attempt_admitted",
+        "process_ends_before_terminal_record",
+        "cold_read"
+      ],
+      "expected": {
+        "observation": "unconfirmed",
+        "checkpoint": "none",
+        "continuation": "uncertainty_ack_required",
+        "sourceReads": 0,
+        "pickerLaunches": 0
+      }
+    },
+    {
+      "id": "cold_queued",
+      "targets": [
+        "pc_history",
+        "android_history",
+        "ios_private_history"
+      ],
+      "events": [
+        "whole_roster_admitted",
+        "row_never_started",
+        "cold_read"
+      ],
+      "expected": {
+        "observation": "not_started",
+        "checkpoint": "none",
+        "continuation": "fresh_mapping_required",
+        "sourceReads": 0,
+        "pickerLaunches": 0
+      }
+    },
+    {
+      "id": "continuation_no_mapping",
+      "targets": [
+        "pc_history",
+        "android_history",
+        "ios_private_history"
+      ],
+      "events": [
+        "cold_read",
+        "continuation_requested_without_fresh_source_mapping"
+      ],
+      "expected": {
+        "observation": "rejected",
+        "checkpoint": "none",
+        "continuation": "fresh_mapping_required",
+        "sourceReads": 0
+      }
+    },
+    {
+      "id": "continuation_unknown_no_ack",
+      "targets": [
+        "pc_history",
+        "android_history",
+        "ios_private_history"
+      ],
+      "events": [
+        "cold_unconfirmed",
+        "fresh_source_mapping",
+        "continuation_requested_without_uncertainty_ack"
+      ],
+      "expected": {
+        "observation": "rejected",
+        "checkpoint": "none",
+        "continuation": "uncertainty_ack_required",
+        "sourceReads": 0
+      }
+    },
+    {
+      "id": "clear_late_callback",
+      "targets": [
+        "pc_history",
+        "android_history",
+        "ios_private_history",
+        "ios_picker_history"
+      ],
+      "events": [
+        "attempt_admitted",
+        "clear_confirmed",
+        "late_terminal_callback"
+      ],
+      "expected": {
+        "observation": "cleared",
+        "checkpoint": "none",
+        "continuation": "not_applicable",
+        "recordsRecreated": 0,
+        "deleteCompletedOutput": false
+      }
+    },
+    {
+      "id": "terminal_write_failed_cold",
+      "targets": [
+        "pc_history",
+        "android_history",
+        "ios_private_history"
+      ],
+      "events": [
+        "attempt_admitted",
+        "route_commit_confirmed",
+        "terminal_history_write_failed",
+        "cold_read"
+      ],
+      "expected": {
+        "observation": "unconfirmed",
+        "checkpoint": "none",
+        "continuation": "uncertainty_ack_required",
+        "saveConfirmed": false,
+        "deleteCompletedOutput": false
+      }
+    },
+    {
+      "id": "retained_missing",
+      "targets": [
+        "ios_private_history"
+      ],
+      "events": [
+        "private_copy_retained",
+        "private_copy_removed_externally",
+        "cold_read"
+      ],
+      "expected": {
+        "observation": "prepared_copy_unavailable",
+        "checkpoint": "private_copy",
+        "continuation": "blocked",
+        "saveConfirmed": false,
+        "automaticSourceDownload": false
+      }
+    },
+    {
+      "id": "bounded_capacity",
+      "targets": [
+        "pc_history",
+        "android_history",
+        "ios_private_history"
+      ],
+      "events": [
+        "unresolved_history_capacity_reached",
+        "continuation_admission_requested"
+      ],
+      "expected": {
+        "observation": "rejected",
+        "checkpoint": "none",
+        "continuation": "not_applicable",
+        "sourceReads": 0,
+        "pickerLaunches": 0,
+        "evictUnresolvedRecords": false
+      }
+    },
+    {
+      "id": "duplicate_filename",
+      "targets": [
+        "pc_history",
+        "android_history",
+        "ios_private_history"
+      ],
+      "events": [
+        "two_rows_same_display_name",
+        "first_row_complete"
+      ],
+      "expected": {
+        "observation": "independent_rows",
+        "checkpoint": "none",
+        "continuation": "not_applicable",
+        "secondRowComplete": false,
+        "mediaIdentityInferred": false
+      }
+    },
+    {
+      "id": "linked_completion",
+      "targets": [
+        "pc_history",
+        "android_history",
+        "ios_private_history"
+      ],
+      "events": [
+        "explicit_mapping_admitted",
+        "linked_attempt_complete",
+        "ancestor_continuation_requested"
+      ],
+      "expected": {
+        "observation": "rejected",
+        "checkpoint": "none",
+        "continuation": "blocked",
+        "sourceReads": 0
+      }
+    },
+    {
+      "id": "cold_picker_pending",
+      "targets": [
+        "ios_picker_history"
+      ],
+      "events": [
+        "attempt_admitted",
+        "picker_presented",
+        "process_ends_before_terminal_record",
+        "cold_read"
+      ],
+      "expected": {
+        "observation": "unconfirmed",
+        "checkpoint": "none",
+        "continuation": "new_explicit_export_required",
+        "saveConfirmed": false,
+        "inspectDestination": true,
+        "sourceReads": 0,
+        "pickerLaunches": 0,
+        "perFileMappingConfirmed": false
+      }
+    },
+    {
+      "id": "picker_terminal_write_failed_cold",
+      "targets": [
+        "ios_picker_history"
+      ],
+      "events": [
+        "attempt_admitted",
+        "picker_presented",
+        "unique_destinations_reported",
+        "terminal_history_write_failed",
+        "cold_read"
+      ],
+      "expected": {
+        "observation": "unconfirmed",
+        "checkpoint": "none",
+        "continuation": "new_explicit_export_required",
+        "saveConfirmed": false,
+        "inspectDestination": true,
+        "sourceReads": 0,
+        "pickerLaunches": 0,
+        "perFileMappingConfirmed": false
+      }
+    }
+  ]
+}

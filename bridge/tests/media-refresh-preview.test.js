@@ -103,7 +103,8 @@ function fixture(t, { dated = false } = {}) {
     sleep: async (delay) => { delays.push(delay); },
     clampFps: (value) => value,
     reviewResponse: () => ({ items: [LATEST, OLD] }),
-    chooseMediaWritable: async () => ({ writable: null, cancelled: false }),
+    chooseMediaWritable: async () => ({ handle: null, cancelled: false }),
+    mediaHistoryCall: async () => ({ ok: true, ticket: {}, receipt: {}, updated: true }),
     saveMediaBlob: (blob, name) => savedBlobs.push({ blob, name }),
     fetch: async (url, options) => {
       assert.equal(options.method, "DELETE", "Only playback-ticket cleanup may use fetch");
@@ -552,7 +553,7 @@ test("closing an image preview leaves its independently requested original save 
     s.previews[0].reject(new Error("Synthetic retired preview failed after original save"));
     await preview;
     assert.deepEqual(previewSnapshot(s), current);
-    assert.equal(s.feedback.some((message) => message.startsWith("downloaded:")), true);
+    assert.equal(s.feedback.some((message) => message.startsWith("downloadHandedOff:")), true);
     assertReadOnly(s);
   });
 

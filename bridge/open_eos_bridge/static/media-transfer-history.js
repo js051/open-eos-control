@@ -10,14 +10,29 @@
   // inventing a selected roster, and upgraded in the same atomic transaction as
   // the next mutation. Old clients reject newer snapshots instead of overwriting them.
   const DATABASE_VERSION = 1;
-  const SCHEMA_VERSION = 3;
+  const SCHEMA_VERSION = 4;
   const MAX_ENTRIES = 100;
   const MAX_FILENAME_LENGTH = 120;
   const MAX_SNAPSHOT_LENGTH = 100 * 1024;
   const STORE = "history";
   const KEY = "state";
   const DESTINATION = "browser-directory";
-  const OUTCOMES = ["in-progress", "completed", "failed", "cancelled-or-unknown"];
+  const DIRECTORY_OUTCOMES = ["in-progress", "completed", "failed", "cancelled-or-unknown"];
+  const OBSERVATION_DESTINATIONS = ["browser-download", "browser-file"];
+  const OUTCOMES = [...DIRECTORY_OUTCOMES, "handoff-requested", "close-confirmed"];
+
+  // These are observed browser checkpoints, never interchangeable save receipts.
+  // Download handoff has no save callback. Single-file close is not a worklist row.
+  function validDestinationOutcome(entry, version) {
+    if (entry.destination === DESTINATION) return DIRECTORY_OUTCOMES.includes(entry.outcome);
+    if (version !== 4 || !OBSERVATION_DESTINATIONS.includes(entry.destination)) return false;
+    if (["in-progress", "failed", "cancelled-or-unknown"].includes(entry.outcome)) return true;
+    if (entry.destination === "browser-file" && entry.outcome === "close-confirmed") {
+      return !entry.mayRemain && !entry.outcomeUnknown;
+    }
+    return entry.destination === "browser-download" && entry.outcome === "handoff-requested"
+      && !entry.mayRemain && entry.outcomeUnknown;
+  }
   const LEGACY_SNAPSHOT_FIELDS = ["schemaVersion", "epoch", "nextSequence", "entries"];
   const SNAPSHOT_FIELDS = [...LEGACY_SNAPSHOT_FIELDS, "plans"];
   const PLAN_FIELDS = ["batchId", "createdAtMillis", "rows"];
@@ -97,7 +112,7 @@
   }
 
   function validateSnapshot(snapshot) {
-    if (snapshot && ![1, 2, SCHEMA_VERSION].includes(snapshot.schemaVersion)) return "unsupported-schema";
+    if (snapshot && ![1, 2, 3, SCHEMA_VERSION].includes(snapshot.schemaVersion)) return "unsupported-schema";
     if (!exactFields(snapshot, snapshot?.schemaVersion === 1 ? LEGACY_SNAPSHOT_FIELDS : SNAPSHOT_FIELDS) || !integer(snapshot.epoch)
       || !integer(snapshot.nextSequence) || !Array.isArray(snapshot.entries)
       || snapshot.entries.length > MAX_ENTRIES) return "corrupt";
@@ -111,7 +126,7 @@
         || plan.rows.length === 0 || plan.rows.length > MAX_ENTRIES) return "corrupt";
       batches.add(plan.batchId);
       for (const [index, row] of plan.rows.entries()) {
-        if (!(exactFields(row, ROW_FIELDS) || (snapshot.schemaVersion === 3
+        if (!(exactFields(row, ROW_FIELDS) || ([3, 4].includes(snapshot.schemaVersion)
           && exactFields(row, [...ROW_FIELDS, "origin"])
           && exactFields(row.origin, ["batchId", "rowId"])
           && identifier(row.origin.batchId) && identifier(row.origin.rowId))) || !identifier(row.rowId) || rows.has(row.rowId)
@@ -138,7 +153,8 @@
         || typeof entry.filename !== "string" || entry.filename.length > MAX_FILENAME_LENGTH
         || (planned ? planned.batchId !== entry.batchId || planned.row.filename !== entry.filename
           : batches.has(entry.batchId) || sanitizeFilename(entry.filename) !== entry.filename)
-        || entry.destination !== DESTINATION
+        || !validDestinationOutcome(entry, snapshot.schemaVersion)
+        || (planned && entry.destination !== DESTINATION)
         || !timestamp(entry.startedAtMillis) || !OUTCOMES.includes(entry.outcome)
         || typeof entry.mayRemain !== "boolean" || typeof entry.outcomeUnknown !== "boolean"
         || !(entry.bytesTransferred === null || integer(entry.bytesTransferred))) return "corrupt";
@@ -189,7 +205,9 @@
    * planned batch persists every selected row atomically before any original or
    * destination is opened. Dynamic foreground imports only record actual starts.
    * Neither is a resumable queue or evidence that a completed file still exists;
-   * completion only records a confirmed writer.close, not fsync or existence.
+   * directory completion and browser-file close-confirmed only record writer.close,
+   * not fsync or existence. Browser-download handoff-requested never confirms saving.
+   * Single-file observations share capacity but have no worklist or replay capability.
    * Await admission, then recheck the transfer's cancellation/session ownership.
    * Call finish at confirmed close or failure, independent of current UI ownership.
    * Once a transfer actually runs, finishing history must never change its return
@@ -505,7 +523,7 @@
       return transact("readwrite", (snapshot) => {
         if (!tickets.has(ticket) || plannedTickets.has(ticket)) return { result: failure("invalid-ticket") };
         if (ticket.epoch !== snapshot.epoch) return { result: failure("stale-ticket") };
-        if (input.destination !== DESTINATION || typeof input.filename !== "string"
+        if (![DESTINATION, ...OBSERVATION_DESTINATIONS].includes(input.destination) || typeof input.filename !== "string"
           || input.filename.length > 4096 || snapshot.nextSequence >= Number.MAX_SAFE_INTEGER) {
           return { result: failure("invalid-input") };
         }
@@ -518,7 +536,7 @@
         const planned = plannedRows(snapshot);
         const receipt = Object.freeze({ receiptId, batchId: ticket.batchId, epoch: ticket.epoch });
         snapshot.entries.unshift({ receiptId, batchId: ticket.batchId, sequence: snapshot.nextSequence++,
-          filename: sanitizeFilename(input.filename), destination: DESTINATION, startedAtMillis,
+          filename: sanitizeFilename(input.filename), destination: input.destination, startedAtMillis,
           finishedAtMillis: null, outcome: "in-progress", mayRemain: false, outcomeUnknown: false, bytesTransferred: null });
         while (!fitsCapacity(snapshot)) {
           const removable = snapshot.entries.findLastIndex((entry) => !planned.has(entry.receiptId) && entry.outcome !== "in-progress");
@@ -535,7 +553,7 @@
       try {
         ({ outcome, mayRemain = false, outcomeUnknown = false, bytesTransferred = null } = input);
       } catch (_) { return failure("invalid-input"); }
-      if (receipts.has(receipt) && OUTCOMES.slice(1).includes(outcome)
+      if (receipts.has(receipt) && DIRECTORY_OUTCOMES.slice(1).includes(outcome)
         && typeof mayRemain === "boolean" && typeof outcomeUnknown === "boolean"
         && (bytesTransferred === null || integer(bytesTransferred))
         && !(outcome === "completed" && (mayRemain || outcomeUnknown))) {
@@ -553,7 +571,8 @@
         const finishedAtMillis = now();
         if (!OUTCOMES.slice(1).includes(outcome) || typeof mayRemain !== "boolean" || typeof outcomeUnknown !== "boolean"
           || !(bytesTransferred === null || integer(bytesTransferred)) || !timestamp(finishedAtMillis)
-          || (outcome === "completed" && (mayRemain || outcomeUnknown))) return { result: failure("invalid-input") };
+          || (outcome === "completed" && (mayRemain || outcomeUnknown))
+          || !validDestinationOutcome({ ...entry, outcome, mayRemain, outcomeUnknown }, SCHEMA_VERSION)) return { result: failure("invalid-input") };
         activeReceiptIds.delete(receipt.receiptId);
         Object.assign(entry, { outcome, mayRemain, outcomeUnknown, bytesTransferred,
           finishedAtMillis: Math.max(entry.startedAtMillis, finishedAtMillis) });

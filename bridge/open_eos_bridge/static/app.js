@@ -516,9 +516,9 @@
       mediaSelectionClear: "Clear selection",
       mediaSelectionSummary: "{selected} selected · {hidden} hidden by filters · {notLoaded} not currently loaded",
       mediaSelectionHelp: "Selects loaded matches across pages, not unseen files on the card. Selection is kept when filters or scope change. Hidden and no-longer-loaded selections are included in the batch.",
-      mediaHistoryTitle: "Batch saving history",
-      mediaHistoryOpen: "Batch saving history",
-      mediaHistoryHelp: "Worklists and other started attempts share 100 rows in this browser profile and Bridge address. Queued rows have no confirmed attempt. Saved means the browser confirmed close at that time, not that the file still exists. Unconfirmed attempts may still be running in another tab. Names are display labels, not camera identity. Nothing reconnects or retries automatically; single-file browser downloads are excluded.",
+      mediaHistoryTitle: "Saving history",
+      mediaHistoryOpen: "Saving history",
+      mediaHistoryHelp: "Worklists and other started attempts share 100 rows in this browser profile and Bridge address. Queued rows have no confirmed attempt. Saved means the browser confirmed close at that time, not that the file still exists. Unconfirmed attempts may still be running in another tab. Names are display labels, not camera identity. Single-file browser handoff only means a download was requested; check Downloads for the save result. Single-file observations have no continuation action. Nothing reconnects or retries automatically.",
       mediaHistoryWarning: "Saving history is unavailable or incomplete. This does not change the actual file transfer result. Inspect the destination before retrying.",
       mediaHistoryLoading: "Loading history…",
       mediaHistoryUnavailable: "History could not be read. Existing records have not been cleared.",
@@ -527,6 +527,11 @@
       mediaHistoryQueued: "Queued; no confirmed attempt",
       mediaHistoryWorklistPosition: "Worklist {created} · item {position} of {total}",
       mediaHistoryLegacyAttempt: "Separate attempt; no complete worklist",
+      mediaHistoryBrowserDownload: "Single-file browser download; no continuation action",
+      mediaHistoryBrowserFile: "Single-file picker destination; no continuation action",
+      mediaHistoryHandoff: "Browser download requested; check Downloads for the save result",
+      mediaHistoryCloseConfirmed: "Browser confirmed file close at that time",
+      mediaSingleAdmissionFailed: "The download could not be recorded. No file writer was opened or original requested. Check history and the selected destination before starting again.",
       mediaWorklistAdmissionFailed: "The next worklist attempt could not be recorded. Saving stopped before opening its file or requesting the original. Inspect history before retrying.",
       mediaWorklistAdmissionUnknown: "The worklist save could not be confirmed. No files were opened or originals requested. Inspect history before starting a new batch.",
       mediaHistoryCompleted: "Saved at the time of transfer",
@@ -638,7 +643,9 @@
       cancelDownload: "Cancel download",
       cancellingDownload: "Cancelling download",
       downloadCancelled: "Download cancelled",
-      downloaded: "Downloaded {name}",
+      downloaded: "Browser confirmed file close for {name}",
+      downloadHandedOff: "Handed {name} to your browser. Check Downloads for the save result.",
+      downloadUnconfirmed: "The save result is unconfirmed. Check the destination before trying again.",
       uploadMedia: "Upload media",
       uploading: "Uploading {name}",
       uploadProgress: "{transferred} of {total} ({percent}%)",
@@ -1113,9 +1120,9 @@
       mediaSelectionClear: "清除選取",
       mediaSelectionSummary: "已選 {selected} 項 · 篩選隱藏 {hidden} 項 · 目前未載入 {notLoaded} 項",
       mediaSelectionHelp: "跨頁選取已載入且符合篩選的項目，不包含記憶卡上尚未載入的檔案。變更篩選或範圍會保留選取；已隱藏與目前未載入的選取項目也包含在批次中。",
-      mediaHistoryTitle: "批次儲存紀錄",
-      mediaHistoryOpen: "批次儲存紀錄",
-      mediaHistoryHelp: "此瀏覽器設定檔及 Bridge 網址的工作清單與其他已開始嘗試共用 100 列。排隊列尚未確認開始嘗試；已儲存只代表當時瀏覽器確認 close，不保證檔案現在仍存在。未確認嘗試也可能仍在另一分頁執行。名稱僅供顯示，不能識別相機來源；不會自動連線或重試，不含單檔瀏覽器下載。",
+      mediaHistoryTitle: "儲存紀錄",
+      mediaHistoryOpen: "儲存紀錄",
+      mediaHistoryHelp: "此瀏覽器設定檔及 Bridge 網址的工作清單與其他已開始嘗試共用 100 列。排隊列尚未確認開始嘗試；已儲存只代表當時瀏覽器確認 close，不保證檔案現在仍存在。未確認嘗試也可能仍在另一分頁執行。名稱僅供顯示，不能識別相機來源；單檔瀏覽器交接只代表已提出下載要求，請查看下載項目確認儲存結果。單檔紀錄沒有續接操作；不會自動連線或重試。",
       mediaHistoryWarning: "儲存紀錄無法使用或不完整，不影響實際檔案傳輸結果。重試前請先查看目的地。",
       mediaHistoryLoading: "正在讀取紀錄…",
       mediaHistoryUnavailable: "無法讀取紀錄，未清除既有資料。",
@@ -1124,6 +1131,11 @@
       mediaHistoryQueued: "排隊中；尚未確認開始嘗試",
       mediaHistoryWorklistPosition: "工作清單 {created} · 第 {position} / {total} 項",
       mediaHistoryLegacyAttempt: "獨立嘗試；沒有完整工作清單",
+      mediaHistoryBrowserDownload: "單檔瀏覽器下載；沒有續接操作",
+      mediaHistoryBrowserFile: "單檔選檔器目的地；沒有續接操作",
+      mediaHistoryHandoff: "已要求瀏覽器下載；請查看下載項目確認儲存結果",
+      mediaHistoryCloseConfirmed: "瀏覽器當時已確認關閉檔案",
+      mediaSingleAdmissionFailed: "無法確認下載紀錄，尚未開啟檔案 writer 或請求原檔。請先檢查紀錄與所選目的地，再重新開始。",
       mediaWorklistAdmissionFailed: "無法記錄下一項工作清單嘗試，已在開啟檔案或請求原檔前停止。重試前請查看紀錄。",
       mediaWorklistAdmissionUnknown: "無法確認工作清單已儲存，尚未開啟檔案或請求原檔。開始新批次前請查看紀錄。",
       mediaHistoryCompleted: "傳輸當時已儲存",
@@ -1235,7 +1247,9 @@
       cancelDownload: "取消下載",
       cancellingDownload: "正在取消下載",
       downloadCancelled: "已取消下載",
-      downloaded: "已下載 {name}",
+      downloaded: "瀏覽器已確認關閉檔案 {name}",
+      downloadHandedOff: "已將 {name} 交給瀏覽器下載，請在下載項目中確認儲存結果。",
+      downloadUnconfirmed: "儲存結果尚未確認。再次嘗試前，請先檢查儲存位置。",
       uploadMedia: "上傳媒體",
       uploading: "正在上傳 {name}",
       uploadProgress: "已傳輸 {transferred}／{total}（{percent}%）",
@@ -6085,7 +6099,7 @@
       return;
     }
     ui.mediaHistoryStatus.textContent = rows.length ? t("mediaHistoryCount", { count: rows.length }) : t("mediaHistoryEmpty");
-    const outcomeKeys = { completed: "mediaHistoryCompleted", failed: "mediaHistoryFailed", queued: "mediaHistoryQueued", "cancelled-or-unknown": "mediaHistoryUnconfirmed" };
+    const outcomeKeys = { "handoff-requested": "mediaHistoryHandoff", "close-confirmed": "mediaHistoryCloseConfirmed", completed: "mediaHistoryCompleted", failed: "mediaHistoryFailed", queued: "mediaHistoryQueued", "cancelled-or-unknown": "mediaHistoryUnconfirmed" };
     const draft = { session: state.session, epoch: result.epoch, bindings: new Map(),
       loaded: [...state.media], acknowledged: false };
     mediaContinuationDraft = draft;
@@ -6097,7 +6111,8 @@
       const name = document.createElement("strong");
       name.textContent = entry.filename;
       const scope = document.createElement("span");
-      scope.textContent = plan ? t("mediaHistoryWorklistPosition", { position, total: plan.rows.length, created: new Date(plan.createdAtMillis).toLocaleString(resolvedLanguage() === "zh-TW" ? "zh-TW" : "en") }) : t("mediaHistoryLegacyAttempt");
+      scope.textContent = plan ? t("mediaHistoryWorklistPosition", { position, total: plan.rows.length, created: new Date(plan.createdAtMillis).toLocaleString(resolvedLanguage() === "zh-TW" ? "zh-TW" : "en") }) : t(entry.destination === "browser-download" ? "mediaHistoryBrowserDownload"
+        : entry.destination === "browser-file" ? "mediaHistoryBrowserFile" : "mediaHistoryLegacyAttempt");
       const detail = document.createElement("span");
       detail.textContent = t(outcomeKeys[entry.outcome] || "mediaHistoryUnconfirmed");
       const when = document.createElement("time");
@@ -7631,15 +7646,15 @@
   async function chooseMediaWritable(item) {
     const pickerAvailable = typeof window.showSaveFilePicker === "function";
     if (!mediaTransfer.shouldUseDirectWriter(item.sizeBytes, pickerAvailable)) {
-      return { writable: null, cancelled: false };
+      return { handle: null, cancelled: false };
     }
     try {
       const handle = await window.showSaveFilePicker({
         suggestedName: mediaTransfer.safeDownloadName(item.name),
       });
-      return { writable: await handle.createWritable(), cancelled: false };
+      return { handle, cancelled: false };
     } catch (error) {
-      if (mediaTransfer.isAbortError(error)) return { writable: null, cancelled: true };
+      if (mediaTransfer.isAbortError(error)) return { handle: null, cancelled: true };
       throw error;
     }
   }
@@ -7670,10 +7685,15 @@
     renderMediaPreviewNavigation();
     let writable = null;
     let writableClosed = false;
+    let creationRequested = false;
+    let closeRequested = false;
+    let handoffRequested = false;
+    let historyReceipt = null;
     let transfer = null;
     try {
+      // Invoke the picker before the first await/IDB request to preserve the
+      // trusted user gesture. Only the chosen handle stays in this local stack.
       const destination = await chooseMediaWritable(item);
-      writable = destination.writable;
       // Disconnect can finish while the browser is still creating the destination.
       // An old handle must be discarded before any request can use another session.
       if (!ownsDownload() || owner.cancelled) throw mediaTransfer.cancellationError();
@@ -7681,6 +7701,22 @@
         setOperationState(t("ready"));
         return;
       }
+      const ticket = await mediaHistoryCall("createBatchTicket");
+      if (!ownsDownload() || owner.cancelled) throw mediaTransfer.cancellationError();
+      if (!ticket.ok) throw new Error(t("mediaSingleAdmissionFailed"));
+      const started = await mediaHistoryCall("startAttempt", ticket.ticket, {
+        filename: item.name, destination: destination.handle ? "browser-file" : "browser-download",
+      });
+      if (started.ok) historyReceipt = started.receipt;
+      // Confirm durable admission before opening a writer or reading originals.
+      // Only terminal recording is best effort after real I/O has settled.
+      if (!ownsDownload() || owner.cancelled) throw mediaTransfer.cancellationError();
+      if (!started.ok) throw new Error(t("mediaSingleAdmissionFailed"));
+      if (destination.handle) {
+        creationRequested = true;
+        writable = await destination.handle.createWritable();
+      }
+      if (!ownsDownload() || owner.cancelled) throw mediaTransfer.cancellationError();
       const controller = new AbortController();
       state.mediaDownloadPreparing = false;
       transfer = {
@@ -7716,26 +7752,47 @@
       });
       if (controller.signal.aborted || owner.cancelled || !ownsDownload()) throw mediaTransfer.cancellationError();
       if (writable) {
+        closeRequested = true;
         await writable.close();
         writableClosed = true;
       } else if (result.blob) {
+        handoffRequested = true;
         saveMediaBlob(result.blob, item.name);
       } else {
         throw new Error("Media download completed without a file destination.");
       }
-      if (!ownsDownload()) return;
-      showToast(t("downloaded", { name: item.name }));
+      // Record the observed checkpoint even if cancellation/session retirement
+      // arrived while close was pending. Recording cannot undo successful I/O.
+      if (historyReceipt) await mediaHistoryCall("finishAttempt", historyReceipt, {
+        outcome: writableClosed ? "close-confirmed" : "handoff-requested",
+        outcomeUnknown: !writableClosed, bytesTransferred: result.bytesTransferred,
+      });
+      if (!ownsDownload() || (owner.cancelled && owner.silent)) return;
+      // An anchor click is only a browser handoff; it has no completion callback.
+      showToast(t(writableClosed ? "downloaded" : "downloadHandedOff", { name: item.name }));
       setOperationState(t("ready"));
     } catch (error) {
+      // Rejected close may already have installed the file. Successful abort
+      // cannot prove otherwise, and failed abort leaves the output uncertain too.
+      let outcomeUnknown = (creationRequested && !writable) || (closeRequested && !writableClosed) || handoffRequested;
       if (writable && !writableClosed) {
         try {
           await writable.abort(error);
         } catch (_) {
-          // The browser may already have closed or discarded the temporary file.
+          outcomeUnknown = true;
         }
       }
-      if (!ownsDownload()) return;
-      if (owner.cancelled || mediaTransfer.isAbortError(error) || transfer?.controller.signal.aborted) {
+      if (historyReceipt) await mediaHistoryCall("finishAttempt", historyReceipt, {
+        outcome: owner.cancelled || mediaTransfer.isAbortError(error) || transfer?.controller.signal.aborted
+          ? "cancelled-or-unknown" : "failed",
+        outcomeUnknown, mayRemain: outcomeUnknown,
+        bytesTransferred: transfer?.bytesTransferred ?? null,
+      });
+      if (!ownsDownload() || (owner.cancelled && owner.silent)) return;
+      if (outcomeUnknown) {
+        setOperationState(t("downloadUnconfirmed"), true);
+        showToast(t("downloadUnconfirmed"), true);
+      } else if (owner.cancelled || mediaTransfer.isAbortError(error) || transfer?.controller.signal.aborted) {
         if (!(transfer?.silent ?? owner.silent)) {
           showToast(t("downloadCancelled"));
           setOperationState(t("ready"));
@@ -7755,6 +7812,7 @@
         renderAvailability();
         renderMediaPreviewNavigation();
       }
+      if (ui.mediaHistoryDialog?.open) void refreshMediaHistory().catch(() => {});
     }
   }
 
