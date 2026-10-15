@@ -1734,3 +1734,232 @@ for (const stage of ["creation", "close", "cleanup"]) {
     assert.equal(subject.requests.length, stage === "creation" ? 0 : 1);
   });
 }
+
+// Fixed two-axis contract shared byte-for-byte with iOS and Android. The adapter
+// below supplies synthetic transport observations, never expected production results.
+const reviewEvidenceVectors = JSON.parse(fs.readFileSync(path.join(__dirname,
+  "../../contracts/capture-review-evidence/v1/review-evidence-vectors.json"), "utf8"));
+const evidenceOld = [item("OLD_A"), item("OLD_B")];
+const evidencePhoto = item("NEW_PHOTO", "2020-01-01T00:00:00Z");
+const evidenceVideo = { ...item("NEW_VIDEO"), name: "NEW_VIDEO.MP4", kind: "video", contentType: "video/mp4" };
+const evidenceFound = [evidenceOld[0], evidencePhoto, evidenceVideo,
+  { ...evidencePhoto, id: "NEW_PHOTO_2" }, { ...evidenceVideo, id: "NEW_VIDEO_2" }];
+
+function installEvidenceReads(subject, reads, intent = "photo") {
+  let next = 0;
+  const previousApi = subject.api;
+  subject.api = async (url, options = {}) => {
+    if (url.endsWith("/recording/stop")) {
+      subject.requests.push({ url, method: options.method || "GET", json: options.json });
+      return { mode: "Movie", recording: false };
+    }
+    if (!url.endsWith("/media?limit=8")) return previousApi(url, options);
+    subject.requests.push({ url, method: options.method || "GET", signal: options.signal });
+    assert.ok(next < reads.length, "Bounded review exceeded the fixture read budget");
+    const read = reads[next++];
+    if (read === "failure") throw new Error("Synthetic list read failure");
+    if (read === "malformed") return { items: null };
+    const items = read === "empty" ? [] : read === "known-only" ? evidenceOld :
+      read === "wrong-kind" ? [intent === "photo" ? evidenceVideo : evidencePhoto] : evidenceFound;
+    return { items };
+  };
+}
+
+for (const vector of reviewEvidenceVectors.cases) {
+  test(`shared review evidence: ${vector.id}`, async () => {
+    const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+    installLatestMediaRenderer(subject);
+    if (vector.intent === "video") {
+      subject.state.captureMode = "video";
+      subject.state.status = { mode: "Movie", recording: true };
+    }
+    installEvidenceReads(subject, vector.reads, vector.intent);
+    await captureAndReview(subject);
+    assert.deepEqual(JSON.parse(JSON.stringify(subject.state.latestMediaReviewEvidence)), vector.expected);
+    assert.equal(Object.isFrozen(subject.state.latestMediaReviewEvidence), true);
+    assert.equal(subject.state.latestMediaItem?.id, vector.expected.candidateId || evidenceOld[0].id);
+    assert.equal(subject.state.latestMediaReviewStatus, vector.expected.candidateId ? "READY" : "NOT_READY");
+    assert.equal(listingRequests(subject).length, vector.reads.length);
+    assert.deepEqual(subject.delays, reviewEvidenceVectors.retryDelaysMillis.slice(0, vector.reads.length - 1));
+    assert.equal(writes(subject).length, 1, "Only the original acknowledged capture/stop may write");
+    assert.equal(subject.state.latestMediaController, null);
+    assert.equal(subject.state.latestMediaRefreshPromise, null);
+    if (!vector.expected.candidateId) {
+      const prefix = vector.intent === "video" ? "latestVideo" : "latestMedia";
+      const suffix = vector.expected.successfulReads && vector.expected.lastCompletedRead === "failure" ?
+        "MixedReadFailed" : vector.expected.successfulReads ? "NotReady" : "ReadFailed";
+      assert.equal(subject.ui.latestMediaReviewStatus.textContent, prefix + suffix);
+    }
+  });
+}
+
+for (const vector of reviewEvidenceVectors.retryCases) {
+  test(`shared review retry evidence: ${vector.id}`, async () => {
+    const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+    installEvidenceReads(subject, vector.first);
+    await captureAndReview(subject);
+    const previous = subject.state.latestMediaReviewEvidence;
+    installEvidenceReads(subject, vector.second);
+    await subject.retryLatestMedia();
+    assert.deepEqual(JSON.parse(JSON.stringify(subject.state.latestMediaReviewEvidence)), vector.expected);
+    assert.notEqual(subject.state.latestMediaReviewEvidence, previous);
+    assert.equal(Object.isFrozen(previous), true);
+    assert.equal(listingRequests(subject).length, 8);
+    assert.equal(writes(subject).length, 1, "A retry must not resend shutter/REC/AF");
+  });
+}
+
+for (const retirement of ["zero-completed", "in-delay", "same-id-session", "new-attempt"]) {
+  test(`retired review preserves terminal evidence: ${retirement}`, async () => {
+    const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+    installEvidenceReads(subject, ["failure", "failure", "failure", "failure"]);
+    await captureAndReview(subject);
+    const previous = subject.state.latestMediaReviewEvidence;
+    const previousAttempt = subject.state.latestMediaReviewAttempt;
+    const gate = deferred();
+    const originalApi = subject.api;
+    subject.api = async (url, options = {}) => {
+      if (!url.endsWith("/media?limit=8")) return originalApi(url, options);
+      subject.requests.push({ url, method: "GET", signal: options.signal });
+      if (retirement === "in-delay") return { items: [] };
+      await gate.promise;
+      if (retirement === "same-id-session") throw new Error("Retired owner failure");
+      return { items: evidenceFound };
+    };
+    if (retirement === "in-delay") subject.sleep = () => gate.promise;
+    const pending = subject.retryLatestMedia();
+    await eventually(() => listingRequests(subject).length === 5, "new invocation read admission");
+    if (retirement === "in-delay") await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(subject.state.latestMediaReviewEvidence, previous, "Partial progress is not terminal publication");
+    subject.cancelLatestMediaRefresh();
+    assert.equal(subject.state.latestMediaReviewEvidence, previous);
+    assert.equal(subject.state.latestMediaReviewStatus, "NOT_READY");
+    if (retirement === "same-id-session") subject.state.session = { id: subject.state.session.id };
+    if (retirement === "new-attempt") subject.state.latestMediaReviewAttempt = { ...previousAttempt };
+    gate.resolve();
+    await pending;
+    assert.equal(subject.state.latestMediaReviewEvidence, previous, "A late success/failure cannot overwrite prior evidence");
+    assert.equal(subject.state.latestMediaItem, evidenceOld[0]);
+    assert.equal(listingRequests(subject).length, 5);
+    assert.equal(writes(subject).length, 1);
+    assert.equal(subject.state.latestMediaController, null);
+  });
+}
+
+test("new capture cancelled before a completed list check never fabricates failure evidence", async () => {
+  const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+  const gate = deferred();
+  const originalApi = subject.api;
+  subject.api = async (url, options = {}) => {
+    if (!url.endsWith("/media?limit=8")) return originalApi(url, options);
+    subject.requests.push({ url, method: "GET", signal: options.signal });
+    await gate.promise;
+    return { items: [] };
+  };
+  await subject.operateShutter();
+  const pending = subject.state.latestMediaRefreshPromise;
+  subject.cancelLatestMediaRefresh();
+  gate.resolve();
+  await pending;
+  assert.equal(subject.state.latestMediaReviewEvidence, null);
+  assert.equal(subject.state.latestMediaReviewReadFailed, false);
+  assert.equal(subject.state.latestMediaReviewStatus, "IDLE");
+  assert.equal(writes(subject).length, 1);
+});
+
+for (const response of [null, {}, { items: {} }, { items: [null] }, { items: [{ id: "" }] },
+  { items: [{ id: "NEW" }] }, { items: [{ id: "NEW", name: "" }] }, { items: [{ id: "NEW", name: 42 }] }]) {
+  test(`invalid list shape cannot masquerade as observed empty: ${JSON.stringify(response)}`, async () => {
+    const subject = context();
+    const originalApi = subject.api;
+    subject.api = async (url, options = {}) => {
+      if (!url.endsWith("/media?limit=8")) return originalApi(url, options);
+      subject.requests.push({ url, method: "GET" });
+      return response;
+    };
+    await captureAndReview(subject);
+    assert.equal(subject.state.latestMediaReviewEvidence.observation, "unread");
+    assert.equal(subject.state.latestMediaReviewEvidence.successfulReads, 0);
+    assert.equal(subject.state.latestMediaReviewEvidence.failedReads, 4);
+    assert.equal(subject.state.latestMediaItem, OLD_A);
+    assert.equal(writes(subject).length, 1);
+  });
+}
+
+for (const replacement of ["same-id-session", "attempt"]) {
+  test(`identity fencing rejects late result without explicit cancellation: ${replacement}`, async () => {
+    const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+    installEvidenceReads(subject, ["empty", "failure", "failure", "failure"]);
+    await captureAndReview(subject);
+    const previous = subject.state.latestMediaReviewEvidence;
+    const gate = deferred();
+    subject.api = async (url, options = {}) => {
+      assert.ok(url.endsWith("/media?limit=8"));
+      subject.requests.push({ url, method: "GET", signal: options.signal });
+      await gate.promise;
+      return { items: evidenceFound };
+    };
+    const pending = subject.retryLatestMedia();
+    await eventually(() => listingRequests(subject).length === 5, "held retry read");
+    if (replacement === "same-id-session") subject.state.session = { id: subject.state.session.id };
+    else subject.state.latestMediaReviewAttempt = { ...subject.state.latestMediaReviewAttempt };
+    gate.resolve();
+    await pending;
+    assert.equal(subject.state.latestMediaReviewEvidence, previous);
+    assert.equal(subject.state.latestMediaItem, evidenceOld[0]);
+    assert.notEqual(subject.state.latestMediaReviewStatus, "READY");
+    assert.equal(listingRequests(subject).length, 5);
+    assert.equal(writes(subject).length, 1);
+  });
+}
+
+for (const language of ["en", "zh-TW"]) {
+  for (const intent of ["photo", "video"]) {
+    test(`mixed last-read failure is explicit in ${language} ${intent} UI`, async () => {
+      const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+      installLatestMediaRenderer(subject);
+      const dictionarySource = source.slice(source.indexOf("  const messages = {"),
+        source.indexOf("  const commonSettingValueKeys = {"));
+      const dictionaries = vm.runInNewContext(`${dictionarySource}\nmessages;`);
+      subject.t = (key) => dictionaries[language][key];
+      if (intent === "video") {
+        subject.state.captureMode = "video";
+        subject.state.status = { mode: "Movie", recording: true };
+      }
+      installEvidenceReads(subject, ["empty", "failure", "failure", "failure"], intent);
+      await captureAndReview(subject);
+      const label = subject.ui.latestMediaReviewStatus.textContent;
+      assert.match(label, language === "en" ? /No new .* observed/ : /尚未觀察到/);
+      assert.match(label, language === "en" ? /latest list read failed; current visibility is unconfirmed/ : /最後一次清單讀取失敗，目前可見情況未確認/);
+      assert.match(label, language === "en" ? /without/ : /不會再次/);
+      assert.equal(writes(subject).length, 1);
+    });
+  }
+}
+
+for (const completedBeforeAbort of [0, 1]) {
+  test(`current-owner abort restores terminal evidence after ${completedBeforeAbort} reads`, async () => {
+    const subject = context({ loaded: evidenceOld, latest: evidenceOld[0] });
+    installEvidenceReads(subject, ["empty", "failure", "failure", "failure"]);
+    await captureAndReview(subject);
+    const previous = subject.state.latestMediaReviewEvidence;
+    let read = 0;
+    subject.api = async (url, options = {}) => {
+      assert.ok(url.endsWith("/media?limit=8"));
+      subject.requests.push({ url, method: "GET", signal: options.signal });
+      if (read++ < completedBeforeAbort) return { items: [] };
+      const error = new Error("Synthetic retired listing");
+      error.name = "AbortError";
+      throw error;
+    };
+    await subject.retryLatestMedia();
+    assert.equal(subject.state.latestMediaReviewEvidence, previous);
+    assert.equal(subject.state.latestMediaReviewStatus, "NOT_READY");
+    assert.equal(subject.state.latestMediaReviewReadFailed, true);
+    assert.equal(subject.state.latestMediaThumbnailLoading, false);
+    assert.equal(subject.state.latestMediaController, null);
+    assert.equal(subject.state.latestMediaRefreshPromise, null);
+    assert.equal(listingRequests(subject).length, 5 + completedBeforeAbort);
+    assert.equal(writes(subject).length, 1);
+  });
+}
