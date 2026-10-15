@@ -687,9 +687,9 @@
     <string name="monitoring_assists">Monitoring assists</string>
     <string name="monitoring_assists_rtp_unavailable">Histogram, luma waveform, LUT preview, zebra, false color, and focus peaking require decoded Live View frames. Frame guides and desqueeze remain available.</string>
     <string name="native_monitor_lut_unavailable">Native RTP scopes use sampled preview frames (up to 4 updates/sec). LUT preview is unavailable on this path; any loaded LUT is retained but not applied.</string>
-    <string name="native_monitor_sampled">Sampled displayed-image scopes · up to 4 updates/sec</string>
+    <string name="native_monitor_sampled">Sampled submitted-frame scopes · up to 4 updates/sec</string>
     <string name="native_monitor_waiting">Scopes: waiting for a fresh native frame</string>
-    <string name="native_monitor_no_data">Scopes: native frame pixels not ready</string>
+    <string name="native_monitor_no_data">Scopes: frame-matched pixels unavailable</string>
     <string name="native_monitor_failed">Scopes: frame sampling unavailable</string>
     <string name="native_monitor_stale">Scopes: waiting for a fresh sample</string>
     <string name="histogram">Histogram</string>

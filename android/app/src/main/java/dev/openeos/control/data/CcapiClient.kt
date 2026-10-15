@@ -3282,7 +3282,7 @@ class CcapiClient(
             )
             session.awaitReady(RTP_FIRST_VIDEO_TIMEOUT_MILLIS)
             currentCoroutineContext().ensureActive()
-            check(LiveViewLifecycleEvidence(frameEvidence = "encoded-frame").evaluate().canPublishInputReady)
+            check(LiveViewLifecycleEvidence(frameEvidence = "decoded-frame").evaluate().canPublishDecoded)
             nativeLiveViewSession = session
             activeLiveViewSource = LiveViewSource.CCAPI_RTP
             observedFeatures.add(CameraFeature.LIVE_VIEW)

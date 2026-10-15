@@ -1000,6 +1000,8 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
     }
     SideEffect { state.nativeLiveViewSession?.setVideoLut(nativeLut) }
     val nativeMonitor by nativeSampler.result.collectAsState()
+    val noNativeFrame = remember { MutableStateFlow<dev.openeos.control.data.NativeLiveViewRenderedFrame?>(null) }
+    val latestNativeFrame by (state.nativeLiveViewSession?.renderedFrames ?: noNativeFrame).collectAsState()
     val nativeSamplingEnabled = !state.previewMode && state.liveViewAutoRefresh &&
         state.liveViewTemperatureAllowed && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
     val monitorRotation = LocalCameraControlTargetRotation.current
@@ -1097,8 +1099,12 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
     val monitorAnalysis = if (state.nativeLiveViewSession != null) {
         nativeMonitor.analysis.takeIf { nativeMonitorCurrent }
     } else decodedMonitorAnalysis.takeIf { pixelAnalysisAvailable }
-    val monitorOverlay = remember(monitorAnalysis) {
-        monitorAnalysis?.overlayPixels?.let { pixels ->
+    // Spatial overlays must match the newest submitted frame. Sampled scopes may retain an
+    // explicitly identified older frame for their bounded freshness window.
+    val overlayFrameMatches = state.nativeLiveViewSession == null ||
+        (nativeMonitor.identity != null && nativeMonitor.identity == latestNativeFrame?.identity)
+    val monitorOverlay = remember(monitorAnalysis, overlayFrameMatches) {
+        monitorAnalysis?.overlayPixels?.takeIf { overlayFrameMatches }?.let { pixels ->
             Bitmap.createBitmap(
                 pixels,
                 monitorAnalysis!!.width,

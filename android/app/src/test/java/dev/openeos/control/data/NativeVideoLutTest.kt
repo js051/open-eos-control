@@ -124,4 +124,26 @@ class NativeVideoLutTest {
         assertTrue(replacementStarted)
     }
 
+    @Test fun replacementSessionAndCancelledIntermediateCannotOvertakeTheSameSurfaceWriter() = runBlocking {
+        val registry = NativeVideoSurfaceDrainRegistry()
+        val target = Any()
+        val entered = CompletableDeferred<Unit>()
+        val drain = CompletableDeferred<Unit>()
+        val original = registry.launch(this, target, null) {
+            try { entered.complete(Unit); CompletableDeferred<Unit>().await() }
+            finally { withContext(NonCancellable) { drain.await() } }
+        }
+        entered.await()
+        val middle = registry.launch(this, target, null) { error("Cancelled middle cannot write") }
+        middle.cancel()
+        var started = false
+        val replacement = registry.launch(this, target, null) { started = true }
+        repeat(3) { yield() }
+        assertFalse(original.isCompleted)
+        assertFalse(started)
+        drain.complete(Unit)
+        replacement.join()
+        assertTrue(started)
+    }
+
 }

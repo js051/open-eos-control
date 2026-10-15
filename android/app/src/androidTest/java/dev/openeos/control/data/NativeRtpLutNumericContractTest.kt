@@ -60,7 +60,7 @@ class NativeRtpLutNumericContractTest {
             val input = vector.getJSONArray("inputRgb8").bytes()
             val expected = vector.getJSONArray("expectedRgb8").bytes()
             val presented = CompletableFuture<Unit>()
-            val renderer = NativeRtpLutRenderer(target, lut, { true }, { presented.complete(Unit) }, {
+            val renderer = NativeRtpLutRenderer(target, lut, { true }, { _, _ -> presented.complete(Unit) }, {
                 presented.completeExceptionally(AssertionError("$id: real GPU renderer failed"))
             })
             var bitmap: Bitmap? = null

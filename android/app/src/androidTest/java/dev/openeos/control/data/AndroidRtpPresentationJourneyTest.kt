@@ -36,21 +36,67 @@ class AndroidRtpPresentationJourneyTest {
         var sending: Job? = null
         try {
             session.setListener(events::add); session.start()
-            compose.runOnIdle { session.attachSurface(surface) }
             sending = launch(Dispatchers.IO) {
                 var sequence = 0
                 while (isActive) { sender.send(packet(port, sequence++)); delay(60) }
             }
-            session.awaitReady(2_000)
+            // Core readiness is real headless decode, before the UI receives/attaches its Surface.
+            session.awaitReady(5_000)
+            assertTrue(session.videoStatus.decodedFrames > 0)
+            assertNull(session.renderedFrames.value)
+            assertTrue(events.none { it is NativeLiveViewEvent.FrameRendered })
+            session.setMonitorSamplingEnabled(true)
+            compose.runOnIdle { session.attachSurface(surface) }
             withTimeout(5_000) { while (events.none { it is NativeLiveViewEvent.FrameRendered }) delay(20) }
             assertNotNull(session.renderedFrames.value)
             assertTrue(events.any { it is NativeLiveViewEvent.FrameRendered })
+            val first = requireNotNull(session.renderedFrames.value)
+            withTimeout(5_000) { while (session.renderedFrames.value?.let {
+                it.identity.frameId > first.identity.frameId && it.pixels != null
+            } != true) delay(20) }
+            assertEquals(NativeFrameEvidence.EGL_SURFACE_SUBMISSION, session.renderedFrames.value?.evidence)
+            assertTrue(session.videoStatus.presentationFrames >= 2)
+            session.setRenderingEnabled(false)
+            assertNull(session.renderedFrames.value)
+            delay(150)
+            assertNull(session.renderedFrames.value)
+            session.setRenderingEnabled(true)
+            withTimeout(5_000) { while (session.renderedFrames.value?.identity?.renderingGeneration == null) delay(20) }
+            assertTrue(requireNotNull(session.renderedFrames.value).identity.renderingGeneration > first.identity.renderingGeneration)
+            val revision = requireNotNull(session.renderedFrames.value).identity.lutRevision
+            session.setVideoLut(NativeVideoLut(2, floatArrayOf(0f, 0f, 0f), floatArrayOf(1f, 1f, 1f),
+                (0..1).flatMap { b -> (0..1).flatMap { g -> (0..1).flatMap { r -> listOf(b.toFloat(), g.toFloat(), r.toFloat()) } } }.toFloatArray()))
+            assertNull(session.renderedFrames.value)
+            withTimeout(5_000) { while (session.renderedFrames.value?.let {
+                it.identity.lutRevision > revision && it.pixels != null
+            } != true) delay(20) }
+            assertEquals(NativeVideoLutStatus.APPLIED, session.videoLutStatus.value)
             sending.cancelAndJoin()
             withTimeout(7_000) { while (events.none { it is NativeLiveViewEvent.Failed }) delay(20) }
             assertNull(session.renderedFrames.value)
             assertFalse(session.videoStatus.ready)
             assertEquals(1, events.count { it is NativeLiveViewEvent.Failed })
         } finally { sending?.cancelAndJoin(); sender.close(); session.close() }
+    }
+
+    @Test fun oneAccessUnitDrainsDecodedOutputWithoutWaitingForAnotherPacket() = runBlocking {
+        val port = DatagramSocket(0).use { it.localPort }
+        val session = AndroidCcapiRtpSession(CcapiRtpSessionDescription("synthetic", RtpMediaDescription("video", port, 103, "H264", 90_000), null),
+            "127.0.0.1", DatagramSocketBinder {})
+        DatagramSocket().use { sender ->
+            try {
+                session.start()
+                sender.send(packet(port, 1))
+                session.awaitReady(4_000)
+                assertEquals(1L, session.videoStatus.accessUnitsReceived)
+                assertEquals(1L, session.videoStatus.decodedFrames)
+                assertNull(session.renderedFrames.value)
+                session.close()
+                delay(150)
+                assertFalse(session.videoStatus.ready)
+                assertNull(session.renderedFrames.value)
+            } finally { session.close() }
+        }
     }
 
     @Test fun attachedSurfaceWithNoDecodedOutputFailsWithinItsOwnBound() = runBlocking {
@@ -66,6 +112,57 @@ class AndroidRtpPresentationJourneyTest {
             assertTrue(events.none { it is NativeLiveViewEvent.FrameRendered })
             assertNull(session.renderedFrames.value)
         } finally { session.close() }
+    }
+
+    @Test fun continuingHeadlessDecodeCannotWaitForeverForTheFirstSurface() = runBlocking {
+        verifyMissingSurfaceDeadline(detachAfterPresentation = false, startPaused = false)
+    }
+
+    @Test fun detachWithContinuingRtpHasABoundedSurfaceReplacementWait() = runBlocking {
+        verifyMissingSurfaceDeadline(detachAfterPresentation = true, startPaused = false)
+    }
+
+    @Test fun pausedHeadlessDecodeWaitsOnlyAfterRenderingResumes() = runBlocking {
+        verifyMissingSurfaceDeadline(detachAfterPresentation = false, startPaused = true)
+    }
+
+    private suspend fun verifyMissingSurfaceDeadline(detachAfterPresentation: Boolean, startPaused: Boolean) = coroutineScope {
+        val target = if (detachAfterPresentation) createSurface() else null
+        val port = DatagramSocket(0).use { it.localPort }
+        val events = CopyOnWriteArrayList<NativeLiveViewEvent>()
+        val session = AndroidCcapiRtpSession(CcapiRtpSessionDescription("synthetic", RtpMediaDescription("video", port, 103, "H264", 90_000), null),
+            "127.0.0.1", DatagramSocketBinder {})
+        val sender = DatagramSocket()
+        var sending: Job? = null
+        try {
+            session.setListener(events::add)
+            session.setRenderingEnabled(!startPaused)
+            session.start()
+            sending = launch(Dispatchers.IO) {
+                var sequence = 0
+                while (isActive) { sender.send(packet(port, sequence++)); delay(60) }
+            }
+            session.awaitReady(5_000)
+            if (startPaused) {
+                delay(5_500)
+                assertNull(session.videoStatus.error)
+                assertTrue(session.videoStatus.decodedFrames > 1)
+                session.setRenderingEnabled(true)
+            }
+            if (target != null) {
+                compose.runOnIdle { session.attachSurface(target) }
+                withTimeout(5_000) { while (session.renderedFrames.value == null) delay(20) }
+                compose.runOnIdle { session.detachSurface(target) }
+            }
+            val receivedBeforeWait = session.videoStatus.accessUnitsReceived
+            withTimeout(7_000) { while (events.none { it is NativeLiveViewEvent.Failed }) delay(20) }
+            val failure = events.filterIsInstance<NativeLiveViewEvent.Failed>().single()
+            assertTrue(failure.message.startsWith("RTP preview surface unavailable"))
+            assertTrue(session.videoStatus.accessUnitsReceived > receivedBeforeWait)
+            assertNull(session.renderedFrames.value)
+            assertFalse(session.videoStatus.ready)
+            if (target == null) assertTrue(events.none { it is NativeLiveViewEvent.FrameRendered })
+        } finally { sending?.cancelAndJoin(); sender.close(); session.close() }
     }
 
     private fun createSurface(): Surface {

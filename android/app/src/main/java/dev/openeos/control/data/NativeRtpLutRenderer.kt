@@ -15,14 +15,17 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
+import java.nio.ByteBuffer
+import kotlin.math.roundToInt
 
 /** MediaCodec -> external texture -> LUT -> the ORIGINAL visible Surface. No bitmap video overlay. */
 internal class NativeRtpLutRenderer(
     private val target: Surface,
-    private val lut: NativeVideoLut,
+    private val lut: NativeVideoLut?,
     private val canPresent: (Long) -> Boolean,
-    private val presented: (Long) -> Unit,
+    private val presented: (Long, NativeRtpFramePixels?) -> Unit,
     private val failed: () -> Unit,
+    private val sampleEnabled: () -> Boolean = { false },
 ) {
     private val thread = HandlerThread("eos-rtp-lut").apply { start() }
     private val handler = Handler(thread.looper)
@@ -40,6 +43,11 @@ internal class NativeRtpLutRenderer(
     private val textures = IntArray(2)
     private var program = 0
     private val transform = FloatArray(16)
+    private val sampleFramebuffer = IntArray(1)
+    private val sampleTexture = IntArray(1)
+    private var lastSampleNanos = 0L
+    private val effectiveLut = lut ?: NativeVideoLut(2, floatArrayOf(0f, 0f, 0f), floatArrayOf(1f, 1f, 1f),
+        (0..1).flatMap { b -> (0..1).flatMap { g -> (0..1).flatMap { r -> listOf(r.toFloat(), g.toFloat(), b.toFloat()) } } }.toFloatArray())
 
     val hasFailed: Boolean get() = broken.get()
 
@@ -64,10 +72,9 @@ internal class NativeRtpLutRenderer(
         if (closed.compareAndSet(false, true)) {
             presentationGate.configure(false)
             handler.post {
-                try { release() } finally {
-                    retired.complete(Unit)
-                    thread.quitSafely()
-                }
+                try { release(); retired.complete(Unit) }
+                catch (error: Exception) { retired.completeExceptionally(error) }
+                finally { thread.quitSafely() }
             }
         }
         retired.await()
@@ -98,7 +105,7 @@ internal class NativeRtpLutRenderer(
         check("GL_OES_EGL_image_external_essl3" in extensions)
         val maximum = IntArray(1)
         GLES30.glGetIntegerv(GLES30.GL_MAX_3D_TEXTURE_SIZE, maximum, 0)
-        check(lut.size <= maximum[0])
+        check(effectiveLut.size <= maximum[0])
         program = link(vertexShader, fragmentShader)
         GLES30.glGenTextures(2, textures, 0)
         GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textures[0])
@@ -113,8 +120,10 @@ internal class NativeRtpLutRenderer(
         for (axis in intArrayOf(GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_TEXTURE_WRAP_R)) {
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, axis, GLES30.GL_CLAMP_TO_EDGE)
         }
-        GLES30.glTexImage3D(GLES30.GL_TEXTURE_3D, 0, GLES30.GL_RGBA32F, lut.size, lut.size, lut.size,
-            0, GLES30.GL_RGBA, GLES30.GL_FLOAT, lut.rgbaTexture())
+        GLES30.glTexImage3D(GLES30.GL_TEXTURE_3D, 0, GLES30.GL_RGBA32F, effectiveLut.size, effectiveLut.size, effectiveLut.size,
+            0, GLES30.GL_RGBA, GLES30.GL_FLOAT, effectiveLut.rgbaTexture())
+        GLES30.glGenFramebuffers(1, sampleFramebuffer, 0)
+        GLES30.glGenTextures(1, sampleTexture, 0)
         checkGl()
         texture = SurfaceTexture(textures[0]).also { source ->
             source.setDefaultBufferSize(1920, 1080)
@@ -153,18 +162,58 @@ internal class NativeRtpLutRenderer(
             GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, textures[1])
             GLES30.glUniform1i(location("cube"), 1)
-            GLES30.glUniform1i(location("cubeSize"), lut.size)
-            GLES30.glUniform3fv(location("domainMin"), 1, lut.domainMinimum(), 0)
-            GLES30.glUniform3fv(location("domainMax"), 1, lut.domainMaximum(), 0)
+            GLES30.glUniform1i(location("cubeSize"), effectiveLut.size)
+            GLES30.glUniform3fv(location("domainMin"), 1, effectiveLut.domainMinimum(), 0)
+            GLES30.glUniform3fv(location("domainMax"), 1, effectiveLut.domainMaximum(), 0)
             GLES30.glUniformMatrix4fv(location("textureTransform"), 1, false, transform, 0)
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             checkGl()
             // Recheck retirement immediately before handing this frame to the visible Surface.
             if (!presentationGate.owns(ticket) || !canPresent(presentationTimeUs)) return
+            // Read from this exact source texture and immutable LUT, before swap. Never
+            // associate a later PixelCopy of the Surface with an earlier frame notification.
+            val now = System.nanoTime()
+            val sample = if (sampleEnabled() && now - lastSampleNanos >= 250_000_000L) {
+                lastSampleNanos = now
+                readFramePixels(width[0], height[0])
+            } else null
+            if (!presentationGate.owns(ticket) || !canPresent(presentationTimeUs)) return
             check(EGL14.eglSwapBuffers(display, window))
-            presented(presentationTimeUs)
+            presented(presentationTimeUs, sample)
         } catch (_: Exception) {
             if (broken.compareAndSet(false, true)) failed()
+        }
+    }
+
+    private fun readFramePixels(width: Int, height: Int): NativeRtpFramePixels {
+        val scale = minOf(1.0, 320.0 / maxOf(width, height))
+        val w = (width * scale).roundToInt().coerceAtLeast(1)
+        val h = (height * scale).roundToInt().coerceAtLeast(1)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sampleTexture[0])
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, w, h, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, sampleFramebuffer[0])
+        try {
+            GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, sampleTexture[0], 0)
+            check(GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) == GLES30.GL_FRAMEBUFFER_COMPLETE)
+            GLES30.glViewport(0, 0, w, h)
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+            val rgba = ByteBuffer.allocateDirect(w * h * 4)
+            GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, rgba)
+            checkGl()
+            val argb = IntArray(w * h)
+            for (y in 0 until h) for (x in 0 until w) {
+                val offset = (y * w + x) * 4
+                argb[(h - y - 1) * w + x] = (0xff shl 24) or
+                    ((rgba.get(offset).toInt() and 255) shl 16) or
+                    ((rgba.get(offset + 1).toInt() and 255) shl 8) or (rgba.get(offset + 2).toInt() and 255)
+            }
+            return NativeRtpFramePixels(w, h, argb)
+        } finally {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+            GLES30.glViewport(0, 0, width, height)
         }
     }
 
@@ -179,6 +228,8 @@ internal class NativeRtpLutRenderer(
                 EGL14.eglMakeCurrent(display, window, window, context)
                 if (program != 0) GLES30.glDeleteProgram(program)
                 GLES30.glDeleteTextures(2, textures, 0)
+                GLES30.glDeleteTextures(1, sampleTexture, 0)
+                GLES30.glDeleteFramebuffers(1, sampleFramebuffer, 0)
             }
             EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
             if (window != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display, window)

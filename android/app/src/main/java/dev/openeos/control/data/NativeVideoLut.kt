@@ -129,12 +129,29 @@ internal class NativeVideoDecodeContinuity {
 }
 
 /** Even a cancelled intermediate replacement must retain the prior decoder's real drain barrier. */
-internal fun launchDrainedNativeVideoJob(scope: CoroutineScope, previous: Job?, block: suspend () -> Unit): Job =
+internal fun launchDrainedNativeVideoJob(scope: CoroutineScope, previous: Job?, additional: Job? = null, block: suspend () -> Unit): Job =
     scope.launch(start = CoroutineStart.UNDISPATCHED) {
-        withContext(NonCancellable) { previous?.join() }
+        withContext(NonCancellable) { previous?.join(); if (additional !== previous) additional?.join() }
         // UNDISPATCHED establishes the barrier before another replacement can cancel us.
         // Yield back to the scope dispatcher before entering any native codec/GL operation.
         yield()
         currentCoroutineContext().ensureActive()
         block()
     }
+
+/** A replacement session cannot write the same Surface until the prior native writer really drains. */
+internal class NativeVideoSurfaceDrainRegistry {
+    private val writers = java.util.IdentityHashMap<Any, Job>()
+
+    @Synchronized fun launch(scope: CoroutineScope, target: Any?, previous: Job?, block: suspend () -> Unit): Job {
+        if (target == null) return launchDrainedNativeVideoJob(scope, previous, block = block)
+        val priorWriter = writers[target]
+        priorWriter?.cancel()
+        val replacement = launchDrainedNativeVideoJob(scope, previous, priorWriter, block)
+        writers[target] = replacement
+        replacement.invokeOnCompletion {
+            synchronized(this) { if (writers[target] === replacement) writers.remove(target) }
+        }
+        return replacement
+    }
+}

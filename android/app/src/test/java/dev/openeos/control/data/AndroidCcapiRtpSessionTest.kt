@@ -108,7 +108,7 @@ class AndroidCcapiRtpSessionTest {
     }
 
     @Test
-    fun rtpReadinessRequiresSpsPpsAndAKeyFrame() = runBlocking {
+    fun encodedSpsPpsAndKeyFrameDoNotProveDecoderReadiness() = runBlocking {
         val videoPort = availableUdpPort()
         val audioPort = availableUdpPort(excluding = setOf(videoPort))
         val session = session(
@@ -125,7 +125,9 @@ class AndroidCcapiRtpSessionTest {
             sender.send(videoPacket(videoPort, sequence = 2, timestamp = 2_000, payload = byteArrayOf(0x68, 0x01)))
             sender.send(videoPacket(videoPort, sequence = 3, timestamp = 3_000, payload = byteArrayOf(0x65, 0x01)))
 
-            session.awaitReady(timeoutMillis = 2_000)
+            val failure = runCatching { session.awaitReady(timeoutMillis = 2_000) }.exceptionOrNull()
+            assertTrue("Truncated synthetic input cannot prove decoded output", failure != null)
+            assertFalse(session.videoStatus.ready)
         } finally {
             sender.close()
             session.close()
@@ -133,7 +135,7 @@ class AndroidCcapiRtpSessionTest {
     }
 
     @Test
-    fun rtpReadinessUsesSdpParameterSetsWhenTheStreamOnlySendsAKeyFrame() = runBlocking {
+    fun sdpParameterSetsAndEncodedKeyFrameDoNotProveDecoderReadiness() = runBlocking {
         val videoPort = availableUdpPort()
         val audioPort = availableUdpPort(excluding = setOf(videoPort))
         val session = session(
@@ -149,8 +151,9 @@ class AndroidCcapiRtpSessionTest {
             session.start()
             sender.send(videoPacket(videoPort, sequence = 1, timestamp = 1_000, payload = byteArrayOf(0x65, 0x01)))
 
-            session.awaitReady(timeoutMillis = 2_000)
-            assertTrue(session.videoStatus.ready)
+            val failure = runCatching { session.awaitReady(timeoutMillis = 2_000) }.exceptionOrNull()
+            assertTrue("Truncated synthetic input cannot prove decoded output", failure != null)
+            assertFalse(session.videoStatus.ready)
             assertTrue(session.videoStatus.hasSequenceParameterSet)
             assertTrue(session.videoStatus.hasPictureParameterSet)
             assertEquals(1L, session.videoStatus.datagramsReceived)
@@ -188,7 +191,7 @@ class AndroidCcapiRtpSessionTest {
     }
 
     @Test
-    fun aReadyStreamThatGoesSilentFailsOnceAndReplaysFailureToALateListener() = runBlocking {
+    fun decoderFailureRetiresEncodedOnlyInputAndReplaysFailureToALateListener() = runBlocking {
         val videoPort = availableUdpPort()
         val session = session(videoPort, availableUdpPort(excluding = setOf(videoPort)),
             videoFormatParameters = mapOf("sprop-parameter-sets" to "Z0I=,aAE="),
@@ -199,10 +202,9 @@ class AndroidCcapiRtpSessionTest {
             try {
                 session.start()
                 sender.send(videoPacket(videoPort, 1, 1_000, byteArrayOf(0x65, 0x01)))
-                session.awaitReady(2_000)
-                assertTrue(session.videoStatus.ready)
+                assertTrue(runCatching { session.awaitReady(2_000) }.isFailure)
                 assertTrue(events.none { it is NativeLiveViewEvent.FrameRendered })
-                await(timeoutMillis = 6_000) { session.videoStatus.error?.contains("No complete H.264") == true }
+                await(timeoutMillis = 6_000) { session.videoStatus.error != null }
                 assertFalse(session.videoStatus.ready)
                 assertEquals(null, session.renderedFrames.value)
                 session.setListener(events::add)
