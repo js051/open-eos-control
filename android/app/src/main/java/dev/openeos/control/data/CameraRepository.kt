@@ -208,6 +208,11 @@ class CameraRepository(
 
     suspend fun setCameraSetting(key: String, value: String): CameraStatus = backend.setSetting(key, value)
 
+    fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess {
+        val owner = backend
+        return owner.shootingSettingAccess(request)
+    }
+
     /** The handle captures the actual backend, connection and routes before any await. */
     fun captureConfigurationAccess(): CaptureConfigurationAccess {
         val owner = backend

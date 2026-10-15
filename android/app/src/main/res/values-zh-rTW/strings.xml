@@ -814,4 +814,16 @@
     <string name="capture_configuration_cancelled">已取消。已送出的相機寫入無法撤回；已取得的回應證據仍保留。</string>
     <string name="capture_configuration_recover">讀取目前設定（不寫入）</string>
     <string name="capture_configuration_draft_retained">結果傳回時會保留您的草稿。再次寫入前，請編輯內容或重新開啟編輯器。</string>
+    <string name="shooting_setting_current">讀取到的目前值：%1$s</string>
+    <string name="shooting_setting_requested">要求的 %1$s：%2$s</string>
+    <string name="shooting_setting_not_sent">尚未傳送設定命令。</string>
+    <string name="shooting_setting_unknown">命令結果未知。請先唯讀確認目前值，再決定是否套用新的編輯。</string>
+    <string name="shooting_setting_response_received">已收到傳輸回應，並不代表相機已確認確切設定值。</string>
+    <string name="shooting_setting_not_read">尚未讀取目前設定。</string>
+    <string name="shooting_setting_unavailable">無法確認目前設定值。</string>
+    <string name="shooting_setting_mismatch">最新讀取的設定值與要求不同。</string>
+    <string name="shooting_setting_matched">最新讀取的設定值與要求相符。</string>
+    <string name="shooting_setting_cancelled">已停止等待。已送出的命令仍可能生效。</string>
+    <string name="shooting_setting_previous_session">這是先前連線的紀錄；重新連線不會重送命令。</string>
+    <string name="shooting_setting_read_current">僅讀取目前值</string>
 </resources>

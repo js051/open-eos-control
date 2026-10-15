@@ -1051,4 +1051,16 @@
     <string name="capture_configuration_cancelled">Cancelled. A dispatched camera write cannot be undone; retained evidence remains valid.</string>
     <string name="capture_configuration_recover">Read current settings (no writes)</string>
     <string name="capture_configuration_draft_retained">Your draft stays unchanged when results arrive. Edit it or reopen this editor before making a new write.</string>
+    <string name="shooting_setting_current">Observed value: %1$s</string>
+    <string name="shooting_setting_requested">Requested %1$s: %2$s</string>
+    <string name="shooting_setting_not_sent">The setting command was not sent.</string>
+    <string name="shooting_setting_unknown">Command outcome unknown. Read the current value before deciding whether to apply a new edit.</string>
+    <string name="shooting_setting_response_received">Transport response received. This is not an exact camera acknowledgement.</string>
+    <string name="shooting_setting_not_read">The current setting has not been read.</string>
+    <string name="shooting_setting_unavailable">Current setting could not be verified.</string>
+    <string name="shooting_setting_mismatch">Freshly observed setting differs from the request.</string>
+    <string name="shooting_setting_matched">Freshly observed setting matches the request.</string>
+    <string name="shooting_setting_cancelled">Stopped waiting. A sent command may still have taken effect.</string>
+    <string name="shooting_setting_previous_session">Previous connection. Reconnect does not replay this command.</string>
+    <string name="shooting_setting_read_current">Read current value only</string>
 </resources>

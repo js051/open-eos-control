@@ -17,6 +17,53 @@ import java.nio.charset.StandardCharsets
 
 class UsbPtpCameraBackendTest {
     @Test
+    fun shootingSettingStandardWriteHasOneMutationAndFreshPropertyRead() = runTest {
+        val transport = ScriptedTransport(advertiseCapture = false)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("SYNTHETIC"), PtpTransportFactory { transport })
+        backend.initialize()
+        val request = ShootingSettingRequest("iso", "800")
+        val evidence = ShootingSettingEvidence(request)
+        val before = transport.sentContainers.size
+        backend.writeShootingSetting(request, evidence)
+        assertEquals(ShootingSettingWriteEvidence.RESPONSE_RECEIVED, evidence.snapshot().writeEvidence)
+        val commands = transport.sentContainers.drop(before).filter { it.type == PtpContainerType.COMMAND }
+        assertEquals(1, commands.count { it.code == PtpOperationCode.SET_DEVICE_PROP_VALUE })
+        assertTrue(commands.any { it.code == PtpOperationCode.GET_DEVICE_PROP_DESC })
+        val readStart = transport.sentContainers.size
+        assertEquals("800", backend.readShootingSetting(request).value)
+        val reads = transport.sentContainers.drop(readStart).filter { it.type == PtpContainerType.COMMAND }
+        assertEquals(listOf(PtpOperationCode.GET_DEVICE_PROP_VALUE), reads.map { it.code })
+    }
+
+    @Test
+    fun canonWithoutExplicitPropertyReadCannotVerifyOptimisticCache() = runTest {
+        val transport = CanonEosScriptedTransport(advertiseTextMetadata = false, advertiseLensName = false)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("SYNTHETIC"), PtpTransportFactory { transport })
+        backend.initialize()
+        backend.capabilities()
+        val request = ShootingSettingRequest("iso", "800")
+        val evidence = ShootingSettingEvidence(request)
+        backend.writeShootingSetting(request, evidence)
+        assertEquals(ShootingSettingWriteEvidence.RESPONSE_RECEIVED, evidence.snapshot().writeEvidence)
+        val before = transport.sentContainers.size
+        assertTrue(runCatching { backend.readShootingSetting(request) }.isFailure)
+        assertEquals(before, transport.sentContainers.size)
+    }
+
+    @Test
+    fun unknownUsbSettingFailsWithoutMutationOrReadFanout() = runTest {
+        val transport = ScriptedTransport(advertiseCapture = false)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("SYNTHETIC"), PtpTransportFactory { transport })
+        backend.initialize()
+        val request = ShootingSettingRequest("unknownsetting", "800")
+        val evidence = ShootingSettingEvidence(request)
+        val before = transport.sentContainers.size
+        assertTrue(runCatching { backend.writeShootingSetting(request, evidence) }.isFailure)
+        assertEquals(ShootingSettingWriteEvidence.NOT_SENT, evidence.snapshot().writeEvidence)
+        assertEquals(before, transport.sentContainers.size)
+    }
+
+    @Test
     fun backendExposesOnlyAdvertisedStandardOperationsAndRunsMediaPath() = runTest {
         val transport = ScriptedTransport(advertiseCapture = true)
         val backend = UsbPtpCameraBackend(
@@ -2159,6 +2206,74 @@ class UsbPtpCameraBackendTest {
         assertTrue(failure is PtpProtocolException)
         assertTrue(failure?.message.orEmpty().contains("explicitly selected phone"))
         assertFalse(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_ON))
+        backend.close()
+    }
+
+    @Test
+    fun shootingSettingPhoneIntentPreventsFallbackWhenCapacityPreparationFails() = runTest {
+        val transport = CanonEosScriptedTransport(captureDestination = 4, availableShots = 0,
+            hostCaptureObjects = listOf(HostCaptureObject(0x4A, PtpObjectFormat.EXIF_JPEG, "IMG_0050.JPG", byteArrayOf(5, 0))),
+            rejectOperationCode = CanonEosOperationCode.PC_HDD_CAPACITY)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("SYNTHETIC"),
+            PtpTransportFactory { transport }, MemoryHostCaptureStore())
+        backend.initialize()
+        backend.capabilities()
+        val request = ShootingSettingRequest("capturetarget", "Phone")
+        val evidence = ShootingSettingEvidence(request)
+        backend.shootingSettingAccess(request).write(request, evidence)
+        assertEquals(ShootingSettingWriteEvidence.RESPONSE_RECEIVED, evidence.snapshot().writeEvidence)
+        val before = transport.sentContainers.size
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure?.message.orEmpty().contains("explicitly selected phone"))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_ON))
+        assertFalse(transport.sentContainers.drop(before).any {
+            it.type == PtpContainerType.COMMAND && it.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX
+        })
+        backend.close()
+    }
+
+    @Test
+    fun uncertainPhoneTargetWriteRetainsIntentBeforeShutter() = runTest {
+        val transport = CanonEosScriptedTransport(captureDestination = 2, availableShots = 0,
+            hostCaptureObjects = listOf(HostCaptureObject(0x4A, PtpObjectFormat.EXIF_JPEG, "IMG_0050.JPG", byteArrayOf(5, 0))),
+            rejectPropertyCode = CanonEosPropertyCode.CAPTURE_DESTINATION)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("SYNTHETIC"),
+            PtpTransportFactory { transport }, MemoryHostCaptureStore())
+        backend.initialize()
+        backend.capabilities()
+        val request = ShootingSettingRequest("capturetarget", "Phone")
+        val evidence = ShootingSettingEvidence(request)
+        assertTrue(runCatching { backend.shootingSettingAccess(request).write(request, evidence) }.isFailure)
+        assertEquals(ShootingSettingWriteEvidence.UNKNOWN, evidence.snapshot().writeEvidence)
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure?.message.orEmpty().contains("explicitly selected phone"))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_ON))
+        backend.close()
+    }
+
+    @Test
+    fun uncertainCardTargetNeverCapturesToPhoneOrAutomaticallyRetriesCard() = runTest {
+        val transport = CanonEosScriptedTransport(captureDestination = 4, availableShots = 0,
+            hostCaptureObjects = listOf(HostCaptureObject(0x4A, PtpObjectFormat.EXIF_JPEG, "IMG_0050.JPG", byteArrayOf(5, 0))),
+            rejectPropertyCode = CanonEosPropertyCode.CAPTURE_DESTINATION)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("SYNTHETIC"),
+            PtpTransportFactory { transport }, MemoryHostCaptureStore())
+        backend.initialize()
+        backend.capabilities()
+        val request = ShootingSettingRequest("capturetarget", "Memory card")
+        val evidence = ShootingSettingEvidence(request)
+        assertTrue(runCatching { backend.shootingSettingAccess(request).write(request, evidence) }.isFailure)
+        assertEquals(ShootingSettingWriteEvidence.UNKNOWN, evidence.snapshot().writeEvidence)
+        val before = transport.sentContainers.size
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure?.message.orEmpty().contains("explicitly selected memory-card"))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_ON))
+        assertFalse(transport.sentContainers.drop(before).any {
+            it.type == PtpContainerType.COMMAND && it.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX
+        })
         backend.close()
     }
 

@@ -535,6 +535,75 @@ class DesktopBridgeClient(
         )
     ).also { observedFeatures.add(featureForSetting(key)) }
 
+    fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess {
+        val owner = requireShutterSession()
+        val engine = sessionEngine
+        return ShootingSettingAccess("Desktop bridge", write = { frozen, evidence ->
+            require(frozen == request); writeShootingSetting(frozen, evidence, owner, engine)
+        }, read = { frozen -> require(frozen == request); readShootingSetting(frozen, owner, engine) })
+    }
+
+    suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence) =
+        writeShootingSetting(request, evidence, requireShutterSession(), sessionEngine)
+
+    private suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence,
+        owner: BridgeShutterReleaseSession, engine: String?) {
+        require(evidence.request == request)
+        requireCurrentSession(owner)
+        val url = endpoint("v1", "session", owner.id, "settings", request.key, "outcome")
+        val httpRequest = Request.Builder().url(url)
+            .post(JSONObject().put("value", request.requestedValue).toString().toRequestBody(jsonMediaType)).build()
+        shootingSettingJson(httpRequest, owner, evidence) { body ->
+            require(applyShootingSettingBridgeOutcome(evidence, engine, 200, body.opt("version"), body.opt("engine"),
+                body.opt("key"), body.opt("requestedValue"), body.opt("writeEvidence"), body.opt("readbackEvidence"),
+                body.optJSONObject("setting")?.toStrictShootingSetting())) {
+                "Bridge did not return a valid same-request setting outcome."
+            }
+        }
+    }
+
+    suspend fun readShootingSetting(request: ShootingSettingRequest): ShootingSettingObservation =
+        readShootingSetting(request, requireShutterSession(), sessionEngine)
+
+    private suspend fun readShootingSetting(request: ShootingSettingRequest, owner: BridgeShutterReleaseSession,
+        engine: String?): ShootingSettingObservation {
+        requireCurrentSession(owner)
+        var observed: ShootingSettingObservation? = null
+        val url = endpoint("v1", "session", owner.id, "settings", request.key)
+        shootingSettingJson(Request.Builder().url(url).header("Cache-Control", "no-cache, no-store").get().build(), owner) { body ->
+            require(engine != null && body.opt("version") is Int && body.optInt("version") == 1 && body.opt("engine") == engine)
+            val setting = body.optJSONObject("setting")?.toStrictShootingSetting()
+            require(setting != null && setting.key == request.key && acceptsShootingSettingObservation(setting))
+            observed = ShootingSettingObservation(request.key, setting.value)
+        }
+        return requireNotNull(observed)
+    }
+
+    /** Separate from generic status parser: complete strict outcome is never mistaken for status. */
+    private suspend fun shootingSettingJson(request: Request, owner: BridgeShutterReleaseSession,
+        evidence: ShootingSettingEvidence? = null, accept: (JSONObject) -> Unit) = withContext(Dispatchers.IO) {
+        val call = newBridgeCall(request, true)
+        val cancellationWatcher = if (evidence == null) launch(start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { call.cancel() }
+        } else null
+        try {
+            currentCoroutineContext().ensureActive()
+            requireCurrentSession(owner)
+            evidence?.beforeDispatch()
+            call.execute().use { response ->
+                check(response.code == 200) { "The Bridge setting operation did not return HTTP 200." }
+                requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                    response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                val body = response.body ?: error("The Bridge setting response is empty.")
+                val text = body.byteStream().use { readCaptureConfigurationJsonText(it, body.contentLength()) }
+                StrictMediaJson(text).validate()
+                accept(JSONObject(text))
+                currentCoroutineContext().ensureActive()
+                requireCurrentSession(owner)
+            }
+        } finally { cancellationWatcher?.cancel() }
+    }
+
     suspend fun createDirectory(name: String, evidence: CaptureConfigurationEvidence = CaptureConfigurationEvidence(
         CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, name),
     )): String = captureConfigurationOperation(evidence) {
@@ -2064,3 +2133,15 @@ private fun ByteArray.isCompleteJpeg(): Boolean =
         (this[1].toInt() and 0xFF) == 0xD8 &&
         (this[lastIndex - 1].toInt() and 0xFF) == 0xFF &&
         (this[lastIndex].toInt() and 0xFF) == 0xD9
+
+private fun JSONObject.toStrictShootingSetting(): CameraSettingControl? {
+    val key = opt("key") as? String ?: return null
+    val label = opt("label") as? String ?: return null
+    val value = opt("value") as? String ?: return null
+    val array = optJSONArray("values") ?: return null
+    if (array.length() > 1024) return null
+    val values = (0 until array.length()).map { array.opt(it) as? String ?: return null }
+    val kind = when (opt("inputKind")) { "choice" -> CameraSettingInputKind.CHOICE; "text" -> CameraSettingInputKind.TEXT; else -> return null }
+    val maxLength = if (!has("maxLength") || isNull("maxLength")) null else opt("maxLength") as? Int ?: return null
+    return CameraSettingControl(key, label, value, values, kind, maxLength).takeIf(::acceptsShootingSettingObservation)
+}
