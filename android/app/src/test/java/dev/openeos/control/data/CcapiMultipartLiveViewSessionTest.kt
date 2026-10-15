@@ -5,6 +5,12 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
 import okhttp3.OkHttpClient
 import okhttp3.ResponseBody
 import okhttp3.mockwebserver.Dispatcher
@@ -19,6 +25,45 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CcapiMultipartLiveViewSessionTest {
+    @Test fun knownTerminalFailureWinsOverBothRetainedAndUnreadFirstFrame() {
+        for (consumeFirst in listOf(false, true)) {
+            val jpeg = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 1, 0xff.toByte(), 0xd9.toByte())
+            val eofEntered = CountDownLatch(1)
+            val releaseEof = CountDownLatch(1)
+            val responseClosed = CountDownLatch(1)
+            val bytes = Buffer().writeUtf8("--canon\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.size}\r\n\r\n")
+                .write(jpeg).writeUtf8("\r\n")
+            val source = object : ForwardingSource(bytes) {
+                override fun read(sink: Buffer, byteCount: Long): Long {
+                    val read = super.read(sink, byteCount)
+                    if (read == -1L) {
+                        eofEntered.countDown()
+                        check(releaseEof.await(2, TimeUnit.SECONDS))
+                    }
+                    return read
+                }
+                override fun close() { try { super.close() } finally { responseClosed.countDown() } }
+            }.buffer()
+            val request = Request.Builder().url("http://127.0.0.1/multipart").build()
+            val response = Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(object : ResponseBody() {
+                    override fun contentType() = null
+                    override fun contentLength() = -1L
+                    override fun source(): BufferedSource = source
+                }).build()
+            val session = CcapiMultipartLiveViewSession(OkHttpClient().newCall(request), response, request.url.toString(), "canon")
+            try {
+                assertTrue(eofEntered.await(2, TimeUnit.SECONDS))
+                if (consumeFirst) assertArrayEquals(jpeg, session.nextFrame().bytes)
+                session.checkUsable()
+                releaseEof.countDown()
+                assertTrue(responseClosed.await(2, TimeUnit.SECONDS))
+                assertTrue(runCatching { session.checkUsable() }.isFailure)
+                assertTrue(runCatching { session.nextFrame() }.isFailure)
+            } finally { releaseEof.countDown(); session.close() }
+        }
+    }
+
     @Test fun stoppingMultipartLeavesResponseCloseWithTheReaderUntilItsReadUnwinds() = runBlocking {
         val server = MockWebServer()
         val readerEntered = CountDownLatch(1)
@@ -98,9 +143,11 @@ class CcapiMultipartLiveViewSessionTest {
         val client = CcapiClient(server.url("/").toString(), treatAsSimulator = false, httpClient = http)
         try {
             client.initialize()
-            client.startLiveView(LiveViewRequest(source = LiveViewSource.CCAPI_MULTIPART))
+            val start = launch(Dispatchers.Default) { runCatching {
+                client.startLiveView(LiveViewRequest(source = LiveViewSource.CCAPI_MULTIPART))
+            } }
             assertTrue("The reader must be inside the response source", readerEntered.await(2, TimeUnit.SECONDS))
-            client.stopLiveView()
+            start.cancelAndJoin()
             assertTrue("Call cancellation must unblock the socket reader", readerUnwinding.await(1, TimeUnit.SECONDS))
             assertEquals("Only the reader may close its response after leaving read", 0, closes.get())
             assertEquals(1, streamStops.get())

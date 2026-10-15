@@ -22,14 +22,41 @@ class CameraRepository(
     private var liveViewRequest = LiveViewRequest()
     private var active = false
     private var liveViewRunning = false
+    private var liveViewAttemptGeneration = 0L
     private var activeInfo: CameraInfo? = null
     private val connectionMutex = Mutex()
+    private val liveViewStarter = LiveViewStartOperation()
+
+    internal fun cancelPendingLiveViewStart() = liveViewStarter.retire()
+
+    private suspend fun startOwnedLiveView(): Boolean {
+        liveViewAttemptGeneration += 1
+        val owner = backend
+        val request = liveViewRequest
+        return liveViewStarter.run(start = { owner.startLiveView(request) },
+            stopRequired = { owner.liveViewStopRequired }, stop = { owner.stopLiveView() })
+    }
 
     fun isRealCamera(): Boolean = backend.prefersBitmapLiveViewFrames
 
     fun nativeLiveViewSession(): NativeLiveViewSession? = backend.nativeLiveViewSession
 
     fun isLiveViewRunning(): Boolean = liveViewRunning
+
+    internal fun liveViewOwner() = CameraLiveViewOwner(backend, liveViewAttemptGeneration)
+
+    internal fun ownsLiveView(owner: CameraLiveViewOwner): Boolean =
+        active && owner.backend === backend && owner.attempt == liveViewAttemptGeneration
+
+    /** Retire local health immediately; the backend retains its exact remote Stop responsibility. */
+    internal fun retireLiveView(owner: CameraLiveViewOwner): Boolean {
+        if (!ownsLiveView(owner)) return false
+        liveViewRunning = false
+        backend.retireLiveViewLocally()
+        return true
+    }
+
+    fun activeLiveViewSource(): LiveViewSource? = backend.activeLiveViewSource
 
     // Stop ownership is distinct from confirmed running: a lost start response can leave only cleanup.
     fun isLiveViewStopRequired(): Boolean = backend.liveViewStopRequired
@@ -40,6 +67,7 @@ class CameraRepository(
             httpTransportFactory = AndroidCameraHttpTransportFactory(context.applicationContext),
             ptpTransportFactory = AndroidUsbPtpTransportFactory(context.applicationContext),
             usbHostCaptureStore = AndroidUsbHostCaptureStore(context.applicationContext),
+            jpegFrameValidator = ::androidDecodesLiveViewJpeg,
         )
     }
 
@@ -132,9 +160,8 @@ class CameraRepository(
             if (startLiveView && status.shutterReleaseUnconfirmed != true &&
                 status.bulbExposureActive != true && capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
                 try {
-                    backend.startLiveView(liveViewRequest)
-                    liveViewRunning = true
-                    if (!backend.prefersBitmapLiveViewFrames) {
+                    liveViewRunning = startOwnedLiveView()
+                    if (liveViewRunning && !backend.prefersBitmapLiveViewFrames) {
                         liveViewFrameUrl = nextLiveViewFrameUrl()
                     }
                 } catch (exception: CancellationException) {
@@ -173,8 +200,8 @@ class CameraRepository(
         return {
             connectionMutex.withLock {
                 check(active && backend === owner && owner.maintenanceStopOwned) { "Maintenance Stop owner changed." }
-                owner.stopLiveView()
                 if (backend === owner) liveViewRunning = false
+                owner.stopLiveView()
             }
         }
     }
@@ -278,10 +305,14 @@ class CameraRepository(
             eventStopRequired = eventPollingActive && access.eventStopRequired,
             liveViewStopRequired = (hadLiveView || owner.liveViewStopRequired) && access.liveViewStopRequired, stopEvents = access.stopEvents,
             stopLiveView = {
-                access.stopLiveView()
                 if (backend === owner) liveViewRunning = false
+                access.stopLiveView()
             }, dispatch = access.dispatch, read = access.read,
             restore = {
+                if (backend === owner) {
+                    liveViewAttemptGeneration += 1
+                    liveViewRunning = false
+                }
                 access.restore()
                 if (backend === owner) liveViewRunning = hadLiveView
             })
@@ -422,12 +453,12 @@ class CameraRepository(
             check(active) { "Camera is not connected." }
             if ((liveViewRunning || backend.liveViewStopRequired) && (!enabled || restart)) {
                 // Retain ownership on failure so a later stop/disconnect can retry cleanup.
-                backend.stopLiveView()
                 liveViewRunning = false
+                backend.stopLiveView()
             }
             if (enabled && !liveViewRunning) {
-                backend.startLiveView(liveViewRequest)
-                liveViewRunning = true
+                check(!backend.liveViewStopRequired) { "Live View must be stopped before starting again." }
+                liveViewRunning = startOwnedLiveView()
                 liveViewRequest = liveViewRequest.clampTo(backend.capabilities().liveView)
             }
             liveViewRequest

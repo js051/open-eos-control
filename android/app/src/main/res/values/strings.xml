@@ -951,6 +951,7 @@
     <string name="refresh_recording_status">Refresh recording status</string>
     <string name="recording_command_unconfirmed">The recording command result is unknown. The camera may still be recording. Use Stop recording or check the camera. Refresh cannot confirm a lost command response.</string>
     <string name="recording_disconnect_warning">Check the previous camera: recording may still be active and was not confirmed stopped.</string>
+    <string name="live_view_stop_pending">Preview is locally paused. Camera Stop is pending and will wait for active camera controls to finish.</string>
     <string name="live_view_stop_unconfirmed">Live View stop is unconfirmed. Turn Remote Live View off or use Stop remote Live View in Debug to retry only Stop. An older Bridge may need an update.</string>
     <string name="live_view_disconnect_warning">Check the previous camera: Live View was not confirmed stopped before disconnecting.</string>
     <string name="media_continuation_start">Continue unfinished items…</string>

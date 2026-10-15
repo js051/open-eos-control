@@ -87,6 +87,8 @@ interface CameraControlBackend {
     suspend fun stopEventPolling() = Unit
     suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest())
     suspend fun stopLiveView()
+    /** Close local receivers without sending camera commands or discarding remote Stop ownership. */
+    fun retireLiveViewLocally() { nativeLiveViewSession?.close() }
     suspend fun setExposure(iso: String? = null, shutter: String? = null, aperture: String? = null): CameraStatus
     suspend fun setWhiteBalance(value: String): CameraStatus
     suspend fun setSetting(key: String, value: String): CameraStatus
@@ -190,6 +192,7 @@ interface CameraControlBackend {
 class CcapiCameraBackend(
     override val connection: CameraConnection.CcapiNetwork,
     httpTransportFactory: CameraHttpTransportFactory = DefaultCameraHttpTransportFactory(),
+    jpegFrameValidator: ((ByteArray) -> Boolean)? = null,
 ) : CameraControlBackend {
     private val httpTransport = httpTransportFactory.create(connection.baseUrl)
     private val client = CcapiClient(
@@ -200,6 +203,7 @@ class CcapiCameraBackend(
         treatAsSimulator = connection.simulatorMode,
         rtpDestinationAddress = httpTransport.rtpDestinationAddress,
         rtpSessionFactory = httpTransport.rtpSessionFactory,
+        jpegFrameValidator = jpegFrameValidator,
     )
 
     override val transport: CameraTransport = CameraTransport.CCAPI_NETWORK
@@ -234,6 +238,8 @@ class CcapiCameraBackend(
     override suspend fun close() = client.close()
 
     override suspend fun retireMaintenanceLocally() = client.retireMaintenanceLocally()
+
+    override fun retireLiveViewLocally() = client.retireLiveViewLocally()
 
     override suspend fun info(): CameraInfo = client.info()
 
@@ -639,10 +645,11 @@ class CameraBackendFactory(
     private val httpTransportFactory: CameraHttpTransportFactory = DefaultCameraHttpTransportFactory(),
     private val ptpTransportFactory: PtpTransportFactory? = null,
     private val usbHostCaptureStore: UsbHostCaptureStore? = null,
+    private val jpegFrameValidator: ((ByteArray) -> Boolean)? = null,
 ) {
     fun create(connection: CameraConnection): CameraControlBackend =
         when (connection) {
-            is CameraConnection.CcapiNetwork -> CcapiCameraBackend(connection, httpTransportFactory)
+            is CameraConnection.CcapiNetwork -> CcapiCameraBackend(connection, httpTransportFactory, jpegFrameValidator)
             is CameraConnection.AndroidUsbPtp -> ptpTransportFactory
                 ?.let { UsbPtpCameraBackend(connection, it, usbHostCaptureStore) }
                 ?: PlannedCameraBackend(connection)

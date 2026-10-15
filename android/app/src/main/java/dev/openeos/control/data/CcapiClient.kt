@@ -146,6 +146,7 @@ class CcapiClient(
     password: String = "",
     private val rtpDestinationAddress: String? = null,
     private val rtpSessionFactory: CcapiRtpSessionFactory? = null,
+    private val jpegFrameValidator: ((ByteArray) -> Boolean)? = null,
 ) {
     private val baseUrl = baseUrl.trimEnd('/')
     private val httpClient = (httpClient ?: OkHttpClient()).newBuilder().apply {
@@ -251,6 +252,8 @@ class CcapiClient(
     private var activeJpegLiveViewOperations: CcapiJpegLiveViewOperations? = null
     private var activeMultipartLiveViewOperations: CcapiMultipartOperations? = null
     private var multipartLiveViewSession: CcapiMultipartLiveViewSession? = null
+    private var firstLiveViewFrame: LiveViewFrame? = null
+    private var liveViewStartAttempt = 0L
     // Owned before sending a start: a missing response cannot prove that the camera stayed stopped.
     @Volatile private var pendingLiveViewStop: (suspend () -> Unit)? = null
     @Volatile private var pendingLiveViewLocalClose: (suspend () -> Unit)? = null
@@ -274,7 +277,19 @@ class CcapiClient(
     var maintenanceSessionOwned: Boolean = false
         private set
 
+    fun retireLiveViewLocally() {
+        firstLiveViewFrame = null
+        latestLiveViewGeometry = null
+        multipartLiveViewSession?.close()
+        multipartLiveViewSession = null
+        nativeLiveViewSession?.close()
+        nativeLiveViewSession = null
+        activeLiveViewSource = null
+        // pendingLiveViewStop retains its original remote routes/session until acknowledgement.
+    }
+
     suspend fun retireMaintenanceLocally() {
+        firstLiveViewFrame = null
         activeEventCall.getAndSet(null)?.cancel()
         pendingLiveViewLocalClose?.invoke()
         pendingLiveViewLocalClose = null
@@ -2342,6 +2357,7 @@ class CcapiClient(
             check(sources.isNotEmpty()) { "Camera did not advertise a complete Live View CCAPI lifecycle." }
             val failures = mutableListOf<Throwable>()
             for (source in sources) {
+                val previousAttempt = liveViewStartAttempt
                 try {
                     when (source) {
                         LiveViewSource.CCAPI_RTP -> startRtpLiveView(request)
@@ -2349,11 +2365,19 @@ class CcapiClient(
                         LiveViewSource.CCAPI_JPEG_POLLING -> startJpegLiveView(request)
                         else -> error("${source.label} is not available through the CCAPI network backend.")
                     }
+                    currentCoroutineContext().ensureActive()
                     return
                 } catch (exception: Exception) {
                     if (exception is CancellationException || exception is CcapiLiveViewReleaseException) throw exception
+                    currentCoroutineContext().ensureActive()
                     failures += exception
-                    if (request.source != LiveViewSource.AUTO) throw exception
+                    val admitted = previousAttempt != liveViewStartAttempt
+                    if (!LiveViewLifecycleEvidence(
+                            startAdmitted = admitted, startAcknowledged = false, terminal = true,
+                            sourceMode = if (request.source == LiveViewSource.AUTO) "AUTO" else "explicit",
+                            stopEvidence = if (pendingLiveViewStop != null) "unconfirmed"
+                                else if (admitted) "confirmed" else "not-needed",
+                        ).evaluate().canFallback) throw exception
                 }
             }
             throw IllegalStateException(
@@ -2370,6 +2394,7 @@ class CcapiClient(
     }
 
     private suspend fun stopLiveViewOwned() {
+        firstLiveViewFrame = null
         latestLiveViewGeometry = null
         val stop = pendingLiveViewStop ?: return
         try {
@@ -2392,14 +2417,17 @@ class CcapiClient(
         start: suspend () -> Unit,
     ) {
         check(pendingLiveViewStop == null) { "Live View must be stopped before starting again." }
+        liveViewStartAttempt += 1
+        firstLiveViewFrame = null
         pendingLiveViewStop = stop
         pendingLiveViewLocalClose = localClose
         pendingLiveViewMaintenanceOwned = currentCoroutineContext()[MaintenanceIoContext] != null
         try {
             start()
+            currentCoroutineContext().ensureActive()
         } catch (failure: Throwable) {
             // Maintenance restoration never dispatches an automatic cleanup/retry after an uncertain Start.
-            if (currentCoroutineContext()[MaintenanceIoContext] != null) throw failure
+            if (currentCoroutineContext()[MaintenanceIoContext] != null || failure is CcapiLiveViewReleaseException) throw failure
             try {
                 stopLiveView()
             } catch (releaseFailure: CcapiLiveViewReleaseException) {
@@ -2469,6 +2497,20 @@ class CcapiClient(
         liveViewFrameUrls(cacheKey, request).first()
 
     suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): LiveViewFrame {
+        currentCoroutineContext().ensureActive()
+        if (activeLiveViewSource != null) firstLiveViewFrame?.let { frame ->
+            if (activeLiveViewSource == LiveViewSource.CCAPI_MULTIPART) {
+                checkNotNull(multipartLiveViewSession).checkUsable()
+            }
+            firstLiveViewFrame = null
+            observedFeatures.add(CameraFeature.LIVE_VIEW)
+            when (activeLiveViewSource) {
+                LiveViewSource.CCAPI_MULTIPART -> observedFeatures.add(CameraFeature.LIVE_VIEW_MULTIPART)
+                LiveViewSource.CCAPI_JPEG_POLLING -> observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+                else -> Unit
+            }
+            return frame
+        }
         if (isRealCamera && activeLiveViewSource == LiveViewSource.CCAPI_MULTIPART) {
             return runInterruptible(Dispatchers.IO) {
                 checkNotNull(multipartLiveViewSession) { "Canon multipart Live View session is not active." }
@@ -2979,15 +3021,29 @@ class CcapiClient(
         }) {
             activeJpegLiveViewOperations = operations
             startCcapiLiveView(request, operations.startLiveView.path)
-            if (operations.stopMethod == CcapiLiveViewStopMethod.POST_OFF && currentCoroutineContext()[MaintenanceIoContext] == null) {
+            if (currentCoroutineContext()[MaintenanceIoContext] != null) {
+                // Maintenance restores only the frozen endpoint, once, with strict transport.
+                val sourceUrl = liveViewFrameUrls(System.nanoTime(), request).firstOrNull()
+                    ?: error("The frozen JPEG source has no advertised frame endpoint.")
+                firstLiveViewFrame = requestLiveViewFrame(Request.Builder().url(sourceUrl).get()
+                    .header("Accept", "image/jpeg,image/*,*/*")
+                    .header("Cache-Control", "no-cache, no-store").build(), sourceUrl)
+            } else {
                 try {
                     validateJpegLiveViewFrame(request)
                 } catch (exception: Exception) {
-                    if (exception is CancellationException || request.size == LiveViewSize.SMALL || !exception.isRejectedLiveViewSize()) {
+                    if (exception is CancellationException || operations.stopMethod != CcapiLiveViewStopMethod.POST_OFF ||
+                        request.size == LiveViewSize.SMALL || !exception.isRejectedLiveViewSize()) {
                         throw exception
                     }
-                    withContext(NonCancellable) {
-                        stopCcapiLiveView(operations.stopLiveView, operations.stopMethod)
+                    try {
+                        withContext(NonCancellable) {
+                            stopCcapiLiveView(operations.stopLiveView, operations.stopMethod)
+                        }
+                    } catch (stopFailure: Exception) {
+                        // A failed size-downgrade Stop is unknown cleanup. The outer Start
+                        // transaction must not silently retry it or admit another Start.
+                        throw CcapiLiveViewReleaseException(stopFailure).also { it.addSuppressed(exception) }
                     }
                     val fallback = request.copy(
                         size = LiveViewSize.SMALL,
@@ -2999,15 +3055,34 @@ class CcapiClient(
                     activeLiveViewSize = LiveViewSize.SMALL
                 }
             }
+            validateFirstLiveViewJpeg(checkNotNull(firstLiveViewFrame))
             activeLiveViewSource = LiveViewSource.CCAPI_JPEG_POLLING
         }
     }
 
+    private suspend fun validateFirstLiveViewJpeg(frame: LiveViewFrame) {
+        val validator = jpegFrameValidator
+        if (validator != null) {
+            check(withContext(Dispatchers.Default) { validator(frame.bytes) }) {
+                "The first Live View JPEG could not be decoded by Android."
+            }
+        }
+        currentCoroutineContext().ensureActive()
+        check(LiveViewLifecycleEvidence(frameEvidence = if (validator == null) "encoded-frame" else "decoded-frame")
+            .evaluate().canPublishInputReady)
+    }
+
     private suspend fun validateJpegLiveViewFrame(request: LiveViewRequest) {
-        liveViewFrame(
-            cacheKey = System.nanoTime(),
-            request = request.copy(source = LiveViewSource.CCAPI_JPEG_POLLING),
-        )
+        // Preserve encoded evidence for the first Android decode; Start ACK alone is not readiness.
+        firstLiveViewFrame = try {
+            withContext(Dispatchers.IO) { withTimeout(15_000L) { liveViewFrame(
+                cacheKey = System.nanoTime(),
+                request = request.copy(source = LiveViewSource.CCAPI_JPEG_POLLING),
+            ) } }
+        } catch (failure: TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
+            throw IOException("Timed out waiting for the first Canon JPEG Live View frame.", failure)
+        }
     }
 
     private fun Throwable.isRejectedLiveViewSize(): Boolean {
@@ -3110,6 +3185,7 @@ class CcapiClient(
                                 val response = call.execute()
                                 if (response.code == 200) {
                                     try {
+                                        check(response.headers("Content-Range").isEmpty()) { "Multipart Live View cannot be a partial response." }
                                         val boundary = parseCcapiMultipartBoundary(response.header("content-type"))
                                         CcapiMultipartLiveViewSession(call, response, sourceUrl, boundary).also {
                                             // Keep ownership outside withContext: cancellation may discard its return value.
@@ -3151,6 +3227,12 @@ class CcapiClient(
                 }
                 throw checkNotNull(lastFailure)
             }
+            // HTTP 200 and a boundary are only transport admission. Fail inside the frozen
+            // Stop transaction so AUTO can continue only after confirmed cleanup.
+            firstLiveViewFrame = runInterruptible(Dispatchers.IO) { session.nextFrame() }
+            currentCoroutineContext().ensureActive()
+            validateFirstLiveViewJpeg(checkNotNull(firstLiveViewFrame))
+            session.checkUsable() // Decoding may yield while the receiver reaches EOF/failure.
             multipartLiveViewSession = session
             activeLiveViewSource = LiveViewSource.CCAPI_MULTIPART
         }
@@ -3199,6 +3281,8 @@ class CcapiClient(
                     .put("ipaddress", checkNotNull(rtpDestinationAddress)),
             )
             session.awaitReady(RTP_FIRST_VIDEO_TIMEOUT_MILLIS)
+            currentCoroutineContext().ensureActive()
+            check(LiveViewLifecycleEvidence(frameEvidence = "encoded-frame").evaluate().canPublishInputReady)
             nativeLiveViewSession = session
             activeLiveViewSource = LiveViewSource.CCAPI_RTP
             observedFeatures.add(CameraFeature.LIVE_VIEW)
@@ -4635,18 +4719,31 @@ class CcapiClient(
             if (isDetailedFrame) {
                 latestLiveViewGeometry = null
             }
-            val call = newCameraCall(request)
+            val maintenance = currentCoroutineContext()[MaintenanceIoContext]
+            maintenance?.requireActive?.invoke()
+            val call = newCameraCall(request, captureConfiguration = maintenance != null)
+            if (call.timeout().timeoutNanos() == 0L || call.timeout().timeoutNanos() > TimeUnit.SECONDS.toNanos(15)) {
+                call.timeout().timeout(15, TimeUnit.SECONDS)
+            }
             val cancelCall = AtomicBoolean(true)
             val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
                 try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
             }
+            val ownerWatchers = if (maintenance != null) maintenanceCancellationWatchers {
+                if (cancelCall.get()) call.cancel()
+            } else emptyList()
             try {
                 call.execute().use { response ->
+                    if (maintenance != null) {
+                        check(response.code == 200) { "Maintenance JPEG readiness requires HTTP 200." }
+                        requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                            response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                    }
                     val contentType = response.header("content-type")
                     val body = response.body ?: error("Live view frame failed: empty response body")
 
                     if (!response.isSuccessful) {
-                        val preview = body.string().trim().take(MAX_ERROR_BODY_CHARS)
+                        val preview = body.byteStream().readBoundedBytes(MAX_ERROR_BODY_CHARS).toString(StandardCharsets.UTF_8).trim()
                         throw CcapiHttpException(
                             statusCode = response.code,
                             message = "Live view frame failed: ${request.method} ${request.url} returned HTTP ${response.code}\n" +
@@ -4655,16 +4752,25 @@ class CcapiClient(
                         )
                     }
 
+                    check(response.code == 200 && response.headers("Content-Range").isEmpty()) {
+                        "Live View frame requires a complete HTTP 200 representation without Content-Range."
+                    }
                     if (contentType.isTextLikeContentType()) {
-                        val preview = body.string().trim().take(MAX_ERROR_BODY_CHARS)
+                        val preview = body.byteStream().readBoundedBytes(MAX_ERROR_BODY_CHARS).toString(StandardCharsets.UTF_8).trim()
                         error(
                             "Live view frame returned ${contentType ?: "text"} instead of image bytes.\n" +
                                 "Body: $preview"
                         )
                     }
 
+                    val completeBody = if (maintenance != null) body.byteStream().readBoundedBytes(MAX_LIVE_VIEW_SCAN_BYTES).also {
+                        check(body.contentLength() < 0 || body.contentLength() == it.size.toLong()) {
+                            "Maintenance JPEG response ended before its declared body length."
+                        }
+                        maintenance.requireActive()
+                    } else null
                     val detailed = if (isDetailedFrame) {
-                        parseDetailedLiveView(body.byteStream().readBoundedBytes(MAX_LIVE_VIEW_SCAN_BYTES))
+                        parseDetailedLiveView(completeBody ?: body.byteStream().readBoundedBytes(MAX_LIVE_VIEW_SCAN_BYTES))
                     } else {
                         null
                     }
@@ -4676,7 +4782,7 @@ class CcapiClient(
                         bytes = when {
                             detailed?.image != null -> detailed.image
                             detailed != null -> error("Detailed Live View response did not contain an image packet.")
-                            else -> readFirstJpegFrame(body.byteStream())
+                            else -> readFirstJpegFrame(completeBody?.inputStream() ?: body.byteStream())
                         },
                         contentType = contentType,
                         sourceUrl = sourceUrl,
@@ -4688,6 +4794,7 @@ class CcapiClient(
             } finally {
                 cancelCall.set(false)
                 watcher.cancel()
+                ownerWatchers.forEach { it.cancel() }
             }
         }
 
