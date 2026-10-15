@@ -100,7 +100,7 @@ internal class AndroidCcapiRtpSession(
         )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val accessUnits = Channel<Pair<Long, H264AccessUnit>>(
+    private val accessUnits = Channel<Pair<NativeRtpInputIdentity, H264AccessUnit>>(
         capacity = RTP_ACCESS_UNIT_QUEUE_CAPACITY,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
@@ -356,14 +356,22 @@ internal class AndroidCcapiRtpSession(
     }
 
     private suspend fun receivePackets(datagramSocket: DatagramSocket) {
-        val depacketizer = H264RtpDepacketizer(description.video.payloadType)
+        var receiveGeneration = renderingGeneration.get()
+        var depacketizer = H264RtpDepacketizer(description.video.payloadType)
         val buffer = ByteArray(MAX_RTP_DATAGRAM_BYTES)
         val packet = DatagramPacket(buffer, buffer.size)
 
         while (currentCoroutineContext().isActive && !closed.get()) {
             try {
+                val inputGeneration = renderingGeneration.get()
+                if (inputGeneration != receiveGeneration) {
+                    // Discard partial pre-change NAL assembly as well as completed queued input.
+                    depacketizer = H264RtpDepacketizer(description.video.payloadType)
+                    receiveGeneration = inputGeneration
+                }
                 packet.length = buffer.size
                 datagramSocket.receive(packet)
+                if (inputGeneration != renderingGeneration.get()) continue
                 val nowMillis = System.currentTimeMillis()
                 videoDatagramsReceived.incrementAndGet()
                 videoLastDatagramAtMillis.set(nowMillis)
@@ -374,7 +382,7 @@ internal class AndroidCcapiRtpSession(
                     if (accessUnit.keyFrame) videoKeyFramesReceived.incrementAndGet()
                     accessUnit.sequenceParameterSet?.let { latestSps = it }
                     accessUnit.pictureParameterSet?.let { latestPps = it }
-                    accessUnits.trySend(sequence to accessUnit)
+                    accessUnits.trySend(NativeRtpInputIdentity(sequence, inputGeneration) to accessUnit)
                     if (accessUnit.keyFrame && latestSps != null && latestPps != null) {
                         // Core cannot wait for a UI Surface created only after Start returns.
                         // Encoded admission starts one headless decoder; only its output is ready.
@@ -591,7 +599,7 @@ internal class AndroidCcapiRtpSession(
             var lastRenderedAtNanos = 0L
             var videoWidth = DEFAULT_VIDEO_WIDTH
             var videoHeight = DEFAULT_VIDEO_HEIGHT
-            val bytesByPresentationTime = linkedMapOf<Long, Pair<Int, Long>>()
+            val bytesByPresentationTime = linkedMapOf<Long, Pair<Int, NativeRtpInputIdentity>>()
             val codecTimeline = NativeRtpCodecTimeline()
             val bufferInfo = MediaCodec.BufferInfo()
 
@@ -600,8 +608,10 @@ internal class AndroidCcapiRtpSession(
                 if (lutRenderer?.hasFailed == true) throw LutFallback(NativeVideoLutStatus.FAILED)
                 // Output is polled even when RTP has gone quiet; delayed decoder output must drain.
                 val next = withTimeoutOrNull(DECODER_OUTPUT_POLL_MILLIS) { accessUnits.receive() }
-                if (next != null && continuity.admit(next.first, next.second.keyFrame)) {
-                    val (sequence, accessUnit) = next
+                if (next != null && !next.first.ownsRendering(renderingGeneration.get())) continuity.dropped()
+                if (next != null && next.first.ownsRendering(renderingGeneration.get()) &&
+                    continuity.admit(next.first.frameId, next.second.keyFrame)) {
+                    val (identity, accessUnit) = next
                     val encoded = if (continuity.needsKeyFrame) {
                         concatenateParameterSets(latestSps, latestPps, accessUnit.bytes)
                     } else {
@@ -615,7 +625,7 @@ internal class AndroidCcapiRtpSession(
 
                     val queued = queueDecoderInput(codec, encoded, presentationTimeUs)
                     if (queued) {
-                        bytesByPresentationTime[presentationTimeUs] = encoded.size to sequence
+                        bytesByPresentationTime[presentationTimeUs] = encoded.size to identity
                         while (bytesByPresentationTime.size > MAX_PENDING_FRAME_STATS) {
                             bytesByPresentationTime.remove(bytesByPresentationTime.keys.first())
                         }
@@ -636,7 +646,8 @@ internal class AndroidCcapiRtpSession(
                                 (targetSurface != null || bufferInfo.size > 0)
                             val actualOutput = synchronized(decoderGuard) {
                                 val accepted = picture && !closed.get() && !terminalFailure.get() && decoderGeneration.get() == generation &&
-                                    frameProgress.decoded(generation, requireNotNull(decoded).second)
+                                    requireNotNull(decoded).second.ownsRendering(renderingGeneration.get()) &&
+                                    frameProgress.decoded(generation, decoded.second.frameId)
                                 if (accepted) {
                                     videoLastDecodedAtMillis.set(System.currentTimeMillis())
                                     decodedDeadline.observe(System.nanoTime())
@@ -647,11 +658,12 @@ internal class AndroidCcapiRtpSession(
                                 accepted
                             }
                             val render = actualOutput && targetSurface != null && renderingEnabled.get() &&
+                                decoded?.second?.ownsRendering(renderingGeneration.get()) == true &&
                                 (lastRenderedAtNanos == 0L || nowNanos - lastRenderedAtNanos >= frameInterval)
                             val encodedBytes = decoded?.first ?: 0
                             if (render) synchronized(renderedGuard) {
                                 pendingRendered[bufferInfo.presentationTimeUs] = PendingPresentation(
-                                    formatGeneration, renderingGeneration.get(), encodedBytes, videoWidth, videoHeight, requireNotNull(decoded).second)
+                                    formatGeneration, requireNotNull(decoded).second.renderingGeneration, encodedBytes, videoWidth, videoHeight, decoded.second.frameId)
                                 while (pendingRendered.size > MAX_PENDING_FRAME_STATS) {
                                     pendingRendered.remove(pendingRendered.keys.first())
                                 }

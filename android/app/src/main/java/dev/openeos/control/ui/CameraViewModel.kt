@@ -1016,6 +1016,7 @@ class CameraViewModel(
                 liveViewSize = session.liveViewRequest.size,
                 liveViewSource = activeSource,
                 liveViewMagnification = session.capabilities.liveView.currentMagnification,
+                liveViewCoordinateRefreshPending = false,
                 liveViewDiagnostics = session.nativeLiveViewSession?.let { native ->
                     LiveViewDiagnostics(contentType = native.contentType, sourceUrl = native.sourceUrl)
                 } ?: it.liveViewDiagnostics,
@@ -2132,7 +2133,8 @@ class CameraViewModel(
 
     fun setLiveViewMagnification(magnification: LiveViewMagnification) {
         val state = _uiState.value
-        if (state.autofocusHoldState != AutofocusHoldState.IDLE) return
+        if (state.autofocusHoldState != AutofocusHoldState.IDLE || state.isBusy(CameraOperation.LIVE_VIEW) ||
+            state.isBusy(CameraOperation.SETTING) || state.isBusy(CameraOperation.FOCUS)) return
         if (
             state.captureMode != CaptureMode.PHOTO ||
             !state.supports(CameraFeature.LIVE_VIEW_MAGNIFICATION) ||
@@ -2142,11 +2144,32 @@ class CameraViewModel(
             _uiState.update { it.copy(liveViewMagnification = magnification) }
             return
         }
+        val generation = cameraSessionGeneration
+        val connection = state.info
+        val liveViewOwner = repository.liveViewOwner()
+        invalidateCameraFocusInfo()
+        liveViewGeneration += 1
+        val presentationGeneration = liveViewGeneration
+        fun ownsMagnification() = generation == cameraSessionGeneration && _uiState.value.info === connection &&
+            presentationGeneration == liveViewGeneration && repository.ownsLiveView(liveViewOwner)
+        stopLiveViewLoop()
+        state.nativeLiveViewSession?.setRenderingEnabled(false)
+        _uiState.update { it.copy(liveViewCoordinateRefreshPending = true, liveViewBitmap = null, liveViewFrameUrl = null) }
         runCamera(CameraOperation.LIVE_VIEW) {
-            val result = repository.setLiveViewMagnification(magnification)
-            if (result.ok) {
-                _uiState.update { it.copy(liveViewMagnification = result.magnification) }
-                if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
+            if (!ownsMagnification()) return@runCamera
+            try {
+                val result = repository.setLiveViewMagnification(magnification)
+                coroutineContext.ensureActive()
+                if (!ownsMagnification()) return@runCamera
+                if (result.ok) _uiState.update { it.copy(liveViewMagnification = result.magnification) }
+            } finally {
+                // Rebind only this owner's post-command presentation. Buffered native camera
+                // timing still needs device evidence; queued old listener callbacks are rejected.
+                if (ownsMagnification()) {
+                    liveViewGeneration += 1
+                    configureNativeLiveViewSession(_uiState.value.nativeLiveViewSession, _uiState.value.liveViewFrameRateFps)
+                    startLiveViewLoopIfNeeded()
+                }
             }
         }
     }
@@ -3596,6 +3619,7 @@ class CameraViewModel(
     }
 
     fun tapFocus(x: Double, y: Double) {
+        if (_uiState.value.liveViewCoordinateRefreshPending) return
         if (_uiState.value.isBusy(CameraOperation.FOCUS) || _uiState.value.isBusy(CameraOperation.LIVE_VIEW)) return
         invalidateCameraFocusInfo()
         focusFeedbackJob?.cancel()
@@ -3615,6 +3639,8 @@ class CameraViewModel(
             clearFocusFeedbackAfter(FocusFeedback.ACCEPTED)
             return
         }
+        val generation = cameraSessionGeneration
+        val connection = _uiState.value.info
         runCamera(
             operation = CameraOperation.FOCUS,
             onError = {
@@ -3623,6 +3649,8 @@ class CameraViewModel(
             },
         ) {
             val result = repository.tapFocus(x, y)
+            coroutineContext.ensureActive()
+            if (generation != cameraSessionGeneration || _uiState.value.info !== connection) return@runCamera
             check(result.ok) { "Camera rejected the focus point." }
             _uiState.update {
                 it.copy(
@@ -3646,6 +3674,8 @@ class CameraViewModel(
     }
 
     fun clickWhiteBalance(x: Double, y: Double) {
+        if (_uiState.value.liveViewCoordinateRefreshPending) return
+        if (_uiState.value.isBusy(CameraOperation.SETTING) || _uiState.value.isBusy(CameraOperation.LIVE_VIEW)) return
         _uiState.update {
             it.copy(
                 focusPoint = FocusPoint(x, y),
@@ -3664,6 +3694,8 @@ class CameraViewModel(
             clearFocusFeedbackAfter(FocusFeedback.SUCCESS)
             return
         }
+        val generation = cameraSessionGeneration
+        val connection = _uiState.value.info
         runCamera(
             operation = CameraOperation.SETTING,
             onError = {
@@ -3673,6 +3705,8 @@ class CameraViewModel(
         ) {
             val revision = cameraStateRevision
             val status = latestCameraStatus(repository.clickWhiteBalance(x, y), revision)
+            coroutineContext.ensureActive()
+            if (generation != cameraSessionGeneration || _uiState.value.info !== connection) return@runCamera
             _uiState.update {
                 it.copy(
                     status = status,
@@ -4030,6 +4064,7 @@ class CameraViewModel(
                     it.copy(
                         liveViewFrameUrl = nextUrl,
                         liveViewBitmap = null,
+                        liveViewCoordinateRefreshPending = false,
                         error = if (it.errorOperation == CameraOperation.LIVE_VIEW) null else it.error,
                         errorOperation = it.errorOperation.takeUnless { operation -> operation == CameraOperation.LIVE_VIEW },
                         liveViewDiagnostics = recordFrame(
@@ -4063,6 +4098,7 @@ class CameraViewModel(
                     it.copy(
                         liveViewFrameUrl = frame.sourceUrl,
                         liveViewBitmap = bitmap,
+                        liveViewCoordinateRefreshPending = false,
                         error = if (it.errorOperation == CameraOperation.LIVE_VIEW) null else it.error,
                         errorOperation = it.errorOperation.takeUnless { operation -> operation == CameraOperation.LIVE_VIEW },
                         liveViewDiagnostics = recordFrame(
@@ -4838,6 +4874,7 @@ class CameraViewModel(
 
                     is NativeLiveViewEvent.FrameRendered -> _uiState.update {
                         it.copy(
+                            liveViewCoordinateRefreshPending = false,
                             liveViewAspectRatio = event.width.toFloat() / event.height.coerceAtLeast(1),
                             liveViewDiagnostics = recordFrame(
                                 current = it.liveViewDiagnostics,

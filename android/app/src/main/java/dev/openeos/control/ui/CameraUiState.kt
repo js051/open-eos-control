@@ -181,6 +181,7 @@ data class CameraUiState(
     val liveViewSource: LiveViewSource = LiveViewSource.AUTO,
     val liveViewAspectRatio: Float = 16f / 9f,
     val liveViewMagnification: LiveViewMagnification? = null,
+    val liveViewCoordinateRefreshPending: Boolean = false,
     val liveViewDiagnostics: LiveViewDiagnostics = LiveViewDiagnostics(),
     val cameraFocusInfo: dev.openeos.control.data.CameraFocusInfo? = null,
     val cameraFocusInfoAtMillis: Long? = null,

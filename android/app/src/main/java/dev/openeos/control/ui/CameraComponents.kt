@@ -976,7 +976,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         state.supports(CameraFeature.CLICK_WHITE_BALANCE) -> LiveViewTapAction.WHITE_BALANCE
         else -> null
     }
-    val canTap = state.liveViewAutoRefresh && !state.isBusy(CameraOperation.LIVE_VIEW) && when (tapAction) {
+    val canTap = state.liveViewAutoRefresh && !state.liveViewCoordinateRefreshPending && !state.isBusy(CameraOperation.LIVE_VIEW) && when (tapAction) {
         LiveViewTapAction.FOCUS -> !state.isBusy(CameraOperation.FOCUS)
         LiveViewTapAction.WHITE_BALANCE -> !state.isBusy(CameraOperation.SETTING)
         null -> false

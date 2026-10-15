@@ -1,5 +1,8 @@
 package dev.openeos.control.data
 
+import java.io.InputStream
+import java.util.concurrent.LinkedBlockingQueue
+import okio.source
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -25,6 +28,48 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CcapiMultipartLiveViewSessionTest {
+    @Test fun magnificationDiscardsMailboxAndInFlightPartWithoutClosingStream() {
+        val input = object : InputStream() {
+            val bytes = LinkedBlockingQueue<Int>()
+            val waiting = LinkedBlockingQueue<Unit>()
+            override fun read(): Int {
+                val ready = synchronized(this) { bytes.poll().also { if (it == null) waiting.put(Unit) } }
+                return ready ?: bytes.take()
+            }
+            // Avoid InputStream's default bulk read waiting to fill an entire Okio segment.
+            override fun read(target: ByteArray, offset: Int, length: Int): Int {
+                if (length == 0) return 0
+                target[offset] = read().toByte()
+                return 1
+            }
+            @Synchronized fun send(marker: Int) {
+                val jpeg = byteArrayOf(255.toByte(), 216.toByte(), marker.toByte(), 255.toByte(), 217.toByte())
+                val part = "--canon\nContent-Type: image/jpeg\nContent-Length: ${jpeg.size}\n\n".toByteArray() + jpeg + "\n".toByteArray()
+                part.forEach { bytes.put(it.toInt() and 255) }
+            }
+            fun awaitRead() { assertNotNull(waiting.poll(2, TimeUnit.SECONDS)) }
+        }
+        val request = Request.Builder().url("http://127.0.0.1/multipart").build()
+        val response = Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+            .body(object : ResponseBody() {
+                val stream = input.source().buffer()
+                override fun contentType() = null
+                override fun contentLength() = -1L
+                override fun source(): BufferedSource = stream
+            }).build()
+        val session = CcapiMultipartLiveViewSession(OkHttpClient().newCall(request), response, request.url.toString(), "canon")
+        try {
+            input.awaitRead(); input.send(1); input.awaitRead()
+            session.discardPendingFrames()
+            assertTrue(runCatching { session.nextFrame(0) }.isFailure)
+            input.send(2); input.awaitRead()
+            assertTrue("Old in-flight frame must not acquire the new epoch", runCatching { session.nextFrame(0) }.isFailure)
+            input.send(3); input.awaitRead()
+            assertEquals(3, session.nextFrame(0).bytes[2].toInt())
+            session.checkUsable()
+        } finally { session.close() }
+    }
+
     @Test fun knownTerminalFailureWinsOverBothRetainedAndUnreadFirstFrame() {
         for (consumeFirst in listOf(false, true)) {
             val jpeg = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 1, 0xff.toByte(), 0xd9.toByte())
