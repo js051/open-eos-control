@@ -132,6 +132,12 @@ def test_transport_reason_uses_exception_type_without_message_parsing(monkeypatc
         raise failure
 
     monkeypatch.setattr("open_eos_bridge.ccapi.urlopen", fail)
+    # Strict identity probes now use a no-redirect opener. Keep every synthetic
+    # discovery route inside the fixture rather than making a real request.
+    class FailureOpener:
+        open = staticmethod(fail)
+
+    monkeypatch.setattr("open_eos_bridge.ccapi.build_opener", lambda *_handlers: FailureOpener())
     session = CcapiSession("http://camera.invalid", UrllibCcapiTransport())
     with pytest.raises(BridgeError) as caught:
         session.initialize()

@@ -149,7 +149,7 @@ function fixture(options = {}) {
     "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh", "closeMediaPreview",
     "closeMediaDetails", "releaseObjectUrl", "clearBulbTimer", "renderHealth"]) context[name] = () => {};
   state.mediaDisplayZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  const names = ["refreshMediaDateZone", "recordingRecoveryActive", "mediaTransferActive", "cameraInteractionBusy", "mediaAutoImportEligible", "ownsMediaAutoImport",
+  const names = ["maintenanceHeld", "cancelMaintenance", "suspendMaintenanceForLifecycle", "refreshMediaDateZone", "recordingRecoveryActive", "mediaTransferActive", "cameraInteractionBusy", "mediaAutoImportEligible", "ownsMediaAutoImport",
     "mediaAutoImportManualBusy", "assertMediaAutoImportCurrent", "withMediaAutoImportRead", "requireMediaAutoImportResponse",
     "readMediaAutoImportInventory", "readMediaAutoImportMetadata", "mediaAutoImportHistoryCall", "transferMediaAutoImportItem",
     "finishMediaAutoImportOwner", "scheduleMediaAutoImport", "stepMediaAutoImport", "startMediaAutoImport", "stopMediaAutoImport", "renderMediaAutoImport", "cancelSetting", "resetSession",

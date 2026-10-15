@@ -18,12 +18,14 @@ function deferred() {
   return { promise, resolve, reject };
 }
 function fixture() {
-  const state = { session: { id: "synthetic-A" }, liveActive: true, liveGeneration: 1,
+  const state = { session: { id: "synthetic-A", engine: "ccapi" }, liveActive: true, liveGeneration: 1,
     liveSource: "CCAPI_RTP", activeLiveSource: "CCAPI_RTP", requestedFps: 15,
     previewInput: "CAMERA", localVideoSupport: { available: true }, busy: false, refreshGeneration: 0,
-    status: {}, frameTimes: [] };
+    status: {}, frameTimes: [], maintenanceSequence: 0, maintenanceHistory: [] };
   const requests = [], messages = [], pending = [];
-  const context = vm.createContext({ state,
+  const context = vm.createContext({ state, AbortController, setTimeout, clearTimeout,
+    maintenanceLifecycle: require("../open_eos_bridge/static/maintenance-lifecycle.js"), mediaTransferActive: () => false,
+    renderAdvancedSettings() {},
     ui: { fpsSelect: { value: "30" }, liveSourceSelect: { value: "CCAPI_JPEG_POLLING" },
       previewInputSelect: { value: "LOCAL_VIDEO" } },
     FEATURES: { LIVE_VIEW: "LIVE_VIEW", CAMERA_SLEEP: "CAMERA_SLEEP", SENSOR_CLEANING: "SENSOR_CLEANING" },
@@ -43,9 +45,12 @@ function fixture() {
     setOperationState: message => messages.push(message),
     api: (url, options) => { const gate = deferred(); requests.push({ url, options }); pending.push(gate); return gate.promise; },
   });
-  const names = ["adoptCameraStatus", "beginCameraInteraction", "refreshSession", "stopLiveView", "startLiveView", "toggleLiveView", "changeFps", "changeLiveSource", "changePreviewInput",
+  const names = ["maintenanceHeld", "maintenancePaused", "maintenanceCurrent", "maintenancePublishable",
+    "maintenanceSafetyClear", "maintenanceOtherBusy", "cancelMaintenance", "suspendMaintenanceForLifecycle", "maintenanceControlRequest", "maintenanceOwnedControl", "maintenanceStopRetryAvailable", "disconnectMaintenanceCamera", "runMaintenance", "maintenanceRead",
+    "recoverMaintenance", "restoreMaintenance", "adoptCameraStatus", "beginCameraInteraction", "refreshSession", "stopLiveView", "startLiveView", "toggleLiveView", "changeFps", "changeLiveSource", "changePreviewInput",
     "sleepCamera", "cleanSensor"];
   if (/function liveViewStopRequired\(/.test(source)) names.push("liveViewStopRequired");
+  context.captureConfiguration = { transfer: async (url, options) => ({ status: 200, body: await context.api(url, options) }) };
   vm.runInContext(names.map(body).join("\n"), context);
   return Object.assign(context, { requests, pending, messages });
 }
@@ -201,15 +206,22 @@ for (const method of ["sleepCamera", "cleanSensor"]) {
     assert.equal(f.requests.length, 1); assert.equal(f.liveViewStopRequired(), true);
   });
 }
-test("non-poweroff cleaning resumes preview only after explicit stop and maintenance", async () => {
+test("non-poweroff cleaning holds preview until an explicit fresh-read restore", async () => {
   const f = fixture(); const operation = f.cleanSensor({}, false);
   f.pending[0].resolve({ active: false, liveViewStopUnconfirmed: false }); await turns();
-  assert.match(f.requests[1].url, /maintenance\/sensor-cleaning$/);
-  f.pending[1].resolve({}); await turns();
-  assert.match(f.requests[2].url, /\/status$/);
-  f.pending[2].resolve({}); await turns();
-  assert.match(f.requests[3].url, /liveview\/start$/);
-  f.pending[3].resolve({ active: true }); await operation;
+  assert.match(f.requests[1].url, /maintenance\/sensor-cleaning\/outcome$/);
+  f.pending[1].resolve({ version: 1, engine: "ccapi", operation: "sensor-cleaning", autoPowerOff: false,
+    responseEvidence: "response-received", clockReference: null, clockObservation: null, clockReadEvidence: "not-applicable" });
+  await operation;
+  assert.equal(f.requests.length, 2); assert.equal(f.state.liveActive, false);
+  f.state.requestedFps = 25; f.state.liveSource = "AUTO";
+  const restore = f.restoreMaintenance(f.state.maintenanceHistory[0]); await turns();
+  assert.match(f.requests[2].url, /maintenance\/sensor-cleaning$/);
+  f.pending[2].resolve({ version: 1, engine: "ccapi", operation: "sensor-cleaning", observationEvidence: "reachable", clockObservation: null }); await turns();
+  assert.match(f.requests[3].url, /maintenance\/control\/liveview\/start$/);
+  assert.equal(f.requests[3].options.payload.fps, 15);
+  assert.equal(f.requests[3].options.payload.source, "CCAPI_RTP");
+  f.pending[3].resolve({ active: true, liveViewStopUnconfirmed: false }); assert.equal(await restore, true);
   assert.equal(f.state.liveActive, true);
 });
 for (const reply of [null, {}, [], { active: false }, { active: "true" }]) {
@@ -356,4 +368,136 @@ test("active Start reply with explicit stop warning never publishes preview or s
   const retry = f.stopLiveView();
   f.pending[2].resolve({ active: false, liveViewStopUnconfirmed: false });
   assert.equal(await retry, true);
+});
+
+test("cancel after restore Start dispatch retains stop responsibility and cannot publish late preview", async () => {
+  const f=fixture(),action=f.cleanSensor({},false);
+  f.pending[0].resolve({active:false,liveViewStopUnconfirmed:false});await turns();
+  f.pending[1].resolve({version:1,engine:'ccapi',operation:'sensor-cleaning',autoPowerOff:false,responseEvidence:'response-received',clockReference:null,clockObservation:null,clockReadEvidence:'not-applicable'});await action;
+  const record=f.state.maintenanceHistory[0],restore=f.restoreMaintenance(record);
+  f.pending[2].resolve({version:1,engine:'ccapi',operation:'sensor-cleaning',observationEvidence:'reachable',clockObservation:null});await turns();
+  assert.match(f.requests[3].url,/liveview\/start$/);f.cancelMaintenance();
+  f.pending[3].resolve({active:true});assert.equal(await restore,false);
+  assert.equal(f.state.liveActive,false);assert.equal(f.liveViewStopRequired(),true);
+  assert.equal(f.state.liveViewStopOwner.stopUnconfirmed,true);assert.equal(record.restoreEvidence,'unknown');
+  assert.equal(f.state.maintenanceHold,record);assert.equal(f.requests.length,4);
+});
+
+function maintenanceHeldFixture() {
+  const f = fixture();
+  const record = { owner: f.state.session, token: 'SYNTHETIC-FROZEN', retired: false, wasEvents: true,
+    resume: { source: 'CCAPI_RTP', fps: 15, size: 'MEDIUM' } };
+  f.state.token = 'SYNTHETIC-NEW'; f.state.maintenanceHold = record;
+  f.state.liveActive = false;
+  f.state.liveViewStopOwner = { session: f.state.session, maintenanceRecord: record, stopUnconfirmed: true };
+  f.cancelEventLoop = () => {}; f.cancelMediaDownload = () => {};
+  f.ui.connectionError = { textContent: '', hidden: true };
+  f.captureConfiguration.transfer = async (url, options) => ({ status: options.method === 'DELETE' ? 204 : 200,
+    body: await f.api(url, options) });
+  return { f, record };
+}
+test('held maintenance Retry Stop remains reachable, bounded, single-dispatch and retains frozen token', async () => {
+  const { f, record } = maintenanceHeldFixture();
+  assert.equal(f.maintenanceStopRetryAvailable(), true);
+  const marker = source.indexOf('    const liveStopRequired = liveViewStopRequired();');
+  const end = source.indexOf('    const quickActionCount =', marker);
+  assert.ok(marker > 0 && end > marker);
+  f.ui.liveToggleButton = {}; f.ui.railLiveButton = {};
+  Object.assign(f, { interactionBusy: true, bulbActive: false, cameraLiveSupported: true,
+    localLiveSupported: false, selectedLiveSupported: true, temperatureAllows: () => true });
+  vm.runInContext(source.slice(marker, end), f);
+  assert.equal(f.ui.liveToggleButton.disabled, false);
+  const stop = f.toggleLiveView();
+  assert.equal(f.maintenanceStopRetryAvailable(), false);
+  await f.toggleLiveView(); assert.equal(f.requests.length, 1);
+  assert.match(f.requests[0].url, /maintenance\/control\/liveview\/stop$/);
+  assert.equal(f.requests[0].options.token, record.token);
+  assert.equal(f.requests[0].options.strictSettings, true);
+  assert.equal(f.requests[0].options.strictIntegerTokens, true);
+  assert.ok(f.requests[0].options.signal);
+  f.pending[0].resolve({ active: false, liveViewStopUnconfirmed: false }); await stop;
+  assert.equal(f.liveViewStopRequired(), false);
+  assert.equal(f.state.maintenanceHold, record);
+  assert.equal(f.state.liveActive, false);
+});
+test('same-owner newer Stop warning cannot be cleared by late strict Stop proof', async () => {
+  const { f } = maintenanceHeldFixture(); const stop = f.toggleLiveView();
+  f.adoptCameraStatus({ liveViewStopUnconfirmed: true }, f.state.session, f.state.liveViewStopRevision || 0);
+  f.pending[0].resolve({ active: false, liveViewStopUnconfirmed: false }); await stop;
+  assert.equal(f.liveViewStopRequired(), true); assert.equal(f.state.liveViewStopOwner.stopUnconfirmed, true);
+});
+test('same-owner newer Stop warning prevents late maintenance Restore Start publication', async () => {
+  const { f, record } = maintenanceHeldFixture(); f.state.liveViewStopOwner = null;
+  const invocation = { record, mode: 'restore', restoreAdmitted: true, cancelled: false, controller: new AbortController() };
+  f.state.maintenanceOwner = invocation;
+  const start = f.startLiveView({ maintenanceRestore: invocation });
+  f.adoptCameraStatus({ liveViewStopUnconfirmed: true }, f.state.session, f.state.liveViewStopRevision);
+  f.pending[0].resolve({ active: true, liveViewStopUnconfirmed: false }); await start;
+  assert.equal(f.state.liveActive, false); assert.equal(f.state.liveViewStopOwner.stopUnconfirmed, true);
+  assert.equal(f.state.liveViewStopOwner.maintenanceRecord, record);
+});
+test('background cancellation preserves strict Stop responsibility and explicit retry uses a fresh signal', async () => {
+  const { f } = maintenanceHeldFixture(); const stop = f.toggleLiveView();
+  const signal = f.requests[0].options.signal;
+  f.suspendMaintenanceForLifecycle(); assert.equal(signal.aborted, true);
+  f.pending[0].resolve({ active: false, liveViewStopUnconfirmed: false }); await stop;
+  assert.equal(f.liveViewStopRequired(), true);
+  const retry = f.toggleLiveView(); assert.notEqual(f.requests[1].options.signal, signal);
+  assert.equal(f.requests[1].options.signal.aborted, false);
+  f.pending[1].resolve({ active: false, liveViewStopUnconfirmed: false }); await retry;
+  assert.equal(f.liveViewStopRequired(), false); assert.equal(f.requests.length, 2);
+});
+for (const retireFails of [false, true]) test(`explicit maintenance disconnect retains Stop uncertainty across local retire failure=${retireFails}`, async () => {
+  const { f, record } = maintenanceHeldFixture();
+  const close = f.disconnectMaintenanceCamera(f.state.session, record);
+  f.pending[0].reject(new Error('Synthetic lost stop')); await turns();
+  assert.match(f.requests[1].url, /maintenance\/control\/events$/);
+  f.pending[1].resolve(null); await turns();
+  assert.match(f.requests[2].url, /maintenance\/control\/session$/);
+  if (retireFails) f.pending[2].reject(new Error('Synthetic local retirement failure'));
+  else f.pending[2].resolve(null);
+  await close;
+  assert.equal(f.requests.length, 3);
+  assert.equal(f.state.session, null);
+  assert.match(f.ui.connectionError.textContent, /liveViewStopUnconfirmed/);
+  assert.equal(f.ui.connectionError.textContent.includes('maintenanceRetireUnconfirmed'), retireFails);
+  assert.equal(f.requests.every(r => r.options.token === record.token && r.options.strictSettings), true);
+});
+for (const releaseConfirmed of [true, false]) test(`restored maintenance disconnect preserves subsequent Bulb release confirmed=${releaseConfirmed}`, async () => {
+  const { f, record } = maintenanceHeldFixture(); f.bulbControlLocked = () => true;
+  const close = f.disconnectMaintenanceCamera(f.state.session, record);
+  assert.match(f.requests[0].url, /bulb\/stop$/);
+  f.pending[0].resolve({ bulbExposureActive: !releaseConfirmed, shutterReleaseUnconfirmed: !releaseConfirmed }); await turns();
+  const offset = releaseConfirmed ? 1 : 0;
+  if (releaseConfirmed) {
+    assert.match(f.requests[1].url, /maintenance\/control\/liveview\/stop$/);
+    f.pending[1].resolve({ active: false, liveViewStopUnconfirmed: false }); await turns();
+  }
+  if (releaseConfirmed) {
+    assert.match(f.requests[1 + offset].url, /maintenance\/control\/events$/);
+    f.pending[1 + offset].resolve(null); await turns();
+  }
+  const retirementIndex = releaseConfirmed ? 3 : 1;
+  assert.match(f.requests[retirementIndex].url, /maintenance\/control\/session$/);
+  f.pending[retirementIndex].resolve(null); await close;
+  assert.equal(f.requests.length, retirementIndex + 1);
+  assert.equal(Boolean(f.state.shutterDisconnectWarning), !releaseConfirmed);
+  if (!releaseConfirmed) assert.match(f.ui.connectionError.textContent, /bulbDisconnectWarning/);
+});
+test('restored maintenance disconnect preserves subsequent held AF release failure', async () => {
+  const { f, record } = maintenanceHeldFixture(); const held = {}; f.state.heldAutofocusOwner = held;
+  let calls = 0; f.stopHeldAutofocus = async ({ owner }) => { calls++; assert.equal(owner || f.state.heldAutofocusOwner, held); return false; };
+  const close = f.disconnectMaintenanceCamera(f.state.session, record); await turns();
+  // Stop Live View cannot cross an unresolved held AF release, and retire cannot claim it did.
+  assert.match(f.requests[0].url, /maintenance\/control\/session$/);
+  f.pending[0].resolve(null); await close;
+  assert.equal(f.requests.length, 1);
+  assert.equal(calls, 1); assert.equal(f.state.shutterDisconnectWarning, true);
+});
+test('cancelling Close during required physical release cannot dispatch a later Stop or retirement',async()=>{
+ const {f,record}=maintenanceHeldFixture(),gate=deferred();f.state.heldAutofocusOwner={};let calls=0;
+ f.stopHeldAutofocus=async()=>{calls++;return gate.promise;};
+ const close=f.disconnectMaintenanceCamera(f.state.session,record);f.suspendMaintenanceForLifecycle();gate.resolve(false);await close;
+ assert.equal(calls,1);assert.equal(f.requests.length,0);assert.equal(f.state.session,null);
+ assert.match(f.ui.connectionError.textContent,/maintenanceRetireUnconfirmed/);
 });

@@ -65,6 +65,7 @@ from .models import (
     LiveViewMagnificationResult,
     LiveViewStartRequest,
     LiveViewState,
+    MaintenanceRequest,
     MediaArchiveUpdate,
     MediaItem,
     MediaList,
@@ -635,6 +636,67 @@ def create_app(
         payload: FileNamingUpdate,
     ) -> FileNamingState:
         return manager.get(session_id).set_file_naming(field, payload.value)
+
+    @router.post("/session/{session_id}/maintenance/{operation}/outcome")
+    def perform_maintenance_outcome(session_id: str, operation: str, payload: MaintenanceRequest,
+                                    response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        session = manager.get(session_id)
+        performer = getattr(session, "perform_maintenance_outcome", None)
+        if not callable(performer):
+            raise BridgeError("UNSUPPORTED_MAINTENANCE_OUTCOME", "Scoped maintenance is unavailable.", status_code=409)
+        return performer(operation, payload.auto_power_off)
+
+    @router.get("/session/{session_id}/maintenance/{operation}")
+    def read_maintenance(session_id: str, operation: str, response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        session = manager.get(session_id)
+        reader = getattr(session, "read_maintenance", None)
+        if not callable(reader):
+            raise BridgeError("UNSUPPORTED_MAINTENANCE_READBACK", "Read-only maintenance observation unavailable.",
+                              status_code=409)
+        return reader(operation)
+
+    @router.delete("/session/{session_id}/maintenance/control/session", status_code=204)
+    def retire_maintenance_session(session_id: str) -> Response:
+        manager.retire_maintenance(session_id)
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+    @router.delete("/session/{session_id}/maintenance/control/events", status_code=204)
+    def stop_maintenance_events(session_id: str) -> Response:
+        session = manager.get(session_id)
+        operation = getattr(session, "maintenance_stop_events", None)
+        if not callable(operation):
+            raise unsupported("MAINTENANCE_CONTROLS", session.engine_name)
+        operation()
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+    @router.post("/session/{session_id}/maintenance/control/liveview/stop", response_model=LiveViewState)
+    def stop_maintenance_live_view(session_id: str, response: Response) -> LiveViewState:
+        session = manager.get(session_id)
+        operation = getattr(session, "maintenance_stop_live_view", None)
+        if not callable(operation):
+            raise unsupported("MAINTENANCE_CONTROLS", session.engine_name)
+        operation()
+        response.headers["Cache-Control"] = "no-store"
+        return LiveViewState(active=False, live_view_stop_unconfirmed=
+            getattr(session, "live_view_stop_unconfirmed", None))
+
+    @router.post("/session/{session_id}/maintenance/control/liveview/start", response_model=LiveViewState,
+                 response_model_exclude_none=True)
+    def start_maintenance_live_view(
+        session_id: str, payload: LiveViewStartRequest, response: Response,
+    ) -> LiveViewState:
+        session = manager.get(session_id)
+        operation = getattr(session, "maintenance_start_live_view", None)
+        if not callable(operation):
+            raise unsupported("MAINTENANCE_CONTROLS", session.engine_name)
+        operation(payload)
+        response.headers["Cache-Control"] = "no-store"
+        return LiveViewState(active=True, requested_fps=getattr(session, "requested_fps", min(payload.fps, 5)),
+                            source=getattr(session, "live_view_source", payload.source),
+                            size=getattr(session, "live_view_size", None),
+                            live_view_stop_unconfirmed=getattr(session, "live_view_stop_unconfirmed", None))
 
     @router.post("/session/{session_id}/clock/sync", response_model=CameraStatus)
     def sync_camera_clock(session_id: str) -> CameraStatus:

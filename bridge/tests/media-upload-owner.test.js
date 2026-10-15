@@ -219,7 +219,7 @@ test("UI strings, script order, review and lifecycle entry points are wired into
   assert.ok(html.indexOf('/app/media-upload.js') < html.indexOf('/app/app.js'));
   assert.match(source, /mediaUploadButton.addEventListener\("click", openMediaUploadPicker\)/);
   assert.match(source, /mediaUploadReview.addEventListener\("click",/);
-  assert.match(source, /window.addEventListener\("pagehide", \(\) => \{\s+cancelMediaUpload\(\{ silent: true, retire: true \}\)/);
+  assert.match(source, /window.addEventListener\("pagehide", \(\) => \{\s+suspendMaintenanceForLifecycle\(\);\s+cancelMediaUpload\(\{ silent: true, retire: true \}\)/);
   assert.match(extract("resetSession"), /cancelMediaUpload\(\{ silent: true, retire: true \}\)/);
   assert.doesNotMatch(extract("cancelMediaUpload"), /state\.media\.some|deleteMedia|uploadMedia\(/);
 });

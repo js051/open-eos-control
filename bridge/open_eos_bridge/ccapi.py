@@ -24,6 +24,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from .errors import BridgeError, ConnectionFailureReason, unsupported
 from .focus_info import MAX_FOCUS_INFO_BYTES, parse_ccapi_focus_info_packet
 from .jpeg_original import MAX_ENCODED_BYTES, InvalidJpegOriginal, validate_http_types
+from .maintenance import observation as maintenance_observation
+from .maintenance import require_intent, response_received
 from .media_folders import camera_folder_fields
 from .media_listing import MAX_LIST_SNAPSHOT_ITEMS
 from .media_metadata import MIME_ALIASES, declared_media_mime
@@ -643,6 +645,7 @@ class CcapiTransport(Protocol):
         headers: Mapping[str, str] | None = None,
         timeout: float = 15.0,
         max_bytes: int = MAX_JSON_BYTES,
+        strict_control: bool = False,
     ) -> CcapiResponse: ...
 
     def open_stream(
@@ -653,6 +656,7 @@ class CcapiTransport(Protocol):
         headers: Mapping[str, str] | None = None,
         timeout: float = 60.0,
         follow_redirects: bool = True,
+        strict_control: bool = False,
     ) -> CcapiStreamResponse: ...
 
     def close(self) -> None: ...
@@ -679,18 +683,20 @@ class UrllibCcapiTransport:
         headers: Mapping[str, str] | None = None,
         timeout: float = 15.0,
         max_bytes: int = MAX_JSON_BYTES,
+        strict_control: bool = False,
     ) -> CcapiResponse:
         resource_path = urlsplit(url).path
-        configuration_resource = (
+        configuration_resource = strict_control or (
             resource_path.endswith((DIRECTORY_CREATE_PATH_SUFFIX, DIRECTORY_SELECTION_PATH_SUFFIX,
-                                    ZOOM_PATH_SUFFIX, MOVIE_MODE_PATH_SUFFIX))
+                                    ZOOM_PATH_SUFFIX, MOVIE_MODE_PATH_SUFFIX, "/functions/datetime",
+                                    "/functions/sensorcleaning", "/functions/autopoweroff", "/deviceinformation"))
             or "/shooting/settings" in resource_path
             or any(resource_path.endswith(suffix) for suffix, _ in FILE_NAMING_ENDPOINTS.values())
         )
         deadline = time.monotonic() + timeout if configuration_resource else None
         response = self._open(
             method, url, body=body, headers=headers, timeout=timeout,
-            follow_redirects=method != "DELETE" and not configuration_resource,
+            follow_redirects=method != "DELETE" and not configuration_resource, strict_control=strict_control,
         )
         try:
             if method != "DELETE" and not 200 <= response.status < 300:
@@ -757,8 +763,10 @@ class UrllibCcapiTransport:
         headers: Mapping[str, str] | None = None,
         timeout: float = 60.0,
         follow_redirects: bool = True,
+        strict_control: bool = False,
     ) -> CcapiStreamResponse:
-        return self._open(method, url, headers=headers, timeout=timeout, follow_redirects=follow_redirects)
+        return self._open(method, url, headers=headers, timeout=timeout, follow_redirects=follow_redirects,
+                          strict_control=strict_control)
 
     def close(self) -> None:
         self._authorization = None
@@ -772,6 +780,7 @@ class UrllibCcapiTransport:
         headers: Mapping[str, str] | None = None,
         timeout: float,
         follow_redirects: bool = True,
+        strict_control: bool = False,
     ) -> CcapiStreamResponse:
         request_headers = {
             "Accept": "application/json,*/*",
@@ -799,8 +808,10 @@ class UrllibCcapiTransport:
                 engine=ENGINE_NAME,
             ) from error
         resource_path = urlsplit(url).path
-        strict_setting = ("/shooting/settings" in resource_path
-                          or resource_path.endswith((ZOOM_PATH_SUFFIX, MOVIE_MODE_PATH_SUFFIX)))
+        strict_setting = strict_control or ("/shooting/settings" in resource_path
+                          or resource_path.endswith((ZOOM_PATH_SUFFIX, MOVIE_MODE_PATH_SUFFIX,
+                                                     "/functions/datetime", "/functions/sensorcleaning",
+                                                     "/functions/autopoweroff", "/deviceinformation")))
         if strict_setting:
             get_all = getattr(response.headers, "get_all", None)
             ambiguous = callable(get_all) and any(
@@ -973,6 +984,9 @@ class CcapiSession:
         self._active_multipart_operations: CcapiMultipartOperations | None = None
         self._active_jpeg_operations: CcapiJpegOperations | None = None
         self._live_view_size_control = True
+        self._maintenance_control_active = False
+        self._maintenance_stop_owned = False
+        self._maintenance_restore_request: LiveViewStartRequest | None = None
         self._rejected_live_view_sizes: set[str] = set()
         self._active_live_view_size: str | None = None
         self._live_view_magnification: tuple[int, list[int]] | None = None
@@ -2032,6 +2046,188 @@ class CcapiSession:
             self._observed.add(CameraFeature.FILE_NAMING_CONTROL)
             return updated
 
+    def _maintenance_clock_sample(self, path: str, deadline: float) -> dict[str, object]:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance read timed out.", status_code=504)
+        raw = self._request_capture_configuration_json("GET", path, timeout=remaining, strict_setting=True)
+        if time.monotonic() >= deadline:
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance read timed out.", status_code=504)
+        stamp, daylight = self._validate_camera_clock_response(raw)
+        offset = stamp.utcoffset().total_seconds()
+        if offset % 60:
+            raise BridgeError("INVALID_CCAPI_RESPONSE", "Clock offset is not a whole minute.", status_code=502)
+        return {"epochSeconds": int(stamp.timestamp()), "utcOffsetMinutes": int(offset // 60),
+                "daylightSaving": daylight}
+
+    def read_maintenance(self, operation: str) -> dict[str, object]:
+        require_intent(operation, False)
+        deadline = time.monotonic() + 15.0
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance lock timed out.", status_code=504)
+        try:
+            self._require_open()
+            if not self._initialized:
+                raise BridgeError("SESSION_NOT_INITIALIZED", "Connect before maintenance reads.", status_code=409)
+            if operation == "clock-sync":
+                operations = self._camera_clock_operations()
+                if operations is None:
+                    raise unsupported(CameraFeature.CAMERA_CLOCK_SYNC.value, self.engine_name)
+                return maintenance_observation(self.engine_name, operation,
+                                               self._maintenance_clock_sample(operations[0].path, deadline))
+            probe = self._operation("GET", "/deviceinformation")
+            if probe is None:
+                raise unsupported("MAINTENANCE_READBACK", self.engine_name)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance read timed out.", status_code=504)
+            raw = self._request_capture_configuration_json("GET", probe.path, timeout=remaining, strict_setting=True)
+            if (time.monotonic() >= deadline or not isinstance(raw, dict)
+                    or not isinstance(raw.get("productname"), str) or not raw["productname"].strip()):
+                raise BridgeError("INVALID_CCAPI_RESPONSE", "Required camera identity read unavailable.",
+                                  status_code=502)
+            # Do not return identity/serial data, cached status or physical completion claims.
+            return maintenance_observation(self.engine_name, operation, reachable=True)
+        finally:
+            self._lock.release()
+
+    @contextmanager
+    def _maintenance_controls(self) -> Iterator[None]:
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance control lock timed out.", status_code=504)
+        previous = self._maintenance_control_active
+        try:
+            self._require_open()
+            if not self._initialized:
+                raise BridgeError("SESSION_NOT_INITIALIZED", "Connect before maintenance.", status_code=409)
+            self._maintenance_control_active = True
+            yield
+        finally:
+            self._maintenance_control_active = previous
+            self._lock.release()
+
+    def maintenance_stop_events(self) -> None:
+        with self._maintenance_controls():
+            operations = self._event_polling_operations()
+            if operations is None:
+                raise unsupported("MAINTENANCE_CONTROLS", self.engine_name)
+            self._request_ok("DELETE", operations[1].path, timeout=5.0, expected_status=204)
+
+    def maintenance_retire(self) -> None:
+        """Retire local resources only; this never acknowledges or retries camera Stop."""
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance retire lock timed out.", status_code=504)
+        try:
+            if self._closed:
+                return
+            # A local-only retire must never discard a physical shutter release obligation.
+            if self._short_control_release is not None or self._bulb_release_operation is not None:
+                raise self._shutter_release_error(blocked=True)
+            self._closed = True
+            self._live_view_stop_unconfirmed |= self._pending_live_view_stop is not None
+            self._live_view_active = False
+            self._active_live_view_source = None
+            self._maintenance_restore_request = None
+            self._settings_cache = None
+            self._file_naming_cache = None
+            self._media_cache.clear()
+            try:
+                self._close_live_view_receivers()
+            finally:
+                self.transport.close()
+        finally:
+            self._lock.release()
+
+    def maintenance_stop_live_view(self) -> None:
+        with self._maintenance_controls():
+            if self._active_live_view_source and self._live_view_active:
+                self._maintenance_restore_request = LiveViewStartRequest(
+                    fps=self._requested_fps, source=self._active_live_view_source,
+                    size=self._active_live_view_size or "MEDIUM")
+            self._maintenance_stop_owned = True
+            self._stop_live_view_locked()
+
+    def maintenance_start_live_view(self, request: LiveViewStartRequest) -> None:
+        with self._maintenance_controls():
+            frozen = self._maintenance_restore_request
+            if self._live_view_stop_unconfirmed:
+                raise self._live_view_stop_error()
+            if frozen is None or frozen.source == "AUTO":
+                raise BridgeError("MAINTENANCE_RESTORE_UNAVAILABLE", "No frozen prior Live View source.",
+                                  status_code=409)
+            if self._recording is True or self._bulb_exposure_active:
+                raise BridgeError("CAMERA_BUSY", "Stop recording or Bulb before restoration.", status_code=409)
+            # Request fields are transport-compatible, but cannot replace the original source/size/FPS.
+            del request
+            self._maintenance_stop_owned = True
+            self.start_live_view(frozen)
+            self._maintenance_restore_request = None
+
+    def perform_maintenance_outcome(self, operation: str, auto_power_off: bool) -> dict[str, object]:
+        require_intent(operation, auto_power_off)
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance lock timed out.", status_code=504)
+        try:
+            self._require_shutter_release_confirmed()
+            if not self._initialized:
+                raise BridgeError("SESSION_NOT_INITIALIZED", "Connect before maintenance.", status_code=409)
+            if self._recording is True or self._bulb_exposure_active:
+                raise BridgeError("CAMERA_BUSY", "Stop recording or Bulb before maintenance.", status_code=409)
+            if operation != "clock-sync" and (self._live_view_active or self._live_view_stop_unconfirmed):
+                raise BridgeError("LIVE_VIEW_STOP_REQUIRED", "Confirm Live View stopped before maintenance.",
+                                  status_code=409)
+            if operation == "clock-sync":
+                operations = self._camera_clock_operations()
+                if operations is None:
+                    raise unsupported(CameraFeature.CAMERA_CLOCK_SYNC.value, self.engine_name)
+                read, write = operations
+                requested = datetime.now().astimezone().replace(microsecond=0)
+                # astimezone() carries a fixed offset, whose dst() is normally None.
+                # Query host DST for this exact instant, including transition boundaries.
+                daylight = time.localtime(requested.timestamp()).tm_isdst > 0
+                reference = {"earliestEpochSeconds": int(requested.timestamp()) - 10,
+                             "latestEpochSeconds": int(requested.timestamp()) + 10,
+                             "utcOffsetMinutes": int(requested.utcoffset().total_seconds() // 60),
+                             "daylightSaving": daylight}
+                # Freeze exact read/write route. One write; validate the existing clock response contract.
+                raw = self._request_capture_configuration_json(write.method, write.path,
+                        {"datetime": format_datetime(requested), "dst": daylight}, strict_setting=True)
+                self._validate_camera_clock_response(raw)
+                result = response_received(self.engine_name, operation, False, reference,
+                         lambda: self._maintenance_clock_sample(read.path, time.monotonic() + 15.0))
+                if result["clockReadEvidence"] == "matched":
+                    self._observed.add(CameraFeature.CAMERA_CLOCK_SYNC)
+                return result
+            if operation == "sleep":
+                pair = self._read_write_setting_operations("/functions/autopoweroff")
+                if pair is None:
+                    raise unsupported(CameraFeature.CAMERA_SLEEP.value, self.engine_name)
+                read, write = pair
+                raw = self._request_capture_configuration_json("GET", read.path, strict_setting=True)
+                setting = _validated_string_ability_setting(
+                    raw, AUTO_POWER_OFF_SETTING_VALUES | {AUTO_POWER_OFF_IMMEDIATELY})
+                if setting is None or AUTO_POWER_OFF_IMMEDIATELY not in setting["ability"]:
+                    raise unsupported(CameraFeature.CAMERA_SLEEP.value, self.engine_name)
+                method, path, payload, expected = write.method, write.path, {"value": AUTO_POWER_OFF_IMMEDIATELY}, 202
+            else:
+                selected = self._operation("POST", "/functions/sensorcleaning")
+                if selected is None:
+                    raise unsupported(CameraFeature.SENSOR_CLEANING.value, self.engine_name)
+                method, path, payload, expected = selected.method, selected.path, {"autopoweroff": auto_power_off}, 200
+            response = self._request(method, path, payload, max_bytes=65536)
+            length = response.headers.get("content-length")
+            if (response.status != expected or "content-range" in response.headers or len(response.body) > 65536
+                    or response.headers.get("content-encoding") not in {None, "identity"}
+                    or (length is not None and (not re.fullmatch(r"0|[1-9][0-9]*", length)
+                        or int(length) != len(response.body) or "transfer-encoding" in response.headers))):
+                raise BridgeError("INVALID_CCAPI_RESPONSE", "Incomplete maintenance response.", status_code=502)
+            # No post-action status, hidden restart, DELETE, route fallback or retries.
+            self._settings_cache = None
+            self._observed.add(CameraFeature.CAMERA_SLEEP if operation == "sleep" else CameraFeature.SENSOR_CLEANING)
+            return response_received(self.engine_name, operation, auto_power_off)
+        finally:
+            self._lock.release()
+
     def sleep_camera(self) -> None:
         with self._lock:
             self._require_shutter_release_confirmed()
@@ -2581,13 +2777,21 @@ class CcapiSession:
                     self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
                 return
             except _CcapiLiveViewSizeUnsupported:
-                if size == "SMALL":
+                if self._maintenance_control_active or size == "SMALL":
                     raise
                 # The cleanup context confirmed the original stop before resizing.
                 self._rejected_live_view_sizes.add(size)
                 size = "SMALL"
 
     def _start_ccapi_live_view(self, request: LiveViewStartRequest, size: str, path: str) -> str:
+        if self._maintenance_control_active:
+            payload = {"cameradisplay": "on"}
+            if self._live_view_size_control:
+                payload["liveviewsize"] = size.casefold()
+            self._request_ok("POST", path, payload, expected_status=204)
+            self._active_live_view_size = size if self._live_view_size_control else None
+            self._requested_fps = max(1, min(30, request.fps))
+            return size
         try:
             self._request_ok("POST", path, {"cameradisplay": "on", "liveviewsize": size.casefold()})
             self._live_view_size_control = True
@@ -2634,12 +2838,14 @@ class CcapiSession:
             self._active_multipart_operations = operations
             size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
             response: CcapiStreamResponse | None = None
-            for attempt in range(len(MULTIPART_START_RETRY_DELAYS) + 1):
+            for attempt in range(1 if self._maintenance_control_active else len(MULTIPART_START_RETRY_DELAYS) + 1):
                 response = self.transport.open_stream(
                     "GET",
                     self._url(operations.open_stream.path),
                     headers={"Accept": "multipart/x-mixed-replace", "Cache-Control": "no-cache"},
-                    timeout=60.0,
+                    timeout=15.0 if self._maintenance_control_active else 60.0,
+                    **({"strict_control": True, "follow_redirects": False}
+                       if self._maintenance_control_active else {}),
                 )
                 if response.status == 200:
                     break
@@ -2651,7 +2857,8 @@ class CcapiSession:
                         response.close()
                 response = None
                 retryable = (
-                    status == 503
+                    not self._maintenance_control_active
+                    and status == 503
                     and b"live view not started" in payload.lower()
                     and attempt < len(MULTIPART_START_RETRY_DELAYS)
                 )
@@ -2740,6 +2947,11 @@ class CcapiSession:
         try:
             yield
         except BaseException as error:
+            if self._maintenance_control_active:
+                self._live_view_active = False
+                self._live_view_stop_unconfirmed = True
+                self._close_live_view_receivers()
+                raise
             try:
                 self._stop_live_view_locked()
             except BaseException as stop_error:
@@ -2788,6 +3000,11 @@ class CcapiSession:
                 ) from error
 
     def _stop_live_view_locked(self) -> None:
+        if self._maintenance_stop_owned and not self._maintenance_control_active:
+            # Explicit Retry Stop / disconnect cannot downgrade a maintenance obligation.
+            with self._maintenance_controls():
+                self._stop_live_view_locked()
+            return
         stop = self._pending_live_view_stop
         if stop is None:
             return
@@ -2811,6 +3028,7 @@ class CcapiSession:
                 raise
             raise failure from error
         self._pending_live_view_stop = None
+        self._maintenance_stop_owned = False
         self._live_view_stop_unconfirmed = False
         self._active_multipart_operations = None
         self._active_live_view_source = None
@@ -4550,7 +4768,13 @@ class CcapiSession:
         timeout: float = 15.0,
         expected_status: int | None = None,
     ) -> None:
-        response = self._request(method, path, payload, timeout=timeout)
+        response = self._request(method, path, payload, timeout=timeout,
+                                 max_bytes=65536 if self._maintenance_control_active else MAX_JSON_BYTES)
+        if self._maintenance_control_active and expected_status is None:
+            expected_status = (204 if path.endswith(("/event/polling", "/shooting/liveview",
+                                                    "/shooting/liveview/rtp")) else 200)
+        if self._maintenance_control_active and expected_status == 204 and response.body:
+            raise BridgeError("INVALID_CCAPI_RESPONSE", "Event stop response must be empty.", status_code=502)
         if expected_status is not None and response.status != expected_status:
             raise BridgeError(
                 "INVALID_CCAPI_RESPONSE",
@@ -4578,7 +4802,15 @@ class CcapiSession:
             headers=headers,
             timeout=timeout,
             max_bytes=max_bytes,
+            **({"strict_control": True} if self._maintenance_control_active else {}),
         )
+        if self._maintenance_control_active:
+            length = response.headers.get("content-length")
+            if ("content-range" in response.headers
+                    or response.headers.get("content-encoding") not in {None, "identity"}
+                    or (length is not None and (not re.fullmatch(r"0|[1-9][0-9]*", length)
+                        or int(length) != len(response.body) or "transfer-encoding" in response.headers))):
+                raise BridgeError("INVALID_CCAPI_RESPONSE", "Incomplete maintenance control response.", status_code=502)
         if not 200 <= response.status < 300:
             raise _CcapiHTTPError(method, path, response)
         return response

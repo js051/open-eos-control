@@ -2039,11 +2039,18 @@ async function run() {
       simulatorOrigin,
       (state) => state.sensor_cleaning.count === 1 &&
         !state.sensor_cleaning.auto_power_off &&
-        state.canonical.live_view_active &&
-        state.canonical.live_view_start_count === 2 &&
+        !state.canonical.live_view_active &&
+        state.canonical.live_view_start_count === 1 &&
         state.canonical.live_view_stop_count === 1,
-      "CCAPI sensor cleaning and Live View restoration",
+      "CCAPI sensor cleaning leaves monitoring paused",
     );
+    const maintenanceRestore = page.locator('[data-maintenance-history] [data-maintenance-action="restore"]').last();
+    await maintenanceRestore.waitFor({ state: "visible" });
+    page.once("dialog", (dialog) => dialog.accept());
+    await maintenanceRestore.click();
+    await waitForSimulatorState(simulatorOrigin, (state) => state.canonical.live_view_active &&
+      state.canonical.live_view_start_count === 2 && state.sensor_cleaning.count === 1,
+      "Explicit restore uses a fresh reachable read without repeating sensor cleaning");
 
     await page.click('.tab[data-view="diagnostics"]');
     await page.waitForSelector("#diagnostics-panel:not([hidden])");
@@ -2059,7 +2066,9 @@ async function run() {
     await page.waitForSelector('[data-camera-command="sleep"]:not([disabled])');
     page.once("dialog", (dialog) => dialog.accept());
     await page.click('[data-camera-command="sleep"]');
-    await page.waitForSelector("#connection-view:not([hidden])");
+    await page.waitForSelector('[data-maintenance-history] [data-maintenance-action="recover"]:not([disabled])');
+    assert.equal(await page.locator("#control-view").isVisible(), true);
+    assert.equal(await page.locator("#live-toggle-button").isDisabled(), true);
     const finalState = await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.camera_sleep_count === 1 &&
@@ -2067,7 +2076,7 @@ async function run() {
         state.canonical.live_view_stop_count === 2 &&
         state.canonical.event_delete_count >= 1 &&
         state.canonical.event_active_requests === 0,
-      "CCAPI camera sleep to stop Live View, event polling, and disconnect",
+      "CCAPI camera sleep stops monitoring and retains outcome until explicit disconnect",
     );
     assert.equal(finalState.canonical.af_start_count, finalState.canonical.af_stop_count);
     assert.equal(finalState.half_press_count, finalState.shutter_release_count);

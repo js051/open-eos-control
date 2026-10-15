@@ -433,6 +433,10 @@ class FileNamingUpdate(ApiModel):
     value: str = Field(min_length=1, max_length=16)
 
 
+class MaintenanceRequest(ApiModel):
+    auto_power_off: bool = Field(strict=True)
+
+
 class SensorCleaningRequest(ApiModel):
     auto_power_off: bool = False
 

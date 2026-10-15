@@ -148,7 +148,7 @@ def test_configuration_transport_disables_redirects_without_changing_other_comma
         assert opened.call_args.kwargs['follow_redirects'] is False
     with patch.object(transport, '_open', side_effect=OSError('synthetic')) as opened:
         with pytest.raises(OSError):
-            transport.request('GET', 'http://192.0.2.1/ccapi/ver100/deviceinformation')
+            transport.request('GET', 'http://192.0.2.1/ccapi/ver100/devicestatus/battery')
         assert opened.call_args.kwargs['follow_redirects'] is True
 
 
