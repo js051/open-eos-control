@@ -698,7 +698,7 @@ final class ForegroundMediaIntegrationTests: XCTestCase {
         XCTAssertFalse(fixture.state.mediaLibraryLoading)
         await fixture.state.loadMediaThumbnail(item)
         await fixture.state.loadMediaInfo(item)
-        await fixture.state.setMediaRating(item, rating: 5)
+        await fixture.state.setMediaRating(item, rating: 5, owner: fixture.state.mediaLibrarySessionID)
         await fixture.state.refresh()
         await fixture.state.captureStill()
     }

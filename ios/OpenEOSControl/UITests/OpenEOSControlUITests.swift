@@ -444,6 +444,93 @@ final class OpenEOSControlUITests: XCTestCase {
         }
     }
 
+    /// Production multi-select menu/review/cancel/confirm journey, synthetic only.
+    /// Native UI execution remains NOT_RUN in the Linux source-evidence workspace.
+    @MainActor
+    func testCanonicalMetadataBatchReviewCancellationAndExactReadbackInBothLanguages() async throws {
+        guard try await waitForSimulatorHealth() else {
+            #if OEC_REQUIRE_SIMULATOR_E2E
+            XCTFail("The required synthetic camera is not reachable")
+            return
+            #else
+            throw XCTSkip("Start the synthetic camera for metadata batch UI acceptance")
+            #endif
+        }
+        let paths = ["SIM_0001.PNG", "SIM_0002.PNG"].map { "/ccapi/ver100/contents/card1/100CANON/" + $0 }
+        for (language, apple, locale, confirmed) in [
+            ("english", "en", "en_US", "Confirmed"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "已確認"),
+        ] {
+            _ = try await simulatorRequest(path: "/ccapi/test/reset", method: "POST")
+            _ = try await simulatorRequest(path: "/ccapi/test/capture-delivery", method: "POST", jsonBody: ["enabled": true])
+            var before: [String] = []
+            for path in paths {
+                let info = try await simulatorRequest(path: path, queryItems: [URLQueryItem(name: "kind", value: "info")])
+                before.append(try XCTUnwrap(info["rating"] as? String))
+            }
+            let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
+                environment: ["OEC_HTTP_PRESET_URL": simulatorURL.absoluteString],
+                contentSizeCategory: "UICTContentSizeCategoryAccessibilityXXXL")
+            defer { app.terminate() }
+            try tapForAsyncTest(app.buttons["preset-http-button"])
+            _ = try XCTUnwrap(scrollConnectionButtonIntoView(in: app, timeout: 8) ? true : nil)
+            try tapForAsyncTest(app.buttons["connect-button"])
+            _ = try XCTUnwrap(waitForInteraction(app.buttons["shutter-button"], timeout: 30) ? true : nil)
+            try openMoreActionsForAsyncTest(in: app)
+            guard try tapCameraActionForAsyncTest(app.buttons["camera-media-menu-button"], in: app) else { return }
+            for path in paths {
+                let checkbox = app.buttons["media-select-" + path]
+                _ = try XCTUnwrap(scrollToInteraction(checkbox, in: app, timeout: 8) ? true : nil)
+                try tapForAsyncTest(checkbox)
+            }
+            let menu = app.buttons["media-mutation-menu"]
+            _ = try XCTUnwrap(scrollToInteraction(menu, in: app, timeout: 8) ? true : nil)
+            try tapForAsyncTest(menu)
+            try tapForAsyncTest(app.buttons["media-mutation-rating-menu"])
+            try tapForAsyncTest(app.buttons["media-mutation-action-rating-5"])
+            let cancel = app.buttons["media-mutation-review-cancel"]
+            _ = try XCTUnwrap(waitForInteraction(cancel, timeout: 5) ? true : nil)
+            addScreenshot(name: "media-metadata-batch-review-\(language)")
+            try tapForAsyncTest(cancel)
+            for (index, path) in paths.enumerated() {
+                let info = try await simulatorRequest(path: path, queryItems: [URLQueryItem(name: "kind", value: "info")])
+                XCTAssertEqual(info["rating"] as? String, before[index], "Cancelling review must not write")
+            }
+            XCTAssertFalse(app.buttons["media-mutation-cancel"].exists)
+            _ = try XCTUnwrap(scrollToInteraction(menu, in: app, timeout: 8) ? true : nil)
+            try tapForAsyncTest(menu)
+            try tapForAsyncTest(app.buttons["media-mutation-rating-menu"])
+            try tapForAsyncTest(app.buttons["media-mutation-action-rating-5"])
+            try tapForAsyncTest(app.buttons["media-mutation-confirm"])
+            for path in paths {
+                let result = app.descendants(matching: .any)["media-mutation-result-" + path].firstMatch
+                _ = try XCTUnwrap(scrollToInteraction(result, in: app, timeout: 8) ? true : nil)
+                _ = try XCTUnwrap(waitForLabel(result, containing: confirmed, timeout: 15) ? true : nil)
+                let info = try await simulatorRequest(path: path, queryItems: [URLQueryItem(name: "kind", value: "info")])
+                XCTAssertEqual(info["rating"] as? String, "5")
+            }
+            let state = try await simulatorRequest(path: "/ccapi/test/state")
+            XCTAssertEqual((state["capture_count"] as? NSNumber)?.intValue, 0)
+            addScreenshot(name: "media-metadata-batch-confirmed-\(language)")
+            let clear = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "media-mutation-history-clear-")).firstMatch
+            _ = try XCTUnwrap(scrollToInteraction(clear, in: app, timeout: 8) ? true : nil)
+            try tapForAsyncTest(clear)
+            let warning = language == "english" ? "It is not an undo" : "這不是復原操作"
+            XCTAssertTrue(app.alerts.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", warning)).firstMatch.exists)
+            try tapForAsyncTest(app.buttons["media-mutation-history-clear-cancel"])
+            XCTAssertTrue(clear.exists, "Cancelling history removal retains the finished batch")
+            try tapForAsyncTest(clear)
+            try tapForAsyncTest(app.buttons["media-mutation-history-clear-confirm"])
+            XCTAssertFalse(clear.exists)
+            for path in paths {
+                XCTAssertFalse(app.descendants(matching: .any)["media-mutation-result-" + path].firstMatch.exists)
+                let info = try await simulatorRequest(path: path, queryItems: [URLQueryItem(name: "kind", value: "info")])
+                XCTAssertEqual(info["rating"] as? String, "5", "Clearing a result record must not undo camera changes")
+            }
+            addScreenshot(name: "media-metadata-history-cleared-\(language)")
+        }
+    }
+
     @MainActor
     func testCanonicalBatchPreparesTwoOriginalsWithoutCapturingOrClaimingExternalSave() async throws {
         continueAfterFailure = true

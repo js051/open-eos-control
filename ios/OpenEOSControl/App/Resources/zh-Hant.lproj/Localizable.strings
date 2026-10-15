@@ -820,3 +820,47 @@
 "media_files_export_history_started" = "匯出已開始，尚待最終結果。";
 
 "media_time_zone_unknown" = "時區未知";
+
+// Explicit metadata batches and per-item readback evidence.
+"media_mutation_menu" = "變更所選素材…";
+"media_mutation_rating_menu" = "評分";
+"media_mutation_rotation_menu" = "設定旋轉角度";
+"media_mutation_rating" = "設定評分為 %d";
+"media_mutation_protect" = "保護";
+"media_mutation_unprotect" = "取消保護";
+"media_mutation_rotate" = "設定旋轉角度為 %d°";
+"media_mutation_archive" = "封存";
+"media_mutation_unarchive" = "取消封存";
+"media_mutation_review" = "確認素材變更";
+"media_mutation_apply" = "套用至此清單";
+"media_mutation_cancel" = "取消剩餘變更";
+"media_mutation_confirmation" = "僅處理以下列出的確切素材，包含被篩選隱藏的選取項目。未載入或不支援的項目會保留在清單中，不會送出變更。每項最多送出一次；結果未確認時即停止後續項目。取消無法撤回已送出的變更。";
+"media_mutation_result_notice" = "「已確認」表示同一確切素材已回報要求的值。先前結果會保留，不會自動重試；再次確認會開始另一項獨立操作。";
+"media_mutation_previous_session" = "此為先前連線的結果。本批次不會再送出變更。";
+"media_mutation_status_notStarted" = "未開始";
+"media_mutation_status_applying" = "正在套用並讀回確認…";
+"media_mutation_status_confirmed" = "已確認";
+"media_mutation_status_failedNotSent" = "無法執行；未送出";
+"media_mutation_status_unconfirmed" = "結果未確認；可能已變更";
+"media_mutation_reason_unloaded" = "目前未載入。未另行查找素材，也未擴大掃描記憶卡。";
+"media_mutation_reason_unsupported" = "此連線未宣告支援這項操作。";
+"media_mutation_reason_invalid" = "所選素材或要求的值無效。";
+"media_mutation_reason_cancelled" = "剩餘工作已取消。已送出的變更仍可能生效。";
+"media_mutation_reason_ownerChanged" = "連線已變更。本批次不會在另一台相機上繼續執行。";
+"media_mutation_reason_blocked" = "相機忙碌、未連線，或需要先處理快門恢復。未送出變更。";
+"media_mutation_reason_notSent" = "本機檢查已在送出變更前停止此項目。";
+"media_mutation_reason_uncertain" = "讀回未能確認要求的變更。剩餘項目未送出。開始另一項操作前，請先確認相機狀態。";
+"media_mutation_reason_limit" = "選取超過 1,000 個不同素材。整批未開始，請減少選取數量。";
+"media_mutation_reason_unknownMetadata" = "封存狀態未知，未送出變更。";
+"media_mutation_reason_notWritable" = "此素材明確標示為不可寫入，未送出變更。";
+
+// Bounded result history and explicit non-undo clearing.
+"media_mutation_rejected_count" = "批次已拒絕：已選取 %d 項。未送出任何命令。";
+"media_mutation_rejection_capacity" = "結果歷史已滿（所有連線合計最多 20 批或 2,000 列）。請檢視並明確清除一批已結束的記錄，再建立新的審閱。既有結果均未移除。";
+"media_mutation_rejection_limit" = "選取超過 1,000 個不同項目。已拒絕整批，未截斷清單，也未保留結果列。請縮小選取範圍並建立新的審閱。";
+"media_mutation_rejection_staleReview" = "建立此審閱後，歷史記錄已清除。未送出任何命令。請重新審閱；舊確認不可重複使用。";
+"media_mutation_history_capacity" = "結果歷史：%d/%d 批、%d/%d 列。僅在沒有批次執行時可清除。";
+"media_mutation_history_clear" = "清除此已結束批次的記錄⋯";
+"media_mutation_history_clear_title" = "清除此批次記錄？";
+"media_mutation_history_clear_confirm" = "只清除記錄";
+"media_mutation_history_clear_warning" = "這會永久移除此 app 執行期間的結果記錄，無法復原記錄。這不是復原操作：不會撤銷相機命令或已發生的變更。未確認的變更可能已生效；再次操作前請檢查相機。執行中的批次不能清除；其他批次會保留。";

@@ -2481,7 +2481,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         }
         try await ensureInitialized()
         if resolvedMode == .simulator {
-            let value = try await requestJSON(path: "/ccapi/media")
+            let value = try await requestJSON(path: "/ccapi/media", mediaMetadata: true)
             guard let rawItems = value.array("items") else {
                 throw CCAPIError.invalidResponse("Simulator media response must contain an items array.")
             }
@@ -2498,13 +2498,18 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                     sizeBytes: item.integer64("size_bytes"),
                     captureTime: item.string("capture_time").nilIfEmpty,
                     previewAvailable: ["image", "raw"].contains(item.string("kind", default: "other").lowercased()),
-                    protected: item.bool("protect"),
-                    rating: item.integer("rating").flatMap { (0...5).contains($0) ? $0 : nil },
-                    rotationDegrees: item.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil },
-                    archived: item.bool("archive"),
+                    protected: CameraMediaMetadataValue.boolean(item["protect"]),
+                    rating: CameraMediaMetadataValue.integer(item["rating"], allowed: Array(0...5)),
+                    rotationDegrees: CameraMediaMetadataValue.integer(item["rotate"], allowed: [0, 90, 180, 270]),
+                    archived: CameraMediaMetadataValue.boolean(item["archive"]),
                     contentType: try CameraMediaType.declaredMIME(in: item),
                     widthPixels: item.integer("width_pixels").flatMap { $0 > 0 ? $0 : nil },
-                    heightPixels: item.integer("height_pixels").flatMap { $0 > 0 ? $0 : nil }
+                    heightPixels: item.integer("height_pixels").flatMap { $0 > 0 ? $0 : nil },
+                    writable: CameraMediaMetadataValue.boolean(item["writable"]),
+                    ratingWritable: CameraMediaMetadataValue.boolean(item["ratingWritable"]),
+                    protectionWritable: CameraMediaMetadataValue.boolean(item["protectionWritable"]),
+                    rotationWritable: CameraMediaMetadataValue.boolean(item["rotationWritable"]),
+                    archiveWritable: CameraMediaMetadataValue.boolean(item["archiveWritable"])
                 )
             }
             let items = maximumItems.map { Array(allItems.prefix($0)) } ?? allItems
@@ -2773,23 +2778,23 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             throw CCAPIError.unsupported(.mediaBrowser)
         }
         let path = try mediaPath(item)
-        let body = try await requestJSON(path: "\(path)?kind=info")
+        let body = try await requestJSON(path: "\(path)?kind=info", maximumBytes: 1_048_576, mediaMetadata: true)
         return try parseMediaInfo(item, body: body)
     }
 
-    public func setMediaProtection(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
+    public func setMediaProtection(_ item: CameraMediaItem, enabled: Bool, attempt: CameraMediaMutationAttempt? = nil) async throws -> CameraMediaItem {
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
         return try await modifyMedia(
             item,
             action: "protect",
             value: enabled ? "enable" : "disable",
-            feature: .mediaProtect,
-            matches: { $0.protected == enabled }
+            target: .protection(enabled),
+            attempt: attempt
         )
     }
 
-    public func setMediaRating(_ item: CameraMediaItem, rating: Int) async throws -> CameraMediaItem {
+    public func setMediaRating(_ item: CameraMediaItem, rating: Int, attempt: CameraMediaMutationAttempt? = nil) async throws -> CameraMediaItem {
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
         guard (0...5).contains(rating) else {
@@ -2799,12 +2804,12 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             item,
             action: "rating",
             value: rating == 0 ? "off" : String(rating),
-            feature: .mediaRating,
-            matches: { $0.rating == rating }
+            target: .rating(rating),
+            attempt: attempt
         )
     }
 
-    public func setMediaRotation(_ item: CameraMediaItem, degrees: Int) async throws -> CameraMediaItem {
+    public func setMediaRotation(_ item: CameraMediaItem, degrees: Int, attempt: CameraMediaMutationAttempt? = nil) async throws -> CameraMediaItem {
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
         guard Self.mediaRotations.contains(degrees) else {
@@ -2814,20 +2819,20 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             item,
             action: "rotate",
             value: String(degrees),
-            feature: .mediaRotate,
-            matches: { $0.rotationDegrees == degrees }
+            target: .rotation(degrees),
+            attempt: attempt
         )
     }
 
-    public func setMediaArchive(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
+    public func setMediaArchive(_ item: CameraMediaItem, enabled: Bool, attempt: CameraMediaMutationAttempt? = nil) async throws -> CameraMediaItem {
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
         return try await modifyMedia(
             item,
             action: "archive",
             value: enabled ? "enable" : "disable",
-            feature: .mediaArchive,
-            matches: { $0.archived == enabled }
+            target: .archive(enabled),
+            attempt: attempt
         )
     }
 
@@ -2835,27 +2840,34 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         _ item: CameraMediaItem,
         action: String,
         value: String,
-        feature: CameraFeature,
-        matches: (CameraMediaItem) -> Bool
+        target: CameraMediaMutation,
+        attempt: CameraMediaMutationAttempt?
     ) async throws -> CameraMediaItem {
+        let feature = target.feature
+        guard target.isWritable(item) else { throw CCAPIError.invalidResponse("This media item is not writable.") }
         try await ensureInitialized()
         if resolvedMode != .simulator, !supportsMediaModify() {
             throw CCAPIError.unsupported(feature)
         }
-        try await requestOK(
-            path: try mediaPath(item),
-            method: .put,
-            json: ["action": action, "value": value],
-            expectedStatusCode: 200
-        )
+        let request = try request(path: mediaPath(item), method: .put, json: ["action": action, "value": value])
+        try Task.checkCancellation()
+        guard !closing else { throw CancellationError() }
+        try attempt?.markDispatched()
+        let response = try await transport.send(request)
+        try validate(response, request: request)
+        guard response.statusCode == 200 else { throw CCAPIError.invalidResponse("Media mutation did not return HTTP 200.") }
         var latest = item
-        for attempt in 0..<3 {
+        for readAttempt in 0..<3 {
+            try Task.checkCancellation()
+            guard !closing else { throw CancellationError() }
             latest = try await mediaInfo(item)
-            if matches(latest) {
+            try Task.checkCancellation()
+            guard !closing else { throw CancellationError() }
+            if target.confirms(latest, original: item) {
                 observedFeatures.insert(feature)
                 return latest
             }
-            if attempt < 2 { try await Task.sleep(nanoseconds: 100_000_000) }
+            if readAttempt < 2 { try await Task.sleep(nanoseconds: 100_000_000) }
         }
         throw CCAPIError.invalidResponse(
             "Camera accepted media \(action) but did not report the requested value."
@@ -2872,18 +2884,10 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     private func parseMediaInfo(_ item: CameraMediaItem, body: JSONDictionary) throws -> CameraMediaItem {
         let id = try Self.mediaInfoString(body, keys: ["id"], fallback: item.id)
         guard id?.utf8.elementsEqual(item.id.utf8) == true else { throw CameraMediaMetadataError.invalidMetadata }
-        let protected: Bool? = switch body.string("protect") {
-        case "enable": true
-        case "disable": false
-        default: nil
-        }
-        let ratingValue = body.string("rating")
-        let parsedRating = Int(ratingValue)
-        let rating = ratingValue == "off"
-            ? 0
-            : parsedRating.flatMap { (1...5).contains($0) ? $0 : nil }
-        let rotation = body.integer("rotate").flatMap { Self.mediaRotations.contains($0) ? $0 : nil }
-        let archived = Self.parseMediaArchive(body.string("archive"))
+        let protected = CameraMediaMetadataValue.canonFlag(body["protect"])
+        let rating = CameraMediaMetadataValue.canonRating(body["rating"])
+        let rotation = CameraMediaMetadataValue.canonRotation(body["rotate"])
+        let archived = CameraMediaMetadataValue.canonFlag(body["archive"])
         return CameraMediaItem(
             id: item.id,
             name: try Self.mediaInfoString(body, keys: ["name", "filename"], fallback: item.name) ?? "",
@@ -2898,7 +2902,12 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             contentType: try CameraMediaType.declaredMIME(in: body),
             widthPixels: item.widthPixels,
             heightPixels: item.heightPixels,
-            folder: item.folder
+            folder: item.folder,
+            writable: CameraMediaMetadataValue.boolean(body["writable"]) ?? item.writable,
+            ratingWritable: CameraMediaMetadataValue.boolean(body["ratingWritable"]) ?? item.ratingWritable,
+            protectionWritable: CameraMediaMetadataValue.boolean(body["protectionWritable"]) ?? item.protectionWritable,
+            rotationWritable: CameraMediaMetadataValue.boolean(body["rotationWritable"]) ?? item.rotationWritable,
+            archiveWritable: CameraMediaMetadataValue.boolean(body["archiveWritable"]) ?? item.archiveWritable
         )
     }
 
@@ -2920,14 +2929,6 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             result = value
         }
         return present ? result : fallback
-    }
-
-    private static func parseMediaArchive(_ value: String) -> Bool? {
-        switch value {
-        case "enable": true
-        case "disable": false
-        default: nil
-        }
     }
 
     private func mediaImageRepresentation(
@@ -5062,7 +5063,8 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         method: HTTPMethod = .get,
         json: JSONDictionary? = nil,
         timeoutInterval: TimeInterval = 10,
-        maximumBytes: Int? = nil
+        maximumBytes: Int? = nil,
+        mediaMetadata: Bool = false
     ) async throws -> JSONDictionary {
         let request = try request(path: path, method: method, json: json, timeoutInterval: timeoutInterval)
         let response = try await transport.send(request)
@@ -5071,7 +5073,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             throw CCAPIError.invalidResponse("Camera response at \(path) exceeded the \(maximumBytes)-byte limit.")
         }
         do {
-            return try decodeJSONObject(response.body)
+            return try mediaMetadata ? CameraMediaMetadataJSON.decode(response.body) : decodeJSONObject(response.body)
         } catch let error as CCAPIError {
             throw error
         } catch {

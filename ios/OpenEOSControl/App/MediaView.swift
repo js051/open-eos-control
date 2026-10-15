@@ -12,8 +12,8 @@ struct MediaView: View {
     @State private var exportPayload: MediaBatchExportPayload?
     @StateObject private var filesExporter = MediaFilesExportController()
     @State private var pendingDeletion: CameraMediaItem?
-    @State private var metadataItemID: String?
-    @State private var pendingPreviewMetadataItemID: String?
+    @State private var metadataPresentation: MediaMetadataPresentation?
+    @State private var pendingPreviewMetadataPresentation: MediaMetadataPresentation?
     @State private var isFileImporterPresented = false
     @State private var mediaFilter = MediaFilter.all
     @State private var mediaSort = MediaSort.newest
@@ -115,6 +115,8 @@ struct MediaView: View {
         }
         .onDisappear { camera.closeMediaPreview() }
         .onChange(of: camera.mediaLibrarySessionID) { _, _ in
+            metadataPresentation = nil
+            pendingPreviewMetadataPresentation = nil
             isDateFilterPresented = false
             dateFilterOwner = nil
             isRatingFilterPresented = false
@@ -135,36 +137,34 @@ struct MediaView: View {
                 set: { if !$0 { camera.closeMediaPreview() } }
             ),
             onDismiss: {
-                guard let pendingPreviewMetadataItemID else { return }
-                self.pendingPreviewMetadataItemID = nil
-                metadataItemID = pendingPreviewMetadataItemID
+                guard let pending = pendingPreviewMetadataPresentation else { return }
+                pendingPreviewMetadataPresentation = nil
+                guard pending.owner == camera.mediaLibrarySessionID else { return }
+                metadataPresentation = pending
             }
         ) {
+            // Capture the action owner while building this presentation, not in
+            // the later metadata Task or preview-dismiss callback.
+            let metadataOwner = camera.mediaLibrarySessionID
             MediaPreviewView(
                 items: displayedMedia.filter(canPreview),
                 controlRotation: controlRotation,
                 onActions: { item in
-                    pendingPreviewMetadataItemID = item.id
+                    guard metadataOwner == camera.mediaLibrarySessionID else { return }
+                    pendingPreviewMetadataPresentation = MediaMetadataPresentation(itemID: item.id, owner: metadataOwner)
                     camera.closeMediaPreview()
                 }
             )
                 .environmentObject(camera)
                 .environmentObject(language)
         }
-        .sheet(
-            isPresented: Binding(
-                get: { metadataItemID != nil },
-                set: { if !$0 { metadataItemID = nil } }
-            )
-        ) {
-            if let metadataItemID {
-                MediaMetadataView(itemID: metadataItemID) { item in
-                    self.metadataItemID = nil
-                    pendingDeletion = item
-                }
-                .environmentObject(camera)
-                .environmentObject(language)
+        .sheet(item: $metadataPresentation) { presentation in
+            MediaMetadataView(itemID: presentation.itemID, owner: presentation.owner) { item in
+                metadataPresentation = nil
+                pendingDeletion = item
             }
+            .environmentObject(camera)
+            .environmentObject(language)
         }
         .alert(
             language.string("delete_media_title"),
@@ -583,13 +583,15 @@ struct MediaView: View {
 
     @ViewBuilder
     private func mediaActions(_ item: CameraMediaItem) -> some View {
+        let metadataOwner = camera.mediaLibrarySessionID
         HStack(spacing: 2) {
             if camera.supports(.mediaDownload) {
                 downloadAction(item)
             }
             if camera.supports(.mediaBrowser) {
                 Button {
-                    metadataItemID = item.id
+                    guard metadataOwner == camera.mediaLibrarySessionID else { return }
+                    metadataPresentation = MediaMetadataPresentation(itemID: item.id, owner: metadataOwner)
                 } label: {
                     Image(systemName: "ellipsis")
                         .frame(width: 48, height: 48)
@@ -983,14 +985,22 @@ private func mediaDimensionsText(_ item: CameraMediaItem) -> String? {
     return "\(width) x \(height)"
 }
 
+private struct MediaMetadataPresentation: Identifiable {
+    let id = UUID()
+    let itemID: String
+    let owner: UUID
+}
+
 private struct MediaMetadataView: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
     let itemID: String
+    let owner: UUID
     let onDelete: (CameraMediaItem) -> Void
 
     private var item: CameraMediaItem? {
-        camera.mediaItems.first { $0.id == itemID }
+        guard owner == camera.mediaLibrarySessionID else { return nil }
+        return camera.mediaItems.first { $0.id.utf8.elementsEqual(itemID.utf8) }
     }
 
     var body: some View {
@@ -1035,13 +1045,13 @@ private struct MediaMetadataView: View {
                                 label: language.format("protect_media", item.name),
                                 selected: item.protected == true,
                                 enabled: item.protected != true
-                            ) { Task { await camera.setMediaProtection(item, enabled: true) } }
+                            ) { Task { await camera.setMediaProtection(item, enabled: true, owner: owner) } }
                             metadataIconButton(
                                 systemName: "lock.open",
                                 label: language.format("unprotect_media", item.name),
                                 selected: item.protected == false,
                                 enabled: item.protected != false
-                            ) { Task { await camera.setMediaProtection(item, enabled: false) } }
+                            ) { Task { await camera.setMediaProtection(item, enabled: false, owner: owner) } }
                         }
                     }
 
@@ -1070,7 +1080,7 @@ private struct MediaMetadataView: View {
                             language.string("media_rotation"),
                             selection: Binding(
                                 get: { item.rotationDegrees ?? -1 },
-                                set: { value in Task { await camera.setMediaRotation(item, degrees: value) } }
+                                set: { value in Task { await camera.setMediaRotation(item, degrees: value, owner: owner) } }
                             )
                         ) {
                             ForEach([0, 90, 180, 270], id: \.self) { value in
@@ -1092,13 +1102,13 @@ private struct MediaMetadataView: View {
                                 label: language.format("archive_media", item.name),
                                 selected: item.archived == true,
                                 enabled: item.archived != true
-                            ) { Task { await camera.setMediaArchive(item, enabled: true) } }
+                            ) { Task { await camera.setMediaArchive(item, enabled: true, owner: owner) } }
                             metadataIconButton(
                                 systemName: "arrow.up.bin",
                                 label: language.format("unarchive_media", item.name),
                                 selected: item.archived == false,
                                 enabled: item.archived != false
-                            ) { Task { await camera.setMediaArchive(item, enabled: false) } }
+                            ) { Task { await camera.setMediaArchive(item, enabled: false, owner: owner) } }
                         }
                     }
 
@@ -1162,7 +1172,7 @@ private struct MediaMetadataView: View {
 
     private func ratingButton(_ item: CameraMediaItem, rating: Int, systemName: String) -> some View {
         Button {
-            Task { await camera.setMediaRating(item, rating: rating) }
+            Task { await camera.setMediaRating(item, rating: rating, owner: owner) }
         } label: {
             Image(systemName: systemName)
                 .frame(maxWidth: .infinity, minHeight: 48)

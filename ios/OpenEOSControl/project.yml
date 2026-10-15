@@ -49,6 +49,12 @@ targets:
       - path: ../../contracts/capture-review-evidence/v1/review-evidence-vectors.json
         createIntermediateGroups: false
         buildPhase: resources
+      - path: ../../contracts/media-mutation/v1/media-mutation-eligibility-vectors.json
+        createIntermediateGroups: false
+        buildPhase: resources
+      - path: ../../contracts/media-mutation/v1/media-mutation-vectors.json
+        createIntermediateGroups: false
+        buildPhase: resources
       - path: ../../contracts/media-type/v1/media-type-vectors.json
         createIntermediateGroups: false
         buildPhase: resources

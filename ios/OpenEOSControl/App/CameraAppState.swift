@@ -215,6 +215,14 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var activeMediaDownloadID: String?
     @Published private(set) var mediaDownloadProgress: CameraMediaTransferProgress?
     @Published private(set) var selectedMediaItems: [CameraMediaItem] = []
+    @Published private(set) var mediaMetadataBatches: [MediaMetadataBatchRun] = []
+    @Published private(set) var mediaMetadataBatchRejection: MediaMetadataBatchRejection?
+    private var mediaMetadataHistoryEpoch = UUID()
+    private(set) var mediaMetadataBatchTask: Task<Void, Never>?
+    private var mediaMetadataBatchToken: UUID?
+    private var mediaMetadataAttempt: CameraMediaMutationAttempt?
+    private var singleMediaMetadataAttempt: CameraMediaMutationAttempt?
+    private let mediaMetadataBeforeItem: (@MainActor (Int) -> Void)?
     @Published private(set) var mediaBatchResults: [MediaBatchResult] = []
     @Published private(set) var mediaBatchState = MediaBatchState.idle
     @Published private(set) var mediaBatchProgress: CameraMediaTransferProgress?
@@ -260,6 +268,9 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaFolderFilter = MediaFolderFilter.all
     private var session: CameraSession? {
         didSet {
+            singleMediaMetadataAttempt?.cancel()
+            singleMediaMetadataAttempt = nil
+            retireMediaMetadataBatch()
             resetMediaBatchState()
             selectedMediaItems = []
             exportGeneration = UUID()
@@ -451,9 +462,11 @@ final class CameraAppState: ObservableObject {
         mediaDeliveryReplyDelay: (@Sendable (MediaDeliveryReplyStage) async -> Void)? = nil,
         foregroundMedia: ForegroundMediaController? = nil,
         foregroundFiles: ForegroundFilesDelivery? = nil,
-        latestMediaReviewDelay: (@Sendable (UInt64) async throws -> Void)? = nil
+        latestMediaReviewDelay: (@Sendable (UInt64) async throws -> Void)? = nil,
+        mediaMetadataBeforeItem: (@MainActor (Int) -> Void)? = nil
     ) {
         self.defaults = defaults
+        self.mediaMetadataBeforeItem = mediaMetadataBeforeItem
         self.latestMediaReviewDelay = latestMediaReviewDelay
         self.foregroundMedia = foregroundMedia ?? ForegroundMediaController()
         self.foregroundFiles = foregroundFiles ?? ForegroundFilesDelivery()
@@ -1060,6 +1073,7 @@ final class CameraAppState: ObservableObject {
             invalidateCameraFocusInfo()
             cancelMediaWorklistContinuation()
             if mediaBatchContinuationActive { cancelMediaBatchDownload() }
+            cancelMediaMetadataBatch()
             foregroundMedia.stop(reason: .background)
             stopLiveViewLoop()
         } else if let session {
@@ -2392,72 +2406,95 @@ final class CameraAppState: ObservableObject {
         }
     }
 
-    func setMediaProtection(_ item: CameraMediaItem, enabled: Bool) async {
-        await updateMediaMetadata(item, feature: .mediaProtect) { session in
-            try await session.setMediaProtection(item, enabled: enabled)
+    func setMediaProtection(_ item: CameraMediaItem, enabled: Bool, owner: UUID) async {
+        await updateMediaMetadata(item, target: .protection(enabled), owner: owner) { session, attempt in
+            try await session.mutateMedia(item, target: .protection(enabled), attempt: attempt)
         } preview: {
             CameraMediaItem(
                 id: item.id, name: item.name, kind: item.kind, sizeBytes: item.sizeBytes,
                 captureTime: item.captureTime, previewAvailable: item.previewAvailable,
                 protected: enabled, rating: item.rating, rotationDegrees: item.rotationDegrees,
                 archived: item.archived, contentType: item.contentType,
-                widthPixels: item.widthPixels, heightPixels: item.heightPixels, folder: item.folder
+                widthPixels: item.widthPixels, heightPixels: item.heightPixels, folder: item.folder, writable: item.writable,
+                ratingWritable: item.ratingWritable,
+                protectionWritable: item.protectionWritable,
+                rotationWritable: item.rotationWritable,
+                archiveWritable: item.archiveWritable
             )
         }
     }
 
-    func setMediaRating(_ item: CameraMediaItem, rating: Int) async {
+    func setMediaRating(_ item: CameraMediaItem, rating: Int, owner: UUID) async {
         guard (0...5).contains(rating) else { return }
-        await updateMediaMetadata(item, feature: .mediaRating) { session in
-            try await session.setMediaRating(item, rating: rating)
+        await updateMediaMetadata(item, target: .rating(rating), owner: owner) { session, attempt in
+            try await session.mutateMedia(item, target: .rating(rating), attempt: attempt)
         } preview: {
             CameraMediaItem(
                 id: item.id, name: item.name, kind: item.kind, sizeBytes: item.sizeBytes,
                 captureTime: item.captureTime, previewAvailable: item.previewAvailable,
                 protected: item.protected, rating: rating, rotationDegrees: item.rotationDegrees,
                 archived: item.archived, contentType: item.contentType,
-                widthPixels: item.widthPixels, heightPixels: item.heightPixels, folder: item.folder
+                widthPixels: item.widthPixels, heightPixels: item.heightPixels, folder: item.folder, writable: item.writable,
+                ratingWritable: item.ratingWritable,
+                protectionWritable: item.protectionWritable,
+                rotationWritable: item.rotationWritable,
+                archiveWritable: item.archiveWritable
             )
         }
     }
 
-    func setMediaRotation(_ item: CameraMediaItem, degrees: Int) async {
+    func setMediaRotation(_ item: CameraMediaItem, degrees: Int, owner: UUID) async {
         guard [0, 90, 180, 270].contains(degrees) else { return }
-        await updateMediaMetadata(item, feature: .mediaRotate) { session in
-            try await session.setMediaRotation(item, degrees: degrees)
+        await updateMediaMetadata(item, target: .rotation(degrees), owner: owner) { session, attempt in
+            try await session.mutateMedia(item, target: .rotation(degrees), attempt: attempt)
         } preview: {
             CameraMediaItem(
                 id: item.id, name: item.name, kind: item.kind, sizeBytes: item.sizeBytes,
                 captureTime: item.captureTime, previewAvailable: item.previewAvailable,
                 protected: item.protected, rating: item.rating, rotationDegrees: degrees,
                 archived: item.archived, contentType: item.contentType,
-                widthPixels: item.widthPixels, heightPixels: item.heightPixels, folder: item.folder
+                widthPixels: item.widthPixels, heightPixels: item.heightPixels, folder: item.folder, writable: item.writable,
+                ratingWritable: item.ratingWritable,
+                protectionWritable: item.protectionWritable,
+                rotationWritable: item.rotationWritable,
+                archiveWritable: item.archiveWritable
             )
         }
     }
 
     private func updateMediaMetadata(
         _ item: CameraMediaItem,
-        feature: CameraFeature,
-        update: (CameraSession) async throws -> CameraMediaItem,
+        target: CameraMediaMutation,
+        owner: UUID,
+        update: (CameraSession, CameraMediaMutationAttempt) async throws -> CameraMediaItem,
         preview: () -> CameraMediaItem
     ) async {
-        guard !mediaLibraryLoading, supports(feature), begin(.media) else { return }
+        // The owner was captured by the opening UI, before its async callback.
+        guard owner == mediaLibrarySessionID, !Task.isCancelled else { return }
+        let current = mediaItems.first { mediaItemIdentity($0) == mediaItemIdentity(item) } ?? item
+        guard !mediaLibraryLoading, supports(target.feature), target.isWritable(current), begin(.media) else { return }
         let generation = sessionGeneration
-        defer { end(.media, generation: generation) }
+        let attempt = CameraMediaMutationAttempt()
+        singleMediaMetadataAttempt = attempt
+        defer {
+            if singleMediaMetadataAttempt === attempt { singleMediaMetadataAttempt = nil }
+            end(.media, generation: generation)
+        }
         if isPreview {
             applyUpdatedMedia(preview())
             lastError = nil
             return
         }
-        guard let session else { return }
+        guard owner == mediaLibrarySessionID, !Task.isCancelled, let session else { return }
         do {
-            let updated = try await update(session)
-            guard generation == sessionGeneration else { return }
-            applyUpdatedMedia(updated)
+            let updated = try await update(session, attempt)
+            guard owner == mediaLibrarySessionID, generation == sessionGeneration else { return }
+            guard target.confirms(updated, original: item) else { throw CameraMediaMetadataError.invalidMetadata }
+            let current = mediaItems.first { mediaItemIdentity($0) == mediaItemIdentity(item) } ?? item
+            applyUpdatedMedia(target.mergingConfirmedField(into: current))
             lastError = nil
         } catch {
-            guard generation == sessionGeneration else { return }
+            guard owner == mediaLibrarySessionID, generation == sessionGeneration else { return }
             record(error)
         }
     }
@@ -2851,6 +2888,175 @@ final class CameraAppState: ObservableObject {
                 generation: draft.sessionGeneration, continuation: draft, acknowledgedUnknown: acknowledgedUnknown)
         }
         return true
+    }
+
+    var canPrepareMediaMetadataBatch: Bool {
+        !isPreview && applicationActive && connected && session != nil && !selectedMediaItems.isEmpty
+            && !mediaLibraryLoading && !isBusy(.media) && !shutterReleaseRequired
+    }
+
+    func makeMediaMetadataBatchDraft(_ target: CameraMediaMutation, displayed: [CameraMediaItem]) -> MediaMetadataBatchDraft? {
+        guard canPrepareMediaMetadataBatch else { return nil }
+        let rows = MediaMetadataBatchDraft.rows(selection: selectedMediaItems, loaded: mediaItems)
+        let visible = Set(displayed.map(mediaItemIdentity))
+        return MediaMetadataBatchDraft(target: target, sessionID: mediaLibrarySessionID, generation: sessionGeneration,
+            historyEpoch: mediaMetadataHistoryEpoch, rows: rows, hiddenCount: rows.filter { $0.loadedAtConfirmation && !visible.contains(mediaItemIdentity($0.item)) }.count)
+    }
+
+    /// The confirmation authorizes this immutable roster and absolute target only.
+    /// Changing filters/selection afterwards cannot expand, shrink or retarget it.
+    @discardableResult
+    func startMediaMetadataBatch(_ draft: MediaMetadataBatchDraft) -> Bool {
+        guard !draft.rows.isEmpty,
+              !mediaMetadataBatches.contains(where: { $0.id == draft.id }) else { return false }
+        // Rejections use one bounded summary, never another ledger entry. Clearing
+        // history invalidates every old review without an unbounded consumed-ID set.
+        let rejection: MediaMetadataBatchRejection.Reason?
+        if draft.historyEpoch != mediaMetadataHistoryEpoch { rejection = .staleReview }
+        else if draft.rows.count > 1_000 { rejection = .limit }
+        else if mediaMetadataBatches.count >= MediaMetadataBatchHistory.maximumBatches
+            || draft.rows.count > MediaMetadataBatchHistory.maximumRows - mediaMetadataHistoryRowCount { rejection = .capacity }
+        else { rejection = nil }
+        if let rejection {
+            mediaMetadataBatchRejection = MediaMetadataBatchRejection(selectedCount: draft.rows.count, reason: rejection)
+            return false
+        }
+        mediaMetadataBatchRejection = nil
+        var run = MediaMetadataBatchRun(id: draft.id, target: draft.target, hiddenCount: draft.hiddenCount,
+            unloadedCount: draft.unloadedCount, rows: draft.rows)
+        let invalidOwner = draft.sessionID != mediaLibrarySessionID || draft.generation != sessionGeneration
+        let blocked = isPreview || !applicationActive || !connected || session == nil || mediaLibraryLoading
+            || isBusy(.media) || shutterReleaseRequired
+        if invalidOwner || blocked || !draft.target.valid {
+            let reason: MediaMetadataBatchReason = invalidOwner ? .ownerChanged : !draft.target.valid ? .invalid : .blocked
+            for index in run.rows.indices { run.rows[index].reason = reason }
+            run.running = false; run.ownerRetired = invalidOwner
+            mediaMetadataBatches.append(run)
+            return false
+        }
+        guard let session, begin(.media) else {
+            for index in run.rows.indices { run.rows[index].reason = .blocked }
+            run.running = false
+            mediaMetadataBatches.append(run)
+            return false
+        }
+        mediaMetadataBatches.append(run)
+        mediaMetadataBatchToken = draft.id
+        mediaMetadataBatchTask = Task { [weak self] in
+            await self?.performMediaMetadataBatch(draft, session: session)
+        }
+        return true
+    }
+
+    var mediaMetadataHistoryRowCount: Int { mediaMetadataBatches.reduce(0) { $0 + $1.rows.count } }
+    var canClearMediaMetadataHistory: Bool {
+        !mediaMetadataBatches.contains { $0.running || $0.rows.contains { $0.status == .applying } }
+    }
+
+    /// The UI explicitly warns that removing this record is irreversible and is not
+    /// an undo. Unconfirmed changes may already have taken effect on the camera.
+    @discardableResult
+    func clearMediaMetadataBatchHistory(_ id: UUID, confirmed: Bool) -> Bool {
+        // The active executor retains a batch index; never shift it while running.
+        guard confirmed, canClearMediaMetadataHistory,
+              let index = mediaMetadataBatches.firstIndex(where: { $0.id == id }) else { return false }
+        mediaMetadataBatches.remove(at: index)
+        mediaMetadataHistoryEpoch = UUID()
+        mediaMetadataBatchRejection = nil
+        return true
+    }
+
+    func cancelMediaMetadataBatch() {
+        guard let token = mediaMetadataBatchToken,
+              let index = mediaMetadataBatches.firstIndex(where: { $0.id == token }) else { return }
+        mediaMetadataBatches[index].cancellationRequested = true
+        mediaMetadataAttempt?.cancel()
+        // Cancel remaining work. An in-flight request keeps its bounded readback
+        // so an exact same-owner confirmation is not discarded by cancellation.
+        for row in mediaMetadataBatches[index].rows.indices where mediaMetadataBatches[index].rows[row].status == .notStarted && mediaMetadataBatches[index].rows[row].reason == nil {
+            mediaMetadataBatches[index].rows[row].reason = .cancelled
+        }
+    }
+
+    private func retireMediaMetadataBatch() {
+        guard let token = mediaMetadataBatchToken,
+              let index = mediaMetadataBatches.firstIndex(where: { $0.id == token }) else { return }
+        mediaMetadataAttempt?.cancel() // Atomically prohibits a not-yet-dispatched send.
+        mediaMetadataBatchTask?.cancel()
+        for row in mediaMetadataBatches[index].rows.indices {
+            switch mediaMetadataBatches[index].rows[row].status {
+            case .applying:
+                mediaMetadataBatches[index].rows[row].status = mediaMetadataAttempt?.dispatched == true ? .unconfirmed : .notStarted
+                mediaMetadataBatches[index].rows[row].reason = .ownerChanged
+            case .notStarted:
+                if mediaMetadataBatches[index].rows[row].reason == nil { mediaMetadataBatches[index].rows[row].reason = .ownerChanged }
+            default: break // Confirmed and earlier failure evidence survive retirement.
+            }
+        }
+        mediaMetadataBatches[index].running = false
+        mediaMetadataBatches[index].ownerRetired = true
+        mediaMetadataBatchToken = nil
+        mediaMetadataAttempt = nil
+        mediaMetadataBatchTask = nil
+        end(.media)
+    }
+
+    private func performMediaMetadataBatch(_ draft: MediaMetadataBatchDraft, session: CameraSession) async {
+        func owns() -> Bool {
+            mediaMetadataBatchToken == draft.id && sessionGeneration == draft.generation && mediaLibrarySessionID == draft.sessionID
+        }
+        guard owns(), let batch = mediaMetadataBatches.firstIndex(where: { $0.id == draft.id }) else { return }
+        defer {
+            if owns() {
+                mediaMetadataBatches[batch].running = false
+                mediaMetadataBatchToken = nil
+                mediaMetadataAttempt = nil
+                mediaMetadataBatchTask = nil
+                end(.media, generation: draft.generation)
+            }
+        }
+        for (row, entry) in draft.rows.enumerated() {
+            // Optional deterministic scheduling seam; production has no hook.
+            mediaMetadataBeforeItem?(row)
+            guard owns() else { return }
+            guard !Task.isCancelled, !mediaMetadataBatches[batch].cancellationRequested, applicationActive else { return }
+            let current = entry.loadedAtConfirmation
+                ? mediaItems.first(where: { mediaItemIdentity($0) == mediaItemIdentity(entry.item) }) : nil
+            let reason = MediaMetadataBatchEligibility.reason(snapshot: entry.item, current: current,
+                target: draft.target, supported: supports(draft.target.feature)) ?? (shutterReleaseRequired ? .blocked : nil)
+            if let reason {
+                mediaMetadataBatches[batch].rows[row].status = [.unloaded, .unknownMetadata].contains(reason) ? .notStarted : .failedNotSent
+                mediaMetadataBatches[batch].rows[row].reason = reason
+                continue
+            }
+            let attempt = CameraMediaMutationAttempt()
+            mediaMetadataAttempt = attempt
+            mediaMetadataBatches[batch].rows[row].status = .applying
+            do {
+                let updated = try await session.mutateMedia(entry.item, target: draft.target, attempt: attempt)
+                guard owns() else { return }
+                guard attempt.dispatched, draft.target.confirms(updated, original: entry.item) else {
+                    throw CameraMediaMetadataError.invalidMetadata
+                }
+                mediaMetadataBatches[batch].rows[row].status = .confirmed
+                mediaMetadataBatches[batch].rows[row].reason = nil
+                let current = mediaItems.first { mediaItemIdentity($0) == mediaItemIdentity(entry.item) } ?? entry.item
+                applyUpdatedMedia(draft.target.mergingConfirmedField(into: current))
+            } catch {
+                guard owns() else { return }
+                let uncertain = attempt.dispatched
+                let cancelled = Task.isCancelled || mediaMetadataBatches[batch].cancellationRequested
+                mediaMetadataBatches[batch].rows[row].status = uncertain ? .unconfirmed : cancelled ? .notStarted : .failedNotSent
+                mediaMetadataBatches[batch].rows[row].reason = uncertain ? .uncertain : cancelled ? .cancelled : .notSent
+                if uncertain || cancelled {
+                    for remaining in mediaMetadataBatches[batch].rows.indices where remaining > row {
+                        mediaMetadataBatches[batch].rows[remaining].reason = cancelled ? .cancelled : .uncertain
+                    }
+                    return // No mutation retry or automatic continuation after uncertainty.
+                }
+            }
+            mediaMetadataAttempt = nil
+        }
     }
 
     var canStartMediaBatchDownload: Bool {
@@ -3295,16 +3501,20 @@ final class CameraAppState: ObservableObject {
         }
     }
 
-    func setMediaArchive(_ item: CameraMediaItem, enabled: Bool) async {
-        await updateMediaMetadata(item, feature: .mediaArchive) { session in
-            try await session.setMediaArchive(item, enabled: enabled)
+    func setMediaArchive(_ item: CameraMediaItem, enabled: Bool, owner: UUID) async {
+        await updateMediaMetadata(item, target: .archive(enabled), owner: owner) { session, attempt in
+            try await session.mutateMedia(item, target: .archive(enabled), attempt: attempt)
         } preview: {
             CameraMediaItem(
                 id: item.id, name: item.name, kind: item.kind, sizeBytes: item.sizeBytes,
                 captureTime: item.captureTime, previewAvailable: item.previewAvailable,
                 protected: item.protected, rating: item.rating, rotationDegrees: item.rotationDegrees,
                 archived: enabled, contentType: item.contentType,
-                widthPixels: item.widthPixels, heightPixels: item.heightPixels, folder: item.folder
+                widthPixels: item.widthPixels, heightPixels: item.heightPixels, folder: item.folder, writable: item.writable,
+                ratingWritable: item.ratingWritable,
+                protectionWritable: item.protectionWritable,
+                rotationWritable: item.rotationWritable,
+                archiveWritable: item.archiveWritable
             )
         }
     }

@@ -15,6 +15,8 @@ CONTRACTS = {
     "../../contracts/capture-review-evidence/v1/review-evidence-vectors.json",
     "../../contracts/media-type/v1/media-type-vectors.json",
     "../../contracts/jpeg-original/v1/jpeg-original-vectors.json",
+    "../../contracts/media-mutation/v1/media-mutation-vectors.json",
+    "../../contracts/media-mutation/v1/media-mutation-eligibility-vectors.json",
 }
 
 
@@ -30,7 +32,7 @@ class IOSProjectSourcePathTests(unittest.TestCase):
     def test_every_external_source_opts_out_of_intermediate_ancestor_groups(self):
         entries = source_entries("OpenEOSControlTests")
         external = [(path, settings) for path, settings in entries if path.startswith("../")]
-        self.assertEqual(len(external), 7)
+        self.assertEqual(len(external), 9)
         self.assertEqual({path for path, _ in external}, CONTRACTS | {SHARED_SWIFT})
         for path, settings in external:
             with self.subTest(path=path):
@@ -52,7 +54,7 @@ class IOSProjectSourcePathTests(unittest.TestCase):
                     self.assertTrue(resolved.is_relative_to(ROOT))
                     self.assertTrue(resolved.exists())
                     count += 1
-        self.assertEqual(count, 12)
+        self.assertEqual(count, 14)
 
     def test_contract_resources_and_shared_real_swift_test_remain_required(self):
         entries = dict(source_entries("OpenEOSControlTests"))

@@ -731,6 +731,12 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
     public let widthPixels: Int?
     public let heightPixels: Int?
     public let folder: CameraMediaFolder?
+    /// An explicit transport denial vetoes metadata writes; absence grants no new capability.
+    public let writable: Bool?
+    public let ratingWritable: Bool?
+    public let protectionWritable: Bool?
+    public let rotationWritable: Bool?
+    public let archiveWritable: Bool?
 
     public init(
         id: String,
@@ -746,7 +752,12 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
         contentType: String? = nil,
         widthPixels: Int? = nil,
         heightPixels: Int? = nil,
-        folder: CameraMediaFolder? = nil
+        folder: CameraMediaFolder? = nil,
+        writable: Bool? = nil,
+        ratingWritable: Bool? = nil,
+        protectionWritable: Bool? = nil,
+        rotationWritable: Bool? = nil,
+        archiveWritable: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -762,6 +773,11 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
         self.widthPixels = widthPixels
         self.heightPixels = heightPixels
         self.folder = folder
+        self.writable = writable
+        self.ratingWritable = ratingWritable
+        self.protectionWritable = protectionWritable
+        self.rotationWritable = rotationWritable
+        self.archiveWritable = archiveWritable
     }
 }
 
