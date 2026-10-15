@@ -314,7 +314,13 @@ final class CameraAppState: ObservableObject {
     private var captureConfigurationAttempt: CameraCaptureConfigurationAttempt?
     private var captureConfigurationAttempts: [UUID: CameraCaptureConfigurationAttempt] = [:]
     @Published private(set) var operatorConfirmedFeatures = Set<CameraFeature>()
-    @Published private(set) var lastError: String?
+    @Published private(set) var lastError: String? {
+        didSet { lastErrorOwner = UUID() }
+    }
+    // Every write gets a fresh owner, including a camera error with identical text.
+    private var lastErrorOwner = UUID()
+    private var cubeLutImportErrorOwner: UUID?
+    private var cubeLutRenderErrorOwner: UUID?
     @Published private(set) var busyOperations = Set<CameraOperation>()
 
     private let defaults: UserDefaults
@@ -355,6 +361,12 @@ final class CameraAppState: ObservableObject {
     private var bridgeScanOwner = UUID()
     private var connectionConfigurationOwner = UUID()
     private var cubeLutOwner = UUID()
+    private var cubeLutPickerOwner: UUID?
+    private var cubeLutReadTask: Task<CubeLut, Error>?
+    private let cubeLutFileReader: CubeLutFileReader
+    @Published private(set) var isImportingCubeLut = false
+    @Published private(set) var isRetiringCubeLutRead = false
+    @Published private(set) var cubeLutImportError: String?
     private var focusMarkerOwner = UUID()
     private var heldAutofocusOwner: UUID?
     private var heldAutofocusTask: Task<Void, Error>?
@@ -527,6 +539,7 @@ final class CameraAppState: ObservableObject {
         sessionFactory: (@MainActor () throws -> CameraSession)? = nil,
         bridgeCameraDiscovery: (@Sendable (String, String) async throws -> [DesktopBridgeCamera])? = nil,
         cubeLutLoader: (@Sendable (URL) async throws -> CubeLut)? = nil,
+        cubeLutFileReader: CubeLutFileReader = CubeLutFileReader(),
         focusMarkerDelay: (@Sendable () async throws -> Void)? = nil,
         heldAutofocusDelay: (@Sendable () async throws -> Void)? = nil,
         rtpEventDispatcher: (@Sendable (@escaping @MainActor @Sendable () -> Void) -> Void)? = nil,
@@ -553,6 +566,7 @@ final class CameraAppState: ObservableObject {
         self.sessionFactory = sessionFactory
         self.bridgeCameraDiscovery = bridgeCameraDiscovery
         self.cubeLutLoader = cubeLutLoader
+        self.cubeLutFileReader = cubeLutFileReader
         self.focusMarkerDelay = focusMarkerDelay
         self.heldAutofocusDelay = heldAutofocusDelay
         if CommandLine.arguments.contains("-resetState") {
@@ -4551,15 +4565,18 @@ final class CameraAppState: ObservableObject {
             "rtpAudioReason=\(rtpAudioStatus.reason ?? "none")",
             "rtpAudioError=\(rtpAudioStatus.error ?? "none")",
         ].joined(separator: "\n")
+        // Provider errors can contain LUT filenames, titles, paths or contents.
+        // Preserve their detail only in UI; never pass it to report builders.
+        let diagnosticError = cubeLutImportErrorOwner == lastErrorOwner ? "LUT_IMPORT_FAILED" : lastError
         let report: String
         if let session {
-            report = await session.diagnosticReport(snapshot: snapshot, liveView: metrics, lastError: lastError)
+            report = await session.diagnosticReport(snapshot: snapshot, liveView: metrics, lastError: diagnosticError)
         } else if connectionMode == .desktopBridge, let url = URL(string: bridgeURL) {
             report = DesktopBridgeDiagnosticReport.make(
                 baseURL: url,
                 snapshot: snapshot,
                 liveView: metrics,
-                lastError: lastError
+                lastError: diagnosticError
             )
         } else {
             let url = URL(string: baseURL) ?? URL(string: Self.defaultCameraURL)!
@@ -4569,7 +4586,7 @@ final class CameraAppState: ObservableObject {
                 versions: isPreview ? ["offline-preview"] : [],
                 snapshot: snapshot,
                 liveView: metrics,
-                lastError: lastError
+                lastError: diagnosticError
             )
         }
         try Task.checkCancellation()
@@ -4616,57 +4633,148 @@ final class CameraAppState: ObservableObject {
         lastError = nil
     }
 
-    func importCubeLut(from url: URL) async {
-        guard !Task.isCancelled else { return }
+    /// Opening or dismissing a picker does not retire an accepted import.
+    func beginCubeLutPicker() -> UUID {
         let owner = UUID()
-        cubeLutOwner = owner
-        let loader = cubeLutLoader
-        let task = Task.detached(priority: .userInitiated) { () async throws -> CubeLut in
-            if let loader { return try await loader(url) }
-            let accessed = url.startAccessingSecurityScopedResource()
-            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-            let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
-            guard fileSize == nil || fileSize! <= maximumCubeLutBytes else {
-                throw CubeLutError.invalid("3D LUT exceeds the 16 MiB limit.")
-            }
-            let data = try Data(contentsOf: url, options: .mappedIfSafe)
-            guard data.count <= maximumCubeLutBytes else {
-                throw CubeLutError.invalid("3D LUT exceeds the 16 MiB limit.")
-            }
-            guard let text = String(data: data, encoding: .utf8) else {
-                throw CubeLutError.invalid("The selected LUT is not valid UTF-8 text.")
-            }
-            return try parseCubeLut(text, fallbackName: url.lastPathComponent)
-        }
-        do {
-            let lut = try await task.value
-            guard cubeLutOwner == owner, !Task.isCancelled else { return }
-            monitorSettings.cubeLut = lut
-            lastError = nil
-        } catch {
-            guard cubeLutOwner == owner, !Task.isCancelled else { return }
-            lastError = String(
-                format: NSLocalizedString("lut_import_failed", comment: ""),
-                error.localizedDescription
-            )
+        cubeLutPickerOwner = owner
+        return owner
+    }
+
+    /// Called synchronously by the picker delegate, before creating a Task.
+    func completeCubeLutPicker(_ result: Result<URL?, Error>, owner: UUID) -> CubeLutImportSelection? {
+        guard cubeLutPickerOwner == owner else { return nil }
+        cubeLutPickerOwner = nil
+        switch result {
+        case let .success(url):
+            guard let url else { return nil }
+            return acceptCubeLutSelection(from: url)
+        case let .failure(error):
+            // User cancellation is not a failure and leaves accepted work alone.
+            guard !isCubeLutCancellation(error) else { return nil }
+            reportCubeLutImportError(error)
+            return nil
         }
     }
 
-    func clearCubeLut() {
+    func acceptCubeLutSelection(from url: URL) -> CubeLutImportSelection? {
+        guard !Task.isCancelled else { return nil }
+        retireCubeLutImport()
+        clearCubeLutImportError()
+        isImportingCubeLut = true
+        return CubeLutImportSelection(owner: cubeLutOwner, url: url)
+    }
+
+    func importCubeLut(from url: URL) async {
+        guard let selection = acceptCubeLutSelection(from: url) else { return }
+        await importCubeLut(selection)
+    }
+
+    func importCubeLut(_ selection: CubeLutImportSelection) async {
+        guard cubeLutOwner == selection.owner else { return }
+        guard !Task.isCancelled else {
+            cancelCubeLutImport(owner: selection.owner)
+            return
+        }
+        // A selection is consumed once, even if a delegate repeats a callback.
+        guard cubeLutReadTask == nil, isImportingCubeLut else { return }
+        let loader = cubeLutLoader
+        let reader = cubeLutFileReader
+        let task = Task.detached(priority: .userInitiated) { () async throws -> CubeLut in
+            try Task.checkCancellation()
+            if let loader { return try await loader(selection.url) }
+            return try await reader.load(selection.url)
+        }
+        cubeLutReadTask = task
+        defer {
+            isRetiringCubeLutRead = cubeLutFileReader.bufferedRequestCounts.retiring > 0
+            if cubeLutOwner == selection.owner {
+                cubeLutReadTask = nil
+                isImportingCubeLut = false
+            }
+        }
+        do {
+            let lut = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+                Task { @MainActor [weak self] in
+                    self?.cancelCubeLutImport(owner: selection.owner)
+                }
+            }
+            guard cubeLutOwner == selection.owner, !Task.isCancelled else { return }
+            monitorSettings.cubeLut = lut
+            clearCubeLutImportError()
+            // LUT success may retire its own render warning, not a camera error.
+            if cubeLutRenderErrorOwner == lastErrorOwner { lastError = nil }
+            cubeLutRenderErrorOwner = nil
+        } catch {
+            guard cubeLutOwner == selection.owner, !Task.isCancelled else { return }
+            guard !isCubeLutCancellation(error) else { return }
+            publishCubeLutImportError(error)
+        }
+    }
+
+    func cancelCubeLutImport() {
+        retireCubeLutImport()
+        clearCubeLutImportError()
+    }
+
+    private func cancelCubeLutImport(owner: UUID) {
+        guard cubeLutOwner == owner else { return }
+        cancelCubeLutImport()
+    }
+
+    private func retireCubeLutImport() {
         cubeLutOwner = UUID()
+        cubeLutPickerOwner = nil
+        cubeLutReadTask?.cancel()
+        cubeLutReadTask = nil
+        isRetiringCubeLutRead = cubeLutFileReader.bufferedRequestCounts.retiring > 0
+        isImportingCubeLut = false
+    }
+
+    func clearCubeLut() {
+        cancelCubeLutImport()
         monitorSettings.cubeLut = nil
     }
 
     func reportCubeLutImportError(_ error: Error) {
-        cubeLutOwner = UUID()
-        lastError = String(
+        guard !isCubeLutCancellation(error) else { return }
+        retireCubeLutImport()
+        publishCubeLutImportError(error)
+    }
+
+    private func publishCubeLutImportError(_ error: Error) {
+        let message = String(
             format: NSLocalizedString("lut_import_failed", comment: ""),
             error.localizedDescription
         )
+        let canMirror = lastError == nil || cubeLutImportErrorOwner == lastErrorOwner
+            || cubeLutRenderErrorOwner == lastErrorOwner
+        cubeLutImportError = message
+        cubeLutImportErrorOwner = nil
+        if canMirror {
+            lastError = message
+            cubeLutImportErrorOwner = lastErrorOwner
+            cubeLutRenderErrorOwner = nil
+        }
+    }
+
+    private func clearCubeLutImportError() {
+        if cubeLutImportErrorOwner == lastErrorOwner { lastError = nil }
+        cubeLutImportError = nil
+        cubeLutImportErrorOwner = nil
+    }
+
+    private func isCubeLutCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        let cocoa = error as NSError
+        return cocoa.domain == NSCocoaErrorDomain && cocoa.code == NSUserCancelledError
     }
 
     func reportCubeLutRenderFailure() {
         lastError = NSLocalizedString("lut_render_failed", comment: "")
+        cubeLutRenderErrorOwner = lastErrorOwner
     }
 
     private func begin(_ operation: CameraOperation) -> Bool {
