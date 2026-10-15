@@ -1,0 +1,2792 @@
+{
+  "schemaVersion": 1,
+  "kind": "rtp-monitor-output-evidence",
+  "description": "Pure necessary gate only: producers must supply real decoded/renderer evidence and exact output identity; it cannot prove I/O or physical display.",
+  "cases": [
+    {
+      "name": "evidence-decoded-output",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "decoded-output"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "evidence-surface-submitted",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "surface-submitted"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "evidence-presentation-confirmed",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": true
+      }
+    },
+    {
+      "name": "evidence-unknown",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "unknown"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "evidence-encoded-frame",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "encoded-frame"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "evidence-enqueue-intent",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "enqueue-intent"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "evidence-nonempty-buffer",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "nonempty-buffer"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "evidence-pixel-copy",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "pixel-copy"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "evidence-",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": ""
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "evidence-None",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": null
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "active-False",
+      "input": {
+        "active": false,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "active-None",
+      "input": {
+        "active": null,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sameOwner-False",
+      "input": {
+        "active": true,
+        "sameOwner": false,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sameOwner-None",
+      "input": {
+        "active": true,
+        "sameOwner": null,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sameRenderer-False",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sameRenderer-None",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": null,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "stopPending-False",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": false,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "stopPending-None",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": null,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "terminal-True",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": true,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "terminal-None",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": null,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "foreground-True-False",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": false,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "foreground-True-None",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": null,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "foreground-False-False",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": false,
+        "foreground": false,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": true
+      }
+    },
+    {
+      "name": "foreground-False-None",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": false,
+        "foreground": null,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": true
+      }
+    },
+    {
+      "name": "foreground-None-True",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": null,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleFrame-0",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 0,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleFrame--1",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": -1,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleFrame-9",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 9,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleFrame-1.5",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 1.5,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleFrame-None",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": null,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleFrame-9007199254740992",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 9007199254740992,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentFrame-0",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 0,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentFrame--1",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": -1,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentFrame-9",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 9,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentFrame-1.5",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 1.5,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentFrame-None",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": null,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentFrame-9007199254740992",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 9007199254740992,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleLut--1",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": -1,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleLut-4",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 4,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleLut-1.5",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 1.5,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleLut-None",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": null,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleLut-9007199254740992",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 9007199254740992,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentLut--1",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": -1,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentLut-4",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 4,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentLut-1.5",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 1.5,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentLut-None",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": null,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentLut-9007199254740992",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 9007199254740992,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "lut-off-zero",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 0,
+        "currentLut": 0,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": true
+      }
+    },
+    {
+      "name": "frame-one",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 1,
+        "currentFrame": 1,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": true
+      }
+    },
+    {
+      "name": "safe-integer-frame",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 9007199254740991,
+        "currentFrame": 9007199254740991,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": true
+      }
+    },
+    {
+      "name": "sampleAgeMs--1",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": -1,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleAgeMs-0",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 0,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": true
+      }
+    },
+    {
+      "name": "sampleAgeMs-4999.5",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 4999.5,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": true
+      }
+    },
+    {
+      "name": "sampleAgeMs-5000",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 5000,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": true
+      }
+    },
+    {
+      "name": "sampleAgeMs-5000.1",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 5000.1,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleAgeMs-None",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": null,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "frameAgeMs--1",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": -1,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "frameAgeMs-0",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 0,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": true
+      }
+    },
+    {
+      "name": "frameAgeMs-4999.5",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 4999.5,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": true
+      }
+    },
+    {
+      "name": "frameAgeMs-5000",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 5000,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": true
+      }
+    },
+    {
+      "name": "frameAgeMs-5000.1",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 5000.1,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "frameAgeMs-None",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": null,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "max-age-0",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 0,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "max-age--1",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": -1,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "max-age-1",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 1,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "max-age-25",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 25,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "max-age-50",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 50,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": true,
+        "canPublishSubmittedAnalysis": true,
+        "canClaimPresentation": true
+      }
+    },
+    {
+      "name": "max-age-5001",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5001,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "max-age-None",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": null,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-active",
+      "input": {
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-sameOwner",
+      "input": {
+        "active": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-sameRenderer",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-foregroundRequired",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-foreground",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-terminal",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-stopPending",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-sampleFrame",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-currentFrame",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-sampleLut",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-currentLut",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-sampleAgeMs",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-frameAgeMs",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-maxAgeMs",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "missing-evidence",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleFrame-invalid-type-bool-True",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": true,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleFrame-invalid-type-bool-False",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": false,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleFrame-invalid-type-str-8",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": "8",
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentFrame-invalid-type-bool-True",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": true,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentFrame-invalid-type-bool-False",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": false,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentFrame-invalid-type-str-8",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": "8",
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleLut-invalid-type-bool-True",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": true,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleLut-invalid-type-bool-False",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": false,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleLut-invalid-type-str-3",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": "3",
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentLut-invalid-type-bool-True",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": true,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentLut-invalid-type-bool-False",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": false,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "currentLut-invalid-type-str-3",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": "3",
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleAgeMs-invalid-type-bool-True",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": true,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleAgeMs-invalid-type-bool-False",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": false,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sampleAgeMs-invalid-type-str-25",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": "25",
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "frameAgeMs-invalid-type-bool-True",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": true,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "frameAgeMs-invalid-type-bool-False",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": false,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "frameAgeMs-invalid-type-str-50",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": "50",
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "maxAgeMs-invalid-type-bool-True",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": true,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "maxAgeMs-invalid-type-bool-False",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": false,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "maxAgeMs-invalid-type-str-5000",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": "5000",
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "active-numeric-not-boolean",
+      "input": {
+        "active": 1,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sameOwner-numeric-not-boolean",
+      "input": {
+        "active": true,
+        "sameOwner": 1,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "sameRenderer-numeric-not-boolean",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": 1,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "stopPending-numeric-not-boolean",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": 1,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "terminal-numeric-not-boolean",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "terminal": 1,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "foregroundRequired-numeric-not-boolean",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": 1,
+        "foreground": true,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    },
+    {
+      "name": "foreground-numeric-not-boolean",
+      "input": {
+        "active": true,
+        "sameOwner": true,
+        "sameRenderer": true,
+        "foregroundRequired": true,
+        "foreground": 1,
+        "terminal": false,
+        "stopPending": true,
+        "sampleFrame": 8,
+        "currentFrame": 8,
+        "sampleLut": 3,
+        "currentLut": 3,
+        "sampleAgeMs": 25,
+        "frameAgeMs": 50,
+        "maxAgeMs": 5000,
+        "evidence": "presentation-confirmed"
+      },
+      "expected": {
+        "canPublishDecodedAnalysis": false,
+        "canPublishSubmittedAnalysis": false,
+        "canClaimPresentation": false
+      }
+    }
+  ]
+}

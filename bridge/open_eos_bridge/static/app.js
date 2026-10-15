@@ -1783,6 +1783,10 @@
     frameContentType: null,
     lastFrameAt: null,
     liveObjectUrl: null,
+    liveDecodedImage: null,
+    liveFrameRevision: 0,
+    liveFrameSample: null,
+    liveFrameExpiryTimer: null,
     livePollingSuspended: false,
     rtpAudioEnabled: false,
     rtpAudioBusy: false,
@@ -1798,6 +1802,8 @@
     rtpAudioLastAt: null,
     rtpAudioError: null,
     monitorAnalysisError: null,
+    monitorLutRevision: 0,
+    monitorFrameEvidence: null,
     monitorSettings: {
       histogramVisible: false,
       waveformVisible: false,
@@ -5857,6 +5863,9 @@
 
   function stopLiveLoop() {
     cancelCameraFocusInfo();
+    clearTimeout(state.liveFrameExpiryTimer);
+    state.liveFrameExpiryTimer = null;
+    state.liveFrameSample = null;
     state.liveFrameAbortController?.abort();
     state.liveFrameAbortController = null;
     stopRtpAudio({ announce: false });
@@ -5936,10 +5945,19 @@
         if (!policy.canPublishDecoded || !current()) { decoded.image.removeAttribute("src"); releaseObjectUrl(decoded.url); return; }
         const previous = state.liveObjectUrl;
         const previousDecoded = state.liveDecodedImage;
-        // Decode into a private image first. An obsolete decode never mutates the shared image.
-        ui.liveImage.src = decoded.url;
+        // Install the already-decoded object itself. Reassigning src on another
+        // img would leave display and monitoring on different decode revisions.
+        for (const attribute of ui.liveImage.attributes) {
+          if (attribute.name !== "src") decoded.image.setAttribute(attribute.name, attribute.value);
+        }
+        ui.liveImage.replaceWith(decoded.image);
+        ui.liveImage = decoded.image;
         state.liveObjectUrl = decoded.url;
         state.liveDecodedImage = decoded.image;
+        state.liveFrameRevision = (state.liveFrameRevision || 0) + 1;
+        state.liveFrameSample = { session, owner, generation, image: decoded.image,
+          frame: state.liveFrameRevision, decodedAt: performance.now() };
+        expireLiveFrame(state.liveFrameSample);
         ui.liveImage.hidden = false;
         ui.viewfinderPlaceholder.hidden = true;
         previousDecoded?.removeAttribute("src");
@@ -5984,6 +6002,10 @@
     cancelCameraFocusInfo();
     if (!state.liveActive) return;
     state.livePollingSuspended = true;
+    clearTimeout(state.liveFrameExpiryTimer);
+    state.liveFrameExpiryTimer = null;
+    state.liveFrameSample = null;
+    clearMonitoringLayers();
     state.liveFrameAbortController?.abort();
     state.liveFrameAbortController = null;
     state.liveGeneration += 1;
@@ -5997,6 +6019,22 @@
     state.livePollingSuspended = false;
     state.liveGeneration += 1;
     pollLiveView(state.liveGeneration);
+  }
+
+  function expireLiveFrame(sample) {
+    clearTimeout(state.liveFrameExpiryTimer);
+    state.liveFrameExpiryTimer = setTimeout(() => {
+      if (state.liveFrameSample !== sample || state.session !== sample.session ||
+          state.liveViewStopOwner !== sample.owner || state.liveGeneration !== sample.generation) return;
+      state.liveFrameExpiryTimer = null;
+      // The last image may stay visible, but it no longer contributes fresh
+      // monitoring or FPS while a bounded next-frame request is outstanding.
+      sample.expired = true;
+      state.frameTimes = [];
+      state.observedFps = 0;
+      clearMonitoringLayers();
+      renderFrameIndicator();
+    }, 5000);
   }
 
   async function changeFps() {
@@ -6368,22 +6406,71 @@
     return rect;
   }
 
+  function cameraMonitorPolicy(sample, frame, lutRevision, sampledAt, level) {
+    const now = performance.now();
+    return liveViewLifecycle.evaluateRtpMonitorEvidence({
+      active: state.liveActive === true && !state.livePollingSuspended,
+      sameOwner: Boolean(sample && state.session === sample.session && state.liveViewStopOwner === sample.owner &&
+        state.liveGeneration === sample.generation && !sample.expired),
+      sameRenderer: Boolean(sample && state.liveDecodedImage === sample.image && ui.liveImage === sample.image),
+      foregroundRequired: false, terminal: !state.liveActive || sample?.owner?.stopUnconfirmed === true,
+      stopPending: sample?.owner?.confirmedStart === true,
+      sampleFrame: frame, currentFrame: state.liveFrameSample?.frame,
+      sampleLut: lutRevision, currentLut: state.monitorLutRevision || 0,
+      sampleAgeMs: now - sampledAt, frameAgeMs: now - sample?.decodedAt,
+      maxAgeMs: 5000, evidence: level,
+    });
+  }
+
+  function currentMonitorFrameEvidence() {
+    const record = state.monitorFrameEvidence;
+    return record && cameraMonitorPolicy(state.liveFrameSample, record.frameRevision,
+      record.lutRevision, record.sampledAt, record.sourceEvidence).canPublishDecodedAnalysis ? record : null;
+  }
+
   function renderMonitoringFrame() {
     const display = activePreviewElement();
     // Pixels come from the fully decoded private image, never a pending DOM src.
     const media = display === ui.liveImage && state.liveDecodedImage ? state.liveDecodedImage : display;
+    const sample = display === ui.liveImage ? state.liveFrameSample : null;
+    const lutRevision = state.monitorLutRevision || 0;
+    const sampledAt = performance.now();
+    const evidence = (level) => cameraMonitorPolicy(sample, sample?.frame, lutRevision, sampledAt, level);
+    if (display === ui.liveImage && !evidence("decoded-output").canPublishDecodedAnalysis) {
+      clearMonitoringLayers();
+      return;
+    }
     const sourceDimensions = previewDimensions(media);
     const rect = applyLiveViewLayout();
     if (!rect) {
       clearMonitoringLayers();
       return;
     }
+    state.monitorAnalysisError = null;
+    state.monitorFrameEvidence = null;
     const lutRendered = renderLutPreview(media);
+    // A selected LUT that failed must not be silently reported as successful
+    // ungraded analysis, or leave the previous frame's spatial overlay visible.
+    if (state.monitorSettings.cubeLut && !lutRendered) {
+      ui.monitorPixelOverlay.hidden = true;
+      ui.monitorHistogram.hidden = true;
+      ui.monitorWaveform.hidden = true;
+      return;
+    }
+    const level = lutRendered ? "surface-submitted" : "decoded-output";
+    const publishEvidence = () => {
+      if (!sample) return;
+      const policy = evidence(level);
+      if (!policy.canPublishDecodedAnalysis) { clearMonitoringLayers(); return; }
+      state.monitorFrameEvidence = { frameRevision: sample.frame, lutRevision,
+        sourceEvidence: level, presentationConfirmed: policy.canClaimPresentation, sampledAt };
+    };
     if (!monitorNeedsPixelAnalysis()) {
       ui.monitorPixelOverlay.hidden = true;
       ui.monitorHistogram.hidden = true;
       ui.monitorWaveform.hidden = true;
       state.monitorAnalysisError = null;
+      publishEvidence();
       return;
     }
     try {
@@ -6399,10 +6486,15 @@
         falseColorEnabled: state.monitorSettings.falseColorEnabled,
         focusPeakingEnabled: state.monitorSettings.focusPeakingEnabled,
       });
+      if (sample && !evidence(level).canPublishDecodedAnalysis) {
+        clearMonitoringLayers();
+        return;
+      }
       renderMonitorPixelOverlay(analysis);
       renderMonitorHistogram(analysis.histogram);
       renderMonitorWaveform(analysis.waveform);
       state.monitorAnalysisError = null;
+      publishEvidence();
     } catch (error) {
       state.monitorAnalysisError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       ui.monitorPixelOverlay.hidden = true;
@@ -6425,6 +6517,10 @@
     } catch (error) {
       state.monitorAnalysisError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       ui.monitorLutPreview.hidden = true;
+      // Recreate after a context/render failure; retained resources must not
+      // make later frames look like a successfully submitted LUT revision.
+      try { lutPreviewRenderer?.dispose(); } catch (_) {}
+      lutPreviewRenderer = null;
       return false;
     }
   }
@@ -6561,6 +6657,7 @@
   }
 
   function clearMonitoringLayers() {
+    state.monitorFrameEvidence = null;
     clearCameraFocusFrames();
     ui.monitorLutPreview.hidden = true;
     ui.monitorPixelOverlay.hidden = true;
@@ -6625,6 +6722,7 @@
       const parsed = lut.parseCubeLut(await file.text(), file.name);
       lutPreviewRenderer ||= lut.createWebGLRenderer(ui.monitorLutPreview);
       state.monitorSettings = { ...state.monitorSettings, cubeLut: parsed };
+      state.monitorLutRevision = (state.monitorLutRevision || 0) + 1;
       state.monitorAnalysisError = null;
       renderMonitoringControls();
       renderMonitoringFrame();
@@ -6640,6 +6738,7 @@
 
   function removeCubeLut() {
     state.monitorSettings = { ...state.monitorSettings, cubeLut: null };
+    state.monitorLutRevision = (state.monitorLutRevision || 0) + 1;
     ui.monitorLutPreview.hidden = true;
     state.monitorAnalysisError = null;
     renderMonitoringControls();
@@ -9541,6 +9640,10 @@
         frameBytes: state.frameBytes,
         contentType: state.frameContentType,
         lastFrameAt: state.lastFrameAt,
+        // img.decode/DOM installation and WebGL submission are not compositor callbacks.
+        cameraDecodedFrameRevision: state.liveFrameSample?.frame ?? null,
+        cameraDecodedFrameAgeMs: state.liveFrameSample ? Math.max(0, performance.now() - state.liveFrameSample.decodedAt) : null,
+        cameraPresentationConfirmed: false,
         rtpAudio: {
           ...currentRtpAudioStatus(),
           enabled: state.rtpAudioEnabled,
@@ -9565,6 +9668,7 @@
             ? { loaded: true, size: state.monitorSettings.cubeLut.size }
             : { loaded: false },
           analysisError: state.monitorAnalysisError,
+          frameEvidence: currentMonitorFrameEvidence(),
         },
         localVideo: {
           available: state.localVideoSupport.available,
