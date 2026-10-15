@@ -322,9 +322,14 @@ class CameraBridgeShutterRecoverySessionTest {
         compose.onNodeWithContentDescription(text(R.string.start_recording)).assertDoesNotExist()
         compose.onNodeWithContentDescription(text(R.string.stop_bulb_exposure))
             .assertIsDisplayed().assertIsEnabled().performClick()
+        // CAPTURE is removed before the queued Live View reconciliation starts. Wait for
+        // camera B's first resumed frame too, not that transient empty pending-operation set.
         compose.waitUntil(TIMEOUT) {
             val state = viewModel.uiState.value
-            cameraB.count("POST", "bulb/stop") == 1 && !state.bulbExposureActive && state.pendingOperations.isEmpty()
+            cameraB.count("POST", "bulb/stop") == 1 && !state.bulbExposureActive &&
+                cameraB.count("POST", "liveview/start") == 1 && cameraB.frames.get() > 0 &&
+                state.liveViewBitmap != null && state.pendingOperations.isEmpty() &&
+                !state.isBusy(CameraOperation.CAPTURE)
         }
         assertEquals(false, viewModel.uiState.value.status?.bulbExposureActive)
         assertEquals(false, viewModel.uiState.value.status?.shutterReleaseUnconfirmed)
@@ -462,7 +467,9 @@ private class BridgeRecoveryPeer(private val label: String) : AutoCloseable {
                             }
                         }
                     }
-                    method == "POST" && path in setOf("$sessionPath/liveview/start", "$sessionPath/liveview/stop") -> json("{}")
+                    method == "POST" && path == "$sessionPath/liveview/start" -> json("""{"active":true}""")
+                    method == "POST" && path == "$sessionPath/liveview/stop" ->
+                        json("""{"active":false,"liveViewStopUnconfirmed":false}""")
                     method == "GET" && path == "$sessionPath/liveview/frame" -> {
                         frames.incrementAndGet()
                         MockResponse().setHeader("Content-Type", "image/jpeg").setBody(Buffer().write(jpeg))

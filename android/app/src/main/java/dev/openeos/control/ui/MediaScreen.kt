@@ -52,6 +52,7 @@ import dev.openeos.control.R
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.isVisualMedia
 import dev.openeos.control.data.CameraMediaTransferProgress
 import java.util.Locale
 import java.time.ZoneId
@@ -81,14 +82,14 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
     var dateDialogVisible by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     var selectionDrag by remember { mutableStateOf<MediaSelectionDrag?>(null) }
-    val displayZone = ZoneId.systemDefault()
+    val displayZone = rememberMediaDisplayZone()
     val libraryFilteredItems = remember(state.mediaItems, state.mediaDateRange, state.mediaRatingFilter, state.mediaFolderFilter, displayZone) {
         mediaItemsForDisplay(
             state.mediaItems, MediaFilter.ALL, MediaSort.CAMERA, state.mediaDateRange, displayZone, state.mediaRatingFilter, state.mediaFolderFilter,
         )
     }
-    val displayedItems = remember(libraryFilteredItems, mediaFilter, mediaSort) {
-        mediaItemsForDisplay(libraryFilteredItems, mediaFilter, mediaSort)
+    val displayedItems = remember(libraryFilteredItems, mediaFilter, mediaSort, displayZone) {
+        mediaItemsForDisplay(libraryFilteredItems, mediaFilter, mediaSort, displayZone = displayZone)
     }
     val ratingViewActive = state.mediaRatingFilter != MediaRatingFilter.ALL || mediaSort.isRatingOrder
     val folders = remember(state.mediaItems) { loadedMediaFolders(state.mediaItems) }
@@ -136,7 +137,8 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
     state.mediaPreviewItem?.let { item ->
         // Capture review or refreshed metadata can open an item outside the current filter.
         // Show that exact item as a standalone preview, never 0/N or an unrelated adjacent item.
-        val viewerItems = displayedItems.takeIf { item.id in displayedIds } ?: listOf(item)
+        val viewerItems = displayedItems.filter { it.isVisualMedia }
+            .takeIf { candidates -> candidates.any { it.id == item.id } } ?: listOf(item)
         val previewIndex = viewerItems.indexOfFirst { it.id == item.id }
         val viewerActionsEnabled = !state.isBusy(CameraOperation.MEDIA) && (
             state.supports(CameraFeature.MEDIA_BROWSER) ||
@@ -151,6 +153,7 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
         }
         MediaViewerDialog(
             item = item,
+            displayZone = displayZone,
             bytes = state.mediaPreviewBytes,
             streamSource = state.mediaStreamSource,
             loading = state.mediaPreviewLoading,
@@ -261,6 +264,7 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
             LaunchedEffect(itemId) { actions.loadMediaInfo(item) }
             MediaMetadataSheet(
                 item = item,
+                displayZone = displayZone,
                 busy = state.isBusy(CameraOperation.MEDIA),
                 protectSupported = state.supports(CameraFeature.MEDIA_PROTECT) && item.protected != null,
                 archiveSupported = state.supports(CameraFeature.MEDIA_ARCHIVE) && item.archived != null,
@@ -571,6 +575,14 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
             }
         }
 
+        if (state.mediaWorklistUnavailable) {
+            Text(
+                stringResource(R.string.media_worklist_unavailable),
+                color = AppWarning,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
         state.lastDownloadedMediaName?.let { name ->
             Text(
                 stringResource(R.string.media_downloaded, name),
@@ -621,12 +633,17 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
         state.lastMediaBatchResult?.let { result ->
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text(
-                    stringResource(
-                        if (result.failedItems == 0) R.string.media_batch_complete else R.string.media_batch_partial,
-                        result.succeededItems,
-                        result.totalItems,
-                        result.failedItems,
-                    ),
+                    if (result.operation == MediaBatchOperation.DOWNLOAD && result.failedItems > 0) {
+                        stringResource(R.string.media_batch_download_stopped,
+                            result.succeededItems, result.failedItems, result.notStartedItems)
+                    } else {
+                        stringResource(
+                            if (result.failedItems == 0) R.string.media_batch_complete else R.string.media_batch_partial,
+                            result.succeededItems,
+                            result.totalItems,
+                            result.failedItems,
+                        )
+                    },
                     color = if (result.failedItems == 0) AppSuccess else AppWarning,
                 )
                 if (result.failedItemNames.isNotEmpty()) {
@@ -736,6 +753,7 @@ private fun MediaMessage(message: Int) {
 @OptIn(ExperimentalMaterial3Api::class)
 private fun MediaMetadataSheet(
     item: CameraMediaItem,
+    displayZone: ZoneId,
     busy: Boolean,
     protectSupported: Boolean,
     archiveSupported: Boolean,
@@ -791,7 +809,7 @@ private fun MediaMetadataSheet(
                     value = size,
                 )
             }
-            mediaCaptureTimeLabel(item.captureTime)?.let { capturedAt ->
+            mediaCaptureTimeLabel(item.captureTime, displayZone, stringResource(R.string.media_time_zone_unknown))?.let { capturedAt ->
                 MetadataSectionTitle(
                     title = stringResource(R.string.media_captured_at),
                     value = capturedAt,

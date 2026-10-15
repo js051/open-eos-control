@@ -105,6 +105,7 @@ import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.isVisualMedia
 import dev.openeos.control.data.CameraMediaFolder
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraMediaStreamSource
@@ -119,7 +120,7 @@ import kotlin.math.min
 
 // Offline items open the existing placeholder; they never imply camera preview support.
 internal fun canPreviewGalleryItem(state: CameraUiState, item: CameraMediaItem): Boolean =
-    !state.isBusy(CameraOperation.MEDIA) &&
+    item.isVisualMedia && !state.isBusy(CameraOperation.MEDIA) &&
         (state.previewMode || if (item.isVideo) {
             item.streamAvailable
         } else {
@@ -189,8 +190,8 @@ internal fun MediaFilterBar(
     unknownFolderCount: Int = 0,
     onFolderFilter: (MediaFolderFilter) -> Unit = {},
 ) {
-    val photos = items.count { !it.isVideo }
-    val videos = items.size - photos
+    val photos = items.count { it.isPhoto }
+    val videos = items.count { it.isVideo }
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -334,8 +335,8 @@ internal fun MediaGalleryGrid(
                 }
             }
             items(group.items, key = CameraMediaItem::id) { item ->
-                val thumbnailSupported = state.supports(CameraFeature.MEDIA_THUMBNAIL) &&
-                    !state.isBusy(CameraOperation.MEDIA) && state.mediaPreviewItem == null
+                val thumbnailSupported = item.isVisualMedia && state.supports(CameraFeature.MEDIA_THUMBNAIL) &&
+                    !state.mediaListingDefersThumbnails && !state.isBusy(CameraOperation.MEDIA) && state.mediaPreviewItem == null
                 DisposableEffect(item.id, thumbnailSupported, state.mediaLibraryLoading) {
                     if (thumbnailSupported) actions.loadMediaThumbnail(item)
                     onDispose { actions.cancelMediaThumbnail(item) }
@@ -404,7 +405,7 @@ private fun MediaGalleryTile(
             ),
     ) {
         when {
-            thumbnail != null -> Image(
+            item.isVisualMedia && thumbnail != null -> Image(
                 bitmap = thumbnail.asImageBitmap(),
                 contentDescription = stringResource(R.string.media_thumbnail, item.name),
                 contentScale = ContentScale.Crop,
@@ -418,7 +419,8 @@ private fun MediaGalleryTile(
             else -> Icon(
                 painterResource(
                     if (item.isVideo) LucideR.drawable.lucide_ic_file_video_camera
-                    else LucideR.drawable.lucide_ic_image,
+                    else if (item.isPhoto) LucideR.drawable.lucide_ic_image
+                    else LucideR.drawable.lucide_ic_file,
                 ),
                 contentDescription = null,
                 tint = if (item.kind.equals("raw", ignoreCase = true)) AppWarning else AppAccent,
@@ -483,6 +485,7 @@ private fun MediaGalleryTile(
 @Composable
 internal fun MediaViewerDialog(
     item: CameraMediaItem,
+    displayZone: ZoneId,
     bytes: ByteArray?,
     streamSource: CameraMediaStreamSource?,
     loading: Boolean,
@@ -506,7 +509,7 @@ internal fun MediaViewerDialog(
     modifier: Modifier = Modifier,
 ) {
     val hasSaveFeedback = saveFeedback != null || otherDownloadName != null
-    val captureTime = mediaCaptureTimeLabel(item.captureTime)
+    val captureTime = mediaCaptureTimeLabel(item.captureTime, displayZone, stringResource(R.string.media_time_zone_unknown))
     val size = mediaByteSizeLabel(item.sizeBytes)
     val dimensions = mediaDimensionsLabel(item)
     val contentType = mediaContentTypeLabel(item.contentType)
@@ -574,7 +577,7 @@ internal fun MediaViewerDialog(
                             downloadEnabled = downloadEnabled && !downloadBusy,
                             onDownload = onDownload,
                         )
-                        !item.isVideo && bytes != null -> ZoomableMediaImage(
+                        item.isPhoto && bytes != null -> ZoomableMediaImage(
                             item = item,
                             bytes = bytes,
                             hasBottomMetadata = !hasSaveFeedback && (captureTime != null || technicalDetails != null),
@@ -681,6 +684,7 @@ private fun MediaSaveFeedbackPanel(
         val status = when (feedback) {
             MediaSaveFeedback.SelectingDestination -> stringResource(R.string.media_save_choose_destination)
             MediaSaveFeedback.Queued -> stringResource(R.string.media_save_queued)
+            MediaSaveFeedback.NotStarted -> stringResource(R.string.media_save_not_started)
             is MediaSaveFeedback.Saving -> stringResource(R.string.downloading_media, item.name)
             is MediaSaveFeedback.Saved -> stringResource(R.string.media_saved_location, feedback.location)
             is MediaSaveFeedback.Failed -> stringResource(R.string.media_save_failed, feedback.message)
@@ -708,7 +712,7 @@ private fun MediaSaveFeedbackPanel(
         if (feedback is MediaSaveFeedback.Saving || feedback is MediaSaveFeedback.Queued || otherDownloadName != null) {
             TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel_media_download)) }
         }
-        if (feedback is MediaSaveFeedback.Failed || feedback is MediaSaveFeedback.Cancelled || feedback is MediaSaveFeedback.IncompleteFile) {
+        if (feedback is MediaSaveFeedback.Failed || feedback is MediaSaveFeedback.Cancelled || feedback is MediaSaveFeedback.IncompleteFile || feedback is MediaSaveFeedback.NotStarted) {
             TextButton(onClick = onRetry, enabled = retryEnabled) { Text(stringResource(R.string.media_save_retry)) }
         }
         captureTime?.let { Text(it, color = AppSubtleText) }

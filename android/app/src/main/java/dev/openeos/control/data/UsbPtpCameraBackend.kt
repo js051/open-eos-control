@@ -145,7 +145,7 @@ class UsbPtpCameraBackend(
         val info = requireDeviceInfo()
         refreshCanonPropertyState(info)
         refreshPropertyValuesIfNeeded(info)
-        val storageResult = refreshStorageSnapshot(info)
+        refreshStorageSnapshot(info, observeStatus = true)
         val batteryLevel = propertyValues[PtpDevicePropertyCode.BATTERY_LEVEL]
             ?.unsignedLong()
             ?.takeIf { it <= 100UL }
@@ -153,7 +153,6 @@ class UsbPtpCameraBackend(
         if (PtpDevicePropertyCode.BATTERY_LEVEL in propertyValues) {
             observedFeatures.add(CameraFeature.BATTERY_STATUS)
         }
-        if (storageResult?.isSuccess == true) observedFeatures.add(CameraFeature.STORAGE_STATUS)
         val standardFreeImages = storageSnapshot.mapNotNull {
             it.freeSpaceImages.takeIf { value -> value >= 0 && value != 0xFFFF_FFFFL }
         }
@@ -928,6 +927,7 @@ class UsbPtpCameraBackend(
     }
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
+        require(item.isVisualMedia) { "Thumbnails require an unambiguous photo or video item." }
         hostCaptureStore?.takeIf { it.owns(item) }?.let { store ->
             return store.thumbnail(item).also { observedFeatures.add(CameraFeature.MEDIA_THUMBNAIL) }
         }
@@ -937,6 +937,10 @@ class UsbPtpCameraBackend(
         val context = captureMediaFolderContext(ptp)
         val objectInfo = cachedMediaInfo(context, handle) ?: ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
         ensureMediaListingSession(context)
+        val sourceItem = objectInfo.toMediaItem(folder = observedMediaFolder(context, objectInfo))
+        require(sourceItem.id == item.id && sourceItem.name == item.name && sourceItem.isVisualMedia) {
+            "Camera changed the media identity or type before reading its thumbnail."
+        }
         if (objectInfo.thumbnailSizeBytes <= 0L || objectInfo.thumbnailFormat == 0) {
             throw PtpProtocolException("${item.name} does not advertise an embedded PTP thumbnail.")
         }
@@ -962,6 +966,7 @@ class UsbPtpCameraBackend(
     }
 
     override suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview {
+        require(item.isPhotoMedia) { "Display preview requires an unambiguous photo item." }
         hostCaptureStore?.takeIf { it.owns(item) }?.let { store ->
             return store.preview(item).also { observedFeatures.add(CameraFeature.MEDIA_PREVIEW) }
         }
@@ -972,7 +977,10 @@ class UsbPtpCameraBackend(
         val objectInfo = cachedMediaInfo(context, handle) ?: ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
         ensureMediaListingSession(context)
         val mediaItem = objectInfo.toMediaItem(folder = observedMediaFolder(context, objectInfo))
-        if (!mediaItem.previewAvailable) {
+        require(mediaItem.id == item.id && mediaItem.name == item.name) {
+            "Camera changed the media identity before reading its preview."
+        }
+        if (!mediaItem.isPhotoMedia || !mediaItem.previewAvailable) {
             throw PtpProtocolException("${item.name} does not advertise a bounded JPEG or PNG preview object.")
         }
         val output = BoundedByteArrayOutputStream(MAX_PTP_MEDIA_PREVIEW_BYTES)
@@ -999,6 +1007,9 @@ class UsbPtpCameraBackend(
         val objectInfo = cachedMediaInfo(context, handle) ?: ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
         ensureMediaListingSession(context)
         val mediaItem = objectInfo.toMediaItem(folder = observedMediaFolder(context, objectInfo))
+        require(mediaItem.id == item.id && mediaItem.name == item.name && mediaItem.isVideoMedia) {
+            "Camera changed the media identity or type before playback."
+        }
         require(mediaItem.sizeBytes != null && mediaItem.sizeBytes > 0L) {
             "${item.name} does not report a valid video size."
         }
@@ -1873,8 +1884,9 @@ class UsbPtpCameraBackend(
 
     private suspend fun readStorageSnapshot(context: MediaFolderContext): List<PtpStorageInfo> {
         val ptp = context.session
+        ensureMediaListingSession(context)
         val storageIds = ptp.storageIds()
-        synchronized(mediaFolderLock) {
+        completeMediaOperation(context) {
             if (isCurrentMediaFolderContext(context)) {
                 val refreshedIds = storageIds.toSet()
                 if (confirmedStorageIds?.let { it != refreshedIds } == true) {
@@ -1883,15 +1895,27 @@ class UsbPtpCameraBackend(
                 confirmedStorageIds = refreshedIds
             }
         }
-        return storageIds.map { storageId -> ptp.storageInfo(storageId) }
+        return storageIds.map { storageId ->
+            ensureMediaListingSession(context)
+            ptp.storageInfo(storageId)
+        }
     }
 
-    private suspend fun refreshStorageSnapshot(info: PtpDeviceInfo): Result<List<PtpStorageInfo>>? {
+    private suspend fun refreshStorageSnapshot(
+        info: PtpDeviceInfo,
+        observeStatus: Boolean = false,
+    ): Result<List<PtpStorageInfo>>? {
         if (!supportsStorage(info)) return null
         val context = captureMediaFolderContext(requireSession())
-        return runCatching { readStorageSnapshot(context) }.also { result ->
+        val result = runCatching { readStorageSnapshot(context) }.onFailure {
+            if (it is CancellationException) throw it
+        }
+        // Success and rejection belong to the captured session, including after a newer listing.
+        return completeMediaOperation(context) {
             storageSnapshot = result.getOrDefault(emptyList())
             storageError = result.exceptionOrNull()?.message
+            if (observeStatus && result.isSuccess) observedFeatures.add(CameraFeature.STORAGE_STATUS)
+            result
         }
     }
 
@@ -2522,7 +2546,7 @@ private fun contentTypeFor(filename: String, kind: String): String =
         "cr2", "cr3" -> "image/x-canon-raw"
         "mp4" -> "video/mp4"
         "mov" -> "video/quicktime"
-        else -> if (kind == "video") "video/*" else "application/octet-stream"
+        else -> "application/octet-stream"
     }
 
 private fun validatePtpUploadName(name: String): String {

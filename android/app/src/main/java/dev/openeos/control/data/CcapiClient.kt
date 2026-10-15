@@ -22,6 +22,7 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -171,10 +172,11 @@ class CcapiClient(
         .cache(null)
         .addNetworkInterceptor { chain ->
             val response = chain.proceed(chain.request())
-            if (!response.isSuccessful) {
+            if (!automaticJpegOriginalResponseAdmitted(response.code, response.headers("Content-Range").isNotEmpty())) {
                 // Fail before OkHttp's follow-up interceptor can repeat a 503/Retry-After: 0.
+                // Even a complete-looking JPEG in a 206/201/range response is not an original.
                 response.close()
-                throw IOException("Original media request failed: HTTP ${response.code}.")
+                throw IOException("Original media request did not return a complete HTTP 200 response.")
             }
             response
         }
@@ -1248,41 +1250,48 @@ class CcapiClient(
     suspend fun startRecording(): CameraStatus {
         refreshTemperatureStatusForRestrictedCommand()
         requireMovieRecordingAllowed()
-        if (isRealCamera) {
-            val operation = recordingOperation()
-            if (enforceAdvertisedOperations && operation == null) {
-                error("Camera did not advertise movie recording control.")
-            }
-            commandOk(
-                pathSuffix = "/shooting/control/recbutton",
-                payload = JSONObject().put("action", "start"),
-                operation = operation,
-            )
-            isRecording = true
-        } else {
-            postJson("/ccapi/record/start", JSONObject())
-        }
-        observedFeatures.add(CameraFeature.VIDEO_RECORDING)
-        return status()
+        return recordingCommand(RecordingCommand.START)
     }
 
-    suspend fun stopRecording(): CameraStatus {
-        if (isRealCamera) {
-            val operation = recordingOperation()
-            if (enforceAdvertisedOperations && operation == null) {
-                error("Camera did not advertise movie recording control.")
+    suspend fun stopRecording(): CameraStatus = recordingCommand(RecordingCommand.STOP)
+
+    private suspend fun recordingCommand(command: RecordingCommand): CameraStatus {
+        val operation = if (isRealCamera) recordingOperation() else null
+        if (isRealCamera && enforceAdvertisedOperations && operation == null) {
+            error("Camera did not advertise movie recording control.")
+        }
+        val evidence = currentCoroutineContext()[RecordingRequestEvidence] ?: RecordingRequestEvidence(command)
+        try {
+            if (isRealCamera) {
+                commandOk(
+                    pathSuffix = "/shooting/control/recbutton",
+                    payload = JSONObject().put("action", if (command == RecordingCommand.START) "start" else "stop"),
+                    operation = operation,
+                    recordingEvidence = evidence,
+                )
+                isRecording = command == RecordingCommand.START
+            } else {
+                postJson("/ccapi/record/${if (command == RecordingCommand.START) "start" else "stop"}", JSONObject(), evidence)
             }
-            commandOk(
-                pathSuffix = "/shooting/control/recbutton",
-                payload = JSONObject().put("action", "stop"),
-                operation = operation,
-            )
-            isRecording = false
-        } else {
-            postJson("/ccapi/record/stop", JSONObject())
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Exception) {
+            if (evidence.unresolved && (exception is IOException || exception is JSONException)) {
+                throw RecordingCommandUnconfirmedException(command, exception)
+            }
+            throw exception
         }
         observedFeatures.add(CameraFeature.VIDEO_RECORDING)
-        return status()
+        return recordingStatusAfterAcknowledgement(command)
+    }
+
+    private suspend fun recordingStatusAfterAcknowledgement(command: RecordingCommand): CameraStatus = try {
+        status()
+    } catch (exception: CancellationException) {
+        throw exception
+    } catch (exception: Exception) {
+        currentCoroutineContext().ensureActive()
+        throw RecordingStatusReadbackException(command, exception)
     }
 
     suspend fun captureStill(autofocus: Boolean = true): CameraStatus {
@@ -1628,6 +1637,7 @@ class CcapiClient(
     }
 
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
+        require(item.isVisualMedia) { "Thumbnails require an unambiguous photo or video item." }
         val (bytes, contentType) = mediaImageRepresentation(
             item = item,
             kind = "thumbnail",
@@ -1644,7 +1654,7 @@ class CcapiClient(
         } else {
             item.kind.isCcapiPreviewKind()
         }
-        require(previewEligible) {
+        require(item.isPhotoMedia && previewEligible) {
             "CCAPI display preview is available only for JPEG or CR3 items."
         }
         val (bytes, contentType) = mediaImageRepresentation(
@@ -1672,6 +1682,9 @@ class CcapiClient(
             }
         } else {
             item
+        }
+        require(playbackItem.id == item.id && playbackItem.name == item.name && playbackItem.isVideoMedia) {
+            "Camera changed the media identity or type before playback."
         }
         val path = mediaItemPath(playbackItem)
         val paths = if (isRealCamera) listOf(path, "$path?kind=main", "$path?type=main") else listOf(path)
@@ -1772,6 +1785,7 @@ class CcapiClient(
     }
 
     private fun parseMediaInfo(item: CameraMediaItem, body: JSONObject): CameraMediaItem {
+        val canonicalName = if (isRealCamera) mediaItemPath(item).substringAfterLast('/') else item.name
         val ratingValue = body.optString("rating").let { value ->
             when (value) {
                 "off" -> 0
@@ -1779,6 +1793,11 @@ class CcapiClient(
             }
         }
         return item.copy(
+            // Canon may omit identity/type fields. Explicit returned evidence must not be hidden.
+            id = if (body.has("id")) body.opt("id") as? String ?: "" else item.id,
+            name = if (body.has("name")) body.opt("name") as? String ?: "" else canonicalName,
+            kind = if (body.has("kind")) body.opt("kind") as? String ?: "" else canonicalName.mediaKind(),
+            contentType = body.cameraMediaContentType(),
             sizeBytes = body.optLong("filesize").takeIf { it > 0L } ?: item.sizeBytes,
             captureTime = body.optString("lastmodifieddate").takeIf { it.isNotBlank() } ?: item.captureTime,
             protected = when (body.optString("protect")) {
@@ -2865,6 +2884,7 @@ class CcapiClient(
         pathSuffix: String,
         payload: JSONObject,
         operation: CcapiApiOperation? = null,
+        recordingEvidence: RecordingRequestEvidence? = null,
     ) {
         val selected = operation ?: if (!enforceAdvertisedOperations) {
             CcapiApiOperation(method = "POST", path = "$apiVersionPrefix$pathSuffix")
@@ -2878,7 +2898,7 @@ class CcapiClient(
             "POST" -> builder.post(requestBody).build()
             else -> error("Unsupported CCAPI command method ${selected.method} for ${selected.path}")
         }
-        requestOk(request)
+        requestOk(request, recordingEvidence = recordingEvidence)
     }
 
     private suspend fun withRecoverableFocusRelease(
@@ -2895,15 +2915,24 @@ class CcapiClient(
     }
 
     private suspend fun listSimulatorMedia(): List<CameraMediaItem> {
-        val items = getJson("/ccapi/media").optJSONArray("items") ?: return emptyList()
-        return List(items.length()) { index -> parseSimulatorMediaItem(items.getJSONObject(index)) }.filterNotNull()
+        // A successful HTTP response is not a successfully parsed listing. Missing,
+        // mistyped or invalid identities must not become empty/no-candidate evidence.
+        val items = getJson("/ccapi/media").getJSONArray("items")
+        return List(items.length()) { index ->
+            val item = items.getJSONObject(index)
+            check(item.opt("id") is String && item.opt("name") is String) {
+                "Simulator returned an invalid media identity."
+            }
+            checkNotNull(parseSimulatorMediaItem(item)) { "Simulator returned an invalid media identity." }
+        }
     }
 
     private fun parseSimulatorMediaItem(item: JSONObject): CameraMediaItem? {
-        val id = item.optString("id").trim()
-        val name = item.optString("name").trim()
+        val id = item.optString("id")
+        val name = item.optString("name")
         if (id.isBlank() || name.isBlank()) return null
         val kind = item.optString("kind", "other")
+        val contentType = item.cameraMediaContentType()
         return CameraMediaItem(
             id = id,
             name = name,
@@ -2916,8 +2945,8 @@ class CcapiClient(
             rating = item.normalizedMediaRating(),
             rotationDegrees = item.optInt("rotate").takeIf { item.has("rotate") && it in MEDIA_ROTATIONS },
             ratingWritable = true,
-            streamAvailable = cameraMediaIsVideo(kind, name),
-            contentType = item.optString("content_type").takeIf { it.isNotBlank() },
+            streamAvailable = cameraMediaHasVideoTransportHint(kind, name) && cameraMediaIsVideo(kind, name, contentType),
+            contentType = contentType,
             widthPixels = item.optInt("width_pixels").takeIf { item.has("width_pixels") && it > 0 },
             heightPixels = item.optInt("height_pixels").takeIf { item.has("height_pixels") && it > 0 },
         )
@@ -3145,11 +3174,9 @@ class CcapiClient(
         } else {
             getFirstJson(numberPaths)
         }
-        val pageCount = if (strict && pageInfo != null) {
-            pageInfo.inventoryPageCount()
-        } else {
-            pageInfo?.optInt("pagenumber", 0) ?: 0
-        }
+        // All listing consumers need valid page metadata; strict also controls
+        // inventory transport fallback, independently of response validation.
+        val pageCount = pageInfo?.inventoryPageCount() ?: 0
         check(pageCount >= 0) { "Camera returned a negative media page count at $containerPath." }
         val paths = linkedSetOf<String>()
         if (pageCount <= 0) {
@@ -3159,12 +3186,12 @@ class CcapiClient(
             } else {
                 getFirstJsonRequired(listOf(containerPath), "Reading camera media page")
             }
-            paths.addAll(response.contentPaths(strict = strict))
+            paths.addAll(response.contentPaths(strict = true))
             onPage(paths.toList())
         } else if (mediaDescendingOrderSupported == false) {
             for (page in pageCount downTo 1) {
                 val response = getContentPage(containerPath, page, strict, beforeRequest)
-                paths.addAll(response.contentPaths(reverse = true, strict = strict))
+                paths.addAll(response.contentPaths(reverse = true, strict = true))
                 if (!onPage(paths.toList())) break
             }
         } else {
@@ -3172,15 +3199,15 @@ class CcapiClient(
             if (mediaDescendingOrderSupported == false) {
                 for (page in pageCount downTo 1) {
                     val response = if (page == 1) firstResponse else getContentPage(containerPath, page, strict, beforeRequest)
-                    paths.addAll(response.contentPaths(reverse = true, strict = strict))
+                    paths.addAll(response.contentPaths(reverse = true, strict = true))
                     if (!onPage(paths.toList())) break
                 }
             } else {
-                paths.addAll(firstResponse.contentPaths(strict = strict))
+                paths.addAll(firstResponse.contentPaths(strict = true))
                 if (onPage(paths.toList())) {
                     for (page in 2..pageCount) {
                         val response = getContentPage(containerPath, page, strict, beforeRequest)
-                        paths.addAll(response.contentPaths(strict = strict))
+                        paths.addAll(response.contentPaths(strict = true))
                         if (!onPage(paths.toList())) break
                     }
                 }
@@ -3355,6 +3382,13 @@ class CcapiClient(
                         continue
                     }
 
+                    if (singleAttempt && !automaticJpegOriginalResponseAdmitted(
+                            response.code, response.headers("Content-Range").isNotEmpty())) {
+                        // Application interceptors can transform a response after the network
+                        // interceptor. Recheck before peeking, writing, or reporting progress.
+                        response.close()
+                        throw IOException("Original media request did not return a complete HTTP 200 response.")
+                    }
                     if (!response.isSuccessful) {
                         response.use {
                             val preview = response.body?.string().orEmpty().take(MAX_ERROR_BODY_CHARS)
@@ -3364,6 +3398,10 @@ class CcapiClient(
                     }
 
                     val contentType = response.header("content-type")
+                    if (singleAttempt && !automaticJpegResponseHeadersAdmitted(response.headers("content-type"))) {
+                        response.close()
+                        throw InvalidAutomaticJpegException("conflicting original response content type")
+                    }
                     val previewBytes = try {
                         response.peekBody(MEDIA_SNIFF_BYTES).bytes()
                     } catch (exception: Exception) {
@@ -3963,11 +4001,11 @@ class CcapiClient(
         }
     }
 
-    private suspend fun postJson(path: String, payload: JSONObject): JSONObject = requestJson(
+    private suspend fun postJson(path: String, payload: JSONObject, recordingEvidence: RecordingRequestEvidence? = null): JSONObject = requestJson(
         Request.Builder()
             .url("$baseUrl$path")
             .post(payload.toString().toRequestBody(jsonMediaType))
-            .build(),
+            .build(), recordingEvidence,
     )
 
     private suspend fun patchJson(path: String, payload: JSONObject): JSONObject = requestJson(
@@ -4036,7 +4074,7 @@ class CcapiClient(
         return mutationHttpClient.newCall(request.newBuilder().method(request.method, oneShot).build())
     }
 
-    private suspend fun requestJson(request: Request): JSONObject = withContext(Dispatchers.IO) {
+    private suspend fun requestJson(request: Request, recordingEvidence: RecordingRequestEvidence? = null): JSONObject = withContext(Dispatchers.IO) {
         val call = newCameraCall(request)
         val readOnly = request.method == "GET" || request.method == "HEAD"
         val cancelCall = AtomicBoolean(true)
@@ -4044,7 +4082,12 @@ class CcapiClient(
             try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
         } else null
         try {
+            recordingEvidence?.let {
+                currentCoroutineContext().ensureActive()
+                it.beginRequest()
+            }
             call.execute().use { response ->
+                recordingEvidence?.rejected = !response.isSuccessful
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
                     throw CcapiHttpException(
@@ -4099,8 +4142,14 @@ class CcapiClient(
     private suspend fun requestOk(
         request: Request,
         expectedStatusCode: Int? = null,
+        recordingEvidence: RecordingRequestEvidence? = null,
     ): Unit = withContext(Dispatchers.IO) {
+        recordingEvidence?.let {
+            currentCoroutineContext().ensureActive()
+            it.beginRequest()
+        }
         newCameraCall(request).execute().use { response ->
+            recordingEvidence?.rejected = !response.isSuccessful
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw CcapiHttpException(
@@ -4473,7 +4522,7 @@ private fun JSONObject.toCameraStatus(): CameraStatus {
         connected = optBoolean("connected"),
         batteryLevel = battery.optNullableInt("level"),
         batteryStatus = battery.optString("status"),
-        recording = optNullableBoolean("recording"),
+        recording = strictRecordingStatus(),
         mode = optString("mode"),
         mediaAvailable = media.optNullableBoolean("available"),
         remainingMinutes = media.optNullableInt("remaining_minutes"),

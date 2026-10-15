@@ -1,0 +1,565 @@
+{
+  "schemaVersion": 1,
+  "colorEncoding": "srgb-display-values",
+  "interpolation": "trilinear",
+  "tableOrder": "red-fastest",
+  "cpuAbsoluteTolerance": 2e-06,
+  "uint8Rounding": "nearest-ties-up-after-output-clamp",
+  "luts": [
+    {
+      "id": "identity",
+      "size": 2,
+      "domainMin": [
+        0,
+        0,
+        0
+      ],
+      "domainMax": [
+        1,
+        1,
+        1
+      ],
+      "values": [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "invert",
+      "size": 2,
+      "domainMin": [
+        0,
+        0,
+        0
+      ],
+      "domainMax": [
+        1,
+        1,
+        1
+      ],
+      "values": [
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "cross-mix",
+      "size": 2,
+      "domainMin": [
+        0,
+        0,
+        0
+      ],
+      "domainMax": [
+        1,
+        1,
+        1
+      ],
+      "values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "nonunit-cross-mix",
+      "size": 2,
+      "domainMin": [
+        -1,
+        0,
+        0.25
+      ],
+      "domainMax": [
+        1,
+        2,
+        0.75
+      ],
+      "values": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "extended-nodes",
+      "size": 2,
+      "domainMin": [
+        0,
+        0,
+        0
+      ],
+      "domainMax": [
+        1,
+        1,
+        1
+      ],
+      "values": [
+        -1.0,
+        -1.0,
+        -1.0,
+        2.0,
+        -1.0,
+        -1.0,
+        -1.0,
+        2.0,
+        -1.0,
+        2.0,
+        2.0,
+        -1.0,
+        -1.0,
+        -1.0,
+        2.0,
+        2.0,
+        -1.0,
+        2.0,
+        -1.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    {
+      "id": "asymmetric-three",
+      "size": 3,
+      "domainMin": [
+        0,
+        0,
+        0
+      ],
+      "domainMax": [
+        1,
+        1,
+        1
+      ],
+      "values": [
+        0.1,
+        0.05,
+        0.02,
+        0.15,
+        0.1,
+        0.17,
+        0.3,
+        0.15,
+        0.32,
+        0.25,
+        0.15,
+        0.07,
+        0.3,
+        0.2,
+        0.22,
+        0.45,
+        0.25,
+        0.37,
+        0.4,
+        0.45,
+        0.12,
+        0.45,
+        0.5,
+        0.27,
+        0.6,
+        0.55,
+        0.42,
+        0.15,
+        0.15,
+        0.145,
+        0.2,
+        0.2,
+        0.295,
+        0.35,
+        0.25,
+        0.445,
+        0.3,
+        0.25,
+        0.195,
+        0.35,
+        0.3,
+        0.345,
+        0.5,
+        0.35,
+        0.495,
+        0.45,
+        0.55,
+        0.245,
+        0.5,
+        0.6,
+        0.395,
+        0.65,
+        0.65,
+        0.545,
+        0.2,
+        0.25,
+        0.52,
+        0.25,
+        0.3,
+        0.67,
+        0.4,
+        0.35,
+        0.82,
+        0.35,
+        0.35,
+        0.57,
+        0.4,
+        0.4,
+        0.72,
+        0.55,
+        0.45,
+        0.87,
+        0.5,
+        0.65,
+        0.62,
+        0.55,
+        0.7,
+        0.77,
+        0.7,
+        0.75,
+        0.92
+      ]
+    }
+  ],
+  "vectors": [
+    {
+      "id": "identity-interior",
+      "lutId": "identity",
+      "inputRgb": [
+        0.25,
+        0.5,
+        0.75
+      ],
+      "expectedRgb": [
+        0.25,
+        0.5,
+        0.75
+      ]
+    },
+    {
+      "id": "identity-decoded-bytes",
+      "lutId": "identity",
+      "inputRgb": [
+        0.06666666666666667,
+        0.4980392156862745,
+        0.9372549019607843
+      ],
+      "expectedRgb": [
+        0.06666666666666667,
+        0.4980392156862745,
+        0.9372549019607843
+      ],
+      "inputRgb8": [
+        17,
+        127,
+        239
+      ],
+      "expectedRgb8": [
+        17,
+        127,
+        239
+      ]
+    },
+    {
+      "id": "invert-interior",
+      "lutId": "invert",
+      "inputRgb": [
+        0.25,
+        0.5,
+        0.75
+      ],
+      "expectedRgb": [
+        0.75,
+        0.5,
+        0.25
+      ]
+    },
+    {
+      "id": "invert-boundary-bytes",
+      "lutId": "invert",
+      "inputRgb": [
+        0,
+        0.5019607843137255,
+        1
+      ],
+      "expectedRgb": [
+        1,
+        0.4980392156862745,
+        0
+      ],
+      "inputRgb8": [
+        0,
+        128,
+        255
+      ],
+      "expectedRgb8": [
+        255,
+        127,
+        0
+      ]
+    },
+    {
+      "id": "cross-mix-interior",
+      "lutId": "cross-mix",
+      "inputRgb": [
+        0.25,
+        0.5,
+        0.75
+      ],
+      "expectedRgb": [
+        0.125,
+        0.375,
+        0.1875
+      ]
+    },
+    {
+      "id": "cross-mix-decoded-bytes",
+      "lutId": "cross-mix",
+      "inputRgb": [
+        0.2,
+        0.4,
+        0.8
+      ],
+      "expectedRgb": [
+        0.08,
+        0.32,
+        0.16
+      ],
+      "inputRgb8": [
+        51,
+        102,
+        204
+      ],
+      "expectedRgb8": [
+        20,
+        82,
+        41
+      ]
+    },
+    {
+      "id": "nonunit-decoded-bytes",
+      "lutId": "nonunit-cross-mix",
+      "inputRgb": [
+        0.2,
+        0.4,
+        0.8
+      ],
+      "expectedRgb": [
+        0.12,
+        0.2,
+        0.6
+      ],
+      "inputRgb8": [
+        51,
+        102,
+        204
+      ],
+      "expectedRgb8": [
+        31,
+        51,
+        153
+      ]
+    },
+    {
+      "id": "nonunit-outside-boundary",
+      "lutId": "nonunit-cross-mix",
+      "inputRgb": [
+        -2,
+        3,
+        1
+      ],
+      "expectedRgb": [
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "id": "extended-interpolate-before-clamp",
+      "lutId": "extended-nodes",
+      "inputRgb": [
+        0.4,
+        0.5019607843137255,
+        0.6
+      ],
+      "expectedRgb": [
+        0.2,
+        0.5058823529411764,
+        0.8
+      ],
+      "inputRgb8": [
+        102,
+        128,
+        153
+      ],
+      "expectedRgb8": [
+        51,
+        129,
+        204
+      ]
+    },
+    {
+      "id": "extended-clamp-result",
+      "lutId": "extended-nodes",
+      "inputRgb": [
+        0.25,
+        0.5,
+        0.75
+      ],
+      "expectedRgb": [
+        0,
+        0.5,
+        1
+      ]
+    },
+    {
+      "id": "asymmetric-three-decoded-bytes",
+      "lutId": "asymmetric-three",
+      "inputRgb": [
+        0.2,
+        0.4,
+        0.8
+      ],
+      "expectedRgb": [
+        0.32,
+        0.31,
+        0.47
+      ],
+      "inputRgb8": [
+        51,
+        102,
+        204
+      ],
+      "expectedRgb8": [
+        82,
+        79,
+        120
+      ]
+    },
+    {
+      "id": "asymmetric-three-boundary",
+      "lutId": "asymmetric-three",
+      "inputRgb": [
+        1,
+        0.5,
+        0
+      ],
+      "expectedRgb": [
+        0.45,
+        0.25,
+        0.37
+      ]
+    }
+  ],
+  "quantizationVectors": [
+    {
+      "id": "half-rounds-up",
+      "rgb": [
+        -0.25,
+        0.5,
+        1.25
+      ],
+      "expectedRgb8": [
+        0,
+        128,
+        255
+      ]
+    },
+    {
+      "id": "binary-fractions",
+      "rgb": [
+        0.125,
+        0.375,
+        0.875
+      ],
+      "expectedRgb8": [
+        32,
+        96,
+        223
+      ]
+    }
+  ]
+}

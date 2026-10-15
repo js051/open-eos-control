@@ -1,6 +1,20 @@
 package dev.openeos.control.data
 
 import android.view.Surface
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+
+/** A render notification is a freshness signal, not the identity of later PixelCopy pixels. */
+data class NativeLiveViewRenderedFrame(
+    val surface: Surface,
+    val decoderGeneration: Long,
+    val formatGeneration: Long,
+    val sequence: Long,
+    val renderedAtNanos: Long,
+)
+
+private val noRenderedFrames = MutableStateFlow<NativeLiveViewRenderedFrame?>(null)
+private val noVideoLut = MutableStateFlow(NativeVideoLutStatus.OFF)
 
 sealed interface NativeLiveViewEvent {
     data class FrameRendered(
@@ -73,6 +87,12 @@ interface NativeLiveViewSession : AutoCloseable {
         get() = NativeLiveViewAudioStatus.None
     val videoStatus: NativeLiveViewVideoStatus
         get() = NativeLiveViewVideoStatus.None
+    val renderedFrames: StateFlow<NativeLiveViewRenderedFrame?>
+        get() = noRenderedFrames
+
+    val supportsVideoLut: Boolean get() = false
+    val videoLutStatus: StateFlow<NativeVideoLutStatus> get() = noVideoLut
+    fun setVideoLut(lut: NativeVideoLut?) = Unit
 
     fun start()
     suspend fun awaitReady(timeoutMillis: Long)

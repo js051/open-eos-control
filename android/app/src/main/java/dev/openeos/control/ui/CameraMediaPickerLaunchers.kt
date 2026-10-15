@@ -14,6 +14,7 @@ internal data class CameraMediaPickerLaunchers(
     val downloadDocument: (CameraMediaItem) -> Unit,
     val downloadFolder: (List<CameraMediaItem>) -> Unit,
     val upload: () -> Unit,
+    val continueFolder: (String) -> Unit,
 )
 
 /** Register at the app root, including while disconnected, so restored results are consumed there. */
@@ -70,6 +71,17 @@ internal fun rememberCameraMediaPickerLaunchers(viewModel: CameraViewModel): Cam
                 } catch (_: Exception) {
                     if (uploadRequestId == id) uploadRequestId = null
                     viewModel.failMediaPickerLaunch(context, CameraMediaPickerKind.UPLOAD, id)
+                }
+            }
+        },
+        continueFolder = { draftId ->
+            viewModel.beginContinuationFolderPicker(draftId)?.let { id ->
+                folderRequestId = id
+                try {
+                    folderLauncher.launch(null)
+                } catch (_: Exception) {
+                    if (folderRequestId == id) folderRequestId = null
+                    viewModel.failMediaPickerLaunch(context, CameraMediaPickerKind.DOWNLOAD_FOLDER, id)
                 }
             }
         },

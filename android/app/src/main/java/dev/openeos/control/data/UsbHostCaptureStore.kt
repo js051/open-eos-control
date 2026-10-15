@@ -94,6 +94,7 @@ class AndroidUsbHostCaptureStore(context: Context) : UsbHostCaptureStore {
     }
 
     override suspend fun thumbnail(item: CameraMediaItem): CameraMediaThumbnail = withContext(Dispatchers.IO) {
+        require(item.isPhotoMedia) { "Host thumbnails require an unambiguous photo item." }
         val file = requireFile(item)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.absolutePath, bounds)
@@ -127,7 +128,7 @@ class AndroidUsbHostCaptureStore(context: Context) : UsbHostCaptureStore {
 
     override suspend fun preview(item: CameraMediaItem): CameraMediaPreview = withContext(Dispatchers.IO) {
         val file = requireFile(item)
-        if (!item.previewAvailable || file.length() !in 1..MAX_HOST_PREVIEW_BYTES) {
+        if (!item.isPhotoMedia || !item.previewAvailable || file.length() !in 1..MAX_HOST_PREVIEW_BYTES) {
             throw PtpProtocolException("${item.name} does not have a bounded Android-decodable image preview.")
         }
         val bytes = file.inputStream().use { input ->
@@ -270,7 +271,7 @@ private fun hostContentType(filename: String, kind: String): String =
         "cr2", "cr3" -> "image/x-canon-raw"
         "mp4" -> "video/mp4"
         "mov" -> "video/quicktime"
-        else -> if (kind == "video") "video/*" else "application/octet-stream"
+        else -> "application/octet-stream"
     }
 
 private fun hasHostPreviewExtension(filename: String): Boolean =

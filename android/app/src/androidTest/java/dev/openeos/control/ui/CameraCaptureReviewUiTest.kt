@@ -114,6 +114,57 @@ class CameraCaptureReviewUiTest {
         }
     }
 
+    @Test fun mixedFinalFailureShowsBothFactsInButtonAndDialogForBothLanguages() {
+        val state = mutableStateOf(CameraUiState().withOfflinePreview().copy(
+            previewMode = false, captureReviewStatus = CaptureReviewStatus.NOT_READY,
+            captureReviewObservation = CaptureReviewObservation.NO_CANDIDATE_OBSERVED,
+            captureReviewEvidence = CaptureReviewEvidence(1, 3, CaptureReviewRead.FAILURE),
+        ))
+        val locale = mutableStateOf(LocaleList("en"))
+        val old = state.value.captureReviewItem
+        var retries = 0
+        var commands = 0
+        val actions = noOpActions().copy(
+            retryCaptureReview = { retries++ }, captureStill = { commands++ },
+            toggleRecording = { commands++ }, autofocus = { commands++ },
+        )
+        compose.setContent {
+            key(locale.value) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.Locales(locale.value)) {
+                    DialogFontScaleOverride(2f) {
+                        MaterialTheme(colorScheme = OpenEosColorScheme) { CaptureReviewButton(state.value, actions) }
+                    }
+                }
+            }
+        }
+        for (language in listOf("en", "zh-TW")) {
+            val mixed = if (language == "en")
+                "Completed checks found no eligible new media. The last list read failed; retry to check again."
+                else "已完成的檢查尚未找到符合條件的新素材，且最後一次清單讀取失敗；請重試以再次確認。"
+            val ordinary = if (language == "en") "New media has not been found yet." else "尚未找到新出現的素材。"
+            compose.runOnIdle {
+                locale.value = LocaleList(language)
+                state.value = state.value.copy(captureReviewEvidence = CaptureReviewEvidence(1, 3, CaptureReviewRead.FAILURE))
+            }
+            compose.onNodeWithTag("capture-review-button").assertContentDescriptionEquals(mixed).performClick()
+            compose.onNodeWithText(mixed).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText(ordinary).assertDoesNotExist()
+            compose.onNodeWithTag("capture-review-retry").performScrollTo().assertIsEnabled().performClick()
+            compose.runOnIdle {
+                assertEquals(old, state.value.captureReviewItem)
+                state.value = state.value.copy(captureReviewEvidence = CaptureReviewEvidence(1, 3, CaptureReviewRead.SUCCESS))
+            }
+            compose.onNodeWithText(ordinary).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText(mixed).assertDoesNotExist()
+            compose.onNodeWithTag("capture-review-dismiss").performScrollTo().performClick()
+            compose.onNodeWithTag("capture-review-button").assertContentDescriptionEquals(ordinary)
+        }
+        compose.runOnIdle {
+            assertEquals(2, retries)
+            assertEquals(0, commands)
+        }
+    }
+
     @Test fun noPreviousItemStillExposesNotReadyRetryAndOfflinePreviewRemainsDirect() {
         val state = mutableStateOf(CameraUiState().withOfflinePreview().copy(
             previewMode = false, captureReviewItem = null, captureReviewStatus = CaptureReviewStatus.NOT_READY,

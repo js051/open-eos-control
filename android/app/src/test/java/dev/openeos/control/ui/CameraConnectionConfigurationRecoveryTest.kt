@@ -256,6 +256,163 @@ class CameraConnectionConfigurationRecoveryTest {
         assertNull(viewModel.uiState.value.error)
     }
 
+    @Test fun bridgeCameraDiscoveryReasonsReachSafeRecoveryAndClearOnExplicitRetry() = runBlocking {
+        viewModel.setConnectionTarget(ConnectionTarget.DESKTOP_BRIDGE)
+        viewModel.setBridgeBaseUrl(oldPeer.baseUrl)
+        viewModel.setBridgeToken("synthetic-phone-token")
+        val reasons = listOf(
+            ConnectionFailureReason.AUTHENTICATION_REJECTED, ConnectionFailureReason.TLS_ERROR,
+            ConnectionFailureReason.HOST_NOT_FOUND, ConnectionFailureReason.TIMEOUT,
+            ConnectionFailureReason.UNREACHABLE, ConnectionFailureReason.HTTP_ERROR,
+            ConnectionFailureReason.DISCOVERY_FAILED, ConnectionFailureReason.ENDPOINT_NOT_FOUND,
+        )
+        for (reason in reasons) {
+            oldPeer.intercept = { request ->
+                if (request.requestUrl?.encodedPath == "/v1/cameras") cameraDiscoveryError(reason.name) else null
+            }
+            val previousRequests = oldPeer.requests.size
+            viewModel.scanDesktopBridge()
+            assertTrue("Camera reason did not reach recovery: $reason", pumpUntil {
+                viewModel.uiState.value.connectionRecovery != null && !viewModel.uiState.value.busy
+            })
+
+            val failed = viewModel.uiState.value
+            assertEquals(ConnectionRecovery(ConnectionAttemptTarget.DESKTOP_BRIDGE, reason, cameraViaBridge = true),
+                failed.connectionRecovery)
+            assertEquals("Connection failed: ${reason.name}", failed.error)
+            assertFalse(failed.bridgeScanCompleted)
+            assertTrue(failed.bridgeCameras.isEmpty())
+            assertNull(failed.selectedBridgeCameraId)
+            assertEquals(listOf("/health", "/v1/cameras"), oldPeer.requests.drop(previousRequests).map { it.path })
+            viewModel.clearError()
+            assertNull(viewModel.uiState.value.connectionRecovery)
+            assertEquals(previousRequests + 2, oldPeer.requests.size)
+        }
+
+        oldPeer.intercept = null
+        viewModel.scanDesktopBridge()
+        assertTrue(pumpUntil { viewModel.uiState.value.bridgeScanCompleted && !viewModel.uiState.value.busy })
+        assertEquals(oldPeer.cameraId, viewModel.uiState.value.selectedBridgeCameraId)
+        assertNull(viewModel.uiState.value.connectionRecovery)
+        assertNull(viewModel.uiState.value.error)
+        assertTrue(newPeer.requests.isEmpty())
+        assertTrue(oldPeer.requests.all { it.authorization == "Bearer synthetic-phone-token" })
+        assertReadOnlyRequests()
+    }
+
+    @Test fun bridgeSessionCreationFailureRetainsTheCameraOrigin() = runBlocking {
+        oldPeer.intercept = { request ->
+            if (request.method == "POST" && request.requestUrl?.encodedPath == "/v1/session") {
+                cameraDiscoveryError("AUTHENTICATION_REJECTED")
+            } else null
+        }
+        viewModel.setConnectionTarget(ConnectionTarget.DESKTOP_BRIDGE)
+        viewModel.setBridgeBaseUrl(oldPeer.baseUrl)
+        viewModel.connectBridge()
+        assertTrue(pumpUntil { viewModel.uiState.value.connectionRecovery != null && !viewModel.uiState.value.busy })
+
+        assertEquals(ConnectionRecovery(ConnectionAttemptTarget.DESKTOP_BRIDGE,
+            ConnectionFailureReason.AUTHENTICATION_REJECTED, cameraViaBridge = true),
+            viewModel.uiState.value.connectionRecovery)
+        assertEquals("Connection failed: AUTHENTICATION_REJECTED", viewModel.uiState.value.error)
+        assertFalse(viewModel.uiState.value.connected)
+        assertNull(viewModel.uiState.value.info)
+        assertEquals(listOf("GET" to "/health", "POST" to "/v1/session"), oldPeer.requests.map { it.method to it.path })
+        assertTrue(newPeer.requests.isEmpty())
+    }
+
+    @Test fun actualBridge401And403CannotBecomeCameraGuidance() = runBlocking {
+        viewModel.setConnectionTarget(ConnectionTarget.DESKTOP_BRIDGE)
+        viewModel.setBridgeBaseUrl(oldPeer.baseUrl)
+        for (status in listOf(401, 403)) {
+            oldPeer.intercept = { request ->
+                if (request.requestUrl?.encodedPath == "/v1/cameras") cameraDiscoveryError("TLS_ERROR", status) else null
+            }
+            viewModel.scanDesktopBridge()
+            assertTrue(pumpUntil { viewModel.uiState.value.connectionRecovery != null && !viewModel.uiState.value.busy })
+
+            assertEquals(ConnectionRecovery(ConnectionAttemptTarget.DESKTOP_BRIDGE,
+                ConnectionFailureReason.AUTHENTICATION_REJECTED), viewModel.uiState.value.connectionRecovery)
+            assertFalse(viewModel.uiState.value.bridgeScanCompleted)
+            assertEquals("Connection failed: AUTHENTICATION_REJECTED", viewModel.uiState.value.error)
+        }
+        assertReadOnlyRequests()
+    }
+
+    @Test fun legacyAndUnknownBridgeReasonsRemainGenericRecovery() = runBlocking {
+        viewModel.setConnectionTarget(ConnectionTarget.DESKTOP_BRIDGE)
+        viewModel.setBridgeBaseUrl(oldPeer.baseUrl)
+        for (reason in listOf(null, "NEW_FUTURE_REASON", "INVALID_ADDRESS", 401, JSONObject.NULL)) {
+            oldPeer.intercept = { request ->
+                if (request.requestUrl?.encodedPath == "/v1/cameras") cameraDiscoveryError(reason) else null
+            }
+            viewModel.scanDesktopBridge()
+            assertTrue(pumpUntil { viewModel.uiState.value.connectionRecovery != null && !viewModel.uiState.value.busy })
+
+            assertEquals(ConnectionRecovery(ConnectionAttemptTarget.DESKTOP_BRIDGE, ConnectionFailureReason.HTTP_ERROR),
+                viewModel.uiState.value.connectionRecovery)
+            assertEquals("Connection failed: HTTP_ERROR", viewModel.uiState.value.error)
+        }
+        assertReadOnlyRequests()
+    }
+
+    @Test fun cancelledLateCameraFailureCannotReopenRecoveryOrRetry() = runBlocking {
+        oldPeer.intercept = { request ->
+            if (request.requestUrl?.encodedPath == "/v1/cameras") cameraDiscoveryError("AUTHENTICATION_REJECTED") else null
+        }
+        viewModel.setConnectionTarget(ConnectionTarget.DESKTOP_BRIDGE)
+        viewModel.setBridgeBaseUrl(oldPeer.baseUrl)
+        val gate = oldPeer.gateNext("/v1/cameras")
+        viewModel.scanDesktopBridge()
+        assertTrue(pumpUntil { gate.entered.count == 0L })
+        val attempt = currentAttemptJobs()
+        viewModel.cancelConnectionAttempt()
+        viewModel.setBridgeBaseUrl(newPeer.baseUrl)
+        gate.release.countDown()
+        awaitAttempt(attempt)
+
+        assertNull(viewModel.uiState.value.connectionRecovery)
+        assertNull(viewModel.uiState.value.error)
+        assertFalse(viewModel.uiState.value.bridgeScanCompleted)
+        assertTrue(viewModel.uiState.value.bridgeCameras.isEmpty())
+        assertTrue(newPeer.requests.isEmpty())
+        assertEquals(listOf("/health", "/v1/cameras"), oldPeer.requests.map { it.path })
+        viewModel.scanDesktopBridge()
+        assertTrue(pumpUntil { viewModel.uiState.value.bridgeScanCompleted && !viewModel.uiState.value.busy })
+        assertEquals(newPeer.cameraId, viewModel.uiState.value.selectedBridgeCameraId)
+        assertNull(viewModel.uiState.value.connectionRecovery)
+        assertReadOnlyRequests()
+    }
+
+    @Test fun bridgeReleaseSafetyRemainsOutsideConnectionRecovery() = runBlocking {
+        oldPeer.intercept = { request ->
+            if (request.requestUrl?.encodedPath == "/v1/session") {
+                cameraDiscoveryError("AUTHENTICATION_REJECTED", code = "SHUTTER_RELEASE_UNCONFIRMED")
+            } else null
+        }
+        viewModel.setConnectionTarget(ConnectionTarget.DESKTOP_BRIDGE)
+        viewModel.setBridgeBaseUrl(oldPeer.baseUrl)
+        viewModel.connectBridge()
+        assertTrue(pumpUntil {
+            viewModel.uiState.value.shutterReleaseUnconfirmed &&
+                viewModel.uiState.value.pendingOperations.isEmpty()
+        })
+
+        assertNull(viewModel.uiState.value.connectionRecovery)
+        assertTrue(viewModel.uiState.value.shutterReleaseUnconfirmed)
+        // The request has settled, but the release obligation intentionally keeps
+        // the camera busy and blocks a fresh press or connection attempt.
+        assertTrue(viewModel.uiState.value.busy)
+        assertTrue(viewModel.uiState.value.isBusy(CameraOperation.CAPTURE))
+        assertTrue(viewModel.uiState.value.isBusy(CameraOperation.CONNECT))
+        viewModel.clearError()
+        assertTrue(viewModel.uiState.value.shutterReleaseUnconfirmed)
+        assertTrue(viewModel.uiState.value.busy)
+        assertTrue(viewModel.uiState.value.isBusy(CameraOperation.CAPTURE))
+        assertTrue(viewModel.uiState.value.isBusy(CameraOperation.CONNECT))
+        assertEquals(listOf("/health", "/v1/session"), oldPeer.requests.map { it.path })
+    }
+
     @Test fun invalidAddressesFailBeforeHttpWithoutEchoingEnteredData() = runBlocking {
         viewModel.setBaseUrl("synthetic private address")
         viewModel.connect()
@@ -343,6 +500,14 @@ class CameraConnectionConfigurationRecoveryTest {
         assertTrue(oldPeer.requests.any { it.path == "/ccapi/ver110/deviceinformation" })
         return currentAttemptJobs()
     }
+
+    private fun cameraDiscoveryError(
+        reason: Any?, status: Int = 502, code: String = "CCAPI_DISCOVERY_FAILED",
+    ): MockResponse = MockResponse().setResponseCode(status).setHeader("Content-Type", "application/json")
+        .setBody(JSONObject().put("error", JSONObject()
+            .put("code", code).put("engine", "ccapi").put("connectionReason", reason)
+            .put("message", "SYNTHETIC-PRIVATE-RESPONSE https://synthetic.example/?token=synthetic-fixture"))
+            .toString())
 
     private suspend fun connectAndVerifyReplacement() {
         viewModel.connect()

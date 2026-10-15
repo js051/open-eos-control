@@ -52,6 +52,7 @@ import org.junit.Assume.assumeFalse
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
@@ -90,9 +91,16 @@ class CameraForegroundImportJourneyTest {
     private val inventory = AtomicReference(baseline)
     private val originalMode = AtomicReference(OriginalMode.COMPLETE)
     private val metadataReads = CopyOnWriteArrayList<MetadataRead>()
-    // A valid display JPEG plus distinct original payload. This exceeds the production 512 KiB
-    // progress interval, so cancellation observes actual written bytes, not merely an HTTP header.
-    private val originalBytes = camera.imageBytes + ByteArray(2 * 1024 * 1024) { (it % 251).toByte() }
+    // Large legal COM segments keep the JPEG complete with EOI at its exact end. The original
+    // exceeds 512 KiB so cancellation observes actual writes, not merely an HTTP header.
+    private val originalBytes = ByteArrayOutputStream().apply {
+        write(camera.imageBytes, 0, 2)
+        repeat(33) { index ->
+            write(byteArrayOf(0xff.toByte(), 0xfe.toByte(), 0xff.toByte(), 0xff.toByte()))
+            write(ByteArray(65_533) { ((it + index) % 251).toByte() })
+        }
+        write(camera.imageBytes, 2, camera.imageBytes.size - 2)
+    }.toByteArray()
     private val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
     private val resolver get() = compose.activity.contentResolver
     private val status get() = model.uiState.value.foregroundJpegImport
@@ -126,6 +134,13 @@ class CameraForegroundImportJourneyTest {
                     OriginalMode.SLOW -> originalResponse(originalBytes)
                         .throttleBody(64 * 1024L, 300, TimeUnit.MILLISECONDS)
                     OriginalMode.WRONG_LENGTH -> originalResponse(camera.imageBytes)
+                    OriginalMode.INVALID_JPEG -> originalResponse(originalBytes.copyOf().also { it[0] = 0 })
+                    OriginalMode.CONFLICTING_MIME -> originalResponse(originalBytes).setHeader("Content-Type", "image/png")
+                    OriginalMode.PARTIAL_HTTP -> originalResponse(originalBytes).setResponseCode(206)
+                    OriginalMode.CREATED_HTTP -> originalResponse(originalBytes).setResponseCode(201)
+                    OriginalMode.RANGE_HTTP -> originalResponse(originalBytes)
+                        .setHeader("Content-Range", "bytes 0-${originalBytes.lastIndex}/${originalBytes.size}")
+                    OriginalMode.EMPTY_RANGE_HTTP -> originalResponse(originalBytes).setHeader("Content-Range", "")
                     OriginalMode.HTTP_FAILURE -> MockResponse().setResponseCode(503)
                         .setBody("Synthetic single-attempt original failure")
                     null -> error("A synthetic response mode is required")
@@ -309,6 +324,65 @@ class CameraForegroundImportJourneyTest {
     @Test
     fun failedOriginalStopsAfterOneGetWithoutPublicationOrAutomaticRetry() =
         assertTerminalOriginalFailure(OriginalMode.HTTP_FAILURE)
+
+    @Test
+    fun sameLengthInvalidJpegStopsAfterOneGetWithoutSuccessReceiptOrAutomaticRetry() =
+        assertTerminalOriginalFailure(OriginalMode.INVALID_JPEG)
+
+    @Test
+    fun conflictingOriginalMimeStopsAfterOneGetWithoutSuccessReceiptOrAutomaticRetry() =
+        assertTerminalOriginalFailure(OriginalMode.CONFLICTING_MIME)
+
+    @Test
+    fun completeJpegInHttp206NeverPublishesOrCompletesAfterItsSingleGet() =
+        assertTerminalOriginalFailure(OriginalMode.PARTIAL_HTTP)
+
+    @Test
+    fun completeJpegInHttp201NeverPublishesOrCompletesAfterItsSingleGet() =
+        assertTerminalOriginalFailure(OriginalMode.CREATED_HTTP)
+
+    @Test
+    fun completeJpegInHttp200WithContentRangeNeverPublishesOrCompletes() =
+        assertTerminalOriginalFailure(OriginalMode.RANGE_HTTP)
+
+    @Test
+    fun completeJpegInHttp200WithEmptyContentRangeNeverPublishesOrCompletes() =
+        assertTerminalOriginalFailure(OriginalMode.EMPTY_RANGE_HTTP)
+
+    @Test
+    fun explicitReenableAfterValidationFailureBaselinesFailedIdentityAndDeliversOnlyNewOriginal() {
+        assertTerminalOriginalFailure(OriginalMode.INVALID_JPEG)
+        // The failed identity is now part of a new complete baseline. Re-enable is a new
+        // user decision, never an implicit retry of that earlier camera original.
+        enableThroughUi(expectedBaseline = baseline.size + 1)
+        inventory.set(baseline + newJpeg + nextJpeg)
+        awaitCompleted(nextJpeg, count = 1)
+        assertReceipt(newJpeg, DownloadHistoryOutcome.FAILED)
+        assertReceipt(nextJpeg, DownloadHistoryOutcome.COMPLETED)
+        assertEquals(listOf(originalPath(newJpeg), originalPath(nextJpeg)), camera.originalReads.toList())
+        assertPublishedOriginal(nextJpeg)
+        compose.waitUntil(IMPORT_TIMEOUT_MILLIS) { model.savedJpegState.value.rows.size == 1 }
+        compose.runOnIdle { model.stopForegroundJpegImport() }
+        awaitStopped(ForegroundImportStopReason.USER)
+    }
+
+    @Test
+    fun laterInvalidOriginalKeepsTheEarlierPublishedCopyAndIndependentReceipts() {
+        enableThroughUi(expectedBaseline = baseline.size)
+        inventory.set(baseline + newJpeg)
+        awaitCompleted(newJpeg, count = 1)
+        originalMode.set(OriginalMode.INVALID_JPEG)
+        inventory.set(baseline + newJpeg + nextJpeg)
+        awaitStopped(ForegroundImportStopReason.TRANSFER_FAILED)
+        assertEquals(1, status.completedCount)
+        assertPublishedOriginal(newJpeg)
+        assertReceipt(newJpeg, DownloadHistoryOutcome.COMPLETED)
+        assertReceipt(nextJpeg, DownloadHistoryOutcome.FAILED)
+        assertTrue(model.uiState.value.mediaSaveFeedback[nextJpeg] is MediaSaveFeedback.Failed)
+        compose.waitUntil(IMPORT_TIMEOUT_MILLIS) { model.savedJpegState.value.rows.size == 1 }
+        assertEquals(name(newJpeg), model.savedJpegState.value.rows.single().filename)
+        assertEquals(listOf(originalPath(newJpeg), originalPath(nextJpeg)), camera.originalReads.toList())
+    }
 
     @Test
     fun publicationWinningTheStopRaceKeepsTheRealOriginalAndCompletedReceipt() {
@@ -611,7 +685,10 @@ class CameraForegroundImportJourneyTest {
 
     private data class SavedRow(val uri: Uri, val name: String, val pending: Int, val mimeType: String)
     private data class MetadataRead(val id: String, val atNanos: Long)
-    private enum class OriginalMode { COMPLETE, SLOW, WRONG_LENGTH, HTTP_FAILURE }
+    private enum class OriginalMode {
+        COMPLETE, SLOW, WRONG_LENGTH, INVALID_JPEG, CONFLICTING_MIME,
+        PARTIAL_HTTP, CREATED_HTTP, RANGE_HTTP, EMPTY_RANGE_HTTP, HTTP_FAILURE,
+    }
 
     companion object {
         // Two complete baseline reads, 5 s discovery, 1 s fresh metadata spacing and real

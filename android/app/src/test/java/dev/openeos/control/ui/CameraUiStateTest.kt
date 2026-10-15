@@ -12,6 +12,44 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraUiStateTest {
+    @Test fun bridgeThumbnailDemandResumesOnlyAfterSuccessfulCompletion() {
+        for (status in MediaLibraryLoadStatus.entries) {
+            val state = CameraUiState(transport = dev.openeos.control.data.CameraTransport.DESKTOP_BRIDGE,
+                mediaLibraryLoadStatus = status)
+            assertEquals(status != MediaLibraryLoadStatus.COMPLETE, state.mediaListingDefersThumbnails)
+            assertTrue(state.copy(mediaLibraryLoading = true).mediaListingDefersThumbnails)
+            assertFalse(state.copy(transport = dev.openeos.control.data.CameraTransport.CCAPI_NETWORK,
+                mediaLibraryLoading = true).mediaListingDefersThumbnails)
+        }
+    }
+
+    @Test fun pendingRecordingBlocksPhotoAndPreservesStopDuringForegroundImport() {
+        for (command in dev.openeos.control.data.RecordingCommand.entries) for (unconfirmed in listOf(false, true)) {
+            val state = CameraUiState().withOfflinePreview().copy(
+                pendingRecordingCommand = command,
+                recordingCommandUnconfirmed = unconfirmed,
+                pendingOperations = setOf(CameraOperation.MEDIA),
+                foregroundJpegImport = ForegroundJpegImportStatus(phase = ForegroundImportPhase.SAVING),
+            )
+            assertTrue(state.recordingStopAvailable)
+            assertFalse(captureModeSwitchEnabled(state))
+            assertTrue(state.isBusy(CameraOperation.CAPTURE))
+            assertTrue(state.isBusy(CameraOperation.SETTING))
+            assertFalse(state.isBusy(CameraOperation.RECORDING))
+            assertFalse(state.isBusy(CameraOperation.STATUS))
+            assertFalse(state.foregroundImportCameraIdle())
+            assertEquals(state, state.dismissVisibleCameraMessage())
+        }
+    }
+
+    @Test fun previousCameraRecordingWarningDoesNotCreateStopResponsibilityInNewSession() {
+        val state = CameraUiState().withOfflinePreview().copy(recordingDisconnectWarning = true)
+        assertFalse(state.recordingStopAvailable)
+        assertFalse(state.recordingCommandUnconfirmed)
+        assertNull(state.pendingRecordingCommand)
+        assertFalse(state.dismissVisibleCameraMessage().recordingDisconnectWarning)
+    }
+
     @Test fun boundedFocusBlocksConflictingCommandsButNotReadOnlyStatus() {
         val state = CameraUiState().withOfflinePreview().copy(pendingOperations = setOf(CameraOperation.FOCUS))
         for (operation in HELD_AF_INTERLOCK_OPERATIONS) {

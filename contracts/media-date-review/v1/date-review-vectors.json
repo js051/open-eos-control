@@ -1,0 +1,1219 @@
+{
+  "schemaVersion": 1,
+  "instantResolution": "milliseconds-truncated",
+  "calendar": "proleptic-gregorian-ad-1-9999",
+  "kinds": [
+    "instant",
+    "floating",
+    "date-only",
+    "unknown"
+  ],
+  "displayZones": [
+    "UTC",
+    "Asia/Taipei",
+    "America/Los_Angeles"
+  ],
+  "dateSortPrecisionOrder": [
+    "instant",
+    "floating",
+    "date-only"
+  ],
+  "unknownAndTies": "loaded-order",
+  "vectors": [
+    {
+      "id": "offset-plus8",
+      "raw": "2026-08-14T00:30:00+08:00",
+      "kind": "instant",
+      "instantMillis": 1786638600000,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-13",
+          "timeKey": "16:30:00.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-13",
+          "timeKey": "09:30:00.000"
+        }
+      }
+    },
+    {
+      "id": "same-instant-z",
+      "raw": "2026-08-13T16:30:00Z",
+      "kind": "instant",
+      "instantMillis": 1786638600000,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-13",
+          "timeKey": "16:30:00.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-13",
+          "timeKey": "09:30:00.000"
+        }
+      }
+    },
+    {
+      "id": "compact-offset",
+      "raw": "2026-08-14T00:30:00+0800",
+      "kind": "instant",
+      "instantMillis": 1786638600000,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-13",
+          "timeKey": "16:30:00.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-13",
+          "timeKey": "09:30:00.000"
+        }
+      }
+    },
+    {
+      "id": "minute-only",
+      "raw": "2026-08-14T12:34Z",
+      "kind": "instant",
+      "instantMillis": 1786710840000,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-14",
+          "timeKey": "12:34:00.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": "20:34:00.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-14",
+          "timeKey": "05:34:00.000"
+        }
+      }
+    },
+    {
+      "id": "fraction-truncated",
+      "raw": "2026-08-14T12:34:56.123456789Z",
+      "kind": "instant",
+      "instantMillis": 1786710896123,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-14",
+          "timeKey": "12:34:56.123"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": "20:34:56.123"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-14",
+          "timeKey": "05:34:56.123"
+        }
+      }
+    },
+    {
+      "id": "trimmed",
+      "raw": " 2026-08-14T12:34:56Z ",
+      "kind": "instant",
+      "instantMillis": 1786710896000,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-14",
+          "timeKey": "12:34:56.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": "20:34:56.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-14",
+          "timeKey": "05:34:56.000"
+        }
+      }
+    },
+    {
+      "id": "named-zone-utc",
+      "raw": "2026-08-14T12:34:56Z[UTC]",
+      "kind": "instant",
+      "instantMillis": 1786710896000,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-14",
+          "timeKey": "12:34:56.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": "20:34:56.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-14",
+          "timeKey": "05:34:56.000"
+        }
+      }
+    },
+    {
+      "id": "named-zone-la",
+      "raw": "2026-08-14T12:34:56-07:00[America/Los_Angeles]",
+      "kind": "instant",
+      "instantMillis": 1786736096000,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-14",
+          "timeKey": "19:34:56.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-15",
+          "timeKey": "03:34:56.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-14",
+          "timeKey": "12:34:56.000"
+        }
+      }
+    },
+    {
+      "id": "maximum-offset",
+      "raw": "2026-08-14T12:34:56+18:00",
+      "kind": "instant",
+      "instantMillis": 1786646096000,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-13",
+          "timeKey": "18:34:56.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": "02:34:56.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-13",
+          "timeKey": "11:34:56.000"
+        }
+      }
+    },
+    {
+      "id": "minimum-offset",
+      "raw": "2026-08-14T12:34:56-1800",
+      "kind": "instant",
+      "instantMillis": 1786775696000,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-15",
+          "timeKey": "06:34:56.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-15",
+          "timeKey": "14:34:56.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-14",
+          "timeKey": "23:34:56.000"
+        }
+      }
+    },
+    {
+      "id": "dst-before",
+      "raw": "2026-03-08T09:59:59Z",
+      "kind": "instant",
+      "instantMillis": 1772963999000,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-03-08",
+          "timeKey": "09:59:59.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-03-08",
+          "timeKey": "17:59:59.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-03-08",
+          "timeKey": "01:59:59.000"
+        }
+      }
+    },
+    {
+      "id": "dst-after",
+      "raw": "2026-03-08T10:00:00Z",
+      "kind": "instant",
+      "instantMillis": 1772964000000,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-03-08",
+          "timeKey": "10:00:00.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-03-08",
+          "timeKey": "18:00:00.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-03-08",
+          "timeKey": "03:00:00.000"
+        }
+      }
+    },
+    {
+      "id": "dst-fall-first",
+      "raw": "2026-11-01T08:30:00Z",
+      "kind": "instant",
+      "instantMillis": 1793521800000,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-11-01",
+          "timeKey": "08:30:00.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-11-01",
+          "timeKey": "16:30:00.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-11-01",
+          "timeKey": "01:30:00.000"
+        }
+      }
+    },
+    {
+      "id": "dst-fall-second",
+      "raw": "2026-11-01T09:30:00Z",
+      "kind": "instant",
+      "instantMillis": 1793525400000,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-11-01",
+          "timeKey": "09:30:00.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-11-01",
+          "timeKey": "17:30:00.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-11-01",
+          "timeKey": "01:30:00.000"
+        }
+      }
+    },
+    {
+      "id": "literal",
+      "raw": "2026-08-14",
+      "kind": "date-only",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-14",
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-14",
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "leap",
+      "raw": "2024-02-29",
+      "kind": "date-only",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": "2024-02-29",
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": "2024-02-29",
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2024-02-29",
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "early-year",
+      "raw": "0099-06-15",
+      "kind": "date-only",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": "0099-06-15",
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": "0099-06-15",
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": "0099-06-15",
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "skipped-local-day",
+      "raw": "2011-12-30",
+      "kind": "date-only",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": "2011-12-30",
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": "2011-12-30",
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2011-12-30",
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "floating-iso",
+      "raw": "2026-08-14T00:30:00",
+      "kind": "floating",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        }
+      }
+    },
+    {
+      "id": "floating-space",
+      "raw": "2026-08-14 00:30:00",
+      "kind": "floating",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        }
+      }
+    },
+    {
+      "id": "floating-ptp",
+      "raw": "20260814T003000",
+      "kind": "floating",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        }
+      }
+    },
+    {
+      "id": "floating-minute",
+      "raw": "2026-08-14 00:30",
+      "kind": "floating",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.000"
+        }
+      }
+    },
+    {
+      "id": "floating-fraction",
+      "raw": "2026-08-14 00:30:00.123456789",
+      "kind": "floating",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.123"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.123"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-08-14",
+          "timeKey": "00:30:00.123"
+        }
+      }
+    },
+    {
+      "id": "floating-dst-gap",
+      "raw": "2026-03-08T02:30:00",
+      "kind": "floating",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-03-08",
+          "timeKey": "02:30:00.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-03-08",
+          "timeKey": "02:30:00.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-03-08",
+          "timeKey": "02:30:00.000"
+        }
+      }
+    },
+    {
+      "id": "floating-dst-overlap",
+      "raw": "2026-11-01T01:30:00",
+      "kind": "floating",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": "2026-11-01",
+          "timeKey": "01:30:00.000"
+        },
+        "Asia/Taipei": {
+          "dateKey": "2026-11-01",
+          "timeKey": "01:30:00.000"
+        },
+        "America/Los_Angeles": {
+          "dateKey": "2026-11-01",
+          "timeKey": "01:30:00.000"
+        }
+      }
+    },
+    {
+      "id": "invalid-00",
+      "raw": null,
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-01",
+      "raw": "",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-02",
+      "raw": " ",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-03",
+      "raw": "unknown",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-04",
+      "raw": "2026-02-29",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-05",
+      "raw": "20260230T120000",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-06",
+      "raw": "1900-02-29",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-07",
+      "raw": "0000-01-01",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-08",
+      "raw": "2026-04-31",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-09",
+      "raw": "2026-13-01",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-10",
+      "raw": "2026-08-14T24:00:00Z",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-11",
+      "raw": "2026-08-14T12:60:00Z",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-12",
+      "raw": "2026-08-14T12:34:60Z",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-13",
+      "raw": "2026-08-14junk",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-14",
+      "raw": "2026-08-14T12:34:56Zjunk",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-15",
+      "raw": "2026-08-14T12:34:56+18:01",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-16",
+      "raw": "2026-08-14T12:34:56+19:00",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-17",
+      "raw": "2026-08-14T12:34:56+08:60",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-18",
+      "raw": "2026-08-14T12:34:56.1234567890Z",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-19",
+      "raw": "2026-08-14T12:34:56+08:00[UTC]",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-20",
+      "raw": "2026-08-14T12:34:56[UTC]",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-21",
+      "raw": "2026-08-14T12:34:56Z[Not/A_Zone]",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    },
+    {
+      "id": "invalid-22",
+      "raw": "2026-08-14T12:34:56-08:00[America/Los_Angeles]",
+      "kind": "unknown",
+      "instantMillis": null,
+      "display": {
+        "UTC": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "Asia/Taipei": {
+          "dateKey": null,
+          "timeKey": null
+        },
+        "America/Los_Angeles": {
+          "dateKey": null,
+          "timeKey": null
+        }
+      }
+    }
+  ],
+  "sortItems": [
+    {
+      "id": "U_FIRST",
+      "name": "Z.JPG",
+      "captureTime": null,
+      "kind": "image"
+    },
+    {
+      "id": "DATE",
+      "name": "ONLY.JPG",
+      "captureTime": "2026-08-14",
+      "kind": "image"
+    },
+    {
+      "id": "FLOAT_LATE",
+      "name": "LATE.JPG",
+      "captureTime": "2026-08-14 20:00:00",
+      "kind": "image"
+    },
+    {
+      "id": "RAW",
+      "name": "PAIR.CR3",
+      "captureTime": "2026-08-14T19:00:00Z",
+      "kind": "image"
+    },
+    {
+      "id": "JPEG",
+      "name": "PAIR.JPG",
+      "captureTime": "2026-08-14T12:00:00-07:00",
+      "kind": "image"
+    },
+    {
+      "id": "FLOAT_EARLY",
+      "name": "EARLY.JPG",
+      "captureTime": "20260814T010000",
+      "kind": "image"
+    },
+    {
+      "id": "PREVIOUS",
+      "name": "PREV.JPG",
+      "captureTime": "2026-08-13",
+      "kind": "image"
+    },
+    {
+      "id": "U_LAST",
+      "name": "A.JPG",
+      "captureTime": "2026-02-29",
+      "kind": "image"
+    }
+  ],
+  "sortCases": [
+    {
+      "zone": "UTC",
+      "sort": "newest",
+      "expectedIds": [
+        "RAW",
+        "JPEG",
+        "FLOAT_LATE",
+        "FLOAT_EARLY",
+        "DATE",
+        "PREVIOUS",
+        "U_FIRST",
+        "U_LAST"
+      ]
+    },
+    {
+      "zone": "UTC",
+      "sort": "oldest",
+      "expectedIds": [
+        "PREVIOUS",
+        "RAW",
+        "JPEG",
+        "FLOAT_EARLY",
+        "FLOAT_LATE",
+        "DATE",
+        "U_FIRST",
+        "U_LAST"
+      ]
+    },
+    {
+      "zone": "UTC",
+      "sort": "camera",
+      "expectedIds": [
+        "U_FIRST",
+        "DATE",
+        "FLOAT_LATE",
+        "RAW",
+        "JPEG",
+        "FLOAT_EARLY",
+        "PREVIOUS",
+        "U_LAST"
+      ]
+    },
+    {
+      "zone": "Asia/Taipei",
+      "sort": "newest",
+      "expectedIds": [
+        "RAW",
+        "JPEG",
+        "FLOAT_LATE",
+        "FLOAT_EARLY",
+        "DATE",
+        "PREVIOUS",
+        "U_FIRST",
+        "U_LAST"
+      ]
+    },
+    {
+      "zone": "Asia/Taipei",
+      "sort": "oldest",
+      "expectedIds": [
+        "PREVIOUS",
+        "FLOAT_EARLY",
+        "FLOAT_LATE",
+        "DATE",
+        "RAW",
+        "JPEG",
+        "U_FIRST",
+        "U_LAST"
+      ]
+    },
+    {
+      "zone": "Asia/Taipei",
+      "sort": "camera",
+      "expectedIds": [
+        "U_FIRST",
+        "DATE",
+        "FLOAT_LATE",
+        "RAW",
+        "JPEG",
+        "FLOAT_EARLY",
+        "PREVIOUS",
+        "U_LAST"
+      ]
+    },
+    {
+      "zone": "America/Los_Angeles",
+      "sort": "newest",
+      "expectedIds": [
+        "RAW",
+        "JPEG",
+        "FLOAT_LATE",
+        "FLOAT_EARLY",
+        "DATE",
+        "PREVIOUS",
+        "U_FIRST",
+        "U_LAST"
+      ]
+    },
+    {
+      "zone": "America/Los_Angeles",
+      "sort": "oldest",
+      "expectedIds": [
+        "PREVIOUS",
+        "RAW",
+        "JPEG",
+        "FLOAT_EARLY",
+        "FLOAT_LATE",
+        "DATE",
+        "U_FIRST",
+        "U_LAST"
+      ]
+    },
+    {
+      "zone": "America/Los_Angeles",
+      "sort": "camera",
+      "expectedIds": [
+        "U_FIRST",
+        "DATE",
+        "FLOAT_LATE",
+        "RAW",
+        "JPEG",
+        "FLOAT_EARLY",
+        "PREVIOUS",
+        "U_LAST"
+      ]
+    }
+  ],
+  "reviewItems": [
+    {
+      "id": "NEW_PHOTO_NO_DATE",
+      "name": "PHOTO.JPG",
+      "captureTime": null,
+      "kind": "image"
+    },
+    {
+      "id": "NEW_VIDEO_FUTURE",
+      "name": "MOVIE.MP4",
+      "captureTime": "2030-01-01T00:00:00Z",
+      "kind": "video"
+    },
+    {
+      "id": "OLD",
+      "name": "OLD.JPG",
+      "captureTime": "2099-01-01T00:00:00Z",
+      "kind": "image"
+    },
+    {
+      "id": "NEW_PHOTO_WITH_DATE",
+      "name": "DATED.CR3",
+      "captureTime": "2026-08-14T12:34:56Z",
+      "kind": "image"
+    }
+  ],
+  "reviewCases": [
+    {
+      "kind": "photo",
+      "previousIds": [
+        "OLD"
+      ],
+      "expectedId": "NEW_PHOTO_NO_DATE"
+    },
+    {
+      "kind": "video",
+      "previousIds": [
+        "OLD"
+      ],
+      "expectedId": "NEW_VIDEO_FUTURE"
+    },
+    {
+      "kind": "recent",
+      "previousIds": [],
+      "expectedId": "NEW_PHOTO_NO_DATE"
+    },
+    {
+      "kind": "photo",
+      "previousIds": [
+        "NEW_PHOTO_NO_DATE",
+        "NEW_VIDEO_FUTURE",
+        "OLD",
+        "NEW_PHOTO_WITH_DATE"
+      ],
+      "expectedId": null
+    }
+  ]
+}

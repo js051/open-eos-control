@@ -19,6 +19,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -208,6 +209,41 @@ class DesktopBridgeControlDeadlineTest {
                 assertTrue(peer.awaitDeleteBody())
                 closing.cancel()
                 assertTrue("requestOk cancellation must cover body consumption", closing.finishesWithinObservation())
+                assertTrue("Cancellation must abort the in-flight DELETE", peer.deleteCallCancelled())
+                assertEquals("DELETE keeps its original call budget", 0L, peer.deleteTimeoutMillis())
+                client.initialize() // Cancellation must still retire the old local session.
+                peer.paceDelete = false
+                client.close()
+            } finally {
+                closing.cancel()
+                peer.abortCalls()
+                closing.join()
+            }
+        }
+    }
+
+    @Test fun cancelledCloseWithOutstandingBulbStillAttemptsBoundedDelete() = runBlocking<Unit> {
+        Peer().use { peer ->
+            peer.paceDelete = true
+            val client = peer.client()
+            client.initialize()
+            client.startBulbExposure()
+            val failure = AtomicReference<Throwable?>()
+            val closing = launch(Dispatchers.IO) {
+                failure.set(runCatching { client.close() }.exceptionOrNull())
+            }
+            try {
+                assertTrue(peer.awaitDeleteBody())
+                closing.cancel()
+                assertTrue("Unresolved Bulb cleanup must have a total deadline despite paced bytes",
+                    closing.finishesWithinObservation(RECOVERY_BUDGET_MILLIS + OBSERVATION_MILLIS))
+                assertEquals(RECOVERY_BUDGET_MILLIS, peer.deleteTimeoutMillis())
+                assertTrue("Cleanup must report expiry rather than a camera release ACK", failure.get() is IOException)
+                assertTrue(peer.deleteCallCancelled())
+                assertEquals("Cleanup must not replay the Bulb mutation", 0, peer.count("POST", "bulb/stop"))
+                client.initialize()
+                peer.paceDelete = false
+                client.close()
             } finally {
                 closing.cancel()
                 peer.abortCalls()
@@ -316,6 +352,9 @@ class DesktopBridgeControlDeadlineTest {
         fun anyCallCancelled() = calls.any(Call::isCanceled)
         fun stopCallCancelled() = calls.single { it.request().url.encodedPath.endsWith("/bulb/stop") }.isCanceled()
         fun stopTimeoutMillis() = calls.single { it.request().url.encodedPath.endsWith("/bulb/stop") }
+            .timeout().timeoutNanos().let(TimeUnit.NANOSECONDS::toMillis)
+        fun deleteCallCancelled() = calls.single { it.request().method == "DELETE" }.isCanceled()
+        fun deleteTimeoutMillis() = calls.single { it.request().method == "DELETE" }
             .timeout().timeoutNanos().let(TimeUnit.NANOSECONDS::toMillis)
         fun abortCalls() = calls.forEach(Call::cancel)
         override fun close() {
