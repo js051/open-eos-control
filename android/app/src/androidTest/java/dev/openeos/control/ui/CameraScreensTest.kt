@@ -2738,6 +2738,7 @@ class CameraScreensTest {
         compose.setContent {
             MaterialTheme(colorScheme = OpenEosColorScheme) {
                 MediaViewerDialog(
+                    displayZone = java.time.ZoneId.of("UTC"),
                     item = item,
                     bytes = null,
                     streamSource = null,
@@ -2758,7 +2759,7 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.media_viewer_position, 2, 8)).assertIsDisplayed()
-        compose.onNodeWithText("2026-08-14 10:05").assertIsDisplayed()
+        compose.onNodeWithText("2026-08-14 10:05 (${compose.activity.getString(R.string.media_time_zone_unknown)})").assertIsDisplayed()
         compose.onNodeWithText("2.0 MB").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.previous_media)).assertDoesNotExist()
         compose.onNodeWithContentDescription(resourceText(R.string.next_media)).performClick()

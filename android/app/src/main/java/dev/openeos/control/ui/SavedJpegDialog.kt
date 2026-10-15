@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.openeos.control.R
+import java.time.ZoneId
 
 /** Local Gallery references and handoff feedback, outside every camera-session UI subtree. */
 @Composable
@@ -58,6 +59,7 @@ internal fun SavedJpegDialog(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val displayZone = rememberMediaDisplayZone()
     var confirmClear by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val active = handoff.active
@@ -190,6 +192,7 @@ internal fun SavedJpegDialog(
                     items(state.rows, key = { it.id.value }) { row ->
                         SavedJpegRow(
                             row = row,
+                            displayZone = displayZone,
                             selected = row.id in state.selectedIds && row.id !in state.unavailableIds,
                             enabled = !handoff.busy && row.id !in state.unavailableIds,
                             unavailable = row.id in state.unavailableIds,
@@ -287,6 +290,7 @@ private fun SavedJpegHandoffStatus(
 @Composable
 private fun SavedJpegRow(
     row: DeliveredJpegRow,
+    displayZone: ZoneId,
     selected: Boolean,
     enabled: Boolean,
     unavailable: Boolean,
@@ -308,7 +312,8 @@ private fun SavedJpegRow(
                 Text(row.filename, style = MaterialTheme.typography.titleSmall)
                 Text(row.cameraModel, style = MaterialTheme.typography.bodySmall)
                 Text(
-                    mediaCaptureTimeLabel(row.captureTime) ?: stringResource(R.string.media_unknown_date),
+                    mediaCaptureTimeLabel(row.captureTime, displayZone, stringResource(R.string.media_time_zone_unknown))
+                        ?: stringResource(R.string.media_unknown_date),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(mediaByteSizeLabel(row.byteLength).orEmpty(), style = MaterialTheme.typography.bodySmall)

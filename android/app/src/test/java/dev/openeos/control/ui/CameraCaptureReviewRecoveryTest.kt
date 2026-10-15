@@ -94,6 +94,16 @@ class CameraCaptureReviewRecoveryTest {
         assertNull(viewModel.uiState.value.error)
     }
 
+    @Test fun stillReviewChoosesUndatedPhotoEvenWhenFutureVideoAppearsFirst() = runBlocking {
+        connect()
+        peer.publishFutureVideo.set(true)
+        viewModel.captureStill()
+        assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewItem?.name == "NEW.JPG" })
+        assertNull(viewModel.uiState.value.captureReviewItem?.captureTime)
+        assertEquals(1, peer.captureWrites.get())
+        assertEquals(CaptureReviewStatus.IDLE, viewModel.uiState.value.captureReviewStatus)
+    }
+
     @Test fun rejectedCommandDoesNotReviewOrClaimAcknowledgement() = runBlocking {
         connect()
         peer.rejectCapture.set(true)
@@ -779,6 +789,7 @@ private class CaptureReviewPeer {
     private val nativeListingFailed = AtomicBoolean(false)
     val rejectCapture = AtomicBoolean(false)
     val publishNew = AtomicBoolean(true)
+    val publishFutureVideo = AtomicBoolean(false)
     val captureWrites = AtomicInteger()
     val writes = CopyOnWriteArrayList<String>()
     val failedStatusReads = AtomicInteger()
@@ -844,8 +855,12 @@ private class CaptureReviewPeer {
                             check(gate.release.await(5, TimeUnit.SECONDS)) { "Simulator listing gate was not released" }
                         }
                         if (failed) return MockResponse().setResponseCode(503).setBody("Synthetic private failure detail")
-                        json(JSONObject().put("items", JSONArray().put(JSONObject().put("id", latest)
-                            .put("name", latest).put("kind", "jpeg"))).toString())
+                        val rows = JSONArray()
+                        if (latest == "NEW.JPG" && publishFutureVideo.get()) rows.put(JSONObject()
+                            .put("id", "NEW.MP4").put("name", "NEW.MP4").put("kind", "video")
+                            .put("capture_time", "2030-01-01T00:00:00Z"))
+                        rows.put(JSONObject().put("id", latest).put("name", latest).put("kind", "jpeg"))
+                        json(JSONObject().put("items", rows).toString())
                     }
                     path.endsWith("/contents") && url.queryParameter("kind") == "number" -> {
                         reviewReads.incrementAndGet()

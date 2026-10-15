@@ -737,4 +737,5 @@
     <string name="native_lut_unsupported_color">未套用 LUT：色彩格式不支援，保留原生影片</string>
     <string name="native_lut_unsupported_gpu">未套用 LUT：GPU 路徑不可用，保留原生影片</string>
     <string name="native_lut_failed">LUT 處理失敗；降回原生影片並保留 LUT</string>
+    <string name="media_time_zone_unknown">時區未知</string>
 </resources>
