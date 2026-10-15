@@ -120,6 +120,23 @@ final class RTPEventDeliveryOwnershipTests: XCTestCase {
         XCTAssertEqual(fixture.rendered.timestamps, [2, 5])
     }
 
+    func testTerminalLatchRejectsLateVideoAndDuplicateFailureBeforeRetirementDelivery() async throws {
+        let fixture = RTPVideoFixture()
+        addTeardownBlock { await fixture.cleanup() }
+        _ = try await fixture.session(includeAudio: false)
+        let current = try XCTUnwrap(fixture.deliveries.last)
+        fixture.controller.emit(.failed("Synthetic first terminal failure"), owner: current.owner)
+        fixture.controller.emit(.failed("Synthetic duplicate failure"), owner: current.owner)
+        fixture.submit(timestamp: 10, owner: current.owner)
+        XCTAssertTrue(fixture.rendered.timestamps.isEmpty, "No MainActor retirement callback was needed to reject late output")
+        XCTAssertFalse(fixture.controller.accepts(current), "Previously queued nonterminal status is no longer admissible")
+        let terminal = try XCTUnwrap(fixture.deliveries.last)
+        XCTAssertTrue(fixture.controller.accepts(terminal), "Original-owner failure still reaches Stop retirement")
+        if case let .failed(message) = terminal.event {
+            XCTAssertEqual(message, "Synthetic first terminal failure")
+        } else { XCTFail("Only the first failure should be emitted") }
+    }
+
     func testVideoOnlySessionCanRenderUntilRetired() async throws {
         let fixture = RTPVideoFixture()
         addTeardownBlock { await fixture.cleanup() }

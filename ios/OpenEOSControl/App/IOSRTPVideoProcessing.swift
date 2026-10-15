@@ -10,6 +10,7 @@ enum IOSNativeVideoStatus: String {
     case off = "native_lut_off"
     case waiting = "native_lut_waiting"
     case applied = "native_lut_applied"
+    case processed = "native_lut_processed_unverified"
     case unsupportedColor = "native_lut_unsupported_color"
     case unavailable = "native_lut_unavailable"
     case failed = "native_lut_failed"
@@ -18,16 +19,19 @@ enum IOSNativeVideoStatus: String {
 @MainActor
 final class IOSNativeVideoPresentation: ObservableObject {
     @Published var status: IOSNativeVideoStatus = .off
+    @Published var progress: IOSRTPPresentationState = .waiting
+    @Published var presentedFrame: IOSRTPFrameToken?
 }
 
 struct IOSNativeProcessedFrame: @unchecked Sendable {
     let sampleBuffer: CMSampleBuffer
     let pixelBuffer: CVPixelBuffer
     let format: CMVideoFormatDescription
+    let decodedAt: TimeInterval
 }
 
 enum IOSNativeVideoResult: @unchecked Sendable {
-    case decoded // Decode-only readiness, never renderer/presentation evidence.
+    case decoded(at: TimeInterval) // Actual decoder output, never renderer/presentation evidence.
     case frame(IOSNativeProcessedFrame)
     case backpressure
     case unsupportedColor
@@ -86,6 +90,12 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
     private var pool: CVPixelBufferPool?
     private var poolSize: CGSize = .zero
     private var context: CIContext?
+    private let decoderResourceChanged: @Sendable (Bool) -> Void
+    private var decoderResourceActive = false
+
+    init(decoderResourceChanged: @escaping @Sendable (Bool) -> Void = { _ in }) {
+        self.decoderResourceChanged = decoderResourceChanged
+    }
 
     var busy: Bool { lock.lock(); defer { lock.unlock() }; return inFlight != nil }
 
@@ -98,6 +108,22 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
         if let ticket {
             queue.async { [self] in resetResources(); finish(ticket) }
         }
+    }
+
+    /// Used by the isolated first-frame probe: readiness must not overlap its
+    /// physical VT session with the continuous owner decoder.
+    @MainActor
+    func retireAndWait() async {
+        invalidate()
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                resetResources()
+                continuation.resume()
+            }
+        }
+        // Result delivery can still be queued on MainActor after native work
+        // finished. Its physical ticket must close before a replacement submit.
+        while busy { await Task.yield() }
     }
 
     @MainActor
@@ -148,7 +174,6 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
     }
 
     private func process(_ request: Request) -> IOSNativeVideoResult {
-        guard request.decodeOnly || nativeRTPPreviewColorSupported(format: request.format, sps: request.sps) else { return .unsupportedColor }
         let dimensions = CMVideoFormatDescriptionGetDimensions(request.format)
         guard dimensions.width > 0, dimensions.height > 0,
               dimensions.width <= 8192, dimensions.height <= 8192,
@@ -165,6 +190,8 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
                 imageBufferAttributes: attributes as CFDictionary, outputCallback: nil,
                 decompressionSessionOut: &decoder)
             guard status == noErr, decoder != nil else { return .unavailable }
+            decoderResourceActive = true
+            decoderResourceChanged(true)
             decoderFormat = request.format
         }
         guard let decoder else { return .unavailable }
@@ -173,15 +200,24 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
             flags: [], infoFlagsOut: nil) { result, _, image, _, _ in
                 decodedOutput.status = result
                 decodedOutput.buffer = image
+                if image != nil { decodedOutput.completedAt = ProcessInfo.processInfo.systemUptime }
             }
         guard status == noErr, decodedOutput.status == noErr else { return .failed }
-        guard request.present, let decoded = decodedOutput.buffer else { return .backpressure }
-        if request.decodeOnly { return .decoded }
+        guard let decoded = decodedOutput.buffer, let decodedAt = decodedOutput.completedAt else { return .backpressure }
+        if request.decodeOnly { return .decoded(at: decodedAt) }
+        guard request.present else { return .decoded(at: decodedAt) }
+        if request.lut != nil && !nativeRTPPreviewColorSupported(format: request.format, sps: request.sps) {
+            return .unsupportedColor
+        }
         guard CVPixelBufferGetPixelFormatType(decoded) == kCVPixelFormatType_32BGRA,
               CVPixelBufferGetWidth(decoded) == Int(dimensions.width),
               CVPixelBufferGetHeight(decoded) == Int(dimensions.height) else { return .unsupportedColor }
         let output: CVPixelBuffer
-        do {
+        if request.lut == nil {
+            // Continuous native decode is required even with all tools off. No CI/Metal
+            // copy is needed for the unfiltered path; preserve decoder color attachments.
+            output = decoded
+        } else {
             guard let device = MTLCreateSystemDefaultDevice() else { return .unavailable }
             if context == nil {
                 context = nativeRTPPreviewContext(device: device)
@@ -204,7 +240,7 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
             var target: CVPixelBuffer?
             let allocation = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, pool,
                 [kCVPixelBufferPoolAllocationThresholdKey: 3] as CFDictionary, &target)
-            if allocation == kCVReturnWouldExceedAllocationThreshold { return .backpressure }
+            if allocation == kCVReturnWouldExceedAllocationThreshold { return .decoded(at: decodedAt) }
             guard allocation == kCVReturnSuccess, let target else { return .unavailable }
             let inputImage = CIImage(cvPixelBuffer: decoded)
             let image: CIImage
@@ -216,8 +252,10 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
             output = target
         }
         // Preserve the compressed stream's display geometry; convert color explicitly to SDR sRGB.
-        CVBufferSetAttachment(output, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
-        CVBufferSetAttachment(output, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_sRGB, .shouldPropagate)
+        if request.lut != nil {
+            CVBufferSetAttachment(output, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+            CVBufferSetAttachment(output, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_sRGB, .shouldPropagate)
+        }
         for (sourceKey, targetKey) in [
             (kCMFormatDescriptionExtension_CleanAperture, kCVImageBufferCleanApertureKey),
             (kCMFormatDescriptionExtension_PixelAspectRatio, kCVImageBufferPixelAspectRatioKey),
@@ -238,21 +276,26 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
            let attachment = attachments.firstObject as? NSMutableDictionary {
             attachment[kCMSampleAttachmentKey_DisplayImmediately] = true
         }
-        return .frame(IOSNativeProcessedFrame(sampleBuffer: sample, pixelBuffer: output, format: format))
+        return .frame(IOSNativeProcessedFrame(sampleBuffer: sample, pixelBuffer: output, format: format, decodedAt: decodedAt))
     }
 
     private final class DecodedOutput: @unchecked Sendable {
         var status: OSStatus = noErr
         var buffer: CVPixelBuffer?
+        var completedAt: TimeInterval?
     }
 
     private func resetResources() {
         if let decoder { VTDecompressionSessionInvalidate(decoder) }
+        if decoderResourceActive { decoderResourceActive = false; decoderResourceChanged(false) }
         decoder = nil; decoderFormat = nil; pool = nil; poolSize = .zero
         context?.clearCaches(); context = nil
     }
 
-    deinit { if let decoder { VTDecompressionSessionInvalidate(decoder) } }
+    deinit {
+        if let decoder { VTDecompressionSessionInvalidate(decoder) }
+        if decoderResourceActive { decoderResourceChanged(false) }
+    }
 }
 
 func nativeRTPPreviewContext(device: MTLDevice) -> CIContext {

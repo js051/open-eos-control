@@ -36,7 +36,10 @@ private struct LiveViewSurfaceContent: View {
             let imageRect = contentSize.map { aspectFitRect(contentSize: $0, containerSize: proxy.size) }
                 ?? CGRect(origin: .zero, size: proxy.size)
             let monitorAnalysis = displayedAnalysis
-            let overlayImage = monitorAnalysis?.overlayImage()
+            let overlayImage = camera.activeLiveViewSource == .ccapiRTP
+                ? nativeMonitor.currentOverlayAnalysis(settings: camera.monitorSettings,
+                    frame: nativeVideo.presentedFrame, owner: monitorOwner)?.overlayImage()
+                : monitorAnalysis?.overlayImage()
 
             ZStack {
                 Color.black
@@ -55,9 +58,9 @@ private struct LiveViewSurfaceContent: View {
                     offlineSurface
                 }
 
-                if camera.activeLiveViewSource == .ccapiRTP,
-                   camera.monitorSettings.needsPixelAnalysis || camera.monitorSettings.cubeLut != nil {
+                if camera.activeLiveViewSource == .ccapiRTP {
                     VStack(spacing: 3) {
+                        Text(LocalizedStringKey(nativeVideo.progress.rawValue))
                         if camera.monitorSettings.needsPixelAnalysis {
                             Text(LocalizedStringKey(nativeMonitor.status.rawValue))
                         }
@@ -324,7 +327,7 @@ private struct LiveViewSurfaceContent: View {
     private var displayedAnalysis: LiveViewMonitorAnalysis? {
         if camera.activeLiveViewSource == .ccapiRTP {
             guard nativeMonitorTaskID.enabled else { return nil }
-            return nativeMonitor.currentAnalysis(settings: camera.monitorSettings)
+            return nativeMonitor.currentAnalysis(settings: camera.monitorSettings, owner: monitorOwner)
         }
         return monitorAnalysis
     }

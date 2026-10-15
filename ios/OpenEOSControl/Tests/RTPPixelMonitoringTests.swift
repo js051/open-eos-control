@@ -150,89 +150,185 @@ final class RTPPixelConversionTests: XCTestCase {
 
 @MainActor
 final class RTPPixelMonitorOwnershipTests: XCTestCase {
-    func testSuccessfulSampleExpiresWithoutFurtherSourceActivity() async throws {
-        guard #available(iOS 17.4, *) else { throw XCTSkip("Displayed pixel API starts at iOS 17.4") }
+    func testSuccessfulExactFrameSampleExpiresWithoutFurtherSourceActivity() async throws {
         let source = try makeRTPMonitorSample(width: 12, height: 8)
-        let monitor = IOSRTPPixelMonitor(readPixels: { _ in source.buffer })
-        let sampled = expectation(description: "Sample published")
-        let stale = expectation(description: "Sample expires without another frame")
+        let monitor = IOSRTPPixelMonitor()
+        let sampled = expectation(description: "Exact sample published")
+        let stale = expectation(description: "Same frame expires without another presentation")
         let subscription = monitor.$status.sink {
             if $0 == .sampled { sampled.fulfill() }
             if $0 == .stale { stale.fulfill() }
         }
         defer { subscription.cancel() }
-        var settings = LiveViewMonitorSettings()
-        settings.histogramVisible = true
-        let owner = UUID()
+        var settings = LiveViewMonitorSettings(); settings.histogramVisible = true
+        let owner = UUID(), token = makeMonitorToken()
         monitor.configure(settings: settings, owner: owner)
-        let layer = AVSampleBufferDisplayLayer()
-        monitor.frameSubmitted(layer: layer, owner: UUID(), format: source.format)
+        let presentedAt = ProcessInfo.processInfo.systemUptime
+        monitor.frameAvailable(token: token, format: source.format, buffer: source.buffer, outputAt: presentedAt)
         await fulfillment(of: [sampled], timeout: 2)
-        XCTAssertNotNil(monitor.currentAnalysis(settings: settings))
+        XCTAssertNotNil(monitor.currentAnalysis(settings: settings, owner: owner))
+        XCTAssertNil(monitor.currentOverlayAnalysis(settings: settings, frame: makeMonitorToken(), owner: owner))
+        XCTAssertNil(monitor.currentAnalysis(settings: settings, owner: UUID()))
         await fulfillment(of: [stale], timeout: 2)
-        XCTAssertNil(monitor.analysis)
-        XCTAssertNil(monitor.currentAnalysis(settings: settings))
+        // Re-reading the same image cannot acquire a fresh timestamp or publish it again.
+        monitor.presentationChanged(to: nil)
+        monitor.frameAvailable(token: token, format: source.format, buffer: source.buffer, outputAt: presentedAt)
+        XCTAssertFalse(monitor.isProcessing)
+        XCTAssertNil(monitor.currentAnalysis(settings: settings, owner: owner))
         monitor.deactivate(owner: owner)
     }
 
-    func testDisabledAndLUTOnlySettingsNeverReadPixelsAndNilClearsState() throws {
-        guard #available(iOS 17.4, *) else { throw XCTSkip("Displayed pixel API starts at iOS 17.4") }
-        var reads = 0
-        let monitor = IOSRTPPixelMonitor(readPixels: { _ in reads += 1; return nil })
+    func testDisabledAndLUTOnlySettingsNeverAnalyzePixels() throws {
+        let monitor = IOSRTPPixelMonitor(analyze: { _, _ in XCTFail("Inactive tools must not analyze"); return nil })
         let source = try makeRTPMonitorSample(width: 12, height: 8)
-        let layer = AVSampleBufferDisplayLayer()
-        let owner = UUID()
+        let owner = UUID(), token = makeMonitorToken()
         monitor.configure(settings: LiveViewMonitorSettings(), owner: owner)
-        monitor.frameSubmitted(layer: layer, owner: UUID(), format: source.format)
-        XCTAssertEqual(reads, 0)
+        monitor.frameAvailable(token: token, format: source.format, buffer: source.buffer,
+                               outputAt: ProcessInfo.processInfo.systemUptime)
         var lutOnly = LiveViewMonitorSettings()
         lutOnly.cubeLut = CubeLut(name: "Synthetic", size: 2, domainMin: [0, 0, 0], domainMax: [1, 1, 1],
                                values: Array(repeating: 0, count: 24))
         monitor.configure(settings: lutOnly, owner: owner)
-        monitor.frameSubmitted(layer: layer, owner: UUID(), format: source.format)
-        XCTAssertEqual(reads, 0, "A retained inactive LUT must not start pixel readback")
-        var settings = LiveViewMonitorSettings()
-        settings.histogramVisible = true
-        monitor.configure(settings: settings, owner: owner)
-        monitor.frameSubmitted(layer: layer, owner: UUID(), format: source.format)
-        XCTAssertEqual(reads, 1)
+        monitor.frameAvailable(token: token, format: source.format, buffer: source.buffer,
+                               outputAt: ProcessInfo.processInfo.systemUptime)
+        XCTAssertFalse(monitor.isProcessing)
         XCTAssertNil(monitor.analysis)
-        XCTAssertEqual(monitor.status, .unavailable)
         monitor.deactivate(owner: owner)
         XCTAssertEqual(monitor.status, .off)
     }
 
     func testOldViewCannotDeactivateReplacementAndInvalidationKeepsPhysicalSlot() async throws {
-        guard #available(iOS 17.4, *) else { throw XCTSkip("Displayed pixel API starts at iOS 17.4") }
         let source = try makeRTPMonitorSample(width: 12, height: 8)
         let gate = RTPAnalysisGate()
         defer { gate.release.signal() }
-        var reads = 0
-        let monitor = IOSRTPPixelMonitor(readPixels: { _ in reads += 1; return source.buffer },
-            analyze: { _, _ in
-                gate.started.fulfill()
-                _ = gate.release.wait(timeout: .now() + 5)
-                return LiveViewMonitorAnalysis(width: 1, height: 1, histogram: [1], waveform: nil, overlayRGBA: nil)
-            })
-        var settings = LiveViewMonitorSettings()
-        settings.histogramVisible = true
-        let firstView = UUID(), secondView = UUID(), sourceOwner = UUID()
-        let layer = AVSampleBufferDisplayLayer()
+        let monitor = IOSRTPPixelMonitor(analyze: { _, _ in
+            gate.started.fulfill()
+            _ = gate.release.wait(timeout: .now() + 5)
+            return LiveViewMonitorAnalysis(width: 1, height: 1, histogram: [1], waveform: nil, overlayRGBA: nil)
+        })
+        var settings = LiveViewMonitorSettings(); settings.histogramVisible = true
+        let firstView = UUID(), secondView = UUID(), token = makeMonitorToken()
         monitor.configure(settings: settings, owner: firstView)
-        monitor.frameSubmitted(layer: layer, owner: sourceOwner, format: source.format)
+        monitor.frameAvailable(token: token, format: source.format, buffer: source.buffer,
+                               outputAt: ProcessInfo.processInfo.systemUptime)
         await fulfillment(of: [gate.started], timeout: 2)
         monitor.configure(settings: settings, owner: secondView)
         monitor.deactivate(owner: firstView)
         XCTAssertEqual(monitor.status, .waiting)
-        for _ in 0..<10 { monitor.frameSubmitted(layer: layer, owner: sourceOwner, format: source.format) }
-        XCTAssertEqual(reads, 1, "A new view cannot start overlapping physical work")
+        for _ in 0..<10 {
+            monitor.frameAvailable(token: token, format: source.format, buffer: source.buffer,
+                                   outputAt: ProcessInfo.processInfo.systemUptime)
+        }
+        XCTAssertTrue(monitor.isProcessing, "A new view cannot release overlapping physical work")
         monitor.deactivate(owner: secondView)
         gate.release.signal()
         let deadline = ProcessInfo.processInfo.systemUptime + 2
         while monitor.isProcessing, ProcessInfo.processInfo.systemUptime < deadline { await Task.yield() }
-        XCTAssertFalse(monitor.isProcessing, "Wait for the real worker completion before inspecting retirement")
+        XCTAssertFalse(monitor.isProcessing)
         XCTAssertNil(monitor.analysis)
         XCTAssertEqual(monitor.status, .off)
+    }
+
+    func testNewSubmissionAndLutChangeRejectHeldAnalysisEvenWithIdenticalPixels() async throws {
+        let source = try makeRTPMonitorSample(width: 12, height: 8)
+        let gate = RTPAnalysisGate()
+        defer { gate.release.signal() }
+        let monitor = IOSRTPPixelMonitor(analyze: { _, _ in
+            gate.started.fulfill()
+            _ = gate.release.wait(timeout: .now() + 5)
+            return LiveViewMonitorAnalysis(width: 1, height: 1, histogram: [1], waveform: nil, overlayRGBA: [0, 0, 0, 255])
+        })
+        var settings = LiveViewMonitorSettings(); settings.histogramVisible = true
+        let view = UUID(), token = makeMonitorToken()
+        monitor.configure(settings: settings, owner: view)
+        monitor.frameAvailable(token: token, format: source.format, buffer: source.buffer,
+                               outputAt: ProcessInfo.processInfo.systemUptime)
+        await fulfillment(of: [gate.started], timeout: 2)
+        // This invalidation precedes renderer enqueue, so a late analysis cannot
+        // paint a prior frame's overlay on an asynchronously presented replacement.
+        monitor.presentationChanged(to: nil)
+        settings.cubeLut = CubeLut(name: "Replacement", size: 2, domainMin: [0, 0, 0], domainMax: [1, 1, 1],
+                                  values: Array(repeating: 0, count: 24))
+        monitor.configure(settings: settings, owner: view)
+        gate.release.signal()
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        while monitor.isProcessing, ProcessInfo.processInfo.systemUptime < deadline { await Task.yield() }
+        XCTAssertNil(monitor.analysis)
+        XCTAssertNil(monitor.currentAnalysis(settings: settings, owner: view))
+        monitor.deactivate(owner: view)
+    }
+
+    func testNewerFrameDoesNotStarveSampledScopesButClearsSpatialOverlay() async throws {
+        let source = try makeRTPMonitorSample(width: 12, height: 8)
+        let gate = RTPAnalysisGate()
+        defer { gate.release.signal() }
+        let monitor = IOSRTPPixelMonitor(analyze: { _, _ in
+            gate.started.fulfill()
+            _ = gate.release.wait(timeout: .now() + 5)
+            return LiveViewMonitorAnalysis(width: 1, height: 1, histogram: [1], waveform: nil, overlayRGBA: [0, 0, 0, 255])
+        })
+        var settings = LiveViewMonitorSettings(); settings.histogramVisible = true
+        let view = UUID(), first = makeMonitorToken()
+        let second = IOSRTPFrameToken(owner: first.owner, epoch: first.epoch,
+                                      lutRevision: first.lutRevision, sequence: 2)
+        monitor.configure(settings: settings, owner: view)
+        monitor.frameAvailable(token: first, format: source.format, buffer: source.buffer,
+                               outputAt: ProcessInfo.processInfo.systemUptime)
+        await fulfillment(of: [gate.started], timeout: 2)
+        monitor.presentationChanged(to: nil)
+        monitor.frameAvailable(token: second, format: source.format, buffer: source.buffer,
+                               outputAt: ProcessInfo.processInfo.systemUptime)
+        monitor.presentationChanged(to: second)
+        gate.release.signal()
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.8
+        while monitor.isProcessing, ProcessInfo.processInfo.systemUptime < deadline { await Task.yield() }
+        XCTAssertNotNil(monitor.currentAnalysis(settings: settings, owner: view), "A bounded retained sample may finish at live frame rates")
+        XCTAssertEqual(monitor.analysisFrame, first)
+        XCTAssertNil(monitor.currentOverlayAnalysis(settings: settings, frame: second, owner: view))
+        XCTAssertNil(monitor.currentOverlayAnalysis(settings: settings, frame: first, owner: view))
+        monitor.deactivate(owner: view)
+    }
+
+    func testStaleOrFutureOutputAgeNeverStartsAnalysis() throws {
+        let source = try makeRTPMonitorSample(width: 12, height: 8)
+        let monitor = IOSRTPPixelMonitor(analyze: { _, _ in XCTFail("Untrusted output age"); return nil })
+        var settings = LiveViewMonitorSettings(); settings.histogramVisible = true
+        let view = UUID(), first = makeMonitorToken()
+        monitor.configure(settings: settings, owner: view)
+        monitor.frameAvailable(token: first, format: source.format, buffer: source.buffer,
+                               outputAt: ProcessInfo.processInfo.systemUptime - 2)
+        let second = IOSRTPFrameToken(owner: first.owner, epoch: first.epoch,
+                                      lutRevision: first.lutRevision, sequence: 2)
+        monitor.frameAvailable(token: second, format: source.format, buffer: source.buffer,
+                               outputAt: ProcessInfo.processInfo.systemUptime + 2)
+        XCTAssertFalse(monitor.isProcessing)
+        XCTAssertNil(monitor.analysis)
+        monitor.deactivate(owner: view)
+    }
+
+    func testTerminalProducerLatchRejectsHeldAnalysisBeforeMainActorRetirement() async throws {
+        let source = try makeRTPMonitorSample(width: 12, height: 8)
+        let gate = RTPAnalysisGate()
+        defer { gate.release.signal() }
+        var active = true
+        let monitor = IOSRTPPixelMonitor(isOwnerActive: { _ in active }, analyze: { _, _ in
+            gate.started.fulfill()
+            _ = gate.release.wait(timeout: .now() + 5)
+            return LiveViewMonitorAnalysis(width: 1, height: 1, histogram: [1], waveform: nil, overlayRGBA: nil)
+        })
+        var settings = LiveViewMonitorSettings(); settings.histogramVisible = true
+        let view = UUID(), token = makeMonitorToken()
+        monitor.configure(settings: settings, owner: view)
+        monitor.frameAvailable(token: token, format: source.format, buffer: source.buffer,
+                               outputAt: ProcessInfo.processInfo.systemUptime)
+        await fulfillment(of: [gate.started], timeout: 2)
+        active = false // Producer terminal latch has fired; no invalidate() callback yet.
+        gate.release.signal()
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        while monitor.isProcessing, ProcessInfo.processInfo.systemUptime < deadline { await Task.yield() }
+        XCTAssertNil(monitor.analysis)
+        XCTAssertNil(monitor.currentAnalysis(settings: settings, owner: view))
+        monitor.deactivate(owner: view)
     }
 
     func testHeldFlushCompletionCannotReopenReplacementAttachmentReadback() async {
@@ -305,4 +401,8 @@ private func makeRTPMonitorSample(width: Int, height: Int) throws -> IOSRTPPixel
     XCTAssertEqual(CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault,
         imageBuffer: pixels, formatDescriptionOut: &format), noErr)
     return IOSRTPPixelSample(buffer: pixels, format: try XCTUnwrap(format))
+}
+
+private func makeMonitorToken() -> IOSRTPFrameToken {
+    IOSRTPFrameToken(owner: UUID(), epoch: UUID(), lutRevision: UUID(), sequence: 1)
 }

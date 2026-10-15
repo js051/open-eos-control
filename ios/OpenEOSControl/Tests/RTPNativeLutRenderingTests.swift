@@ -79,6 +79,59 @@ final class RTPNativeLutRenderingTests: XCTestCase {
         }
     }
 
+    func testSharedStartupProbePhysicallyRetiresPreviousDecoderBeforeContinuousAdmission() async throws {
+        let resources = RTPDecoderResources()
+        let continuous = IOSRTPVideoProcessor(decoderResourceChanged: { resources.changed($0) })
+        let probe = IOSRTPVideoProcessor(decoderResourceChanged: { resources.changed($0) })
+        defer { continuous.invalidate(); probe.invalidate() }
+        _ = try frame(await process(continuous, lut: nil))
+        XCTAssertEqual(resources.active, 1, "The previous decoder is still physically allocated")
+        let owner = RTPProbeOwner()
+        let controller = IOSCcapiRTPController(videoProcessor: continuous, readinessDecoder: probe)
+        controller.setEventHandler { owner.set($0.owner) }
+        let description = try CCAPIRTPSessionDescriptionParser.parse("""
+            v=0
+            m=video 12000 RTP/AVP 103
+            a=rtpmap:103 H264/90000
+            """)
+        let session = try await controller.makeSession(description: description, destinationAddress: "127.0.0.1")
+        let sessionID = try XCTUnwrap(owner.value)
+        let (sample, format) = try input()
+        let ready = expectation(description: "Readiness delivered after physical cleanup")
+        let accepted = await controller.submitReadinessProbe(sample, format: format, sps: sps, sessionID: sessionID) { result in
+            guard case .decoded = result else { return XCTFail("Probe requires actual decode") }
+            XCTAssertEqual(resources.active, 0, "Readiness may not precede VT invalidation")
+            XCTAssertFalse(probe.busy, "A logically retired but physically busy slot is not reusable")
+            ready.fulfill()
+        }
+        XCTAssertTrue(accepted)
+        await fulfillment(of: [ready], timeout: 8)
+        _ = try frame(await process(continuous, lut: nil))
+        XCTAssertEqual(resources.maximumActive, 1, "Old owner, probe, and new owner must never overlap physical VT sessions")
+        XCTAssertEqual(resources.creations, 3)
+        await session.close()
+        controller.retireDelivery()
+        await continuous.retireAndWait()
+        await probe.retireAndWait()
+        XCTAssertEqual(resources.active, 0)
+    }
+
+    func testContinuousNativeDecodeWithToolsOffProducesDistinctRetainedOutputs() async throws {
+        let pipeline = IOSRTPVideoProcessor()
+        defer { pipeline.invalidate() }
+        var outputs: [IOSNativeProcessedFrame] = []
+        for _ in 0..<6 {
+            let output = try frame(await process(pipeline, lut: nil))
+            XCTAssertTrue(outputs.allSatisfy { $0.pixelBuffer !== output.pixelBuffer },
+                          "Retained output identities cannot be reused for a newer frame")
+            outputs.append(output)
+        }
+        XCTAssertEqual(outputs.count, 6)
+        // Content is intentionally identical: static scenes still have advancing
+        // actual decoder outputs. This test does not claim display presentation.
+        for output in outputs { XCTAssertEqual(CVPixelBufferGetWidth(output.pixelBuffer), 64) }
+    }
+
     func testRealH264DecodeAndGpuLutPreserveQuadrantRowsAndSwapChannels() async throws {
         let pipeline = IOSRTPVideoProcessor()
         defer { pipeline.invalidate() }
@@ -150,7 +203,7 @@ final class RTPNativeLutRenderingTests: XCTestCase {
         let (sample, format) = try input()
         let done = expectation(description: "Decode without presentation")
         XCTAssertTrue(pipeline.submit(sample, format: format, lut: nil, sps: sps, present: false) { result in
-            guard case .backpressure = result else { return XCTFail("Hidden frame must decode without publishing pixels") }
+            guard case .decoded = result else { return XCTFail("Hidden frame must prove decode without publishing pixels") }
             done.fulfill()
         })
         await fulfillment(of: [done], timeout: 8)
@@ -163,9 +216,9 @@ final class RTPNativeLutRenderingTests: XCTestCase {
         let transform = lut { [$2, $1, $0] }
         let output = try frame(await process(pipeline, lut: transform))
         var settings = LiveViewMonitorSettings()
-        let monitor = IOSRTPPixelMonitor(readPixels: { _ in XCTFail("Supplied post-LUT frame must not read old display pixels"); return nil })
+        let monitor = IOSRTPPixelMonitor()
         let owner = UUID()
-        let layer = AVSampleBufferDisplayLayer()
+        let epoch = UUID(), revision = UUID()
         for tool in 0..<5 {
             settings = LiveViewMonitorSettings()
             settings.cubeLut = transform
@@ -180,7 +233,9 @@ final class RTPNativeLutRenderingTests: XCTestCase {
                 IOSRTPPixelSample(buffer: output.pixelBuffer, format: output.format), settings: settings))
             try await Task.sleep(for: .milliseconds(270)) // Respect the production acquisition cadence.
             monitor.configure(settings: settings, owner: owner)
-            monitor.frameSubmitted(layer: layer, owner: owner, format: output.format, suppliedBuffer: output.pixelBuffer)
+            let token = IOSRTPFrameToken(owner: owner, epoch: epoch, lutRevision: revision, sequence: UInt64(tool + 1))
+            monitor.frameAvailable(token: token, format: output.format, buffer: output.pixelBuffer,
+                                   outputAt: ProcessInfo.processInfo.systemUptime)
             let deadline = ProcessInfo.processInfo.systemUptime + 3
             while monitor.isProcessing && ProcessInfo.processInfo.systemUptime < deadline {
                 try await Task.sleep(for: .milliseconds(10))
@@ -188,7 +243,7 @@ final class RTPNativeLutRenderingTests: XCTestCase {
             XCTAssertEqual(monitor.analysis, expected, "All five tools analyze the already-filtered native pixels once")
         }
         var changed = settings; changed.cubeLut = lut { [$0, $1, $2] }
-        XCTAssertNil(monitor.currentAnalysis(settings: changed), "Old LUT identity cannot publish for new settings")
+        XCTAssertNil(monitor.currentAnalysis(settings: changed, owner: owner), "Old LUT identity cannot publish for new settings")
         monitor.deactivate(owner: owner)
     }
 
@@ -196,9 +251,10 @@ final class RTPNativeLutRenderingTests: XCTestCase {
         let pipeline = IOSRTPVideoProcessor()
         defer { pipeline.invalidate() }
         var held: [IOSNativeProcessedFrame] = []
-        for _ in 0..<3 { held.append(try frame(await process(pipeline, lut: nil))) }
-        let fourth = try await process(pipeline, lut: nil)
-        guard case .backpressure = fourth else { return XCTFail("Retained frame pool must refuse a fourth allocation") }
+        let transform = lut { [$0, $1, $2] }
+        for _ in 0..<3 { held.append(try frame(await process(pipeline, lut: transform))) }
+        let fourth = try await process(pipeline, lut: transform)
+        guard case .decoded = fourth else { return XCTFail("Retained frame pool must refuse a fourth allocation") }
         XCTAssertEqual(held.count, 3)
         held.removeAll()
         _ = try frame(await process(pipeline, lut: nil))
@@ -291,4 +347,25 @@ final class RTPVideoDeliveryBoundTests: XCTestCase {
         XCTAssertTrue(gate.admit(sequence: 7, keyFrame: true))
         XCTAssertTrue(gate.admit(sequence: 8, keyFrame: false))
     }
+}
+
+private final class RTPDecoderResources: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0, peak = 0, started = 0
+    func changed(_ allocated: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        count += allocated ? 1 : -1
+        if allocated { started += 1 }
+        peak = max(peak, count)
+    }
+    var active: Int { lock.lock(); defer { lock.unlock() }; return count }
+    var maximumActive: Int { lock.lock(); defer { lock.unlock() }; return peak }
+    var creations: Int { lock.lock(); defer { lock.unlock() }; return started }
+}
+
+private final class RTPProbeOwner: @unchecked Sendable {
+    private let lock = NSLock()
+    private var owner: UUID?
+    func set(_ value: UUID) { lock.lock(); owner = value; lock.unlock() }
+    var value: UUID? { lock.lock(); defer { lock.unlock() }; return owner }
 }

@@ -763,10 +763,10 @@
 "native_monitor_waiting" = "取樣監看 · 等待影像";
 "native_monitor_no_pixels" = "取樣監看 · 暫無可取樣影像";
 "native_monitor_failed" = "取樣監看 · 不支援的影像或轉換失敗";
-"native_monitor_sampled" = "預覽取樣監看 · 每秒最多 4 次";
+"native_monitor_sampled" = "處理後影格取樣監看 · 每秒最多 4 次";
 "native_monitor_stale" = "取樣監看 · 影像已過期";
 "native_monitor_lut_inactive" = "原生 RTP 未套用已載入的 LUT";
-"native_monitor_scope_notice" = "原生 LUT 處理支援 8-bit SDR 影片，監看每秒最多取樣 4 次。iOS 17.4 以上讀回顯示畫面；較舊版本分析送往顯示器的同一處理後影格。不支援的格式保留未套 LUT 的原生影片。";
+"native_monitor_scope_notice" = "監看分析送入原生顯示器的同一處理後影格，每秒最多 4 次；直方圖與波形取樣最長保留 1 秒。空間疊圖另須確認為當前顯示的同一影格。作業系統無法識別時，顯示進度保持未驗證。支援 8-bit SDR 的 LUT 處理不會變更相機媒體。";
 
 "foreground_media_state_copying" = "正在將保留的原始檔複製至檔案…";
 
@@ -1022,5 +1022,10 @@
 "live_view_retiring" = "已停止本機即時影像，正在等待相機確認 Stop。";
 "live_view_restart_required" = "即時影像已結束，準備好後請重新開始。";
 "live_view_start_again" = "重新開始即時影像";
-"live_view_render_stalled" = "即時影像未產生可用的顯示輸出，請確認 Stop 後再重新開始。";
+"live_view_render_stalled" = "即時影像解碼或已確認的顯示輸出已停止更新，請確認 Stop 後再重新開始。";
 "live_view_stop_pending" = "即時影像仍需清理。請先釋放使用中的相機控制，再重試 Stop。";
+"native_lut_processed_unverified" = "LUT 已處理 · 尚未確認顯示對應影格";
+"native_presentation_waiting" = "等待原生影格輸出";
+"native_presentation_progressing" = "已驗證顯示影格持續更新";
+"native_presentation_unknown" = "解碼輸出 · 顯示進度未驗證";
+"native_presentation_stalled" = "原生輸出已停止更新";

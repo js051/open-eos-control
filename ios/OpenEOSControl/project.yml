@@ -67,6 +67,9 @@ targets:
       - path: ../../contracts/jpeg-original/v1/jpeg-original-vectors.json
         createIntermediateGroups: false
         buildPhase: resources
+      - path: ../../contracts/rtp-presentation/v1/monitor-vectors.json
+        createIntermediateGroups: false
+        buildPhase: resources
       - path: ../OpenEOSCore/Tests/OpenEOSCoreTests/URLSessionPendingBulbStopTests.swift
         createIntermediateGroups: false
     dependencies:
