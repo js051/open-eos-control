@@ -14,7 +14,7 @@ struct MediaView: View {
     @State private var pendingDeletion: CameraMediaItem?
     @State private var metadataPresentation: MediaMetadataPresentation?
     @State private var pendingPreviewMetadataPresentation: MediaMetadataPresentation?
-    @State private var isFileImporterPresented = false
+    @State private var uploadSelection: MediaUploadSelection?
     @State private var mediaFilter = MediaFilter.all
     @State private var mediaSort = MediaSort.newest
     @State private var isFolderFilterPresented = false
@@ -43,7 +43,7 @@ struct MediaView: View {
         VStack(spacing: 0) {
             header
             Divider().overlay(Color.cameraBorder)
-            if camera.activeMediaUploadName != nil || camera.mediaUploadError != nil || camera.uploadedMediaName != nil {
+            if camera.activeMediaUploadName != nil || camera.mediaUploadError != nil || camera.mediaUploadResult != nil {
                 uploadStatus
             }
             ScrollView {
@@ -100,21 +100,21 @@ struct MediaView: View {
             camera.refreshMediaDateDisplayZone()
             if camera.mediaItems.isEmpty { camera.startMediaLibraryLoad() }
         }
-        .fileImporter(
-            isPresented: $isFileImporterPresented,
-            allowedContentTypes: [.data],
-            allowsMultipleSelection: false
-        ) { result in
-            guard case let .success(urls) = result,
-                  let url = urls.first,
-                  url.startAccessingSecurityScopedResource()
-            else { return }
-            if !camera.startMediaUpload(url, securityScoped: true) {
-                url.stopAccessingSecurityScopedResource()
+        .sheet(item: $uploadSelection) { selection in
+            MediaUploadPicker(selection: selection) { opening, urls in
+                if uploadSelection == opening { uploadSelection = nil }
+                guard let url = urls?.first else { camera.cancelMediaUploadSelection(opening); return }
+                camera.startMediaUpload(url, selection: opening, access: .securityScoped)
             }
+            .onDisappear { camera.cancelMediaUploadSelection(selection) }
         }
-        .onDisappear { camera.closeMediaPreview() }
+        .onDisappear {
+            if let selection = uploadSelection { camera.cancelMediaUploadSelection(selection) }
+            uploadSelection = nil
+            camera.closeMediaPreview()
+        }
         .onChange(of: camera.mediaLibrarySessionID) { _, _ in
+            uploadSelection = nil
             metadataPresentation = nil
             pendingPreviewMetadataPresentation = nil
             isDateFilterPresented = false
@@ -395,14 +395,14 @@ struct MediaView: View {
             Button { camera.cancelMediaUpload() } label: {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "xmark.circle.fill")
-                        .accessibilityLabel(Text("cancel_media_upload"))
+                        .accessibilityLabel(Text(camera.mediaUploadResult == nil ? "cancel_media_upload" : "cancel_media_upload_refresh"))
                 }
             }
             .buttonStyle(CameraIconButtonStyle())
             .foregroundStyle(Color.cameraRecording)
             .accessibilityIdentifier("cancel-media-upload")
         } else {
-            Button { isFileImporterPresented = true } label: {
+            Button { uploadSelection = camera.beginMediaUploadSelection() } label: {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "arrow.up.circle")
                         .accessibilityLabel(Text("upload_media"))
@@ -410,7 +410,7 @@ struct MediaView: View {
             }
             .buttonStyle(CameraIconButtonStyle())
             .foregroundStyle(Color.cameraAccent)
-            .disabled(camera.mediaLibraryLoading)
+            .disabled(camera.mediaLibraryLoading || camera.isBusy(.media))
             .accessibilityIdentifier("upload-media-button")
         }
     }
@@ -418,7 +418,7 @@ struct MediaView: View {
     @ViewBuilder
     private var uploadStatus: some View {
         VStack(alignment: .leading, spacing: 5) {
-            if let name = camera.activeMediaUploadName, let progress = camera.mediaUploadProgress {
+            if let name = camera.activeMediaUploadName, let progress = camera.mediaUploadProgress, camera.mediaUploadResult == nil {
                 HStack(spacing: 8) {
                     Text(language.format("uploading_media", name))
                         .font(.caption.weight(.semibold))
@@ -440,18 +440,36 @@ struct MediaView: View {
                 Text(mediaUploadProgressLabel(progress))
                     .font(.caption2)
                     .foregroundStyle(Color.cameraSecondaryText)
-            } else if let error = camera.mediaUploadError {
-                Label(error, systemImage: "exclamationmark.triangle")
+            } else if let result = camera.mediaUploadResult {
+                let verified = result.outcome == .verified
+                let key = verified ? "upload_complete" : (result.outcome == .uncertain ? "media_upload_uncertain" : "media_upload_not_sent")
+                Label(language.format(key, result.filename), systemImage: verified ? "checkmark.circle.fill" : "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(Color.cameraWarning)
-                    .lineLimit(3)
-                    .accessibilityIdentifier("media-upload-error")
-            } else if let name = camera.uploadedMediaName {
-                Label(language.format("upload_complete", name), systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(Color.cameraStatus)
-                    .accessibilityIdentifier("media-upload-complete")
+                    .foregroundStyle(verified ? Color.cameraStatus : Color.cameraWarning)
+                    .accessibilityIdentifier(verified ? "media-upload-complete" : "media-upload-\(result.outcome.rawValue)")
+                if result.owner != camera.mediaLibrarySessionID {
+                    Text(language.string("media_upload_previous_connection"))
+                        .font(.caption2).accessibilityIdentifier("media-upload-previous-connection")
+                }
+                if result.outcome == .uncertain {
+                    Text(language.string("media_upload_manual_recovery"))
+                        .font(.caption2).accessibilityIdentifier("media-upload-recovery")
+                }
+                if result.refreshFailed {
+                    Text(language.string("media_upload_refresh_failed"))
+                        .font(.caption2).accessibilityIdentifier("media-upload-refresh-failed")
+                }
+                if result.owner == camera.mediaLibrarySessionID,
+                   result.outcome == .uncertain || result.refreshFailed {
+                    Button(language.string("media_upload_review_files")) { camera.startMediaLibraryLoad() }
+                        .disabled(camera.isBusy(.media) || camera.mediaLibraryLoading)
+                        .accessibilityIdentifier("media-upload-review-files")
+                }
+                if let error = camera.mediaUploadError {
+                    Text(error).font(.caption2).accessibilityIdentifier("media-upload-error")
+                }
             }
+
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)

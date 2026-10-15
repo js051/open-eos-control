@@ -251,6 +251,10 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var mediaUploadProgress: CameraMediaTransferProgress?
     @Published private(set) var uploadedMediaName: String?
     @Published private(set) var mediaUploadError: String?
+    @Published private(set) var mediaUploadResult: MediaUploadResult?
+    private var mediaUploadSelection: MediaUploadSelection?
+    private var mediaUploadAttempt: CameraMediaUploadAttempt?
+    private var mediaUploadOwner: UUID?
     @Published private(set) var deletedMediaName: String?
     @Published private(set) var lastClockSyncAt: Date?
     @Published private(set) var lastCreatedDirectoryName: String?
@@ -274,6 +278,7 @@ final class CameraAppState: ObservableObject {
             resetMediaBatchState()
             selectedMediaItems = []
             exportGeneration = UUID()
+            mediaUploadSelection = nil
             mediaLibrarySessionID = UUID()
             mediaDateRange = nil
             mediaRatingFilter = .all
@@ -3396,109 +3401,150 @@ final class CameraAppState: ObservableObject {
         selectedMediaItems = selectedMediaItems.map { updated[mediaItemIdentity($0)] ?? $0 }
     }
 
+    func beginMediaUploadSelection() -> MediaUploadSelection? {
+        guard !isPreview, session != nil, !mediaLibraryLoading, !isBusy(.media), supports(.mediaUpload) else { return nil }
+        let selection = MediaUploadSelection(owner: mediaLibrarySessionID)
+        mediaUploadSelection = selection
+        return selection
+    }
+
+    func cancelMediaUploadSelection(_ selection: MediaUploadSelection) {
+        if mediaUploadSelection == selection { mediaUploadSelection = nil }
+    }
+
     @discardableResult
-    func startMediaUpload(_ fileURL: URL, securityScoped: Bool = false) -> Bool {
-        guard !isPreview, let session, !mediaLibraryLoading, supports(.mediaUpload), begin(.media) else { return false }
+    func startMediaUpload(
+        _ fileURL: URL, selection: MediaUploadSelection, access: MediaUploadFileAccess = .unscoped
+    ) -> Bool {
+        let admitted = CameraMediaUploadPolicy.admits(owner: selection.owner, currentOwner: mediaLibrarySessionID,
+            token: selection.id, currentToken: mediaUploadSelection?.id, singleUseAvailable: mediaUploadSelection != nil,
+            supported: !isPreview && session != nil && supports(.mediaUpload),
+            busy: mediaLibraryLoading || isBusy(.media), sourceSelected: true)
+        if mediaUploadSelection == selection { mediaUploadSelection = nil }
+        guard admitted, let session, begin(.media) else { return false }
+        guard access.acquire(fileURL) else {
+            publishMediaUploadResult(filename: fileURL.lastPathComponent, owner: selection.owner, attempt: CameraMediaUploadAttempt())
+            mediaUploadError = CocoaError(.fileReadNoPermission).localizedDescription
+            end(.media)
+            return false
+        }
         let generation = sessionGeneration
         let filename = fileURL.lastPathComponent
         let token = UUID()
+        let attempt = CameraMediaUploadAttempt()
         mediaUploadToken = token
+        mediaUploadAttempt = attempt
+        mediaUploadOwner = selection.owner
         activeMediaUploadName = filename
-        mediaUploadProgress = CameraMediaTransferProgress(
-            bytesTransferred: 0,
-            totalBytes: Int64((try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-        )
+        mediaUploadProgress = CameraMediaTransferProgress(bytesTransferred: 0, totalBytes: nil)
         mediaUploadError = nil
+        mediaUploadResult = nil
         uploadedMediaName = nil
         mediaUploadTask = Task { [weak self] in
-            // The accepted task owns the picker grant even if the state is gone
-            // or this queued upload is retired before its body can enter.
-            defer { if securityScoped { fileURL.stopAccessingSecurityScopedResource() } }
-            await self?.performMediaUpload(fileURL, session: session, token: token, generation: generation)
+            // Exactly one terminal release, even before task entry, retirement,
+            // failed staging or a delayed response from the old connection.
+            defer { access.release(fileURL) }
+            await self?.performMediaUpload(fileURL, session: session, token: token,
+                generation: generation, owner: selection.owner, attempt: attempt)
         }
         return true
     }
 
     func cancelMediaUpload() {
+        mediaUploadAttempt?.cancel()
         mediaUploadTask?.cancel()
     }
 
     private func ownsMediaUpload(_ token: UUID, generation: UUID) -> Bool {
-        mediaUploadToken == token && sessionGeneration == generation
+        CameraMediaUploadPolicy.owns(owner: generation, currentOwner: sessionGeneration,
+                                     token: token, currentToken: mediaUploadToken)
+    }
+
+    private func publishMediaUploadResult(
+        filename: String, owner: UUID, attempt: CameraMediaUploadAttempt
+    ) {
+        let evidence = attempt.evidence
+        let receipt = evidence.receipt
+        mediaUploadResult = MediaUploadResult(attemptID: attempt.id, owner: owner,
+            filename: receipt?.name ?? filename, outcome: evidence.outcome, receipt: receipt)
+        uploadedMediaName = receipt?.name
+        mediaUploadError = nil
+        if receipt != nil {
+            lastError = nil
+            if let snapshot {
+                self.snapshot = CameraSnapshot(info: snapshot.info, status: snapshot.status,
+                    capabilities: snapshot.capabilities.observing(.mediaUpload))
+            }
+        }
     }
 
     private func performMediaUpload(
-        _ fileURL: URL, session: CameraSession, token: UUID, generation: UUID
+        _ fileURL: URL, session: CameraSession, token: UUID, generation: UUID,
+        owner: UUID, attempt: CameraMediaUploadAttempt
     ) async {
         defer {
             if ownsMediaUpload(token, generation: generation) {
                 mediaUploadTask = nil
                 mediaUploadToken = nil
+                mediaUploadAttempt = nil
+                mediaUploadOwner = nil
                 activeMediaUploadName = nil
                 mediaUploadProgress = nil
                 end(.media)
             }
         }
-        guard ownsMediaUpload(token, generation: generation), !Task.isCancelled else { return }
-        do {
-            let result = try await session.uploadMedia(
-                from: fileURL,
-                progress: { [weak self] progress in
-                    Task { @MainActor in
-                        guard self?.ownsMediaUpload(token, generation: generation) == true else { return }
-                        self?.mediaUploadProgress = progress
-                    }
-                }
-            )
-            guard ownsMediaUpload(token, generation: generation) else { return }
-            if Task.isCancelled {
-                await reconcileCancelledMediaUpload(
-                    session: session,
-                    token: token, generation: generation,
-                    name: result.name,
-                    sizeBytes: result.sizeBytes
-                )
-                return
-            }
-            mediaLibraryLoadStatus = .loading
-            let scope = mediaLibraryScope
-            let libraryGeneration = mediaLibraryGeneration
-            do {
-                let items = try await session.listMedia(maximumItems: maximumMediaItems(for: scope))
-                guard ownsMediaUpload(token, generation: generation) else { return }
-                if libraryGeneration == mediaLibraryGeneration, scope == mediaLibraryScope {
-                    applyMediaBatch(items, scope: scope)
-                    mediaLibraryLoadStatus = .complete
-                    resetMediaThumbnails()
-                    resetMediaPreview()
-                }
-            } catch {
-                guard ownsMediaUpload(token, generation: generation) else { return }
-                if libraryGeneration == mediaLibraryGeneration, scope == mediaLibraryScope {
-                    mediaLibraryLoadStatus = .failed
-                    throw error
-                }
-            }
-            uploadedMediaName = result.name
-            mediaUploadError = nil
-            lastError = nil
-            if let snapshot {
-                self.snapshot = CameraSnapshot(
-                    info: snapshot.info,
-                    status: snapshot.status,
-                    capabilities: snapshot.capabilities.observing(.mediaUpload)
-                )
-            }
-        } catch is CancellationError {
-            await reconcileCancelledMediaUpload(session: session, token: token, generation: generation, fileURL: fileURL)
-        } catch let error as URLError where error.code == .cancelled {
-            await reconcileCancelledMediaUpload(session: session, token: token, generation: generation, fileURL: fileURL)
-        } catch {
-            if ownsMediaUpload(token, generation: generation), !Task.isCancelled {
-                mediaUploadError = error.localizedDescription
-                record(error)
-            }
+        guard ownsMediaUpload(token, generation: generation) else { return }
+        guard !Task.isCancelled else {
+            publishMediaUploadResult(filename: fileURL.lastPathComponent, owner: owner, attempt: attempt)
+            return
         }
+        var stagingError: String?
+        do {
+            _ = try await session.uploadMedia(from: fileURL, attempt: attempt, progress: { [weak self] progress in
+                Task { @MainActor in
+                    guard self?.ownsMediaUpload(token, generation: generation) == true,
+                          self?.mediaUploadAttempt === attempt, self?.mediaUploadResult == nil else { return }
+                    self?.mediaUploadProgress = progress
+                }
+            })
+        } catch {
+            guard ownsMediaUpload(token, generation: generation) else { return }
+            // An error or lost ACK after dispatch is uncertain, irrespective of
+            // same-name observations, body progress or cancellation timing.
+            if attempt.outcome == .notSent, !(error is CancellationError),
+               (error as? URLError)?.code != .cancelled { stagingError = error.localizedDescription }
+        }
+        guard ownsMediaUpload(token, generation: generation) else { return }
+        // Publish receipt BEFORE refreshing. Refresh failure/cancellation cannot
+        // revoke a verified response, nor turn a list observation into a receipt.
+        publishMediaUploadResult(filename: fileURL.lastPathComponent, owner: owner, attempt: attempt)
+        mediaUploadError = stagingError
+        guard attempt.outcome == .verified, !Task.isCancelled else { return }
+        await refreshMediaAfterUpload(session: session, token: token, generation: generation, attemptID: attempt.id)
+    }
+
+    private func refreshMediaAfterUpload(
+        session: CameraSession, token: UUID, generation: UUID, attemptID: UUID
+    ) async {
+        guard ownsMediaUpload(token, generation: generation) else { return }
+        let scope = mediaLibraryScope
+        let libraryGeneration = mediaLibraryGeneration
+        // Never add an automatic whole-card scan to an uncertain upload.
+        guard scope == .recent else { return }
+        mediaLibraryLoadStatus = .loading
+        let maximumItems = Self.recentMediaRequestCount
+        let items = try? await session.listMedia(maximumItems: maximumItems)
+        guard ownsMediaUpload(token, generation: generation), mediaUploadResult?.attemptID == attemptID,
+              libraryGeneration == mediaLibraryGeneration, scope == mediaLibraryScope else { return }
+        guard let items else {
+            mediaLibraryLoadStatus = .failed
+            mediaUploadResult?.refreshFailed = true
+            return
+        }
+        applyMediaBatch(items, scope: scope)
+        mediaLibraryLoadStatus = .complete
+        resetMediaThumbnails()
+        resetMediaPreview()
     }
 
     func setMediaArchive(_ item: CameraMediaItem, enabled: Bool, owner: UUID) async {
@@ -3515,63 +3561,6 @@ final class CameraAppState: ObservableObject {
                 protectionWritable: item.protectionWritable,
                 rotationWritable: item.rotationWritable,
                 archiveWritable: item.archiveWritable
-            )
-        }
-    }
-
-    private func reconcileCancelledMediaUpload(
-        session: CameraSession,
-        token: UUID, generation: UUID,
-        fileURL: URL
-    ) async {
-        let size = Int64((try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-        await reconcileCancelledMediaUpload(
-            session: session,
-            token: token, generation: generation,
-            name: fileURL.lastPathComponent,
-            sizeBytes: size > 0 ? size : nil
-        )
-    }
-
-    private func reconcileCancelledMediaUpload(
-        session: CameraSession,
-        token: UUID, generation: UUID,
-        name: String,
-        sizeBytes: Int64?
-    ) async {
-        guard ownsMediaUpload(token, generation: generation), case .desktopBridge = session else { return }
-        mediaLibraryLoadStatus = .loading
-        let scope = mediaLibraryScope
-        let libraryGeneration = mediaLibraryGeneration
-        let maximumItems = maximumMediaItems(for: scope)
-        let items = await Task.detached {
-            try? await session.listMedia(maximumItems: maximumItems)
-        }.value
-        guard ownsMediaUpload(token, generation: generation) else { return }
-        guard let items else {
-            if libraryGeneration == mediaLibraryGeneration, scope == mediaLibraryScope {
-                mediaLibraryLoadStatus = .failed
-            }
-            return
-        }
-        if libraryGeneration == mediaLibraryGeneration, scope == mediaLibraryScope {
-            applyMediaBatch(items, scope: scope)
-            mediaLibraryLoadStatus = .complete
-            resetMediaThumbnails()
-            resetMediaPreview()
-        }
-        guard let uploaded = items.first(where: { item in
-            item.name.caseInsensitiveCompare(name) == .orderedSame &&
-                (sizeBytes == nil || item.sizeBytes == sizeBytes)
-        }) else { return }
-        uploadedMediaName = uploaded.name
-        mediaUploadError = nil
-        lastError = nil
-        if let snapshot {
-            self.snapshot = CameraSnapshot(
-                info: snapshot.info,
-                status: snapshot.status,
-                capabilities: snapshot.capabilities.observing(.mediaUpload)
             )
         }
     }
@@ -4315,9 +4304,18 @@ final class CameraAppState: ObservableObject {
     }
 
     private func resetMediaUploadState() {
+        mediaUploadSelection = nil
+        mediaUploadAttempt?.cancel()
+        if let attempt = mediaUploadAttempt, let filename = activeMediaUploadName, let owner = mediaUploadOwner {
+            // Keep one explicitly labeled previous-connection result. A late
+            // callback cannot publish into this result or a replacement attempt.
+            publishMediaUploadResult(filename: filename, owner: owner, attempt: attempt)
+        }
         mediaUploadTask?.cancel()
         mediaUploadTask = nil
         mediaUploadToken = nil
+        mediaUploadAttempt = nil
+        mediaUploadOwner = nil
         activeMediaUploadName = nil
         mediaUploadProgress = nil
         mediaUploadError = nil
