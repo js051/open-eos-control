@@ -772,7 +772,9 @@ async function verifyRecordingReviewJourneys(browser, bridgeOrigin, simulatorOri
     assert.equal(item.size_bytes, bytes.length);
   };
 
-  for (const language of ["en", "zh-TW"]) {
+  const scenarios = ["en", "zh-TW"].flatMap(language =>
+    ["real-ccapi", "explicit-fresh-event-fixture"].map(observationProvider => ({language, observationProvider})));
+  for (const {language, observationProvider} of scenarios) {
     const reset = await fetch(`${simulatorOrigin}/ccapi/test/reset`, { method: "POST" });
     assert.equal(reset.ok, true);
     const photoResponse = await fetch(`${simulatorOrigin}/ccapi/ver100/contents/card1/100CANON/SIM_0002.PNG`);
@@ -788,6 +790,26 @@ async function verifyRecordingReviewJourneys(browser, bridgeOrigin, simulatorOri
       acceptDownloads: true,
     });
     const page = await context.newPage();
+    if (observationProvider === "explicit-fresh-event-fixture") {
+      // Hypothetical supported authoritative event provider. The real CCAPI
+      // outcome is fetched and checked first; only this clearly labelled fixture
+      // injects fresh observation. Never derive it from CameraStatus cache.
+      await page.route("**/v1/session/*/recording/*/outcome", async route => {
+        const response = await route.fetch();
+        assert.equal(response.status(), 200);
+        const body = await response.json();
+        assert.equal(body.responseEvidence, "response-received");
+        assert.equal(body.observation.observationEvidence, "unavailable");
+        // A separate current test-peer read supplies this synthetic provider's
+        // observation. It is neither the requested command nor Bridge's cache.
+        // /ccapi/test/state is fixture administration, never a production reader.
+        const peer = await readSimulatorState(simulatorOrigin);
+        assert.equal(typeof peer.recording, "boolean");
+        body.observation = {version:1, engine:"ccapi", observationEvidence:"observed",
+          recording:peer.recording, source:"ccapi-event"};
+        await route.fulfill({status:200, contentType:"application/json", body:JSON.stringify(body)});
+      });
+    }
     page.setDefaultTimeout(15_000);
     const requests = [];
     const errors = [];
@@ -818,18 +840,56 @@ async function verifyRecordingReviewJourneys(browser, bridgeOrigin, simulatorOri
       await page.click("#video-mode-button");
     if (await page.locator("#mode-apply-button").isVisible()) await page.click("#mode-apply-button");
       await waitForSimulatorState(simulatorOrigin, (state) => state.movie_mode === "on", "recording journey movie mode");
+      const startResponse = page.waitForResponse(response => response.url().endsWith("/recording/start/outcome"));
       await page.click("#shutter-button");
+      assert.equal((await startResponse).status(), 200);
       await waitForSimulatorState(simulatorOrigin,
         (state) => state.recording && state.record_start_count === 1, "recording journey start");
+      await page.waitForFunction(() => !document.querySelector("#shutter-button").disabled);
       const beforeStop = requests.length;
+      const stopResponse = page.waitForResponse(response => response.url().endsWith("/recording/stop/outcome"));
       await page.click("#shutter-button");
+      const stopResult = await stopResponse;
+      assert.equal(stopResult.status(), 200);
+      const stopOutcome = await stopResult.json();
+      assert.equal(stopOutcome.responseEvidence, "response-received");
       await waitForSimulatorState(simulatorOrigin,
-        (state) => !state.recording && state.record_stop_count === 1, "recording journey confirmed stop");
+        (state) => !state.recording && state.record_stop_count === 1, "recording journey peer-applied stop");
+      if (observationProvider === "real-ccapi") {
+        const responseOnly = language === "en"
+          ? "Recording response received; current camera state unavailable. No video was selected."
+          : "已收到錄影命令回應，目前相機狀態未知，未自動挑選影片。";
+        assert.equal(stopOutcome.observation.observationEvidence, "unavailable");
+        assert.equal(stopOutcome.observation.recording, null);
+        await page.waitForFunction(text => document.querySelector("#operation-state")?.textContent === text, responseOnly);
+        assert.equal(await page.locator("#latest-media-label").innerText(), oldVideo);
+        assert.equal(await page.locator("#latest-media-retry").isHidden(), true);
+        assert.equal(requests.slice(beforeStop).some(request => request.pathname.endsWith("/media")), false,
+          "A real CCAPI Stop receipt must not start automatic stopped-video selection");
+        await uploadFixture(newVideo, videoBytes, "video/mp4");
+        const observationResponse = page.waitForResponse(response => response.url().endsWith("/recording/observation"));
+        await page.locator("#recording-lifecycle-history button").first().click();
+        const observed = await (await observationResponse).json();
+        assert.equal(observed.observationEvidence, "unavailable"); assert.equal(observed.recording, null);
+        await page.waitForFunction(() => !document.querySelector("#shutter-button").disabled);
+        assert.equal(await page.locator("#latest-media-label").innerText(), oldVideo,
+          "A newly uploaded clip cannot manufacture evidence that recording stopped");
+        assert.equal(requests.slice(beforeStop).some(request => request.pathname.endsWith("/media")), false);
+        assert.deepEqual(requests.filter(request => /\/recording\/(?:start|stop)\/outcome$/.test(request.pathname))
+          .map(request => request.pathname.split("/").at(-2)), ["start", "stop"]);
+        assert.deepEqual(errors, []);
+        fs.mkdirSync(RESULTS_DIR, {recursive:true});
+        await page.screenshot({path:path.join(RESULTS_DIR, `desktop-recording-response-only-${language}.png`)});
+        console.log(`PASS: real CCAPI receipt without fresh observation does not auto-select video: ${language}`);
+        continue;
+      }
+      assert.equal(stopOutcome.observation.observationEvidence, "observed");
+      assert.equal(stopOutcome.observation.recording, false);
       await waitForNotReady();
       assert.equal(await page.locator("#latest-media-label").innerText(), oldVideo,
         "A known old video cannot satisfy the stop review");
       const stopRequests = requests.slice(beforeStop);
-      const stopIndex = stopRequests.findIndex((request) => request.pathname.endsWith("/recording/stop"));
+      const stopIndex = stopRequests.findIndex((request) => request.pathname.endsWith("/recording/stop/outcome"));
       const listIndex = stopRequests.findIndex((request) => request.pathname.endsWith("/media"));
       assert.ok(stopIndex >= 0 && listIndex > stopIndex, "STOP must precede the review's bounded listing reads");
       assert.ok(stopRequests.filter((request) => request.pathname.endsWith("/media"))
@@ -910,12 +970,12 @@ async function verifyRecordingReviewJourneys(browser, bridgeOrigin, simulatorOri
       assert.equal(delivered.record_stop_count, 1);
       assert.equal(delivered.capture_count, 0);
       assert.deepEqual(delivered.canonical.shutter_af_requests, []);
-      assert.deepEqual(requests.filter((request) => /\/recording\/(?:start|stop)$/.test(request.pathname))
-        .map((request) => request.pathname.split("/").at(-1)), ["start", "stop"]);
+      assert.deepEqual(requests.filter((request) => /\/recording\/(?:start|stop)\/outcome$/.test(request.pathname))
+        .map((request) => request.pathname.split("/").at(-2)), ["start", "stop"]);
       assert.equal(requests.some((request) => request.method !== "GET" && request.pathname.includes("/capture/")), false);
       assert.deepEqual(errors, []);
       await page.screenshot({ path: path.join(RESULTS_DIR, `desktop-recording-review-original-${language}.png`) });
-      console.log(`PASS: synthetic PC recording stop, read-only video review, and exact original download: ${language}`);
+      console.log(`PASS: explicit fresh-event fixture admits read-only video review and exact original download: ${language}`);
     } catch (error) {
       scenarioError = error;
       throw error;

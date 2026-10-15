@@ -1,0 +1,2267 @@
+{
+  "version": 1,
+  "observations": [
+    {
+      "name": "observed-None-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": null,
+        "source": null
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-None-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": null,
+        "source": "ccapi-event"
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-None-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": null,
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-None-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": null,
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-False-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": false,
+        "source": null
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-False-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": false,
+        "source": "ccapi-event"
+      },
+      "valid": true
+    },
+    {
+      "name": "observed-False-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": false,
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-False-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": false,
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-True-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": true,
+        "source": null
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-True-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": true,
+        "source": "ccapi-event"
+      },
+      "valid": true
+    },
+    {
+      "name": "observed-True-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": true,
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-True-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": true,
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-0-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": 0,
+        "source": null
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-0-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": 0,
+        "source": "ccapi-event"
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-0-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": 0,
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-0-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": 0,
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-'false'-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": "false",
+        "source": null
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-'false'-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": "false",
+        "source": "ccapi-event"
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-'false'-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": "false",
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "observed-'false'-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "observed",
+        "recording": "false",
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-None-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "source": null
+      },
+      "valid": true
+    },
+    {
+      "name": "unavailable-None-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "source": "ccapi-event"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-None-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-None-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-False-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": false,
+        "source": null
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-False-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": false,
+        "source": "ccapi-event"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-False-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": false,
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-False-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": false,
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-True-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": true,
+        "source": null
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-True-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": true,
+        "source": "ccapi-event"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-True-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": true,
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-True-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": true,
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-0-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": 0,
+        "source": null
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-0-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": 0,
+        "source": "ccapi-event"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-0-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": 0,
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-0-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": 0,
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-'false'-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": "false",
+        "source": null
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-'false'-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": "false",
+        "source": "ccapi-event"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-'false'-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": "false",
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "unavailable-'false'-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "unavailable",
+        "recording": "false",
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-None-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": null,
+        "source": null
+      },
+      "valid": true
+    },
+    {
+      "name": "read-failed-None-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": null,
+        "source": "ccapi-event"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-None-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": null,
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-None-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": null,
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-False-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": false,
+        "source": null
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-False-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": false,
+        "source": "ccapi-event"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-False-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": false,
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-False-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": false,
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-True-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": true,
+        "source": null
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-True-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": true,
+        "source": "ccapi-event"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-True-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": true,
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-True-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": true,
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-0-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": 0,
+        "source": null
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-0-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": 0,
+        "source": "ccapi-event"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-0-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": 0,
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-0-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": 0,
+        "source": "unknown"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-'false'-None",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": "false",
+        "source": null
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-'false'-ccapi-event",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": "false",
+        "source": "ccapi-event"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-'false'-gphoto-config",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": "false",
+        "source": "gphoto-config"
+      },
+      "valid": false
+    },
+    {
+      "name": "read-failed-'false'-unknown",
+      "response": {
+        "version": 1,
+        "engine": "ccapi",
+        "observationEvidence": "read-failed",
+        "recording": "false",
+        "source": "unknown"
+      },
+      "valid": false
+    }
+  ],
+  "ownership": [
+    {
+      "name": "start-response-received-False-None",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-response-received-False-False",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-response-received-False-True",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-response-received-True-None",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-response-received-True-False",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-response-received-True-True",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-not-sent-False-None",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "not-sent",
+        "priorStopRequired": false,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-not-sent-False-False",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "not-sent",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-not-sent-False-True",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "not-sent",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-not-sent-True-None",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "not-sent",
+        "priorStopRequired": true,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-not-sent-True-False",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "not-sent",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-not-sent-True-True",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "not-sent",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-unconfirmed-False-None",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-unconfirmed-False-False",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-unconfirmed-False-True",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-unconfirmed-True-None",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-unconfirmed-True-False",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-unconfirmed-True-True",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-rejected-False-None",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "rejected",
+        "priorStopRequired": false,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-rejected-False-False",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "rejected",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-rejected-False-True",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "rejected",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-rejected-True-None",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "rejected",
+        "priorStopRequired": true,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-rejected-True-False",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "rejected",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "start-rejected-True-True",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "rejected",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-response-received-False-None",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-response-received-False-False",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": true,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-response-received-False-True",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-response-received-True-None",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-response-received-True-False",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": true,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-response-received-True-True",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-not-sent-False-None",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "not-sent",
+        "priorStopRequired": false,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-not-sent-False-False",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "not-sent",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": true,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-not-sent-False-True",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "not-sent",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-not-sent-True-None",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "not-sent",
+        "priorStopRequired": true,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-not-sent-True-False",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "not-sent",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": true,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-not-sent-True-True",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "not-sent",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-unconfirmed-False-None",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-unconfirmed-False-False",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": true,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-unconfirmed-False-True",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-unconfirmed-True-None",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-unconfirmed-True-False",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": true,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-unconfirmed-True-True",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-rejected-False-None",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "rejected",
+        "priorStopRequired": false,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-rejected-False-False",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "rejected",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": true,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-rejected-False-True",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "rejected",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-rejected-True-None",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "rejected",
+        "priorStopRequired": true,
+        "observationEvidence": "unavailable",
+        "recording": null,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-rejected-True-False",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "rejected",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": false,
+        "canReview": true,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "stop-rejected-True-True",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "rejected",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": true,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": true,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameOwner-start-False-response-received",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameOwner-start-False-unconfirmed",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameOwner-start-True-response-received",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameOwner-start-True-unconfirmed",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameOwner-stop-False-response-received",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameOwner-stop-False-unconfirmed",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameOwner-stop-True-response-received",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameOwner-stop-True-unconfirmed",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameAttempt-start-False-response-received",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameAttempt-start-False-unconfirmed",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameAttempt-start-True-response-received",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameAttempt-start-True-unconfirmed",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameAttempt-stop-False-response-received",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameAttempt-stop-False-unconfirmed",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameAttempt-stop-True-response-received",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "sameAttempt-stop-True-unconfirmed",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "cancelled-start-False-response-received",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "cancelled-start-False-unconfirmed",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "cancelled-start-True-response-received",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "cancelled-start-True-unconfirmed",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "cancelled-stop-False-response-received",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "cancelled-stop-False-unconfirmed",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "cancelled-stop-True-response-received",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "cancelled-stop-True-unconfirmed",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "retired-start-False-response-received",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "retired-start-False-unconfirmed",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "retired-start-True-response-received",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "retired-start-True-unconfirmed",
+      "input": {
+        "operation": "start",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "retired-stop-False-response-received",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "retired-stop-False-unconfirmed",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": false,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": false,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "retired-stop-True-response-received",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "response-received",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    },
+    {
+      "name": "retired-stop-True-unconfirmed",
+      "input": {
+        "operation": "stop",
+        "responseEvidence": "unconfirmed",
+        "priorStopRequired": true,
+        "observationEvidence": "observed",
+        "recording": false,
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true
+      },
+      "expected": {
+        "canPublish": false,
+        "stopRequired": true,
+        "canReview": false,
+        "retryStart": false
+      }
+    }
+  ]
+}

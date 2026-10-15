@@ -757,6 +757,24 @@ def create_app(
                               "This engine does not support held autofocus.")
         return session.stop_autofocus(payload.owner_id)
 
+    @router.get("/session/{session_id}/recording/observation")
+    def read_recording_observation(session_id: str, response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        session = manager.get(session_id)
+        reader = getattr(session, "read_recording_observation", None)
+        if not callable(reader):
+            raise unsupported("RECORDING_OBSERVATION", session.engine_name)
+        return reader()
+
+    @router.post("/session/{session_id}/recording/{operation}/outcome")
+    def perform_recording_outcome(session_id: str, operation: str, response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        session = manager.get(session_id)
+        performer = getattr(session, "perform_recording_outcome", None)
+        if not callable(performer):
+            raise unsupported("RECORDING_OUTCOME", session.engine_name)
+        return performer(operation)
+
     @router.post("/session/{session_id}/recording/start", response_model=CameraStatus)
     def start_recording(session_id: str) -> CameraStatus:
         return manager.get(session_id).start_recording()
