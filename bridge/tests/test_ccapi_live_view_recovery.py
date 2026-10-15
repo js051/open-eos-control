@@ -15,8 +15,9 @@ from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.models import LiveViewStartRequest
 from open_eos_bridge.rtp import RtpError
 
+from .liveview_jpeg_fixture import JPEG, OpenLiveViewStream
+
 PREFIX = "/ccapi/ver100/shooting/liveview"
-JPEG = b"\xff\xd8synthetic-live-view\xff\xd9"
 SDP = b"v=0\nm=video 12000 RTP/AVP 96\na=rtpmap:96 H264/90000\n"
 SOURCES = ("CCAPI_JPEG_POLLING", "CCAPI_MULTIPART", "CCAPI_RTP")
 
@@ -60,6 +61,8 @@ class LiveViewTransport:
         self.bad_frame = False
         self.unsupported_frame_size = False
         self.bad_stream = False
+        self.stream_frame = JPEG
+        self.stream_terminal = False
         self.stream_error: BaseException | None = None
         self.stream_close_status = 200
         self.stream_bodies: list[BytesIO] = []
@@ -119,9 +122,9 @@ class LiveViewTransport:
             return CcapiStreamResponse(503, {}, self.error_body)
         content = b"invalid" if self.bad_stream else (
             b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
-            + str(len(JPEG)).encode() + b"\r\n\r\n" + JPEG + b"\r\n--frame--\r\n"
+            + str(len(self.stream_frame)).encode() + b"\r\n\r\n" + self.stream_frame + b"\r\n"
         )
-        stream = BytesIO(content)
+        stream = BytesIO(content) if self.bad_stream or self.stream_terminal else OpenLiveViewStream(content)
         self.stream_bodies.append(stream)
         return CcapiStreamResponse(200, {"content-type": "multipart/x-mixed-replace; boundary=frame"}, stream)
 

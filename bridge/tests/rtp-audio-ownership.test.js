@@ -22,7 +22,7 @@ const realFunctions = [
   "featureSupported", "cancelEventLoop", "stopEventLoop", "mediaTransferActive",
   "cameraInteractionBusy", "beginCameraInteraction", "settingByKey", "isBulbMode",
   "captureModeFromCamera", "shutterReleaseUnconfirmed", "bulbControlLocked",
-  "localPreviewSelected", "previewActive", "changePreviewInput", "clampFps", "toggleLiveView", "startLiveView", "stopLiveView",
+  "localPreviewSelected", "previewActive", "changePreviewInput", "clampFps", "toggleLiveView", "startLiveView", "liveViewControlRequest", "stopLiveView",
   "stopLiveLoop", "changeLiveSource", "currentRtpAudioStatus", "refreshRtpAudioStatus",
   "renderRtpAudio", "toggleRtpAudio", "pollRtpAudio", "stopRtpAudioSources", "stopRtpAudio",
   "adoptCameraStatus", "liveViewStopRequired", "maintenanceStopRetryAvailable", "renderAvailability", "setOperationState",
@@ -65,7 +65,7 @@ function harness() {
     close() {this.closeCount += 1; return Promise.resolve();}
   }
   const sandbox = {
-    console, Headers, AbortController, Date, Set, Map, Number, Error, encodeURIComponent,
+    console, Headers, AbortController, Date, Set, Map, Number, Error, encodeURIComponent, setTimeout, clearTimeout,
     ui, window: {AudioContext: FakeAudioContext}, navigator: {mediaDevices: {}},
     localVideo: {supportState: () => ({available: true})},
     document: {querySelector: () => element(), querySelectorAll: () => []},

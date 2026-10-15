@@ -47,7 +47,7 @@ function fixture() {
   });
   const names = ["maintenanceHeld", "maintenancePaused", "maintenanceCurrent", "maintenancePublishable",
     "maintenanceSafetyClear", "maintenanceOtherBusy", "cancelMaintenance", "suspendMaintenanceForLifecycle", "maintenanceControlRequest", "maintenanceOwnedControl", "maintenanceStopRetryAvailable", "disconnectMaintenanceCamera", "runMaintenance", "maintenanceRead",
-    "recoverMaintenance", "restoreMaintenance", "adoptCameraStatus", "beginCameraInteraction", "refreshSession", "stopLiveView", "startLiveView", "toggleLiveView", "changeFps", "changeLiveSource", "changePreviewInput",
+    "recoverMaintenance", "restoreMaintenance", "adoptCameraStatus", "beginCameraInteraction", "refreshSession", "liveViewControlRequest", "stopLiveView", "startLiveView", "toggleLiveView", "changeFps", "changeLiveSource", "changePreviewInput",
     "sleepCamera", "cleanSensor"];
   if (/function liveViewStopRequired\(/.test(source)) names.push("liveViewStopRequired");
   context.captureConfiguration = { transfer: async (url, options) => ({ status: 200, body: await context.api(url, options) }) };
@@ -500,4 +500,37 @@ test('cancelling Close during required physical release cannot dispatch a later 
  const close=f.disconnectMaintenanceCamera(f.state.session,record);f.suspendMaintenanceForLifecycle();gate.resolve(false);await close;
  assert.equal(calls,1);assert.equal(f.requests.length,0);assert.equal(f.state.session,null);
  assert.match(f.ui.connectionError.textContent,/maintenanceRetireUnconfirmed/);
+});
+
+test("held AF failure does not suppress Live View Stop or overwrite its safety warning", async () => {
+  const f = fixture(); f.state.heldAutofocusOwner = { session: f.state.session };
+  f.stopHeldAutofocus = async () => { f.messages.push("AF release unconfirmed"); return false; };
+  const stop = f.stopLiveView(); await turns();
+  assert.equal(f.state.liveActive, false); assert.equal(f.requests.length, 1);
+  assert.match(f.requests[0].url, /liveview\/stop$/);
+  f.pending[0].resolve({ active: false, liveViewStopUnconfirmed: false });
+  assert.equal(await stop, true); assert.deepEqual(f.messages, ["AF release unconfirmed"]);
+  assert.ok(f.state.heldAutofocusOwner);
+});
+
+test("exception during held AF retirement still dispatches source Stop and retains AF duty", async () => {
+  const f = fixture(); f.state.heldAutofocusOwner = { session: f.state.session };
+  f.stopHeldAutofocus = async () => { throw Error("late AF start rejection"); };
+  const stop = f.stopLiveView(); await turns();
+  assert.match(f.requests[0].url, /liveview\/stop$/);
+  f.pending[0].resolve({ active: false, liveViewStopUnconfirmed: false });
+  assert.equal(await stop, true); assert.equal(f.state.heldAutofocusOwner.stopUnconfirmed, true);
+  assert.deepEqual(f.messages, ["heldAutofocusUnconfirmed"]);
+});
+
+test("repeated Stop inherits pending Start before any source Stop can dispatch", async () => {
+  const f = fixture(); f.state.liveActive = false;
+  const start = f.startLiveView(); const stopB = f.stopLiveView(); const stopC = f.stopLiveView();
+  await turns(); assert.equal(f.requests.length, 1);
+  assert.match(f.requests[0].url, /liveview\/start$/);
+  f.pending[0].resolve({ active: true, source: "CCAPI_RTP" }); await start; await turns();
+  assert.equal(await stopB, false); assert.equal(f.requests.length, 2);
+  assert.match(f.requests[1].url, /liveview\/stop$/); assert.equal(f.state.liveActive, false);
+  f.pending[1].resolve({ active: false, liveViewStopUnconfirmed: false });
+  assert.equal(await stopC, true); assert.equal(f.liveViewStopRequired(), false);
 });

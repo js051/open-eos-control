@@ -30,11 +30,11 @@ from open_eos_bridge.models import CameraFeature, CameraTemperatureStatus, FileN
 from open_eos_bridge.rtp import RtpAudioChunk, RtpError, RtpSessionDescription
 
 from .fakes import FakeRunner
+from .liveview_jpeg_fixture import JPEG, OpenLiveViewStream, with_comment
 
-JPEG = b"\xff\xd8open-eos-ccapi\xff\xd9"
 MEDIA = b"camera-media"
 RTP_JPEG = b"\xff\xd8ccapi-rtp\xff\xd9"
-LARGE_MULTIPART_JPEG = b"\xff\xd8" + (b"multipart-frame" * 5_000) + b"\xff\xd9"
+LARGE_MULTIPART_JPEG = with_comment(JPEG, 75000)
 RTP_SDP = """v=0
 m=video 12000 RTP/AVP 96
 a=rtpmap:96 H264/90000
@@ -754,12 +754,12 @@ class FakeCcapiTransport:
                 + str(len(self.multipart_frame)).encode()
                 + b"\n\n"
                 + self.multipart_frame
-                + b"\n--canon--\n"
+                + b"\n"
             )
             return CcapiStreamResponse(
                 200,
                 {"content-type": "multipart/x-mixed-replace;boundary=canon"},
-                BytesIO(multipart),
+                OpenLiveViewStream(multipart),
             )
         if path.endswith("IMG_0001.JPG"):
             return CcapiStreamResponse(

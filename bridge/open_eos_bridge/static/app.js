@@ -22,6 +22,7 @@
   const shootingSettings = globalThis.OpenEOSShootingSettings;
   const maintenanceLifecycle = globalThis.OpenEOSMaintenanceLifecycle;
   const recordingLifecycle = globalThis.OpenEOSRecordingLifecycle;
+  const liveViewLifecycle = globalThis.OpenEOSLiveViewLifecycle;
   if (!mediaUpload) throw new Error("Open EOS media upload module is unavailable.");
   const mediaListing = globalThis.OpenEOSMediaListing;
   if (!mediaListing) throw new Error("Open EOS media listing module is unavailable.");
@@ -385,6 +386,8 @@
       recordingStopped: "Recording stopped",
       liveViewStarted: "Live View started",
       liveViewStopped: "Live View stopped",
+      liveViewWaitingFrame: "Live View connected; waiting for a decoded frame",
+      liveViewFrameTimeout: "Live View frame timed out. Wait for source cleanup; retry Stop if needed.",
       focusMoved: "Focus moved {direction}",
       focusAccepted: "Focus point accepted",
       tapToFocus: "Select a point to focus",
@@ -1119,6 +1122,8 @@
       recordingStopped: "已停止錄影",
       liveViewStarted: "即時預覽已啟動",
       liveViewStopped: "即時預覽已停止",
+      liveViewWaitingFrame: "即時預覽已連線，等待解碼影格",
+      liveViewFrameTimeout: "即時預覽影格逾時。正在清理原來源；確認停止後再開始。",
       focusMoved: "焦點已向{direction}移動",
       focusAccepted: "已設定對焦點",
       tapToFocus: "點選畫面設定對焦點",
@@ -2252,6 +2257,8 @@
         code: typeof error.code === "string" ? error.code : "HTTP_ERROR", status: response.status,
       });
     }
+    // The frame reader bounds all response bodies, including HTTP errors.
+    if (responseType === "liveFrame") return response;
     if (!response.ok) {
       let detail = null;
       try {
@@ -5270,6 +5277,7 @@
   }
 
   function previewDimensions(element = activePreviewElement()) {
+    if (element === ui.liveImage && state.liveDecodedImage) element = state.liveDecodedImage;
     if (!element) return { width: 0, height: 0 };
     if (element === ui.localVideo) {
       return { width: element.videoWidth || 0, height: element.videoHeight || 0 };
@@ -5678,6 +5686,22 @@
     else await startLiveView();
   }
 
+  async function liveViewControlRequest(owner, path, { json = undefined, timeoutMs = 15000 } = {}) {
+    const controller = new AbortController();
+    owner.controlController = controller;
+    let timer;
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(t("liveViewStopUnconfirmed")));
+        controller.abort();
+      }, timeoutMs);
+    });
+    const request = api(path, { method: "POST", json, signal: controller.signal, redirect: "error", authToken: owner.token });
+    owner.controlPromise = Promise.race([request, deadline]);
+    try { return await owner.controlPromise; }
+    finally { clearTimeout(timer); if (owner.controlController === controller) owner.controlController = null; }
+  }
+
   async function startLiveView({ announce = true, maintenanceRestore = null } = {}) {
     const restoring = maintenanceRestore && state.maintenanceOwner === maintenanceRestore &&
       maintenanceRestore.mode === "restore" && maintenanceRestore.restoreAdmitted && maintenancePublishable(maintenanceRestore);
@@ -5686,7 +5710,7 @@
       !featureSupported(FEATURES.LIVE_VIEW)
     ) return;
     const session = state.session;
-    const owner = { session };
+    const owner = { session, token: state.token };
     if (restoring) { owner.stopUnconfirmed = true; owner.maintenanceRecord = maintenanceRestore.record; }
     state.liveViewStopRevision = (state.liveViewStopRevision || 0) + 1;
     state.liveViewStopOwner = owner;
@@ -5702,7 +5726,7 @@
       const payload = restoring ? { ...maintenanceRestore.record.resume } : { fps: clampFps(state.requestedFps),
         size: capabilities.defaultSize || capabilities.sizes?.[0] || "MEDIUM", source: state.liveSource || "AUTO" };
       const response = restoring ? await maintenanceControlRequest(maintenanceRestore, path, { payload }) :
-        await api(path, { method: "POST", json: payload });
+        await liveViewControlRequest(owner, path, { json: payload, timeoutMs: 60000 });
       if (!owns()) return;
       if (restoring && !maintenancePublishable(maintenanceRestore)) { owner.stopUnconfirmed = true; return; }
       if (restoring && (owner.maintenanceWarningRevision || 0) !== maintenanceWarningRevision) {
@@ -5717,6 +5741,8 @@
       state.requestedFps = response.requestedFps || clampFps(state.requestedFps);
       state.activeLiveSource = response.source || state.liveSource;
       state.liveActive = true;
+      owner.announceReady = announce;
+      state.liveViewFirstFramePending = true;
       state.livePollingSuspended = false;
       syncLiveMagnificationFromCapabilities();
       state.frameTimes = [];
@@ -5724,8 +5750,7 @@
       state.liveGeneration += 1;
       pollLiveView(state.liveGeneration);
       void refreshRtpAudioStatus();
-      setOperationState(t("liveViewStarted"));
-      if (announce) showToast(t("liveViewStarted"));
+      setOperationState(t("liveViewWaitingFrame"));
     } catch (error) {
       if (!owns()) return;
       owner.stopUnconfirmed = true;
@@ -5747,14 +5772,15 @@
   async function stopLiveView({ announce = true, remote = true, preserveError = false, maintenanceInvocation = null, maintenanceRecord = null } = {}) {
     const session = state.session;
     if (!session) return false;
-    if (remote && state.heldAutofocusOwner && !await stopHeldAutofocus({ automatic: true })) return false;
-    if (state.session !== session) return false;
     // Only the first Stop after a confirmed start can use the legacy active=false contract.
     const previous = state.liveViewStopOwner?.session === session ? state.liveViewStopOwner : null;
     const legacyStop = !previous?.stopUnconfirmed && (previous ? previous.confirmedStart === true : state.liveActive);
     // A Stop retires any earlier Start/Stop reply, even within this session.
     // Status adoption can still revoke this new owner's legacy eligibility while HTTP waits.
-    const owner = { session, confirmedStart: false, legacyStop, stopUnconfirmed: previous?.stopUnconfirmed === true };
+    const owner = { session, token: previous?.token ?? state.token, confirmedStart: false, legacyStop, stopUnconfirmed: previous?.stopUnconfirmed === true };
+    // Preserve the original in-flight dependency even when an intermediate Stop
+    // is itself still waiting and has not sent its own request yet.
+    owner.predecessorPromise = previous?.controlController ? previous.controlPromise : previous?.predecessorPromise;
     owner.maintenanceRecord = maintenanceInvocation?.record || maintenanceRecord || previous?.maintenanceRecord || null;
     if (owner.maintenanceRecord) owner.legacyStop = false;
     let maintenanceTimer = null;
@@ -5771,11 +5797,27 @@
     renderAvailability();
     let stopped = false;
     try {
+      if (owner.predecessorPromise) await owner.predecessorPromise.catch(() => {});
+      owner.predecessorPromise = null;
+      if (!owns()) return false;
+      // AF failure must not leave a dead Live View reader/remote source running.
+      // Both responsibilities remain visible and keep their original owners.
+      const autofocusOwner = state.heldAutofocusOwner;
+      if (autofocusOwner) {
+        try {
+          if (!await stopHeldAutofocus({ owner: autofocusOwner, automatic: true })) preserveError = true;
+        } catch (_) {
+          autofocusOwner.stopUnconfirmed = true;
+          if (owns() && state.heldAutofocusOwner === autofocusOwner) setOperationState(t("heldAutofocusUnconfirmed"), true);
+          preserveError = true;
+        }
+      }
+      if (!owns()) return false;
       const path = `/v1/session/${encodeURIComponent(session.id)}/liveview/stop`;
       const response = maintenanceInvocation ? await maintenanceControlRequest(maintenanceInvocation, path) :
         owner.maintenanceRecord ? await maintenanceOwnedControl(owner,
           `/v1/session/${encodeURIComponent(session.id)}/maintenance/control/liveview/stop`) :
-          await api(path, { method: "POST" });
+          await liveViewControlRequest(owner, path);
       if (!owns()) return false;
       if (owner.maintenanceRecord && (owner.maintenanceWarningRevision || 0) !== maintenanceWarningRevision) {
         throw new Error(t("liveViewStopUnconfirmed"));
@@ -5792,15 +5834,16 @@
       if (state.status) adoptCameraStatus({ ...state.status, liveViewStopUnconfirmed: false }, session, state.liveViewStopRevision);
       stopped = true;
       if (!preserveError) setOperationState(t("liveViewStopped"));
-      if (announce) showToast(t("liveViewStopped"));
+      if (announce && !preserveError) showToast(t("liveViewStopped"));
     } catch (error) {
       if (!owns()) return false;
       owner.stopUnconfirmed = true;
       owner.confirmedStart = false;
       owner.legacyStop = false;
-      const normalized = captureError(error);
+      owner.stopError = error instanceof Error ? error.message : String(error);
+      const normalized = preserveError ? error : captureError(error);
       if (!preserveError) setOperationState(normalized.message, true);
-      if (announce) showToast(normalized.message, true);
+      if (announce && !preserveError) showToast(normalized.message, true);
     } finally {
       if (maintenanceTimer !== null) clearTimeout(maintenanceTimer);
       if (state.session === session && (owns() || (stopped && !state.liveViewStopOwner))) {
@@ -5818,6 +5861,7 @@
     state.liveFrameAbortController = null;
     stopRtpAudio({ announce: false });
     state.liveActive = false;
+    state.liveViewFirstFramePending = false;
     state.livePollingSuspended = false;
     state.liveGeneration += 1;
     state.frameTimes = [];
@@ -5829,40 +5873,82 @@
     state.lastFrameAt = null;
     state.monitorAnalysisError = null;
     ui.liveImage.removeAttribute("src");
+    state.liveDecodedImage?.removeAttribute("src");
+    state.liveDecodedImage = null;
     releaseObjectUrl(state.liveObjectUrl);
     state.liveObjectUrl = null;
     clearMonitoringLayers();
     renderLiveState();
   }
 
+  async function readDecodedLiveFrame(session, controller, token) {
+    let url = null, staging = null, accepted = false, timer = null, timeoutFailure = null;
+    let rejectAborted;
+    const cancelled = new Promise((_, reject) => { rejectAborted = reject; });
+    const onAbort = () => rejectAborted(timeoutFailure || Object.assign(new Error("Live View frame cancelled"), { name: "AbortError" }));
+    controller.signal.addEventListener("abort", onAbort, { once: true });
+    timer = setTimeout(() => {
+      timeoutFailure = Object.assign(new Error(t("liveViewFrameTimeout")), { code: "LIVE_VIEW_FRAME_TIMEOUT" });
+      controller.abort();
+    }, 15000);
+    try {
+      if (controller.signal.aborted) onAbort();
+      const read = (async () => {
+        const response = await api(`/v1/session/${encodeURIComponent(session.id)}/liveview/frame`, {
+          responseType: "liveFrame", signal: controller.signal, redirect: "error", authToken: token,
+        });
+        const blob = await liveViewLifecycle.readFrame(response, { signal: controller.signal });
+        if (controller.signal.aborted) throw Object.assign(new Error("Live View frame cancelled"), { name: "AbortError" });
+        url = URL.createObjectURL(blob);
+        staging = new Image(); staging.src = url;
+        await staging.decode();
+        if (controller.signal.aborted) throw Object.assign(new Error("Live View frame cancelled"), { name: "AbortError" });
+        if (!(staging.naturalWidth > 0 && staging.naturalHeight > 0) ||
+            staging.naturalWidth * staging.naturalHeight > 64 * 1024 * 1024) throw new Error("Invalid decoded Live View dimensions");
+        return { blob, url, image: staging };
+      })();
+      const frame = await Promise.race([read, cancelled]);
+      accepted = true; return frame;
+    } finally {
+      clearTimeout(timer); controller.signal.removeEventListener("abort", onAbort);
+      if (!accepted) staging?.removeAttribute("src");
+      if (!accepted && url) releaseObjectUrl(url);
+    }
+  }
+
   async function pollLiveView(generation) {
-    while (
-      state.liveActive && !state.livePollingSuspended && !maintenancePaused() &&
-      generation === state.liveGeneration && state.session
-    ) {
+    const session = state.session;
+    const owner = state.liveViewStopOwner;
+    const current = () => state.session === session && state.liveViewStopOwner === owner &&
+      state.liveActive && !state.livePollingSuspended && !maintenancePaused() && generation === state.liveGeneration;
+    while (session && current()) {
       const started = performance.now();
       const controller = new AbortController();
       state.liveFrameAbortController = controller;
+      let decoded = null;
       try {
-        const blob = await api(`/v1/session/${encodeURIComponent(state.session.id)}/liveview/frame`, {
-          responseType: "blob",
-          signal: controller.signal,
-        });
-        if (!state.liveActive || state.livePollingSuspended || maintenancePaused() || generation !== state.liveGeneration) return;
-        const url = URL.createObjectURL(blob);
+        decoded = await readDecodedLiveFrame(session, controller, owner?.token);
+        const policy = liveViewLifecycle.evaluate({ sameOwner: state.session === session,
+          sameAttempt: state.liveViewStopOwner === owner && generation === state.liveGeneration,
+          cancelled: controller.signal.aborted || !current(), retired: false, foregroundRequired: false,
+          startAdmitted: true, startAcknowledged: owner?.confirmedStart === true,
+          stopEvidence: "pending", terminal: false, frameEvidence: "decoded-frame" });
+        if (!policy.canPublishDecoded || !current()) { decoded.image.removeAttribute("src"); releaseObjectUrl(decoded.url); return; }
         const previous = state.liveObjectUrl;
-        ui.liveImage.src = url;
-        await ui.liveImage.decode();
-        if (!state.liveActive || state.livePollingSuspended || maintenancePaused() || generation !== state.liveGeneration) {
-          if (previous) ui.liveImage.src = previous;
-          else ui.liveImage.removeAttribute("src");
-          releaseObjectUrl(url);
-          return;
-        }
-        state.liveObjectUrl = url;
+        const previousDecoded = state.liveDecodedImage;
+        // Decode into a private image first. An obsolete decode never mutates the shared image.
+        ui.liveImage.src = decoded.url;
+        state.liveObjectUrl = decoded.url;
+        state.liveDecodedImage = decoded.image;
         ui.liveImage.hidden = false;
         ui.viewfinderPlaceholder.hidden = true;
+        previousDecoded?.removeAttribute("src");
         releaseObjectUrl(previous);
+        if (state.liveViewFirstFramePending) {
+          state.liveViewFirstFramePending = false;
+          if (!cameraInteractionBusy()) setOperationState(t("liveViewStarted"));
+          if (owner?.announceReady) showToast(t("liveViewStarted"));
+        }
         renderMonitoringFrame();
         void pollCameraFocusInfo();
         const now = performance.now();
@@ -5872,12 +5958,13 @@
           const duration = state.frameTimes.at(-1) - state.frameTimes[0];
           state.observedFps = duration > 0 ? ((state.frameTimes.length - 1) * 1000) / duration : 0;
         }
-        state.frameBytes = blob.size;
-        state.frameContentType = blob.type || "image/jpeg";
+        state.frameBytes = decoded.blob.size;
+        state.frameContentType = decoded.blob.type || "image/jpeg";
         state.lastFrameAt = new Date().toISOString();
         renderFrameIndicator();
       } catch (error) {
-        if (controller.signal.aborted || !state.liveActive || generation !== state.liveGeneration) return;
+        if ((controller.signal.aborted && error?.code !== "LIVE_VIEW_FRAME_TIMEOUT") || !current()) return;
+        if (decoded?.url && state.liveObjectUrl !== decoded.url) releaseObjectUrl(decoded.url);
         const normalized = captureError(error);
         stopLiveLoop();
         setOperationState(normalized.message, true);
@@ -5897,6 +5984,8 @@
     cancelCameraFocusInfo();
     if (!state.liveActive) return;
     state.livePollingSuspended = true;
+    state.liveFrameAbortController?.abort();
+    state.liveFrameAbortController = null;
     state.liveGeneration += 1;
     state.frameTimes = [];
     state.observedFps = 0;
@@ -6183,13 +6272,13 @@
     const owner = {
       session: state.session, liveGeneration: state.liveGeneration,
       generation: state.focusInfoGeneration, controller: new AbortController(),
-      startedAt: now, width: ui.liveImage.naturalWidth, height: ui.liveImage.naturalHeight,
+      startedAt: now, width: (state.liveDecodedImage || ui.liveImage).naturalWidth, height: (state.liveDecodedImage || ui.liveImage).naturalHeight,
     };
     state.focusInfoRequest = owner;
     state.focusInfoNextAt = now + 250;
     const current = () => state.session === owner.session && state.liveGeneration === owner.liveGeneration &&
       state.focusInfoGeneration === owner.generation && cameraFocusInfoEligible() &&
-      ui.liveImage.naturalWidth === owner.width && ui.liveImage.naturalHeight === owner.height;
+      (state.liveDecodedImage || ui.liveImage).naturalWidth === owner.width && (state.liveDecodedImage || ui.liveImage).naturalHeight === owner.height;
     const timeout = window.setTimeout(() => { owner.controller.abort(); clearCameraFocusFrames(); }, 1000);
     try {
       const response = await api(`/v1/session/${encodeURIComponent(owner.session.id)}/liveview/focus-info`, {
@@ -6224,7 +6313,7 @@
     if (!rect || !cameraFocusInfoEligible() || state.session !== snapshot.session ||
         state.liveGeneration !== snapshot.liveGeneration || state.focusInfoGeneration !== snapshot.generation ||
         performance.now() - snapshot.startedAt >= 1000 ||
-        ui.liveImage.naturalWidth !== snapshot.width || ui.liveImage.naturalHeight !== snapshot.height) {
+        (state.liveDecodedImage || ui.liveImage).naturalWidth !== snapshot.width || (state.liveDecodedImage || ui.liveImage).naturalHeight !== snapshot.height) {
       clearCameraFocusFrames();
       return;
     }
@@ -6280,7 +6369,9 @@
   }
 
   function renderMonitoringFrame() {
-    const media = activePreviewElement();
+    const display = activePreviewElement();
+    // Pixels come from the fully decoded private image, never a pending DOM src.
+    const media = display === ui.liveImage && state.liveDecodedImage ? state.liveDecodedImage : display;
     const sourceDimensions = previewDimensions(media);
     const rect = applyLiveViewLayout();
     if (!rect) {
