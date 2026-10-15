@@ -19,7 +19,8 @@ under test. The same bytes are consumed by PC, Android, and iOS tests.
   display-byte tolerance. Do not quantize samples or nodes to make CPU tests pass.
 - `inputRgb8` is optional. Where present, `inputRgb` equals those bytes divided
   by 255; `expectedRgb8` is the fixed final, clamped, nearest-rounded output.
-  Exact half values round upward. The half-rounding test uses binary-exact 0.5.
+  Exact half values round upward. The half-rounding test uses binary-exact 0.5;
+  additional fractional-byte cases use binary-exact 0.125, 0.375, and 0.875.
   Decimal 0.9 is deliberately not used as a tie: its Float32 representation is
   slightly smaller, and double versus float multiplication by 255 can straddle
   a half-byte boundary. Do not hide a transfer-function error with a wide tolerance.
@@ -52,6 +53,9 @@ These are grid interpolations, not direct evaluation of a continuous quadratic.
 
 ## Verification boundaries
 
+Platform filenames below refer to their respective development branches; shared
+fixture is not combined-tree evidence.
+
 - PC: `node bridge/tests/lut.test.js` runs the real production parser and CPU
   sampler and checks all vectors. `npm run test:modules` in `bridge` includes it.
   CPU final-byte checks are not WebGL framebuffer execution evidence.
@@ -66,8 +70,8 @@ These are grid interpolations, not direct evaluation of a continuous quadratic.
 - iOS consumes this identical contract in its platform tests. Core Image or
   native GPU execution must be reported separately from CPU/source checks.
 
-When only the already-installed pinned Kotlin tools are available,
-`python scripts/validation/run_lut_numeric_jvm.py --jvm-tools <existing-tools>
+On the Android development branch only, when the already-installed pinned
+Kotlin tools are available, `python scripts/validation/run_lut_numeric_jvm.py --jvm-tools <existing-tools>
 --output <local-evidence-dir>` runs the unchanged numeric JUnit body with a
 Python-generated **data-only** provider copied from this JSON. It never computes
 expected outputs or downloads dependencies. Its result explicitly excludes the
