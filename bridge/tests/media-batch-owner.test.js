@@ -80,10 +80,15 @@ function fixture(options = {}) {
     const configured = historyPlan[operation] || {};
     const operationIndex = calls.history.filter(entry => entry.operation === operation).length - 1;
     const plan = Array.isArray(configured) ? configured[operationIndex] || {} : configured;
+    // Model a committed storage transaction whose acknowledgement has not yet
+    // reached the caller, separately from a transaction waiting to commit.
+    if (plan.commitBeforeReply) {
+      call.result = Object.hasOwn(plan, "result") ? plan.result : defaultResult();
+    }
     plan.entered?.resolve();
     if (plan.gate) await plan.gate.promise;
     if (plan.error) throw plan.error;
-    call.result = Object.hasOwn(plan, "result") ? plan.result : defaultResult();
+    if (!plan.commitBeforeReply) call.result = Object.hasOwn(plan, "result") ? plan.result : defaultResult();
     return call.result;
   }
   const mediaHistoryStore = {
@@ -1145,6 +1150,71 @@ function continuationOptions(c, items = [c.items[0]]) {
     continuation: { epoch: 0, acknowledgeUnknown: true, rows: items.map((item, index) => ({
       batchId: "old-batch", rowId: `old-row-${index}`, filename: item.name,
     })) } };
+}
+
+for (const retirement of ["cancel", "disconnect", "replace-session"]) {
+  test(`saved original survives ${retirement} during a committed second admission and explicit continuation skips it`, async () => {
+    const gate = deferred(), admitted = deferred();
+    const c = fixture({ planned: true, count: 3, history: {
+      beginPlannedAttempt: [{}, { gate, entered: admitted, commitBeforeReply: true }],
+    } });
+    const pending = c.downloadSelectedMedia();
+    await admitted.promise;
+    const originalPlan = c.historyPlans.get(c.historyTicket.batchId);
+    const firstReceipt = Array.from(c.historyRows.values()).find(row => row.receiptId === originalPlan.rows[0].rowId);
+    const firstReceiptSnapshot = { ...firstReceipt };
+    assert.equal(firstReceipt.outcome, "completed");
+    assert.equal(c.calls.requests.length, 1);
+    assert.equal(c.calls.raw[0].closes, 1);
+    assert.equal(c.calls.raw[0].aborts, 0);
+    assert.equal(Array.from(c.historyRows.values()).find(row => row.receiptId === originalPlan.rows[1].rowId).outcome, "in-progress",
+      "second receipt is already committed while its acknowledgement is held");
+    const replacementSession = { id: c.state.session.id };
+    const replacementOwner = { session: replacementSession, controller: new AbortController() };
+    const replacementBatch = { newBatch: true };
+    if (retirement === "cancel") c.cancelMediaBatch();
+    else if (retirement === "disconnect") c.resetSession();
+    else {
+      c.state.session = replacementSession;
+      c.state.mediaBatchOwner = replacementOwner;
+      c.state.mediaBatch = replacementBatch;
+    }
+    gate.resolve();
+    await pending;
+    assert.equal(c.calls.requests.length, 1, "retired B and queued C have no original GET");
+    assert.equal(c.calls.raw.length, 1, "no destination was opened for the retired admission");
+    assert.deepEqual(firstReceipt, firstReceiptSnapshot, "completed receipt remains byte-for-byte unchanged");
+    const secondReceipt = Array.from(c.historyRows.values()).find(row => row.receiptId === originalPlan.rows[1].rowId);
+    assert.equal(secondReceipt.outcome, "cancelled-or-unknown");
+    assert.equal(secondReceipt.outcomeUnknown, false);
+    assert.equal(secondReceipt.mayRemain, false);
+    assert.ok(!Array.from(c.historyRows.values()).some(row => row.receiptId === originalPlan.rows[2].rowId));
+    if (retirement === "replace-session") {
+      assert.equal(c.state.mediaBatchOwner, replacementOwner);
+      assert.equal(c.state.mediaBatch, replacementBatch, "old reply cannot replace the new owner's UI");
+    }
+
+    // A new user action explicitly maps only B/C to fresh current-session
+    // objects. The fake store scripts admission; its lineage/epoch validation
+    // remains covered by media-transfer-history.test.js, not by this adapter.
+    c.state.session = replacementSession;
+    c.state.mediaBatchOwner = null;
+    c.state.mediaBatch = null;
+    c.state.media = c.items.map(item => ({ ...item }));
+    const remaining = c.state.media.slice(1);
+    await c.downloadSelectedMedia({ session: replacementSession, items: remaining,
+      continuation: { epoch: 0, acknowledgeUnknown: true, rows: remaining.map((item, index) => ({
+        batchId: originalPlan.batchId, rowId: originalPlan.rows[index + 1].rowId, filename: item.name,
+      })) } });
+    assert.deepEqual(c.calls.requests.map(call => decodeURIComponent(call.url.split("/media/")[1])), c.items.map(item => item.id));
+    assert.equal(historyCalls(c, "beginContinuationBatch").length, 1);
+    assert.equal(historyCalls(c, "beginContinuationBatch")[0].args[0].acknowledgeUnknown, true,
+      "the explicit user acknowledgement required by the real store and chooser is preserved");
+    assert.deepEqual(statuses(c), ["completed", "completed"]);
+    assert.deepEqual(firstReceipt, firstReceiptSnapshot);
+    assert.equal(c.calls.raw[0].closes, 1);
+    assert.equal(c.calls.raw[0].aborts, 0);
+  });
 }
 
 test("continuation chooser is synchronous, durable admission precedes originals and closes persist new results", async () => {
