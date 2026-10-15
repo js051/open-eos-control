@@ -153,6 +153,53 @@ final class RTPEventDeliveryOwnershipTests: XCTestCase {
         XCTAssertFalse(fixture.controller.accepts(current))
     }
 
+    func testMagnificationRetiresQueuedVideoAndPreservesAudioSessionOwner() async throws {
+        let fixture = RTPVideoFixture()
+        addTeardownBlock { await fixture.cleanup() }
+        _ = try await fixture.session()
+        let delivery = try XCTUnwrap(fixture.deliveries.last)
+        let before = fixture.controller.currentVideoGeometryRevision()
+        fixture.submit(timestamp: 1, owner: delivery.owner, geometryRevision: before)
+        let pause = fixture.controller.beginMagnificationChange()
+        XCTAssertTrue(fixture.controller.accepts(delivery), "Zoom must not retire the camera/audio session")
+        XCTAssertFalse(fixture.controller.hasCurrentCoordinateOutput)
+        fixture.submit(timestamp: 2, owner: delivery.owner, geometryRevision: before)
+        let during = fixture.controller.currentVideoGeometryRevision()
+        fixture.submit(timestamp: 3, owner: delivery.owner, geometryRevision: during)
+        fixture.controller.finishMagnificationChange(pause)
+        fixture.submit(timestamp: 4, owner: delivery.owner, geometryRevision: before)
+        fixture.submit(timestamp: 5, owner: delivery.owner, geometryRevision: during)
+        let after = fixture.controller.currentVideoGeometryRevision()
+        XCTAssertNotEqual(before, during); XCTAssertNotEqual(during, after)
+        fixture.submit(timestamp: 6, owner: delivery.owner, geometryRevision: after)
+        XCTAssertEqual(fixture.rendered.timestamps, [1, 6], "Queued pre/during-change AUs keep their captured revision")
+        XCTAssertFalse(fixture.controller.hasCurrentCoordinateOutput,
+                       "The controlled consumer is not real decoded/submitted output")
+    }
+
+    func testOldMagnificationFinishCannotReleaseNewPauseOrResetReplacementOwner() async throws {
+        let fixture = RTPVideoFixture()
+        addTeardownBlock { await fixture.cleanup() }
+        _ = try await fixture.session()
+        let first = try XCTUnwrap(fixture.deliveries.last)
+        let old = fixture.controller.beginMagnificationChange()
+        let current = fixture.controller.beginMagnificationChange()
+        fixture.controller.finishMagnificationChange(old)
+        fixture.submit(timestamp: 1, owner: first.owner)
+        XCTAssertTrue(fixture.rendered.timestamps.isEmpty)
+        fixture.controller.finishMagnificationChange(current)
+        fixture.submit(timestamp: 2, owner: first.owner)
+        let retired = fixture.controller.beginMagnificationChange()
+        _ = try await fixture.session()
+        let replacement = try XCTUnwrap(fixture.deliveries.last)
+        let revision = fixture.controller.currentVideoGeometryRevision()
+        fixture.controller.finishMagnificationChange(retired)
+        XCTAssertEqual(fixture.controller.currentVideoGeometryRevision(), revision,
+                       "A late old zoom completion may not reset the new owner's output")
+        fixture.submit(timestamp: 3, owner: replacement.owner, geometryRevision: revision)
+        XCTAssertEqual(fixture.rendered.timestamps, [2, 3])
+    }
+
 }
 
 @MainActor
@@ -286,10 +333,11 @@ private final class RTPVideoFixture {
         return session
     }
 
-    func submit(timestamp: UInt32, owner: UUID) {
+    func submit(timestamp: UInt32, owner: UUID, geometryRevision: UUID? = nil) {
         let frame = CCAPIH264AccessUnit(nalUnits: [Data([0x65, 0x01])], rtpTimestamp: timestamp,
                                        keyFrame: true, sequenceParameterSet: nil, pictureParameterSet: nil)
-        controller.enqueue(frame, sequenceParameterSet: nil, pictureParameterSet: nil, sessionID: owner)
+        controller.enqueue(frame, sequenceParameterSet: nil, pictureParameterSet: nil, sessionID: owner,
+                           geometryRevision: geometryRevision)
     }
 
     func cleanup() async {

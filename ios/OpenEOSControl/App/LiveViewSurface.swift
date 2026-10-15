@@ -311,7 +311,8 @@ private struct LiveViewSurfaceContent: View {
     }
 
     private var liveViewTapAvailable: Bool {
-        switch camera.effectiveLiveViewTapAction {
+        guard camera.liveViewCoordinateControlsReady else { return false }
+        return switch camera.effectiveLiveViewTapAction {
         case .focus: !camera.isBusy(.focus)
         case .whiteBalance: !camera.isBusy(.setting)
         case nil: false

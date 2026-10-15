@@ -436,6 +436,14 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     private var pendingMultipartFrame: Data?
     private var nativeGeometryCacheKey: Int64 = 0
     private var latestLiveViewGeometry: CCAPILiveViewGeometry?
+    private struct LiveViewGeometryOwner {
+        let session: UUID?
+        let source: LiveViewSource?
+        let revision: UUID
+    }
+    private var liveViewGeometryRevision = UUID()
+    private var liveViewMagnificationAttempt: UUID?
+    private var liveViewMagnificationOwner: LiveViewGeometryOwner?
     private var simulatorEventSequence: Int64 = 0
     private var liveViewMagnifications: [LiveViewMagnification] = []
     private var currentLiveViewMagnification: LiveViewMagnification?
@@ -2319,11 +2327,14 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         guard !closing, resolvedMode == .camera, activeLiveViewSource != nil,
               let operation = detailedLiveViewOperation() else { return nil }
         let liveViewOwner = pendingLiveViewStop?.id
+        let geometryOwner = liveViewGeometryOwner
+        guard liveViewGeometryIsCurrent(geometryOwner) else { return nil }
         var read = try request(path: operation.path + "?kind=info", method: .get, timeoutInterval: 2)
         read.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
         read.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         let data = try await CameraFocusMetadata.boundedRead(read, transport: transport)
         guard !closing, activeLiveViewSource != nil, pendingLiveViewStop?.id == liveViewOwner else { return nil }
+        guard liveViewGeometryIsCurrent(geometryOwner) else { return nil }
         return try CameraFocusMetadata.canonPacket(data)
     }
 
@@ -2371,6 +2382,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     public func tapFocus(x: Double, y: Double) async throws -> FocusResult {
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
+        let geometryOwner = liveViewGeometryOwner
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let value = try await requestJSON(path: "/ccapi/focus/tap", method: .post, json: ["x": x, "y": y])
@@ -2388,11 +2400,10 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         guard supportsCoordinateTapFocus() else {
             throw CCAPIError.unsupported(.tapFocus)
         }
-        try await ensureLiveViewGeometryForNativeStream()
+        try await ensureLiveViewGeometryForNativeStream(owner: geometryOwner)
         let position = try cameraLiveViewPosition(x: x, y: y, feature: .tapFocus)
-        try await commandOK(
-            operation: operation,
-            json: ["positionx": position.x, "positiony": position.y]
+        try await sendCoordinateCommand(
+            operation: operation, position: position, owner: geometryOwner
         )
         observedFeatures.insert(.tapFocus)
         return FocusResult(accepted: true, x: x, y: y)
@@ -2401,6 +2412,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     public func clickWhiteBalance(x: Double, y: Double) async throws -> CameraStatus {
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
+        let geometryOwner = liveViewGeometryOwner
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let status = try parseSimulatorStatus(await requestJSON(
@@ -2414,14 +2426,15 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         guard let operation = clickWhiteBalanceOperation(), supportsCoordinateClickWhiteBalance() else {
             throw CCAPIError.unsupported(.clickWhiteBalance)
         }
-        try await ensureLiveViewGeometryForNativeStream()
+        try await ensureLiveViewGeometryForNativeStream(owner: geometryOwner)
         let position = try cameraLiveViewPosition(x: x, y: y, feature: .clickWhiteBalance)
-        try await commandOK(
-            operation: operation,
-            json: ["positionx": position.x, "positiony": position.y]
+        try await sendCoordinateCommand(
+            operation: operation, position: position, owner: geometryOwner
         )
         observedFeatures.insert(.clickWhiteBalance)
-        return try await status()
+        let status = try await status()
+        try requireLiveViewGeometryOwner(geometryOwner)
+        return status
     }
 
     public func driveFocus(
@@ -2911,12 +2924,37 @@ public actor CCAPIClient: CameraForegroundMediaReading {
               cachedSettings?.object(Self.movieModeSettingKey)?.string("value") != "on" else {
             throw CCAPIError.invalidResponse("Canon Live View magnification is unavailable in Movie mode or while recording.")
         }
+        guard !liveViewMagnificationIsCurrent else {
+            throw CCAPIError.invalidResponse("Canon Live View magnification is already changing.")
+        }
+        // Admission revokes old crop coordinates before PUT, including uncertain
+        // outcomes. Acknowledgement/readback is never a replacement geometry sample.
+        invalidateLiveViewGeometry()
+        let owner = liveViewGeometryOwner, attempt = UUID()
+        liveViewMagnificationAttempt = attempt
+        liveViewMagnificationOwner = owner
+        defer {
+            if liveViewMagnificationAttempt == attempt {
+                // Also discard reads/frames admitted while PUT/readback was in flight.
+                // A retired attempt cannot clear a replacement session's geometry.
+                if liveViewGeometryIsCurrent(owner, allowMagnification: true) {
+                    invalidateLiveViewGeometry()
+                }
+                liveViewMagnificationAttempt = nil
+                liveViewMagnificationOwner = nil
+            }
+        }
+        currentLiveViewMagnification = nil
+        try requireLiveViewGeometryOwner(owner, allowMagnification: true)
         try await requestOK(
             path: operations.write.path,
             method: .put,
             json: ["value": String(magnification.rawValue)]
         )
-        guard let readback = try await firstJSON(paths: [operations.read.path], required: true),
+        try requireLiveViewGeometryOwner(owner, allowMagnification: true)
+        let readback = try await firstJSON(paths: [operations.read.path], required: true)
+        try requireLiveViewGeometryOwner(owner, allowMagnification: true)
+        guard let readback,
               let setting = Self.validatedLiveViewMagnificationSetting(readback),
               setting.current == magnification else {
             throw CCAPIError.invalidResponse(
@@ -2930,7 +2968,9 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     }
 
     public func liveViewFrame(cacheKey: Int64) async throws -> LiveViewFrame {
+        let geometryOwner = liveViewGeometryOwner
         try await ensureInitialized()
+        try requireLiveViewGeometryOwner(geometryOwner)
         let owner = pendingLiveViewStop?.id
         if activeLiveViewSource == .ccapiJPEGPolling, let first = pendingJPEGFrame {
             pendingJPEGFrame = nil
@@ -2947,7 +2987,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             } else {
                 frame = try await multipartSession.nextFrame()
             }
-            try Task.checkCancellation()
+            try requireLiveViewGeometryOwner(geometryOwner)
             guard pendingLiveViewStop?.id == owner, activeLiveViewSource == .ccapiMultipart else { throw CancellationError() }
             try multipartSession.checkUsable()
             try validateLiveViewJPEG(frame)
@@ -3002,6 +3042,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     }
 
     private func readJPEGLiveViewFrame(cacheKey: Int64, owner: UUID?, allowSizeFallback: Bool, maintenance: Bool = false) async throws -> LiveViewFrame {
+        let geometryOwner = liveViewGeometryOwner
         let paths: [String]
         if resolvedMode == .simulator {
             paths = ["/ccapi/liveview/frame"]
@@ -3017,7 +3058,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         for attempt in 0...attempts {
             var transientBusy = false
             for path in framePaths {
-                try Task.checkCancellation()
+                try requireLiveViewGeometryOwner(geometryOwner)
                 let sourceURL = try URLForPath(path, cacheKey: cacheKey)
                 var request = request(url: sourceURL, method: .get, timeoutInterval: 5)
                 request.setValue("multipart/x-mixed-replace,image/jpeg,image/*,*/*", forHTTPHeaderField: "Accept")
@@ -3041,7 +3082,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                             throw CCAPIError.invalidResponse("Maintenance Live View requires one complete HTTP 200 image response.")
                         }
                     }
-                    try Task.checkCancellation()
+                    try requireLiveViewGeometryOwner(geometryOwner)
                     guard pendingLiveViewStop?.id == owner else { throw CancellationError() }
                     try validate(response, request: request)
                     guard response.statusCode == 200, response.header("content-range") == nil else {
@@ -3052,11 +3093,10 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                         throw CCAPIError.invalidResponse("Live View returned \(contentType ?? "text") instead of image bytes.")
                     }
                     let frame: Data
+                    var geometry: CCAPILiveViewGeometry?
                     if isDetailedFrame {
                         let detailed = try Self.parseDetailedLiveView(response.body)
-                        if let geometry = detailed.geometry {
-                            latestLiveViewGeometry = geometry
-                        }
+                        geometry = detailed.geometry
                         guard let image = detailed.image else {
                             throw CCAPIError.invalidResponse(
                                 "Detailed Live View response did not contain an image packet."
@@ -3067,6 +3107,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                         frame = try JPEGFrameParser.validatedImageData(response.body, contentType: contentType)
                     }
                     try validateLiveViewJPEG(frame)
+                    if let geometry { latestLiveViewGeometry = geometry }
                     observedFeatures.formUnion([.liveView, .liveViewJPEGPolling])
                     return LiveViewFrame(data: frame, contentType: contentType, sourceURL: sourceURL)
                 } catch {
@@ -4284,7 +4325,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             offset = dataEnd + 2
         }
 
-        guard foundPacket else {
+        guard foundPacket, offset == bytes.count else {
             throw CCAPIError.invalidResponse(
                 "Detailed Live View response did not contain a valid Canon packet."
             )
@@ -4299,17 +4340,17 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         func find(_ node: Any) -> CCAPILiveViewGeometry? {
             guard let object = node as? [String: Any] else { return nil }
             if let image = object["image"] as? [String: Any],
-               let x = image["positionx"] as? NSNumber,
-               let y = image["positiony"] as? NSNumber,
-               let width = image["positionwidth"] as? NSNumber,
-               let height = image["positionheight"] as? NSNumber,
-               width.intValue > 0,
-               height.intValue > 0 {
+               let x = strictInteger(image["positionx"]), x >= 0,
+               let y = strictInteger(image["positiony"]), y >= 0,
+               let width = strictInteger(image["positionwidth"]), width > 0,
+               let height = strictInteger(image["positionheight"]), height > 0,
+               width <= Int(Int32.max), height <= Int(Int32.max),
+               x <= Int(Int32.max) - width, y <= Int(Int32.max) - height {
                 return CCAPILiveViewGeometry(
-                    positionX: x.intValue,
-                    positionY: y.intValue,
-                    positionWidth: width.intValue,
-                    positionHeight: height.intValue
+                    positionX: x,
+                    positionY: y,
+                    positionWidth: width,
+                    positionHeight: height
                 )
             }
             for child in object.values {
@@ -4319,6 +4360,38 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         }
 
         return find(root)
+    }
+
+    private var liveViewGeometryOwner: LiveViewGeometryOwner {
+        LiveViewGeometryOwner(session: pendingLiveViewStop?.id, source: activeLiveViewSource,
+                              revision: liveViewGeometryRevision)
+    }
+
+    private var liveViewMagnificationIsCurrent: Bool {
+        guard liveViewMagnificationAttempt != nil, let owner = liveViewMagnificationOwner else { return false }
+        return owner.session == pendingLiveViewStop?.id && owner.source == activeLiveViewSource
+            && owner.revision == liveViewGeometryRevision
+    }
+
+    private func liveViewGeometryIsCurrent(_ owner: LiveViewGeometryOwner, allowMagnification: Bool = false) -> Bool {
+        !closing && owner.session == pendingLiveViewStop?.id && owner.source == activeLiveViewSource
+            && owner.revision == liveViewGeometryRevision
+            && (allowMagnification || !liveViewMagnificationIsCurrent)
+    }
+
+    private func invalidateLiveViewGeometry() {
+        liveViewGeometryRevision = UUID()
+        latestLiveViewGeometry = nil
+        pendingJPEGFrame = nil
+        pendingMultipartFrame = nil
+        multipartSession?.discardPendingFrame()
+    }
+
+    private func requireLiveViewGeometryOwner(_ owner: LiveViewGeometryOwner, allowMagnification: Bool = false) throws {
+        try Task.checkCancellation()
+        guard liveViewGeometryIsCurrent(owner, allowMagnification: allowMagnification) else {
+            throw CancellationError()
+        }
     }
 
     private func cameraLiveViewPosition(
@@ -4337,7 +4410,20 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         return geometry.cameraPosition(normalizedX: x, normalizedY: y)
     }
 
-    private func ensureLiveViewGeometryForNativeStream() async throws {
+    private func sendCoordinateCommand(
+        operation: CCAPIOperation, position: (x: Int, y: Int), owner: LiveViewGeometryOwner
+    ) async throws {
+        let command = try request(path: operation.path, method: operation.method,
+                                  json: ["positionx": position.x, "positiony": position.y])
+        // No asynchronous preflight may separate the final owner check from send.
+        try requireLiveViewGeometryOwner(owner)
+        let response = try await transport.send(command)
+        try requireLiveViewGeometryOwner(owner)
+        try validate(response, request: command)
+    }
+
+    private func ensureLiveViewGeometryForNativeStream(owner: LiveViewGeometryOwner) async throws {
+        try requireLiveViewGeometryOwner(owner)
         guard latestLiveViewGeometry == nil,
               activeLiveViewSource == .ccapiRTP || activeLiveViewSource == .ccapiMultipart else { return }
         guard let detail = detailedLiveViewOperation() else {
@@ -4348,11 +4434,17 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         let cacheKey = nativeGeometryCacheKey
         nativeGeometryCacheKey &+= 1
         let sourceURL = try URLForPath("\(detail.path)?kind=both", cacheKey: cacheKey)
-        var request = request(url: sourceURL, method: .get)
+        var request = request(url: sourceURL, method: .get, timeoutInterval: 5)
         request.setValue("application/octet-stream,*/*", forHTTPHeaderField: "Accept")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        let response = try await transport.send(request)
+        let response = try await transport.sendLiveViewFrame(request)
+        try requireLiveViewGeometryOwner(owner)
+        try CameraHTTPResponseIntegrity.validate(response, requestMethod: "GET")
         try validate(response, request: request)
+        guard response.statusCode == 200, response.header("content-range") == nil,
+              response.body.count <= CCAPIMultipartLiveView.maximumFrameBytes else {
+            throw CCAPIError.invalidResponse("Coordinate geometry requires a complete bounded Live View response.")
+        }
         let detailed = try Self.parseDetailedLiveView(response.body)
         guard let geometry = detailed.geometry else {
             throw CCAPIError.invalidResponse(

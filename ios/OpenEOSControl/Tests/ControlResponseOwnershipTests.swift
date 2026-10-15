@@ -1,6 +1,7 @@
 import Foundation
 import OpenEOSCore
 import XCTest
+import UIKit
 
 @testable import OpenEOSControl
 
@@ -717,6 +718,82 @@ final class ControlResponseOwnershipTests: XCTestCase {
         XCTAssertNil(state.lastError)
     }
 
+    func testMagnificationRetiresVisibleFrameUntilFreshReaderAndBlocksCoordinates() async throws {
+        for bridge in [false, true] {
+            for fails in [false, true] {
+                let peer = ControlOwnerPeer(owner: "zoom"), state = makeState([peer], bridge: bridge)
+                defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+                func jpeg(_ color: UIColor) throws -> Data {
+                    let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 3)).image { context in
+                        color.setFill(); context.fill(CGRect(x: 0, y: 0, width: 4, height: 3))
+                    }
+                    return try XCTUnwrap(image.jpegData(compressionQuality: 1))
+                }
+                let oldImage = try jpeg(.red), newImage = try jpeg(.blue)
+                await peer.setFrame(oldImage)
+                try await connectAndPrepare(state)
+                await state.setAutoRefresh(true)
+                try await waitForImage(oldImage, state: state)
+                await peer.enqueue(.frame, gate: "old-frame")
+                try await waitForGate("old-frame", peer: peer)
+                await peer.enqueue(.magnification, gate: "zoom", error: fails ? .networkConnectionLost : nil)
+                let zoom = Task { await state.setLiveViewMagnification(.x5) }
+                try await waitForGate("zoom", peer: peer)
+                XCTAssertNil(state.liveViewData); XCTAssertNil(state.lastFrameAt)
+                XCTAssertFalse(state.liveViewCoordinateControlsReady)
+                await state.tapFocus(x: 0.2, y: 0.3); await state.clickWhiteBalance(x: 0.2, y: 0.3)
+                let blockedTap = await peer.count(.tap), blockedWB = await peer.count(.whiteBalance)
+                XCTAssertEqual(blockedTap, 0); XCTAssertEqual(blockedWB, 0)
+                await state.setAutoRefresh(false); await state.setAutoRefresh(true)
+                XCTAssertNotNil(state.activeLiveViewSource, "Toggling refresh during zoom must not start an invalid reader")
+                await peer.setFrame(newImage); await peer.enqueue(.frame, gate: "new-frame")
+                await peer.release("zoom"); await zoom.value
+                try await waitForGate("new-frame", peer: peer)
+                await peer.release("old-frame")
+                for _ in 0..<20 { await Task.yield() }
+                XCTAssertNil(state.liveViewData, "Old completion cannot republish its red image")
+                XCTAssertFalse(state.liveViewCoordinateControlsReady)
+                await peer.release("new-frame")
+                try await waitForImage(newImage, state: state)
+                XCTAssertTrue(state.liveViewCoordinateControlsReady)
+                await state.tapFocus(x: 0.2, y: 0.3); await state.clickWhiteBalance(x: 0.2, y: 0.3)
+                let tap = await peer.count(.tap), wb = await peer.count(.whiteBalance), stops = await peer.count(.liveViewStop)
+                XCTAssertEqual(tap, 1); XCTAssertEqual(wb, 1); XCTAssertEqual(stops, 0)
+            }
+        }
+    }
+
+    func testPreMagnificationCoordinateCompletionCannotRestoreMarkerOrClearNewError() async throws {
+        for bridge in [false, true] {
+            for whiteBalance in [false, true] {
+                let peer = ControlOwnerPeer(owner: "zoom-response"), state = makeState([peer], bridge: bridge)
+                defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+                try await connectAndPrepare(state)
+                await peer.enqueue(whiteBalance ? .whiteBalance : .tap, gate: "old-coordinate")
+                let old = Task {
+                    if whiteBalance { await state.clickWhiteBalance(x: 0.2, y: 0.3) }
+                    else { await state.tapFocus(x: 0.2, y: 0.3) }
+                }
+                try await waitForGate("old-coordinate", peer: peer)
+                await state.setLiveViewMagnification(.x5)
+                state.reportCubeLutRenderFailure()
+                let expectedError = state.lastError
+                await peer.release("old-coordinate"); await old.value
+                XCTAssertNil(state.focusMarker)
+                XCTAssertEqual(state.lastError, expectedError)
+                XCTAssertFalse(state.liveViewCoordinateControlsReady, "No post-change frame was acquired")
+            }
+        }
+    }
+
+    private func waitForImage(_ data: Data, state: CameraAppState) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while state.liveViewData != data {
+            guard ContinuousClock.now < deadline else { throw URLError(.timedOut) }
+            await Task.yield()
+        }
+    }
+
     private struct PreservedControl {
         let snapshot: CameraSnapshot?
         let clock: Date?
@@ -850,7 +927,7 @@ private enum ControlOwnerAction: CaseIterable {
 }
 
 private enum ControlOwnerWire: Hashable, Sendable {
-    case health, open, close, info, status, capabilities, events, stopEvents, media, liveViewStart, liveViewStop
+    case health, open, close, info, status, capabilities, events, stopEvents, media, liveViewStart, liveViewStop, frame
     case clock, clockRead, directory, naming, directoryReadback, namingReadback, sleep, clean, autofocus, halfPress, shutterRelease
     case recordingStart, recordingStop, tap, whiteBalance, drive, magnification, setting
 }
@@ -871,6 +948,8 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
     private var directory = "100EOSXX"
     private var naming = "IMG_"
     private var magnification = 1
+    private var frameData: Data?
+    func setFrame(_ data: Data) { frameData = data }
     private var clockBody: [String: Any] = [:]
     private var plans: [ControlOwnerWire: [Plan]] = [:]
     private var gates: [String: CheckedContinuation<Void, Never>] = [:]
@@ -906,6 +985,7 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         let wire = try route(path: path, method: method, simulator: simulator)
         requests.append(wire)
         let plan = plans[wire]?.isEmpty == false ? plans[wire]!.removeFirst() : Plan(gate: nil, error: nil)
+        let responseFrame = frameData
         var object: [String: Any] = [:]
         switch wire {
         case .health:
@@ -989,11 +1069,15 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             object = ["active": true, "source": "CCAPI_JPEG_POLLING", "size": "MEDIUM", "requestedFps": 6]
         case .liveViewStop:
             object = ["active": false, "liveViewStopUnconfirmed": false]
-        case .close, .stopEvents, .shutterRelease:
+        case .close, .stopEvents, .shutterRelease, .frame:
             break
         }
         if let gate = plan.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
         if let error = plan.error { throw URLError(error) }
+        if wire == .frame {
+            guard let responseFrame else { throw URLError(.cannotDecodeContentData) }
+            return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: responseFrame)
+        }
         if wire == .setting, !simulator, plans[.capabilities]?.isEmpty == false {
             let readback = plans[.capabilities]!.removeFirst()
             if let gate = readback.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
@@ -1032,6 +1116,7 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case ("GET", "/events"): return .events
         case ("DELETE", "/events"), ("DELETE", "/maintenance/control/events"): return .stopEvents
         case ("GET", "/media"): return .media
+        case ("GET", "/liveview/frame"): return .frame
         case ("POST", "/liveview/start"), ("POST", "/maintenance/control/liveview/start"): return .liveViewStart
         case ("POST", "/liveview/stop"), ("POST", "/maintenance/control/liveview/stop"): return .liveViewStop
         case ("POST", "/clock/sync"), ("POST", "/maintenance/clock-sync/outcome"), ("PUT", "/ver100/functions/datetime"): return .clock

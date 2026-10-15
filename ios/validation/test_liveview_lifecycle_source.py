@@ -112,7 +112,13 @@ def test_multipart_wait_is_bounded_cancellable_and_terminal_before_buffer():
     take = section(value, 'private func takeFrame()', 'func nextFrame(')
     assert take.index('if let terminal') < take.index('if let frame')
     assert 'if parser.isClosed' in value and 'func checkUsable()' in value
-    assert 'iterator.next()' not in value
+    # UI readers must remain bounded mailbox consumers. The dedicated producer
+    # owns the iterator and captures its crop revision before awaiting a chunk.
+    wait = section(value, 'func nextFrame(', 'func discardPendingFrame()')
+    assert 'iterator.next()' not in wait
+    producer = section(value, 'worker = Task', 'private func currentGeometryRevision')
+    assert producer.index('self?.currentGeometryRevision()') < producer.index('iterator.next()')
+    assert producer.index('iterator.next()') < producer.index('self?.receive(chunk, revision: revision)')
 
 def test_runtime_reader_failure_retires_once_and_clears_stale_presentation():
     value = app('CameraAppState.swift')
