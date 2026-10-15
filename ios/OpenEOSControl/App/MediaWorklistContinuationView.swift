@@ -124,7 +124,8 @@ struct MediaWorklistContinuationView: View {
         }
         var fields = [prefix + item.name, language.format("media_worklist_source_kind", kind)]
         if let folder = item.folder { fields.append(language.format("media_worklist_source_folder", folder.label)) }
-        if let captured = item.captureTime, !captured.isEmpty {
+        if let captured = mediaCaptureDate(item, displayZone: camera.mediaDateDisplayZone)
+            .detailText(unknownTimeZone: language.string("media_time_zone_unknown")) {
             fields.append(language.format("media_worklist_source_captured", captured))
         }
         if let size = item.sizeBytes {

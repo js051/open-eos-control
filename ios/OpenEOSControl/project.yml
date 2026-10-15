@@ -40,6 +40,8 @@ targets:
         buildPhase: resources
       - path: ../../contracts/live-view-lut/v1/numeric-vectors.json
         buildPhase: resources
+      - path: ../../contracts/media-date-review/v1/date-review-vectors.json
+        buildPhase: resources
       - path: ../OpenEOSCore/Tests/OpenEOSCoreTests/URLSessionPendingBulbStopTests.swift
     dependencies:
       - target: OpenEOSControl

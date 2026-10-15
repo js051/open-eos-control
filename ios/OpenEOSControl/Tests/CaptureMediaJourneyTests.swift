@@ -577,6 +577,49 @@ final class CaptureMediaJourneyTests: XCTestCase {
         }
     }
 
+    func testPhotoReviewKeepsFirstUnknownDatePhotoAheadOfFutureVideoAndLaterDatedPhoto() async throws {
+        let peer = CaptureMediaPeer()
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        state.setShutterAutofocus(false)
+        let undated = CaptureFixtureItem(id: "UNDATED", date: "")
+        let futureVideo = CaptureFixtureItem(id: "FUTURE-VIDEO", date: "2099-01-01T00:00:00Z", video: true)
+        await peer.queueListings([.items([.a, futureVideo, undated, .new, .b])])
+        let before = await peer.listCount()
+        await state.captureStill()
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.latestMediaItem?.id, "UNDATED")
+        XCTAssertEqual(state.captureReviewKind, .photo)
+        XCTAssertEqual(state.captureReviewState, .available)
+        XCTAssertFalse(state.latestMediaIsPrevious)
+        let after = await peer.listCount()
+        let choices = await peer.captureChoices()
+        let requests = await peer.requestsSinceCapture()
+        let limits = await peer.listLimits()
+        XCTAssertEqual(after - before, 1)
+        XCTAssertEqual(choices, [false], "Review must not replay the shutter")
+        XCTAssertTrue(requests.allSatisfy { $0.hasPrefix("GET ") })
+        XCTAssertTrue(limits.allSatisfy { $0 == "8" })
+    }
+
+    func testRecentReviewRetainsFirstUnknownDateRegardlessOfFutureCameraMetadata() async throws {
+        let peer = CaptureMediaPeer()
+        await peer.queueListings([.items([CaptureFixtureItem(id: "UNDATED", date: ""), .a, .newVideo])])
+        let state = makeState(peer)
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        await state.connect()
+        await state.latestMediaTask?.value
+        XCTAssertEqual(state.latestMediaItem?.id, "UNDATED")
+        let choices = await peer.captureChoices()
+        let starts = await peer.count("recording-start")
+        let stops = await peer.count("recording-stop")
+        XCTAssertTrue(choices.isEmpty)
+        XCTAssertEqual(starts, 0)
+        XCTAssertEqual(stops, 0)
+    }
+
     func testOnlyAcknowledgedBridgeReadbackErrorStartsReviewWithoutInventingCaptureSuccess() async throws {
         for code in ["CAPTURE_STATUS_READBACK_FAILED", "CCAPI_UNREACHABLE", "CAPTURE_FAILED", "SHUTTER_RELEASE_UNCONFIRMED"] {
             let peer = CaptureMediaPeer()

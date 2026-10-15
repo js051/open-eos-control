@@ -16,19 +16,9 @@ struct MediaLibraryBatch: Equatable {
 }
 
 func selectLatestMediaItem(_ items: [CameraMediaItem]) -> CameraMediaItem? {
-    guard !items.isEmpty else { return nil }
-    return items.max { left, right in
-        switch (mediaCaptureDate(left), mediaCaptureDate(right)) {
-        case let (.some(leftDate), .some(rightDate)):
-            return leftDate < rightDate
-        case (.some, .none):
-            return false
-        case (.none, .some):
-            return true
-        case (.none, .none):
-            return false
-        }
-    }
+    // Recent review is transport order, independent of gallery date/name sorting.
+    // A visible item never proves which controller caused its capture.
+    items.first
 }
 
 enum CaptureReviewState: String {
@@ -61,8 +51,8 @@ func selectLatestMediaItem(
     previousIDs: Set<String>,
     kind: CaptureReviewKind = .photo
 ) -> CameraMediaItem? {
-    // Visibility is not exposure provenance. Keep the existing date/camera order,
-    // but exclude every known item and require the requested media type.
+    // Visibility is not exposure provenance. Exclude every observed ID first,
+    // enforce the requested kind, and retain bounded camera response order.
     selectLatestMediaItem(items.filter {
         !previousIDs.contains($0.id) && mediaIsVideo($0) == (kind == .video)
     })
@@ -151,6 +141,10 @@ struct MediaDateRange: Equatable {
     let endDate: Date
     let endExclusive: Date
     let timeZone: TimeZone
+    // Literal endpoints are the gallery filter's truth. The Date boundaries above
+    // retain the original editor context for compatibility, never gallery zoning.
+    let startDayKey: String
+    let endDayKey: String
 
     init?(startDate: Date, endDate: Date, timeZone: TimeZone) {
         guard startDate.timeIntervalSinceReferenceDate.isFinite,
@@ -167,11 +161,26 @@ struct MediaDateRange: Equatable {
               lastDay.end.timeIntervalSinceReferenceDate.isFinite,
               lastDay.end > lastDay.start
         else { return nil }
+        guard let firstKey = MediaCaptureDate.dayKey(at: startDate, in: capturedTimeZone),
+              let lastKey = MediaCaptureDate.dayKey(at: endDate, in: capturedTimeZone), firstKey <= lastKey
+        else { return nil }
+        startDayKey = firstKey
+        endDayKey = lastKey
         self.startDate = firstDay.start
         self.endDate = lastDay.start
         // Calendar day intervals include the whole last day even across DST.
         endExclusive = lastDay.end
         self.timeZone = capturedTimeZone
+    }
+
+    // UTC carriers keep date-picker literal days intact even if the viewer zone
+    // skips an entire day. They must not be used as capture instants or sort keys.
+    var startDayCarrier: Date { MediaCaptureDate.dayCarrier(startDayKey)! }
+    var endDayCarrier: Date { MediaCaptureDate.dayCarrier(endDayKey)! }
+
+    func contains(dayKey: String?) -> Bool {
+        guard let dayKey else { return false }
+        return dayKey >= startDayKey && dayKey <= endDayKey
     }
 
     func contains(captureDate: Date) -> Bool {
@@ -193,18 +202,20 @@ func mediaDateFilterSummary(
     filter: MediaFilter,
     dateRange: MediaDateRange?,
     ratingFilter: MediaRatingFilter = .all,
-    folderFilter: MediaFolderFilter = .all
+    folderFilter: MediaFolderFilter = .all,
+    displayZone: TimeZone? = nil
 ) -> MediaDateFilterSummary {
+    let zone = displayZone ?? dateRange?.timeZone ?? .current
     var matchedCount = 0
     var unknownDateCount = 0
     for item in items where mediaMatchesFilter(item, filter: filter)
         && mediaMatchesRatingFilter(item, filter: ratingFilter)
         && mediaMatchesFolderFilter(item, filter: folderFilter)
     {
-        let captureDate = mediaCaptureDate(item)
-        if captureDate == nil { unknownDateCount += 1 }
+        let captureDate = mediaCaptureDate(item, displayZone: zone)
+        if captureDate.kind == .unknown { unknownDateCount += 1 }
         if let dateRange {
-            if let captureDate, dateRange.contains(captureDate: captureDate) { matchedCount += 1 }
+            if dateRange.contains(dayKey: captureDate.dateKey) { matchedCount += 1 }
         } else {
             matchedCount += 1
         }
@@ -229,12 +240,14 @@ func mediaRatingFilterSummary(
     filter: MediaFilter,
     dateRange: MediaDateRange? = nil,
     ratingFilter: MediaRatingFilter = .all,
-    folderFilter: MediaFolderFilter = .all
+    folderFilter: MediaFolderFilter = .all,
+    displayZone: TimeZone? = nil
 ) -> MediaRatingFilterSummary {
+    let zone = displayZone ?? dateRange?.timeZone ?? .current
     var matchedCount = 0
     var unknownRatingCount = 0
     for item in items where mediaMatchesFilter(item, filter: filter)
-        && mediaMatchesDateRange(item, dateRange: dateRange)
+        && mediaMatchesDateRange(item, dateRange: dateRange, displayZone: zone)
         && mediaMatchesFolderFilter(item, filter: folderFilter)
     {
         if mediaNormalizedRating(item) == nil { unknownRatingCount += 1 }
@@ -259,12 +272,14 @@ func mediaFolderFilterSummary(
     filter: MediaFilter,
     dateRange: MediaDateRange? = nil,
     ratingFilter: MediaRatingFilter = .all,
-    folderFilter: MediaFolderFilter = .all
+    folderFilter: MediaFolderFilter = .all,
+    displayZone: TimeZone? = nil
 ) -> MediaFolderFilterSummary {
+    let zone = displayZone ?? dateRange?.timeZone ?? .current
     var matchedCount = 0
     var unknownFolderCount = 0
     for item in items where mediaMatchesFilter(item, filter: filter)
-        && mediaMatchesDateRange(item, dateRange: dateRange)
+        && mediaMatchesDateRange(item, dateRange: dateRange, displayZone: zone)
         && mediaMatchesRatingFilter(item, filter: ratingFilter)
     {
         if item.folder == nil { unknownFolderCount += 1 }
@@ -318,40 +333,63 @@ func mediaIsVideo(_ item: CameraMediaItem) -> Bool {
     return videoExtensions.contains((item.name as NSString).pathExtension.lowercased())
 }
 
+private struct MediaDisplayItem {
+    let loadedIndex: Int
+    let item: CameraMediaItem
+    let date: MediaCaptureDate
+}
+
 func mediaItemsForDisplay(
     _ items: [CameraMediaItem],
     filter: MediaFilter,
     sort: MediaSort,
     dateRange: MediaDateRange? = nil,
     ratingFilter: MediaRatingFilter = .all,
-    folderFilter: MediaFolderFilter = .all
+    folderFilter: MediaFolderFilter = .all,
+    displayZone: TimeZone? = nil
 ) -> [CameraMediaItem] {
-    let filtered = items
-        .filter { item in
-            mediaMatchesFilter(item, filter: filter)
-                && mediaMatchesRatingFilter(item, filter: ratingFilter)
-                && mediaMatchesDateRange(item, dateRange: dateRange)
-                && mediaMatchesFolderFilter(item, filter: folderFilter)
-        }
-    guard sort != .camera else { return filtered }
-    return filtered.enumerated()
-        .sorted { left, right in
-            let compared = compareMediaItems(left.element, right.element, sort: sort)
-            return compared == .orderedSame ? left.offset < right.offset : compared == .orderedAscending
-        }
-        .map { $0.element }
+    let zone = displayZone ?? dateRange?.timeZone ?? .current
+    let dateSort = sort == .newest || sort == .oldest
+    let requiresDate = dateSort || dateRange != nil
+    // Parse once per admitted loaded index, never inside the O(n log n) comparator.
+    // Camera/name/rating sorts with no range do not parse capture metadata at all.
+    let filtered = items.enumerated().compactMap { index, item -> MediaDisplayItem? in
+        guard mediaMatchesFilter(item, filter: filter),
+              mediaMatchesRatingFilter(item, filter: ratingFilter),
+              mediaMatchesFolderFilter(item, filter: folderFilter) else { return nil }
+        let date = requiresDate ? mediaCaptureDate(item, displayZone: zone) : .unknown
+        if let dateRange, !dateRange.contains(dayKey: date.dateKey) { return nil }
+        return MediaDisplayItem(loadedIndex: index, item: item, date: date)
+    }
+    guard sort != .camera else { return filtered.map(\.item) }
+    return filtered.sorted { left, right in
+        let compared = dateSort
+            ? compareMediaCaptureDates(left.date, right.date, newest: sort == .newest)
+            : compareNonDateMediaItems(left.item, right.item, sort: sort)
+        return compared == .orderedSame ? left.loadedIndex < right.loadedIndex : compared == .orderedAscending
+    }.map(\.item)
 }
 
-func mediaCaptureDate(_ item: CameraMediaItem) -> Date? {
-    guard let value = item.captureTime?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
-        return nil
+struct MediaDateGroup: Equatable {
+    let dayKey: String?
+    var items: [CameraMediaItem]
+}
+
+func mediaDateGroups(_ items: [CameraMediaItem], displayZone: TimeZone) -> [MediaDateGroup] {
+    var groups: [MediaDateGroup] = []
+    for item in items {
+        let key = mediaCaptureDate(item, displayZone: displayZone).dateKey
+        if !groups.isEmpty && groups[groups.count - 1].dayKey == key {
+            groups[groups.count - 1].items.append(item)
+        } else {
+            groups.append(MediaDateGroup(dayKey: key, items: [item]))
+        }
     }
-    if let parsed = MediaDateParsers.withFraction.date(from: value)
-        ?? MediaDateParsers.internet.date(from: value)
-    {
-        return parsed
-    }
-    return MediaDateParsers.local.firstNonNil { $0.date(from: value) }
+    return groups
+}
+
+func mediaCaptureDate(_ item: CameraMediaItem, displayZone: TimeZone) -> MediaCaptureDate {
+    MediaCaptureDate.parse(item.captureTime, displayZone: displayZone)
 }
 
 private func mediaMatchesFilter(_ item: CameraMediaItem, filter: MediaFilter) -> Bool {
@@ -376,10 +414,11 @@ private func mediaMatchesRatingFilter(_ item: CameraMediaItem, filter: MediaRati
     }
 }
 
-private func mediaMatchesDateRange(_ item: CameraMediaItem, dateRange: MediaDateRange?) -> Bool {
+private func mediaMatchesDateRange(
+    _ item: CameraMediaItem, dateRange: MediaDateRange?, displayZone: TimeZone
+) -> Bool {
     guard let dateRange else { return true }
-    guard let captureDate = mediaCaptureDate(item) else { return false }
-    return dateRange.contains(captureDate: captureDate)
+    return dateRange.contains(dayKey: mediaCaptureDate(item, displayZone: displayZone).dateKey)
 }
 
 private func mediaMatchesFolderFilter(_ item: CameraMediaItem, filter: MediaFolderFilter) -> Bool {
@@ -390,7 +429,7 @@ private func mediaMatchesFolderFilter(_ item: CameraMediaItem, filter: MediaFold
     }
 }
 
-private func compareMediaItems(
+private func compareNonDateMediaItems(
     _ left: CameraMediaItem,
     _ right: CameraMediaItem,
     sort: MediaSort
@@ -417,25 +456,29 @@ private func compareMediaItems(
         }
     }
 
-    let leftDate = mediaCaptureDate(left)
-    let rightDate = mediaCaptureDate(right)
-    switch (leftDate, rightDate) {
-    case let (.some(leftDate), .some(rightDate)) where leftDate != rightDate:
-        let ascending = leftDate < rightDate ? ComparisonResult.orderedAscending : .orderedDescending
-        return sort == .newest ? ascending.reversed : ascending
-    case (.some(_), .none):
-        return .orderedAscending
-    case (.none, .some(_)):
-        return .orderedDescending
-    case (.none, .none):
-        let compared = naturalMediaName(left, right)
-        let stable = compared == .orderedSame
-            ? left.id.compare(right.id, options: [.caseInsensitive, .numeric])
-            : compared
-        return sort == .newest ? stable.reversed : stable
-    case (.some(_), .some(_)):
-        return .orderedSame
+    // Date modes are handled by their already-parsed display rows above.
+    return .orderedSame
+}
+
+func compareMediaCaptureDates(
+    _ left: MediaCaptureDate, _ right: MediaCaptureDate, newest: Bool
+) -> ComparisonResult {
+    // A total tuple prevents mixed-precision comparison cycles. Bucket order is
+    // presentation only, and says nothing about cross-precision capture chronology.
+    guard let leftDay = left.dateKey else { return right.dateKey == nil ? .orderedSame : .orderedDescending }
+    guard let rightDay = right.dateKey else { return .orderedAscending }
+    if leftDay != rightDay {
+        let ascending: ComparisonResult = leftDay < rightDay ? .orderedAscending : .orderedDescending
+        return newest ? ascending.reversed : ascending
     }
+    if left.kind != right.kind {
+        return left.kind.sortBucket < right.kind.sortBucket ? .orderedAscending : .orderedDescending
+    }
+    let leftValue = left.instantMillis ?? Int64(left.floatingClockMillis ?? 0)
+    let rightValue = right.instantMillis ?? Int64(right.floatingClockMillis ?? 0)
+    guard leftValue != rightValue else { return .orderedSame }
+    let ascending: ComparisonResult = leftValue < rightValue ? .orderedAscending : .orderedDescending
+    return newest ? ascending.reversed : ascending
 }
 
 func mediaImagePanBounds(scale: CGFloat, viewport: CGSize, image: CGSize) -> CGSize {
@@ -469,23 +512,6 @@ private func naturalMediaName(_ left: CameraMediaItem, _ right: CameraMediaItem)
     left.name.compare(right.name, options: [.caseInsensitive, .numeric])
 }
 
-private enum MediaDateParsers {
-    static let withFraction: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-    static let internet = ISO8601DateFormatter()
-    static let local: [DateFormatter] = ["yyyy-MM-dd HH:mm:ss", "yyyyMMdd'T'HHmmss"].map { format in
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = .current
-        formatter.dateFormat = format
-        return formatter
-    }
-}
-
 private extension ComparisonResult {
     var reversed: ComparisonResult {
         switch self {
@@ -493,14 +519,5 @@ private extension ComparisonResult {
         case .orderedDescending: .orderedAscending
         case .orderedSame: .orderedSame
         }
-    }
-}
-
-private extension Array {
-    func firstNonNil<Value>(_ transform: (Element) -> Value?) -> Value? {
-        for element in self {
-            if let value = transform(element) { return value }
-        }
-        return nil
     }
 }

@@ -164,6 +164,54 @@ final class MediaDateFilterOwnershipTests: XCTestCase {
         XCTAssertEqual(state.mediaItems.first { $0.id == video.id }, video)
     }
 
+    func testViewerZoneRefreshPreservesLiteralRangeSelectionAndSessionOwners() throws {
+        try withState { state in
+            state.openOfflinePreview()
+            let owner = state.mediaLibrarySessionID
+            let day = try XCTUnwrap(MediaCaptureDate.dayCarrier("2026-08-14"))
+            let range = try XCTUnwrap(MediaDateRange(startDate: day, endDate: day,
+                timeZone: MediaCaptureDate.carrierTimeZone))
+            XCTAssertTrue(state.setMediaDateRange(range, owner: owner))
+            let selected = try XCTUnwrap(state.mediaItems.first)
+            state.toggleMediaSelection(selected)
+            let selection = state.selectedMediaItems
+            let items = state.mediaItems
+            let status = state.mediaLibraryLoadStatus
+            let beforeTransfer = state.activeMediaDownloadID
+            let sample = CameraMediaItem(id: "synthetic-zone-item", name: "ZONE.JPG", kind: "image",
+                                        captureTime: "2026-08-13T16:30:00Z")
+            for (identifier, visible) in [("UTC", false), ("Asia/Taipei", true), ("America/Los_Angeles", false)] {
+                let zone = try XCTUnwrap(TimeZone(identifier: identifier))
+                state.refreshMediaDateDisplayZone(zone)
+                XCTAssertEqual(state.mediaDateDisplayZone, zone)
+                XCTAssertEqual(state.mediaDateRange, range)
+                XCTAssertEqual(state.mediaDateRange?.startDayKey, "2026-08-14")
+                XCTAssertEqual(state.mediaDateRange?.endDayKey, "2026-08-14")
+                XCTAssertEqual(state.selectedMediaItems, selection)
+                XCTAssertEqual(state.mediaItems, items)
+                XCTAssertEqual(state.mediaLibrarySessionID, owner)
+                XCTAssertEqual(state.mediaLibraryLoadStatus, status)
+                XCTAssertEqual(state.activeMediaDownloadID, beforeTransfer)
+                let displayed = mediaItemsForDisplay([sample], filter: .all, sort: .newest,
+                    dateRange: state.mediaDateRange, displayZone: state.mediaDateDisplayZone)
+                XCTAssertEqual(!displayed.isEmpty, visible)
+                let parsed = mediaCaptureDate(sample, displayZone: state.mediaDateDisplayZone)
+                XCTAssertEqual(parsed.dateKey == "2026-08-14", visible)
+                XCTAssertEqual(mediaDateGroups([sample], displayZone: state.mediaDateDisplayZone).first?.dayKey,
+                               parsed.dateKey)
+            }
+            // A draft's carriers remain literal even when its sheet spans a zone change.
+            let draft = try XCTUnwrap(MediaDateRange(startDate: range.startDayCarrier, endDate: range.endDayCarrier,
+                timeZone: MediaCaptureDate.carrierTimeZone))
+            XCTAssertEqual(draft.startDayKey, range.startDayKey)
+            XCTAssertEqual(draft.endDayKey, range.endDayKey)
+            state.setApplicationActive(true)
+            XCTAssertEqual(state.mediaDateDisplayZone, .current)
+            XCTAssertEqual(state.mediaDateRange, range)
+            XCTAssertEqual(state.selectedMediaItems, selection)
+        }
+    }
+
     private func makeRange(offset: TimeInterval = 0) throws -> MediaDateRange {
         let date = Date(timeIntervalSince1970: 1_786_752_000 + offset)
         return try XCTUnwrap(MediaDateRange(startDate: date, endDate: date, timeZone: TimeZone(secondsFromGMT: 0)!))
