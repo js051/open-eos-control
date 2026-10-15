@@ -56,6 +56,9 @@ from .models import (
     StorageStatus,
     camera_profile,
 )
+from .recording import observation as recording_observation
+from .recording import outcome as recording_outcome
+from .recording import require_operation
 from .rtp import (
     RtpAudioChunk,
     RtpError,
@@ -812,7 +815,7 @@ class UrllibCcapiTransport:
                           or resource_path.endswith((ZOOM_PATH_SUFFIX, MOVIE_MODE_PATH_SUFFIX,
                                                      "/functions/datetime", "/functions/sensorcleaning",
                                                      "/functions/autopoweroff", "/deviceinformation")))
-        if strict_setting:
+        if strict_setting and 200 <= int(response.status) < 300:
             get_all = getattr(response.headers, "get_all", None)
             ambiguous = callable(get_all) and any(
                 len(get_all(name, [])) > 1 for name in
@@ -965,6 +968,8 @@ class CcapiSession:
         self._camera_sleep_path: str | None = None
         self._discovery_source = "unknown"
         self._recording: bool | None = None
+        self._recording_stop_operation: CcapiOperation | None = None
+        self._recording_last_stop_operation: CcapiOperation | None = None
         self._bulb_exposure_active: bool | None = False
         self._bulb_release_operation: CcapiOperation | None = None
         self._bulb_start_confirmed = False
@@ -2585,6 +2590,77 @@ class CcapiSession:
                 raise unsupported(CameraFeature.AUTOFOCUS.value, self.engine_name)
             self._observed.add(CameraFeature.AUTOFOCUS)
             return self.status()
+
+    def read_recording_observation(self) -> dict[str, object]:
+        # Canon status() contains our last acknowledged assignment, not a dedicated REC read.
+        # Do not invent an endpoint or consume another event owner's queue to claim freshness.
+        self._require_open()
+        return recording_observation(self.engine_name)
+
+    def perform_recording_outcome(self, operation: str) -> dict[str, object]:
+        require_operation(operation)
+        try:
+            return self._perform_recording_outcome(operation)
+        except (BridgeError, OSError):
+            # The implementation catches every dispatched REC failure separately.
+            # Exceptions reaching here are pre-admission only, never a lost write.
+            return recording_outcome(self.engine_name, operation, "not-sent")
+
+    def _perform_recording_outcome(self, operation: str) -> dict[str, object]:
+        require_operation(operation)
+        with self._maintenance_controls():
+            starting = operation == "start"
+            if starting:
+                if self._recording_stop_operation is not None:
+                    raise BridgeError("RECORDING_STOP_REQUIRED", "Resolve the previous recording with Stop.",
+                                      status_code=409)
+                try:
+                    self._require_shutter_release_confirmed()
+                    self._refresh_temperature_status()
+                    self._require_temperature_allows_movie_recording()
+                except Exception:
+                    # No REC command was admitted; do not create an unknown write.
+                    return recording_outcome(self.engine_name, operation, "not-sent")
+            command = ((self._recording_stop_operation or self._recording_last_stop_operation)
+                       if not starting else None) or (
+                self._operation("POST", "/shooting/control/recbutton") or
+                self._operation("PUT", "/shooting/control/recbutton"))
+            if command is None:
+                raise unsupported(CameraFeature.VIDEO_RECORDING.value, self.engine_name)
+            prior = self._recording_stop_operation
+            # Freeze the exact advertised route before a write whose response may be lost.
+            self._recording_stop_operation = command
+            # Stop authorization outlives server-side duty: its response may be lost
+            # or retired by the client. It never authorizes Start or another session.
+            self._recording_last_stop_operation = command
+            try:
+                response = self._request(command.method, command.path, {"action": operation},
+                                         timeout=10.0, max_bytes=32768)
+                if response.status == 204:
+                    if response.body:
+                        raise ValueError("Nonempty recording response")
+                elif response.status == 200:
+                    def unique(pairs):
+                        value = {}
+                        for key, item in pairs:
+                            if key in value:
+                                raise ValueError("Duplicate recording response field")
+                            value[key] = item
+                        return value
+                    if response.body.strip() and json.loads(response.body, object_pairs_hook=unique) != {}:
+                        raise ValueError("Invalid recording response")
+                else:
+                    raise ValueError("Unexpected recording success status")
+            except _CcapiHTTPError:
+                self._recording_stop_operation = prior
+                return recording_outcome(self.engine_name, operation, "rejected")
+            except Exception:
+                return recording_outcome(self.engine_name, operation, "unconfirmed")
+            self._recording = starting  # Legacy display cache; never fresh evidence.
+            self._observed.add(CameraFeature.VIDEO_RECORDING)
+            if not starting:
+                self._recording_stop_operation = None
+            return recording_outcome(self.engine_name, operation, "response-received")
 
     def start_recording(self) -> CameraStatus:
         return self._set_recording(True)
@@ -4804,7 +4880,7 @@ class CcapiSession:
             max_bytes=max_bytes,
             **({"strict_control": True} if self._maintenance_control_active else {}),
         )
-        if self._maintenance_control_active:
+        if self._maintenance_control_active and 200 <= response.status < 300:
             length = response.headers.get("content-length")
             if ("content-range" in response.headers
                     or response.headers.get("content-encoding") not in {None, "identity"}

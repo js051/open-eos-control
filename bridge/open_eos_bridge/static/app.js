@@ -21,6 +21,7 @@
   const captureConfiguration = globalThis.OpenEOSCaptureConfiguration;
   const shootingSettings = globalThis.OpenEOSShootingSettings;
   const maintenanceLifecycle = globalThis.OpenEOSMaintenanceLifecycle;
+  const recordingLifecycle = globalThis.OpenEOSRecordingLifecycle;
   if (!mediaUpload) throw new Error("Open EOS media upload module is unavailable.");
   const mediaListing = globalThis.OpenEOSMediaListing;
   if (!mediaListing) throw new Error("Open EOS media listing module is unavailable.");
@@ -183,7 +184,16 @@
       recordingStopUnconfirmed: "Recording stop is not confirmed by the returned camera status.",
       recordingStartUnconfirmed: "The returned camera status does not confirm recording started.",
       recordingCommandUnconfirmed: "The recording result is unknown. Use Stop; refreshed cached status cannot confirm the camera stopped.",
-      recordingStatusUnconfirmed: "The recording command was accepted, but status is unconfirmed. Refresh status; only Stop is available meanwhile.",
+      recordingStatusUnconfirmed: "The recording response was received; the current camera state is unavailable.",
+      recordingResponseOnly: "Recording response received; current camera state unavailable. No video was selected.",
+      recordingObservedActive: "Camera reports recording.",
+      recordingObservedInactive: "Camera reports recording is inactive.",
+      recordingReadOnly: "Read recording state",
+      recordingNotSent: "Recording command was not sent.",
+      recordingRejected: "Recording command was rejected; any previous Stop responsibility remains.",
+      recordingCancel: "Cancel waiting",
+      recordingPrevious: "Previous connection: recording Stop may still be required.",
+      recordingPreviousResult: "Recording result from a previous connection.",
       stopUnconfirmedRecording: "Stop recording (status unconfirmed)",
       latestMediaNotReady: "No new media was observed in the completed checks. Check again without taking another photo.",
       latestMediaMixedReadFailed: "No new media was observed in completed checks, but the latest list read failed; current visibility is unconfirmed. Check again without taking another photo.",
@@ -947,7 +957,16 @@
       recordingStopUnconfirmed: "相機回傳的狀態尚未確認錄影已停止。",
       recordingStartUnconfirmed: "相機回傳的狀態尚未確認錄影已開始。",
       recordingCommandUnconfirmed: "錄影結果不明。請明確停止錄影；重新整理的快取狀態不能證明相機已停止。",
-      recordingStatusUnconfirmed: "錄影命令已接受，但狀態尚未確認。請重新整理狀態；確認前僅可停止錄影。",
+      recordingStatusUnconfirmed: "已收到錄影命令回應，相機目前狀態尚未確認。",
+      recordingResponseOnly: "已收到錄影命令回應，目前相機狀態未知，未自動挑選影片。",
+      recordingObservedActive: "相機新回報：錄影中。",
+      recordingObservedInactive: "相機新回報：目前未錄影。",
+      recordingReadOnly: "唯讀重新確認錄影狀態",
+      recordingNotSent: "錄影命令未送出。",
+      recordingRejected: "錄影命令遭拒，先前的停止責任仍保留。",
+      recordingCancel: "取消等待",
+      recordingPrevious: "前一連線可能仍需要停止錄影。",
+      recordingPreviousResult: "前一連線的錄影結果。",
       stopUnconfirmedRecording: "停止錄影（狀態未確認）",
       latestMediaNotReady: "已完成的查找尚未觀察到新素材。可重新查找，不會再次拍攝。",
       latestMediaMixedReadFailed: "已完成的查找尚未觀察到新素材，但最後一次清單讀取失敗，目前可見情況未確認。可重新查找，不會再次拍攝。",
@@ -1688,6 +1707,8 @@
     info: null,
     status: null,
     recordingRecovery: null,
+    recordingRecord: null,
+    recordingHistory: [],
     capabilities: null,
     shutterAutofocus: true,
     heldAutofocusOwner: null,
@@ -2623,7 +2644,7 @@
       ) return false;
       [state.info, state.capabilities] = [info, capabilities];
       adoptCameraStatus(status, session, liveViewStatusRevision);
-      if (state.recordingRecovery === recordingRecovery && recordingRecovery?.acknowledged !== false && typeof status.recording === "boolean") {
+      if (!state.recordingRecord && state.recordingRecovery === recordingRecovery && recordingRecovery?.acknowledged !== false && typeof status.recording === "boolean") {
         state.recordingRecovery = null;
         if (recordingRecovery?.direction === "stop" && status.recording === false && recordingRecovery.reviewAttempt) {
           state.latestMediaReviewAttempt = recordingRecovery.reviewAttempt;
@@ -2728,6 +2749,7 @@
   }
 
   function resetSession() {
+    if (typeof cancelRecordingWait === "function") cancelRecordingWait({ retire: true });
     state.liveViewStopOwner?.maintenanceController?.abort();
     state.maintenanceCloseOwner?.maintenanceController?.abort();
     state.maintenanceCloseOwner = null;
@@ -2742,7 +2764,8 @@
     // Retiring a connection is not proof that an admitted REC command stopped.
     // Keep only a previous-camera warning; never transfer its Stop to a new session.
     if (state.session && (state.status?.recording === true ||
-        state.recordingRecovery?.session === state.session || state.recordingCommandOwner?.session === state.session)) {
+        state.recordingRecovery?.session === state.session ||
+        (state.recordingCommandOwner?.session === state.session && !state.recordingCommandOwner.readOnly))) {
       state.shutterDisconnectWarning = true;
     }
     if (typeof stopMediaAutoImport === "function") stopMediaAutoImport("session-retired");
@@ -2764,6 +2787,7 @@
     state.status = null;
     state.recordingRecovery = null;
     state.recordingCommandOwner = null;
+    state.recordingRecord = null;
     state.capabilities = null;
     state.shutterAutofocus = true;
     if (typeof cancelCaptureConfiguration === "function") cancelCaptureConfiguration({ retire: true });
@@ -3143,6 +3167,7 @@
     syncBulbTimer();
     renderAvailability();
     renderDiagnostics();
+    renderRecordingHistory();
   }
 
   function temperatureAllows(kind) {
@@ -4427,6 +4452,145 @@
       (shutterAFSupported() || !state.shutterAutofocus);
   }
 
+  function renderRecordingHistory() {
+    let section = document.getElementById("recording-lifecycle-history");
+    if (!section) {
+      section = document.createElement("section"); section.id = "recording-lifecycle-history";
+      ui.operationState?.parentElement?.append(section);
+    }
+    section.replaceChildren();
+    for (const record of state.recordingHistory || []) {
+      const row = document.createElement("p");
+      const current = record.session === state.session && !record.retired;
+      const responseKey = { "response-received": "recordingResponseOnly", "not-sent": "recordingNotSent",
+        "rejected": "recordingRejected", "unconfirmed": "recordingCommandUnconfirmed" }[record.responseEvidence];
+      const observationText = record.observation.observationEvidence === "observed"
+        ? t(record.observation.recording ? "recordingObservedActive" : "recordingObservedInactive") : t("recordingStatusUnconfirmed");
+      row.textContent = `${current ? "" : t(record.stopRequired ? "recordingPrevious" : "recordingPreviousResult") + " "}${t(responseKey)} ${observationText}`;
+      const action = document.createElement("button");
+      const active = state.recordingCommandOwner?.record === record;
+      action.textContent = t(active ? "recordingCancel" : "recordingReadOnly");
+      action.disabled = !current || (!active && (cameraInteractionBusy() || state.recordingRecord !== record));
+      action.addEventListener("click", () => active ? cancelRecordingWait() : void recoverRecording(record));
+      row.append(action); section.append(row);
+    }
+  }
+
+  function cancelRecordingWait({ retire = false } = {}) {
+    const invocation = state.recordingCommandOwner;
+    if (invocation?.record) {
+      invocation.cancelled = true; invocation.controller.abort();
+      invocation.record.cancelled = true;
+      if (!invocation.readOnly && invocation.record.operation === "start" && ["unconfirmed", "response-received"].includes(invocation.record.responseEvidence)) {
+        invocation.record.stopRequired = true;
+      }
+    }
+    if (retire) {
+      for (const record of state.recordingHistory || []) if (record.session === state.session) { record.retired = true; record.token = ""; }
+    }
+  }
+
+  async function recordingTransfer(record, controller, suffix, method) {
+    let timer;
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => { controller.abort(); reject(new Error(t("recordingCommandUnconfirmed"))); }, 15000);
+    });
+    try {
+      return await Promise.race([captureConfiguration.transfer(
+        `/v1/session/${encodeURIComponent(record.session.id)}/recording/${suffix}`,
+        { method, token: record.token, signal: controller.signal, strictSettings: true, strictIntegerTokens: true,
+          headerOnlyStatuses: [400, 401, 403, 404, 405, 409, 410, 422, 429] }), deadline]);
+    } finally { clearTimeout(timer); }
+  }
+
+  function publishRecordingObservation(record, observation, invocation) {
+    const policy = recordingLifecycle.ownership({ sameOwner: state.session === record.session,
+      sameAttempt: state.recordingRecord === record, cancelled: invocation?.cancelled === true,
+      retired: record.retired, operation: record.operation,
+      responseEvidence: invocation?.readOnly ? "not-sent" : record.responseEvidence,
+      priorStopRequired: record.stopRequired, observationEvidence: observation.observationEvidence,
+      recording: observation.recording });
+    if (!policy.canPublish) return false;
+    record.observation = observation; record.stopRequired = policy.stopRequired;
+    if (observation.observationEvidence === "observed") record.lastFreshObservation = { ...observation };
+    state.recordingRecovery = policy.stopRequired ? record : null;
+    if (state.status) state.status = { ...state.status, recording: observation.recording };
+    if (policy.canReview && !record.reviewStarted && !record.reviewRetired && record.reviewAttempt) {
+      record.reviewStarted = true; state.latestMediaReviewAttempt = record.reviewAttempt;
+      state.latestMediaReviewKind = "video"; void refreshLatestMedia();
+    }
+    return true;
+  }
+
+  async function runRecordingLifecycle(operation, reviewAttempt, invocation) {
+    const session = invocation.session;
+    const prior = state.recordingRecord;
+    const record = { session, token: state.token, engine: session.engine || state.info?.engine,
+      operation, direction: operation, reviewAttempt, responseEvidence: "unconfirmed",
+      observation: recordingLifecycle.empty(session.engine || state.info?.engine),
+      priorStopRequired: Boolean(state.recordingRecovery?.session === session) || state.status?.recording === true,
+      stopRequired: operation === "start" || Boolean(state.recordingRecovery?.session === session) || state.status?.recording === true,
+      retired: false, cancelled: false, reviewStarted: false };
+    cancelLatestMediaRefresh();
+    state.latestMediaReviewAttempt = null;
+    if (prior) { prior.superseded = true; prior.token = ""; }
+    state.recordingRecord = record; state.recordingHistory = [record, ...(state.recordingHistory || [])].slice(0, 20);
+    invocation.record = record; invocation.controller = new AbortController(); invocation.cancelled = false;
+    if (record.stopRequired) state.recordingRecovery = record;
+    renderRecordingHistory();
+    try {
+      const response = await recordingTransfer(record, invocation.controller, `${operation}/outcome`, "POST");
+      const parsed = recordingLifecycle.parseOutcome({ status: response.status, engine: record.engine,
+        operation, response: response.body });
+      // These are Bridge preflight rejections; no legacy fallback or write retry.
+      if ([400, 401, 403, 404, 405, 409, 410, 422, 429].includes(response.status)) parsed.responseEvidence = "rejected";
+      record.responseEvidence = parsed.responseEvidence;
+      record.originalOutcome = Object.freeze({ responseEvidence: parsed.responseEvidence,
+        observation: Object.freeze({ ...parsed.observation }) });
+      if (["rejected", "not-sent"].includes(parsed.responseEvidence)) {
+        record.stopRequired = record.priorStopRequired;
+        if (state.session === session && state.recordingRecord === record) {
+          state.recordingRecovery = record.stopRequired ? record : null;
+        }
+      }
+      if (invocation.cancelled || record.retired || state.session !== session || state.recordingRecord !== record) return;
+      publishRecordingObservation(record, parsed.observation, invocation);
+      const fresh = record.observation.observationEvidence === "observed";
+      const key = fresh ? (record.observation.recording ? "recordingObservedActive" : "recordingObservedInactive")
+        : record.responseEvidence === "response-received" ? "recordingResponseOnly"
+        : record.responseEvidence === "not-sent" ? "recordingNotSent"
+        : record.responseEvidence === "rejected" ? "recordingRejected" : "recordingCommandUnconfirmed";
+      setOperationState(t(key), !fresh); showToast(t(key), !fresh);
+    } catch (_) {
+      record.originalOutcome ||= Object.freeze({ responseEvidence: record.responseEvidence,
+        observation: Object.freeze(recordingLifecycle.empty(record.engine)) });
+      // Cancellation/timeout never replays a write or erases its Stop duty.
+      if (state.session === session && state.recordingRecord === record) {
+        state.recordingRecovery = record.stopRequired ? record : null;
+        setOperationState(t("recordingCommandUnconfirmed"), true);
+      }
+    } finally { renderRecordingHistory(); }
+  }
+
+  async function recoverRecording(record) {
+    if (!record || record.session !== state.session || record.retired || state.recordingRecord !== record || cameraInteractionBusy()) return false;
+    const invocation = { session: record.session, record, controller: new AbortController(), cancelled: false, readOnly: true };
+    state.recordingCommandOwner = invocation; beginCameraInteraction(); renderRecordingHistory();
+    try {
+      const response = await recordingTransfer(record, invocation.controller, "observation", "GET");
+      const observed = recordingLifecycle.parseObservation({ status: response.status, engine: record.engine, response: response.body });
+      return publishRecordingObservation(record, observed, invocation);
+    } catch (_) {
+      return false;
+    } finally {
+      if (state.recordingCommandOwner === invocation) {
+        state.recordingCommandOwner = null;
+        if (state.session === record.session) { state.busy = false; renderSession(); }
+      }
+      renderRecordingHistory();
+    }
+  }
+
   function recordingRecoveryActive() {
     return Boolean(state.recordingRecovery && state.recordingRecovery.session === state.session);
   }
@@ -4477,6 +4641,10 @@
         setOperationState(result);
         showToast(result);
       } else if (isPhoto) {
+        if (state.recordingRecord?.session === session) {
+          state.recordingRecord.reviewRetired = true;
+          state.recordingRecord.reviewAttempt = null;
+        }
         reviewAttempt = { sessionId, session, kind: "photo", knownIds: visibleMediaIds() };
         state.latestMediaReviewKind = "photo";
         // A new shutter supersedes an old review before the command waits for ACK.
@@ -4508,28 +4676,7 @@
           state.latestMediaReviewReadFailed = false;
           state.latestMediaReviewEvidence = null;
         }
-        const status = await api(
-          `/v1/session/${encodeURIComponent(sessionId)}/recording/${wasRecording ? "stop" : "start"}`,
-          { method: "POST" },
-        );
-        if (state.session !== session) return;
-        // A complete success body still has to satisfy the REC status contract.
-        // Never coerce malformed recording values into a confirmed stopped state.
-        if (!status || typeof status !== "object" || Array.isArray(status)
-          || (status.recording != null && typeof status.recording !== "boolean")) {
-          throw new ApiError(t("recordingCommandUnconfirmed"));
-        }
-        adoptCameraStatus(status, session, liveViewStatusRevision);
-        const stopped = status.recording === false;
-        state.recordingRecovery = typeof status.recording === "boolean" ? null : { session, direction: wasRecording ? "stop" : "start", reviewAttempt };
-        const uncertainStop = wasRecording ? !stopped : status.recording !== true;
-        const result = wasRecording ? t(stopped ? "recordingStopped" : "recordingStopUnconfirmed") : t(status.recording === true ? "recordingStarted" : "recordingStartUnconfirmed");
-        setOperationState(result, uncertainStop);
-        showToast(result, uncertainStop);
-        if (wasRecording && stopped) {
-          state.latestMediaReviewAttempt = reviewAttempt;
-          void refreshLatestMedia();
-        }
+        await runRecordingLifecycle(wasRecording ? "stop" : "start", reviewAttempt, recordingCommandOwner);
       }
     } catch (error) {
       if (state.session !== session) return;
@@ -5496,7 +5643,8 @@
 
   function adoptCameraStatus(status, session, expectedLiveViewRevision) {
     if (!session || state.session !== session) return false;
-    state.status = status;
+    state.status = state.recordingRecord?.session === session
+      ? { ...status, recording: state.recordingRecord.observation.recording } : status;
     // Ordinary false/missing snapshots are not acknowledgements of a Stop.
     // Reads remain relevant across Stop admission. Only Start admission or a
     // confirmed Stop retires older observations for this session.
@@ -9755,6 +9903,7 @@
     ui.mediaAutoImportStart?.addEventListener("click", startMediaAutoImport);
     ui.mediaAutoImportStop?.addEventListener("click", () => stopMediaAutoImport());
     document.addEventListener?.("visibilitychange", () => {
+      if (document.visibilityState === "hidden" && typeof cancelRecordingWait === "function") cancelRecordingWait();
       if (document.visibilityState !== "visible") {
         suspendMaintenanceForLifecycle();
         stopMediaAutoImport("backgrounded");
@@ -9950,6 +10099,7 @@
       if (previewActive()) applyLiveViewLayout();
     });
     window.addEventListener("beforeunload", () => {
+      if (typeof cancelRecordingWait === "function") cancelRecordingWait();
       const preserveMaintenance = suspendMaintenanceForLifecycle();
       state.mediaListingOwner?.cancel({ silent: true });
       if (typeof cancelMediaMutation === "function") cancelMediaMutation();

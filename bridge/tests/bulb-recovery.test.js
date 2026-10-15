@@ -201,13 +201,33 @@ async function run() {
   }
   for (const recording of [false, true, null]) {
     const test = context({mode:"Manual", recording});
-    test.state.recordingRecovery={session:test.state.session,direction:"stop"};
+    // This is a lifecycle attempt, not an acknowledged CameraStatus cache.
+    const record = {session:test.state.session, engine:"ccapi", operation:"stop", direction:"stop",
+      responseEvidence:"unconfirmed", stopRequired:true,
+      observation:{version:1, engine:"ccapi", observationEvidence:"unavailable", recording:null, source:null}};
+    test.state.recordingRecord=record;
+    test.state.recordingRecovery=record;
     test.featureSupported=()=>false;
     test.renderCaptureMode();
     assert.equal(test.state.captureMode,"video");
     assert.equal(test.ui.shutterLabel.textContent,"stopUnconfirmedRecording");
     assert.equal(test.ui.recordIndicator.hidden,true,"Unknown current recording must not display a confirmed REC indicator");
     assert.equal(test.state.status.recording,recording,"The old snapshot is not replaced with guessed ACK state");
+  }
+  {
+    const test = context({mode:"Manual", recording:null});
+    test.state.captureMode="video";
+    const record = {session:test.state.session, engine:"ccapi", operation:"stop", direction:"stop",
+      responseEvidence:"response-received", stopRequired:false,
+      observation:{version:1, engine:"ccapi", observationEvidence:"unavailable", recording:null, source:null}};
+    test.state.recordingRecord=record;
+    test.state.recordingRecovery=null;
+    test.renderCaptureMode();
+    assert.equal(test.ui.shutterLabel.textContent,"record",
+      "A complete Stop receipt admits a deliberate Start without claiming observed false");
+    assert.equal(test.ui.recordIndicator.hidden,true);
+    assert.equal(test.state.status.recording,null);
+    assert.equal(test.requests.length,0,"Rendering cannot emit Start, Stop, or readback");
   }
   console.log("PASS: production PC Bulb state contracts (mode/capability change, sticky failure, fresh Stop readback, legacy omission, session isolation)");
 }

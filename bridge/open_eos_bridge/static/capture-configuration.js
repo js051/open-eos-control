@@ -117,12 +117,18 @@
     }
     return value;
   }
-  async function transfer(path, { method = "GET", payload, token = "", signal, strictSettings = false, strictIntegerTokens = false, emptyResponseStatus = null } = {}) {
+  async function transfer(path, { method = "GET", payload, token = "", signal, strictSettings = false, strictIntegerTokens = false, emptyResponseStatus = null, headerOnlyStatuses = [] } = {}) {
     const headers = { Accept: "application/json", "Cache-Control": "no-cache, no-store" };
     if (token) headers.Authorization = `Bearer ${token}`;
     if (payload !== undefined) headers["Content-Type"] = "application/json";
     const response = await fetch(path, { method, headers, body: payload === undefined ? undefined : JSON.stringify(payload),
       signal, cache: "no-store", credentials: "omit", redirect: "error" });
+    if (headerOnlyStatuses.includes(response.status)) {
+      // A specifically admitted rejection header is independent of its optional
+      // diagnostic body. Never wait for or replay a mutation to obtain that body.
+      try { void response.body?.cancel?.().catch(() => {}); } catch (_) { /* Keep header evidence. */ }
+      return { status: response.status, body: null };
+    }
     if (strictSettings && (response.headers.has("content-range") ||
         ![null, "identity"].includes(response.headers.get("content-encoding")))) {
       // Reject before reading, but still stop the rejected response transport.

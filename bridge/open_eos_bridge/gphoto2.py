@@ -52,6 +52,9 @@ from .models import (
     StorageStatus,
     camera_profile,
 )
+from .recording import observation as recording_observation
+from .recording import outcome as recording_outcome
+from .recording import require_operation
 from .shooting_settings import exact_setting, observation, require_requested_value, responded, valid_key
 
 ENGINE_NAME = "libgphoto2"
@@ -2048,6 +2051,94 @@ class GPhoto2Session:
                     primary_error.add_note(f"Canon EOS autofocus cancel also failed: {cancel_error}")
             self._observed.add(CameraFeature.AUTOFOCUS)
             return self.status()
+
+    def read_recording_observation(self) -> dict[str, object]:
+        if not self._lock.acquire(timeout=15.0):
+            return recording_observation(self.engine_name, failed=True)
+        try:
+            self._require_open()
+            config = self._recording_config()
+            if config is None or self._live_view_stream is not None:
+                return recording_observation(self.engine_name)
+            try:
+                fresh = self._maintenance_config(config, time.monotonic() + 10.0)
+                if fresh.current not in {"Card", "None"}:
+                    return recording_observation(self.engine_name)
+                if fresh.current == "None":
+                    self._recording_stop_values = None
+                elif getattr(self, "_recording_last_values", None) is not None:
+                    self._recording_stop_values = self._recording_last_values
+                return recording_observation(self.engine_name, fresh.current == "Card", "gphoto-config")
+            except Exception:
+                return recording_observation(self.engine_name, failed=True)
+        finally:
+            self._lock.release()
+
+    def perform_recording_outcome(self, operation: str) -> dict[str, object]:
+        require_operation(operation)
+        try:
+            return self._perform_recording_outcome(operation)
+        except (BridgeError, OSError):
+            # The implementation catches every dispatched REC failure separately.
+            # Exceptions reaching here are pre-admission only, never a lost write.
+            return recording_outcome(self.engine_name, operation, "not-sent")
+
+    def _perform_recording_outcome(self, operation: str) -> dict[str, object]:
+        require_operation(operation)
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("RECORDING_TIMEOUT", "Recording lock timed out.", status_code=504)
+        try:
+            self._require_open()
+            starting = operation == "start"
+            prior = getattr(self, "_recording_stop_values", None)
+            if starting and prior is not None:
+                raise BridgeError("RECORDING_STOP_REQUIRED", "Resolve previous recording with Stop.", status_code=409)
+            retained_stop = (prior or getattr(self, "_recording_last_values", None)) if not starting else None
+            values = retained_stop or self._recording_values()
+            if values is None:
+                raise unsupported(CameraFeature.VIDEO_RECORDING.value, self.engine_name)
+            if starting and self._bulb_exposure_active:
+                raise BridgeError("CAMERA_BUSY", "Release Bulb before recording.", status_code=409)
+            # Explicit recording control keeps the established gphoto command policy:
+            # release the local persistent movie reader before exclusive camera I/O.
+            # The separate read-only observation path never performs this cleanup.
+            stream = self._live_view_stream
+            try:
+                self._stop_movie_stream()
+            except Exception:
+                self._live_view_stream = stream
+                raise
+            config, start_value, stop_value = values
+            target = start_value if starting else stop_value
+            # Stop retains the original validated path/value even if later reads or
+            # capabilities disappear. A failed optional no-op read cannot block release.
+            fresh = None
+            if retained_stop is not None:
+                with suppress(Exception):
+                    fresh = self._maintenance_config(config, time.monotonic() + 10.0)
+            else:
+                fresh = self._maintenance_config(config, time.monotonic() + 10.0)
+                if fresh.readonly or target not in fresh.choices:
+                    raise unsupported(CameraFeature.VIDEO_RECORDING.value, self.engine_name)
+            if fresh is not None and fresh.current == target:
+                self._recording_stop_values = values if starting else None
+                self._recording_last_values = values
+                return recording_outcome(self.engine_name, operation, "not-sent",
+                                         recording_observation(self.engine_name, starting, "gphoto-config"))
+            self._recording_stop_values = values
+            self._recording_last_values = values
+            try:
+                self.runner.run(self._camera_arguments(["--set-config-value", f"{config.path}={target}"]),
+                                timeout=10.0)
+            except Exception:
+                return recording_outcome(self.engine_name, operation, "unconfirmed")
+            self._observed.add(CameraFeature.VIDEO_RECORDING)
+            if not starting:
+                self._recording_stop_values = None
+            return recording_outcome(self.engine_name, operation, "response-received",
+                                     self.read_recording_observation())
+        finally:
+            self._lock.release()
 
     def start_recording(self) -> CameraStatus:
         return self._set_recording(True)

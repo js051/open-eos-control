@@ -104,7 +104,7 @@ function context(item = media(), { metadata } = {}) {
   // Session widgets do not participate in the storage-size formatting contract.
   for (const name of ["renderCaptureMode", "renderExposure", "renderAdvancedSettings",
     "renderPreviewInput", "renderLiveSource", "renderFps", "renderTapAction",
-    "renderTemperatureStatus", "syncBulbTimer", "renderAvailability", "renderDiagnostics"]) {
+    "renderTemperatureStatus", "syncBulbTimer", "renderAvailability", "renderDiagnostics", "renderRecordingHistory"]) {
     sandbox[name] = () => {};
   }
   const names = [
