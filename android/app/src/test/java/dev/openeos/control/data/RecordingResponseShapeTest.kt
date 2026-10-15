@@ -112,7 +112,7 @@ class RecordingResponseShapeTest {
         } finally { client.close(); server.shutdown() }
     }
 
-    @Test fun canonicalNative204CommandAckKeepsEstablishedRecordingCacheSemantics() = runBlocking {
+    @Test fun canonicalNative204CommandAckDoesNotFabricateRecordingState() = runBlocking {
         val actions = CopyOnWriteArrayList<String>()
         val server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
@@ -129,8 +129,8 @@ class RecordingResponseShapeTest {
         val client = CcapiClient(server.url("/").toString(), treatAsSimulator = false, httpClient = http())
         try {
             client.initialize()
-            assertEquals(true, client.startRecording().recording)
-            assertEquals(false, client.stopRecording().recording)
+            assertNull(client.startRecording().recording)
+            assertNull(client.stopRecording().recording)
             assertEquals(2, actions.size)
         } finally { client.close(); server.shutdown() }
     }

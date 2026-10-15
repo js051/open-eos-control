@@ -860,4 +860,12 @@
     <string name="maintenance_hold">相機控制與監看已暫停。請先查看維護紀錄，再明確恢復。休眠或關機後請明確重新連線。</string>
     <string name="maintenance_review">查看維護紀錄</string>
     <string name="maintenance_session_retirement_unconfirmed">本機連線已結束，但尚未確認桌面橋接工作階段已退役。重新連線前請先檢查桌面橋接；未自動重試。</string>
+    <string name="recording_response_received">已收到指令回應</string>
+    <string name="recording_response_unknown">指令回應不明</string>
+    <string name="recording_response_rejected">指令遭拒</string>
+    <string name="recording_response_not_sent">未送出相機指令</string>
+    <string name="recording_observed_active">最新相機觀測：錄影中</string>
+    <string name="recording_observed_stopped">最新相機觀測：已停止</string>
+    <string name="recording_observed_unavailable">目前錄影狀態無法確認</string>
+    <string name="recording_receipt_details">%1$s：%2$s。%3$s。更新只讀取狀態，不會重送指令。</string>
 </resources>

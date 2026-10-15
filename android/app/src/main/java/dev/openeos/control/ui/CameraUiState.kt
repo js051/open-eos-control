@@ -127,6 +127,8 @@ data class CameraUiState(
     val captureReviewObservation: CaptureReviewObservation = CaptureReviewObservation.UNREAD,
     val captureReviewEvidence: CaptureReviewEvidence = CaptureReviewEvidence(),
     val captureStatusReadbackFailed: Boolean = false,
+    val recordingReceipt: dev.openeos.control.data.RecordingReceipt? = null,
+    val recordingHistory: List<dev.openeos.control.data.RecordingReceipt> = emptyList(),
     val pendingRecordingCommand: RecordingCommand? = null,
     val recordingCommandUnconfirmed: Boolean = false,
     val recordingDisconnectWarning: Boolean = false,
@@ -221,7 +223,8 @@ data class CameraUiState(
             (liveViewAutoRefresh || needsLiveViewStopRecovery || errorOperation == CameraOperation.LIVE_VIEW)
 
     val recordingStopAvailable: Boolean
-        get() = pendingRecordingCommand != null || status?.recording == true
+        get() = recordingReceipt?.takeIf { !it.retired && it.sameOwner && it.sameAttempt }?.stopRequired
+            ?: (pendingRecordingCommand != null || status?.recording == true)
 
     val bulbExposureActive: Boolean
         get() = status?.bulbExposureActive == true
@@ -241,6 +244,8 @@ data class CameraUiState(
 
     fun isBusy(operation: CameraOperation): Boolean =
         operation in pendingOperations ||
+            (operation == CameraOperation.CAPTURE && (CameraOperation.RECORDING in pendingOperations || recordingStopAvailable) && !bulbExposureActive) ||
+            (operation == CameraOperation.RECORDING && CameraOperation.CAPTURE in pendingOperations && !recordingStopAvailable) ||
             ((maintenanceSuspended || CameraOperation.MAINTENANCE in pendingOperations) && operation !in setOf(CameraOperation.MAINTENANCE, CameraOperation.CONNECT,
                 CameraOperation.STATUS, CameraOperation.USB, CameraOperation.BRIDGE, CameraOperation.SHUTTER_RELEASE) &&
                 !(operation == CameraOperation.RECORDING && recordingStopAvailable) &&

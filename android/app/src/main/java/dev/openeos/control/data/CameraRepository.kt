@@ -305,6 +305,17 @@ class CameraRepository(
 
     fun refreshNetworkDiagnostics(): CameraNetworkDiagnostics = backend.networkDiagnostics
 
+    fun recordingAccess(): RecordingAccess {
+        val owner = backend
+        return RecordingAccess(dispatch = { command ->
+            check(backend === owner && active) { "Recording owner changed." }
+            recordingIoScope { owner.recordingCommand(command) }
+        }, read = {
+            check(backend === owner && active) { "Recording owner changed." }
+            recordingIoScope { owner.recordingObservation() }
+        })
+    }
+
     suspend fun toggleRecording(recording: Boolean?): CameraStatus =
         if (recording == true) backend.stopRecording() else backend.startRecording()
 

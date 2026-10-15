@@ -12,6 +12,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraUiStateTest {
+    @Test fun captureAndRecordingAdmissionAreMutuallyExclusiveButReleaseStaysAvailable() {
+        val state = CameraUiState().withOfflinePreview()
+        assertTrue(state.copy(pendingOperations = setOf(CameraOperation.RECORDING)).isBusy(CameraOperation.CAPTURE))
+        assertTrue(state.copy(pendingOperations = setOf(CameraOperation.CAPTURE)).isBusy(CameraOperation.RECORDING))
+        assertFalse(state.copy(pendingOperations = setOf(CameraOperation.RECORDING)).isBusy(CameraOperation.SHUTTER_RELEASE))
+        val owned = state.copy(captureMode = CaptureMode.PHOTO, capabilities = null,
+            status = state.status!!.copy(connected = false),
+            recordingReceipt = dev.openeos.control.data.RecordingReceipt(
+                dev.openeos.control.data.RecordingCommand.START, dev.openeos.control.data.RecordingResponseEvidence.RESPONSE_RECEIVED,
+                dev.openeos.control.data.RecordingObservation(true, 1, dev.openeos.control.data.RecordingObservationSource.SIMULATOR_STATUS)))
+        assertTrue(owned.recordingStopAvailable)
+        assertTrue(owned.isBusy(CameraOperation.CAPTURE))
+        assertFalse(owned.isBusy(CameraOperation.RECORDING))
+        assertFalse(owned.copy(pendingOperations = setOf(CameraOperation.CAPTURE)).isBusy(CameraOperation.RECORDING))
+    }
+
     @Test fun bridgeThumbnailDemandResumesOnlyAfterSuccessfulCompletion() {
         for (status in MediaLibraryLoadStatus.entries) {
             val state = CameraUiState(transport = dev.openeos.control.data.CameraTransport.DESKTOP_BRIDGE,

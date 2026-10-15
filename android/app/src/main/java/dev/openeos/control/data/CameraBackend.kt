@@ -110,6 +110,9 @@ interface CameraControlBackend {
         unsupported(CameraFeature.DIRECTORY_CONTROL)
     suspend fun cleanSensor(autoPowerOff: Boolean) = unsupported<Unit>(CameraFeature.SENSOR_CLEANING)
     suspend fun sleepCamera() = unsupported<Unit>(CameraFeature.CAMERA_SLEEP)
+    suspend fun recordingCommand(command: RecordingCommand): CameraStatus =
+        if (command == RecordingCommand.STOP) stopRecording() else startRecording()
+    suspend fun recordingObservation(): RecordingObservation? = null
     suspend fun startRecording(): CameraStatus
     suspend fun stopRecording(): CameraStatus
     suspend fun tapFocus(x: Double, y: Double): FocusResult
@@ -279,6 +282,8 @@ class CcapiCameraBackend(
     override suspend fun cleanSensor(autoPowerOff: Boolean) = client.cleanSensor(autoPowerOff)
 
     override suspend fun sleepCamera() = client.sleepCamera()
+
+    override suspend fun recordingObservation(): RecordingObservation? = client.recordingObservation()
 
     override suspend fun startRecording(): CameraStatus = client.startRecording()
 
@@ -459,6 +464,10 @@ class DesktopBridgeCameraBackend(
     override suspend fun cleanSensor(autoPowerOff: Boolean) = client.cleanSensor(autoPowerOff)
 
     override suspend fun sleepCamera() = client.sleepCamera()
+
+    override suspend fun recordingCommand(command: RecordingCommand): CameraStatus = client.recordingLifecycleCommand(command)
+
+    override suspend fun recordingObservation(): RecordingObservation? = client.recordingObservation()
 
     override suspend fun startRecording(): CameraStatus = client.startRecording()
 

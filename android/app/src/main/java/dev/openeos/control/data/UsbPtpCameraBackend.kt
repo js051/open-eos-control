@@ -58,6 +58,11 @@ class UsbPtpCameraBackend(
     private var advertisedStorageTargets: Map<String, Long> = emptyMap()
     private var bulbExposureActive = false
     private var bulbHostTransferPrepared = false
+    private val recordingSequence = java.util.concurrent.atomic.AtomicLong()
+    @Volatile private var recordingEventObservation: RecordingObservation? = null
+    private var recordingStopOwned = false
+    // Same-session route authority survives cancelled/suppressed Stop ACK or observation.
+    private var recordingStopAuthorized = false
     private val canonEventMutex = Mutex()
     private val observedFeatures = ConcurrentHashMap.newKeySet<CameraFeature>()
 
@@ -98,6 +103,9 @@ class UsbPtpCameraBackend(
             }
         }
         session = null
+        recordingStopOwned = false
+        recordingStopAuthorized = false
+        recordingEventObservation = null
         deviceInfo = null
         storageSnapshot = emptyList()
         storageError = null
@@ -172,6 +180,7 @@ class UsbPtpCameraBackend(
             recording = CanonEosPtp.movieRecording(
                 canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS).currentValue,
             ),
+            recordingObservation = recordingEventObservation,
             mode = corePropertyDisplay(
                 CanonEosPropertyCode.AUTO_EXPOSURE_MODE,
                 PtpDevicePropertyCode.EXPOSURE_PROGRAM_MODE,
@@ -1939,57 +1948,100 @@ class UsbPtpCameraBackend(
         shootingCaptureDestinationIntent = null
     }
 
-    private suspend fun setCanonMovieRecording(recording: Boolean): CameraStatus {
+    override suspend fun recordingObservation(): RecordingObservation? = recordingIoScope {
+        val owner = requireSession()
+        val info = requireDeviceInfo()
+        if (!canonRemotePrepared || !info.supports(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE)) return@recordingIoScope null
+        canonEventMutex.withLock { readCanonRecordingObservationLocked(owner) }
+    }
+
+    /** Existing advertised selected-property reader: drain, request exact EVF status, then match its event. */
+    private suspend fun readCanonRecordingObservationLocked(owner: PtpSession): RecordingObservation? {
+        if (!canonRemotePrepared || !requireDeviceInfo().supports(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE)) return null
+        check(session === owner)
+        currentCoroutineContext().ensureActive()
+        val prior = owner.executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+        check(session === owner)
+        applyCanonPropertyUpdates(prior) // Queued events update display only, never lifecycle evidence.
+        owner.executeOperation(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE,
+            listOf(CanonEosPropertyCode.EVF_RECORD_STATUS.toLong()))
+        repeat(10) {
+            currentCoroutineContext().ensureActive()
+            check(session === owner)
+            val payload = owner.executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+            check(session === owner)
+            applyCanonPropertyUpdates(payload)
+            val values = CanonEosPtp.propertyUpdates(payload).filter {
+                it.propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS && it.currentValue != null
+            }.mapNotNull { it.currentValue }.distinct()
+            if (values.isNotEmpty()) {
+                check(values.size == 1) { "Conflicting USB recording values." }
+                val value = requireNotNull(CanonEosPtp.movieRecording(values.single())) { "Unknown USB recording value." }
+                return RecordingObservation(value, recordingSequence.incrementAndGet(), RecordingObservationSource.USB_EVENT)
+                    .also { recordingEventObservation = it; recordingStopOwned = value; if (value) recordingStopAuthorized = true }
+            }
+            delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
+        }
+        return null
+    }
+
+    private suspend fun setCanonMovieRecording(recording: Boolean): CameraStatus = recordingIoScope {
+        val command = if (recording) RecordingCommand.START else RecordingCommand.STOP
+        val evidence = currentCoroutineContext()[RecordingRequestEvidence] ?: RecordingRequestEvidence(command)
+        val owner = requireSession()
+        evidence.observationFloor = recordingSequence.get()
         val info = requireDeviceInfo()
         refreshCanonPropertyState(info)
         val state = canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS)
-        if (!CanonEosPtp.supportsMovieRecording(info, state.availableValues)) {
+        if (!CanonEosPtp.supportsMovieRecording(info, state.availableValues) && (recording || !recordingStopAuthorized)) {
             unsupported<Unit>(CameraFeature.VIDEO_RECORDING)
         }
-
-        val target = if (recording) {
-            CanonEosPtp.MOVIE_RECORD_TARGET_CARD
-        } else {
-            CanonEosPtp.MOVIE_RECORD_TARGET_NONE
-        }
-        if (state.currentValue != target) {
-            ensureCanonRemoteMode()
-            var lastReadback: Long? = null
-            val verified = canonEventMutex.withLock {
+        val target = if (recording) CanonEosPtp.MOVIE_RECORD_TARGET_CARD else CanonEosPtp.MOVIE_RECORD_TARGET_NONE
+        ensureCanonRemoteMode()
+        canonEventMutex.withLock {
+            check(session === owner)
+            // A cached target is insufficient: only a supported explicit read can authorize the no-op.
+            val before = if (state.currentValue == target) {
+                try { readCanonRecordingObservationLocked(owner) }
+                catch (failure: CancellationException) { throw failure }
+                catch (_: Exception) { null }
+            } else null
+            if (before?.recording == recording) {
+                recordingStopAuthorized = true // This validated no-op also retains the same-session Stop route.
+                evidence.noOp()
+                evidence.observe(before)
+                if (!recording) recordingStopOwned = false
+            } else {
                 drainCanonEventsLocked()
-                requireSession().executeDataOutOperation(
-                    operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
-                    payload = CanonEosPtp.uint16PropertyPayload(
-                        CanonEosPropertyCode.EVF_RECORD_STATUS,
-                        target.toInt(),
-                    ),
-                )
-                withTimeoutOrNull(CANON_MOVIE_RECORD_VERIFY_TIMEOUT_MILLIS) {
-                    while (true) {
-                        val payload = drainCanonEventsLocked()
-                        CanonEosPtp.propertyUpdates(payload)
-                            .lastOrNull {
-                                it.propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS && it.currentValue != null
-                            }
-                            ?.currentValue
-                            ?.let { readback ->
-                                lastReadback = readback
-                                if (readback == target) return@withTimeoutOrNull readback
-                            }
-                        delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
-                    }
+                evidence.observationFloor = recordingSequence.get()
+                check(session === owner)
+                currentCoroutineContext().ensureActive()
+                val priorStopOwned = recordingStopOwned
+                evidence.beginRequest()
+                recordingStopAuthorized = true
+                recordingStopOwned = true
+                try {
+                    owner.executeDataOutOperation(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                        CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.EVF_RECORD_STATUS, target.toInt()))
+                } catch (failure: PtpResponseException) {
+                    evidence.rejected = true
+                    recordingStopOwned = priorStopOwned
+                    throw failure
                 }
-            }
-            if (verified == null) {
-                throw PtpProtocolException(
-                    "Canon EOS accepted the movie-record command but did not report EVFRecordStatus=$target " +
-                        "within ${CANON_MOVIE_RECORD_VERIFY_TIMEOUT_MILLIS / 1_000} seconds " +
-                        "(last=${lastReadback ?: "none"})."
-                )
+                evidence.acknowledge()
+                if (!recording) recordingStopOwned = false
+                val observed = try { readCanonRecordingObservationLocked(owner) }
+                catch (failure: CancellationException) { throw failure }
+                catch (failure: Exception) { throw RecordingStatusReadbackException(command, failure) }
+                evidence.observe(observed)
+                if (observed == null) throw RecordingStatusReadbackException(command,
+                    PtpProtocolException("Canon EOS accepted the movie-record command; fresh EVF recording status is unavailable."))
             }
         }
         observedFeatures.add(CameraFeature.VIDEO_RECORDING)
-        return status()
+        try { status().also { evidence.observe(it.recordingObservation) } }
+        catch (failure: CancellationException) { throw failure }
+        catch (failure: Exception) { throw RecordingStatusReadbackException(command, failure) }
     }
 
     private suspend fun setCanonMovieMode(info: PtpDeviceInfo, label: String, evidence: ShootingSettingEvidence? = null): Boolean {

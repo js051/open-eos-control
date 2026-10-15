@@ -115,8 +115,11 @@ class DesktopBridgeClient(
             val response = chain.proceed(chain.request())
             if (response.code in setOf(408, 421, 503)) {
                 val code = response.code
+                // Gateway failures may hide a camera write. Only the lifecycle rejection allowlist is definite.
+                if (code in setOf(400, 401, 403, 404, 405, 409, 410, 422, 429))
+                    chain.request().tag(RecordingRequestEvidence::class.java)?.rejected = true
                 response.close()
-                throw IOException("Capture configuration request unconfirmed (HTTP $code).")
+                throw IOException("Single-attempt request rejected (HTTP $code).")
             }
             response
         }.build()
@@ -186,6 +189,7 @@ class DesktopBridgeClient(
         liveViewMagnifications = emptyList()
         sessionCameraModel = null
         sessionEngine = null
+        lastRecordingDisplayStatus = null
         validateService()
         val payload = JSONObject().put("engine", cameraEngine ?: "auto")
         cameraId?.takeIf(String::isNotBlank)?.let { payload.put("cameraId", it) }
@@ -896,6 +900,82 @@ class DesktopBridgeClient(
     suspend fun halfPressShutter(): CameraStatus = parseStatus(
         postJson(sessionEndpoint("shutter", "half-press"), JSONObject())
     ).also { observedFeatures.add(CameraFeature.SHUTTER_HALF_PRESS) }
+
+    private val recordingSequence = java.util.concurrent.atomic.AtomicLong()
+    @Volatile private var lastRecordingDisplayStatus: CameraStatus? = null
+
+    suspend fun recordingObservation(): RecordingObservation? = recordingIoScope {
+        val owner = requireShutterSession()
+        val engine = requireNotNull(sessionEngine)
+        val body = recordingLifecycleJson(Request.Builder()
+            .url(endpoint("v1", "session", owner.id, "recording", "observation"))
+            .header("Cache-Control", "no-cache, no-store").get().build(), owner)
+        val observation = recordingWireObservation(body, engine)
+            ?: error("Bridge recording observation schema is invalid.")
+        observation.recording?.let { RecordingObservation(it, recordingSequence.incrementAndGet(), RecordingObservationSource.BRIDGE_STATUS) }
+    }
+
+    /** Additive lifecycle API. A legacy/missing endpoint never falls back to another POST. */
+    suspend fun recordingLifecycleCommand(command: RecordingCommand): CameraStatus = recordingIoScope {
+        val owner = requireShutterSession()
+        val engine = requireNotNull(sessionEngine)
+        val evidence = currentCoroutineContext()[RecordingRequestEvidence] ?: RecordingRequestEvidence(command)
+        evidence.observationFloor = recordingSequence.get()
+        val request = Request.Builder().url(endpoint("v1", "session", owner.id, "recording",
+            command.name.lowercase(), "outcome")).post(JSONObject().toString().toRequestBody(jsonMediaType)).build()
+        recordingLifecycleJson(request, owner, evidence) { body ->
+            val outcome = recordingWireOutcome(body, engine, command)
+                ?: error("Bridge recording outcome schema is invalid.")
+            when (outcome.response) {
+                RecordingResponseEvidence.RESPONSE_RECEIVED -> evidence.acknowledge()
+                RecordingResponseEvidence.REJECTED -> evidence.rejected = true
+                RecordingResponseEvidence.NOT_REQUIRED -> evidence.remoteNoOp()
+                else -> Unit
+            }
+            outcome.observation.recording?.let { evidence.observe(RecordingObservation(it,
+                recordingSequence.incrementAndGet(), RecordingObservationSource.BRIDGE_STATUS)) }
+        }
+        requireCurrentSession(owner)
+        if (evidence.rejected) error("Bridge rejected the recording command.")
+        if (evidence.responseEvidence() == RecordingResponseEvidence.UNKNOWN)
+            throw RecordingCommandUnconfirmedException(command, IOException("Bridge did not confirm the recording command."))
+        val display = lastRecordingDisplayStatus ?: CameraStatus(connected = true, batteryLevel = null,
+            batteryStatus = "unknown", recording = null, mode = "unknown", mediaAvailable = null,
+            remainingMinutes = null, exposure = ExposureState("-", "-", "-", "-"))
+        display.copy(recording = evidence.observation?.recording ?: display.recording,
+            recordingObservation = evidence.observation)
+    }
+
+    private suspend fun recordingLifecycleJson(request: Request, owner: BridgeShutterReleaseSession,
+        evidence: RecordingRequestEvidence? = null, responseReceived: (Map<String, Any?>) -> Unit = {}): Map<String, Any?> = withContext(Dispatchers.IO) {
+        requireCurrentSession(owner)
+        val call = newBridgeCall(request.newBuilder().tag(RecordingRequestEvidence::class.java, evidence).build(), true)
+        val watcher = launch(start = CoroutineStart.UNDISPATCHED) { try { awaitCancellation() } finally { call.cancel() } }
+        try {
+            currentCoroutineContext().ensureActive(); requireCurrentSession(owner); evidence?.beginRequest()
+            call.execute().use { response ->
+                if (response.code in setOf(400, 401, 403, 404, 405, 409, 410, 422, 429)) evidence?.rejected = true
+                check(response.code == 200) { "Recording lifecycle endpoint returned HTTP ${response.code}; no fallback was sent." }
+                requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                    response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                val body = requireNotNull(response.body).let { body ->
+                    body.byteStream().use { readShootingSettingResponseText(it, body.contentLength()) }
+                }
+                val parsed = recordingJsonMap(JSONObject(body))
+                responseReceived(parsed) // Commit complete command receipt before cancellation/session checks.
+                currentCoroutineContext().ensureActive(); requireCurrentSession(owner)
+                parsed
+            }
+        } finally { watcher.cancel() }
+    }
+
+    private fun recordingJsonMap(json: JSONObject): Map<String, Any?> = json.keys().asSequence().associateWith { key ->
+        when (val value = json.get(key)) {
+            JSONObject.NULL -> null
+            is JSONObject -> recordingJsonMap(value)
+            else -> value
+        }
+    }
 
     suspend fun startRecording(): CameraStatus = recordingCommand(RecordingCommand.START)
 
@@ -1732,7 +1812,7 @@ class DesktopBridgeClient(
             },
             temperature = body.optNullableString("temperature")
                 ?.let(CameraTemperatureStatus::fromCcapiValue),
-        )
+        ).also { lastRecordingDisplayStatus = it }
     }
 
     private fun parseBulbStatus(body: JSONObject): CameraStatus {
@@ -1810,8 +1890,9 @@ class DesktopBridgeClient(
         val revision = session?.revision
         val focusSession = heldAutofocusSession
         val focusRevision = focusSession?.revision
-        val call = newBridgeCall(request, captureEvidence != null || captureRecovery)
-        val jsonLimit = strictMediaJsonLimit ?: 65_536.takeIf { captureEvidence != null }
+        val recordingIo = currentCoroutineContext()[RecordingIoContext] != null
+        val call = newBridgeCall(request, captureEvidence != null || captureRecovery || recordingIo)
+        val jsonLimit = strictMediaJsonLimit ?: 65_536.takeIf { captureEvidence != null || recordingIo }
         if (recoveryRead) {
             // Bound only the additional release-proof read, including a continuously paced body.
             // This is an app recovery policy, not a camera timing guarantee or a release ACK.
@@ -1848,7 +1929,7 @@ class DesktopBridgeClient(
                     else if (maxResponseBytes == null) it.string() else it.readBoundedUtf8(maxResponseBytes)
                 }.orEmpty()
                 if (recordingEvidence == null && captureEvidence == null) session?.let(::requireCurrentSession)
-                if (captureEvidence != null) StrictMediaJson(body).validate()
+                if (captureEvidence != null || recordingIo) StrictMediaJson(body).validate()
                 if (!response.isSuccessful) {
                     captureEvidence?.let { evidence ->
                         val envelope = runCatching { JSONObject(body).optJSONObject("error") }.getOrNull()
@@ -2047,7 +2128,7 @@ class DesktopBridgeClient(
         val path = request.url.encodedPath
         val root = session?.let { endpoint("v1", "session", it.id).encodedPath }
         val stopOnly = (request.method == "POST" && path in setOf(
-            "$root/bulb/stop", "$root/liveview/stop", "$root/recording/stop", "$root/focus/auto/stop",
+            "$root/bulb/stop", "$root/liveview/stop", "$root/recording/stop", "$root/recording/stop/outcome", "$root/focus/auto/stop",
         )) || (request.method == "DELETE" && path in setOf(root, "$root/events"))
         if (session != null && heldAutofocusSession?.hasReleaseResponsibility == true &&
             request.tag(BridgeFocusStart::class.java) == null && !stopOnly) {

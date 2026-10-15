@@ -93,7 +93,7 @@ class RecordingStatusReadbackTest {
         } finally { client.close(); server.shutdown() }
     }
 
-    @Test fun nativeOptionalStatusFailuresKeepExistingSuccessfulCommandSemantics() = runBlocking {
+    @Test fun nativeOptionalStatusFailuresKeepAckSeparateFromUnknownPhysicalState() = runBlocking {
         val server = MockWebServer()
         val actions = CopyOnWriteArrayList<String>()
         server.dispatcher = object : Dispatcher() {
@@ -110,8 +110,8 @@ class RecordingStatusReadbackTest {
         val client = CcapiClient(server.url("/").toString(), treatAsSimulator = false, httpClient = http())
         try {
             client.initialize()
-            assertEquals(true, client.startRecording().recording)
-            assertEquals(false, client.stopRecording().recording)
+            assertNull(client.startRecording().recording)
+            assertNull(client.stopRecording().recording)
             assertEquals(2, actions.size)
         } finally { client.close(); server.shutdown() }
     }

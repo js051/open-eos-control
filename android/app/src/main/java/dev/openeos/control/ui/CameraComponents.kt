@@ -1236,7 +1236,8 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                     }
             )
 
-            if (state.status?.recording == true && state.pendingRecordingCommand == null) {
+            if ((state.recordingReceipt?.let { it.canPublish && it.observation?.recording == true }
+                    ?: (state.status?.recording == true)) && state.pendingRecordingCommand == null) {
                 RecordingIndicator(Modifier.align(Alignment.CenterStart).padding(12.dp))
             }
             if (state.bulbExposureActive) {
@@ -1889,7 +1890,7 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
 
 @Composable
 fun CaptureButton(state: CameraUiState, actions: CameraActions) {
-    val photo = state.captureMode == CaptureMode.PHOTO && state.pendingRecordingCommand == null
+    val photo = state.captureMode == CaptureMode.PHOTO && !state.recordingStopAvailable
     val bulb = photo && state.bulbMode
     val bulbActive = state.bulbExposureActive
     val releaseOnly = state.shutterReleaseUnconfirmed
@@ -2014,6 +2015,8 @@ internal fun PersistentCameraWarning(
     message: String,
     onRefresh: (() -> Unit)? = null,
     refreshEnabled: Boolean = true,
+    onStopRecording: (() -> Unit)? = null,
+    stopEnabled: Boolean = true,
 ) {
     val density = LocalDensity.current
     val textStyle = LocalTextStyle.current.copy(color = AppText)
@@ -2034,12 +2037,18 @@ internal fun PersistentCameraWarning(
         )
         CameraReadableSlot(
             width = readingWidth,
-            height = with(density) { (textLayout.size.height + 2 * 8.dp.roundToPx()).toDp() } + if (onRefresh != null) 48.dp else 0.dp,
+            height = with(density) { (textLayout.size.height + 2 * 8.dp.roundToPx()).toDp() } + (if (onRefresh != null) 48.dp else 0.dp) + (if (onStopRecording != null) 48.dp else 0.dp),
             animateRotation = false,
         ) {
             Column(Modifier.fillMaxSize().background(Color(0xFF512326), RoundedCornerShape(6.dp))) {
                 Text(message, style = textStyle,
                     modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp))
+                if (onStopRecording != null) {
+                    androidx.compose.material3.TextButton(onClick = onStopRecording, enabled = stopEnabled,
+                        modifier = Modifier.height(48.dp).testTag("recording-owned-stop")) {
+                        Text(stringResource(R.string.stop_recording))
+                    }
+                }
                 if (onRefresh != null) {
                     androidx.compose.material3.TextButton(
                         onClick = onRefresh,

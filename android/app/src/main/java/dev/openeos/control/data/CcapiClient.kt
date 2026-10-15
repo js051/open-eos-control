@@ -170,8 +170,9 @@ class CcapiClient(
             val response = chain.proceed(chain.request())
             if (response.code in setOf(408, 421, 503)) {
                 val code = response.code
+                chain.request().tag(RecordingRequestEvidence::class.java)?.rejected = true
                 response.close()
-                throw IOException("Capture configuration request unconfirmed (HTTP $code).")
+                throw IOException("Single-attempt request rejected (HTTP $code).")
             }
             response
         }.build()
@@ -197,7 +198,7 @@ class CcapiClient(
         }
         .build()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-    private val eventHttpClient = this.httpClient.newBuilder()
+    private val eventHttpClient = captureConfigurationHttpClient.newBuilder()
         .readTimeout(CCAPI_EVENT_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .callTimeout(CCAPI_EVENT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
@@ -217,6 +218,9 @@ class CcapiClient(
 
     private var apiVersionPrefixes = listOf("/ccapi/ver100")
     private var isRecording: Boolean? = null
+    private val recordingSequence = java.util.concurrent.atomic.AtomicLong()
+    private val recordingEventFence = RecordingEventFence()
+    private var retainedRecordingOperation: CcapiApiOperation? = null
     private var bulbExposureActive = false
     private val heldAutofocus = HeldAutofocusSession()
     private val heldShutter = ShutterReleaseSession()
@@ -711,6 +715,7 @@ class CcapiClient(
                 batteryLevel = batteryLevel,
                 batteryStatus = batteryLevelStr,
                 recording = isRecording,
+                recordingObservation = null, // Canon event queues provide change hints, not a fresh REC snapshot.
                 mode = modeVal,
                 mediaAvailable = storageInfo?.available,
                 remainingMinutes = null,
@@ -734,7 +739,10 @@ class CcapiClient(
                 temperature = latestTemperatureStatus,
             )
         } else {
-            getJson("/ccapi/status").toCameraStatus().also {
+            getJson("/ccapi/status").toCameraStatus().let { value ->
+                value.copy(recordingObservation = value.recording?.let { RecordingObservation(it,
+                    recordingSequence.incrementAndGet(), RecordingObservationSource.SIMULATOR_STATUS) })
+            }.also {
                 latestTemperatureStatus = it.temperature
                 observedFeatures.addAll(setOf(CameraFeature.BATTERY_STATUS, CameraFeature.STORAGE_STATUS))
                 if (it.recordableShots != null || it.remainingRecordingSeconds != null) {
@@ -928,6 +936,7 @@ class CcapiClient(
             val url = "$baseUrl${pollOperation.path}".toHttpUrl().newBuilder()
                 .addQueryParameter(timeoutParameter.first, timeoutParameter.second)
                 .build()
+            val recordingReadEpoch = recordingEventFence.capture()
             val json = requestEventJson(
                 Request.Builder()
                     .url(url)
@@ -936,7 +945,7 @@ class CcapiClient(
                     .header("Cache-Control", "no-cache")
                     .build(),
             )
-            applyRecordingEvent(json)
+            recordingEventFence.accept(recordingReadEpoch) { applyRecordingEvent(json) }
             CameraEvent(changedKeys = json.safeTopLevelKeys())
         } else {
             val url = "$baseUrl/ccapi/events".toHttpUrl().newBuilder()
@@ -961,16 +970,10 @@ class CcapiClient(
 
     private fun applyRecordingEvent(event: JSONObject) {
         val recbutton = event.optJSONObject("recbutton") ?: return
-        val state = when {
-            recbutton.has("action") && !recbutton.isNull("action") -> recbutton.opt("action") as? String
-            recbutton.has("status") && !recbutton.isNull("status") -> recbutton.opt("status") as? String
-            else -> null
-        }
-        isRecording = when (state) {
-            "start" -> true
-            "stop" -> false
-            else -> return
-        }
+        val fields = recbutton.keys().asSequence().associateWith { recbutton.opt(it) }
+        val recording = recordingEventValue(fields) ?: return
+        isRecording = recording
+        // Preserve display-compatible event hints only. Queued delivery cannot prove current REC.
     }
 
     suspend fun stopEventPolling() {
@@ -1534,20 +1537,31 @@ class CcapiClient(
         return status()
     }
 
-    suspend fun startRecording(): CameraStatus {
+    suspend fun recordingObservation(): RecordingObservation? = recordingIoScope {
+        if (isRealCamera) null else {
+            val value = getJson("/ccapi/status").strictRecordingStatus()
+            value?.let { RecordingObservation(it, recordingSequence.incrementAndGet(), RecordingObservationSource.SIMULATOR_STATUS) }
+        }
+    }
+
+    suspend fun startRecording(): CameraStatus = recordingIoScope {
         refreshTemperatureStatusForRestrictedCommand()
         requireMovieRecordingAllowed()
-        return recordingCommand(RecordingCommand.START)
+        recordingCommand(RecordingCommand.START)
     }
 
     suspend fun stopRecording(): CameraStatus = recordingCommand(RecordingCommand.STOP)
 
-    private suspend fun recordingCommand(command: RecordingCommand): CameraStatus {
-        val operation = if (isRealCamera) recordingOperation() else null
+    private suspend fun recordingCommand(command: RecordingCommand): CameraStatus = recordingIoScope {
+        val operation = if (isRealCamera) {
+            if (command == RecordingCommand.STOP) retainedRecordingOperation ?: recordingOperation() else recordingOperation()
+        } else null
         if (isRealCamera && enforceAdvertisedOperations && operation == null) {
             error("Camera did not advertise movie recording control.")
         }
         val evidence = currentCoroutineContext()[RecordingRequestEvidence] ?: RecordingRequestEvidence(command)
+        if (operation != null) retainedRecordingOperation = operation
+        evidence.onAdmission = { recordingEventFence.commandAdmission(); recordingSequence.get() }
         try {
             if (isRealCamera) {
                 commandOk(
@@ -1556,7 +1570,6 @@ class CcapiClient(
                     operation = operation,
                     recordingEvidence = evidence,
                 )
-                isRecording = command == RecordingCommand.START
             } else {
                 postJson("/ccapi/record/${if (command == RecordingCommand.START) "start" else "stop"}", JSONObject(), evidence)
             }
@@ -1567,9 +1580,12 @@ class CcapiClient(
                 throw RecordingCommandUnconfirmedException(command, exception)
             }
             throw exception
+        } finally {
+            if (evidence.attempted) recordingEventFence.commandCompleted()
         }
         observedFeatures.add(CameraFeature.VIDEO_RECORDING)
-        return recordingStatusAfterAcknowledgement(command)
+        evidence.acknowledge()
+        recordingStatusAfterAcknowledgement(command).also { evidence.observe(it.recordingObservation) }
     }
 
     private suspend fun recordingStatusAfterAcknowledgement(command: RecordingCommand): CameraStatus = try {
@@ -4348,7 +4364,8 @@ class CcapiClient(
         val request = Request.Builder().url("$baseUrl$path").get().header("Accept", "text/plain").build()
         val maintenance = currentCoroutineContext()[MaintenanceIoContext]
         maintenance?.requireActive?.invoke()
-        val call = newCameraCall(request, maintenance != null)
+        val recordingIo = currentCoroutineContext()[RecordingIoContext] != null
+        val call = newCameraCall(request, maintenance != null || recordingIo)
         val cancelCall = AtomicBoolean(true)
         val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
@@ -4357,7 +4374,7 @@ class CcapiClient(
         try {
             call.execute().use { response ->
                 val body = response.body?.let { body ->
-                    if (maintenance == null) body.string() else {
+                    if (maintenance == null && !recordingIo) body.string() else {
                         requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
                             response.headers("Content-Length"), response.headers("Transfer-Encoding"))
                         body.byteStream().use { readStrictMediaJsonText(it, body.contentLength(), 65_536) }.also {
@@ -4466,11 +4483,12 @@ class CcapiClient(
         }
         val shootingEvidence = currentCoroutineContext()[ShootingSettingWriteContext]?.evidence
             ?.takeIf { request.method != "GET" && request.method != "HEAD" }
-        val call = newCameraCall(request, captureEvidence != null || captureRecovery || shootingEvidence != null)
-        val jsonLimit = strictMediaJsonLimit ?: 65_536.takeIf { captureEvidence != null }
+        val recordingIo = currentCoroutineContext()[RecordingIoContext] != null || recordingEvidence != null
+        val call = newCameraCall(request.newBuilder().tag(RecordingRequestEvidence::class.java, recordingEvidence).build(), captureEvidence != null || captureRecovery || shootingEvidence != null || recordingIo)
+        val jsonLimit = strictMediaJsonLimit ?: 65_536.takeIf { captureEvidence != null || recordingIo }
         val readOnly = request.method == "GET" || request.method == "HEAD"
         val cancelCall = AtomicBoolean(true)
-        val watcher = if (readOnly) launch(start = CoroutineStart.UNDISPATCHED) {
+        val watcher = if (readOnly || recordingIo) launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
         } else null
         try {
@@ -4486,11 +4504,12 @@ class CcapiClient(
             call.execute().use { response ->
                 recordingEvidence?.rejected = !response.isSuccessful
                 val body = response.body?.let {
-                    if (captureEvidence != null || captureRecovery || shootingEvidence != null) it.byteStream().use { input -> readCaptureConfigurationJsonText(input, it.contentLength()) }
+                    if (recordingIo) it.byteStream().use { input -> readShootingSettingResponseText(input, it.contentLength()) }
+                    else if (captureEvidence != null || captureRecovery || shootingEvidence != null) it.byteStream().use { input -> readCaptureConfigurationJsonText(input, it.contentLength()) }
                     else if (jsonLimit == null) it.string()
                     else it.byteStream().use { input -> readStrictMediaJsonText(input, it.contentLength(), jsonLimit) }
                 }.orEmpty()
-                if (captureEvidence != null) StrictMediaJson(body).validate()
+                if (captureEvidence != null || recordingIo) StrictMediaJson(body).validate()
                 if (!response.isSuccessful) {
                     throw CcapiHttpException(
                         statusCode = response.code,
@@ -4499,6 +4518,12 @@ class CcapiClient(
                 }
                 if (strictMediaJsonLimit != null) StrictMediaJson(body).validate()
                 JSONObject(body).also {
+                    if (recordingIo) {
+                        check(response.code == 200)
+                        requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                            response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                        recordingEvidence?.acknowledge()
+                    }
                     if (shootingEvidence != null || shootingRead) {
                         if (shootingRead) check(response.code == 200)
                         requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
@@ -4530,15 +4555,14 @@ class CcapiClient(
         }
         try {
             call.execute().use { response ->
-                val payload = response.body?.byteStream()?.readBoundedEventPayload() ?: ByteArray(0)
-                val body = payload.toString(StandardCharsets.UTF_8)
-                if (!response.isSuccessful) {
-                    throw CcapiHttpException(
-                        statusCode = response.code,
-                        message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\n" +
-                            "Body: ${body.take(MAX_ERROR_BODY_CHARS)}",
-                    )
+                check(response.code == 200) { "Camera event response requires HTTP 200." }
+                requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                    response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                val body = requireNotNull(response.body).let { body ->
+                    body.byteStream().use { readStrictMediaJsonText(it, body.contentLength(), MAX_CCAPI_EVENT_BODY_BYTES) }
+                        .also { check(body.contentLength() < 0 || it.toByteArray(Charsets.UTF_8).size.toLong() == body.contentLength()) }
                 }
+                StrictMediaJson(body).validate()
                 runCatching { JSONObject(body) }.getOrElse {
                     error("Camera event polling returned invalid JSON.")
                 }
@@ -4565,13 +4589,14 @@ class CcapiClient(
         }
         val shootingEvidence = currentCoroutineContext()[ShootingSettingWriteContext]?.evidence
         shootingEvidence?.let { currentCoroutineContext().ensureActive(); it.beforeDispatch() }
-        val call = newCameraCall(request, shootingEvidence != null)
-        val watcher = if (shootingEvidence != null) launch(start = CoroutineStart.UNDISPATCHED) {
+        val recordingIo = currentCoroutineContext()[RecordingIoContext] != null || recordingEvidence != null
+        val call = newCameraCall(request.newBuilder().tag(RecordingRequestEvidence::class.java, recordingEvidence).build(), shootingEvidence != null || recordingIo)
+        val watcher = if (shootingEvidence != null || recordingIo) launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { call.cancel() }
         } else null
         try { call.execute().use { response ->
             recordingEvidence?.rejected = !response.isSuccessful
-            val body = response.body?.let { body -> if (shootingEvidence == null) body.string() else
+            val body = response.body?.let { body -> if (shootingEvidence == null && !recordingIo) body.string() else
                 body.byteStream().use { readShootingSettingResponseText(it, body.contentLength()) }
             }.orEmpty()
             if (!response.isSuccessful) {
@@ -4586,6 +4611,15 @@ class CcapiClient(
                     message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}; " +
                         "expected HTTP $expectedStatusCode.\nBody: $body",
                 )
+            }
+            if (recordingEvidence != null) {
+                check(response.code == 200 || response.code == 204)
+                if (body.isNotBlank()) { StrictMediaJson(body).validate(); check(JSONObject(body).length() == 0) }
+                requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                    response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                if (response.code == 204) check(body.isEmpty() && response.headers("Content-Length").all { it == "0" } &&
+                    response.headers("Transfer-Encoding").isEmpty())
+                recordingEvidence.acknowledge()
             }
             if (shootingEvidence != null) {
                 requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),

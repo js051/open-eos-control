@@ -3,8 +3,6 @@ package dev.openeos.control.data
 import org.json.JSONException
 import org.json.JSONObject
 
-enum class RecordingCommand { START, STOP }
-
 /** The REC command was acknowledged; its separate status read failed.
  * The requested direction is local evidence, not a confirmed recording state.
  */
