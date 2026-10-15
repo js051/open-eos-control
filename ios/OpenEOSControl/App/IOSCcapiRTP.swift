@@ -121,6 +121,7 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
     private var lastAudioStatusPublishedAt = Date.distantPast
     private var activeAudioSessionID: UUID?
     private var deliveryOwner = UUID()
+    private var videoGeometryRevision = UUID()
     private var terminalVideoFailure: String?
     private let videoConsumer: (@MainActor @Sendable (CCAPIH264AccessUnit) -> Void)?
     private let flushRenderer: @MainActor @Sendable (AVSampleBufferDisplayLayer, Bool, @escaping @Sendable () -> Void) -> Void
@@ -140,6 +141,7 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
     @MainActor private var needsKeyFrame = true
     @MainActor private var deliveryContinuity = IOSRTPVideoDecodeContinuity()
     @MainActor private var renderingEnabled = true
+    @MainActor private var magnificationPause: (id: UUID, session: UUID)?
     @MainActor private var renderedSessionID: UUID?
     @MainActor private var pixelReadbackBarrier: UUID?
     @MainActor private(set) lazy var pixelMonitor = IOSRTPPixelMonitor(isOwnerActive: { [weak self] token in
@@ -213,6 +215,7 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
             audioStatus = .inactive
             audioStatus.retiringResources = audioPipeline.isRetiring
         }
+        magnificationPause = nil
         clearRendererSession()
         publishAudioStatus(force: true)
     }
@@ -393,6 +396,49 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
         }
     }
 
+    /// Local output retirement only. The camera, receiver and audio keep their
+    /// existing owners. Old decode callbacks fail the reset generation check.
+    @MainActor
+    func beginMagnificationChange() -> UUID {
+        let id = UUID()
+        magnificationPause = (id, audioStateLock.synchronized {
+            videoGeometryRevision = UUID()
+            return deliveryOwner
+        })
+        resetRenderer(removingImage: true)
+        return id
+    }
+
+    @MainActor
+    func finishMagnificationChange(_ id: UUID) {
+        guard let pause = magnificationPause, pause.id == id else { return }
+        magnificationPause = nil
+        guard audioStateLock.synchronized({ () -> Bool in
+            guard deliveryOwner == pause.session else { return false }
+            videoGeometryRevision = UUID()
+            return true
+        }) else { return }
+        progress = IOSRTPPresentationProgress()
+        resetRenderer(removingImage: true)
+    }
+
+    /// A fresh local decoded/submitted frame after the completed flush, not proof
+    /// of camera-side magnification timing or physical display presentation.
+    @MainActor
+    var hasCurrentCoordinateOutput: Bool {
+        guard pixelReadbackBarrier == nil,
+              renderingEnabled, let submitted = progress.submitted,
+              magnificationPause?.session != submitted.owner,
+              progress.owns(submitted), submitted.epoch == videoProcessingGeneration else { return false }
+        return audioStateLock.synchronized {
+            deliveryOwner == submitted.owner && applicationActive && terminalVideoFailure == nil
+        }
+    }
+
+    func currentVideoGeometryRevision() -> UUID {
+        audioStateLock.synchronized { videoGeometryRevision }
+    }
+
     @MainActor
     func setRenderingEnabled(_ enabled: Bool) {
         guard renderingEnabled != enabled else { return }
@@ -553,10 +599,13 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
         pictureParameterSet: Data?,
         sessionID: UUID,
         presentFrame: Bool = true,
-        deliverySequence: UInt64? = nil
+        deliverySequence: UInt64? = nil,
+        geometryRevision: UUID? = nil
     ) {
-        guard audioStateLock.synchronized({ activeAudioSessionID == sessionID && deliveryOwner == sessionID && applicationActive && terminalVideoFailure == nil }),
-              renderingEnabled else { return }
+        guard audioStateLock.synchronized({ activeAudioSessionID == sessionID && deliveryOwner == sessionID
+            && applicationActive && terminalVideoFailure == nil
+            && (geometryRevision == nil || geometryRevision == videoGeometryRevision) }),
+              renderingEnabled, magnificationPause?.session != sessionID else { return }
         if renderedSessionID != sessionID {
             clearRendererSession()
             renderedSessionID = sessionID
@@ -1070,7 +1119,7 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
     private var videoDelivery = IOSRTPVideoDeliveryGate()
     private var latestSPS: Data?
     private var latestPPS: Data?
-    private lazy var depacketizer = CCAPIH264RTPDepacketizer(payloadType: description.video.payloadType)
+    private lazy var depacketizer = IOSRTPGeometryDepacketizer(payloadType: description.video.payloadType)
     private var audioDepacketizer: CCAPILatmRTPDepacketizer?
     private var audioExtractor: CCAPILatmSampleExtractor?
     private var firstAudioTimestamp: UInt32?
@@ -1256,9 +1305,12 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
     }
 
     private func receiveVideo(on connection: NWConnection) {
+        let geometryRevision = sink.currentVideoGeometryRevision()
         connection.receiveMessage { [weak self, weak connection] data, _, _, error in
             guard let self, let connection else { return }
-            if let data, data.count <= 65_535, let accessUnit = self.depacketizer.accept(data) {
+            if let data, data.count <= 65_535,
+               let accessUnit = self.depacketizer.accept(data, revision: geometryRevision,
+                    currentRevision: { self.sink.currentVideoGeometryRevision() }) {
                 if let sps = accessUnit.sequenceParameterSet { self.latestSPS = sps }
                 if let pps = accessUnit.pictureParameterSet { self.latestPPS = pps }
                 // Parameter-set-only/SEI traffic is not a fresh video picture.
@@ -1301,7 +1353,8 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
                                 pictureParameterSet: latestPPS,
                                 sessionID: self.sessionID,
                                 presentFrame: present,
-                                deliverySequence: ticket.sequence
+                                deliverySequence: ticket.sequence,
+                                geometryRevision: geometryRevision
                             )
                         }
                     }

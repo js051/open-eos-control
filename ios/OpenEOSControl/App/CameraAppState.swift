@@ -176,6 +176,15 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var rtpAudioRequested = false
     @Published private(set) var rtpAudioStatus = IOSCcapiRTPAudioStatus.inactive
     @Published private(set) var liveViewData: Data?
+    private var liveViewCoordinateRevision = UUID()
+    private var liveViewCoordinateFrameRequired = false
+    private var liveViewMagnificationLifetime: UUID?
+    var liveViewCoordinateControlsReady: Bool {
+        guard !isBusy(.liveView) else { return false }
+        guard liveViewCoordinateFrameRequired, !isPreview else { return true }
+        if activeLiveViewSource == .ccapiRTP { return rtpController.hasCurrentCoordinateOutput }
+        return activeLiveViewSource != nil && liveViewData != nil && lastFrameAt != nil
+    }
     @Published private(set) var liveViewMagnification: LiveViewMagnification?
     @Published private(set) var observedFPS = 0.0
     @Published private(set) var frameBytes = 0
@@ -2471,8 +2480,9 @@ final class CameraAppState: ObservableObject {
     }
 
     func tapFocus(x: Double, y: Double) async {
-        guard supports(.tapFocus), begin(.focus) else { return }
-        let generation = sessionGeneration
+        guard supports(.tapFocus), !isBusy(.liveView), liveViewCoordinateControlsReady, begin(.focus) else { return }
+        let generation = sessionGeneration, revision = liveViewCoordinateRevision
+        let lifetime = liveViewLifetime
         defer { end(.focus, generation: generation) }
         let normalizedX = min(max(x, 0), 1)
         let normalizedY = min(max(y, 0), 1)
@@ -2483,19 +2493,22 @@ final class CameraAppState: ObservableObject {
         guard let session else { return }
         do {
             let result = try await session.tapFocus(x: normalizedX, y: normalizedY)
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration, lifetime == liveViewLifetime,
+                  revision == liveViewCoordinateRevision else { return }
             showFocusMarker(x: result.x, y: result.y, accepted: result.accepted)
             lastError = nil
         } catch {
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration, lifetime == liveViewLifetime,
+                  revision == liveViewCoordinateRevision else { return }
             record(error)
             showFocusMarker(x: normalizedX, y: normalizedY, accepted: false)
         }
     }
 
     func clickWhiteBalance(x: Double, y: Double) async {
-        guard supports(.clickWhiteBalance), begin(.setting) else { return }
-        let generation = sessionGeneration
+        guard supports(.clickWhiteBalance), !isBusy(.liveView), liveViewCoordinateControlsReady, begin(.setting) else { return }
+        let generation = sessionGeneration, revision = liveViewCoordinateRevision
+        let lifetime = liveViewLifetime
         defer { end(.setting, generation: generation) }
         let normalizedX = min(max(x, 0), 1)
         let normalizedY = min(max(y, 0), 1)
@@ -2509,12 +2522,14 @@ final class CameraAppState: ObservableObject {
         guard let session else { return }
         do {
             let status = try await session.clickWhiteBalance(x: normalizedX, y: normalizedY)
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration, lifetime == liveViewLifetime,
+                  revision == liveViewCoordinateRevision else { return }
             updateStatus(status)
             showFocusMarker(x: normalizedX, y: normalizedY, accepted: true)
             lastError = nil
         } catch {
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration, lifetime == liveViewLifetime,
+                  revision == liveViewCoordinateRevision else { return }
             record(error)
             showFocusMarker(x: normalizedX, y: normalizedY, accepted: false)
         }
@@ -2553,15 +2568,40 @@ final class CameraAppState: ObservableObject {
             return
         }
         guard let session, activeLiveViewSource != nil else { return }
+        let lifetime = liveViewLifetime
+        liveViewMagnificationLifetime = lifetime
+        liveViewCoordinateRevision = UUID()
+        liveViewCoordinateFrameRequired = true
+        liveViewData = nil
+        focusMarker = nil
+        resetLiveViewMetrics()
+        liveViewRenderWatchTask?.cancel(); liveViewRenderWatchTask = nil
+        let nativePause = activeLiveViewSource == .ccapiRTP ? rtpController.beginMagnificationChange() : nil
+        // Revoke local frame publication, not camera Live View/Stop ownership.
+        // Old reads may ignore cancellation; their retired reader ID cannot publish.
+        stopLiveViewLoop()
+        defer {
+            if liveViewMagnificationLifetime == lifetime { liveViewMagnificationLifetime = nil }
+            if generation == sessionGeneration, lifetime == liveViewLifetime,
+               activeLiveViewSource != nil, !liveViewRetiring {
+                if let nativePause {
+                    rtpController.finishMagnificationChange(nativePause)
+                    beginLiveViewRenderWatch()
+                }
+                if autoRefresh, applicationActive, activeLiveViewSource != .ccapiRTP {
+                    beginLiveViewLoop(session: session)
+                }
+            }
+        }
         do {
             let result = try await session.setLiveViewMagnification(magnification)
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration, lifetime == liveViewLifetime else { return }
             if result.accepted {
                 liveViewMagnification = result.magnification
             }
             lastError = nil
         } catch {
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration, lifetime == liveViewLifetime else { return }
             record(error)
         }
     }
@@ -5015,7 +5055,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func beginLiveViewLoop(session: CameraSession) {
-        guard !maintenanceControlsPaused, applicationActive, !shutterReleaseRequired || heldAutofocusPressed else { return }
+        guard liveViewMagnificationLifetime != liveViewLifetime, !maintenanceControlsPaused, applicationActive, !shutterReleaseRequired || heldAutofocusPressed else { return }
         let generation = sessionGeneration, lifetime = liveViewLifetime
         stopLiveViewLoop()
         let reader = liveViewReaderID
