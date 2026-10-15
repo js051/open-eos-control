@@ -42,7 +42,7 @@ internal fun selectCaptureReviewItem(
 ): CameraMediaItem? = items.firstOrNull { item ->
     item.id !in previousIds && when (intent) {
         MediaReviewIntent.RECENT -> true
-        MediaReviewIntent.PHOTO -> !item.isVideo
+        MediaReviewIntent.PHOTO -> item.isPhoto
         MediaReviewIntent.VIDEO -> item.isVideo
     }
 }

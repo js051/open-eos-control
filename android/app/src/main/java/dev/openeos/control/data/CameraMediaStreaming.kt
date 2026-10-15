@@ -49,6 +49,7 @@ internal class OkHttpCameraMediaStreamSource(
     private val requestFactory: (Long) -> List<Request>,
 ) : CameraMediaStreamSource {
     override suspend fun open(position: Long): CameraMediaStreamHandle = withContext(Dispatchers.IO) {
+        require(item.isVideoMedia) { "Media streaming requires an unambiguous video item." }
         require(position >= 0L) { "Media stream position cannot be negative." }
         var latestFailure: String? = null
         requestFactory(position).forEach { request ->
@@ -93,7 +94,8 @@ internal class OkHttpCameraMediaStreamSource(
                 error("Camera returned ${responseLength} bytes for ${item.name}, expected ${item.sizeBytes}.")
             }
             val responseContentType = response.header("Content-Type")?.substringBefore(';')?.trim()
-            if (responseContentType.isTextMediaResponse()) {
+            if (responseContentType.isTextMediaResponse() ||
+                !cameraMediaIsVideo(item.kind, item.name, response.header("Content-Type"))) {
                 latestFailure = "unexpected $responseContentType response"
                 response.close()
                 return@forEach

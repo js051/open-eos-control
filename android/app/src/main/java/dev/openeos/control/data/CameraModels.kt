@@ -617,13 +617,10 @@ data class CameraMediaInventory(
 )
 
 val CameraMediaItem.isVideoMedia: Boolean
-    get() = cameraMediaIsVideo(kind = kind, name = name)
+    get() = cameraMediaIsVideo(kind = kind, name = name, contentType = contentType)
 
-fun cameraMediaIsVideo(kind: String, name: String): Boolean =
-    kind.equals("video", ignoreCase = true) ||
-        name.substringAfterLast('.', "").lowercase() in CAMERA_VIDEO_EXTENSIONS
-
-private val CAMERA_VIDEO_EXTENSIONS = setOf("mp4", "mov", "m4v", "avi", "mkv")
+fun cameraMediaIsVideo(kind: String, name: String, contentType: String? = null): Boolean =
+    classifyCameraMedia(kind, name, contentType) == CameraMediaClassification.VIDEO
 
 data class CameraMediaThumbnail(
     val item: CameraMediaItem,

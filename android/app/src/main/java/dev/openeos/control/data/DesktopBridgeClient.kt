@@ -1051,6 +1051,7 @@ class DesktopBridgeClient(
         ?: error("Desktop Bridge returned invalid media information after updating ${item.name}.")
 
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
+        require(item.isVisualMedia) { "Thumbnails require an unambiguous photo or video item." }
         val (bytes, contentType) = mediaImageRepresentation(
             item = item,
             endpoint = "thumbnail",
@@ -1062,7 +1063,7 @@ class DesktopBridgeClient(
     }
 
     suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview {
-        require(item.kind.equals("image", ignoreCase = true) || item.kind.equals("raw", ignoreCase = true)) {
+        require(item.isPhotoMedia && (item.kind.equals("image", ignoreCase = true) || item.kind.equals("raw", ignoreCase = true))) {
             "Display preview is available only for camera image items."
         }
         val (bytes, contentType) = mediaImageRepresentation(
@@ -1360,6 +1361,7 @@ class DesktopBridgeClient(
         val name = item.opt("name") as? String ?: return null
         if (id.isBlank() || name.isBlank()) return null
         val kind = item.optString("kind", "other")
+        val contentType = item.cameraMediaContentType()
         return CameraMediaItem(
             id = id,
             name = name,
@@ -1371,8 +1373,8 @@ class DesktopBridgeClient(
             archived = item.optNullableBoolean("archived"),
             rating = item.normalizedMediaRating(),
             rotationDegrees = item.optNullableInt("rotationDegrees")?.takeIf { it in MEDIA_ROTATIONS },
-            streamAvailable = cameraMediaIsVideo(kind, name),
-            contentType = item.optNullableString("contentType"),
+            streamAvailable = cameraMediaHasVideoTransportHint(kind, name) && cameraMediaIsVideo(kind, name, contentType),
+            contentType = contentType,
             widthPixels = item.optNullableInt("widthPixels")?.takeIf { it > 0 },
             heightPixels = item.optNullableInt("heightPixels")?.takeIf { it > 0 },
             folder = parseMediaFolder(item),

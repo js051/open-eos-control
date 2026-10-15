@@ -52,6 +52,7 @@ import dev.openeos.control.R
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.isVisualMedia
 import dev.openeos.control.data.CameraMediaTransferProgress
 import java.util.Locale
 import java.time.ZoneId
@@ -136,7 +137,8 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
     state.mediaPreviewItem?.let { item ->
         // Capture review or refreshed metadata can open an item outside the current filter.
         // Show that exact item as a standalone preview, never 0/N or an unrelated adjacent item.
-        val viewerItems = displayedItems.takeIf { item.id in displayedIds } ?: listOf(item)
+        val viewerItems = displayedItems.filter { it.isVisualMedia }
+            .takeIf { candidates -> candidates.any { it.id == item.id } } ?: listOf(item)
         val previewIndex = viewerItems.indexOfFirst { it.id == item.id }
         val viewerActionsEnabled = !state.isBusy(CameraOperation.MEDIA) && (
             state.supports(CameraFeature.MEDIA_BROWSER) ||

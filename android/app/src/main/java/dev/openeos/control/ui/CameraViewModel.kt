@@ -26,6 +26,7 @@ import dev.openeos.control.data.RecordingCommand
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraFileNamingField
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.isVisualMedia
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraNetworkDiagnostics
@@ -1951,7 +1952,7 @@ class CameraViewModel(
         setUiMode(UiMode.MEDIA)
         // setUiMode starts an empty album; a populated but older album needs the same refresh.
         if (needsRefresh && !_uiState.value.mediaLibraryLoading) refreshMedia()
-        if (item.previewAvailable || item.isVideo) openMediaPreview(item)
+        if (item.isVisualMedia && (item.previewAvailable || item.isVideo)) openMediaPreview(item)
     }
 
     fun cancelMediaLibraryLoad() {
@@ -1960,6 +1961,7 @@ class CameraViewModel(
     }
 
     fun loadMediaThumbnail(item: CameraMediaItem) {
+        if (!item.isVisualMedia) return
         val state = _uiState.value
         state.mediaThumbnails[item.id]?.let {
             _uiState.update { current ->
@@ -2017,6 +2019,7 @@ class CameraViewModel(
     }
 
     fun openMediaPreview(item: CameraMediaItem) {
+        if (!item.isVisualMedia) return
         val state = _uiState.value
         val isVideo = item.isVideo
         if (state.previewMode) {
@@ -2096,6 +2099,9 @@ class CameraViewModel(
             val stream = if (isVideo) repository.openMediaStream(item) else null
             val preview = if (isVideo) null else try {
                 repository.mediaPreview(item).also {
+                    require(it.item.id == item.id && it.item.name == item.name && it.item.isPhoto) {
+                        "Camera changed the media identity or type before preview decoding."
+                    }
                     if (cancellableImageRead) coroutineContext.ensureActive()
                 }
             } catch (exception: Exception) {
@@ -4273,14 +4279,16 @@ class CameraViewModel(
         if (generation != captureReviewGeneration) return
         pendingCaptureReview = null
         val existing = _uiState.value
-        val canLoadThumbnail = existing.supports(CameraFeature.MEDIA_THUMBNAIL)
+        val canLoadThumbnail = item.isVisualMedia && existing.supports(CameraFeature.MEDIA_THUMBNAIL)
         _uiState.update {
             it.copy(
                 captureReviewItem = item,
                 captureReviewStatus = CaptureReviewStatus.IDLE,
                 captureReviewObservation = CaptureReviewObservation.FOUND,
                 captureReviewEvidence = evidence,
-                captureReviewThumbnail = it.captureReviewThumbnail.takeIf { _ -> it.captureReviewItem?.id == item.id },
+                captureReviewThumbnail = it.captureReviewThumbnail.takeIf { _ ->
+                    item.isVisualMedia && it.captureReviewItem?.id == item.id
+                },
                 captureReviewLoading = canLoadThumbnail,
             )
         }
@@ -4321,10 +4329,14 @@ class CameraViewModel(
     }
 
     private suspend fun fetchMediaThumbnailBitmap(item: CameraMediaItem): android.graphics.Bitmap {
+        require(item.isVisualMedia) { "Thumbnail decoding requires an unambiguous photo or video item." }
         var lastFailure: Exception? = null
         repeat(MEDIA_THUMBNAIL_RETRY_DELAYS_MILLIS.size + 1) { attempt ->
             try {
                 val thumbnail = repository.mediaThumbnail(item)
+                require(thumbnail.item.id == item.id && thumbnail.item.name == item.name && thumbnail.item.isVisualMedia) {
+                    "Camera changed the media identity or type before thumbnail decoding."
+                }
                 return withContext(Dispatchers.Default) {
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     BitmapFactory.decodeByteArray(thumbnail.bytes, 0, thumbnail.bytes.size, bounds)

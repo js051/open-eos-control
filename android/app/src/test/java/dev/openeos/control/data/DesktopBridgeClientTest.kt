@@ -34,6 +34,39 @@ class DesktopBridgeClientTest {
     }
 
     @Test
+    fun freshMediaMetadataPreservesMimeAliasesAndRejectsTheirDisagreement() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        server.enqueue(jsonResponse(SESSION_JSON))
+        val client = DesktopBridgeClient(server.url("/").toString())
+        client.initialize()
+        val original = CameraMediaItem("SYNTHETIC", "FRAME.JPG", "image", contentType = "image/jpeg")
+        for (alias in CAMERA_MEDIA_MIME_ALIASES) {
+            server.enqueue(jsonResponse("""{"id":"SYNTHETIC","name":"FRAME.JPG","kind":"image","$alias":" "}"""))
+            val returned = client.mediaInfo(original)
+            assertEquals(" ", returned.contentType)
+            assertFalse(automaticJpegMetadataAdmitted(original, returned, fresh = true))
+        }
+        server.enqueue(jsonResponse("""{"id":"SYNTHETIC","name":"FRAME.JPG","kind":"image","contentType":"image/jpeg","mimeType":"IMAGE/JPEG"}"""))
+        assertEquals(CameraMediaClassification.UNKNOWN, client.mediaInfo(original).mediaClassification)
+        server.enqueue(jsonResponse("""{"id":"SYNTHETIC","name":"FRAME.JPG ","kind":"image","mimetype":"image/jpeg"}"""))
+        val renamed = client.mediaInfo(original)
+        assertEquals("FRAME.JPG ", renamed.name)
+        assertFalse(automaticJpegMetadataAdmitted(original, renamed, fresh = true))
+    }
+
+    @Test
+    fun unknownAndConflictingMediaNeverIssueThumbnailPreviewOrStreamRequests() = runTest {
+        val client = DesktopBridgeClient(server.url("/").toString())
+        for (item in listOf(CameraMediaItem("unknown", "FILE.bin", "other"),
+            CameraMediaItem("conflict", "FRAME.JPG", "image", contentType = "video/mp4"))) {
+            assertTrue(runCatching { client.mediaThumbnail(item) }.exceptionOrNull() is IllegalArgumentException)
+            assertTrue(runCatching { client.mediaPreview(item) }.exceptionOrNull() is IllegalArgumentException)
+            assertTrue(runCatching { client.openMediaStream(item) }.exceptionOrNull() is IllegalArgumentException)
+        }
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
     fun bridgeClientMapsCompleteSessionContractAndBearerAuthentication() = runTest {
         val dispatcher = BridgeDispatcher()
         server.dispatcher = dispatcher

@@ -98,7 +98,7 @@ class MediaDateRangeTest {
         val items = listOf(
             media("raw", "2026-08-14T10:00:00Z", "PAIR.CR3"),
             media("jpeg", "2026-08-14T10:00:00Z", "PAIR.JPG"),
-            media("video", "2026-08-14T11:00:00Z", "VIDEO.MP4"),
+            media("video", "2026-08-14T11:00:00Z", "VIDEO.MP4").copy(kind = "video"),
             media("outside", "2026-08-15T10:00:00Z"),
         )
         val range = requireNotNull(mediaDateRangeFromInput("2026-08-14", "2026-08-14"))

@@ -927,6 +927,7 @@ class UsbPtpCameraBackend(
     }
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
+        require(item.isVisualMedia) { "Thumbnails require an unambiguous photo or video item." }
         hostCaptureStore?.takeIf { it.owns(item) }?.let { store ->
             return store.thumbnail(item).also { observedFeatures.add(CameraFeature.MEDIA_THUMBNAIL) }
         }
@@ -936,6 +937,10 @@ class UsbPtpCameraBackend(
         val context = captureMediaFolderContext(ptp)
         val objectInfo = cachedMediaInfo(context, handle) ?: ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
         ensureMediaListingSession(context)
+        val sourceItem = objectInfo.toMediaItem(folder = observedMediaFolder(context, objectInfo))
+        require(sourceItem.id == item.id && sourceItem.name == item.name && sourceItem.isVisualMedia) {
+            "Camera changed the media identity or type before reading its thumbnail."
+        }
         if (objectInfo.thumbnailSizeBytes <= 0L || objectInfo.thumbnailFormat == 0) {
             throw PtpProtocolException("${item.name} does not advertise an embedded PTP thumbnail.")
         }
@@ -961,6 +966,7 @@ class UsbPtpCameraBackend(
     }
 
     override suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview {
+        require(item.isPhotoMedia) { "Display preview requires an unambiguous photo item." }
         hostCaptureStore?.takeIf { it.owns(item) }?.let { store ->
             return store.preview(item).also { observedFeatures.add(CameraFeature.MEDIA_PREVIEW) }
         }
@@ -971,7 +977,10 @@ class UsbPtpCameraBackend(
         val objectInfo = cachedMediaInfo(context, handle) ?: ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
         ensureMediaListingSession(context)
         val mediaItem = objectInfo.toMediaItem(folder = observedMediaFolder(context, objectInfo))
-        if (!mediaItem.previewAvailable) {
+        require(mediaItem.id == item.id && mediaItem.name == item.name) {
+            "Camera changed the media identity before reading its preview."
+        }
+        if (!mediaItem.isPhotoMedia || !mediaItem.previewAvailable) {
             throw PtpProtocolException("${item.name} does not advertise a bounded JPEG or PNG preview object.")
         }
         val output = BoundedByteArrayOutputStream(MAX_PTP_MEDIA_PREVIEW_BYTES)
@@ -998,6 +1007,9 @@ class UsbPtpCameraBackend(
         val objectInfo = cachedMediaInfo(context, handle) ?: ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
         ensureMediaListingSession(context)
         val mediaItem = objectInfo.toMediaItem(folder = observedMediaFolder(context, objectInfo))
+        require(mediaItem.id == item.id && mediaItem.name == item.name && mediaItem.isVideoMedia) {
+            "Camera changed the media identity or type before playback."
+        }
         require(mediaItem.sizeBytes != null && mediaItem.sizeBytes > 0L) {
             "${item.name} does not report a valid video size."
         }
@@ -2534,7 +2546,7 @@ private fun contentTypeFor(filename: String, kind: String): String =
         "cr2", "cr3" -> "image/x-canon-raw"
         "mp4" -> "video/mp4"
         "mov" -> "video/quicktime"
-        else -> if (kind == "video") "video/*" else "application/octet-stream"
+        else -> "application/octet-stream"
     }
 
 private fun validatePtpUploadName(name: String): String {
