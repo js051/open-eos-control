@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -2406,6 +2407,48 @@ class CameraScreensTest {
         compose.runOnIdle {
             assertEquals(CameraFileNamingField.MOVIE_REEL_NUMBER to "42", requested)
         }
+    }
+
+    @Test
+    fun namingEditorKeepsNewerTypedDraftWhenReadbackChangesCapabilities() {
+        val state = mutableStateOf(connectedStateWithFileNaming().copy(activeSettingPicker = SettingPicker.MORE))
+        var writes = 0
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(state.value, noOpActions().copy(setFileNaming = { _, _ -> writes++ }))
+            }
+        }
+        compose.onNodeWithTag("file-naming").performScrollTo().performClick()
+        compose.onNodeWithTag("still-user-setting-1").performTextReplacement("ABCD")
+        compose.runOnIdle {
+            val capabilities = requireNotNull(state.value.capabilities)
+            state.value = state.value.copy(capabilities = capabilities.copy(fileNaming = requireNotNull(capabilities.fileNaming).copy(stillUserSetting1 = "EOS_")))
+        }
+        compose.onNodeWithTag("still-user-setting-1").assertTextContains("ABCD")
+        compose.runOnIdle { assertEquals(0, writes) }
+    }
+
+    @Test
+    fun captureConfigurationReceiptOffersOnlyExplicitReadAndShowsIndependentEvidence() {
+        val request = dev.openeos.control.data.CaptureConfigurationRequest(
+            dev.openeos.control.data.CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE")
+        val receipt = CaptureConfigurationReceipt("SYNTHETIC-attempt",
+            CaptureConfigurationDraft(CaptureConfigurationOwner(Any(), 1), "SYNTHETIC-draft", 0, request),
+            "https://synthetic.invalid", dev.openeos.control.data.CaptureConfigurationSnapshot(request,
+                dev.openeos.control.data.CaptureConfigurationWriteEvidence.ACKNOWLEDGED,
+                dev.openeos.control.data.CaptureConfigurationReadEvidence.UNAVAILABLE, acknowledgedValue = "OTHER"), running = false)
+        var reads = 0
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CaptureConfigurationReceiptView(receipt, true, {}, { reads++ })
+            }
+        }
+        compose.onNodeWithTag("capture-configuration-write").assertIsDisplayed()
+        compose.onNodeWithTag("capture-configuration-readback").assertIsDisplayed()
+        compose.onNodeWithTag("capture-configuration-cancel").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, reads) }
+        compose.onNodeWithTag("capture-configuration-recover").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(1, reads) }
     }
 
     @Test

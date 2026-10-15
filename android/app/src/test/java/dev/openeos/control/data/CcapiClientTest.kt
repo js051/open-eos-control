@@ -3154,6 +3154,99 @@ class CcapiClientTest {
     }
 
     @Test
+    fun captureDirectoryAckSurvivesFailedSelectionReadAndRecoveryIsFreshGetOnly() = runTest {
+        server.enqueue(jsonResponse("""{"ver100":[
+            {"path":"/functions/directory/createdirectory","post":true},
+            {"path":"/functions/directory/directoryselection","get":true,"put":true}]}"""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        client.initialize()
+        val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+        server.enqueue(jsonResponse("""{"directoryname":"OTHER"}"""))
+        server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+        assertEquals("OTHER", client.createDirectory("ABCDE", evidence))
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, evidence.snapshot().writeEvidence)
+        assertEquals(CaptureConfigurationReadEvidence.UNAVAILABLE, evidence.snapshot().readbackEvidence)
+        server.enqueue(jsonResponse("""{"value":"100OTHER","ability":["100OTHER"]}"""))
+        assertEquals("100OTHER", client.readCaptureConfiguration(CaptureConfigurationOperation.CREATE_DIRECTORY).directorySelection)
+        repeat(3) { server.takeRequest() }
+        val recovery = server.takeRequest()
+        assertEquals("GET", recovery.method)
+        assertEquals("/ccapi/ver100/functions/directory/directoryselection", recovery.path)
+        assertEquals("no-cache, no-store", recovery.getHeader("Cache-Control"))
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun cachedAggregateDirectorySelectionDoesNotProveCanonicalReadSucceeded() = runTest {
+        server.enqueue(jsonResponse("""{"ver100":[
+            {"path":"/shooting/settings","get":true},
+            {"path":"/shooting/settings/directoryselection","put":true},
+            {"path":"/functions/directory/createdirectory","post":true},
+            {"path":"/functions/directory/directoryselection","get":true,"put":true}]}"""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false); client.initialize()
+        server.enqueue(jsonResponse("""{"directoryname":"ABCDE"}"""))
+        server.enqueue(jsonResponse("""{"directoryselection":{"value":"100ABCDE","ability":["100ABCDE"]}}"""))
+        server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+        val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+        assertEquals("ABCDE", client.createDirectory("ABCDE", evidence))
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, evidence.snapshot().writeEvidence)
+        assertEquals(CaptureConfigurationReadEvidence.UNAVAILABLE, evidence.snapshot().readbackEvidence)
+        assertNull(evidence.snapshot().observedValue)
+        assertTrue(evidence.snapshot().directoryValues.isEmpty())
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun namingAckSurvivesFailedCompleteReadbackAndDirectExceptionCarriesReceipt() = runTest {
+        server.enqueue(jsonResponse(CANON_FILE_NAMING_DISCOVERY_JSON)); server.enqueue(jsonResponse("{}")); enqueueCanonFileNaming()
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        client.initialize(); client.capabilities()
+        server.enqueue(jsonResponse("""{"usersetting1":"EOS_"}""")); server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+        val failure = runCatching { client.setFileNaming(CameraFileNamingField.STILL_USER_SETTING_1, "EOS_") }.exceptionOrNull()
+        assertTrue(failure is CaptureConfigurationException)
+        val receipt = (failure as CaptureConfigurationException).receipt
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, receipt.writeEvidence)
+        assertEquals(CaptureConfigurationReadEvidence.UNAVAILABLE, receipt.readbackEvidence)
+        assertEquals(11, server.requestCount)
+        enqueueCanonFileNaming(stillUserSetting1 = "EOS_")
+        assertEquals("EOS_", client.readCaptureConfiguration(CaptureConfigurationOperation.SET_FILE_NAMING).fileNaming?.stillUserSetting1)
+        repeat(11) { server.takeRequest() }
+        repeat(7) { assertEquals("GET", server.takeRequest().method) }
+        assertEquals(18, server.requestCount)
+    }
+
+    @Test
+    fun namingCompleteMismatchRetainsAcknowledgedWriteAndDifferentObservedValue() = runTest {
+        server.enqueue(jsonResponse(CANON_FILE_NAMING_DISCOVERY_JSON)); server.enqueue(jsonResponse("{}")); enqueueCanonFileNaming()
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        client.initialize(); client.capabilities()
+        server.enqueue(jsonResponse("""{"usersetting1":"EOS_"}""")); enqueueCanonFileNaming()
+        val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.SET_FILE_NAMING,
+            "EOS_", CameraFileNamingField.STILL_USER_SETTING_1))
+        assertTrue(runCatching { client.setFileNaming(CameraFileNamingField.STILL_USER_SETTING_1, "EOS_", evidence) }.isFailure)
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, evidence.snapshot().writeEvidence)
+        assertEquals(CaptureConfigurationReadEvidence.MISMATCH, evidence.snapshot().readbackEvidence)
+        assertEquals("IMG_", evidence.snapshot().observedValue)
+    }
+
+    @Test
+    fun captureConfigurationRedirectAndMalformedAckNeverBecomeAcknowledged() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
+        server.enqueue(MockResponse().setResponseCode(307).setHeader("Location", server.url("/SYNTHETIC/redirect")))
+        val redirect = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+        assertTrue(runCatching { client.createDirectory("ABCDE", redirect) }.isFailure)
+        assertEquals(1, server.requestCount)
+        assertEquals(CaptureConfigurationWriteEvidence.UNKNOWN, redirect.snapshot().writeEvidence)
+        for (body in listOf("""{"directoryname":"ABCDE\n"}""", """{"directoryname":"ABCDE","directoryname":"OTHER"}""")) {
+            server.enqueue(jsonResponse(body))
+            val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+            assertTrue(runCatching { client.createDirectory("ABCDE", evidence) }.isFailure)
+            assertEquals(CaptureConfigurationWriteEvidence.UNKNOWN, evidence.snapshot().writeEvidence)
+        }
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
     fun canonFileNamingRequiresCompleteGroupAndVerifiesStringAndIntegerUpdates() = runTest {
         server.enqueue(jsonResponse(CANON_FILE_NAMING_DISCOVERY_JSON))
         server.enqueue(jsonResponse("{}"))

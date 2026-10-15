@@ -192,6 +192,8 @@ data class CameraUiState(
     val focusFeedback: FocusFeedback? = null,
     val lastClockSyncAtMillis: Long? = null,
     val lastCreatedDirectoryName: String? = null,
+    val captureConfigurationReceipt: CaptureConfigurationReceipt? = null,
+    val captureConfigurationHistory: List<CaptureConfigurationReceipt> = emptyList(),
     val operatorConfirmedFeatures: Set<CameraFeature> = emptySet(),
     val error: String? = null,
     val errorOperation: CameraOperation? = null,

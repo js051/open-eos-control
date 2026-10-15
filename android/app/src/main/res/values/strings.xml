@@ -1032,4 +1032,23 @@
     <string name="media_delete_unsupported">Current connection does not advertise deletion.</string>
     <string name="media_delete_unloaded_count">%1$d frozen items are no longer loaded and will be skipped without sending deletion.</string>
     <string name="media_delete_bridge_endpoint">Connected Bridge host: %1$s · engine %2$s</string>
+    <string name="capture_configuration_result">Capture configuration result</string>
+    <string name="capture_configuration_previous">Previous capture configuration attempt</string>
+    <string name="capture_configuration_automatic">Automatic suffix</string>
+    <string name="capture_configuration_request">%1$s · requested: %2$s</string>
+    <string name="capture_configuration_not_sent">Write: not sent</string>
+    <string name="capture_configuration_unknown">Write: outcome unknown</string>
+    <string name="capture_configuration_acknowledged">Write: camera acknowledged</string>
+    <string name="capture_configuration_ack_value">Acknowledged value: %1$s</string>
+    <string name="capture_configuration_not_read">Readback: not read</string>
+    <string name="capture_configuration_unavailable">Readback: unavailable</string>
+    <string name="capture_configuration_mismatch">Readback: differs from requested value</string>
+    <string name="capture_configuration_matched">Readback: current value matches; this alone does not prove the earlier write</string>
+    <string name="capture_configuration_refreshed">Readback: settings refreshed</string>
+    <string name="capture_configuration_observed_value">Observed value: %1$s</string>
+    <string name="capture_configuration_directory_limit">The ACK is a five-character suffix. It does not identify an exact numbered folder or card slot.</string>
+    <string name="capture_configuration_no_repeat">Do not repeat this write to check its result. Read current settings first.</string>
+    <string name="capture_configuration_cancelled">Cancelled. A dispatched camera write cannot be undone; retained evidence remains valid.</string>
+    <string name="capture_configuration_recover">Read current settings (no writes)</string>
+    <string name="capture_configuration_draft_retained">Your draft stays unchanged when results arrive. Edit it or reopen this editor before making a new write.</string>
 </resources>

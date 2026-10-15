@@ -208,6 +208,27 @@ class CameraRepository(
 
     suspend fun setCameraSetting(key: String, value: String): CameraStatus = backend.setSetting(key, value)
 
+    /** The handle captures the actual backend, connection and routes before any await. */
+    fun captureConfigurationAccess(): CaptureConfigurationAccess {
+        val owner = backend
+        val origin = when (val connection = owner.connection) {
+            is CameraConnection.CcapiNetwork -> mediaDeleteEndpoint(connection.baseUrl)
+            is CameraConnection.DesktopBridge -> mediaDeleteEndpoint(connection.baseUrl)
+            else -> null
+        }
+        return CaptureConfigurationAccess(origin ?: owner.transport.label,
+            write = { request, evidence ->
+                when (request.operation) {
+                    CaptureConfigurationOperation.CREATE_DIRECTORY -> {
+                        owner.createDirectory(request.requestedValue, evidence)
+                        null
+                    }
+                    CaptureConfigurationOperation.SET_FILE_NAMING -> owner.setFileNaming(
+                        requireNotNull(request.field), request.requestedValue, evidence)
+                }
+            }, read = { operation -> owner.readCaptureConfiguration(operation) })
+    }
+
     suspend fun createDirectory(name: String): String = backend.createDirectory(name)
 
     suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming =

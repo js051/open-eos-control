@@ -1,0 +1,1867 @@
+{
+  "version": 1,
+  "receipt": [
+    {
+      "id": "create-directory-exact",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "create-directory-lf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE\n",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE\n",
+          "acknowledgedValue": "ABCDE\n"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "create-directory-crlf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE\r\n",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE\r\n",
+          "acknowledgedValue": "ABCDE\r\n"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "create-directory-space",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE ",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE ",
+          "acknowledgedValue": "ABCDE "
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "create-directory-nul",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE\u0000",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE\u0000",
+          "acknowledgedValue": "ABCDE\u0000"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "create-directory-unicode",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE\u00e9",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE\u00e9",
+          "acknowledgedValue": "ABCDE\u00e9"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-index-exact",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "A1",
+        "field": "movie-index",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "A1",
+          "acknowledgedValue": "A1",
+          "field": "movie-index"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "movie-index-lf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "A1\n",
+        "field": "movie-index",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "A1\n",
+          "acknowledgedValue": "A1\n",
+          "field": "movie-index"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-index-crlf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "A1\r\n",
+        "field": "movie-index",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "A1\r\n",
+          "acknowledgedValue": "A1\r\n",
+          "field": "movie-index"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-index-space",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "A1 ",
+        "field": "movie-index",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "A1 ",
+          "acknowledgedValue": "A1 ",
+          "field": "movie-index"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-index-nul",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "A1\u0000",
+        "field": "movie-index",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "A1\u0000",
+          "acknowledgedValue": "A1\u0000",
+          "field": "movie-index"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-index-unicode",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "A1\u00e9",
+        "field": "movie-index",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "A1\u00e9",
+          "acknowledgedValue": "A1\u00e9",
+          "field": "movie-index"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-1-exact",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "IMG_",
+        "field": "still-user-setting-1",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "IMG_",
+          "acknowledgedValue": "IMG_",
+          "field": "still-user-setting-1"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "still-user-setting-1-lf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "IMG_\n",
+        "field": "still-user-setting-1",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "IMG_\n",
+          "acknowledgedValue": "IMG_\n",
+          "field": "still-user-setting-1"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-1-crlf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "IMG_\r\n",
+        "field": "still-user-setting-1",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "IMG_\r\n",
+          "acknowledgedValue": "IMG_\r\n",
+          "field": "still-user-setting-1"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-1-space",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "IMG_ ",
+        "field": "still-user-setting-1",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "IMG_ ",
+          "acknowledgedValue": "IMG_ ",
+          "field": "still-user-setting-1"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-1-nul",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "IMG_\u0000",
+        "field": "still-user-setting-1",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "IMG_\u0000",
+          "acknowledgedValue": "IMG_\u0000",
+          "field": "still-user-setting-1"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-1-unicode",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "IMG_\u00e9",
+        "field": "still-user-setting-1",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "IMG_\u00e9",
+          "acknowledgedValue": "IMG_\u00e9",
+          "field": "still-user-setting-1"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-2-exact",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "IMG",
+        "field": "still-user-setting-2",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "IMG",
+          "acknowledgedValue": "IMG",
+          "field": "still-user-setting-2"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "still-user-setting-2-lf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "IMG\n",
+        "field": "still-user-setting-2",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "IMG\n",
+          "acknowledgedValue": "IMG\n",
+          "field": "still-user-setting-2"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-2-crlf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "IMG\r\n",
+        "field": "still-user-setting-2",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "IMG\r\n",
+          "acknowledgedValue": "IMG\r\n",
+          "field": "still-user-setting-2"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-2-space",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "IMG ",
+        "field": "still-user-setting-2",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "IMG ",
+          "acknowledgedValue": "IMG ",
+          "field": "still-user-setting-2"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-2-nul",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "IMG\u0000",
+        "field": "still-user-setting-2",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "IMG\u0000",
+          "acknowledgedValue": "IMG\u0000",
+          "field": "still-user-setting-2"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-2-unicode",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "IMG\u00e9",
+        "field": "still-user-setting-2",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "IMG\u00e9",
+          "acknowledgedValue": "IMG\u00e9",
+          "field": "still-user-setting-2"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-user-defined-exact",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "ABCDE",
+        "field": "movie-user-defined",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE",
+          "field": "movie-user-defined"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "movie-user-defined-lf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "ABCDE\n",
+        "field": "movie-user-defined",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE\n",
+          "acknowledgedValue": "ABCDE\n",
+          "field": "movie-user-defined"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-user-defined-crlf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "ABCDE\r\n",
+        "field": "movie-user-defined",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE\r\n",
+          "acknowledgedValue": "ABCDE\r\n",
+          "field": "movie-user-defined"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-user-defined-space",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "ABCDE ",
+        "field": "movie-user-defined",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE ",
+          "acknowledgedValue": "ABCDE ",
+          "field": "movie-user-defined"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-user-defined-nul",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "ABCDE\u0000",
+        "field": "movie-user-defined",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE\u0000",
+          "acknowledgedValue": "ABCDE\u0000",
+          "field": "movie-user-defined"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-user-defined-unicode",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "ABCDE\u00e9",
+        "field": "movie-user-defined",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE\u00e9",
+          "acknowledgedValue": "ABCDE\u00e9",
+          "field": "movie-user-defined"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-reel-number-exact",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "12",
+        "field": "movie-reel-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "12",
+          "acknowledgedValue": "12",
+          "field": "movie-reel-number"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "movie-reel-number-lf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "12\n",
+        "field": "movie-reel-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "12\n",
+          "acknowledgedValue": "12\n",
+          "field": "movie-reel-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-reel-number-crlf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "12\r\n",
+        "field": "movie-reel-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "12\r\n",
+          "acknowledgedValue": "12\r\n",
+          "field": "movie-reel-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-reel-number-space",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "12 ",
+        "field": "movie-reel-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "12 ",
+          "acknowledgedValue": "12 ",
+          "field": "movie-reel-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-reel-number-nul",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "12\u0000",
+        "field": "movie-reel-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "12\u0000",
+          "acknowledgedValue": "12\u0000",
+          "field": "movie-reel-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-reel-number-unicode",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "12\u00e9",
+        "field": "movie-reel-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "12\u00e9",
+          "acknowledgedValue": "12\u00e9",
+          "field": "movie-reel-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-clip-number-exact",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "12",
+        "field": "movie-clip-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "12",
+          "acknowledgedValue": "12",
+          "field": "movie-clip-number"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "movie-clip-number-lf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "12\n",
+        "field": "movie-clip-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "12\n",
+          "acknowledgedValue": "12\n",
+          "field": "movie-clip-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-clip-number-crlf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "12\r\n",
+        "field": "movie-clip-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "12\r\n",
+          "acknowledgedValue": "12\r\n",
+          "field": "movie-clip-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-clip-number-space",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "12 ",
+        "field": "movie-clip-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "12 ",
+          "acknowledgedValue": "12 ",
+          "field": "movie-clip-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-clip-number-nul",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "12\u0000",
+        "field": "movie-clip-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "12\u0000",
+          "acknowledgedValue": "12\u0000",
+          "field": "movie-clip-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-clip-number-unicode",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "12\u00e9",
+        "field": "movie-clip-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "12\u00e9",
+          "acknowledgedValue": "12\u00e9",
+          "field": "movie-clip-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-filename-mode-exact",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "preset_code",
+        "field": "still-filename-mode",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "preset_code",
+          "acknowledgedValue": "preset_code",
+          "field": "still-filename-mode"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "still-filename-mode-lf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "preset_code\n",
+        "field": "still-filename-mode",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "preset_code\n",
+          "acknowledgedValue": "preset_code\n",
+          "field": "still-filename-mode"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-filename-mode-crlf",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "preset_code\r\n",
+        "field": "still-filename-mode",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "preset_code\r\n",
+          "acknowledgedValue": "preset_code\r\n",
+          "field": "still-filename-mode"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-filename-mode-space",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "preset_code ",
+        "field": "still-filename-mode",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "preset_code ",
+          "acknowledgedValue": "preset_code ",
+          "field": "still-filename-mode"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-filename-mode-nul",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "preset_code\u0000",
+        "field": "still-filename-mode",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "preset_code\u0000",
+          "acknowledgedValue": "preset_code\u0000",
+          "field": "still-filename-mode"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-filename-mode-unicode",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "preset_code\u00e9",
+        "field": "still-filename-mode",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "preset_code\u00e9",
+          "acknowledgedValue": "preset_code\u00e9",
+          "field": "still-filename-mode"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-reel-number-invalid-0",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "01",
+        "field": "movie-reel-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "01",
+          "acknowledgedValue": "01",
+          "field": "movie-reel-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-reel-number-invalid-1",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "0",
+        "field": "movie-reel-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "0",
+          "acknowledgedValue": "0",
+          "field": "movie-reel-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-reel-number-invalid-2",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "10000",
+        "field": "movie-reel-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "10000",
+          "acknowledgedValue": "10000",
+          "field": "movie-reel-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-reel-number-invalid-3",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "+1",
+        "field": "movie-reel-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "+1",
+          "acknowledgedValue": "+1",
+          "field": "movie-reel-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-reel-number-invalid-4",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "1.0",
+        "field": "movie-reel-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "1.0",
+          "acknowledgedValue": "1.0",
+          "field": "movie-reel-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-clip-number-invalid-0",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "01",
+        "field": "movie-clip-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "01",
+          "acknowledgedValue": "01",
+          "field": "movie-clip-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-clip-number-invalid-1",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "0",
+        "field": "movie-clip-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "0",
+          "acknowledgedValue": "0",
+          "field": "movie-clip-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-clip-number-invalid-2",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "1000",
+        "field": "movie-clip-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "1000",
+          "acknowledgedValue": "1000",
+          "field": "movie-clip-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-clip-number-invalid-3",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "+1",
+        "field": "movie-clip-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "+1",
+          "acknowledgedValue": "+1",
+          "field": "movie-clip-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-clip-number-invalid-4",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "1.0",
+        "field": "movie-clip-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "1.0",
+          "acknowledgedValue": "1.0",
+          "field": "movie-clip-number"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-index-invalid-0",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "_A",
+        "field": "movie-index",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "_A",
+          "acknowledgedValue": "_A",
+          "field": "movie-index"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-index-invalid-1",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "a1",
+        "field": "movie-index",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "a1",
+          "acknowledgedValue": "a1",
+          "field": "movie-index"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-index-invalid-2",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "A",
+        "field": "movie-index",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "A",
+          "acknowledgedValue": "A",
+          "field": "movie-index"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-index-invalid-3",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "AAA",
+        "field": "movie-index",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "AAA",
+          "acknowledgedValue": "AAA",
+          "field": "movie-index"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-1-invalid-0",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "_IMG",
+        "field": "still-user-setting-1",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "_IMG",
+          "acknowledgedValue": "_IMG",
+          "field": "still-user-setting-1"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-1-invalid-1",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "img_",
+        "field": "still-user-setting-1",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "img_",
+          "acknowledgedValue": "img_",
+          "field": "still-user-setting-1"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-2-invalid-0",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "_IM",
+        "field": "still-user-setting-2",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "_IM",
+          "acknowledgedValue": "_IM",
+          "field": "still-user-setting-2"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "still-user-setting-2-invalid-1",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "imG",
+        "field": "still-user-setting-2",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "imG",
+          "acknowledgedValue": "imG",
+          "field": "still-user-setting-2"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-user-defined-invalid-0",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "AB_CD",
+        "field": "movie-user-defined",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "AB_CD",
+          "acknowledgedValue": "AB_CD",
+          "field": "movie-user-defined"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "movie-user-defined-invalid-1",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "abcde",
+        "field": "movie-user-defined",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "abcde",
+          "acknowledgedValue": "abcde",
+          "field": "movie-user-defined"
+        }
+      },
+      "valid": false
+    }
+  ],
+  "naming": [
+    {
+      "id": "complete",
+      "value": {
+        "stillFilenameMode": "preset_code",
+        "stillFilenameModeOptions": [
+          "preset_code",
+          "usersetting1",
+          "usersetting2"
+        ],
+        "stillUserSetting1": "IMG_",
+        "stillUserSetting2": "IMG",
+        "movieIndex": "A_",
+        "movieReelNumber": 1,
+        "movieReelRange": {
+          "minimum": 1,
+          "maximum": 9999,
+          "step": 1
+        },
+        "movieClipNumber": 1,
+        "movieClipRange": {
+          "minimum": 1,
+          "maximum": 999,
+          "step": 1
+        },
+        "movieUserDefined": "ABCDE"
+      },
+      "valid": true
+    },
+    {
+      "id": "stillUserSetting1-lf",
+      "value": {
+        "stillFilenameMode": "preset_code",
+        "stillFilenameModeOptions": [
+          "preset_code",
+          "usersetting1",
+          "usersetting2"
+        ],
+        "stillUserSetting1": "IMG_\n",
+        "stillUserSetting2": "IMG",
+        "movieIndex": "A_",
+        "movieReelNumber": 1,
+        "movieReelRange": {
+          "minimum": 1,
+          "maximum": 9999,
+          "step": 1
+        },
+        "movieClipNumber": 1,
+        "movieClipRange": {
+          "minimum": 1,
+          "maximum": 999,
+          "step": 1
+        },
+        "movieUserDefined": "ABCDE"
+      },
+      "valid": false
+    },
+    {
+      "id": "stillUserSetting1-crlf",
+      "value": {
+        "stillFilenameMode": "preset_code",
+        "stillFilenameModeOptions": [
+          "preset_code",
+          "usersetting1",
+          "usersetting2"
+        ],
+        "stillUserSetting1": "IMG_\r\n",
+        "stillUserSetting2": "IMG",
+        "movieIndex": "A_",
+        "movieReelNumber": 1,
+        "movieReelRange": {
+          "minimum": 1,
+          "maximum": 9999,
+          "step": 1
+        },
+        "movieClipNumber": 1,
+        "movieClipRange": {
+          "minimum": 1,
+          "maximum": 999,
+          "step": 1
+        },
+        "movieUserDefined": "ABCDE"
+      },
+      "valid": false
+    },
+    {
+      "id": "stillUserSetting1-unicode",
+      "value": {
+        "stillFilenameMode": "preset_code",
+        "stillFilenameModeOptions": [
+          "preset_code",
+          "usersetting1",
+          "usersetting2"
+        ],
+        "stillUserSetting1": "IMG_\u00e9",
+        "stillUserSetting2": "IMG",
+        "movieIndex": "A_",
+        "movieReelNumber": 1,
+        "movieReelRange": {
+          "minimum": 1,
+          "maximum": 9999,
+          "step": 1
+        },
+        "movieClipNumber": 1,
+        "movieClipRange": {
+          "minimum": 1,
+          "maximum": 999,
+          "step": 1
+        },
+        "movieUserDefined": "ABCDE"
+      },
+      "valid": false
+    },
+    {
+      "id": "stillUserSetting2-lf",
+      "value": {
+        "stillFilenameMode": "preset_code",
+        "stillFilenameModeOptions": [
+          "preset_code",
+          "usersetting1",
+          "usersetting2"
+        ],
+        "stillUserSetting1": "IMG_",
+        "stillUserSetting2": "IMG\n",
+        "movieIndex": "A_",
+        "movieReelNumber": 1,
+        "movieReelRange": {
+          "minimum": 1,
+          "maximum": 9999,
+          "step": 1
+        },
+        "movieClipNumber": 1,
+        "movieClipRange": {
+          "minimum": 1,
+          "maximum": 999,
+          "step": 1
+        },
+        "movieUserDefined": "ABCDE"
+      },
+      "valid": false
+    },
+    {
+      "id": "stillUserSetting2-crlf",
+      "value": {
+        "stillFilenameMode": "preset_code",
+        "stillFilenameModeOptions": [
+          "preset_code",
+          "usersetting1",
+          "usersetting2"
+        ],
+        "stillUserSetting1": "IMG_",
+        "stillUserSetting2": "IMG\r\n",
+        "movieIndex": "A_",
+        "movieReelNumber": 1,
+        "movieReelRange": {
+          "minimum": 1,
+          "maximum": 9999,
+          "step": 1
+        },
+        "movieClipNumber": 1,
+        "movieClipRange": {
+          "minimum": 1,
+          "maximum": 999,
+          "step": 1
+        },
+        "movieUserDefined": "ABCDE"
+      },
+      "valid": false
+    },
+    {
+      "id": "stillUserSetting2-unicode",
+      "value": {
+        "stillFilenameMode": "preset_code",
+        "stillFilenameModeOptions": [
+          "preset_code",
+          "usersetting1",
+          "usersetting2"
+        ],
+        "stillUserSetting1": "IMG_",
+        "stillUserSetting2": "IMG\u00e9",
+        "movieIndex": "A_",
+        "movieReelNumber": 1,
+        "movieReelRange": {
+          "minimum": 1,
+          "maximum": 9999,
+          "step": 1
+        },
+        "movieClipNumber": 1,
+        "movieClipRange": {
+          "minimum": 1,
+          "maximum": 999,
+          "step": 1
+        },
+        "movieUserDefined": "ABCDE"
+      },
+      "valid": false
+    },
+    {
+      "id": "movieIndex-lf",
+      "value": {
+        "stillFilenameMode": "preset_code",
+        "stillFilenameModeOptions": [
+          "preset_code",
+          "usersetting1",
+          "usersetting2"
+        ],
+        "stillUserSetting1": "IMG_",
+        "stillUserSetting2": "IMG",
+        "movieIndex": "A_\n",
+        "movieReelNumber": 1,
+        "movieReelRange": {
+          "minimum": 1,
+          "maximum": 9999,
+          "step": 1
+        },
+        "movieClipNumber": 1,
+        "movieClipRange": {
+          "minimum": 1,
+          "maximum": 999,
+          "step": 1
+        },
+        "movieUserDefined": "ABCDE"
+      },
+      "valid": false
+    },
+    {
+      "id": "movieIndex-crlf",
+      "value": {
+        "stillFilenameMode": "preset_code",
+        "stillFilenameModeOptions": [
+          "preset_code",
+          "usersetting1",
+          "usersetting2"
+        ],
+        "stillUserSetting1": "IMG_",
+        "stillUserSetting2": "IMG",
+        "movieIndex": "A_\r\n",
+        "movieReelNumber": 1,
+        "movieReelRange": {
+          "minimum": 1,
+          "maximum": 9999,
+          "step": 1
+        },
+        "movieClipNumber": 1,
+        "movieClipRange": {
+          "minimum": 1,
+          "maximum": 999,
+          "step": 1
+        },
+        "movieUserDefined": "ABCDE"
+      },
+      "valid": false
+    },
+    {
+      "id": "movieIndex-unicode",
+      "value": {
+        "stillFilenameMode": "preset_code",
+        "stillFilenameModeOptions": [
+          "preset_code",
+          "usersetting1",
+          "usersetting2"
+        ],
+        "stillUserSetting1": "IMG_",
+        "stillUserSetting2": "IMG",
+        "movieIndex": "A_\u00e9",
+        "movieReelNumber": 1,
+        "movieReelRange": {
+          "minimum": 1,
+          "maximum": 9999,
+          "step": 1
+        },
+        "movieClipNumber": 1,
+        "movieClipRange": {
+          "minimum": 1,
+          "maximum": 999,
+          "step": 1
+        },
+        "movieUserDefined": "ABCDE"
+      },
+      "valid": false
+    },
+    {
+      "id": "movieUserDefined-lf",
+      "value": {
+        "stillFilenameMode": "preset_code",
+        "stillFilenameModeOptions": [
+          "preset_code",
+          "usersetting1",
+          "usersetting2"
+        ],
+        "stillUserSetting1": "IMG_",
+        "stillUserSetting2": "IMG",
+        "movieIndex": "A_",
+        "movieReelNumber": 1,
+        "movieReelRange": {
+          "minimum": 1,
+          "maximum": 9999,
+          "step": 1
+        },
+        "movieClipNumber": 1,
+        "movieClipRange": {
+          "minimum": 1,
+          "maximum": 999,
+          "step": 1
+        },
+        "movieUserDefined": "ABCDE\n"
+      },
+      "valid": false
+    },
+    {
+      "id": "movieUserDefined-crlf",
+      "value": {
+        "stillFilenameMode": "preset_code",
+        "stillFilenameModeOptions": [
+          "preset_code",
+          "usersetting1",
+          "usersetting2"
+        ],
+        "stillUserSetting1": "IMG_",
+        "stillUserSetting2": "IMG",
+        "movieIndex": "A_",
+        "movieReelNumber": 1,
+        "movieReelRange": {
+          "minimum": 1,
+          "maximum": 9999,
+          "step": 1
+        },
+        "movieClipNumber": 1,
+        "movieClipRange": {
+          "minimum": 1,
+          "maximum": 999,
+          "step": 1
+        },
+        "movieUserDefined": "ABCDE\r\n"
+      },
+      "valid": false
+    },
+    {
+      "id": "movieUserDefined-unicode",
+      "value": {
+        "stillFilenameMode": "preset_code",
+        "stillFilenameModeOptions": [
+          "preset_code",
+          "usersetting1",
+          "usersetting2"
+        ],
+        "stillUserSetting1": "IMG_",
+        "stillUserSetting2": "IMG",
+        "movieIndex": "A_",
+        "movieReelNumber": 1,
+        "movieReelRange": {
+          "minimum": 1,
+          "maximum": 9999,
+          "step": 1
+        },
+        "movieClipNumber": 1,
+        "movieClipRange": {
+          "minimum": 1,
+          "maximum": 999,
+          "step": 1
+        },
+        "movieUserDefined": "ABCDE\u00e9"
+      },
+      "valid": false
+    }
+  ],
+  "directorySelection": [
+    {
+      "id": "exact",
+      "value": {
+        "value": "100EOSXX",
+        "ability": [
+          "100EOSXX",
+          "101ABCDE"
+        ]
+      },
+      "valid": true
+    },
+    {
+      "id": "lf",
+      "value": {
+        "value": "100EOSXX\n",
+        "ability": [
+          "100EOSXX\n"
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "crlf",
+      "value": {
+        "value": "100EOSXX\r\n",
+        "ability": [
+          "100EOSXX\r\n"
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "space",
+      "value": {
+        "value": "100EOSXX ",
+        "ability": [
+          "100EOSXX "
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "unicode",
+      "value": {
+        "value": "100EOSXX\u00e9",
+        "ability": [
+          "100EOSXX\u00e9"
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "duplicate",
+      "value": {
+        "value": "100EOSXX",
+        "ability": [
+          "100EOSXX",
+          "100EOSXX"
+        ]
+      },
+      "valid": false
+    },
+    {
+      "id": "missing-current",
+      "value": {
+        "value": "101ABCDE",
+        "ability": [
+          "100EOSXX"
+        ]
+      },
+      "valid": false
+    }
+  ]
+}

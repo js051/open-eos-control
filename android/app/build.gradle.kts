@@ -27,6 +27,8 @@ val unitContractFixtures = listOf(
     "../../contracts/media-mutation/v1/media-mutation-eligibility-vectors.json",
     "../../contracts/media-upload/v1/upload-outcome-vectors.json",
     "../../contracts/media-delete/v1/delete-outcome-vectors.json",
+    "../../contracts/capture-configuration/v1/capture-configuration-vectors.json",
+    "../../contracts/capture-configuration/v1/exact-value-vectors.json",
 )
 val androidContractFixtures = listOf(
     "../../contracts/live-view-lut/v1/numeric-vectors.json",

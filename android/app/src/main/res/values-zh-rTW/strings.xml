@@ -795,4 +795,23 @@
     <string name="media_delete_unsupported">目前連線未提供刪除能力。</string>
     <string name="media_delete_unloaded_count">凍結清單中有 %1$d 項已未載入，將略過且不送出刪除。</string>
     <string name="media_delete_bridge_endpoint">已連線的 Bridge 主機：%1$s · 引擎 %2$s</string>
+    <string name="capture_configuration_result">拍攝設定結果</string>
+    <string name="capture_configuration_previous">先前拍攝設定操作</string>
+    <string name="capture_configuration_automatic">自動尾碼</string>
+    <string name="capture_configuration_request">%1$s · 要求值：%2$s</string>
+    <string name="capture_configuration_not_sent">寫入：尚未送出</string>
+    <string name="capture_configuration_unknown">寫入：結果不明</string>
+    <string name="capture_configuration_acknowledged">寫入：相機已確認回應</string>
+    <string name="capture_configuration_ack_value">相機確認值：%1$s</string>
+    <string name="capture_configuration_not_read">讀回：尚未讀取</string>
+    <string name="capture_configuration_unavailable">讀回：無法取得</string>
+    <string name="capture_configuration_mismatch">讀回：與要求值不同</string>
+    <string name="capture_configuration_matched">讀回：目前值相符；單憑讀回不能證明先前寫入成功</string>
+    <string name="capture_configuration_refreshed">讀回：已重新取得設定</string>
+    <string name="capture_configuration_observed_value">觀察到的值：%1$s</string>
+    <string name="capture_configuration_directory_limit">確認回應只有五字元尾碼，不能識別確切編號資料夾或記憶卡插槽。</string>
+    <string name="capture_configuration_no_repeat">請勿重送寫入以確認結果。請先唯讀查詢目前設定。</string>
+    <string name="capture_configuration_cancelled">已取消。已送出的相機寫入無法撤回；已取得的回應證據仍保留。</string>
+    <string name="capture_configuration_recover">讀取目前設定（不寫入）</string>
+    <string name="capture_configuration_draft_retained">結果傳回時會保留您的草稿。再次寫入前，請編輯內容或重新開啟編輯器。</string>
 </resources>

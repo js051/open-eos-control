@@ -105,6 +105,21 @@ class DesktopBridgeClient(
             }
         }
     }.build()
+    // Capture configuration only: no redirect, authentication replay, HTTP cache or retry.
+    private val captureConfigurationHttpClient = this.httpClient.newBuilder()
+        .retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false)
+        .authenticator(okhttp3.Authenticator.NONE).proxyAuthenticator(okhttp3.Authenticator.NONE).cache(null)
+        .apply { if (this@DesktopBridgeClient.httpClient.callTimeoutMillis == 0 ||
+            this@DesktopBridgeClient.httpClient.callTimeoutMillis > 15_000) callTimeout(15, TimeUnit.SECONDS) }
+        .addNetworkInterceptor { chain ->
+            val response = chain.proceed(chain.request())
+            if (response.code in setOf(408, 421, 503)) {
+                val code = response.code
+                response.close()
+                throw IOException("Capture configuration request unconfirmed (HTTP $code).")
+            }
+            response
+        }.build()
     private val mutationHttpClient = this.httpClient.newBuilder()
         .retryOnConnectionFailure(false)
         .followRedirects(false)
@@ -520,37 +535,90 @@ class DesktopBridgeClient(
         )
     ).also { observedFeatures.add(featureForSetting(key)) }
 
-    suspend fun createDirectory(name: String): String {
+    suspend fun createDirectory(name: String, evidence: CaptureConfigurationEvidence = CaptureConfigurationEvidence(
+        CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, name),
+    )): String = captureConfigurationOperation(evidence) {
+        require(evidence.request == CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, name))
         require(Regex("^(?:[A-Z0-9_]{5})?$").matches(name)) {
             "Directory name must be empty or exactly five uppercase letters, numbers, or underscores."
         }
-        val created = postJson(
-            sessionEndpoint("directories"),
-            JSONObject().put("name", name),
-        ).opt("name") as? String
-        require(created != null && Regex("^[A-Z0-9_]{5}$").matches(created)) {
-            "Desktop Bridge returned an invalid created directory name."
-        }
+        // Freeze both routes and the exact session object before dispatching the write.
+        val owner = requireShutterSession()
+        val target = endpoint("v1", "session", owner.id, "directories")
+        val readTarget = endpoint("v1", "session", owner.id, "capture-configuration", CaptureConfigurationOperation.CREATE_DIRECTORY.wireName)
+        val created = postJson(target, JSONObject().put("name", name), captureEvidence = evidence, captureOwner = owner,
+            captureResponse = { response ->
+                val suffix = response.opt("name") as? String
+                require(suffix != null && Regex("^[A-Z0-9_]{5}$").matches(suffix)) {
+                    "Desktop Bridge returned an invalid created directory name."
+                }
+                evidence.acknowledge(suffix)
+            }).getString("name")
         observedFeatures.add(CameraFeature.DIRECTORY_CONTROL)
-        return created
+        captureConfigurationPostAckReadback(evidence) {
+            readCaptureConfiguration(CaptureConfigurationOperation.CREATE_DIRECTORY, readTarget, owner)
+        }
+        created
     }
 
-    suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming {
+    suspend fun setFileNaming(field: CameraFileNamingField, value: String,
+        evidence: CaptureConfigurationEvidence = CaptureConfigurationEvidence(
+            CaptureConfigurationRequest(CaptureConfigurationOperation.SET_FILE_NAMING, value, field),
+        ),
+    ): CameraFileNaming = captureConfigurationOperation(evidence) {
+        require(evidence.request == CaptureConfigurationRequest(CaptureConfigurationOperation.SET_FILE_NAMING, value, field))
+        // Freeze the exact session route before the capability await.
+        val owner = requireShutterSession()
+        val target = endpoint("v1", "session", owner.id, "file-naming", field.wireName)
         val current = capabilities().fileNaming
             ?: error("Desktop Bridge did not advertise Canon file-naming control.")
         require(current.accepts(field, value)) {
             "Value '$value' is not valid for Canon file-naming field ${field.wireName}."
         }
-        val updated = putJson(
-            sessionEndpoint("file-naming", field.wireName),
-            JSONObject().put("value", value),
-        ).toBridgeFileNamingOrNull()
-            ?: error("Desktop Bridge returned an invalid file-naming state.")
-        check(updated.accepts(field, value) && updated.fileNamingValue(field) == value) {
-            "Desktop Bridge did not return the requested file-naming value."
-        }
+        val updated = putJson(target, JSONObject().put("value", value), captureEvidence = evidence, captureOwner = owner,
+            captureResponse = { response ->
+                val state = response.toBridgeFileNamingOrNull()
+                    ?: error("Desktop Bridge returned an invalid file-naming state.")
+                check(state.accepts(field, value) && state.fileNamingValue(field) == value) {
+                    "Desktop Bridge did not return the requested file-naming value."
+                }
+                evidence.acknowledge(value)
+                evidence.observe(CaptureConfigurationReadback(fileNaming = state))
+            }).toBridgeFileNamingOrNull() ?: error("Desktop Bridge returned an invalid file-naming state.")
         observedFeatures.add(CameraFeature.FILE_NAMING_CONTROL)
-        return updated
+        updated
+    }
+
+    suspend fun readCaptureConfiguration(operation: CaptureConfigurationOperation): CaptureConfigurationReadback {
+        val owner = requireShutterSession()
+        val target = endpoint("v1", "session", owner.id, "capture-configuration", operation.wireName)
+        return readCaptureConfiguration(operation, target, owner)
+    }
+
+    private suspend fun readCaptureConfiguration(operation: CaptureConfigurationOperation, target: HttpUrl,
+        owner: BridgeShutterReleaseSession): CaptureConfigurationReadback {
+        return kotlinx.coroutines.withTimeout(15_000L) {
+            currentCoroutineContext().ensureActive()
+            requireCurrentSession(owner)
+            val body = requestJson(Request.Builder().url(target).header("Cache-Control", "no-cache, no-store").get().build(),
+                observeStatus = false, strictMediaJsonLimit = 65_536, captureRecovery = true, captureOwner = owner)
+            check(body.opt("operation") == operation.wireName) { "Mismatched capture configuration readback." }
+            when (operation) {
+                CaptureConfigurationOperation.CREATE_DIRECTORY -> {
+                    val selection = body.optJSONObject("directorySelection")
+                    val values = selection?.optJSONArray("ability")
+                    val selected = validCaptureDirectorySelection(selection?.opt("value"),
+                        if (values == null) emptyList() else (0 until values.length()).map { values.opt(it) })
+                        ?: error("Invalid directory selection readback.")
+                    CaptureConfigurationReadback(directorySelection = selected,
+                        directoryValues = (0 until requireNotNull(values).length()).map { values.getString(it) })
+                }
+                CaptureConfigurationOperation.SET_FILE_NAMING -> CaptureConfigurationReadback(
+                    fileNaming = body.optJSONObject("fileNaming")?.toBridgeFileNamingOrNull()
+                        ?: error("Complete file-naming readback unavailable."),
+                )
+            }
+        }
     }
 
     suspend fun syncCameraClock(): CameraStatus = parseStatus(
@@ -1497,12 +1565,15 @@ class DesktopBridgeClient(
     private suspend fun postJson(
         url: HttpUrl, payload: JSONObject, shutterStart: Boolean = false, cameraDiscovery: Boolean = false,
         recordingEvidence: RecordingRequestEvidence? = null,
+        captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null,
+        captureOwner: BridgeShutterReleaseSession? = null,
     ): JSONObject = requestJson(
         Request.Builder()
             .url(url)
             .tag(BridgeShutterStart::class.java, if (shutterStart) BridgeShutterStart else null)
             .post(payload.toString().toRequestBody(jsonMediaType))
             .build(), cameraDiscovery = cameraDiscovery, recordingEvidence = recordingEvidence,
+        captureEvidence = captureEvidence, captureResponse = captureResponse, captureOwner = captureOwner,
     )
 
     private suspend fun postEmptyJson(url: HttpUrl): JSONObject = requestJson(
@@ -1512,11 +1583,14 @@ class DesktopBridgeClient(
             .build(),
     )
 
-    private suspend fun putJson(url: HttpUrl, payload: JSONObject, strictMediaJsonLimit: Int? = null): JSONObject = requestJson(
+    private suspend fun putJson(url: HttpUrl, payload: JSONObject, strictMediaJsonLimit: Int? = null,
+        captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null,
+        captureOwner: BridgeShutterReleaseSession? = null): JSONObject = requestJson(
         Request.Builder()
             .url(url)
             .put(payload.toString().toRequestBody(jsonMediaType))
-            .build(), strictMediaJsonLimit = strictMediaJsonLimit,
+            .build(), strictMediaJsonLimit = strictMediaJsonLimit, captureEvidence = captureEvidence, captureResponse = captureResponse,
+        captureOwner = captureOwner,
     )
 
     private suspend fun requestJson(
@@ -1527,12 +1601,16 @@ class DesktopBridgeClient(
         recordingEvidence: RecordingRequestEvidence? = null,
         maxResponseBytes: Int? = null,
         strictMediaJsonLimit: Int? = null,
+        captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null,
+        captureRecovery: Boolean = false, captureOwner: BridgeShutterReleaseSession? = null,
     ): JSONObject = withContext(Dispatchers.IO) {
         val session = sessionForRequest(request)
+        val captureSessionEngine = sessionEngine
         val revision = session?.revision
         val focusSession = heldAutofocusSession
         val focusRevision = focusSession?.revision
-        val call = newBridgeCall(request)
+        val call = newBridgeCall(request, captureEvidence != null || captureRecovery)
+        val jsonLimit = strictMediaJsonLimit ?: 65_536.takeIf { captureEvidence != null }
         if (recoveryRead) {
             // Bound only the additional release-proof read, including a continuously paced body.
             // This is an app recovery policy, not a camera timing guarantee or a release ACK.
@@ -1545,20 +1623,43 @@ class DesktopBridgeClient(
             try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
         }
         try {
+            captureOwner?.let { owner ->
+                currentCoroutineContext().ensureActive()
+                requireCurrentSession(owner)
+                check(session === owner) { "Capture configuration target does not belong to the frozen session." }
+            }
             recordingEvidence?.let {
                 currentCoroutineContext().ensureActive()
                 it.beginRequest()
+            }
+            captureEvidence?.let {
+                currentCoroutineContext().ensureActive()
+                requireCurrentSession(requireNotNull(session) { "Capture configuration session changed before dispatch." })
+                it.beforeDispatch("${request.method} ${request.url.encodedPath}")
             }
             call.execute().use { response ->
                 // Non-502 rejection headers remain evidence even if the error body is lost.
                 // A 502 may instead carry an acknowledged or unknown camera outcome.
                 if (!response.isSuccessful && response.code != 502) recordingEvidence?.rejected = true
                 val body = response.body?.let {
-                    if (strictMediaJsonLimit != null) it.byteStream().use { input -> readStrictMediaJsonText(input, it.contentLength(), strictMediaJsonLimit) }
+                    if (captureEvidence != null || captureRecovery) it.byteStream().use { input -> readCaptureConfigurationJsonText(input, it.contentLength()) }
+                    else if (jsonLimit != null) it.byteStream().use { input -> readStrictMediaJsonText(input, it.contentLength(), jsonLimit) }
                     else if (maxResponseBytes == null) it.string() else it.readBoundedUtf8(maxResponseBytes)
                 }.orEmpty()
-                if (recordingEvidence == null) session?.let(::requireCurrentSession)
+                if (recordingEvidence == null && captureEvidence == null) session?.let(::requireCurrentSession)
+                if (captureEvidence != null) StrictMediaJson(body).validate()
                 if (!response.isSuccessful) {
+                    captureEvidence?.let { evidence ->
+                        val envelope = runCatching { JSONObject(body).optJSONObject("error") }.getOrNull()
+                        val receipt = envelope?.optJSONObject("captureConfigReceipt")
+                        if (captureSessionEngine == "ccapi" && receipt != null && acceptsCaptureConfigurationBridgeReceipt(evidence.request,
+                            response.code, envelope?.opt("code"), envelope?.opt("engine"), envelope?.opt("feature"),
+                            receipt.opt("version"), receipt.opt("operation"), receipt.opt("stage"),
+                            receipt.opt("requestedValue"), receipt.opt("acknowledgedValue"), receipt.has("field"), receipt.opt("field"))) {
+                            evidence.acknowledge(receipt.getString("acknowledgedValue"))
+                            evidence.unavailable()
+                        }
+                    }
                     val failure = bridgeError(response.code, body, request.url.encodedPath, session, revision,
                         cameraDiscovery = cameraDiscovery)
                     // A malformed/missing 502 body can hide either command uncertainty or
@@ -1579,7 +1680,7 @@ class DesktopBridgeClient(
                     }
                     throw failure
                 }
-                session?.let(::requireCurrentSession)
+                if (captureEvidence == null) session?.let(::requireCurrentSession)
                 if (strictMediaJsonLimit != null) StrictMediaJson(body).validate()
                 val parsed = runCatching { JSONObject(body) }.getOrElse {
                     // Classify at the REC response boundary: coroutine stack recovery can
@@ -1589,6 +1690,8 @@ class DesktopBridgeClient(
                     }
                     throw IllegalStateException("Desktop Bridge returned invalid JSON for ${request.url.encodedPath}.", it)
                 }
+                captureResponse?.invoke(parsed)
+                session?.let(::requireCurrentSession)
                 if (observeStatus && session != null && revision != null &&
                     heldAutofocusSession === focusSession && focusSession?.revision == focusRevision) {
                     observeBridgeStatus(session, parseStatus(parsed), revision)
@@ -1754,9 +1857,9 @@ class DesktopBridgeClient(
         }
     }
 
-    private fun newBridgeCall(request: Request): Call {
+    private fun newBridgeCall(request: Request, captureConfiguration: Boolean = false): Call {
         requireBridgeRequestAllowed(request)
-        if (request.method in setOf("GET", "HEAD")) return httpClient.newCall(request)
+        if (request.method in setOf("GET", "HEAD")) return (if (captureConfiguration) captureConfigurationHttpClient else httpClient).newCall(request)
         val oneShot = request.body?.let { body ->
             object : RequestBody() {
                 override fun contentType() = body.contentType()
@@ -1765,7 +1868,8 @@ class DesktopBridgeClient(
                 override fun writeTo(sink: BufferedSink) = body.writeTo(sink)
             }
         }
-        return mutationHttpClient.newCall(request.newBuilder().method(request.method, oneShot).build())
+        return (if (captureConfiguration) captureConfigurationHttpClient else mutationHttpClient)
+            .newCall(request.newBuilder().method(request.method, oneShot).build())
     }
 
     private fun endpoint(vararg segments: String): HttpUrl = rootUrl.newBuilder().apply {
@@ -1916,9 +2020,7 @@ private fun JSONObject.toBridgeFileNamingOrNull(): CameraFileNaming? {
         movieClipRange = optJSONObject("movieClipRange")?.toBridgeIntegerRangeOrNull(999) ?: return null,
         movieUserDefined = opt("movieUserDefined") as? String ?: return null,
     )
-    return result.takeIf { state ->
-        CameraFileNamingField.entries.all { field -> state.accepts(field, state.fileNamingValue(field)) }
-    }
+    return result.takeIf(::validCaptureConfigurationNaming)
 }
 
 private fun CameraFileNaming.fileNamingValue(field: CameraFileNamingField): String = when (field) {

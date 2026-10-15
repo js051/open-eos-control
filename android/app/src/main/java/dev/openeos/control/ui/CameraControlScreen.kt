@@ -1,5 +1,9 @@
 package dev.openeos.control.ui
 
+import dev.openeos.control.data.CaptureConfigurationOperation
+import dev.openeos.control.data.CaptureConfigurationRequest
+import dev.openeos.control.data.CaptureConfigurationWriteEvidence
+import dev.openeos.control.data.CaptureConfigurationReadEvidence
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -1181,9 +1185,15 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
     val settings = settingsForMode(state.capabilities?.advancedSettings.orEmpty(), state.captureMode)
     var showSleepConfirmation by remember { mutableStateOf(false) }
     var showSensorCleaningConfirmation by remember { mutableStateOf(false) }
-    var showDirectoryCreation by remember { mutableStateOf(false) }
-    var showFileNaming by remember { mutableStateOf(false) }
-    var directoryName by remember { mutableStateOf("") }
+    val configurationOwner = remember(state.info, state.mediaSessionGeneration) {
+        CaptureConfigurationOwner(state.info, state.mediaSessionGeneration)
+    }
+    var showDirectoryCreation by remember(configurationOwner) { mutableStateOf(false) }
+    var showFileNaming by remember(configurationOwner) { mutableStateOf(false) }
+    var directoryName by remember(configurationOwner) { mutableStateOf("") }
+    var directoryDraftToken by remember(configurationOwner) { mutableStateOf(java.util.UUID.randomUUID().toString()) }
+    var directoryDraftRevision by remember(configurationOwner) { mutableStateOf(0L) }
+    var namingDraftToken by remember(configurationOwner) { mutableStateOf(java.util.UUID.randomUUID().toString()) }
     var sensorCleaningAutoPowerOff by remember { mutableStateOf(false) }
     if (showSensorCleaningConfirmation) {
         AlertDialog(
@@ -1273,6 +1283,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                     OutlinedTextField(
                         value = directoryName,
                         onValueChange = { raw ->
+                            directoryDraftRevision += 1
                             directoryName = raw.uppercase()
                                 .filter { it in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" }
                                 .take(5)
@@ -1289,7 +1300,10 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 TextButton(
                     onClick = {
                         showDirectoryCreation = false
-                        actions.createDirectory(directoryName)
+                        val submit = actions.submitCaptureConfiguration
+                        if (submit == null) actions.createDirectory(directoryName) else submit(CaptureConfigurationDraft(
+                            configurationOwner, directoryDraftToken, directoryDraftRevision,
+                            CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, directoryName)))
                     },
                     enabled = validName && !state.isBusy(CameraOperation.DIRECTORY),
                     modifier = Modifier.testTag("create-directory-confirm"),
@@ -1310,6 +1324,14 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 captureMode = state.captureMode,
                 busy = state.previewMode || state.busy,
                 onSet = actions.setFileNaming,
+                draftToken = namingDraftToken,
+                onDraftSet = actions.submitCaptureConfiguration?.let { submit -> { field, value, revision ->
+                    submit(CaptureConfigurationDraft(configurationOwner, namingDraftToken, revision,
+                        CaptureConfigurationRequest(CaptureConfigurationOperation.SET_FILE_NAMING, value, field)))
+                } },
+                receipt = state.captureConfigurationReceipt,
+                onCancel = actions.cancelCaptureConfiguration,
+                onRecover = actions.recoverCaptureConfiguration,
                 onDismiss = { showFileNaming = false },
             )
         }
@@ -1434,6 +1456,16 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         }
                     }
                 }
+                state.captureConfigurationReceipt?.let { receipt ->
+                    CaptureConfigurationReceiptView(receipt, !state.busy,
+                        actions.cancelCaptureConfiguration, actions.recoverCaptureConfiguration)
+                }
+                state.captureConfigurationHistory.filter { it.id != state.captureConfigurationReceipt?.id }.forEach { receipt ->
+                    CaptureConfigurationReceiptView(receipt,
+                        !state.busy && state.connected && receipt.draft.owner.matches(state.info, state.mediaSessionGeneration),
+                        actions.cancelCaptureConfiguration, actions.recoverCaptureConfiguration, history = true,
+                        ownerCurrent = receipt.draft.owner.matches(state.info, state.mediaSessionGeneration))
+                }
                 if (state.supports(CameraFeature.DIRECTORY_CONTROL)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -1452,6 +1484,8 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         Button(
                             onClick = {
                                 directoryName = ""
+                                directoryDraftToken = java.util.UUID.randomUUID().toString()
+                                directoryDraftRevision = 0
                                 showDirectoryCreation = true
                             },
                             enabled = !state.previewMode && !state.busy,
@@ -1490,7 +1524,10 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                             )
                         }
                         Button(
-                            onClick = { showFileNaming = true },
+                            onClick = {
+                                namingDraftToken = java.util.UUID.randomUUID().toString()
+                                showFileNaming = true
+                            },
                             enabled = !state.previewMode && !state.busy,
                             colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
                             shape = RoundedCornerShape(6.dp),
@@ -1605,14 +1642,23 @@ private fun FileNamingEditorDialog(
     captureMode: CaptureMode,
     busy: Boolean,
     onSet: (CameraFileNamingField, String) -> Unit,
+    draftToken: String,
+    onDraftSet: ((CameraFileNamingField, String, Long) -> Unit)?,
+    receipt: CaptureConfigurationReceipt?,
+    onCancel: (String) -> Unit,
+    onRecover: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var stillUserSetting1 by remember(value.stillUserSetting1) { mutableStateOf(value.stillUserSetting1) }
-    var stillUserSetting2 by remember(value.stillUserSetting2) { mutableStateOf(value.stillUserSetting2) }
-    var movieIndex by remember(value.movieIndex) { mutableStateOf(value.movieIndex) }
-    var movieReelNumber by remember(value.movieReelNumber) { mutableStateOf(value.movieReelNumber.toString()) }
-    var movieClipNumber by remember(value.movieClipNumber) { mutableStateOf(value.movieClipNumber.toString()) }
-    var movieUserDefined by remember(value.movieUserDefined) { mutableStateOf(value.movieUserDefined) }
+    var stillUserSetting1 by remember(draftToken) { mutableStateOf(value.stillUserSetting1) }
+    var stillUserSetting2 by remember(draftToken) { mutableStateOf(value.stillUserSetting2) }
+    var movieIndex by remember(draftToken) { mutableStateOf(value.movieIndex) }
+    var movieReelNumber by remember(draftToken) { mutableStateOf(value.movieReelNumber.toString()) }
+    var movieClipNumber by remember(draftToken) { mutableStateOf(value.movieClipNumber.toString()) }
+    var movieUserDefined by remember(draftToken) { mutableStateOf(value.movieUserDefined) }
+    var draftRevision by remember(draftToken) { mutableStateOf(0L) }
+    fun submit(field: CameraFileNamingField, text: String) {
+        if (onDraftSet == null) onSet(field, text) else onDraftSet(field, text, draftRevision)
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.file_naming)) },
@@ -1632,7 +1678,10 @@ private fun FileNamingEditorDialog(
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(value.stillFilenameModeOptions) { option ->
                             Button(
-                                onClick = { onSet(CameraFileNamingField.STILL_FILENAME_MODE, option) },
+                                onClick = {
+                                    draftRevision += 1
+                                    submit(CameraFileNamingField.STILL_FILENAME_MODE, option)
+                                },
                                 enabled = !busy && option != value.stillFilenameMode,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (option == value.stillFilenameMode) AppAccent else AppSurfaceHigh,
@@ -1648,62 +1697,64 @@ private fun FileNamingEditorDialog(
                     FileNamingInputRow(
                         label = stringResource(R.string.still_user_setting_1),
                         value = stillUserSetting1,
-                        onValueChange = { stillUserSetting1 = it.fileNamingText(4, allowUnderscore = true) },
+                        onValueChange = { draftRevision += 1; stillUserSetting1 = it.fileNamingText(4, allowUnderscore = true) },
                         valid = value.accepts(CameraFileNamingField.STILL_USER_SETTING_1, stillUserSetting1),
                         busy = busy,
                         testTag = "still-user-setting-1",
-                        onApply = { onSet(CameraFileNamingField.STILL_USER_SETTING_1, stillUserSetting1) },
+                        onApply = { submit(CameraFileNamingField.STILL_USER_SETTING_1, stillUserSetting1) },
                     )
                     FileNamingInputRow(
                         label = stringResource(R.string.still_user_setting_2),
                         value = stillUserSetting2,
-                        onValueChange = { stillUserSetting2 = it.fileNamingText(3, allowUnderscore = true) },
+                        onValueChange = { draftRevision += 1; stillUserSetting2 = it.fileNamingText(3, allowUnderscore = true) },
                         valid = value.accepts(CameraFileNamingField.STILL_USER_SETTING_2, stillUserSetting2),
                         busy = busy,
                         testTag = "still-user-setting-2",
-                        onApply = { onSet(CameraFileNamingField.STILL_USER_SETTING_2, stillUserSetting2) },
+                        onApply = { submit(CameraFileNamingField.STILL_USER_SETTING_2, stillUserSetting2) },
                     )
                 } else {
                     FileNamingInputRow(
                         label = stringResource(R.string.movie_index),
                         value = movieIndex,
-                        onValueChange = { movieIndex = it.fileNamingText(2, allowUnderscore = true) },
+                        onValueChange = { draftRevision += 1; movieIndex = it.fileNamingText(2, allowUnderscore = true) },
                         valid = value.accepts(CameraFileNamingField.MOVIE_INDEX, movieIndex),
                         busy = busy,
                         testTag = "movie-index",
-                        onApply = { onSet(CameraFileNamingField.MOVIE_INDEX, movieIndex) },
+                        onApply = { submit(CameraFileNamingField.MOVIE_INDEX, movieIndex) },
                     )
                     FileNamingInputRow(
                         label = stringResource(R.string.movie_reel_number),
                         value = movieReelNumber,
-                        onValueChange = { movieReelNumber = it.filter(Char::isDigit).take(4) },
+                        onValueChange = { draftRevision += 1; movieReelNumber = it.filter(Char::isDigit).take(4) },
                         valid = value.accepts(CameraFileNamingField.MOVIE_REEL_NUMBER, movieReelNumber),
                         busy = busy,
                         numeric = true,
                         testTag = "movie-reel-number",
-                        onApply = { onSet(CameraFileNamingField.MOVIE_REEL_NUMBER, movieReelNumber) },
+                        onApply = { submit(CameraFileNamingField.MOVIE_REEL_NUMBER, movieReelNumber) },
                     )
                     FileNamingInputRow(
                         label = stringResource(R.string.movie_clip_number),
                         value = movieClipNumber,
-                        onValueChange = { movieClipNumber = it.filter(Char::isDigit).take(3) },
+                        onValueChange = { draftRevision += 1; movieClipNumber = it.filter(Char::isDigit).take(3) },
                         valid = value.accepts(CameraFileNamingField.MOVIE_CLIP_NUMBER, movieClipNumber),
                         busy = busy,
                         numeric = true,
                         testTag = "movie-clip-number",
-                        onApply = { onSet(CameraFileNamingField.MOVIE_CLIP_NUMBER, movieClipNumber) },
+                        onApply = { submit(CameraFileNamingField.MOVIE_CLIP_NUMBER, movieClipNumber) },
                     )
                     FileNamingInputRow(
                         label = stringResource(R.string.movie_user_defined),
                         value = movieUserDefined,
-                        onValueChange = { movieUserDefined = it.fileNamingText(5, allowUnderscore = false) },
+                        onValueChange = { draftRevision += 1; movieUserDefined = it.fileNamingText(5, allowUnderscore = false) },
                         valid = value.accepts(CameraFileNamingField.MOVIE_USER_DEFINED, movieUserDefined),
                         busy = busy,
                         testTag = "movie-user-defined",
-                        onApply = { onSet(CameraFileNamingField.MOVIE_USER_DEFINED, movieUserDefined) },
+                        onApply = { submit(CameraFileNamingField.MOVIE_USER_DEFINED, movieUserDefined) },
                     )
                 }
                 Text(stringResource(R.string.file_naming_rule), color = AppSubtleText)
+                receipt?.let { CaptureConfigurationReceiptView(it, !busy, onCancel, onRecover) }
+                Text(stringResource(R.string.capture_configuration_draft_retained), color = AppSubtleText)
             }
         },
         confirmButton = {
@@ -2120,3 +2171,53 @@ private val RANGE_SETTING_KEYS = setOf(
     "focusbracketingnumberofshots",
     "focusbracketingfocusincrement",
 )
+
+@Composable
+internal fun CaptureConfigurationReceiptView(
+    receipt: CaptureConfigurationReceipt,
+    recoveryEnabled: Boolean,
+    onCancel: (String) -> Unit,
+    onRecover: (String) -> Unit,
+    history: Boolean = false,
+    ownerCurrent: Boolean = true,
+) {
+    val evidence = receipt.evidence
+    val directory = evidence.request.operation == CaptureConfigurationOperation.CREATE_DIRECTORY
+    Column(Modifier.fillMaxWidth().testTag(if (history) "capture-configuration-history-${receipt.id}" else "capture-configuration-receipt"),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(stringResource(if (history) R.string.capture_configuration_previous else R.string.capture_configuration_result),
+            color = AppText, fontWeight = FontWeight.SemiBold)
+        Text(receipt.origin, color = AppSubtleText, modifier = Modifier.testTag("capture-configuration-origin"))
+        (receipt.draft.owner.connection as? dev.openeos.control.data.CameraInfo)?.model?.let { Text(it, color = AppSubtleText) }
+        evidence.target?.let { Text(it, color = AppSubtleText, modifier = Modifier.testTag("capture-configuration-target")) }
+        Text(stringResource(R.string.capture_configuration_request,
+            if (directory) stringResource(R.string.create_capture_directory) else evidence.request.field?.wireName.orEmpty(),
+            evidence.request.requestedValue.ifEmpty { stringResource(R.string.capture_configuration_automatic) }), color = AppText)
+        Text(stringResource(when (evidence.writeEvidence) {
+            CaptureConfigurationWriteEvidence.NOT_SENT -> R.string.capture_configuration_not_sent
+            CaptureConfigurationWriteEvidence.UNKNOWN -> R.string.capture_configuration_unknown
+            CaptureConfigurationWriteEvidence.ACKNOWLEDGED -> R.string.capture_configuration_acknowledged
+        }), color = AppText, modifier = Modifier.testTag("capture-configuration-write"))
+        evidence.acknowledgedValue?.let { Text(stringResource(R.string.capture_configuration_ack_value, it), color = AppText) }
+        Text(stringResource(when (evidence.readbackEvidence) {
+            CaptureConfigurationReadEvidence.NOT_READ -> R.string.capture_configuration_not_read
+            CaptureConfigurationReadEvidence.UNAVAILABLE -> R.string.capture_configuration_unavailable
+            CaptureConfigurationReadEvidence.MISMATCH -> R.string.capture_configuration_mismatch
+            CaptureConfigurationReadEvidence.MATCHED -> R.string.capture_configuration_matched
+            CaptureConfigurationReadEvidence.REFRESHED -> R.string.capture_configuration_refreshed
+        }), color = AppSubtleText, modifier = Modifier.testTag("capture-configuration-readback"))
+        evidence.observedValue?.takeIf { evidence.readbackEvidence in setOf(CaptureConfigurationReadEvidence.MATCHED,
+            CaptureConfigurationReadEvidence.MISMATCH, CaptureConfigurationReadEvidence.REFRESHED) }?.let { Text(stringResource(R.string.capture_configuration_observed_value, it), color = AppSubtleText) }
+        if (directory) Text(stringResource(R.string.capture_configuration_directory_limit), color = AppSubtleText)
+        if (evidence.writeEvidence == CaptureConfigurationWriteEvidence.UNKNOWN) {
+            Text(stringResource(R.string.capture_configuration_no_repeat), color = AppSubtleText)
+        }
+        if (receipt.cancelled) Text(stringResource(R.string.capture_configuration_cancelled), color = AppSubtleText)
+        if (ownerCurrent) {
+            if (receipt.running || receipt.recovering) TextButton(onClick = { onCancel(receipt.id) },
+                modifier = Modifier.testTag(if (history) "capture-configuration-cancel-${receipt.id}" else "capture-configuration-cancel")) { Text(stringResource(R.string.cancel)) }
+            else TextButton(onClick = { onRecover(receipt.id) }, enabled = recoveryEnabled,
+                modifier = Modifier.testTag(if (history) "capture-configuration-recover-${receipt.id}" else "capture-configuration-recover")) { Text(stringResource(R.string.capture_configuration_recover)) }
+        }
+    }
+}
