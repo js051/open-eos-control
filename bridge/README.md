@@ -131,3 +131,34 @@ reconnect or SDP port change. Different cameras on distinct endpoints remain
 independent. Failed cleanup retains the reservation; a codec that never returns
 or a cleanup failure may require restarting the Bridge. The reservation neither
 sends/persists camera identifiers nor acknowledges a camera Stop.
+
+## Cancel a pending connection
+
+The PC connection page offers **Cancel connection** while session creation or
+initial metadata reads are pending. Cancel immediately retires that attempt's UI
+publication rights and allows editing the connection method, camera, address and
+authentication fields. It does not prove that a Bridge or camera request stopped.
+The admitted creation request remains observed to recover its exact session ID;
+all admitted metadata reads settle before the same captured Bridge endpoint,
+token and session are used for one cleanup DELETE.
+
+Scan and Connect remain unavailable while the shared backend is being retired.
+No new attempt is queued: after cleanup, choose **Retry connection** explicitly.
+Late success, error or completion cannot restore the canceled session, clear new
+settings, replace a newer error, or unlock another owner. Only the Bridge's exact
+HTTP 204 DELETE response acknowledges local session retirement; this is separate
+from physical-camera validation and does not clear existing shutter warnings.
+Late creation or cleanup replies identifying unconfirmed shutter/autofocus,
+Live View, or recording retain separate fixed, localized previous-camera warnings.
+Recording uncertainty explicitly says recording may still be active. These
+warnings direct the user to the old camera and never grant Stop control to a new
+session or display raw provider messages.
+
+An explicit session-creation rejection permits correcting settings and retrying.
+If the creation result is lost or malformed, or DELETE fails/has an unexpected
+response, cleanup remains **unconfirmed** and camera access stays blocked. Check
+the camera, restart this Bridge and reload the page before retrying. Reloading
+alone does not close an unknown session. Page dismissal revokes publication while
+JavaScript remains alive, but a destroyed browser page cannot guarantee observing
+a late POST or delivering cleanup. The host tests cover controlled asynchronous
+ordering; browser lifetime and physical-camera acceptance remain separate.

@@ -43,7 +43,7 @@ function context() {
     shutterDisconnectWarning: true, captureMode: "photo", shutterAutofocus: true, previewInput: "CAMERA" };
   const requests = [], errors = [];
   const sandbox = vm.createContext({ state, ui, requests, errors, URL, AbortController, Headers, Error,
-    connectionGuidance: guidance, document: { createElement: element, querySelector: element, querySelectorAll: () => [] },
+    window: { location: { href: "http://bridge.invalid/" } }, connectionGuidance: guidance, document: { createElement: element, querySelector: element, querySelectorAll: () => [] },
     mediaTransfer: { isAbortError: (error) => error?.name === "AbortError" },
     FEATURES: new Proxy({}, { get: (_, name) => name }),
     t: key => key, api: async (url, options) => { requests.push({ url, options }); return { cameras: [] }; },
@@ -60,7 +60,7 @@ function context() {
   });
   vm.runInContext(["adoptCameraStatus", "showConnectionError", "clearConnectionError", "renderConnectionGuidance", "correctConnection",
     "renderHealth", "validCcapiUrl", "renderConnectionMode", "selectConnectionMode", "renderCameras",
-    "recordingRecoveryActive", "refreshHealth", "cancelCameraScan", "scanCameras", "connectCamera", "liveViewStopRequired", "maintenanceStopRetryAvailable", "renderAvailability"]
+    "recordingRecoveryActive", "refreshHealth", "cancelCameraScan", "scanCameras", "connectionRetirementBlocked", "renderConnectionCleanup", "recordConnectionCleanupWarning", "cancelCameraConnection", "retireConnectionAttempt", "connectCamera", "liveViewStopRequired", "maintenanceStopRetryAvailable", "renderAvailability"]
     .map(productionFunction).join("\n"), sandbox);
   return sandbox;
 }
@@ -315,4 +315,424 @@ test("a late scan cannot publish into a replacement session or render that sessi
   assert.equal(s.state.cameras.length, 0);
   assert.equal(s.ui.connectionStatus.textContent, "replacement owns this UI");
   assert.equal(s.state.capabilities.supported[0], "SYNTHETIC");
+});
+
+// Execute production connection owners with controlled transport completions.
+// No camera, browser, process restart, elapsed-time sleeps or production test hook.
+const flushConnection = () => new Promise(resolve => setImmediate(resolve));
+function connectionContext() {
+  const s = context();
+  s.selectConnectionMode("ccapi");
+  s.ui.connectionView.hidden = false;
+  s.ui.controlView.hidden = true;
+  s.ui.tokenInput.value = "SYNTHETIC-OLD-TOKEN";
+  s.ui.ccapiUsernameInput.value = "synthetic-old-user";
+  s.ui.ccapiPasswordInput.value = "synthetic-old-password";
+  s.feedback = [];
+  s.startEventLoop = () => s.feedback.push("events");
+  s.refreshLatestMedia = () => s.feedback.push("latest-media");
+  s.showToast = message => s.feedback.push(message);
+  return s;
+}
+function connectionResponse(url) {
+  if (url.endsWith("/info")) return { model: "SYNTHETIC" };
+  if (url.endsWith("/status")) return { recording: false };
+  if (url.endsWith("/capabilities")) return { supported: [], liveView: {} };
+  throw new Error(`Unexpected synthetic request: ${url}`);
+}
+
+test("cancel before session reply unlocks settings, waits for exact cleanup, then requires explicit retry", async () => {
+  const s = connectionContext(), old = deferred(), cleanup = deferred();
+  s.api = async (url, options = {}) => {
+    s.requests.push({ url, options });
+    if (options.method === "POST") return old.promise;
+    if (options.method === "DELETE") return cleanup.promise;
+    return connectionResponse(url);
+  };
+  const connecting = s.connectCamera();
+  const attempt = s.state.connectAttempt;
+  assert.equal(s.ui.connectCancelButton.hidden, false);
+  assert.equal(s.ui.cameraSelect.disabled, true);
+  assert.equal(s.ui.tokenInput.disabled, true);
+  await s.connectCamera();
+  assert.equal(s.requests.length, 1);
+  s.cancelCameraConnection(); s.cancelCameraConnection();
+  assert.equal(s.state.connectAttempt, null);
+  assert.equal(s.state.busy, false);
+  assert.equal(s.state.session, null);
+  assert.equal(s.ui.connectCancelButton.hidden, true);
+  for (const field of ["tokenInput", "ccapiUrlInput", "ccapiUsernameInput", "ccapiPasswordInput", "usbModeButton", "ccapiModeButton"]) {
+    assert.equal(s.ui[field].disabled, false, field);
+  }
+  assert.equal(s.ui.connectButton.disabled, true, "shared backend cannot overlap pending creation");
+  assert.equal(s.ui.connectionCleanupNotice.textContent, "connectionCleanupPending");
+  s.ui.tokenInput.value = "SYNTHETIC-NEW-TOKEN";
+  s.ui.ccapiUrlInput.value = "http://new-camera.invalid:8081";
+  s.ui.ccapiUsernameInput.value = "synthetic-new-user";
+  s.ui.ccapiPasswordInput.value = "synthetic-new-password";
+  s.window.location.href = "http://new-bridge.invalid/";
+  s.state.token = "SYNTHETIC-MUTATED-TOKEN";
+  s.selectConnectionMode("usb");
+  await s.scanCameras();
+  s.selectConnectionMode("ccapi");
+  await s.connectCamera();
+  assert.equal(s.requests.length, 1, "editing or retry during teardown never queues a connection");
+  assert.equal(attempt.owner.engine, "ccapi");
+  old.resolve({ id: "synthetic-old" });
+  await flushConnection();
+  assert.equal(s.requests.length, 2);
+  assert.equal(s.requests[1].url, "http://bridge.invalid/v1/session/synthetic-old");
+  assert.equal(s.requests[1].options.method, "DELETE");
+  assert.equal(s.requests[1].options.authToken, "SYNTHETIC-OLD-TOKEN");
+  assert.equal(s.requests[1].options.redirect, "error");
+  assert.equal(s.requests[1].options.keepalive, true);
+  assert.equal(s.requests[0].options.signal, undefined, "POST stays observed to recover its exact session ID");
+  assert.equal(s.requests[0].options.json.ccapiUrl, "http://camera.invalid:8080");
+  assert.equal(s.ui.connectButton.disabled, true, "DELETE acknowledgment is still pending");
+  cleanup.resolve({ status: 204 });
+  await connecting;
+  assert.equal(s.state.connectionCleanupStatus, "acknowledged");
+  assert.equal(s.ui.connectionCleanupNotice.textContent, "connectionCleanupAcknowledged");
+  assert.equal(s.ui.controlView.hidden, true);
+  assert.equal(s.ui.connectButton.disabled, false);
+  assert.equal(s.ui.connectButton.querySelector().textContent, "connectionRetry");
+  assert.deepEqual(s.feedback, []);
+  assert.equal(s.requests.length, 2, "cleanup completion does not reconnect");
+  s.api = async (url, options = {}) => {
+    s.requests.push({ url, options });
+    return options.method === "POST" ? { id: "synthetic-new" } : connectionResponse(url);
+  };
+  await s.connectCamera();
+  assert.equal(s.state.session.id, "synthetic-new");
+  assert.equal(s.requests[2].url, "http://new-bridge.invalid/v1/session");
+  assert.equal(s.requests[2].options.authToken, "SYNTHETIC-NEW-TOKEN");
+  assert.equal(s.requests[2].options.json.ccapiUrl, "http://new-camera.invalid:8081");
+  assert.equal(s.requests[2].options.json.ccapiUsername, "synthetic-new-user");
+  assert.equal(s.requests[2].options.json.ccapiPassword, "synthetic-new-password");
+  assert.equal(s.ui.controlView.hidden, false);
+  assert.equal(s.state.shutterDisconnectWarning, true, "connection cancellation never clears previous control safety evidence");
+});
+
+for (const lateError of [false, true]) test(`cancel during metadata drains all reads and discards late ${lateError ? "error" : "success"}`, async () => {
+  const s = connectionContext(), info = deferred(), status = deferred(), capabilities = deferred();
+  s.api = async (url, options = {}) => {
+    s.requests.push({ url, options });
+    if (options.method === "POST") return { id: "synthetic-old" };
+    if (options.method === "DELETE") return { status: 204 };
+    if (url.endsWith("/info")) return info.promise;
+    if (url.endsWith("/status")) return status.promise;
+    if (url.endsWith("/capabilities")) return capabilities.promise;
+  };
+  const connecting = s.connectCamera();
+  await flushConnection();
+  assert.equal(s.requests.length, 4);
+  assert.equal(s.state.session, null, "uninitialized session is private to its attempt");
+  s.cancelCameraConnection();
+  s.ui.ccapiUrlInput.value = "http://edited-camera.invalid";
+  if (lateError) info.reject(cameraFailure("AUTHENTICATION_REJECTED"));
+  else info.resolve({ model: "SYNTHETIC-OLD" });
+  status.resolve({ recording: false });
+  await flushConnection();
+  assert.equal(s.requests.length, 4, "first read error or completion cannot close beneath remaining reads");
+  assert.equal(s.ui.connectButton.disabled, true);
+  capabilities.resolve({ supported: [] });
+  await connecting;
+  assert.equal(s.requests.length, 5);
+  assert.equal(s.requests[4].url, "http://bridge.invalid/v1/session/synthetic-old");
+  assert.equal(s.state.session, null);
+  assert.equal(s.state.info, undefined);
+  assert.equal(s.state.capabilities, undefined);
+  assert.equal(s.ui.ccapiUrlInput.value, "http://edited-camera.invalid");
+  assert.equal(s.ui.controlView.hidden, true);
+  assert.equal(s.errors.length, 0, "retired initialization cannot restore old failure");
+  assert.deepEqual(s.feedback, []);
+});
+
+for (const lateError of [false, true]) test(`old cleanup ${lateError ? "failure" : "success"} cannot delete or unlock a replacement owner`, async () => {
+  const s = connectionContext(), old = deferred(), cleanup = deferred();
+  s.api = async (url, options = {}) => {
+    s.requests.push({ url, options });
+    return options.method === "POST" ? old.promise : cleanup.promise;
+  };
+  const connecting = s.connectCamera();
+  s.cancelCameraConnection();
+  old.resolve({ id: "synthetic-old" }); await flushConnection();
+  // A separately installed replacement is adversarial; normal admission waits.
+  const replacement = { id: "synthetic-new" }, nextAttempt = {};
+  s.state.session = replacement;
+  s.state.connectAttempt = nextAttempt;
+  s.state.connectionRetirement = nextAttempt;
+  s.state.connectionCleanupStatus = "replacement-owned";
+  s.state.connectionFailure = ["replacement-failure", "address"];
+  s.state.busy = true;
+  s.state.token = "SYNTHETIC-NEW-TOKEN";
+  s.ui.engineState.textContent = "replacement busy";
+  s.ui.connectionStatus.textContent = "replacement status";
+  if (lateError) cleanup.reject(new Error("synthetic old DELETE failure"));
+  else cleanup.resolve({ status: 204 });
+  await connecting;
+  assert.equal(s.state.session, replacement);
+  assert.equal(s.state.connectAttempt, nextAttempt);
+  assert.equal(s.state.connectionRetirement, nextAttempt);
+  assert.equal(s.state.connectionCleanupStatus, "replacement-owned");
+  assert.equal(s.state.connectionFailure[0], "replacement-failure");
+  assert.equal(s.state.busy, true);
+  assert.equal(s.ui.engineState.textContent, "replacement busy");
+  assert.equal(s.ui.connectionStatus.textContent, "replacement status");
+  assert.equal(s.requests.length, 2);
+  assert.equal(s.requests[1].url, "http://bridge.invalid/v1/session/synthetic-old");
+  assert.equal(s.requests[1].options.authToken, "SYNTHETIC-OLD-TOKEN");
+});
+
+for (const rejection of [{ status: 401 }, { status: 422 }, cameraFailure("AUTHENTICATION_REJECTED")]) {
+  test(`cancelled creation with explicit ${rejection.status}/${rejection.code || "HTTP"} rejection permits manual correction`, async () => {
+    const s = connectionContext(), old = deferred();
+    s.api = async (url, options) => { s.requests.push({ url, options }); return old.promise; };
+    const connecting = s.connectCamera(); s.cancelCameraConnection(); old.reject(rejection); await connecting;
+    assert.equal(s.state.connectionCleanupStatus, null);
+    assert.equal(s.state.connectionRetirement, null);
+    assert.equal(s.ui.connectButton.disabled, false);
+    assert.equal(s.errors.length, 0);
+    assert.equal(s.requests.length, 1);
+    assert.equal(s.state.session, null);
+  });
+}
+
+for (const outcome of ["lost-create", "malformed-create", "lost-delete", "unexpected-delete-success", "missing-delete"]) {
+  test(`cancelled ${outcome} remains unconfirmed and cannot silently free the shared backend`, async () => {
+    const s = connectionContext(), old = deferred();
+    s.api = async (url, options = {}) => {
+      s.requests.push({ url, options });
+      if (options.method === "POST") return old.promise;
+      if (outcome === "lost-delete") throw new Error("synthetic lost reply");
+      if (outcome === "missing-delete") throw { status: 404, code: "SESSION_NOT_FOUND" };
+      return { status: 200 };
+    };
+    const connecting = s.connectCamera(); s.cancelCameraConnection();
+    if (outcome === "lost-create") old.reject({ status: 0, code: "NETWORK_ERROR" });
+    else old.resolve(outcome === "malformed-create" ? { id: "" } : { id: "synthetic-old" });
+    await connecting;
+    assert.equal(s.state.connectionCleanupStatus, "unconfirmed");
+    assert.equal(s.state.connectionRetirement, null);
+    assert.equal(s.ui.connectionCleanupNotice.textContent, "connectionCleanupUnconfirmed");
+    assert.equal(s.ui.tokenInput.disabled, false);
+    assert.equal(s.ui.connectButton.disabled, true);
+    const count = s.requests.length;
+    s.selectConnectionMode("usb"); await s.scanCameras();
+    s.selectConnectionMode("ccapi"); await s.connectCamera();
+    assert.equal(s.requests.length, count);
+    assert.equal(s.errors.length, 0);
+  });
+}
+
+test("current metadata failure stays actionable while exact-session cleanup is pending", async () => {
+  const s = connectionContext(), cleanup = deferred();
+  s.api = async (url, options = {}) => {
+    s.requests.push({ url, options });
+    if (options.method === "POST") return { id: "synthetic-current" };
+    if (options.method === "DELETE") return cleanup.promise;
+    if (url.endsWith("/status")) throw { status: 401, code: "UNAUTHORIZED" };
+    return connectionResponse(url);
+  };
+  const connecting = s.connectCamera(); await flushConnection();
+  assert.equal(s.ui.connectionError.textContent, "connectionBridgeAuth");
+  assert.equal(s.state.busy, false);
+  assert.equal(s.ui.tokenInput.disabled, false);
+  assert.equal(s.ui.connectButton.disabled, true);
+  s.correctConnection(); assert.equal(s.ui.tokenInput.focused, true);
+  s.ui.tokenInput.value = "SYNTHETIC-CORRECTED-TOKEN";
+  cleanup.resolve({ status: 204 }); await connecting;
+  assert.equal(s.ui.connectionError.textContent, "connectionBridgeAuth");
+  assert.equal(s.ui.connectButton.disabled, false);
+  assert.equal(s.ui.tokenInput.value, "SYNTHETIC-CORRECTED-TOKEN");
+  assert.equal(s.requests.filter(row => row.options.method === "POST").length, 1);
+});
+
+test("session-creation rejection evidence never treats unknown transport or malformed response as a rejection", () => {
+  for (const error of [{ status: 0, code: "NETWORK_ERROR" }, { status: 502, code: "RESPONSE_BODY_UNAVAILABLE" },
+    { status: 500 }, { status: 503 }, { status: 201 }, { status: 302 }, { name: "AbortError" },
+    { status: 502, code: "CCAPI_DISCOVERY_FAILED", engine: "libgphoto2" }]) {
+    assert.equal(guidance.sessionCreationRejected(error), false);
+  }
+});
+
+test("cancel controls are localized, page retirement is wired, and cleanup evidence is separate from shutter safety", () => {
+  assert.match(html, /id="connect-cancel-button"[^>]*type="button"[^>]*hidden/);
+  assert.match(html, /id="connection-cleanup-notice"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(source, /ui\.connectCancelButton\.addEventListener\("click", cancelCameraConnection\)/);
+  for (const event of ["pagehide", "beforeunload"]) {
+    assert.match(source, new RegExp(`window\\.addEventListener\\("${event}", \\(\\) => \\{\\s+cancelCameraConnection\\(\\)`));
+  }
+  assert.doesNotMatch(productionFunction("cancelCameraConnection"), /\.abort\(|state\.shutterDisconnectWarning\s*=/);
+  assert.doesNotMatch(productionFunction("retireConnectionAttempt"), /state\.token|state\.session\.id|ui\..*\.value/);
+  assert.doesNotMatch(productionFunction("diagnosticReport"), /connectAttempt|connectionRetirement/);
+});
+
+test("every allowed terminal creation rejection is explicit and safety obligations outrank its status", () => {
+  for (const status of [400, 401, 403, 404, 405, 409, 422, 429]) {
+    assert.equal(guidance.sessionCreationRejected({ status }), true, String(status));
+    for (const code of ["SHUTTER_RELEASE_UNCONFIRMED", "LIVE_VIEW_STOP_UNCONFIRMED", "RECORDING_COMMAND_UNCONFIRMED"]) {
+      assert.equal(guidance.sessionCreationRejected({ status, code }), false, `${status}/${code}`);
+    }
+  }
+  for (const status of [501, 503]) {
+    assert.equal(guidance.sessionCreationRejected({ status, code: "ENGINE_UNAVAILABLE" }), true);
+    assert.equal(guidance.sessionCreationRejected({ status, code: "OTHER" }), false);
+  }
+  assert.equal(guidance.sessionCreationRejected(cameraFailure("TIMEOUT")), true);
+});
+
+test("a cancelled creation with late release uncertainty retains its previous-camera safety warning", async () => {
+  const s = connectionContext(), old = deferred(); s.state.shutterDisconnectWarning = false;
+  s.api = async () => old.promise;
+  const connecting = s.connectCamera(); s.cancelCameraConnection();
+  old.reject({ status: 409, code: "SHUTTER_RELEASE_UNCONFIRMED" });
+  await connecting;
+  assert.equal(s.state.connectionCleanupStatus, "unconfirmed");
+  assert.equal(s.state.shutterDisconnectWarning, true);
+  assert.equal(s.ui.shutterDisconnectWarning.hidden, false);
+  assert.equal(s.ui.connectButton.disabled, true);
+  assert.equal(s.errors.length, 0);
+});
+
+const creationVectors = JSON.parse(fs.readFileSync(path.join(__dirname,
+  "../../contracts/connection-lifecycle/v1/session-creation-rejection-vectors.json"), "utf8"));
+for (const vector of creationVectors.vectors) test(`shared creation rejection: ${vector.id}`, () => {
+  assert.equal(guidance.sessionCreationRejected(vector), vector.creationRejected);
+});
+
+test("USB cancellation captures its original backend and camera; a changed selection needs explicit retry", async () => {
+  const s = connectionContext(), old = deferred();
+  s.state.cameras = [{ id: "synthetic-usb-A", engine: "edsdk" }, { id: "synthetic-usb-B", engine: "libgphoto2" }];
+  s.ui.cameraSelect.value = "synthetic-usb-A";
+  s.selectConnectionMode("usb");
+  s.api = async (url, options = {}) => {
+    s.requests.push({ url, options });
+    return options.method === "POST" ? old.promise : { status: 204 };
+  };
+  const connecting = s.connectCamera(); const attempt = s.state.connectAttempt;
+  s.cancelCameraConnection();
+  assert.equal(s.ui.cameraSelect.disabled, false);
+  s.ui.cameraSelect.value = "synthetic-usb-B"; s.renderAvailability();
+  await s.connectCamera(); assert.equal(s.requests.length, 1);
+  old.resolve({ id: "synthetic-usb-session-A" }); await connecting;
+  assert.equal(attempt.owner.engine, "edsdk");
+  assert.equal(s.requests[0].options.json.engine, "edsdk");
+  assert.equal(s.requests[0].options.json.cameraId, "synthetic-usb-A");
+  assert.equal(s.requests[1].url, "http://bridge.invalid/v1/session/synthetic-usb-session-A");
+  assert.equal(s.ui.cameraSelect.value, "synthetic-usb-B");
+  assert.equal(s.ui.connectButton.disabled, false);
+  assert.equal(s.requests.length, 2);
+  s.api = async (url, options = {}) => {
+    s.requests.push({ url, options });
+    return options.method === "POST" ? { id: "synthetic-usb-session-B" } : connectionResponse(url);
+  };
+  await s.connectCamera();
+  assert.equal(s.requests[2].options.json.engine, "libgphoto2");
+  assert.equal(s.requests[2].options.json.cameraId, "synthetic-usb-B");
+  assert.equal(s.state.session.id, "synthetic-usb-session-B");
+});
+
+for (const event of ["pagehide", "beforeunload"]) test(`${event} callback retires pending connection publication without an automatic restart`, async () => {
+  const s = connectionContext(), old = deferred(), handlers = {};
+  s.api = async (url, options = {}) => {
+    s.requests.push({ url, options });
+    return options.method === "POST" ? old.promise : { status: 204 };
+  };
+  const connecting = s.connectCamera();
+  s.window.addEventListener = (name, handler) => { handlers[name] = handler; };
+  for (const name of ["stopRtpAudio", "suspendMaintenanceForLifecycle", "cancelMediaUpload", "stopMediaAutoImport",
+    "releaseHeldAutofocusForLifecycle", "cancelCameraFocusInfo", "cancelMediaDownload", "clearMediaThumbnails",
+    "closeMediaPreview", "closeMediaDetails", "stopLocalVideo"]) s[name] = () => {};
+  s.lutPreviewRenderer = null;
+  const begin = source.indexOf(`    window.addEventListener("${event}"`);
+  vm.runInContext(source.slice(begin, source.indexOf("\n    });", begin) + 8), s);
+  handlers[event]();
+  assert.equal(s.state.connectAttempt, null);
+  assert.equal(s.state.connectionCancelled, true);
+  assert.equal(s.state.busy, false);
+  old.resolve({ id: "synthetic-old" }); await connecting;
+  assert.equal(s.state.session, null);
+  assert.equal(s.requests.length, 2);
+  assert.equal(s.requests[1].options.method, "DELETE");
+  assert.deepEqual(s.feedback, []);
+});
+
+const cleanupSafetyCodes = ["SHUTTER_RELEASE_UNCONFIRMED", "LIVE_VIEW_STOP_UNCONFIRMED", "RECORDING_COMMAND_UNCONFIRMED"];
+for (const code of cleanupSafetyCodes) for (const stage of ["creation", "cleanup"]) for (const replacement of [false, true]) {
+  test(`${stage} late ${code} retains explicit old-camera evidence${replacement ? " beside a replacement owner" : " after cancel"}`, async () => {
+    const s = connectionContext(), creation = deferred(), cleanup = deferred();
+    s.api = async (url, options = {}) => {
+      s.requests.push({ url, options });
+      return options.method === "POST" ? creation.promise : cleanup.promise;
+    };
+    const connecting = s.connectCamera(); s.cancelCameraConnection();
+    if (stage === "cleanup") {
+      creation.resolve({ id: "synthetic-old" }); await flushConnection();
+      assert.equal(s.requests.length, 2);
+    }
+    const newSession = { id: "synthetic-replacement" }, nextAttempt = {}, newStatus = { recording: false };
+    if (replacement) {
+      s.state.session = newSession;
+      s.state.status = newStatus;
+      s.state.connectAttempt = nextAttempt;
+      s.state.connectionRetirement = nextAttempt;
+      s.state.connectionCleanupStatus = "replacement-owned";
+      s.state.connectionFailure = ["replacement-error", "address"];
+      s.state.busy = true;
+    }
+    const failure = { status: 409, code, message: "SYNTHETIC-PRIVATE-PROVIDER-MESSAGE" };
+    (stage === "creation" ? creation : cleanup).reject(failure);
+    await connecting;
+    assert.equal(s.state.connectionCleanupWarnings.has(code), true);
+    assert.equal(s.ui.connectionCleanupNotice.hidden, false);
+    assert.match(s.ui.connectionCleanupNotice.textContent, new RegExp(guidance.cleanupWarningKey(code)));
+    assert.doesNotMatch(s.ui.connectionCleanupNotice.textContent, /SYNTHETIC-PRIVATE|SYNTHETIC-OLD-TOKEN|synthetic-old/);
+    assert.equal(s.state.shutterDisconnectWarning, true, "existing previous-control evidence is never cleared");
+    assert.equal(s.errors.length, 0, "late safety evidence is separate from the current operation error");
+    assert.equal(s.requests.length, stage === "creation" ? 1 : 2);
+    assert.equal(s.requests.some(row => /synthetic-replacement/.test(row.url)), false, "no Stop or cleanup is transferred");
+    if (replacement) {
+      assert.equal(s.state.session, newSession);
+      assert.equal(s.state.status, newStatus);
+      assert.equal(s.state.connectAttempt, nextAttempt);
+      assert.equal(s.state.connectionRetirement, nextAttempt);
+      assert.equal(s.state.connectionCleanupStatus, "replacement-owned");
+      assert.equal(s.state.connectionFailure[0], "replacement-error");
+      assert.equal(s.state.busy, true);
+      assert.equal(s.ui.connectionCleanupNotice.parentElement, s.ui.shutterButton.parentElement);
+    } else {
+      assert.equal(s.state.connectionCleanupStatus, "unconfirmed");
+      assert.equal(s.ui.connectButton.disabled, true);
+    }
+  });
+}
+
+test("old-camera warnings are additive, deduplicated, whitelist-only and survive generic cleanup evidence changes", () => {
+  const s = connectionContext(); s.state.shutterDisconnectWarning = false;
+  for (const code of ["LIVE_VIEW_STOP_UNCONFIRMED", "RECORDING_COMMAND_UNCONFIRMED"]) {
+    s.recordConnectionCleanupWarning(code); s.recordConnectionCleanupWarning(code);
+  }
+  for (const code of [null, {}, "__proto__", "constructor", "UNKNOWN", "SYNTHETIC-PRIVATE-PROVIDER-MESSAGE"]) {
+    s.recordConnectionCleanupWarning(code);
+    assert.equal(guidance.cleanupWarningKey(code), null);
+  }
+  assert.equal(s.state.connectionCleanupWarnings.size, 2);
+  assert.equal(s.state.shutterDisconnectWarning, false, "recording/Live View does not invent a shutter control owner");
+  s.state.connectionCleanupStatus = "acknowledged"; s.renderConnectionCleanup();
+  assert.match(s.ui.connectionCleanupNotice.textContent, /connectionCleanupAcknowledged/);
+  assert.match(s.ui.connectionCleanupNotice.textContent, /connectionPreviousLiveViewUnconfirmed/);
+  assert.match(s.ui.connectionCleanupNotice.textContent, /connectionPreviousRecordingUnconfirmed/);
+  s.clearConnectionError(); s.selectConnectionMode("usb");
+  assert.equal(s.state.connectionCleanupWarnings.size, 2);
+  assert.match(s.ui.connectionCleanupNotice.textContent, /connectionPreviousRecordingUnconfirmed/);
+  assert.doesNotMatch(productionFunction("resetSession"), /connectionCleanupWarnings/);
+});
+
+test("recording and Live View old-camera warnings name the uncertainty in English and Traditional Chinese", () => {
+  assert.match(source, /connectionPreviousRecordingUnconfirmed: "Previous camera: recording is unconfirmed and may still be active\./);
+  assert.match(source, /connectionPreviousRecordingUnconfirmed: "前次相機：錄影狀態未確認，可能仍在錄影。/);
+  assert.match(source, /connectionPreviousLiveViewUnconfirmed: "Previous camera: Live View stop is unconfirmed\./);
+  assert.match(source, /connectionPreviousLiveViewUnconfirmed: "前次相機：尚未確認 Live View 已停止/);
+  assert.doesNotMatch(productionFunction("recordConnectionCleanupWarning"), /\bapi\(|recordingRecovery|state\.status|state\.session\s*=/);
 });

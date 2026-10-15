@@ -18,7 +18,7 @@ function extract(name) {
   return app.slice(match.index, ending + 4);
 }
 const realFunctions = [
-  "recordingRecoveryActive", "api", "connectCamera", "disconnectCamera", "cancelSetting", "resetSession", "refreshSession",
+  "recordingRecoveryActive", "api", "connectionRetirementBlocked", "renderConnectionCleanup", "recordConnectionCleanupWarning", "cancelCameraConnection", "retireConnectionAttempt", "connectCamera", "disconnectCamera", "cancelSetting", "resetSession", "refreshSession",
   "featureSupported", "cancelEventLoop", "stopEventLoop", "mediaTransferActive",
   "cameraInteractionBusy", "beginCameraInteraction", "settingByKey", "isBulbMode",
   "captureModeFromCamera", "shutterReleaseUnconfirmed", "bulbControlLocked",
@@ -65,8 +65,9 @@ function harness() {
     close() {this.closeCount += 1; this.state = "closed"; return Promise.resolve();}
   }
   const sandbox = {
-    console, Headers, AbortController, Date, Set, Map, Number, Error, encodeURIComponent, setTimeout, clearTimeout, performance,
-    ui, window: {AudioContext: FakeAudioContext}, navigator: {mediaDevices: {}},
+    console, URL, Headers, AbortController, Date, Set, Map, Number, Error, encodeURIComponent, setTimeout, clearTimeout, performance,
+    connectionGuidance: require("../open_eos_bridge/static/connection-guidance.js"),
+    ui, window: {location: {href: "http://bridge.invalid/"}, AudioContext: FakeAudioContext}, navigator: {mediaDevices: {}},
     localVideo: {supportState: () => ({available: true})},
     document: {visibilityState: "visible", querySelector: () => element(), querySelectorAll: () => []},
     readLanguagePreference: () => "en",
@@ -84,6 +85,7 @@ function harness() {
     rtpAudio: require("../open_eos_bridge/static/rtp-audio.js"),
     renderLiveState: () => sandbox.renderRtpAudio(),
     fetch: async (url, options) => {
+      url = url.replace(/^http:\/\/bridge.invalid/, "");
       requests.push({url, method: options.method, signal: options.signal});
       let body;
       if (url === "/v1/session" && options.method === "POST") body = nextSession;
@@ -111,7 +113,7 @@ function harness() {
     },
   };
   for (const name of ["renderHeldAutofocus", "cameraFocusInfoEligible", "cancelCameraFocusInfo", "releaseHeldAutofocusForLifecycle", "clearConnectionError", "renderSession", "startEventLoop", "refreshLatestMedia",
-    "writeCameraPreference", "showConnectionError", "renderHealth", "cancelMediaDownload",
+    "writeCameraPreference", "showConnectionError", "renderHealth", "renderConnectionGuidance", "cancelMediaDownload",
     "cancelMediaUpload", "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh",
     "closeMediaPreview", "closeMediaDetails", "releaseObjectUrl", "clearBulbTimer", "stopLocalVideo",
     "syncLiveMagnificationFromCapabilities", "pollLiveView", "renderFps", "clearMonitoringLayers",

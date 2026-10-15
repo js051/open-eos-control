@@ -129,6 +129,14 @@
       connectionCcapiReady: "Check the camera’s CCAPI setup, then choose Connect. No camera command is sent until you connect.",
       connectionScanAgain: "Scan again",
       connectionCancelScan: "Cancel scan",
+      connectionCancel: "Cancel connection",
+      connectionCancelled: "Connection cancelled locally. Edit settings, then choose Retry connection when cleanup finishes.",
+      connectionCleanupPending: "Waiting for the previous Bridge request and session cleanup. Settings can be edited; retry remains unavailable until this finishes. Camera cleanup is not yet confirmed.",
+      connectionCleanupUnconfirmed: "Previous connection cleanup is unconfirmed. Check the camera, restart this Bridge, and reload this page before retrying. Reloading alone does not close an unknown camera session.",
+      connectionCleanupAcknowledged: "The Bridge acknowledged closing the previous session. Physical camera cleanup has not been verified. Retry connection only when you are ready.",
+      connectionPreviousShutterUnconfirmed: "Previous camera: shutter or autofocus stop is unconfirmed. An exposure or control may still be active; check the camera and stop it there.",
+      connectionPreviousLiveViewUnconfirmed: "Previous camera: Live View stop is unconfirmed. Live View may still be active; check the camera and stop it there.",
+      connectionPreviousRecordingUnconfirmed: "Previous camera: recording is unconfirmed and may still be active. Check the camera and stop recording there.",
       connectionRetry: "Retry connection",
       connectionEditToken: "Edit Bridge token",
       connectionEditAddress: "Edit camera address",
@@ -913,6 +921,14 @@
       connectionCcapiReady: "確認相機的 CCAPI 設定後，請按連線。連線前不會傳送相機指令。",
       connectionScanAgain: "重新掃描",
       connectionCancelScan: "取消掃描",
+      connectionCancel: "取消連線",
+      connectionCancelled: "已在本機取消連線。可修改設定，待清理完成後再按重試連線。",
+      connectionCleanupPending: "正在等待前次 Bridge 請求與連線清理。可修改設定，完成前無法重試；尚未確認相機已清理。",
+      connectionCleanupUnconfirmed: "前次連線清理尚未確認。請先檢查相機、重新啟動此 Bridge，再重新載入本頁後重試。只重載頁面不會關閉未知的相機連線。",
+      connectionCleanupAcknowledged: "Bridge 已回覆關閉前次連線；尚未驗證實體相機清理結果。準備好後再按重試連線。",
+      connectionPreviousShutterUnconfirmed: "前次相機：尚未確認快門或自動對焦已停止；曝光或操作可能仍在進行，請檢查相機並在相機上停止。",
+      connectionPreviousLiveViewUnconfirmed: "前次相機：尚未確認 Live View 已停止；即時預覽可能仍在進行，請檢查相機並在相機上停止。",
+      connectionPreviousRecordingUnconfirmed: "前次相機：錄影狀態未確認，可能仍在錄影。請檢查相機並在相機上停止錄影。",
       connectionRetry: "重試連線",
       connectionEditToken: "編輯 Bridge token",
       connectionEditAddress: "編輯相機位址",
@@ -1733,6 +1749,11 @@
     scanAttempt: null,
     scanState: "idle",
     connectionFailure: null,
+    connectAttempt: null,
+    connectionRetirement: null,
+    connectionCleanupStatus: null,
+    connectionCleanupWarnings: new Set(),
+    connectionCancelled: false,
     cameras: [],
     session: null,
     info: null,
@@ -1958,6 +1979,8 @@
     connectionFixButton: byId("connection-fix-button"),
     healthRetryButton: byId("health-retry-button"),
     scanCancelButton: byId("scan-cancel-button"),
+    connectCancelButton: byId("connect-cancel-button"),
+    connectionCleanupNotice: byId("connection-cleanup-notice"),
     ccapiUrlValidation: byId("ccapi-url-validation"),
     cameraCredentials: byId("camera-credentials"),
     shutterDisconnectWarning: byId("shutter-disconnect-warning"),
@@ -2384,10 +2407,14 @@
     ui.ccapiUrlValidation.textContent = invalid ? t("connectionInvalidOrigin") : "";
     ui.healthRetryButton.disabled = state.busy || Boolean(state.healthAttempt) || Boolean(state.scanAttempt);
     ui.scanCancelButton.hidden = !state.scanAttempt;
+    ui.connectCancelButton.hidden = !state.connectAttempt;
+    renderConnectionCleanup();
     ui.scanButton.querySelector("span[data-i18n]").textContent = t(state.scanState === "idle" ? "scan" : "connectionScanAgain");
-    ui.connectButton.querySelector("span[data-i18n]").textContent = t(state.connectionFailure ? "connectionRetry" : "connect");
+    ui.connectButton.querySelector("span[data-i18n]").textContent = t(state.connectionFailure || state.connectionCancelled ? "connectionRetry" : "connect");
     let statusKey;
-    if (state.healthAttempt) statusKey = "checkingBridge";
+    if (state.connectAttempt) statusKey = "connecting";
+    else if (state.connectionCancelled) statusKey = "connectionCancelled";
+    else if (state.healthAttempt) statusKey = "checkingBridge";
     else if (state.healthFailed) statusKey = "connectionBridgeCheckFailed";
     else if (state.health && (network ? !state.health.engines?.ccapi?.available : !connectionGuidance.availableUsbEngine(state.health))) {
       statusKey = network ? "connectionCcapiEngine" : "connectionUsbEngine";
@@ -2541,7 +2568,8 @@
   }
 
   async function scanCameras() {
-    if (state.connectionMode !== "usb" || state.busy || state.scanAttempt || state.healthAttempt || state.session) return;
+    if (state.connectionMode !== "usb" || state.busy || connectionRetirementBlocked() ||
+        state.scanAttempt || state.healthAttempt || state.session) return;
     clearConnectionError();
     state.token = ui.tokenInput.value.trim();
     const attempt = { controller: new AbortController(), session: state.session };
@@ -2579,8 +2607,80 @@
     }
   }
 
+  function connectionRetirementBlocked() {
+    return Boolean(state.connectionRetirement) || state.connectionCleanupStatus === "unconfirmed";
+  }
+
+  function renderConnectionCleanup() {
+    const key = ({ pending: "connectionCleanupPending", unconfirmed: "connectionCleanupUnconfirmed",
+      acknowledged: "connectionCleanupAcknowledged" })[state.connectionCleanupStatus];
+    const warnings = [...(state.connectionCleanupWarnings || [])].map(connectionGuidance.cleanupWarningKey).filter(Boolean);
+    const keys = [...(key ? [key] : []), ...warnings];
+    ui.connectionCleanupNotice.hidden = !keys.length;
+    ui.connectionCleanupNotice.textContent = keys.map((item) => t(item)).join("\n");
+    const host = state.session ? ui.shutterButton.parentElement : ui.connectionError.parentElement;
+    if (ui.connectionCleanupNotice.parentElement !== host) host.append(ui.connectionCleanupNotice);
+  }
+
+  function recordConnectionCleanupWarning(code) {
+    if (!connectionGuidance.cleanupWarningKey(code)) return;
+    state.connectionCleanupWarnings ||= new Set();
+    state.connectionCleanupWarnings.add(code);
+    if (code === "SHUTTER_RELEASE_UNCONFIRMED") state.shutterDisconnectWarning = true;
+    // Previous-camera evidence is additive. It never transfers a Stop command or
+    // a current-operation owner, and never copies a provider's private message.
+    renderConnectionCleanup();
+  }
+
+  function cancelCameraConnection() {
+    const attempt = state.connectAttempt;
+    if (!attempt) return;
+    // Retire publication immediately. Keep observing admitted work: aborting POST
+    // can hide a newly created Bridge session and lose its only cleanup identity.
+    attempt.cancelled = true;
+    state.connectAttempt = null;
+    state.connectionRetirement = attempt;
+    state.connectionCleanupStatus = "pending";
+    state.connectionCancelled = true;
+    state.busy = false;
+    renderHealth();
+    renderConnectionGuidance();
+    renderAvailability();
+  }
+
+  async function retireConnectionAttempt(attempt) {
+    if (attempt.cleanup) return attempt.cleanup;
+    attempt.cleanup = (async () => {
+      let outcome = "unconfirmed";
+      recordConnectionCleanupWarning(attempt.creationSafetyCode);
+      if (attempt.session?.id) {
+        try {
+          const response = await api(`${attempt.owner.baseURL}/${encodeURIComponent(attempt.session.id)}`, {
+            method: "DELETE", authToken: attempt.owner.token, redirect: "error", keepalive: true,
+            responseType: "response",
+          });
+          // A generic 2xx, redirected reply or unreadable body is not the
+          // Bridge's explicit session-retirement contract.
+          if (response?.status === 204) outcome = "acknowledged";
+        } catch (error) {
+          recordConnectionCleanupWarning(error?.code);
+        }
+      } else if (attempt.creationRejected) outcome = null;
+      if (state.connectionRetirement === attempt) {
+        state.connectionRetirement = null;
+        state.connectionCleanupStatus = outcome;
+        renderConnectionCleanup();
+        renderAvailability();
+      }
+      // No token, camera address or previous session is copied into diagnostics.
+      return outcome;
+    })();
+    return attempt.cleanup;
+  }
+
   async function connectCamera() {
-    if (state.busy || state.scanAttempt || state.healthAttempt || state.session || state.healthFailed) return;
+    if (state.busy || state.connectAttempt || connectionRetirementBlocked() || state.scanAttempt ||
+        state.healthAttempt || state.session || state.healthFailed) return;
     const network = state.connectionMode === "ccapi";
     const cameraId = ui.cameraSelect.value;
     const ccapiUrl = ui.ccapiUrlInput.value.trim();
@@ -2589,37 +2689,53 @@
     if ((!network && !cameraId) || (network && !validCcapiUrl())) return;
     clearConnectionError();
     state.token = ui.tokenInput.value.trim();
+    const sessionPayload = network
+      ? { engine: "ccapi", ccapiUrl, ccapiUsername: ui.ccapiUsernameInput.value.trim(),
+          ccapiPassword: ui.ccapiPasswordInput.value }
+      : { engine: engineName || "auto", cameraId };
+    const attempt = {
+      owner: Object.freeze({ baseURL: new URL("/v1/session", window.location.href).href,
+        token: state.token, engine: sessionPayload.engine }),
+      session: null, cancelled: false, creationRejected: false, cleanup: null,
+    };
+    const current = () => state.connectAttempt === attempt && !attempt.cancelled &&
+      (!state.session || state.session === attempt.session);
+    state.connectAttempt = attempt;
+    state.connectionCancelled = false;
     state.busy = true;
     state.operatorConfirmedFeatures.clear();
     ui.engineState.textContent = t("connecting");
+    renderConnectionGuidance();
     renderAvailability();
-    let session = null;
     try {
-      const sessionPayload = network
-        ? {
-            engine: "ccapi",
-            ccapiUrl,
-            ccapiUsername: ui.ccapiUsernameInput.value.trim(),
-            ccapiPassword: ui.ccapiPasswordInput.value,
-          }
-        : {
-            engine: state.cameras.find((camera) => camera.id === cameraId)?.engine || "auto",
-            cameraId,
-          };
-      state.session = await api("/v1/session", {
-        method: "POST",
-        json: sessionPayload,
-      });
-      session = state.session;
-      state.shutterAutofocus = true;
-      const sessionId = encodeURIComponent(session.id);
+      try {
+        attempt.session = await api(attempt.owner.baseURL, {
+          method: "POST", json: sessionPayload, authToken: attempt.owner.token, redirect: "error",
+        });
+      } catch (error) {
+        attempt.creationRejected = connectionGuidance.sessionCreationRejected(error);
+        attempt.creationSafetyCode = connectionGuidance.cleanupWarningKey(error?.code) ? error.code : null;
+        throw error;
+      }
+      if (!attempt.session || typeof attempt.session.id !== "string" ||
+          !/^[A-Za-z0-9_-]{1,128}$/.test(attempt.session.id)) {
+        attempt.session = null;
+        throw new Error("The Bridge session identity could not be verified.");
+      }
+      if (!current()) return;
+      const session = attempt.session;
+      const sessionURL = `${attempt.owner.baseURL}/${encodeURIComponent(session.id)}`;
       const liveViewStatusRevision = state.liveViewStopRevision || 0;
-      const [info, status, capabilities] = await Promise.all([
-        api(`/v1/session/${sessionId}/info`),
-        api(`/v1/session/${sessionId}/status`),
-        api(`/v1/session/${sessionId}/capabilities`),
-      ]);
-      if (state.session !== session) return;
+      // Drain all admitted metadata reads before closing the shared backend.
+      // A first rejection does not prove the other reads have stopped.
+      const results = await Promise.allSettled(["info", "status", "capabilities"].map((resource) =>
+        api(`${sessionURL}/${resource}`, { authToken: attempt.owner.token, redirect: "error" })));
+      if (!current()) return;
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed) throw failed.reason;
+      const [info, status, capabilities] = results.map((result) => result.value);
+      state.session = session;
+      state.shutterAutofocus = true;
       [state.info, state.capabilities] = [info, capabilities];
       adoptCameraStatus(status, session, liveViewStatusRevision);
       state.requestedFps = clampFps(Math.min(15, state.capabilities.liveView?.maxFps || 1));
@@ -2640,21 +2756,34 @@
       void refreshLatestMedia();
       showToast(t("connected"));
     } catch (error) {
-      if (session && state.session !== session) return;
-      if (state.session?.id) {
-        try {
-          await api(`/v1/session/${encodeURIComponent(state.session.id)}`, { method: "DELETE" });
-        } catch (_) {
-          // The original connection error is more useful than cleanup failure.
-        }
+      if (!current()) return;
+      // Publish the current failure promptly. Its teardown keeps a separate
+      // admission gate while the connection fields become editable again.
+      if (state.session === attempt.session) {
+        state.session = null;
+        state.info = null;
+        state.status = null;
+        state.capabilities = null;
       }
-      state.session = null;
+      state.connectionRetirement = attempt;
+      state.connectionCleanupStatus = "pending";
+      state.connectAttempt = null;
+      state.busy = false;
       showConnectionError(error);
       renderHealth();
-    } finally {
-      if (session && state.session && state.session !== session) return;
-      state.busy = false;
+      renderConnectionGuidance();
       renderAvailability();
+    } finally {
+      if (state.session !== attempt.session || !attempt.session) {
+        await retireConnectionAttempt(attempt);
+      }
+      // An old completion can never unlock a replacement connection or command.
+      if (state.connectAttempt === attempt) {
+        state.connectAttempt = null;
+        state.busy = false;
+        renderConnectionGuidance();
+        renderAvailability();
+      }
     }
   }
 
@@ -7163,11 +7292,14 @@
       ui.ccapiUsernameInput, ui.ccapiPasswordInput].forEach((input) => {
       if (input) input.disabled = state.busy;
     });
-    ui.scanButton.disabled = state.busy || Boolean(state.scanAttempt) || Boolean(state.healthAttempt);
+    ui.cameraSelect.disabled = state.busy || !state.cameras.length;
+    if (ui.connectCancelButton) ui.connectCancelButton.hidden = !state.connectAttempt;
+    const connectionBlocked = Boolean(state.connectionRetirement) || state.connectionCleanupStatus === "unconfirmed";
+    ui.scanButton.disabled = state.busy || connectionBlocked || Boolean(state.scanAttempt) || Boolean(state.healthAttempt);
     const connectionReady = state.connectionMode === "ccapi" ? validCcapiUrl() : Boolean(ui.cameraSelect.value);
     const selectedEngine = state.connectionMode === "ccapi" ? "ccapi"
       : state.cameras.find((camera) => camera.id === ui.cameraSelect.value)?.engine;
-    ui.connectButton.disabled = state.busy || Boolean(state.scanAttempt) || Boolean(state.healthAttempt) ||
+    ui.connectButton.disabled = state.busy || connectionBlocked || Boolean(state.scanAttempt) || Boolean(state.healthAttempt) ||
       state.healthFailed || state.health?.engines?.[selectedEngine]?.available === false || !connectionReady;
     if (ui.healthRetryButton) ui.healthRetryButton.disabled = state.busy || Boolean(state.scanAttempt) || Boolean(state.healthAttempt);
     if (ui.connectionFixButton) ui.connectionFixButton.disabled = state.busy || Boolean(state.scanAttempt);
@@ -10140,6 +10272,7 @@
     });
     ui.scanButton.addEventListener("click", scanCameras);
     ui.connectButton.addEventListener("click", connectCamera);
+    ui.connectCancelButton.addEventListener("click", cancelCameraConnection);
     ui.usbModeButton.addEventListener("click", () => selectConnectionMode("usb"));
     ui.ccapiModeButton.addEventListener("click", () => selectConnectionMode("ccapi"));
     ui.cameraSelect.addEventListener("change", renderAvailability);
@@ -10356,6 +10489,7 @@
       }
     });
     window.addEventListener("pagehide", () => {
+      cancelCameraConnection();
       if (typeof cancelCubeLutImport === "function") cancelCubeLutImport();
       stopRtpAudio();
       suspendMaintenanceForLifecycle();
@@ -10539,6 +10673,7 @@
       if (previewActive()) applyLiveViewLayout();
     });
     window.addEventListener("beforeunload", () => {
+      cancelCameraConnection();
       if (typeof cancelCubeLutImport === "function") cancelCubeLutImport();
       if (typeof cancelRecordingWait === "function") cancelRecordingWait();
       const preserveMaintenance = suspendMaintenanceForLifecycle();
