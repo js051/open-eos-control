@@ -67,3 +67,32 @@ open-eos-bridge
 The service listens on `127.0.0.1:18181` by default. LAN binding requires `OPEN_EOS_BRIDGE_TOKEN`; the standalone executable intentionally accepts the token only through the environment and never through a process-list-visible command argument. See the main [Open EOS Control repository](https://github.com/js051/open-eos-control) for platform clients, source code, documentation, and issue tracking.
 
 This is an unofficial Canon EOS project and is licensed under Apache-2.0.
+
+## Automatic original JPEG validation
+
+Foreground automatic JPEG import requests the existing exact original once with
+`attempt=single&validation=jpeg-v1`. The opt-in Bridge path rejects unsupported or
+ambiguous HTTP MIME, caps the encoded transfer at 64 MiB, verifies its closed
+private spool against the streaming SHA-256, parses the complete JPEG, then forces
+strict native PyAV/FFmpeg decode in a separate process. Only success emits
+`X-Open-EOS-Original-Validation: jpeg-v1`. The browser requires this proof before
+writing or closing its pending output. Default/manual JPEG and RAW downloads, and
+the older `attempt=single` route, retain their format behavior.
+
+The [shared JPEG contract](../contracts/jpeg-original/v1/README.md) defines the
+conservative envelope: 64,000,000 source pixels, 16,384 per source axis, bounded
+markers/scans, and supported 8-bit sequential/progressive coding. Decode uses one
+thread and one-eighth output resolution, capped at 2,048 per decoded axis. One
+validation process can run at a time; its 15-second deadline includes startup,
+and timeout triggers termination. Stop/disconnect prevents browser publication;
+it does not instantly interrupt an opaque native call. This is bounded format
+and decoder evidence, not proof that every corruption is detected or that the
+camera supplied the intended photograph. Original bytes are never re-encoded.
+
+Any validation, transfer or save failure stops the watcher without a redownload
+or shutter resend. Only owned pending outputs are aborted/removed; already saved
+files and existing transfer-history entries are retained. History remains subject
+to the existing unavailable-storage warning. Review the failed result and any
+partial file, then explicitly enable again to select a destination and establish
+two fresh baselines. Existing files, including the failed ID, are skipped; the
+new run watches newly observed photos only.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import hashlib
 import hmac
 import os
 import shutil
@@ -27,6 +28,7 @@ from .engine import CameraEngine, NetworkCameraEngine
 from .engine_registry import LocalEngineRegistry
 from .errors import BridgeError, unsupported
 from .gphoto2 import GPhoto2Engine
+from .jpeg_original import MAX_ENCODED_BYTES, validate_jpeg_original
 from .media_listing import MediaListingStreams, accepts_media_stream
 from .media_metadata import media_response_content_type
 from .media_streaming import (
@@ -103,6 +105,8 @@ def _stage_media(
     chunks,
     *,
     playback: bool = False,
+    max_bytes: int | None = None,
+    jpeg_validation: bool = False,
     on_activity: Callable[[], bool] | None = None,
 ) -> tuple[MediaItem, Path]:
     """Read a camera response completely so HTTP length errors happen before headers."""
@@ -111,6 +115,7 @@ def _stage_media(
     staged = Path(name)
     expected = item.size_bytes
     actual = 0
+    digest = hashlib.sha256() if jpeg_validation else None
     iterator = iter(chunks)
     next_activity_at = 0.0
     try:
@@ -121,6 +126,9 @@ def _stage_media(
                 status_code=507,
                 feature=CameraFeature.MEDIA_DOWNLOAD.value,
             )
+        if max_bytes is not None and expected > max_bytes:
+            raise BridgeError("MEDIA_ORIGINAL_JPEG_INVALID", "Original JPEG exceeds the encoded-size limit.",
+                              status_code=502, feature=CameraFeature.MEDIA_DOWNLOAD.value)
         with staged.open("wb") as destination:
             for chunk in iterator:
                 if not chunk:
@@ -139,6 +147,9 @@ def _stage_media(
                 if on_activity is not None and time.monotonic() >= next_activity_at:
                     next_activity_at = time.monotonic() + 30
                 actual += len(chunk)
+                if max_bytes is not None and actual > max_bytes:
+                    raise BridgeError("MEDIA_ORIGINAL_JPEG_INVALID", "Original JPEG exceeds the encoded-size limit.",
+                                      status_code=502, feature=CameraFeature.MEDIA_DOWNLOAD.value)
                 if expected > 0 and actual > expected:
                     raise BridgeError(
                         "MEDIA_LENGTH_MISMATCH",
@@ -147,6 +158,8 @@ def _stage_media(
                         feature=CameraFeature.MEDIA_DOWNLOAD.value,
                     )
                 destination.write(chunk)
+                if digest is not None:
+                    digest.update(chunk)
             if expected > 0 and actual != expected:
                 raise BridgeError(
                     "MEDIA_LENGTH_MISMATCH",
@@ -154,6 +167,8 @@ def _stage_media(
                     status_code=502,
                     feature=CameraFeature.MEDIA_DOWNLOAD.value,
                 )
+        if digest is not None:
+            validate_jpeg_original(staged, expected_sha256=digest.hexdigest())
         return item.model_copy(update={"size_bytes": actual}), staged
     except OSError as error:
         _remove_staged_media(staged)
@@ -299,8 +314,12 @@ def create_app(
         inline: bool,
         playback_token: str | None = None,
         single_attempt: bool = False,
+        jpeg_validation: bool = False,
     ) -> Response:
         session = manager.get(session_id)
+        if jpeg_validation and not single_attempt:
+            raise BridgeError("INVALID_ORIGINAL_VALIDATION", "JPEG validation requires a single original GET.",
+                              status_code=422)
         if single_attempt:
             if not isinstance(session, CcapiSession):
                 raise unsupported("MEDIA_SINGLE_ORIGINAL", session.engine_name)
@@ -327,19 +346,24 @@ def create_app(
             staged = None
         else:
             item, chunks = (
-                session.download_media(media_id, single_attempt=True)
+                session.download_media(media_id, single_attempt=True, jpeg_validation=True)
+                if jpeg_validation else session.download_media(media_id, single_attempt=True)
                 if single_attempt else session.download_media(media_id)
             )
             item, staged = _stage_media(
                 item,
                 chunks,
                 playback=playback_token is not None,
+                max_bytes=MAX_ENCODED_BYTES if jpeg_validation else None,
+                jpeg_validation=jpeg_validation,
                 on_activity=(
                     lambda: renew_playback(playback_token)
                     if playback_token
                     else True
                 ),
             )
+            if jpeg_validation:
+                item = item.model_copy(update={"content_type": "image/jpeg"})
             if playback_token:
                 try:
                     grant = playback_tickets.resolve(playback_token, renew=True)
@@ -377,6 +401,8 @@ def create_app(
         }
         if single_attempt:
             headers["X-Open-EOS-Original-Attempt"] = "single-v1"
+        if jpeg_validation:
+            headers["X-Open-EOS-Original-Validation"] = "jpeg-v1"
         if byte_range is not None:
             headers["X-Open-EOS-Range-Mode"] = "staged-file"
         status_code = 200
@@ -890,8 +916,10 @@ def create_app(
         media_id: str,
         request: Request,
         attempt: Literal["single"] | None = Query(default=None),
+        validation: Literal["jpeg-v1"] | None = Query(default=None),
     ) -> Response:
-        return media_response(session_id, media_id, request, inline=False, single_attempt=attempt == "single")
+        return media_response(session_id, media_id, request, inline=False,
+                              single_attempt=attempt == "single", jpeg_validation=validation == "jpeg-v1")
 
     @router.delete("/session/{session_id}/media/{media_id}", status_code=204)
     def delete_media(session_id: str, media_id: str) -> Response:

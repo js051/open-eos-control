@@ -19,6 +19,7 @@ OLD_B = "SYNTHETIC_OLD_B.JPG"
 fixture = {
     "mode": "old",
     "short_original": False,
+    "invalid_original": False,
     "listing_reads": 0,
     "original_reads": 0,
     "thumbnail_reads": 0,
@@ -39,6 +40,16 @@ REPRESENTATIONS = {
 }
 
 
+def original_bytes() -> bytes:
+    content = REPRESENTATIONS["original"]
+    if fixture["invalid_original"]:
+        # Valid SOF/SOS/EOI framing and truthful length, but entropy ends early.
+        scan = content.index(b"\xff\xda") + 2
+        entropy = scan + int.from_bytes(content[scan:scan + 2], "big")
+        return content[:entropy + 10] + b"\xff\xd9"
+    return content
+
+
 @app.post("/__test/capture-review", include_in_schema=False)
 async def configure_capture_review(payload: dict[str, object]) -> dict[str, object]:
     if payload.get("reset") is True:
@@ -47,7 +58,7 @@ async def configure_capture_review(payload: dict[str, object]) -> dict[str, obje
             {"id": name, "name": name, "kind": "image", "capture_time": "2026-10-07T10:00:00Z"}
             for name in (OLD_A, OLD_B)
         ]
-        fixture.update(mode="old", short_original=False, listing_reads=0, original_reads=0,
+        fixture.update(mode="old", short_original=False, invalid_original=False, listing_reads=0, original_reads=0,
                        thumbnail_reads=0, preview_reads=0)
     if "mode" in payload:
         if payload["mode"] not in {"old", "reordered", "new-second", "new-first", "unavailable"}:
@@ -55,6 +66,8 @@ async def configure_capture_review(payload: dict[str, object]) -> dict[str, obje
         fixture["mode"] = payload["mode"]
     if "short_original" in payload:
         fixture["short_original"] = payload["short_original"] is True
+    if "invalid_original" in payload:
+        fixture["invalid_original"] = payload["invalid_original"] is True
     return dict(fixture)
 
 
@@ -94,12 +107,12 @@ async def synthetic_media_visibility(request: Request, call_next):
         if kind == "info":
             item = main.canonical_media_item(resource.rsplit("/", 1)[-1])
             information = main.media_info(item)
-            information["filesize"] = len(REPRESENTATIONS["original"])
+            information["filesize"] = len(original_bytes())
             return JSONResponse(content=information)
         representation = kind if kind in {"thumbnail", "display"} else "original"
         counter = {"thumbnail": "thumbnail_reads", "display": "preview_reads", "original": "original_reads"}
         fixture[counter[representation]] += 1
-        content = REPRESENTATIONS[representation]
+        content = original_bytes() if representation == "original" else REPRESENTATIONS[representation]
         if representation == "original" and fixture["short_original"]:
             async def interrupted_body():
                 yield content[: len(content) // 2]

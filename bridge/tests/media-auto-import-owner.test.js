@@ -43,7 +43,7 @@ function fixture(options = {}) {
   const calls = { picker: 0, requests: [], directories: 0, raw: [], history: [], renders: 0, warnings: 0 };
   const entered = Object.fromEntries(["inventory", "metadata", "original", "write", "close", "abort", "history", "thumbnail"].map(name => [name, deferred()]));
   const timers = new Map();
-  let timerId = 0, now = 0, inventories = 0, metadata = 0;
+  let timerId = 0, now = 0, inventories = 0, metadata = 0, originals = 0;
   const missing = () => Object.assign(new Error("Synthetic missing entry"), { name: "NotFoundError" });
   const root = { kind: "directory", name: options.directoryName || "Synthetic folder", async getDirectoryHandle(name, opts) {
     if (!opts.create) throw missing();
@@ -129,15 +129,18 @@ function fixture(options = {}) {
       if (url.includes("fresh=true")) {
         entered.metadata.resolve();
         if (options.metadataGate) await options.metadataGate.promise;
-        const sizeBytes = options.sizes?.[metadata++] ?? 3;
-        return Response.json({ ...added, sizeBytes, ...(options.metadataFields || {}) }, { headers: options.missingHeader === "metadata" ? {} : { "X-Open-EOS-Fresh-Metadata": "v1" } });
+        const sizeBytes = options.sizes?.[metadata] ?? 3;
+        const metadataItem = options.metadataItems?.[metadata++] || added;
+        return Response.json({ ...metadataItem, sizeBytes, ...(options.metadataFields || {}) }, { headers: options.missingHeader === "metadata" ? {} : { "X-Open-EOS-Fresh-Metadata": "v1" } });
       }
-      assert.ok(url.endsWith("?attempt=single"), "one strict original path, with no fallback");
+      assert.ok(url.endsWith("?attempt=single&validation=jpeg-v1"), "one strict original path, with no fallback");
       entered.original.resolve();
+      const originalOptions = options.originals?.[originals++] || options;
       const headers = options.missingHeader === "original" ? {} : { "X-Open-EOS-Original-Attempt": "single-v1" };
+      if (originalOptions.missingHeader !== "validation") headers["X-Open-EOS-Original-Validation"] = originalOptions.validation || "jpeg-v1";
       if (options.contentLength !== undefined) headers["Content-Length"] = String(options.contentLength);
       if (options.contentRange) headers["Content-Range"] = options.contentRange;
-      const response = new Response(new Uint8Array(options.bytes || [1, 2, 3]), { status: options.originalStatus || 200, headers });
+      const response = new Response(new Uint8Array(options.bytes || [1, 2, 3]), { status: originalOptions.originalStatus || 200, headers });
       if (options.redirected) Object.defineProperty(response, "redirected", { value: true });
       return response;
     },
@@ -167,7 +170,7 @@ function fixture(options = {}) {
   async function stableCandidate() { await baseline(); await step(6000); }
   return { context, state, ui, window, document, calls, entered, timers, root, base, added, step, baseline, stableCandidate };
 }
-const originalCalls = c => c.calls.requests.filter(call => call.url.endsWith("?attempt=single"));
+const originalCalls = c => c.calls.requests.filter(call => call.url.endsWith("?attempt=single&validation=jpeg-v1"));
 const finishCalls = c => c.calls.history.filter(call => call.operation === "finishAttempt");
 
 test("explicit user picker establishes two complete baselines without output, then saves one stable JPEG", async () => {
@@ -860,4 +863,75 @@ test("late latest-photo thumbnail and a queued request recheck current name/type
     assert.equal(c.state.latestMediaThumbnailUrl, null);
     assert.equal(c.calls.requests.length, queued ? 0 : 1);
   }
+});
+
+
+test("automatic originals require exact decode proof before writes or close, and never retry", async () => {
+  for (const options of [{ missingHeader: "validation" }, { validation: "jpeg-v0" },
+    { validation: "jpeg-v1, jpeg-v1" }, { originalStatus: 502 }]) {
+    const c = fixture(options);
+    await c.stableCandidate();
+    await c.step(7000);
+    assert.equal(originalCalls(c).length, 1);
+    assert.equal(c.calls.raw[0].writes.length, 0);
+    assert.equal(c.calls.raw[0].closes, 0);
+    assert.equal(c.calls.raw[0].aborts, 1);
+    assert.equal(c.state.mediaAutoImport.snapshot.completed, 0);
+    assert.equal(c.state.mediaAutoImport.snapshot.results[0].status, "failed");
+    assert.equal(finishCalls(c)[0].args[1].outcome, "failed");
+    assert.equal(c.state.mediaAutoImportOwner, null);
+    assert.equal(c.timers.size, 0);
+    await c.step(60000);
+    assert.equal(originalCalls(c).length, 1, "no automatic redownload after validation failure");
+    assert.equal(c.ui.mediaAutoImportStart.disabled, false, "explicit re-enable remains available");
+    assert.equal(c.ui.mediaAutoImportReason.textContent.startsWith("mediaAutoImportFailed:"), true);
+  }
+});
+
+test("failure recovery retains delivered files/history and fresh baselines skip all existing IDs", async () => {
+  const base = { id: "synthetic:card/OLD.JPG", name: "OLD.JPG", kind: "image", sizeBytes: 3 };
+  const first = { id: "synthetic:card/NEW.JPG", name: "NEW.JPG", kind: "image", sizeBytes: 3 };
+  const second = { id: "synthetic:card/SECOND.JPG", name: "SECOND.JPG", kind: "image", sizeBytes: 3 };
+  const third = { id: "synthetic:card/THIRD.JPG", name: "THIRD.JPG", kind: "image", sizeBytes: 3 };
+  const existing = [base, first, second];
+  const c = fixture({ inventories: [[base], [base], existing, existing, existing, [...existing, third]],
+    metadataItems: [first, first, second, second, third, third],
+    originals: [{}, { originalStatus: 502 }, {}] });
+  await c.baseline();
+  for (const at of [6000, 7000, 8000, 9000]) await c.step(at);
+  assert.equal(c.state.mediaAutoImport.snapshot.completed, 1);
+  assert.deepEqual(Array.from(c.state.mediaAutoImport.snapshot.results, row => row.status), ["completed", "failed"]);
+  assert.equal(c.calls.raw[0].closes, 1);
+  assert.equal(c.calls.raw[0].aborts, 0);
+  assert.equal(c.calls.raw[1].closes, 0);
+  assert.equal(c.calls.raw[1].aborts, 1);
+  assert.equal(c.state.mediaAutoImportOwner, null);
+  assert.equal(c.timers.size, 0);
+  await c.context.startMediaAutoImport();
+  assert.equal(c.calls.picker, 2, "recovery is an explicit new folder grant");
+  await c.step(10000);
+  await c.step(11000);
+  assert.equal(originalCalls(c).length, 2, "new baselines cannot retry a failed or delivered old ID");
+  assert.equal(c.state.mediaAutoImport.snapshot.knownCount, 3);
+  await c.step(16000);
+  await c.step(17000);
+  assert.equal(originalCalls(c).length, 3);
+  assert.equal(originalCalls(c)[2].url.includes(encodeURIComponent(third.id)), true);
+  assert.equal(c.state.mediaAutoImport.snapshot.completed, 1);
+  assert.equal(c.calls.raw[0].closes, 1, "previous delivered file was not touched");
+  assert.equal(c.calls.raw[0].aborts, 0);
+  assert.deepEqual(finishCalls(c).map(call => call.args[1].outcome), ["completed", "failed", "completed"]);
+  assert.equal(c.calls.requests.every(call => !call.request.method || call.request.method === "GET"), true,
+    "recovery never sends a shutter or other camera mutation");
+});
+
+test("automatic encoded-size envelope refuses original request and can be re-enabled", async () => {
+  const c = fixture({ sizes: [64 * 1024 * 1024 + 1, 64 * 1024 * 1024 + 1] });
+  await c.stableCandidate();
+  await c.step(7000);
+  assert.equal(originalCalls(c).length, 0);
+  assert.equal(c.calls.raw.length, 0);
+  assert.equal(c.state.mediaAutoImport.snapshot.results[0].status, "failed");
+  assert.equal(c.state.mediaAutoImportOwner, null);
+  assert.equal(c.ui.mediaAutoImportStart.disabled, false);
 });
