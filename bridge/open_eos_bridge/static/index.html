@@ -536,12 +536,14 @@
         <div>
           <strong data-i18n="lutPreview">3D LUT preview</strong>
           <span id="monitor-lut-summary" class="supporting" data-i18n="noLutLoaded">No LUT loaded</span>
+          <span id="monitor-lut-status" class="supporting" role="status" aria-live="polite" hidden></span>
         </div>
         <div class="monitoring-lut-actions">
           <input id="monitor-lut-file" type="file" accept=".cube,text/plain" hidden>
           <button id="monitor-lut-load" class="button secondary" type="button">
             <span class="icon" data-icon="download" aria-hidden="true"></span><span data-i18n="loadCubeLut">Load .cube LUT</span>
           </button>
+          <button id="monitor-lut-cancel" class="button secondary" type="button" data-i18n="cancelLutImport" hidden>Cancel import</button>
           <button id="monitor-lut-remove" class="icon-button danger" type="button" data-i18n-aria="removeLut" hidden>
             <span class="icon" data-icon="trash-2" aria-hidden="true"></span>
           </button>
