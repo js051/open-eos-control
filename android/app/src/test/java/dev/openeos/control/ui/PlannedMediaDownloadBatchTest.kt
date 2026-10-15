@@ -13,6 +13,7 @@ import dev.openeos.control.data.MAX_DOWNLOAD_HISTORY_ENTRIES
 import dev.openeos.control.data.DownloadWorklistAdmission
 import dev.openeos.control.data.DownloadWorklistContinuationSelection
 import dev.openeos.control.data.DownloadWorklistOrigin
+import dev.openeos.control.data.DownloadWorklistFailure
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -476,7 +477,7 @@ class PlannedMediaDownloadBatchTest {
         }
     }
 
-    @Test fun failedCleanupKeepsReceiptRiskAndOrdinaryFailureStillAllowsNextPlannedRow() = runTest(timeout = 15.seconds) {
+    @Test fun failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow() = runTest(timeout = 15.seconds) {
         val directory = temporary.newFolder()
         val store = history(directory)
         val items = items(2)
@@ -507,17 +508,59 @@ class PlannedMediaDownloadBatchTest {
         store.awaitIdle()
         assertEquals(1, attempts)
         assertEquals(1, cleanups)
-        assertEquals(1, result.succeededItems)
+        assertEquals(0, result.succeededItems)
+        assertEquals(1, result.notStartedItems)
         assertEquals(listOf(items.first().name), result.failedItemNames)
         assertArrayEquals(ORIGINAL.take(2).toByteArray(), File(outputs, items.first().name).readBytes())
-        assertArrayEquals(ORIGINAL, File(outputs, items.last().name).readBytes())
+        assertFalse(File(outputs, items.last().name).exists())
         val cold = history(directory)
         cold.awaitIdle()
         val rows = cold.state.value.worklists.single().rows
         assertEquals(DownloadHistoryOutcome.FAILED, rows.first().receipt?.outcome)
         assertTrue(requireNotNull(rows.first().receipt).cleanupUnconfirmed)
-        assertEquals(DownloadHistoryOutcome.COMPLETED, rows.last().receipt?.outcome)
-        assertFalse(requireNotNull(rows.last().receipt).cleanupUnconfirmed)
+        assertNull("The untouched row remains queued, never failed or completed", rows.last().receipt)
+        val old = cold.state.value.worklists.single()
+        val mapping = DownloadWorklistContinuationSelection(
+            DownloadWorklistOrigin(old.worklistId, rows.first().rowId), "FRESH.JPG")
+        val rejected = cold.admitContinuation(cold.captureRequest(), listOf(mapping), DownloadHistoryDestination.FOLDER)
+        assertEquals(DownloadWorklistFailure.UNCERTAINTY_NOT_ACKNOWLEDGED,
+            (rejected as DownloadWorklistAdmission.Rejected).reason)
+        val acknowledged = cold.admitContinuation(cold.captureRequest(),
+            listOf(mapping.copy(uncertaintyAcknowledged = true)), DownloadHistoryDestination.FOLDER)
+        assertTrue(acknowledged is DownloadWorklistAdmission.Admitted)
+        assertNull("Fresh consent admits a roster, never automatically starts a transfer",
+            cold.state.value.worklists.first().rows.single().receipt)
+        batch.release()
+        cold.releaseWorklist((acknowledged as DownloadWorklistAdmission.Admitted).token)
+    }
+
+    @Test fun cleanFailureKeepsEarlierCompletionAndLaterRowsQueuedAfterReopen() = runTest {
+        val directory = temporary.newFolder()
+        val store = history(directory)
+        val items = items(3)
+        val batch = batch(store, items)
+        val visited = mutableListOf<String>()
+        assertTrue(batch.prepare())
+        val result = executeMediaBatch(items, MediaBatchOperation.DOWNLOAD) { item ->
+            batch.transfer(items.indexOf(item)) { completed ->
+                visited += item.name
+                if (item == items[1]) throw IOException("Synthetic clean transfer failure")
+                completed()
+            }
+        }
+        batch.release()
+        store.awaitIdle()
+        assertEquals(items.take(2).map { it.name }, visited)
+        assertEquals(1, result.succeededItems)
+        assertEquals(listOf(items[1].name), result.failedItemNames)
+        assertEquals(1, result.notStartedItems)
+        val cold = history(directory)
+        cold.awaitIdle()
+        val rows = cold.state.value.worklists.single().rows
+        assertEquals(DownloadHistoryOutcome.COMPLETED, rows[0].receipt?.outcome)
+        assertEquals(DownloadHistoryOutcome.FAILED, rows[1].receipt?.outcome)
+        assertFalse(requireNotNull(rows[1].receipt).cleanupUnconfirmed)
+        assertNull(rows[2].receipt)
     }
 
     @Test fun typedAdmissionFailureStopsDownloadQueueWithoutMarkingLaterRowsFailed() = runTest(timeout = 15.seconds) {
@@ -537,17 +580,18 @@ class PlannedMediaDownloadBatchTest {
         assertEquals(0, progress.single().completedItems)
     }
 
-    @Test fun ordinaryDownloadFailureContinuesRemainingRows() = runTest(timeout = 15.seconds) {
+    @Test fun ordinaryDownloadFailureStopsBeforeRemainingRows() = runTest(timeout = 15.seconds) {
         val items = items(3)
         val visited = mutableListOf<String>()
         val result = executeMediaBatch(items, MediaBatchOperation.DOWNLOAD) { item ->
             visited += item.name
             if (item == items.first()) throw IOException("Synthetic ordinary original read failure")
         }
-        assertEquals(items.map { it.name }, visited)
-        assertEquals(2, result.succeededItems)
+        assertEquals(listOf(items.first().name), visited)
+        assertEquals(0, result.succeededItems)
         assertEquals(listOf(items.first().name), result.failedItemNames)
         assertEquals(3, result.totalItems)
+        assertEquals(2, result.notStartedItems)
     }
 
     @Test fun typedAdmissionFailureDoesNotChangeNonDownloadOperationControls() = runTest(timeout = 15.seconds) {

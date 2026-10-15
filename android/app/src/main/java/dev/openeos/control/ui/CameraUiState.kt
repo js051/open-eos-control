@@ -60,6 +60,10 @@ data class MediaBatchResult(
 ) {
     val failedItems: Int
         get() = failedItemNames.size
+
+    /** A stopped download must not count the untouched remainder as failures. */
+    val notStartedItems: Int
+        get() = (totalItems - succeededItems - failedItems).coerceAtLeast(0)
 }
 
 data class LiveViewDiagnostics(

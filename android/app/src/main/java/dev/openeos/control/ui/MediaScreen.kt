@@ -629,12 +629,17 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
         state.lastMediaBatchResult?.let { result ->
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text(
-                    stringResource(
-                        if (result.failedItems == 0) R.string.media_batch_complete else R.string.media_batch_partial,
-                        result.succeededItems,
-                        result.totalItems,
-                        result.failedItems,
-                    ),
+                    if (result.operation == MediaBatchOperation.DOWNLOAD && result.failedItems > 0) {
+                        stringResource(R.string.media_batch_download_stopped,
+                            result.succeededItems, result.failedItems, result.notStartedItems)
+                    } else {
+                        stringResource(
+                            if (result.failedItems == 0) R.string.media_batch_complete else R.string.media_batch_partial,
+                            result.succeededItems,
+                            result.totalItems,
+                            result.failedItems,
+                        )
+                    },
                     color = if (result.failedItems == 0) AppSuccess else AppWarning,
                 )
                 if (result.failedItemNames.isNotEmpty()) {

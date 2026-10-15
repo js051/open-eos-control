@@ -499,6 +499,7 @@
     <string name="media_batch_progress">第 %1$d 個，共 %2$d 個：%3$s</string>
     <string name="media_batch_complete">已完成 %1$d／%2$d 個項目。</string>
     <string name="media_batch_partial">已完成 %1$d／%2$d 個項目；%3$d 個失敗，可保持選取後重試。</string>
+    <string name="media_batch_download_stopped">下載已停止：已確認 %1$d 個、失敗 %2$d 個、未開始 %3$d 個。請先檢查儲存位置，再明確續接或重新選擇下載。</string>
     <string name="media_batch_failed_items">失敗項目：%1$s</string>
     <string name="camera_error_timeout">相機回應逾時。請保持相機喚醒後重試。</string>
     <string name="camera_error_connection_interrupted">相機連線已中斷。請重新連線後重試。</string>

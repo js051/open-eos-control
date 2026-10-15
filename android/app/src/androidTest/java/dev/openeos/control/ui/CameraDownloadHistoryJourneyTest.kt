@@ -258,6 +258,44 @@ class CameraDownloadHistoryJourneyTest {
         assertTrue(model.uiState.value.mediaSaveFeedback[item.id] is MediaSaveFeedback.Saved)
     }
 
+    @Test fun failedMiddleDownloadKeepsFirstSavedAndLastNotStartedInUiAndHistory() {
+        val directory = File(root, "stop-after-failure")
+        history = newHistory(directory)
+        val ordinary = camera.intercept
+        camera.intercept = { request ->
+            val url = requireNotNull(request.requestUrl)
+            if (url.encodedPath == "/ccapi/media/two" && url.query == null) {
+                okhttp3.mockwebserver.MockResponse().setResponseCode(500).setBody("Synthetic original failure")
+            } else ordinary(request)
+        }
+        installApp()
+        connectAndOpenAlbum()
+        compose.onNodeWithContentDescription(text(R.string.preview_media, "ONE.JPG"))
+            .performScrollTo().performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        compose.onNodeWithContentDescription(text(R.string.select_all_media)).performClick()
+        compose.onNodeWithContentDescription(text(R.string.download_selected_media, 3)).performClick()
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            model.uiState.value.lastMediaBatchResult?.failedItems == 1 && !model.uiState.value.isBusy(CameraOperation.MEDIA)
+        }
+        runBlocking { history.awaitIdle() }
+        val state = model.uiState.value
+        assertEquals(1, state.lastMediaBatchResult?.succeededItems)
+        assertEquals(1, state.lastMediaBatchResult?.notStartedItems)
+        assertTrue(state.mediaSaveFeedback["one"] is MediaSaveFeedback.Saved)
+        assertTrue(state.mediaSaveFeedback["two"] is MediaSaveFeedback.Failed)
+        assertEquals(MediaSaveFeedback.NotStarted, state.mediaSaveFeedback["three"])
+        assertTrue(state.mediaSaveFeedback.values.none { it.isPending })
+        assertEquals(1, camera.originalReads.count { it == "/ccapi/media/one" })
+        assertTrue(camera.originalReads.count { it == "/ccapi/media/two" } in 1..3)
+        assertFalse(camera.originalReads.contains("/ccapi/media/three"))
+        assertSavedOriginals(1)
+        val rows = DownloadHistoryFileStorage(directory).readSnapshot().worklists.single().rows
+        assertEquals(DownloadHistoryOutcome.COMPLETED, rows[0].receipt?.outcome)
+        assertEquals(DownloadHistoryOutcome.FAILED, rows[1].receipt?.outcome)
+        assertFalse(requireNotNull(rows[1].receipt).cleanupUnconfirmed)
+        assertNull(rows[2].receipt)
+    }
+
     @Test fun clearingWhileBatchIsActiveDoesNotRecreateRecordsForLaterItems() {
         history = newHistory(File(root, "active-clear"))
         val gate = camera.gate()
