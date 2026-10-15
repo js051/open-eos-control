@@ -63,6 +63,8 @@ class NativeVideoLutTest {
         assertTrue(nativeLutColorSupported(null, null, null)) // untagged display-preview approximation
         for (transfer in listOf(0, 1, 6, 7, 999)) assertFalse(nativeLutColorSupported(1, transfer, 8))
         assertFalse(nativeLutColorSupported(6, 3, 8))
+        // Mixed SD-default primaries / BT.709 matrix from an incompletely tagged SPS.
+        assertFalse(nativeLutColorSupported(75, 3, 8))
         assertFalse(nativeLutColorSupported(1, 3, 10))
     }
 

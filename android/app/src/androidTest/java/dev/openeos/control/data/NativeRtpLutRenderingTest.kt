@@ -38,7 +38,10 @@ import java.util.concurrent.atomic.AtomicLong
 @RunWith(AndroidJUnit4::class)
 class NativeRtpLutRenderingTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
-    private val fixture = Base64.getDecoder().decode("AAAAAWdkEAqsuI9NQICAUAAAAwAQAAADACBAAAAAAWjuASyyLAAAAAFliIQ6/vOwfmWVcMjc9396sU68Xq2KSZ/Z1yk56ylhRBv1U+mU30I0Mj4UmV3uYf7yU5xO2A99Sa1rES0kusaJZgSJBlnVOP5+YjUvqLBSBdOb96m0lFYjjsqbyoKCtoK2/Ui3FUTivt/uYo03ooGWdmlKBYZOq6rTjaSQ+vk=")
+    // Synthetic 8-bit limited-range BT.709: VUI primaries/transfer/matrix are ALL 1.
+    // A matrix-only tag leaves SD-size primaries to the decoder's BT.601 default,
+    // producing a mixed color standard and a different SurfaceTexture conversion.
+    private val fixture = Base64.getDecoder().decode("AAAAAWdkEAqsuI9NQEBAUAAAAwAQAAADACBAAAAAAWjuASyyLAAAAAFliIQ6/vOwfmWVcMjc9396sU68Xq2KSZ/Z1yk56ylhRBv1U+mU30I0Mj4UmV3uYf7yU5xO2A99Sa1rES0kusaJZgSJBlnVOP5+YjUvqLBSBdOb96m0lFYjjsqbyoKCtoK2/Ui3FUTivt/uYo03ooGWdmlKBYZOq6rTjaSQ+vk=")
     private data class Target(val surface: Surface, val width: Int, val height: Int)
     private val positions = arrayOf(16 to 12, 48 to 12, 16 to 36, 48 to 36)
 
@@ -187,7 +190,11 @@ class NativeRtpLutRenderingTest {
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(6)
             while (completed.count > 0 && failed.count > 0 && System.nanoTime() < deadline) {
                 val output = codec.dequeueOutputBuffer(info, 10_000)
-                if (output == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) outputFormat = describeFormat(codec.outputFormat)
+                if (output == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    val format = codec.outputFormat
+                    outputFormat = describeFormat(format)
+                    assertFixtureColorFormat(format)
+                }
                 if (output >= 0) {
                     outputCount++
                     lastOutputTimeUs = info.presentationTimeUs
@@ -196,6 +203,7 @@ class NativeRtpLutRenderingTest {
             }
             assertEquals("Real GPU pipeline failed", 1L, failed.count)
             assertEquals("Decoder/GPU did not present fixture", 0L, completed.count)
+            assertTrue("Decoder must report the fixture's color format", outputFormat != "unobserved")
             if (swap && overrideLut == null) {
                 verifyPostLutScopes(target) { phase = "post-lut-scopes-$it" }
             }
@@ -221,6 +229,17 @@ class NativeRtpLutRenderingTest {
             retired.exceptionOrNull()?.let { cleanupFailure ->
                 primaryFailure?.addSuppressed(cleanupFailure) ?: throw cleanupFailure
             }
+        }
+    }
+
+    private fun assertFixtureColorFormat(format: MediaFormat) {
+        for ((key, expected) in listOf(
+            MediaFormat.KEY_COLOR_STANDARD to MediaFormat.COLOR_STANDARD_BT709,
+            MediaFormat.KEY_COLOR_RANGE to MediaFormat.COLOR_RANGE_LIMITED,
+            MediaFormat.KEY_COLOR_TRANSFER to MediaFormat.COLOR_TRANSFER_SDR_VIDEO,
+        )) {
+            assertTrue("Explicit BT.709 fixture is missing $key", format.containsKey(key))
+            assertEquals("Explicit BT.709 fixture has unexpected $key", expected, format.getInteger(key))
         }
     }
 
