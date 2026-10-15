@@ -49,6 +49,29 @@ import kotlin.math.ceil
 class SavedJpegDialogInstrumentedTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun englishSavedRowsPreserveDatePrecision() = verifySavedDatePrecision("en")
+
+    @Test fun traditionalChineseSavedRowsPreserveDatePrecision() = verifySavedDatePrecision("zh-TW")
+
+    private fun verifySavedDatePrecision(locale: String) {
+        val floating = row(0).copy(captureTime = "2026-03-08T02:30:00")
+        val fixture = Fixture().apply {
+            state.value = SavedJpegUiState(rows = listOf(floating), selectedIds = setOf(floating.id))
+        }
+        showDialog(fixture, locale)
+        scrollToTag("saved-jpegs-entry-synthetic-0")
+        compose.onNodeWithText("2026-03-08 02:30 (${text(locale, R.string.media_time_zone_unknown)})")
+            .assertIsDisplayed()
+        compose.runOnIdle { fixture.state.value = fixture.state.value.copy(rows = listOf(floating.copy(captureTime = "2026-03-08"))) }
+        scrollToTag("saved-jpegs-entry-synthetic-0")
+        compose.onNodeWithText("2026-03-08").assertIsDisplayed()
+        compose.onNodeWithText("2026-03-08 00:00").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(setOf(floating.id), fixture.state.value.selectedIds)
+            assertTrue(fixture.calls.isEmpty())
+        }
+    }
+
     @Test fun englishNarrowPortraitAtTwoTimesFontKeepsEveryActionReachable() =
         verifyLargeTextActions("en", landscape = false)
 

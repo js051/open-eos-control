@@ -81,14 +81,14 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
     var dateDialogVisible by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     var selectionDrag by remember { mutableStateOf<MediaSelectionDrag?>(null) }
-    val displayZone = ZoneId.systemDefault()
+    val displayZone = rememberMediaDisplayZone()
     val libraryFilteredItems = remember(state.mediaItems, state.mediaDateRange, state.mediaRatingFilter, state.mediaFolderFilter, displayZone) {
         mediaItemsForDisplay(
             state.mediaItems, MediaFilter.ALL, MediaSort.CAMERA, state.mediaDateRange, displayZone, state.mediaRatingFilter, state.mediaFolderFilter,
         )
     }
-    val displayedItems = remember(libraryFilteredItems, mediaFilter, mediaSort) {
-        mediaItemsForDisplay(libraryFilteredItems, mediaFilter, mediaSort)
+    val displayedItems = remember(libraryFilteredItems, mediaFilter, mediaSort, displayZone) {
+        mediaItemsForDisplay(libraryFilteredItems, mediaFilter, mediaSort, displayZone = displayZone)
     }
     val ratingViewActive = state.mediaRatingFilter != MediaRatingFilter.ALL || mediaSort.isRatingOrder
     val folders = remember(state.mediaItems) { loadedMediaFolders(state.mediaItems) }
@@ -151,6 +151,7 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
         }
         MediaViewerDialog(
             item = item,
+            displayZone = displayZone,
             bytes = state.mediaPreviewBytes,
             streamSource = state.mediaStreamSource,
             loading = state.mediaPreviewLoading,
@@ -261,6 +262,7 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
             LaunchedEffect(itemId) { actions.loadMediaInfo(item) }
             MediaMetadataSheet(
                 item = item,
+                displayZone = displayZone,
                 busy = state.isBusy(CameraOperation.MEDIA),
                 protectSupported = state.supports(CameraFeature.MEDIA_PROTECT) && item.protected != null,
                 archiveSupported = state.supports(CameraFeature.MEDIA_ARCHIVE) && item.archived != null,
@@ -749,6 +751,7 @@ private fun MediaMessage(message: Int) {
 @OptIn(ExperimentalMaterial3Api::class)
 private fun MediaMetadataSheet(
     item: CameraMediaItem,
+    displayZone: ZoneId,
     busy: Boolean,
     protectSupported: Boolean,
     archiveSupported: Boolean,
@@ -804,7 +807,7 @@ private fun MediaMetadataSheet(
                     value = size,
                 )
             }
-            mediaCaptureTimeLabel(item.captureTime)?.let { capturedAt ->
+            mediaCaptureTimeLabel(item.captureTime, displayZone, stringResource(R.string.media_time_zone_unknown))?.let { capturedAt ->
                 MetadataSectionTitle(
                     title = stringResource(R.string.media_captured_at),
                     value = capturedAt,

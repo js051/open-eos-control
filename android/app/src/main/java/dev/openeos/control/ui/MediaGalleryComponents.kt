@@ -483,6 +483,7 @@ private fun MediaGalleryTile(
 @Composable
 internal fun MediaViewerDialog(
     item: CameraMediaItem,
+    displayZone: ZoneId,
     bytes: ByteArray?,
     streamSource: CameraMediaStreamSource?,
     loading: Boolean,
@@ -506,7 +507,7 @@ internal fun MediaViewerDialog(
     modifier: Modifier = Modifier,
 ) {
     val hasSaveFeedback = saveFeedback != null || otherDownloadName != null
-    val captureTime = mediaCaptureTimeLabel(item.captureTime)
+    val captureTime = mediaCaptureTimeLabel(item.captureTime, displayZone, stringResource(R.string.media_time_zone_unknown))
     val size = mediaByteSizeLabel(item.sizeBytes)
     val dimensions = mediaDimensionsLabel(item)
     val contentType = mediaContentTypeLabel(item.contentType)

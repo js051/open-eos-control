@@ -6,13 +6,9 @@ import dev.openeos.control.data.isVideoMedia
 import java.math.BigInteger
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.OffsetDateTime
 import java.time.ZoneId
-import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
-import java.time.format.ResolverStyle
 import java.util.Locale
 
 enum class MediaFilter { ALL, PHOTOS, VIDEOS }
@@ -74,23 +70,12 @@ internal fun mediaDateRangeFromInput(start: String, end: String): MediaDateRange
 
 private fun String.toStrictMediaDate(): LocalDate? {
     if (!ISO_DATE.matches(this)) return null
-    return parseMediaDate { LocalDate.parse(this, DateTimeFormatter.ISO_LOCAL_DATE) }
+    return parseMediaDate { LocalDate.parse(this, DateTimeFormatter.ISO_LOCAL_DATE) }?.takeIf { it.year in 1..9999 }
 }
 
 /** Missing dates and malformed full timestamps stay unknown, never normalized from a prefix. */
-internal fun String?.toMediaDisplayDate(displayZone: ZoneId): LocalDate? {
-    val value = this?.trim().orEmpty()
-    // A date without a time is not an instant; do not invent midnight or an offset.
-    return value.toStrictMediaDate()
-        ?: value.toStrictMediaInstant(displayZone)?.atZone(displayZone)?.toLocalDate()
-}
-
-private fun String.toStrictMediaInstant(displayZone: ZoneId): Instant? =
-    parseMediaDate { OffsetDateTime.parse(this).toInstant() }
-        ?: parseMediaDate { ZonedDateTime.parse(this).toInstant() }
-        ?: STRICT_LOCAL_DATE_TIME_FORMATS.firstNotNullOfOrNull { formatter ->
-            parseMediaDate { LocalDateTime.parse(this, formatter).atZone(displayZone).toInstant() }
-        }
+internal fun String?.toMediaDisplayDate(displayZone: ZoneId): LocalDate? =
+    parseMediaCaptureDate(this).inDisplayZone(displayZone).day
 
 private inline fun <T> parseMediaDate(block: () -> T): T? = try {
     block()
@@ -167,27 +152,15 @@ internal fun mediaItemsForDisplay(
         }
     }
     if (sort == MediaSort.CAMERA) return filtered
-    // Parse each timestamp once, not on every comparison in a large card sort.
+    // Cache by loaded index, preserving even duplicate rows without conflating IDs.
     val times = if (sort == MediaSort.NEWEST || sort == MediaSort.OLDEST) {
-        filtered.associate { it.id to it.captureTime.toMediaInstant() }
-    } else emptyMap()
+        filtered.map { parseMediaCaptureDate(it.captureTime).inDisplayZone(displayZone) }
+    } else emptyList()
     return filtered.withIndex().sortedWith { left, right ->
-        compareMediaItems(left.value, right.value, sort, times[left.value.id], times[right.value.id])
-            .takeIf { it != 0 }
-            ?: if (
-                sort == MediaSort.OLDEST &&
-                times[left.value.id] == null &&
-                times[right.value.id] == null
-            ) {
-                right.index.compareTo(left.index)
-            } else {
-                left.index.compareTo(right.index)
-            }
+        compareMediaItems(left.value, right.value, sort, times.getOrNull(left.index), times.getOrNull(right.index))
+            .takeIf { it != 0 } ?: left.index.compareTo(right.index)
     }.map { it.value }
 }
-
-internal fun selectCaptureReviewItem(items: List<CameraMediaItem>): CameraMediaItem? =
-    mediaItemsForDisplay(items, MediaFilter.ALL, MediaSort.NEWEST).firstOrNull()
 
 internal val CameraMediaItem.isVideo: Boolean
     get() = isVideoMedia
@@ -221,8 +194,8 @@ private fun compareMediaItems(
     left: CameraMediaItem,
     right: CameraMediaItem,
     sort: MediaSort,
-    leftTime: Instant?,
-    rightTime: Instant?,
+    leftTime: MediaCaptureDateDisplay?,
+    rightTime: MediaCaptureDateDisplay?,
 ): Int {
     if (sort.isRatingOrder) {
         val leftRating = left.knownRating
@@ -235,23 +208,14 @@ private fun compareMediaItems(
         return naturalCompare(left.name, right.name).takeIf { it != 0 }
             ?: left.id.compareTo(right.id)
     }
-    if (leftTime != null || rightTime != null) {
-        if (leftTime == null) return 1
-        if (rightTime == null) return -1
-        val compared = leftTime.compareTo(rightTime)
-        if (compared != 0) return if (sort == MediaSort.NEWEST) -compared else compared
-        return 0
-    }
-    // Canon's descending contents order is better evidence than comparing unrelated
-    // IMG_/MVI_ prefixes when the listing does not include capture timestamps.
-    return 0
+    return compareMediaCaptureDates(requireNotNull(leftTime), requireNotNull(rightTime), newest = sort == MediaSort.NEWEST)
 }
 
-internal fun mediaCaptureTimeLabel(value: String?, displayZone: ZoneId = ZoneId.systemDefault()): String? =
-    value?.trim()?.let {
-        it.toStrictMediaDate()?.toString()
-            ?: it.toStrictMediaInstant(displayZone)?.atZone(displayZone)?.format(MEDIA_DISPLAY_DATE_TIME)
-    }
+internal fun mediaCaptureTimeLabel(
+    value: String?,
+    displayZone: ZoneId = ZoneId.systemDefault(),
+    unknownTimeZoneLabel: String = "Time zone unknown",
+): String? = parseMediaCaptureDate(value).inDisplayZone(displayZone).label(unknownTimeZoneLabel)
 
 internal fun mediaByteSizeLabel(value: Long?): String? {
     val bytes = value?.takeIf { it >= 0 } ?: return null
@@ -279,22 +243,8 @@ internal fun mediaContentTypeLabel(value: String?): String? = value
     ?.trim()
     ?.takeIf { it.isNotEmpty() && it != "application/octet-stream" }
 
-internal fun String?.toMediaInstant(): Instant? {
-    val value = this?.trim().orEmpty()
-    if (value.isEmpty()) return null
-    return parseDate { Instant.parse(value) }
-        ?: parseDate { OffsetDateTime.parse(value).toInstant() }
-        ?: parseDate { ZonedDateTime.parse(value).toInstant() }
-        ?: LOCAL_DATE_TIME_FORMATS.firstNotNullOfOrNull { formatter ->
-            parseDate { LocalDateTime.parse(value, formatter).atZone(ZoneId.systemDefault()).toInstant() }
-        }
-}
-
-private inline fun parseDate(block: () -> Instant): Instant? = try {
-    block()
-} catch (_: DateTimeParseException) {
-    null
-}
+/** Only explicit-offset metadata can represent a real instant. */
+internal fun String?.toMediaInstant(): Instant? = (parseMediaCaptureDate(this) as? MediaCaptureDate.OffsetInstant)?.value
 
 private fun naturalCompare(left: String, right: String): Int {
     val leftParts = NATURAL_PART.findAll(left.lowercase()).map { it.value }.toList()
@@ -312,19 +262,8 @@ private fun naturalCompare(left: String, right: String): Int {
     return leftParts.size.compareTo(rightParts.size).takeIf { it != 0 } ?: left.compareTo(right, ignoreCase = true)
 }
 
-private val LOCAL_DATE_TIME_FORMATS = listOf(
-    DateTimeFormatter.ISO_LOCAL_DATE_TIME,
-    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
-    DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss"),
-)
-private val MEDIA_DISPLAY_DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 private val NATURAL_PART = Regex("\\d+|\\D+")
-private val ISO_DATE = Regex("\\d{4}-\\d{2}-\\d{2}")
-private val STRICT_LOCAL_DATE_TIME_FORMATS = listOf(
-    DateTimeFormatter.ISO_LOCAL_DATE_TIME,
-    DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss").withResolverStyle(ResolverStyle.STRICT),
-    DateTimeFormatter.ofPattern("uuuuMMdd'T'HHmmss").withResolverStyle(ResolverStyle.STRICT),
-)
+private val ISO_DATE = Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")
 private const val KIBIBYTE = 1024L
 private const val MEBIBYTE = KIBIBYTE * 1024L
 private const val GIBIBYTE = MEBIBYTE * 1024L

@@ -974,4 +974,5 @@
     <string name="native_lut_unsupported_color">LUT not applied: unsupported color format; native video retained</string>
     <string name="native_lut_unsupported_gpu">LUT not applied: GPU path unavailable; native video retained</string>
     <string name="native_lut_failed">LUT processing failed; native video fallback, LUT retained</string>
+    <string name="media_time_zone_unknown">Time zone unknown</string>
 </resources>
