@@ -22,6 +22,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -51,6 +52,118 @@ class CcapiClientTest {
     @After
     fun tearDown() {
         server.shutdown()
+    }
+
+    private fun maintenanceAttempt(request: MaintenanceRequest) = dev.openeos.control.ui.MaintenanceAttempt(
+        dev.openeos.control.ui.MaintenanceDraft(dev.openeos.control.ui.MaintenanceOwner(Any(), 1), "synthetic-confirmation", request),
+        client.maintenanceAccess(request, null), { true }, publish = {})
+
+    @Test fun maintenanceClockSeparatesAcceptedResponseFromFreshReadWithoutStatus() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
+        val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(1_700_000_000_000, 28_800, false))
+        val clock = """{"datetime":"Wed, 15 Nov 2023 06:13:20 +0800","dst":false}"""
+        server.enqueue(jsonResponse(clock)); server.enqueue(jsonResponse(clock))
+        val attempt = maintenanceAttempt(request); attempt.run()
+        assertEquals(MaintenanceCommandEvidence.RESPONSE_RECEIVED, attempt.snapshot().evidence.command)
+        assertEquals(MaintenanceClockEvidence.MATCHED, attempt.snapshot().evidence.clockRead)
+        assertEquals(2, server.requestCount)
+        val write = server.takeRequest(); val read = server.takeRequest()
+        assertEquals("PUT", write.method); assertEquals("/ccapi/ver100/functions/datetime", write.path)
+        assertEquals("Wed, 15 Nov 2023 06:13:20 +0800", JSONObject(write.body.readUtf8()).getString("datetime"))
+        assertEquals("GET", read.method); assertEquals(write.path, read.path)
+        assertEquals("no-cache, no-store", read.getHeader("Cache-Control"))
+    }
+
+    @Test fun maintenanceClockReadFailureRetainsResponseAndRecoveryNeverWrites() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
+        val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(1_700_000_000_000, 0, false))
+        val clock = """{"datetime":"Tue, 14 Nov 2023 22:13:20 +0000","dst":false}"""
+        server.enqueue(jsonResponse(clock)); server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+        val attempt = maintenanceAttempt(request); attempt.run()
+        assertEquals(MaintenanceCommandEvidence.RESPONSE_RECEIVED, attempt.snapshot().evidence.command)
+        assertEquals(MaintenanceClockEvidence.UNAVAILABLE, attempt.snapshot().evidence.clockRead)
+        server.enqueue(jsonResponse(clock)); attempt.recover()
+        assertEquals(3, server.requestCount)
+        assertEquals(listOf("PUT", "GET", "GET"), (0 until 3).map { server.takeRequest().method })
+        assertEquals(MaintenanceClockEvidence.UNAVAILABLE, attempt.snapshot().evidence.clockRead)
+        assertNotNull(attempt.snapshot().evidence.recoveryClock)
+    }
+
+    @Test fun maintenanceSimulatorCleaningUsesExact204AndDoesNotRestoreOrSleepAutomatically() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
+        server.enqueue(MockResponse().setResponseCode(204)); server.enqueue(jsonResponse(STATUS_JSON))
+        val attempt = maintenanceAttempt(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING)); attempt.run()
+        assertEquals(MaintenanceCommandEvidence.RESPONSE_RECEIVED, attempt.snapshot().evidence.command)
+        assertEquals(MaintenanceRestoreEvidence.NOT_REQUESTED, attempt.snapshot().evidence.restore)
+        assertEquals(2, server.requestCount)
+        assertEquals("/ccapi/sensor-cleaning", server.takeRequest().path)
+        assertEquals("/ccapi/status", server.takeRequest().path)
+    }
+
+    @Test fun maintenanceEventStopRejectsRedirectAndNon204WithoutDispatch() = runTest {
+        for (code in listOf(200, 201, 202, 302)) {
+            client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+            server.enqueue(jsonResponse("""{"ver100":[{"path":"/event/polling","get":true,"delete":true},{"path":"/functions/sensorcleaning","post":true}]}"""))
+            client.initialize()
+            server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", server.url("/forbidden-replay")).setBody("{}"))
+            val before = server.requestCount
+            val attempt = maintenanceAttempt(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING)); attempt.run()
+            assertEquals(before + 1, server.requestCount)
+            assertEquals(MaintenanceCommandEvidence.NOT_SENT, attempt.snapshot().evidence.command)
+            assertEquals(MaintenanceStopEvidence.UNKNOWN, attempt.snapshot().evidence.eventStop)
+        }
+    }
+
+    @Test fun maintenanceLiveViewDependenciesUseStrictTransportAndNeverRetryStartOrCleanup() = runTest {
+        var authReplays = 0
+        val http = okhttp3.OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).authenticator { _, response ->
+            authReplays++; response.request.newBuilder().header("Authorization", "synthetic-replay").build()
+        }.build()
+        client = CcapiClient(server.url("/").toString(), httpClient = http)
+        client.forceRealCamera()
+        server.enqueue(MockResponse().setResponseCode(204))
+        client.startLiveView(LiveViewRequest(size = LiveViewSize.LARGE, source = LiveViewSource.CCAPI_JPEG_POLLING))
+        client.javaClass.getDeclaredField("cameraSleepWritePath").apply { isAccessible = true; set(client, "/ccapi/ver100/shooting/settings/autopoweroff") }
+        val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SLEEP), LiveViewRequest(size = LiveViewSize.LARGE))
+        server.enqueue(MockResponse().setResponseCode(204))
+        val guard = MaintenanceIoContext(kotlin.coroutines.coroutineContext) {}
+        kotlinx.coroutines.withContext(guard) { access.stopLiveView() }
+        assertFalse(client.liveViewStopRequired)
+        server.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
+        assertTrue(runCatching { kotlinx.coroutines.withContext(guard) { access.restore() } }.isFailure)
+        assertEquals(3, server.requestCount); assertTrue(client.liveViewStopRequired)
+        val requests = (0 until 3).map { server.takeRequest() }
+        assertEquals(listOf("POST", "DELETE", "POST"), requests.map { it.method })
+        assertEquals("large", JSONObject(requests.last().body.readUtf8()).getString("liveviewsize"))
+        assertTrue(client.maintenanceStopOwned)
+        val strictClient = client.javaClass.getDeclaredField("captureConfigurationHttpClient").apply { isAccessible = true }.get(client) as okhttp3.OkHttpClient
+        assertEquals(15_000, strictClient.callTimeoutMillis)
+        for (code in listOf(302, 401)) {
+            server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", server.url("/forbidden-stop-replay")).setBody("{}"))
+            val before = server.requestCount
+            assertTrue(runCatching { client.stopLiveView() }.isFailure)
+            assertEquals(before + 1, server.requestCount); assertTrue(client.maintenanceStopOwned)
+            assertEquals("DELETE", server.takeRequest().method)
+        }
+        server.enqueue(MockResponse().setResponseCode(403).setBody("{}"))
+        val beforeClose = server.requestCount
+        assertTrue(runCatching { client.close() }.isFailure)
+        assertEquals(beforeClose + 1, server.requestCount); server.takeRequest()
+        assertTrue(client.maintenanceStopOwned); assertEquals(0, authReplays)
+        server.enqueue(MockResponse().setResponseCode(204)); client.stopLiveView()
+        assertFalse(client.liveViewStopRequired); assertFalse(client.maintenanceStopOwned)
+    }
+
+    @Test fun maintenanceEventStopFailurePreventsCleaningDispatch() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver100":[{"path":"/event/polling","get":true,"delete":true},{"path":"/functions/sensorcleaning","post":true}]}"""))
+        client.initialize()
+        server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+        val attempt = maintenanceAttempt(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING)); attempt.run()
+        assertEquals(MaintenanceStopEvidence.UNKNOWN, attempt.snapshot().evidence.eventStop)
+        assertEquals(MaintenanceCommandEvidence.NOT_SENT, attempt.snapshot().evidence.command)
+        assertEquals(2, server.requestCount); server.takeRequest()
+        assertEquals("DELETE", server.takeRequest().method)
     }
 
     @Test

@@ -101,6 +101,32 @@ import org.junit.Assert.assertTrue
 class CameraScreensTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun maintenanceHoldKeepsReviewVisibleWithoutASecondCameraAction() {
+        var opened: SettingPicker? = null
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) {
+            CameraControlScreen(connectedState().copy(maintenanceSuspended = true), noOpActions().copy(openPicker = { opened = it }))
+        } }
+        compose.onNodeWithTag("maintenance-hold-banner").assertIsDisplayed()
+        compose.onNodeWithTag("maintenance-review").performClick()
+        compose.runOnIdle { assertEquals(SettingPicker.MORE, opened) }
+    }
+
+    @Test fun maintenanceSleepConfirmationCannotSurviveOwnerReplacement() {
+        val base = connectedState()
+        val capabilities = requireNotNull(base.capabilities)
+        val supported = base.copy(activeSettingPicker = SettingPicker.MORE, capabilities = capabilities.copy(
+            matrix = capabilities.matrix.copy(supported = capabilities.matrix.supported + CameraFeature.CAMERA_SLEEP)))
+        val state = mutableStateOf(supported); var commands = 0
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) {
+            CameraControlScreen(state.value, noOpActions().copy(submitMaintenance = { commands++ }))
+        } }
+        compose.onNodeWithTag("camera-sleep").performScrollTo().performClick()
+        compose.onNodeWithTag("camera-sleep-confirm").assertIsDisplayed()
+        compose.runOnIdle { state.value = supported.copy(mediaSessionGeneration = supported.mediaSessionGeneration + 1) }
+        compose.onNodeWithTag("camera-sleep-confirm").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, commands) }
+    }
+
     @Test fun cameraHudTextFitsAfterRotationLocaleAndFontChanges() {
         val bitmap = Bitmap.createBitmap(16, 12, Bitmap.Config.ARGB_8888).apply {
             eraseColor(android.graphics.Color.DKGRAY)

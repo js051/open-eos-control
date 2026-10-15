@@ -68,10 +68,18 @@ interface CameraControlBackend {
     val liveViewStopRequired: Boolean
         get() = false
 
+    val maintenanceStopOwned: Boolean
+        get() = false
+    val maintenanceSessionOwned: Boolean
+        get() = false
+    suspend fun closeMaintenanceSession(): Boolean { retireMaintenanceLocally(); return false }
+
     fun observedFeatures(): Set<CameraFeature> = emptySet()
 
     suspend fun initialize()
     suspend fun close() = Unit
+    /** Local teardown only while a maintenance hold forbids implicit camera/session cleanup. */
+    suspend fun retireMaintenanceLocally() { nativeLiveViewSession?.close() }
     suspend fun info(): CameraInfo
     suspend fun status(): CameraStatus
     suspend fun capabilities(): CameraCapabilities
@@ -89,6 +97,7 @@ interface CameraControlBackend {
     fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess = ShootingSettingAccess(transport.label,
         write = { frozen, evidence -> require(frozen == request); writeShootingSetting(frozen, evidence) },
         read = { frozen -> require(frozen == request); readShootingSetting(frozen) })
+    fun maintenanceAccess(request: MaintenanceRequest, liveView: LiveViewRequest?): MaintenanceAccess = unsupported(CameraFeature.CAMERA_CLOCK_SYNC)
     suspend fun syncCameraClock(): CameraStatus = unsupported(CameraFeature.CAMERA_CLOCK_SYNC)
     suspend fun createDirectory(name: String): String = unsupported(CameraFeature.DIRECTORY_CONTROL)
     suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming =
@@ -207,11 +216,21 @@ class CcapiCameraBackend(
     override val liveViewStopRequired: Boolean
         get() = client.liveViewStopRequired
 
+    override val maintenanceStopOwned: Boolean
+        get() = client.maintenanceStopOwned
+
+    override val maintenanceSessionOwned: Boolean
+        get() = client.maintenanceSessionOwned
+
+    override suspend fun closeMaintenanceSession(): Boolean = client.closeMaintenanceSession()
+
     override fun observedFeatures(): Set<CameraFeature> = client.observedFeatureSnapshot()
 
     override suspend fun initialize() = client.initialize()
 
     override suspend fun close() = client.close()
+
+    override suspend fun retireMaintenanceLocally() = client.retireMaintenanceLocally()
 
     override suspend fun info(): CameraInfo = client.info()
 
@@ -240,6 +259,8 @@ class CcapiCameraBackend(
     override suspend fun readShootingSetting(request: ShootingSettingRequest): ShootingSettingObservation =
         client.readShootingSetting(request)
     override fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess = client.shootingSettingAccess(request)
+
+    override fun maintenanceAccess(request: MaintenanceRequest, liveView: LiveViewRequest?): MaintenanceAccess = client.maintenanceAccess(request, liveView)
 
     override suspend fun syncCameraClock(): CameraStatus = client.syncCameraClock()
 
@@ -372,6 +393,14 @@ class DesktopBridgeCameraBackend(
     override val liveViewStopRequired: Boolean
         get() = client.liveViewStopRequired
 
+    override val maintenanceStopOwned: Boolean
+        get() = client.maintenanceStopOwned
+
+    override val maintenanceSessionOwned: Boolean
+        get() = client.maintenanceSessionOwned
+
+    override suspend fun closeMaintenanceSession(): Boolean = client.closeMaintenanceSession()
+
     override val networkDiagnostics: CameraNetworkDiagnostics
         get() = httpTransport.diagnosticsProvider()
 
@@ -380,6 +409,8 @@ class DesktopBridgeCameraBackend(
     override suspend fun initialize() = client.initialize()
 
     override suspend fun close() = client.close()
+
+    override suspend fun retireMaintenanceLocally() = client.retireMaintenanceLocally()
 
     override suspend fun info(): CameraInfo = client.info()
 
@@ -408,6 +439,8 @@ class DesktopBridgeCameraBackend(
     override suspend fun readShootingSetting(request: ShootingSettingRequest): ShootingSettingObservation =
         client.readShootingSetting(request)
     override fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess = client.shootingSettingAccess(request)
+
+    override fun maintenanceAccess(request: MaintenanceRequest, liveView: LiveViewRequest?): MaintenanceAccess = client.maintenanceAccess(request, liveView)
 
     override suspend fun syncCameraClock(): CameraStatus = client.syncCameraClock()
 

@@ -168,12 +168,42 @@ class CameraRepository(
         }
     }
 
+    fun maintenanceStopRecoveryAccess(): suspend () -> Unit {
+        val owner = backend
+        return {
+            connectionMutex.withLock {
+                check(active && backend === owner && owner.maintenanceStopOwned) { "Maintenance Stop owner changed." }
+                owner.stopLiveView()
+                if (backend === owner) liveViewRunning = false
+            }
+        }
+    }
+
+    fun maintenanceRetirementAccess(force: Boolean): (suspend () -> Unit)? {
+        val owner = backend
+        if (!force && !owner.maintenanceSessionOwned) return null
+        return {
+            connectionMutex.withLock {
+                owner.retireMaintenanceLocally()
+                if (backend === owner) {
+                    active = false
+                    liveViewRunning = false
+                    activeInfo = null
+                }
+            }
+        }
+    }
+
     suspend fun disconnect() = connectionMutex.withLock {
         disconnectLocked()
     }
 
     private suspend fun disconnectLocked(): Boolean {
         if (!active) return false
+        if (backend.maintenanceSessionOwned) {
+            try { return backend.closeMaintenanceSession() }
+            finally { active = false; liveViewRunning = false; activeInfo = null }
+        }
         val hadLiveView = liveViewRunning || backend.liveViewStopRequired
         var liveViewStopUnconfirmed = false
         try {
@@ -238,6 +268,24 @@ class CameraRepository(
 
     suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming =
         backend.setFileNaming(field, value)
+
+    fun maintenanceAccess(request: MaintenanceRequest, eventPollingActive: Boolean): MaintenanceAccess {
+        val owner = backend
+        val hadLiveView = liveViewRunning
+        val preview = liveViewRequest.takeIf { hadLiveView }
+        val access = owner.maintenanceAccess(request, preview)
+        return MaintenanceAccess(access.origin, restoreAvailable = request.allowsRestore,
+            eventStopRequired = eventPollingActive && access.eventStopRequired,
+            liveViewStopRequired = (hadLiveView || owner.liveViewStopRequired) && access.liveViewStopRequired, stopEvents = access.stopEvents,
+            stopLiveView = {
+                access.stopLiveView()
+                if (backend === owner) liveViewRunning = false
+            }, dispatch = access.dispatch, read = access.read,
+            restore = {
+                access.restore()
+                if (backend === owner) liveViewRunning = hadLiveView
+            })
+    }
 
     suspend fun syncCameraClock(): CameraStatus = backend.syncCameraClock()
 

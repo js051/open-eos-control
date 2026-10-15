@@ -139,16 +139,25 @@ class DesktopBridgeClient(
     private var sessionId: String? = null
     @Volatile private var shutterSession: BridgeShutterReleaseSession? = null
     @Volatile private var heldAutofocusSession: BridgeHeldAutofocusSession? = null
+    private class MaintenanceBridgeOwnerContext(val owner: BridgeShutterReleaseSession) :
+        kotlin.coroutines.AbstractCoroutineContextElement(Key) {
+        companion object Key : kotlin.coroutines.CoroutineContext.Key<MaintenanceBridgeOwnerContext>
+    }
     private class LiveViewStopOwner(
         val session: BridgeShutterReleaseSession,
         val stopUrl: HttpUrl,
         var confirmedStart: Boolean = false,
+        val maintenanceOwned: Boolean = false,
     )
     @Volatile private var liveViewStopOwner: LiveViewStopOwner? = null
     @Volatile private var liveViewRevision = 0L
     private val liveViewStateLock = Any()
     val liveViewStopRequired: Boolean
         get() = liveViewStopOwner?.let { it.session === shutterSession && !it.session.closed } == true
+    val maintenanceStopOwned: Boolean
+        get() = liveViewStopRequired && liveViewStopOwner?.maintenanceOwned == true
+    var maintenanceSessionOwned: Boolean = false
+        private set
     private var sessionEngine: String? = null
     private var sessionCameraModel: String? = null
     private var eventPollingSupported = false
@@ -195,7 +204,39 @@ class DesktopBridgeClient(
             ?.takeIf(String::isNotEmpty)
     }
 
+    suspend fun retireMaintenanceLocally() { shutterSession?.let { retireMaintenanceOwnerLocally(it) } }
+
+    private fun retireMaintenanceOwnerLocally(owner: BridgeShutterReleaseSession) {
+        owner.close()
+        if (shutterSession !== owner) return
+        activeEventCall.getAndSet(null)?.cancel()
+        activeMediaListing.getAndSet(null)?.call?.cancel()
+        // A replacement session must never be retired by late cleanup of an original owner.
+        shutterSession = null
+        heldAutofocusSession = null
+        sessionId = null
+    }
+
+    suspend fun closeMaintenanceSession(): Boolean {
+        val owner = requireShutterSession()
+        val focusOwner = heldAutofocusSession
+        return maintenanceCloseOnce(liveViewStopRequired,
+            releasePhysical = { maintenancePhysicalReleaseOnce(
+                autofocus = { requireCurrentSession(owner); focusOwner?.close() },
+                shutter = { requireCurrentSession(owner); if (owner.hasReleaseResponsibility) stopBulbExposure(owner) }) },
+            stop = { maintenanceStopRecoveryScope {
+                withContext(MaintenanceBridgeOwnerContext(owner)) { stopLiveViewOwned(owner) }
+            } }, retireRemote = {
+                maintenanceJson(Request.Builder().url(endpoint("v1", "session", owner.id, "maintenance", "control", "session"))
+                    .delete().build(), owner, expected = 204, empty = true)
+            }, retireLocal = { retireMaintenanceOwnerLocally(owner) })
+    }
+
     suspend fun close() {
+        if (maintenanceSessionOwned) {
+            check(!closeMaintenanceSession()) { "Live View Stop remains unconfirmed after Bridge session retirement." }
+            return
+        }
         val callerContext = currentCoroutineContext()
         withContext(NonCancellable) {
             val session = shutterSession ?: return@withContext
@@ -690,6 +731,67 @@ class DesktopBridgeClient(
         }
     }
 
+    fun maintenanceAccess(request: MaintenanceRequest, liveView: LiveViewRequest?): MaintenanceAccess {
+        val owner = requireShutterSession()
+        val engine = sessionEngine
+        val root = endpoint("v1", "session", owner.id, "maintenance", request.action.wireName)
+        val outcome = root.newBuilder().addPathSegment("outcome").build()
+        if (request.needsStop) maintenanceSessionOwned = true
+        return MaintenanceAccess("Desktop bridge", eventStopRequired = eventPollingSupported,
+            liveViewStopRequired = liveViewStopRequired, stopEvents = {
+            requireCurrentSession(owner)
+            activeEventCall.getAndSet(null)?.cancel()
+            // The legacy stop method swallows errors; maintenance needs a real phase result.
+            maintenanceJson(Request.Builder().url(endpoint("v1", "session", owner.id, "maintenance", "control", "events")).delete().build(), owner, expected = 204, empty = true)
+        }, stopLiveView = {
+            requireCurrentSession(owner)
+            withContext(MaintenanceBridgeOwnerContext(owner)) { stopLiveViewOwned(owner) }
+        }, dispatch = { frozen, evidence ->
+            require(frozen == request); requireCurrentSession(owner)
+            val httpRequest = Request.Builder().url(outcome).post(JSONObject().put("autoPowerOff", request.autoPowerOff)
+                .toString().toRequestBody(jsonMediaType)).build()
+            maintenanceJson(httpRequest, owner, evidence) { body ->
+                check(applyMaintenanceBridgeOutcome(evidence, engine, 200, body.toMaintenanceMap())) {
+                    "Bridge maintenance outcome did not match the frozen request."
+                }
+            }
+        }, read = { frozen ->
+            require(frozen == request); requireCurrentSession(owner)
+            var result: MaintenanceReadback? = null
+            maintenanceJson(Request.Builder().url(root).header("Cache-Control", "no-cache, no-store").get().build(), owner) { body ->
+                result = maintenanceBridgeReadback(engine, request, body.toMaintenanceMap())
+            }
+            requireNotNull(result) { "Bridge maintenance observation is unavailable." }
+        }, restore = {
+            requireCurrentSession(owner)
+            if (liveView != null) withContext(MaintenanceBridgeOwnerContext(owner)) { startLiveViewOwned(liveView, owner) }
+        })
+    }
+
+    private fun JSONObject.toMaintenanceMap(): Map<String, Any?> = keys().asSequence().associateWith { key ->
+        when (val value = opt(key)) { JSONObject.NULL -> null; is JSONObject -> value.toMaintenanceMap(); else -> value }
+    }
+
+    private suspend fun maintenanceJson(request: Request, owner: BridgeShutterReleaseSession,
+        evidence: MaintenanceEvidence? = null, expected: Int = 200, empty: Boolean = false, accept: ((JSONObject) -> Unit)? = null) = withContext(Dispatchers.IO) {
+        currentCoroutineContext()[MaintenanceIoContext]?.requireActive?.invoke()
+        val call = newBridgeCall(request, true)
+        val watchers = maintenanceCancellationWatchers { call.cancel() }
+        try {
+            currentCoroutineContext().ensureActive(); requireCurrentSession(owner); evidence?.beforeDispatch()
+            call.execute().use { response ->
+                requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                    response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                check(response.code == expected)
+                val text = response.body?.let { body -> body.byteStream().use { readShootingSettingResponseText(it, body.contentLength()) } }.orEmpty()
+                if (empty) requireMaintenanceEmptyResponse(response.code, response.headers("Content-Length"), response.headers("Transfer-Encoding"), text)
+                if (accept != null) accept(JSONObject(text))
+                // A cancelled/retired attempt retains a complete original response in its history only.
+                currentCoroutineContext().ensureActive(); requireCurrentSession(owner)
+            }
+        } finally { watchers.forEach { it.cancel() } }
+    }
+
     suspend fun syncCameraClock(): CameraStatus = parseStatus(
         postJson(sessionEndpoint("clock", "sync"), JSONObject())
     ).also { observedFeatures.add(CameraFeature.CAMERA_CLOCK_SYNC) }
@@ -873,12 +975,16 @@ class DesktopBridgeClient(
         ).also { if (it.ok) observedFeatures.add(CameraFeature.LIVE_VIEW_MAGNIFICATION) }
     }
 
-    suspend fun startLiveView(request: LiveViewRequest) {
-        val session = requireShutterSession()
+    suspend fun startLiveView(request: LiveViewRequest) = startLiveViewOwned(request, requireShutterSession())
+
+    private suspend fun startLiveViewOwned(request: LiveViewRequest, session: BridgeShutterReleaseSession) {
         session.mutex.withLock {
             requireCurrentSession(session)
             currentCoroutineContext().ensureActive()
-            val owner = LiveViewStopOwner(session, endpoint("v1", "session", session.id, "liveview", "stop"))
+            val strict = currentCoroutineContext()[MaintenanceBridgeOwnerContext] != null
+            val owner = LiveViewStopOwner(session,
+                if (strict) endpoint("v1", "session", session.id, "maintenance", "control", "liveview", "stop")
+                else endpoint("v1", "session", session.id, "liveview", "stop"), maintenanceOwned = strict)
             // Record the original endpoint before the Start request can reach Bridge.
             val startRevision = synchronized(liveViewStateLock) {
                 check(!liveViewStopRequired) { "Retry stopping Live View before starting again." }
@@ -887,15 +993,20 @@ class DesktopBridgeClient(
                 liveViewRevision
             }
             val response = postJson(
-                endpoint("v1", "session", session.id, "liveview", "start"),
+                if (strict) endpoint("v1", "session", session.id, "maintenance", "control", "liveview", "start")
+                else endpoint("v1", "session", session.id, "liveview", "start"),
                 JSONObject().put("fps", request.fps).put("size", request.size.name).put("source", request.source.name),
             )
             requireCurrentSession(session)
             check(response.opt("active") == true) { "Desktop Bridge did not confirm Live View start." }
-            check(response.opt("liveViewStopUnconfirmed") != true) {
+            check(if (strict) response.opt("liveViewStopUnconfirmed") == false else response.opt("liveViewStopUnconfirmed") != true) {
                 "Desktop Bridge did not confirm Live View started without a pending stop. Retry Stop before starting again."
             }
             synchronized(liveViewStateLock) {
+                // A strict Start response cannot discharge a newer same-session warning.
+                if (strict) check(liveViewStopOwner === owner && liveViewRevision == startRevision) {
+                    "Maintenance Live View Start was superseded by newer Stop evidence."
+                }
                 // A delayed Start acknowledgement cannot undo a newer Stop warning.
                 if (liveViewStopOwner === owner && liveViewRevision == startRevision) owner.confirmedStart = true
                 liveViewRevision += 1
@@ -904,23 +1015,37 @@ class DesktopBridgeClient(
         }
     }
 
-    suspend fun stopLiveView() = withContext(NonCancellable) {
+    suspend fun stopLiveView() {
         val session = requireShutterSession()
+        if (maintenanceStopOwned) maintenanceStopRecoveryScope { stopLiveViewOwned(session) }
+        else withContext(NonCancellable) { stopLiveViewOwned(session) }
+    }
+
+    private suspend fun stopLiveViewOwned(session: BridgeShutterReleaseSession) {
         session.mutex.withLock {
             requireCurrentSession(session)
+            val requestedStrict = currentCoroutineContext()[MaintenanceBridgeOwnerContext] != null
             val (owner, legacyStopAllowed, stopRevision) = synchronized(liveViewStateLock) {
-                val current = liveViewStopOwner?.takeIf { it.session === session }
+                var current = liveViewStopOwner?.takeIf { it.session === session }
                     ?: LiveViewStopOwner(session, endpoint("v1", "session", session.id, "liveview", "stop"))
-                val legacy = current.confirmedStart
+                if (requestedStrict && !current.maintenanceOwned) current = LiveViewStopOwner(session,
+                    endpoint("v1", "session", session.id, "maintenance", "control", "liveview", "stop"),
+                    confirmedStart = current.confirmedStart, maintenanceOwned = true)
+                val legacy = current.confirmedStart && !current.maintenanceOwned
                 current.confirmedStart = false
                 liveViewStopOwner = current
                 liveViewRevision += 1
                 Triple(current, legacy, liveViewRevision)
             }
-            val response = postJson(owner.stopUrl, JSONObject())
+            val response = if (owner.maintenanceOwned) maintenanceStopRecoveryScope {
+                withContext(MaintenanceBridgeOwnerContext(session)) { postJson(owner.stopUrl, JSONObject()) }
+            } else postJson(owner.stopUrl, JSONObject())
             requireCurrentSession(session)
             synchronized(liveViewStateLock) {
                 requireCurrentSession(session)
+                if (owner.maintenanceOwned) check(liveViewStopOwner === owner && liveViewRevision == stopRevision) {
+                    "Maintenance Live View Stop was superseded by newer Stop evidence."
+                }
                 val explicit = response.opt("liveViewStopUnconfirmed")
                 val legacyStillValid = legacyStopAllowed && liveViewRevision == stopRevision
                 check(response.opt("active") == false && (explicit == false ||
@@ -1673,6 +1798,13 @@ class DesktopBridgeClient(
         captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null,
         captureRecovery: Boolean = false, captureOwner: BridgeShutterReleaseSession? = null,
     ): JSONObject = withContext(Dispatchers.IO) {
+        val maintenanceOwner = currentCoroutineContext()[MaintenanceBridgeOwnerContext]?.owner
+        if (maintenanceOwner != null) {
+            val owner = maintenanceOwner
+            var result: JSONObject? = null
+            maintenanceJson(request, owner) { result = it }
+            return@withContext requireNotNull(result)
+        }
         val session = sessionForRequest(request)
         val captureSessionEngine = sessionEngine
         val revision = session?.revision

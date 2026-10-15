@@ -1,5 +1,12 @@
 package dev.openeos.control.ui
 
+import dev.openeos.control.data.MaintenanceAction
+import dev.openeos.control.data.MaintenanceRequest
+import dev.openeos.control.data.MaintenanceCommandEvidence
+import dev.openeos.control.data.MaintenanceClockEvidence
+import dev.openeos.control.data.MaintenanceAvailability
+import dev.openeos.control.data.MaintenanceStopEvidence
+import dev.openeos.control.data.MaintenanceRestoreEvidence
 import dev.openeos.control.data.ShootingSettingRequest
 import dev.openeos.control.data.ShootingSettingWriteEvidence
 import dev.openeos.control.data.ShootingSettingReadEvidence
@@ -162,6 +169,17 @@ fun CameraControlScreen(
 private fun StableCameraControls(state: CameraUiState, actions: CameraActions) {
     Box(Modifier.fillMaxSize()) {
         LiveViewFrame(state, actions, Modifier.fillMaxSize())
+        if (state.maintenanceSuspended) {
+            Surface(modifier = Modifier.align(Alignment.Center).padding(16.dp).widthIn(max = 360.dp)
+                .testTag("maintenance-hold-banner"), color = AppSurface, shape = RoundedCornerShape(8.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.maintenance_hold), color = AppWarning)
+                    TextButton(onClick = { actions.openPicker(SettingPicker.MORE) }, modifier = Modifier.testTag("maintenance-review")) {
+                        Text(stringResource(R.string.maintenance_review))
+                    }
+                }
+            }
+        }
         if (state.hudVisible) {
             CameraOverlayHeader(state, actions)
             state.status?.temperature?.takeUnless(CameraTemperatureStatus::isNormal)?.let { temperature ->
@@ -1235,8 +1253,10 @@ private fun liveViewSourceLabel(source: LiveViewSource): String = stringResource
 @Composable
 private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
     val settings = settingsForMode(state.capabilities?.advancedSettings.orEmpty(), state.captureMode)
-    var showSleepConfirmation by remember { mutableStateOf(false) }
-    var showSensorCleaningConfirmation by remember { mutableStateOf(false) }
+    val maintenanceOwner = remember(state.info, state.mediaSessionGeneration) { MaintenanceOwner(state.info, state.mediaSessionGeneration) }
+    var showSleepConfirmation by remember(maintenanceOwner) { mutableStateOf(false) }
+    var showSensorCleaningConfirmation by remember(maintenanceOwner) { mutableStateOf(false) }
+    var maintenanceToken by remember(maintenanceOwner) { mutableStateOf(java.util.UUID.randomUUID().toString()) }
     val configurationOwner = remember(state.info, state.mediaSessionGeneration) {
         CaptureConfigurationOwner(state.info, state.mediaSessionGeneration)
     }
@@ -1246,7 +1266,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
     var directoryDraftToken by remember(configurationOwner) { mutableStateOf(java.util.UUID.randomUUID().toString()) }
     var directoryDraftRevision by remember(configurationOwner) { mutableStateOf(0L) }
     var namingDraftToken by remember(configurationOwner) { mutableStateOf(java.util.UUID.randomUUID().toString()) }
-    var sensorCleaningAutoPowerOff by remember { mutableStateOf(false) }
+    var sensorCleaningAutoPowerOff by remember(maintenanceOwner) { mutableStateOf(false) }
     if (showSensorCleaningConfirmation) {
         AlertDialog(
             onDismissRequest = { showSensorCleaningConfirmation = false },
@@ -1281,8 +1301,12 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 TextButton(
                     onClick = {
                         showSensorCleaningConfirmation = false
-                        actions.cleanSensor(sensorCleaningAutoPowerOff)
+                        val submit = actions.submitMaintenance
+                        if (submit != null) submit(MaintenanceDraft(maintenanceOwner, maintenanceToken,
+                            MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING, autoPowerOff = sensorCleaningAutoPowerOff)))
+                        else actions.cleanSensor(sensorCleaningAutoPowerOff)
                     },
+                    enabled = !state.busy && !state.recordingStopAvailable && !state.bulbExposureActive && !state.shutterReleaseUnconfirmed,
                     modifier = Modifier.testTag("sensor-cleaning-confirm"),
                 ) {
                     Text(stringResource(R.string.clean_now), color = AppAccent)
@@ -1307,8 +1331,11 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 TextButton(
                     onClick = {
                         showSleepConfirmation = false
-                        actions.sleepCamera()
+                        val submit = actions.submitMaintenance
+                        if (submit != null) submit(MaintenanceDraft(maintenanceOwner, maintenanceToken, MaintenanceRequest(MaintenanceAction.SLEEP)))
+                        else actions.sleepCamera()
                     },
+                    enabled = !state.busy && !state.recordingStopAvailable && !state.bulbExposureActive && !state.shutterReleaseUnconfirmed,
                     modifier = Modifier.testTag("camera-sleep-confirm"),
                 ) {
                     Text(stringResource(R.string.sleep_now), color = AppRecord)
@@ -1488,7 +1515,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         }
                         Button(
                             onClick = actions.syncCameraClock,
-                            enabled = !state.isBusy(CameraOperation.CLOCK),
+                            enabled = !state.previewMode && !state.busy && !state.recordingStopAvailable && !state.isBusy(CameraOperation.CLOCK),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = AppSurfaceHigh,
                                 contentColor = AppText,
@@ -1508,6 +1535,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         }
                     }
                 }
+                state.maintenanceHistory.forEach { receipt -> MaintenanceReceiptView(receipt, state, actions) }
                 state.shootingSettingHistory.filter { it.id != state.shootingSettingReceipt?.id ||
                     settings.none { setting -> setting.key == it.draft.request.key } }.forEach { receipt ->
                     ShootingSettingReceiptView(receipt, state, actions)
@@ -1606,10 +1634,11 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         Button(
                             onClick = {
                                 sensorCleaningAutoPowerOff = false
+                                maintenanceToken = java.util.UUID.randomUUID().toString()
                                 showSensorCleaningConfirmation = true
                             },
                             enabled = !state.previewMode &&
-                                state.status?.recording != true &&
+                                !state.recordingStopAvailable &&
                                 !state.bulbExposureActive &&
                                 !state.busy,
                             colors = ButtonDefaults.buttonColors(
@@ -1642,9 +1671,9 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                             Text(stringResource(R.string.camera_sleep_hint), color = AppSubtleText)
                         }
                         Button(
-                            onClick = { showSleepConfirmation = true },
+                            onClick = { maintenanceToken = java.util.UUID.randomUUID().toString(); showSleepConfirmation = true },
                             enabled = !state.previewMode &&
-                                state.status?.recording != true &&
+                                !state.recordingStopAvailable &&
                                 !state.bulbExposureActive &&
                                 !state.busy,
                             colors = ButtonDefaults.buttonColors(
@@ -2214,3 +2243,87 @@ internal fun CaptureConfigurationReceiptView(
         }
     }
 }
+
+
+@Composable
+internal fun MaintenanceReceiptView(receipt: MaintenanceReceipt, state: CameraUiState, actions: CameraActions) {
+    val evidence = receipt.evidence
+    val ownerCurrent = receipt.draft.owner.matches(state.info, state.mediaSessionGeneration)
+    val available = state.connected && ownerCurrent && state.pendingOperations.isEmpty()
+    var showRestore by remember(receipt.id, ownerCurrent) { mutableStateOf(false) }
+    if (showRestore && ownerCurrent) {
+        AlertDialog(onDismissRequest = { showRestore = false },
+            title = { Text(stringResource(R.string.maintenance_restore_title)) },
+            text = { Text(stringResource(R.string.maintenance_restore_confirm)) },
+            confirmButton = { TextButton(onClick = { showRestore = false; actions.restoreMaintenance(receipt.id) },
+                enabled = available && !state.recordingStopAvailable && !state.bulbExposureActive && !state.shutterReleaseUnconfirmed,
+                modifier = Modifier.testTag("maintenance-restore-confirm-${receipt.id}")) { Text(stringResource(R.string.maintenance_restore)) } },
+            dismissButton = { TextButton(onClick = { showRestore = false }) { Text(stringResource(R.string.cancel)) } })
+    }
+    Column(Modifier.fillMaxWidth().testTag("maintenance-receipt-${receipt.id}"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(stringResource(R.string.maintenance_result), color = AppText, fontWeight = FontWeight.SemiBold)
+        Text(receipt.origin, color = AppSubtleText)
+        (receipt.draft.owner.connection as? dev.openeos.control.data.CameraInfo)?.model?.let { Text(it, color = AppSubtleText) }
+        Text(stringResource(when (receipt.draft.request.action) {
+            MaintenanceAction.CLOCK_SYNC -> R.string.sync_camera_clock
+            MaintenanceAction.SENSOR_CLEANING -> R.string.sensor_cleaning
+            MaintenanceAction.SLEEP -> R.string.camera_sleep
+        }), color = AppText)
+        if (receipt.draft.request.action == MaintenanceAction.SENSOR_CLEANING) Text(stringResource(R.string.maintenance_power_choice,
+            stringResource(if (receipt.draft.request.autoPowerOff) R.string.yes else R.string.no)), color = AppSubtleText)
+        Text(stringResource(when (evidence.command) {
+            MaintenanceCommandEvidence.NOT_SENT -> R.string.maintenance_not_sent
+            MaintenanceCommandEvidence.UNKNOWN -> R.string.maintenance_unknown
+            MaintenanceCommandEvidence.RESPONSE_RECEIVED -> R.string.maintenance_response
+        }), color = AppText, modifier = Modifier.testTag("maintenance-command-${receipt.id}"))
+        if (receipt.draft.request.needsStop) {
+            Text(stringResource(R.string.maintenance_stops, maintenanceStopLabel(evidence.eventStop), maintenanceStopLabel(evidence.liveViewStop)), color = AppSubtleText)
+            Text(stringResource(R.string.maintenance_completion_limit), color = AppSubtleText)
+        }
+        if (receipt.draft.request.action == MaintenanceAction.CLOCK_SYNC) {
+            Text(stringResource(when (evidence.clockRead) {
+                MaintenanceClockEvidence.MATCHED -> R.string.maintenance_clock_matched
+                MaintenanceClockEvidence.MISMATCH -> R.string.maintenance_clock_mismatch
+                MaintenanceClockEvidence.UNAVAILABLE -> R.string.maintenance_clock_unavailable
+                else -> R.string.maintenance_clock_not_read
+            }), color = AppSubtleText, modifier = Modifier.testTag("maintenance-clock-${receipt.id}"))
+            evidence.clockReference?.let { reference ->
+                Text(stringResource(R.string.maintenance_clock_reference,
+                    java.time.Instant.ofEpochSecond(reference.earliestEpochSeconds).toString(),
+                    java.time.Instant.ofEpochSecond(reference.latestEpochSeconds).toString()), color = AppSubtleText)
+                Text(if (reference.utcOffsetMinutes == null) stringResource(R.string.maintenance_clock_epoch_only)
+                    else stringResource(R.string.maintenance_clock_zone, reference.utcOffsetMinutes,
+                        stringResource(if (reference.daylightSaving == true) R.string.yes else R.string.no)), color = AppSubtleText)
+            }
+            evidence.observedClock?.let { Text(stringResource(R.string.maintenance_initial_clock, java.time.Instant.ofEpochSecond(it.epochSeconds).toString()), color = AppSubtleText) }
+            evidence.recoveryClock?.let { Text(stringResource(R.string.maintenance_latest_clock, java.time.Instant.ofEpochSecond(it.epochSeconds).toString()), color = AppSubtleText) }
+        }
+        Text(stringResource(when (evidence.availability) {
+            MaintenanceAvailability.NOT_READ -> R.string.maintenance_not_read
+            MaintenanceAvailability.REACHABLE -> R.string.maintenance_reachable
+            MaintenanceAvailability.UNAVAILABLE -> R.string.maintenance_unavailable
+        }), color = AppSubtleText)
+        if (receipt.cancelled) Text(stringResource(R.string.maintenance_cancelled), color = AppSubtleText)
+        if (!ownerCurrent || receipt.retired) Text(stringResource(R.string.maintenance_retired), color = AppSubtleText)
+        if (evidence.restore != MaintenanceRestoreEvidence.NOT_REQUESTED) Text(stringResource(
+            if (evidence.restore == MaintenanceRestoreEvidence.RESTORED) R.string.maintenance_restored else R.string.maintenance_restore_unknown), color = AppSubtleText)
+        if (ownerCurrent && (receipt.running || receipt.recovering || receipt.restoring)) {
+            TextButton(onClick = { actions.cancelMaintenance(receipt.id) }, modifier = Modifier.testTag("maintenance-cancel-${receipt.id}")) { Text(stringResource(R.string.cancel)) }
+        } else if (ownerCurrent) {
+            TextButton(onClick = { actions.recoverMaintenance(receipt.id) }, enabled = available,
+                modifier = Modifier.testTag("maintenance-recover-${receipt.id}")) { Text(stringResource(R.string.maintenance_recover)) }
+            if (state.maintenanceReceipt?.id == receipt.id && canRestoreMaintenance(receipt, true)) {
+                TextButton(onClick = { showRestore = true }, enabled = available && !state.recordingStopAvailable && !state.bulbExposureActive && !state.shutterReleaseUnconfirmed,
+                    modifier = Modifier.testTag("maintenance-restore-${receipt.id}")) { Text(stringResource(R.string.maintenance_restore)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun maintenanceStopLabel(value: MaintenanceStopEvidence): String = stringResource(when (value) {
+    MaintenanceStopEvidence.NOT_REQUIRED -> R.string.maintenance_phase_not_required
+    MaintenanceStopEvidence.NOT_ATTEMPTED -> R.string.maintenance_phase_pending
+    MaintenanceStopEvidence.UNKNOWN -> R.string.maintenance_phase_unknown
+    MaintenanceStopEvidence.STOPPED -> R.string.maintenance_phase_confirmed
+})
