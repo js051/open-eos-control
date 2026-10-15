@@ -219,7 +219,21 @@ test("UI strings, script order, review and lifecycle entry points are wired into
   assert.ok(html.indexOf('/app/media-upload.js') < html.indexOf('/app/app.js'));
   assert.match(source, /mediaUploadButton.addEventListener\("click", openMediaUploadPicker\)/);
   assert.match(source, /mediaUploadReview.addEventListener\("click",/);
-  assert.match(source, /window.addEventListener\("pagehide", \(\) => \{\s+suspendMaintenanceForLifecycle\(\);\s+cancelMediaUpload\(\{ silent: true, retire: true \}\)/);
+  // Execute the production callback rather than requiring upload cleanup to be
+  // its first action; independent LUT/audio retirement must remain composable.
+  const lifecycle = [], handlers = {};
+  const start = source.indexOf('    window.addEventListener("pagehide"');
+  assert.ok(start >= 0);
+  vm.runInNewContext(source.slice(start, source.indexOf("\n    });", start) + 8), {
+    window: { addEventListener: (name, callback) => { handlers[name] = callback; } },
+    cancelCubeLutImport: () => lifecycle.push("lut"), stopRtpAudio: () => lifecycle.push("audio"),
+    suspendMaintenanceForLifecycle: () => lifecycle.push("maintenance"),
+    cancelMediaUpload: options => lifecycle.push({ upload: { ...options } }),
+    stopMediaAutoImport() {}, releaseHeldAutofocusForLifecycle() {}, cancelCameraFocusInfo() {},
+  });
+  handlers.pagehide();
+  assert.deepEqual(lifecycle.filter(item => item?.upload), [{ upload: { silent: true, retire: true } }]);
+  assert.ok(lifecycle.indexOf("maintenance") < lifecycle.findIndex(item => item?.upload));
   assert.match(extract("resetSession"), /cancelMediaUpload\(\{ silent: true, retire: true \}\)/);
   assert.doesNotMatch(extract("cancelMediaUpload"), /state\.media\.some|deleteMedia|uploadMedia\(/);
 });

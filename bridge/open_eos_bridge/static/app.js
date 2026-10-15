@@ -1587,6 +1587,10 @@
     lutLoaded: "3D LUT loaded",
     lutRemoved: "3D LUT removed",
     lutLoadFailed: "Could not load 3D LUT",
+    lutLoading: "Loading 3D LUT…",
+    lutWaiting: "Waiting for the previous LUT read to finish…",
+    lutStopping: "Import cancelled; waiting for the file read to finish…",
+    cancelLutImport: "Cancel import",
   });
   Object.assign(messages["zh-TW"], {
     recordingTimeRemaining: "剩餘 {time}",
@@ -1598,6 +1602,10 @@
     lutLoaded: "已載入 3D LUT",
     lutRemoved: "已移除 3D LUT",
     lutLoadFailed: "無法載入 3D LUT",
+    lutLoading: "正在載入 3D LUT…",
+    lutWaiting: "正在等待前一次 LUT 讀取結束…",
+    lutStopping: "已取消匯入，正在等待檔案讀取結束…",
+    cancelLutImport: "取消匯入",
     alomode: "自動亮度優化",
     valueStandard: "標準",
     valueStandardDisabledManual: "標準（手動曝光時停用）",
@@ -1826,6 +1834,10 @@
     rtpAudioError: null,
     monitorAnalysisError: null,
     monitorLutRevision: 0,
+    monitorLutPicker: null,
+    monitorLutImportOwner: null,
+    monitorLutReadOwner: null,
+    monitorLutImportError: null,
     monitorFrameEvidence: null,
     monitorSettings: {
       histogramVisible: false,
@@ -2029,6 +2041,8 @@
     monitorLutFile: byId("monitor-lut-file"),
     monitorLutLoad: byId("monitor-lut-load"),
     monitorLutRemove: byId("monitor-lut-remove"),
+    monitorLutCancel: byId("monitor-lut-cancel"),
+    monitorLutStatus: byId("monitor-lut-status"),
     monitorZebraSelect: byId("monitor-zebra-select"),
     monitorFalseColorToggle: byId("monitor-false-color-toggle"),
     monitorFocusPeakingToggle: byId("monitor-focus-peaking-toggle"),
@@ -6812,6 +6826,17 @@
       ui.monitorLutSummary.textContent = t("noLutLoaded");
       ui.monitorLutRemove.hidden = true;
     }
+    const importing = Boolean(state.monitorLutImportOwner);
+    const reading = Boolean(state.monitorLutReadOwner);
+    const waiting = importing && reading && state.monitorLutImportOwner !== state.monitorLutReadOwner;
+    // Import errors belong to the selection, not the per-frame renderer. A
+    // successful frame must not erase a failed replacement's explanation.
+    ui.monitorLutCancel.hidden = !importing;
+    ui.monitorLutStatus.hidden = !importing && !reading && !state.monitorLutImportError;
+    ui.monitorLutStatus.textContent = waiting ? t("lutWaiting") :
+      !importing && reading ? t("lutStopping") : importing ? t("lutLoading") :
+      state.monitorLutImportError ? `${t("lutLoadFailed")}: ${state.monitorLutImportError}` : "";
+    ui.monitorLutStatus.setAttribute("aria-busy", String(importing || reading));
     ui.monitorZebraSelect.value = settings.zebraThresholdPercent === null
       ? ""
       : String(settings.zebraThresholdPercent);
@@ -6843,38 +6868,113 @@
     renderDiagnostics();
   }
 
-  async function importCubeLutFile() {
-    const file = ui.monitorLutFile.files?.[0];
-    ui.monitorLutFile.value = "";
-    if (!file) return;
+  function prepareCubeLutPicker() {
+    // A native picker has its own input and ticket. Opening or cancelling a
+    // picker does not supersede an import until a non-null file is selected.
+    const input = ui.monitorLutFile.cloneNode(false);
+    ui.monitorLutFile.replaceWith(input);
+    ui.monitorLutFile = input;
+    const picker = { input };
+    state.monitorLutPicker = picker;
+    input.addEventListener("change", () => {
+      if (state.monitorLutPicker !== picker || ui.monitorLutFile !== input) return;
+      state.monitorLutPicker = null;
+      const file = input.files?.[0];
+      input.value = "";
+      void importCubeLutFile(file);
+    });
+    input.addEventListener("cancel", () => {
+      if (state.monitorLutPicker !== picker) return;
+      state.monitorLutPicker = null;
+      input.value = "";
+    });
+    return input;
+  }
+
+  function openCubeLutPicker() {
+    const input = prepareCubeLutPicker();
+    const picker = state.monitorLutPicker;
     try {
-      if (file.size > lut.MAX_CUBE_BYTES) throw new RangeError("3D LUT exceeds the 16 MiB limit.");
-      const parsed = lut.parseCubeLut(await file.text(), file.name);
-      lutPreviewRenderer ||= lut.createWebGLRenderer(ui.monitorLutPreview);
-      state.monitorSettings = { ...state.monitorSettings, cubeLut: parsed };
-      state.monitorLutRevision = (state.monitorLutRevision || 0) + 1;
-      state.monitorAnalysisError = null;
-      renderMonitoringControls();
-      renderMonitoringFrame();
-      renderDiagnostics();
-      showToast(t("lutLoaded"));
+      input.click();
     } catch (error) {
+      if (state.monitorLutPicker !== picker) return;
+      state.monitorLutPicker = null;
       const message = error instanceof Error ? error.message : String(error);
-      state.monitorAnalysisError = `LUT: ${message}`;
+      // A failed picker opening did not accept a replacement. Keep an existing
+      // import and its error/loading ownership intact.
+      if (!state.monitorLutImportOwner) state.monitorLutImportError = message;
       showToast(`${t("lutLoadFailed")}: ${message}`, true);
+      renderMonitoringControls();
       renderDiagnostics();
     }
   }
 
+  function cancelCubeLutImport() {
+    state.monitorLutPicker = null;
+    ui.monitorLutFile.value = "";
+    if (!state.monitorLutImportOwner) return;
+    state.monitorLutImportOwner = null;
+    renderMonitoringControls();
+    renderDiagnostics();
+  }
+
+  function importCubeLutFile(file) {
+    if (!file) return;
+    // Keep at most one physical read and one latest queued replacement. Logical
+    // cancellation cannot stop Blob.arrayBuffer, so do not start unbounded
+    // parallel 16 MiB reads when selections change quickly.
+    state.monitorLutImportOwner = { file };
+    state.monitorLutImportError = null;
+    renderMonitoringControls();
+    renderDiagnostics();
+    return readPendingCubeLut();
+  }
+
+  async function readPendingCubeLut() {
+    if (state.monitorLutReadOwner || !state.monitorLutImportOwner) return;
+    const owner = state.monitorLutImportOwner;
+    state.monitorLutReadOwner = owner;
+    const current = () => state.monitorLutImportOwner === owner;
+    try {
+      const bytes = await lut.readCubeLutBytes(owner.file);
+      if (!current()) return;
+      const parsed = lut.parseCubeLutBytes(bytes, owner.file.name);
+      if (!current()) return;
+      lutPreviewRenderer ||= lut.createWebGLRenderer(ui.monitorLutPreview);
+      if (!current()) return;
+      state.monitorSettings = { ...state.monitorSettings, cubeLut: parsed };
+      state.monitorLutRevision = (state.monitorLutRevision || 0) + 1;
+      state.monitorFrameEvidence = null;
+      state.monitorAnalysisError = null;
+      renderMonitoringFrame();
+      showToast(t("lutLoaded"));
+    } catch (error) {
+      if (!current()) return;
+      const message = error instanceof Error ? error.message : String(error);
+      state.monitorLutImportError = message;
+      showToast(`${t("lutLoadFailed")}: ${message}`, true);
+    } finally {
+      state.monitorLutReadOwner = null;
+      if (current()) state.monitorLutImportOwner = null;
+      renderMonitoringControls();
+      renderDiagnostics();
+      if (state.monitorLutImportOwner) void readPendingCubeLut();
+    }
+  }
+
   function removeCubeLut() {
+    cancelCubeLutImport();
+    const hadLut = Boolean(state.monitorSettings.cubeLut);
     state.monitorSettings = { ...state.monitorSettings, cubeLut: null };
-    state.monitorLutRevision = (state.monitorLutRevision || 0) + 1;
+    if (hadLut) state.monitorLutRevision = (state.monitorLutRevision || 0) + 1;
+    state.monitorFrameEvidence = null;
     ui.monitorLutPreview.hidden = true;
     state.monitorAnalysisError = null;
+    state.monitorLutImportError = null;
     renderMonitoringControls();
     renderMonitoringFrame();
     renderDiagnostics();
-    showToast(t("lutRemoved"));
+    if (hadLut) showToast(t("lutRemoved"));
   }
 
   function renderLiveMagnification() {
@@ -9804,6 +9904,11 @@
             ? { loaded: true, size: state.monitorSettings.cubeLut.size }
             : { loaded: false },
           analysisError: state.monitorAnalysisError,
+          lutImportPending: Boolean(state.monitorLutImportOwner),
+          lutReadPending: Boolean(state.monitorLutReadOwner),
+          // Provider/renderer messages may contain a private LUT name or path.
+          // Keep the detailed error in the local UI, never in exported reports.
+          lutImportFailed: Boolean(state.monitorLutImportError),
           frameEvidence: currentMonitorFrameEvidence(),
         },
         localVideo: {
@@ -10115,8 +10220,9 @@
       if (ui.monitorWaveformToggle.checked) ui.monitorHistogramToggle.checked = false;
       changeMonitoringSettings();
     });
-    ui.monitorLutLoad.addEventListener("click", () => ui.monitorLutFile.click());
-    ui.monitorLutFile.addEventListener("change", () => void importCubeLutFile());
+    prepareCubeLutPicker();
+    ui.monitorLutLoad.addEventListener("click", openCubeLutPicker);
+    ui.monitorLutCancel.addEventListener("click", cancelCubeLutImport);
     ui.monitorLutRemove.addEventListener("click", removeCubeLut);
     [
       ui.monitorZebraSelect,
@@ -10250,6 +10356,7 @@
       }
     });
     window.addEventListener("pagehide", () => {
+      if (typeof cancelCubeLutImport === "function") cancelCubeLutImport();
       stopRtpAudio();
       suspendMaintenanceForLifecycle();
       cancelMediaUpload({ silent: true, retire: true });
@@ -10432,6 +10539,7 @@
       if (previewActive()) applyLiveViewLayout();
     });
     window.addEventListener("beforeunload", () => {
+      if (typeof cancelCubeLutImport === "function") cancelCubeLutImport();
       if (typeof cancelRecordingWait === "function") cancelRecordingWait();
       const preserveMaintenance = suspendMaintenanceForLifecycle();
       state.mediaListingOwner?.cancel({ silent: true });

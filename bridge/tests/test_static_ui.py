@@ -518,3 +518,23 @@ def test_shutter_recovery_alerts_do_not_cover_controls_and_live_start_has_a_guar
     bulb_lock = script.split("function bulbControlLocked()", 1)[1].split("function clearBulbTimer", 1)[0]
     assert "shutterReleaseUnconfirmed() || state.status?.bulbExposureActive === true" in bulb_lock
     assert "ui.toast.hidden = true;" in toast
+
+
+def test_lut_import_has_owned_status_and_explicit_cancel_without_clearing_applied_summary() -> None:
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert 'id="monitor-lut-status" class="supporting" role="status" aria-live="polite" hidden' in html
+    assert 'id="monitor-lut-cancel"' in html
+    assert 'data-i18n="cancelLutImport"' in html
+    assert 'ui.monitorLutCancel.addEventListener("click", cancelCubeLutImport)' in script
+    assert 'ui.monitorLutLoad.addEventListener("click", openCubeLutPicker)' in script
+    controls = script.split("  function renderMonitoringControls() {", 1)[1].split(
+        "  function openMonitoringDialog() {", 1,
+    )[0]
+    assert "settings.cubeLut.name" in controls
+    assert "state.monitorLutImportError" in controls
+    assert 'setAttribute("aria-busy", String(importing || reading))' in controls
+    assert 't("lutWaiting")' in controls
+    assert 't("lutStopping")' in controls
+    assert "lutImportPending: Boolean(state.monitorLutImportOwner)" in script
+    assert "lutImportFailed: Boolean(state.monitorLutImportError)" in script

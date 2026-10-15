@@ -22,6 +22,6 @@ Android and iOS native RTP retain their direct native-surface renderers. LUT pre
 
 ## Privacy And Lifetime
 
-Imported LUT contents, title and filename remain in memory for the active app/page lifetime. Diagnostics report only whether a LUT is loaded and its cube size. They never include the filename, title, table values, file path or file contents.
+Imported LUT contents, title and filename remain in memory for the active app/page lifetime. Diagnostics report only whether a LUT is loaded, its cube size, and Boolean import/read pending or import-failure flags. They never include the filename, title, table values, file path or file contents.
 
 Pixel-derived monitoring assists analyze the post-LUT image, so histogram, waveform, zebra, false color and focus peaking match the displayed preview. Removing the LUT immediately restores the unmodified decoded Live View.

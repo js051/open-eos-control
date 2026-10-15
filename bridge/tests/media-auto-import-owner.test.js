@@ -145,7 +145,7 @@ function fixture(options = {}) {
       return response;
     },
   });
-  for (const name of ["releaseHeldAutofocusForLifecycle", "cancelCameraFocusInfo", "stopLiveLoop", "stopLocalVideo", "cancelEventLoop", "cancelMediaDownload", "cancelMediaUpload",
+  for (const name of ["releaseHeldAutofocusForLifecycle", "cancelCameraFocusInfo", "stopLiveLoop", "stopLocalVideo", "stopRtpAudio", "cancelEventLoop", "cancelMediaDownload", "cancelMediaUpload",
     "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh", "closeMediaPreview",
     "closeMediaDetails", "releaseObjectUrl", "clearBulbTimer", "renderHealth"]) context[name] = () => {};
   state.mediaDisplayZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
