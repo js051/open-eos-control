@@ -938,6 +938,7 @@ for (const language of ["en", "zh-TW"]) {
       assert.deepEqual(Buffer.from(files[0].bytes), expected);
       assert.equal(originalRequests.length, 1);
       assert.equal(new URL(originalRequests[0]).searchParams.get("attempt"), "single");
+      assert.equal(new URL(originalRequests[0]).searchParams.get("validation"), "jpeg-v1");
       const fresh = infoRequests.filter((url) => new URL(url).searchParams.get("fresh") === "true");
       assert.equal(fresh.length, 2, "Only the new JPEG receives two current size observations");
       assert.equal(new Set(fresh.map((url) => new URL(url).pathname)).size, 1);
@@ -998,6 +999,62 @@ cases.push({
     await assertOneCapture(simulatorOrigin);
   },
 });
+
+for (const fault of ["missing-proof", "premature-entropy"]) {
+  cases.push({
+    name: `automatic JPEG validation rejects ${fault} and explicit recovery skips the failed ID`,
+    batch: {},
+    run: async ({ page, simulatorOrigin, originalRequests, routeCleanups }) => {
+      const pattern = /\/v1\/session\/[^/]+\/media\/[^/?]+\?attempt=single&validation=jpeg-v1/;
+      const handler = async (route) => {
+        const response = await route.fetch();
+        const headers = response.headers(); delete headers["x-open-eos-original-validation"];
+        await route.fulfill({ response, headers });
+      };
+      if (fault === "missing-proof") {
+        await page.route(pattern, handler);
+        routeCleanups.push(() => page.unroute(pattern, handler));
+      }
+      await page.click('.tab[data-view="media"]');
+      await startForegroundImportAfterGallerySettles(page);
+      await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "watching");
+      await configure(simulatorOrigin, { mode: "new-first", invalid_original: fault === "premature-entropy" });
+      await page.click('.tab[data-view="live"]');
+      await capture(page, simulatorOrigin);
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "stopped",
+        null, { timeout: 20_000 });
+      assert.equal(originalRequests.length, 1);
+      assert.equal(await page.locator('#media-auto-list [data-status="failed"]').count(), 1);
+      const files = await page.evaluate(() => window.__batchFiles);
+      assert.equal(files.length, 1);
+      assert.equal(files[0].closed, false);
+      assert.equal(files[0].aborted, true);
+      assert.equal(files[0].bytes.length, 0);
+      await assertOneCapture(simulatorOrigin);
+      if (fault === "missing-proof") await page.unroute(pattern, handler);
+      await configure(simulatorOrigin, { invalid_original: false });
+      await startForegroundImportAfterGallerySettles(page);
+      await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "watching");
+      assert.equal(originalRequests.length, 1, "explicit re-enable establishes fresh baselines, never retries old IDs");
+      assert.equal((await peerState(simulatorOrigin)).capture_count, 1, "recovery never resends the shutter");
+      await page.click('.tab[data-view="live"]');
+      await capture(page, simulatorOrigin);
+      await page.click('.tab[data-view="media"]');
+      await page.waitForFunction(() => document.querySelectorAll('#media-auto-list [data-status="completed"]').length === 1,
+        null, { timeout: 20_000 });
+      await page.click("#media-auto-stop");
+      assert.equal(originalRequests.length, 2);
+      const records = await page.evaluate(async () => {
+        const store = OpenEOSMediaTransferHistory.createHistoryStore();
+        const result = await store.list(); store.close(); return result;
+      });
+      assert.equal(records.entries.some(row => row.outcome === "failed"), true);
+      assert.equal(records.entries.some(row => row.outcome === "completed"), true);
+      assert.equal(await page.evaluate(() => window.__batchFiles.filter(file => file.closed).length), 1);
+    },
+  });
+}
 
 async function run() {
   const [simulatorPort, bridgePort] = await Promise.all([freePort(), freePort()]);

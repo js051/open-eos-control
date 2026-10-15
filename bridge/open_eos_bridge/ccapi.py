@@ -23,6 +23,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from .errors import BridgeError, ConnectionFailureReason, unsupported
 from .focus_info import MAX_FOCUS_INFO_BYTES, parse_ccapi_focus_info_packet
+from .jpeg_original import MAX_ENCODED_BYTES, InvalidJpegOriginal, validate_http_types
 from .media_folders import camera_folder_fields
 from .media_listing import MAX_LIST_SNAPSHOT_ITEMS
 from .media_metadata import MIME_ALIASES, declared_media_mime
@@ -3065,7 +3066,12 @@ class CcapiSession:
                 engine=self.engine_name,
             )
 
-    def download_media(self, media_id: str, *, single_attempt: bool = False) -> tuple[MediaItem, Iterator[bytes]]:
+    def download_media(
+        self, media_id: str, *, single_attempt: bool = False, jpeg_validation: bool = False,
+    ) -> tuple[MediaItem, Iterator[bytes]]:
+        if jpeg_validation and not single_attempt:
+            raise BridgeError("INVALID_ORIGINAL_VALIDATION", "JPEG validation requires a single original GET.",
+                              status_code=422)
         with self._lock:
             if single_attempt:
                 self._require_open()
@@ -3098,6 +3104,20 @@ class CcapiSession:
                 if single_attempt:
                     try:
                         strict_length = self._strict_media_length(response)
+                        if jpeg_validation:
+                            get_all = getattr(getattr(response.body, "headers", None), "get_all", None)
+                            values = get_all("Content-Type", []) if callable(get_all) else [
+                                value for key, value in response.headers.items() if key.casefold() == "content-type"
+                            ]
+                            try:
+                                validate_http_types(values)
+                                if strict_length is not None and strict_length > MAX_ENCODED_BYTES:
+                                    raise InvalidJpegOriginal("encoded size limit")
+                            except InvalidJpegOriginal as error:
+                                raise BridgeError(
+                                    "MEDIA_ORIGINAL_JPEG_INVALID", "Original response MIME or size is not allowed.",
+                                    status_code=502, feature=CameraFeature.MEDIA_DOWNLOAD.value,
+                                ) from error
                     except BridgeError:
                         response.close()
                         raise
@@ -3111,7 +3131,8 @@ class CcapiSession:
                         engine=self.engine_name,
                     )
                 if 200 <= response.status < 300:
-                    content_type = response.headers.get("content-type", "").split(";", 1)[0]
+                    raw_type = response.headers.get("content-type", "")
+                    content_type = ((raw_type or "") if jpeg_validation else raw_type).split(";", 1)[0]
                     if _is_text_content_type(content_type):
                         try:
                             preview = response.body.read(MAX_ERROR_BYTES).decode("utf-8", errors="replace").strip()
@@ -3125,6 +3146,12 @@ class CcapiSession:
                         else (_positive_int(response.headers.get("content-length"))
                               or (cached.size_bytes if cached else 0))
                     )
+                    if jpeg_validation and size > MAX_ENCODED_BYTES:
+                        response.close()
+                        raise BridgeError(
+                            "MEDIA_ORIGINAL_JPEG_INVALID", "Original JPEG exceeds the encoded-size limit.",
+                            status_code=502, feature=CameraFeature.MEDIA_DOWNLOAD.value,
+                        )
                     item = cached or MediaItem(
                         id=media_id,
                         name=name,

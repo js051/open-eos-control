@@ -601,7 +601,7 @@
       mediaAutoImportInventoryUnavailable: "The Bridge could not confirm a complete bounded inventory. Import stopped without trusting a partial or legacy response.",
       mediaAutoImportMetadataUnavailable: "Fresh matching metadata could not be confirmed. No original was requested for this candidate.",
       mediaAutoImportUnconfirmed: "The save result is unconfirmed. Inspect the destination; do not assume the camera read was cancelled.",
-      mediaAutoImportFailed: "The original request or save failed. Inspect any partial file before retrying.",
+      mediaAutoImportFailed: "The original request, JPEG validation or save failed. Already saved files remain. Review this failed result and any partial file, then enable again when ready; the new run watches new photos only and will not retry this file.",
       mediaAutoImportDestinationUnavailable: "The selected folder could not be prepared. Enable again to choose a writable folder.",
       mediaAutoImportUnknown: "Import stopped for an unrecognized reason ({reason}). Inspect the destination before retrying.",
       mediaAutoImportProtocol: "Required strict Bridge response evidence is unavailable or inconsistent.",
@@ -1208,7 +1208,7 @@
       mediaAutoImportInventoryUnavailable: "Bridge 無法確認有界限的完整清單，已停止匯入，不會信任部分清單或舊版回應。",
       mediaAutoImportMetadataUnavailable: "無法確認最新且相符的中繼資料，未請求此候選檔案的原檔。",
       mediaAutoImportUnconfirmed: "儲存結果未確認，請檢查目的地；不可假定相機讀取已取消。",
-      mediaAutoImportFailed: "原檔請求或儲存失敗。重試前請檢查可能留下的不完整檔案。",
+      mediaAutoImportFailed: "原檔請求、JPEG 驗證或儲存失敗。已儲存檔案會保留。請查看此失敗結果，並檢查可能留下的不完整檔案後，可明確重新啟用；新一輪只監看新照片，不會重試此檔。",
       mediaAutoImportDestinationUnavailable: "無法準備選定的資料夾，請重新啟用並選擇可寫入的資料夾。",
       mediaAutoImportUnknown: "因未識別的原因（{reason}）停止匯入，重試前請檢查目的地。",
       mediaAutoImportProtocol: "缺少必要的嚴格 Bridge 回應證據，或證據不一致。",
@@ -6652,7 +6652,8 @@
       try {
         assertMediaAutoImportCurrent(owner);
         if (!mediaLibrary.automaticJpegEligible(item) ||
-            !Number.isSafeInteger(expectedBytes) || expectedBytes <= 0 || expectedBytes !== item.sizeBytes) {
+            !Number.isSafeInteger(expectedBytes) || expectedBytes <= 0 || expectedBytes > 64 * 1024 * 1024 ||
+            expectedBytes !== item.sizeBytes) {
           throw new Error(t("mediaAutoImportProtocol"));
         }
         if (!owner.historyStarted) {
@@ -6669,11 +6670,12 @@
         const file = await destination.open(item, index);
         writable = file.writable;
         assertMediaAutoImportCurrent(owner);
-        const response = await api(`/v1/session/${encodeURIComponent(owner.session.id)}/media/${encodeURIComponent(item.id)}?attempt=single`, {
+        const response = await api(`/v1/session/${encodeURIComponent(owner.session.id)}/media/${encodeURIComponent(item.id)}?attempt=single&validation=jpeg-v1`, {
           responseType: "response", signal, redirect: "error",
         });
         assertMediaAutoImportCurrent(owner);
         requireMediaAutoImportResponse(response, "X-Open-EOS-Original-Attempt", "single-v1");
+        requireMediaAutoImportResponse(response, "X-Open-EOS-Original-Validation", "jpeg-v1");
         const contentLength = response.headers.get("content-length");
         if (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) !== expectedBytes)) {
           throw mediaTransfer.lengthMismatchError(expectedBytes, Number(contentLength));
