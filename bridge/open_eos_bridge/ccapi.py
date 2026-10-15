@@ -24,6 +24,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from .errors import BridgeError, ConnectionFailureReason, unsupported
 from .focus_info import MAX_FOCUS_INFO_BYTES, parse_ccapi_focus_info_packet
 from .jpeg_original import MAX_ENCODED_BYTES, InvalidJpegOriginal, validate_http_types
+from .liveview_decode import validate_first_jpeg
+from .liveview_lifecycle import evaluate as liveview_policy
 from .maintenance import observation as maintenance_observation
 from .maintenance import require_intent, response_received
 from .media_folders import camera_folder_fields
@@ -565,6 +567,7 @@ class CcapiMultipartSession:
                 if remaining <= 0:
                     raise _multipart_error("Timed out waiting for the next Canon multipart Live View frame.")
                 self._condition.wait(remaining)
+            self._check_usable_locked()
             if self._produced_generation > self._consumed_generation:
                 assert self._latest_frame is not None
                 self._consumed_generation = self._produced_generation
@@ -575,7 +578,7 @@ class CcapiMultipartSession:
                 raise _multipart_error(f"Canon multipart Live View stream failed: {self._terminal_error}")
             raise _multipart_error("Canon multipart Live View stream is closed.")
 
-    def wait_until_ready(self, timeout: float = 15.0) -> None:
+    def wait_until_ready(self, timeout: float = 15.0) -> bytes:
         deadline = time.monotonic() + max(timeout, 0.0)
         with self._condition:
             while (
@@ -587,13 +590,27 @@ class CcapiMultipartSession:
                 if remaining <= 0:
                     raise _multipart_error("Timed out waiting for the first Canon multipart Live View frame.")
                 self._condition.wait(remaining)
+            self._check_usable_locked()
             if self._produced_generation > 0:
-                return
+                assert self._latest_frame is not None
+                return self._latest_frame
             if self._terminal_error is not None:
                 if isinstance(self._terminal_error, BridgeError):
                     raise self._terminal_error
                 raise _multipart_error(f"Canon multipart Live View stream failed: {self._terminal_error}")
             raise _multipart_error("Canon multipart Live View stream closed before its first frame.")
+
+    def check_usable(self) -> None:
+        with self._condition:
+            self._check_usable_locked()
+
+    def _check_usable_locked(self) -> None:
+        if self._closed:
+            raise _multipart_error("Canon multipart Live View stream is closed.")
+        if self._terminal_error is not None:
+            if isinstance(self._terminal_error, BridgeError):
+                raise self._terminal_error
+            raise _multipart_error(f"Canon multipart Live View stream failed: {self._terminal_error}")
 
     def close(self) -> None:
         with self._condition:
@@ -2805,6 +2822,7 @@ class CcapiSession:
             )
             failures: list[BridgeError] = []
             for selected in candidates:
+                self._liveview_start_attempt_admitted = False
                 try:
                     if selected == "CCAPI_RTP":
                         if not rtp_supported:
@@ -2825,7 +2843,12 @@ class CcapiSession:
                     return
                 except BridgeError as error:
                     failures.append(error)
-                    if source != "AUTO" or self._pending_live_view_stop is not None:
+                    admitted = self._liveview_start_attempt_admitted
+                    cleanup = ("unconfirmed" if self._pending_live_view_stop is not None else
+                               "confirmed" if admitted else "not-needed")
+                    if not liveview_policy({'sameOwner': True, 'sameAttempt': True,
+                                            'sourceMode': source, 'terminal': True,
+                                            'startAdmitted': admitted, 'stopEvidence': cleanup})['canFallback']:
                         raise
             if failures:
                 raise failures[-1]
@@ -2847,7 +2870,7 @@ class CcapiSession:
                 ):
                     self._active_jpeg_operations = operations
                     size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
-                    self._jpeg_live_view_frame()
+                    validate_first_jpeg(self._jpeg_live_view_frame())
                     self._live_view_active = True
                     self._active_live_view_size = size if self._live_view_size_control else None
                     self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
@@ -2954,7 +2977,8 @@ class CcapiSession:
                 with suppress(Exception):
                     response.close()
                 raise
-            self._multipart_session.wait_until_ready(timeout=15.0)
+            validate_first_jpeg(self._multipart_session.wait_until_ready(timeout=15.0))
+            self._multipart_session.check_usable()
             self._live_view_active = True
 
     def _start_rtp_live_view(self, request: LiveViewStartRequest) -> None:
@@ -3016,6 +3040,7 @@ class CcapiSession:
     ) -> Iterator[None]:
         # Own the original stop before dispatch: a failed POST response is not
         # proof that the camera did not start. Discovery cannot replace this owner.
+        self._liveview_start_attempt_admitted = True
         self._pending_live_view_stop = _CcapiLiveViewStop(
             source, operation, tuple(payload.items()) if payload is not None else None, close_stream
         )
@@ -3241,6 +3266,9 @@ class CcapiSession:
                         },
                         max_bytes=MAX_LIVE_VIEW_SCAN_BYTES,
                     )
+                    if response.status != 200 or any(key.casefold() == "content-range" for key in response.headers):
+                        raise BridgeError("INVALID_LIVE_VIEW_FRAME", "Live View requires a complete HTTP 200 response.",
+                                          status_code=502, engine=self.engine_name)
                     content_type = response.headers.get("content-type", "")
                     if _is_text_content_type(content_type):
                         raise BridgeError(

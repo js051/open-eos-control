@@ -1397,7 +1397,7 @@ test("accepted shutter status admitted before Live View Stop revokes its legacy 
   s.featureSupported = feature => feature !== "MEDIA_BROWSER" && feature !== "MEDIA_THUMBNAIL";
   s.stopLiveLoop = () => { s.state.liveActive = false; };
   s.renderLiveState = () => {};
-  vm.runInContext(["stopLiveView", "liveViewStopRequired"].map(productionFunction).join("\n"), s);
+  vm.runInContext(["liveViewControlRequest", "stopLiveView", "liveViewStopRequired"].map(productionFunction).join("\n"), s);
   const captureReply = deferred(), stopReply = deferred();
   s.api = async (url, options) => {
     s.requests.push({ url, method: options?.method || "GET" });

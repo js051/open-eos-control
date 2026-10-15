@@ -1169,8 +1169,11 @@ async function verifyHeldAutofocusAndFocusFrames(browser, origin) {
     const context = await browser.newContext({ locale: "en-US", viewport: { width: 1280, height: 900 } });
     const page = await context.newPage();
     const errors = [], commands = [];
-    let stopAttempts = 0, focusReads = 0, focusAspectRatio = 1;
-    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+    let stopAttempts = 0, focusReads = 0, focusAspectRatio = 4 / 3;
+    const jpegVector = JSON.parse(fs.readFileSync(path.join(REPOSITORY_ROOT,
+      "contracts/jpeg-original/v1/jpeg-original-vectors.json"), "utf8")).byteVectors.find(row => row.id === "rgb-baseline");
+    const jpeg = Buffer.from(jpegVector.base64, "base64");
+    assert.equal(createHash("sha256").update(jpeg).digest("hex"), jpegVector.sha256);
     page.on("pageerror", error => errors.push(error.message));
     await page.route(/\/capabilities$/, async route => {
       const response = await route.fetch();
@@ -1199,7 +1202,7 @@ async function verifyHeldAutofocusAndFocusFrames(browser, origin) {
       active: route.request().url().endsWith("/start"), liveViewStopUnconfirmed: false,
       requestedFps: 4, source: "DESKTOP_BRIDGE_STREAM",
     } }));
-    await page.route(/\/liveview\/frame$/, route => route.fulfill({ contentType: "image/png", body: png }));
+    await page.route(/\/liveview\/frame$/, route => route.fulfill({ contentType: "image/jpeg", body: jpeg }));
     await page.route(/\/liveview\/focus-info$/, route => {
       focusReads++;
       return route.fulfill({ json: { magnification: 1, imageAspectRatio: focusAspectRatio,
