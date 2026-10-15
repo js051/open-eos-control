@@ -192,7 +192,10 @@ def test_directory_ack_uses_only_canonical_read_not_aggregate_cache():
 
 def test_bridge_receipt_binds_frozen_exact_actual_engine():
     text = source("DesktopBridgeClient.swift")
-    assert 'captureConfigurationSessionEngine = body["engine"] as? String' in text
+    # Session creation now crosses an owned Sendable result. Preserve the exact,
+    # untrimmed engine through both links instead of accepting normalized evidence.
+    assert 'rawEngine: body["engine"] as? String' in text
+    assert 'captureConfigurationSessionEngine = created.rawEngine' in text
     request = section(text, "private func requestJSON(", "private func requestOK(")
     assert request.index("let captureConfigurationEngine = captureConfigurationSessionEngine") < request.index("await transport.sendCaptureConfiguration")
     assert "connectedEngine: captureConfigurationEngine" in request

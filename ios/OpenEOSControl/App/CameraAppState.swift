@@ -101,6 +101,10 @@ final class CameraAppState: ObservableObject {
         }
     }
     @Published private(set) var connectionRecovery: ConnectionRecovery?
+    @Published private(set) var connectionWasCancelled = false
+    @Published private(set) var connectionIsWaitingForCleanup = false
+    @Published private(set) var pendingConnectionCleanup = Set<UUID>()
+    @Published private(set) var previousConnectionCleanupWarnings = Set<UUID>()
     @Published private(set) var bridgeScanState = BridgeScanState.notScanned
     @Published private(set) var bridgeCameras: [DesktopBridgeCamera] = []
     @Published var selectedBridgeCameraID: String? {
@@ -360,6 +364,20 @@ final class CameraAppState: ObservableObject {
     private let heldAutofocusDelay: (@Sendable () async throws -> Void)?
     private var bridgeScanOwner = UUID()
     private var connectionConfigurationOwner = UUID()
+    private var connectionAttemptOwner: UUID?
+    private var connectionSnapshotTask: Task<CameraSnapshot, Error>?
+    @MainActor private final class ConnectingSessionRetirement {
+        let session: CameraSession
+        let opening: Task<CameraSnapshot, Error>
+        var cleanup: Task<Void, Never>?
+        init(session: CameraSession, opening: Task<CameraSnapshot, Error>) {
+            self.session = session; self.opening = opening
+        }
+    }
+    private var connectingSessionRetirement: ConnectingSessionRetirement?
+    // A retired attempt keeps its exact client and late-opening task until both
+    // have settled. Retrying must not race the old camera's owned teardown.
+    private(set) var connectionCleanupTasks: [UUID: Task<Void, Never>] = [:]
     private var cubeLutOwner = UUID()
     private var cubeLutPickerOwner: UUID?
     private var cubeLutReadTask: Task<CubeLut, Error>?
@@ -524,12 +542,21 @@ final class CameraAppState: ObservableObject {
             operatorConfirmedFeatures: operatorConfirmedFeatures
         )
     }
+    var canCancelConnection: Bool { connectionAttemptOwner != nil && snapshot == nil }
+
+    var canScanBridgeCameras: Bool {
+        pendingConnectionCleanup.isEmpty && previousConnectionCleanupWarnings.isEmpty
+            && !isBusy(.connect) && !isBusy(.scan)
+            && !bridgeURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var canConnect: Bool {
+        guard previousConnectionCleanupWarnings.isEmpty else { return false }
         switch connectionMode {
         case .ccapi:
-            !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .desktopBridge:
-            !bridgeURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return !bridgeURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 && selectedBridgeCameraID != nil
         }
     }
@@ -679,7 +706,9 @@ final class CameraAppState: ObservableObject {
     func scanBridgeCameras() async {
         // Both operations publish connection guidance; admission is exclusive
         // even for callers that do not go through the disabled UI controls.
-        guard !Task.isCancelled, !busyOperations.contains(.connect), begin(.scan) else { return }
+        // Discovery can invoke the same Bridge camera provider as session open.
+        // Editing is allowed during retirement; discovery must wait for proof.
+        guard !Task.isCancelled, canScanBridgeCameras, begin(.scan) else { return }
         let owner = UUID()
         bridgeScanOwner = owner
         let previousScanState = bridgeScanState
@@ -727,17 +756,34 @@ final class CameraAppState: ObservableObject {
     }
 
     func connect() async {
-        guard !Task.isCancelled, session == nil, !isPreview,
+        guard !Task.isCancelled, session == nil, !isPreview, previousConnectionCleanupWarnings.isEmpty,
               !busyOperations.contains(.scan), begin(.connect) else { return }
         exportGeneration = UUID()
         let generation = sessionGeneration
         let configurationOwner = connectionConfigurationOwner
+        let owner = UUID()
+        connectionAttemptOwner = owner
         let requestedMode = connectionMode
         connectionRecovery = nil
-        defer { end(.connect, generation: generation) }
+        connectionWasCancelled = false
+        defer {
+            if connectionAttemptOwner == owner {
+                connectionAttemptOwner = nil
+                connectionSnapshotTask = nil
+                connectingSessionRetirement = nil
+                connectionIsWaitingForCleanup = false
+            }
+            end(.connect, generation: generation)
+        }
+        // Capture only predecessors. A later cancel/retry has its own admission.
+        let precedingCleanup = Array(connectionCleanupTasks.values)
+        connectionIsWaitingForCleanup = !precedingCleanup.isEmpty
         await disconnectTask?.value
-        guard generation == sessionGeneration, configurationOwner == connectionConfigurationOwner,
-              !Task.isCancelled else { return }
+        for cleanup in precedingCleanup { await cleanup.value }
+        guard generation == sessionGeneration, connectionAttemptOwner == owner,
+              configurationOwner == connectionConfigurationOwner, !Task.isCancelled,
+              previousConnectionCleanupWarnings.isEmpty else { return }
+        connectionIsWaitingForCleanup = false
         cancelLiveViewFPSUpdate()
         shutterAutofocus = true
         operatorConfirmedFeatures.removeAll()
@@ -778,32 +824,40 @@ final class CameraAppState: ObservableObject {
                     )
                 }
             }
-            // Retain a connecting session so a disconnect also closes a suspended connect.
+            // Retain both owners before suspension. UI cancellation is immediate;
+            // a transport may ignore it and return an allocated session much later.
             session = newSession
+            let opening = Task { try await newSession.connectSnapshot() }
+            connectionSnapshotTask = opening
+            let retirement = ConnectingSessionRetirement(session: newSession, opening: opening)
+            connectingSessionRetirement = retirement
             let newSnapshot: CameraSnapshot
             do {
-                newSnapshot = try await newSession.connectSnapshot()
-            } catch {
-                if generation == sessionGeneration {
-                    let release = await newSession.closeWithShutterReleaseState()
-                    guard generation == sessionGeneration else { return }
-                    preservePreviousReleaseWarning(release, generation: generation)
-                    session = nil
+                newSnapshot = try await withTaskCancellationHandler {
+                    try await opening.value
+                } onCancel: {
+                    opening.cancel()
                 }
+            } catch {
+                await retireConnectingSession(retirement, generation: generation).value
+                if generation == sessionGeneration, connectionAttemptOwner == owner { session = nil }
                 throw error
             }
             let release = await newSession.shutterReleaseState()
             let liveViewStop = await newSession.liveViewStopState()
             let deleteEngine = await newSession.mediaDeleteEngine()
             let deleteEndpoint = await newSession.mediaDeleteBridgeEndpoint()
-            guard generation == sessionGeneration else { return }
-            if Task.isCancelled || configurationOwner != connectionConfigurationOwner {
-                let release = await newSession.closeWithShutterReleaseState()
-                guard generation == sessionGeneration else { return }
-                preservePreviousReleaseWarning(release, generation: generation)
-                session = nil
+            guard generation == sessionGeneration, connectionAttemptOwner == owner,
+                  !Task.isCancelled, configurationOwner == connectionConfigurationOwner else {
+                // Even a late successful return still owes cleanup of newSession.
+                // Never read mutable `session` here: it may already belong to B.
+                await retireConnectingSession(retirement, generation: generation).value
+                if generation == sessionGeneration, connectionAttemptOwner == owner { session = nil }
                 return
             }
+            connectionAttemptOwner = nil
+            connectionSnapshotTask = nil
+            connectingSessionRetirement = nil
             snapshot = newSnapshot
             mediaDeleteBridgeEngine = deleteEngine
             mediaDeleteBridgeEndpoint = deleteEndpoint
@@ -832,11 +886,75 @@ final class CameraAppState: ObservableObject {
                 await startLiveView()
             }
         } catch {
-            guard generation == sessionGeneration, configurationOwner == connectionConfigurationOwner,
-                  !Task.isCancelled,
+            guard generation == sessionGeneration, connectionAttemptOwner == owner,
+                  configurationOwner == connectionConfigurationOwner, !Task.isCancelled,
                   let recovery = ConnectionRecovery.classify(error, mode: requestedMode, operation: .connect) else { return }
             connectionRecovery = recovery
         }
+    }
+
+    /// Revoke publication synchronously. Keep all editable fields and the scanned
+    /// selection; neither cancellation nor a later edit initiates another attempt.
+    func cancelConnection() {
+        guard canCancelConnection else { return }
+        let generation = sessionGeneration
+        let retirement = connectingSessionRetirement
+        let opening = connectionSnapshotTask
+        connectionAttemptOwner = nil
+        connectionSnapshotTask = nil
+        connectingSessionRetirement = nil
+        opening?.cancel()
+        session = nil
+        sessionGeneration = UUID()
+        exportGeneration = UUID()
+        connectionConfigurationOwner = UUID()
+        connectionRecovery = nil
+        connectionWasCancelled = true
+        connectionIsWaitingForCleanup = false
+        end(.connect)
+        if let retirement { _ = retireConnectingSession(retirement, generation: generation) }
+    }
+
+    /// The cleanup Task does not inherit caller cancellation. Close first blocks
+    /// further old-client operations; awaiting opening retains late allocation
+    /// cleanup responsibility. A completed local close is not physical proof.
+    private func retireConnectingSession(_ retirement: ConnectingSessionRetirement,
+                                         generation: UUID) -> Task<Void, Never> {
+        // The record survives in the old connect continuation after the pending
+        // dictionary entry is removed, so its late catch cannot close twice.
+        if let cleanup = retirement.cleanup { return cleanup }
+        let closingSession = retirement.session
+        let opening = retirement.opening
+        pendingConnectionCleanup.insert(generation)
+        let cleanup = Task { [weak self] in
+            let firstRelease = await closingSession.closeWithShutterReleaseState()
+            let firstRecording = await closingSession.recordingCommandEvidence()
+            let firstLiveView = await closingSession.liveViewStopState()
+            let firstMaintenance = await closingSession.maintenanceRetirementUnconfirmed()
+            _ = await opening.result
+            let release = await closingSession.closeWithShutterReleaseState()
+            let recording = await closingSession.recordingCommandEvidence()
+            let liveView = await closingSession.liveViewStopState()
+            let maintenance = await closingSession.maintenanceRetirementUnconfirmed()
+            let connection = await closingSession.connectionRetirementUnconfirmed()
+            let retiredSafety = await closingSession.connectionRetirementSafetyWarnings()
+            guard let self else { return }
+            // Closing twice is locally idempotent, but never let later idle state
+            // erase an earlier unconfirmed shutter/recording/live-view obligation.
+            self.preservePreviousReleaseWarning(
+                firstRelease.releaseRequired || firstRelease.releaseUnconfirmed ? firstRelease : release,
+                generation: generation)
+            if firstRecording != nil || recording != nil { self.preservePreviousRecordingWarning(generation: generation) }
+            if firstLiveView.stopUnconfirmed || liveView.stopUnconfirmed { self.preservePreviousLiveViewWarning(generation: generation) }
+            if firstMaintenance || maintenance { self.previousMaintenanceRetirementWarnings.insert(generation) }
+            self.preservePreviousConnectionSafetyWarnings(retiredSafety, generation: generation)
+            if connection { self.previousConnectionCleanupWarnings.insert(generation) }
+            self.pendingConnectionCleanup.remove(generation)
+            self.connectionCleanupTasks[generation] = nil
+        }
+        retirement.cleanup = cleanup
+        connectionCleanupTasks[generation] = cleanup
+        return cleanup
     }
 
     func refreshMediaDateDisplayZone(_ timeZone: TimeZone = .current) {
@@ -904,11 +1022,16 @@ final class CameraAppState: ObservableObject {
 
     func requestDisconnect() {
         let generation = sessionGeneration
+        let retirement = connectingSessionRetirement
         let release = shutterReleaseState
         if recordingStopRequired { preservePreviousRecordingWarning(generation: generation) }
         let closingSession = prepareDisconnect()
         guard let closingSession else { return }
         preservePreviousReleaseWarning(release, generation: generation)
+        if let retirement {
+            disconnectTask = retireConnectingSession(retirement, generation: generation)
+            return
+        }
         let precedingClose = disconnectTask
         disconnectTask = Task { [weak self] in
             await precedingClose?.value
@@ -924,6 +1047,9 @@ final class CameraAppState: ObservableObject {
             let liveView = await closingSession.liveViewStopState()
             if liveView.stopUnconfirmed { self?.preservePreviousLiveViewWarning(generation: generation) }
             if await closingSession.maintenanceRetirementUnconfirmed() { self?.previousMaintenanceRetirementWarnings.insert(generation) }
+            let retiredSafety = await closingSession.connectionRetirementSafetyWarnings()
+            self?.preservePreviousConnectionSafetyWarnings(retiredSafety, generation: generation)
+            if await closingSession.connectionRetirementUnconfirmed() { self?.previousConnectionCleanupWarnings.insert(generation) }
         }
     }
 
@@ -950,6 +1076,19 @@ final class CameraAppState: ObservableObject {
         previousLiveViewWarnings.removeAll()
     }
 
+    private func preservePreviousConnectionSafetyWarnings(
+        _ warnings: Set<DesktopBridgeClient.ConnectionRetirementSafetyWarning>, generation: UUID
+    ) {
+        // A server safety code is warning evidence, never permission to send a
+        // Stop to an unknown ID or to the replacement camera.
+        if warnings.contains(.shutterRelease) {
+            preservePreviousReleaseWarning(
+                CameraShutterReleaseState(releaseUnconfirmed: true, bulbExposureActive: nil), generation: generation)
+        }
+        if warnings.contains(.recordingCommand) { preservePreviousRecordingWarning(generation: generation) }
+        if warnings.contains(.liveViewStop) { preservePreviousLiveViewWarning(generation: generation) }
+    }
+
     private func preservePreviousLiveViewWarning(generation: UUID) {
         guard !acknowledgedPreviousLiveViewWarnings.contains(generation) else { return }
         previousLiveViewWarnings.insert(generation)
@@ -970,6 +1109,12 @@ final class CameraAppState: ObservableObject {
     }
 
     private func prepareDisconnect() -> CameraSession? {
+        connectionSnapshotTask?.cancel()
+        connectionSnapshotTask = nil
+        connectingSessionRetirement = nil
+        connectionAttemptOwner = nil
+        connectionWasCancelled = false
+        connectionIsWaitingForCleanup = false
         invalidateConnectionGuidance()
         foregroundMedia.retire()
         foregroundFolderSelection = nil
@@ -1221,6 +1366,7 @@ final class CameraAppState: ObservableObject {
         applicationActive = active
         rtpController.setApplicationActive(active)
         if !active {
+            cancelConnection()
             foregroundFolderSelection = nil
             releaseHeldAutofocus()
             invalidateCameraFocusInfo()

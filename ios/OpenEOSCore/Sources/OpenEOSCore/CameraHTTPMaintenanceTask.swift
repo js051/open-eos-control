@@ -3,8 +3,8 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Scoped to camera maintenance and read-only Live View frames on the existing
-/// HTTP transport. One body
+/// Scoped to camera maintenance, Bridge session lifecycle, and read-only Live
+/// View frames on the existing HTTP transport. One body
 /// source, no redirect/authentication replay, bounded complete response evidence.
 /// This does not assert physical-camera or native wire acceptance without tests.
 final class CameraHTTPMaintenanceTask: NSObject, URLSessionDataDelegate, @unchecked Sendable {

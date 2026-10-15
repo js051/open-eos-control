@@ -101,7 +101,7 @@ private struct ShutterReleaseRecoveryView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     var body: some View {
-        if camera.liveViewNeedsRestart || camera.shutterReleaseRequired || camera.previousShutterReleaseUnconfirmed || !camera.previousRecordingWarnings.isEmpty || camera.liveViewStopState.stopUnconfirmed || !camera.previousLiveViewWarnings.isEmpty || !camera.previousMaintenanceRetirementWarnings.isEmpty {
+        if camera.liveViewNeedsRestart || camera.shutterReleaseRequired || camera.previousShutterReleaseUnconfirmed || !camera.previousRecordingWarnings.isEmpty || camera.liveViewStopState.stopUnconfirmed || !camera.previousLiveViewWarnings.isEmpty || !camera.previousMaintenanceRetirementWarnings.isEmpty || !camera.pendingConnectionCleanup.isEmpty || !camera.previousConnectionCleanupWarnings.isEmpty {
             VStack(spacing: 8) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
@@ -123,6 +123,16 @@ private struct ShutterReleaseRecoveryView: View {
                             Text(camera.liveViewStopState.stopUnconfirmed ? "live_view_stop_unconfirmed" : "live_view_stop_pending")
                                 .font(.headline)
                                 .accessibilityIdentifier("live-view-stop-warning")
+                        }
+                        if !camera.pendingConnectionCleanup.isEmpty {
+                            Text("connection_cleanup_pending")
+                                .font(.subheadline)
+                                .accessibilityIdentifier("connection-cleanup-pending")
+                        }
+                        if !camera.previousConnectionCleanupWarnings.isEmpty {
+                            Text("connection_cleanup_unconfirmed")
+                                .font(.subheadline)
+                                .accessibilityIdentifier("connection-cleanup-warning")
                         }
                         if !camera.previousMaintenanceRetirementWarnings.isEmpty {
                             Text("maintenance_retirement_unconfirmed")

@@ -62,8 +62,9 @@ struct ConnectionView: View {
                         } else {
                             Image(systemName: camera.connectionMode == .ccapi ? "wifi" : "desktopcomputer")
                         }
-                        Text(LocalizedStringKey(camera.isBusy(.connect) ? "connecting" :
-                            camera.connectionRecovery?.operation == .connect ? "connection_retry_connect" : "connect"))
+                        Text(LocalizedStringKey(camera.connectionIsWaitingForCleanup ? "connection_waiting_cleanup" :
+                            camera.isBusy(.connect) ? "connecting" :
+                            camera.connectionWasCancelled || camera.connectionRecovery?.operation == .connect ? "connection_retry_connect" : "connect"))
                             .fontWeight(.bold)
                     }
                     .frame(maxWidth: .infinity, minHeight: 54)
@@ -74,6 +75,27 @@ struct ConnectionView: View {
                 .foregroundStyle(Color.cameraBackground)
                 .disabled(camera.isBusy(.connect) || camera.isBusy(.scan) || !camera.canConnect)
                 .accessibilityIdentifier("connect-button")
+
+                if camera.canCancelConnection {
+                    Button("connection_cancel", role: .cancel) { camera.cancelConnection() }
+                        .buttonStyle(.bordered)
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("connection-cancel-button")
+                }
+                if camera.connectionWasCancelled {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("connection_cancelled_help")
+                            .font(.callout)
+                            .accessibilityIdentifier("connection-cancelled-message")
+                        Button("connection_edit_settings") {
+                            focusedField = camera.connectionMode == .ccapi ? .cameraURL : .bridgeURL
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("connection-edit-settings-button")
+                    }
+                    .foregroundStyle(Color.cameraSecondaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
                 HStack(spacing: 12) {
                     Rectangle().fill(Color.cameraBorder).frame(height: 1)
@@ -282,11 +304,7 @@ struct ConnectionView: View {
             .buttonStyle(.bordered)
             .buttonBorderShape(.roundedRectangle(radius: 6))
             .tint(Color.cameraText)
-            .disabled(
-                camera.isBusy(.scan)
-                    || camera.isBusy(.connect)
-                    || camera.bridgeURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            )
+            .disabled(!camera.canScanBridgeCameras)
             .accessibilityIdentifier("bridge-scan-button")
 
             if camera.bridgeScanState != .completed || camera.bridgeCameras.isEmpty {

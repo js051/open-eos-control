@@ -164,8 +164,24 @@ public actor DesktopBridgeClient {
     private var recordingLifecycleOwned = false
     private var mediaListingOwner: UUID?
     private var mediaListingStream: CameraHTTPStreamResponse?
+    private struct CreatedConnection: Sendable {
+        let id: String
+        let engine: String?
+        let rawEngine: String?
+    }
+    private struct SessionCreationNotDispatched: Error {}
     private var initializationToken: UUID?
     private var initializationCancelled = false
+    /// Server session deletion evidence only; never physical-camera stop proof.
+    public private(set) var connectionRetirementUnconfirmed = false
+    /// Evidence about this retired client only. These codes confer no Stop URL,
+    /// retryable command or responsibility on this client or its replacement.
+    public enum ConnectionRetirementSafetyWarning: String, Hashable, Sendable {
+        case shutterRelease = "SHUTTER_RELEASE_UNCONFIRMED"
+        case liveViewStop = "LIVE_VIEW_STOP_UNCONFIRMED"
+        case recordingCommand = "RECORDING_COMMAND_UNCONFIRMED"
+    }
+    public private(set) var connectionRetirementSafetyWarnings: Set<ConnectionRetirementSafetyWarning> = []
     private var isClosing = false
     private var closeWaiters: [CheckedContinuation<CameraShutterReleaseState, Never>] = []
     private var completedCloseState = CameraShutterReleaseState.idle
@@ -281,7 +297,8 @@ public actor DesktopBridgeClient {
     }
 
     public func initialize() async throws {
-        guard !isClosing else { throw DesktopBridgeError.sessionChanged }
+        try Task.checkCancellation()
+        guard !isClosing, !connectionRetirementUnconfirmed else { throw DesktopBridgeError.sessionChanged }
         guard sessionID == nil else { return }
         guard bulbStartTask == nil, bulbStopTask == nil, !bulbOperationInFlight else {
             throw DesktopBridgeError.sessionChanged
@@ -298,22 +315,58 @@ public actor DesktopBridgeClient {
         focusInfoSupported = false
         liveViewMagnifications = []
         try await validateService()
-        guard initializationToken == token, !initializationCancelled, !isClosing else { throw DesktopBridgeError.sessionChanged }
+        guard initializationToken == token, !initializationCancelled, !isClosing, !Task.isCancelled else {
+            throw DesktopBridgeError.sessionChanged
+        }
         var payload: BridgeJSON = ["engine": cameraEngine ?? "auto"]
         if let cameraID { payload["cameraId"] = cameraID }
         if let profileHint { payload["profileHint"] = profileHint }
-        let body = try await requestJSON(
-            url: endpoint(["v1", "session"]), method: "POST", payload: payload, connectionGuidance: true
-        )
-        guard let id = body.nonEmptyString("id") else {
-            throw DesktopBridgeError.invalidResponse("Desktop Bridge did not return a session ID.")
+        // Once dispatched, observe this bounded POST through its own task even
+        // if the UI opening task is cancelled. Aborting the wire reply would lose
+        // the allocated ID and turn an ordinary cancel into an unknown owner.
+        let creation = Task { () async throws -> CreatedConnection in
+            guard initializationToken == token, !initializationCancelled, !isClosing else {
+                throw SessionCreationNotDispatched()
+            }
+            let body = try await requestJSON(
+                url: endpoint(["v1", "session"]), method: "POST", payload: payload, connectionGuidance: true,
+                preserveConnectionRejection: true
+            )
+            guard let id = body["id"] as? String, (1...128).contains(id.utf8.count),
+                  id.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0)
+                      || (48...57).contains($0) || $0 == 45 || $0 == 95 }) else {
+                throw DesktopBridgeError.invalidResponse("Desktop Bridge did not return a valid session ID.")
+            }
+            return CreatedConnection(id: id, engine: body.nonEmptyString("engine"), rawEngine: body["engine"] as? String)
         }
+        let created: CreatedConnection
+        do {
+            created = try await creation.value
+        } catch {
+            // A genuinely lost/malformed POST may have allocated an unknown ID.
+            // A locally retired task that never dispatched owes no server cleanup.
+            if !(error is SessionCreationNotDispatched), !Self.isDefinitiveSessionRejection(error) {
+                connectionRetirementUnconfirmed = true
+            }
+            throw error
+        }
+        let id = created.id
         guard initializationToken == token, !initializationCancelled, !isClosing, !Task.isCancelled else {
             // Close may have invalidated an opening connection while POST was away.
             // Dispose only that returned ID; never install it into a newer session.
-            try? await requestOK(endpoint(["v1", "session", id]), method: "DELETE")
+            connectionRetirementUnconfirmed = true
+            // Unstructured cleanup has a fresh cancellation context and retains
+            // this immutable endpoint, token and returned ID until DELETE settles.
+            let deletion = Task { try await requestOK(endpoint(["v1", "session", id]), method: "DELETE", connectionRetirement: true) }
+            do {
+                try await deletion.value
+                connectionRetirementUnconfirmed = false
+            } catch {
+                // Keep the warning. Cancellation succeeded locally, not remotely.
+            }
             throw DesktopBridgeError.sessionChanged
         }
+        connectionRetirementUnconfirmed = false
         sessionGeneration = UUID()
         maintenanceLifecycleOwned = false; maintenanceEventStopRequired = false; maintenanceRetirementUnconfirmed = false
         maintenanceRecordingObservation = nil
@@ -330,8 +383,23 @@ public actor DesktopBridgeClient {
         shutterRelease = nil
         ownsShutterStatus = false
         sessionID = id
-        sessionEngine = body.nonEmptyString("engine")
-        captureConfigurationSessionEngine = body["engine"] as? String
+        sessionEngine = created.engine
+        captureConfigurationSessionEngine = created.rawEngine
+    }
+
+    private func preserveConnectionRetirementSafetyWarning(_ error: DesktopBridgeError) {
+        guard case let .http(_, _, _, code, _, _, _) = error,
+              let warning = ConnectionRetirementSafetyWarning(rawValue: code) else { return }
+        connectionRetirementSafetyWarnings.insert(warning)
+    }
+
+    private static func isDefinitiveSessionRejection(_ error: Error) -> Bool {
+        let underlying = (error as? DesktopBridgeCameraConnectionError)?.httpError ?? (error as? DesktopBridgeError)
+        guard let underlying, case let .http(status, _, _, code, _, _, engine) = underlying else { return false }
+        if ["SHUTTER_RELEASE_UNCONFIRMED", "LIVE_VIEW_STOP_UNCONFIRMED", "RECORDING_COMMAND_UNCONFIRMED"].contains(code) { return false }
+        if [400, 401, 403, 404, 405, 409, 422, 429].contains(status) { return true }
+        if [501, 503].contains(status), code == "ENGINE_UNAVAILABLE" { return true }
+        return status == 502 && code == "CCAPI_DISCOVERY_FAILED" && engine == "ccapi"
     }
 
     public func shutterReleaseState() -> CameraShutterReleaseState {
@@ -386,10 +454,11 @@ public actor DesktopBridgeClient {
             // Unstructured cleanup does not inherit the caller's cancellation.
             // Still await its result before retiring the session or close waiters.
             let deletion = Task {
-                try await requestOK(endpoint(["v1", "session", id]), method: "DELETE")
+                try await requestOK(endpoint(["v1", "session", id]), method: "DELETE", connectionRetirement: true)
             }
             try await deletion.value
         } catch {
+            connectionRetirementUnconfirmed = true
             if liveViewStop != nil || Self.isLiveViewStopError(error) { liveViewStopUnconfirmed = true }
             if shutterRelease != nil || focusHold != nil || Self.isShutterReleaseError(error) {
                 // DELETE can remove the server session even when cleanup fails.
@@ -426,9 +495,13 @@ public actor DesktopBridgeClient {
 
     public func connectSnapshot() async throws -> CameraSnapshot {
         try await initialize()
+        try Task.checkCancellation()
         let info = try await info()
+        try Task.checkCancellation()
         let status = try await status()
+        try Task.checkCancellation()
         let capabilities = try await capabilities()
+        try Task.checkCancellation()
         return CameraSnapshot(info: info, status: status, capabilities: capabilities)
     }
 
@@ -2334,6 +2407,7 @@ public actor DesktopBridgeClient {
         maximumBytes: Int? = nil,
         shutterOperation: Bool = false,
         connectionGuidance: Bool = false,
+        preserveConnectionRejection: Bool = false,
         recordingCommand: Bool? = nil,
         mediaMetadata: Bool = false,
         mediaMutationAttempt: CameraMediaMutationAttempt? = nil,
@@ -2389,6 +2463,8 @@ public actor DesktopBridgeClient {
                     response = try await transport.sendShootingSetting(request)
                 } else if captureConfigurationAttempt != nil || captureConfigurationRead {
                     response = try await transport.sendCaptureConfiguration(request)
+                } else if preserveConnectionRejection {
+                    response = try await transport.sendConnectionLifecycle(request)
                 } else if shutterOperation && isClosing && maintenanceLifecycleOwned {
                     request.timeoutInterval = 15
                     response = try await transport.sendMaintenance(request)
@@ -2431,8 +2507,15 @@ public actor DesktopBridgeClient {
         if shootingSettingAttempt != nil || shootingSettingRead {
             guard response.statusCode == 200 else { throw DesktopBridgeError.invalidResponse("Setting evidence requires HTTP 200.") }
         }
+        if preserveConnectionRejection {
+            try CameraHTTPResponseIntegrity.validate(response, requestMethod: method)
+            guard response.statusCode != 206, response.header("content-range") == nil else {
+                throw DesktopBridgeError.invalidResponse("Bridge session creation requires a complete response.")
+            }
+        }
         let responseError = (200..<300).contains(response.statusCode)
-            ? nil : Self.httpError(response: response, method: method, url: url, preservingProtocolStrings: recordingCommand != nil)
+            ? nil : Self.httpError(response: response, method: method, url: url,
+                preservingProtocolStrings: recordingCommand != nil || preserveConnectionRejection)
         if recordingCommand != nil, generation == sessionGeneration, !isClosing,
            let error = responseError, response.statusCode != 502 || recordingBodyComplete,
            !Self.isRecordingResponseUnconfirmed(response, error: error) {
@@ -2456,6 +2539,7 @@ public actor DesktopBridgeClient {
             throw DesktopBridgeError.recordingCommandUnconfirmed(starting: recordingCommand)
         }
         if let error = responseError {
+            if preserveConnectionRejection { preserveConnectionRetirementSafetyWarning(error) }
             if let recordingCommand, Self.isRecordingResponseUnconfirmed(response, error: error) {
                 throw DesktopBridgeError.recordingCommandUnconfirmed(starting: recordingCommand)
             }
@@ -2464,7 +2548,9 @@ public actor DesktopBridgeClient {
                 try adoptShutterRelease(unconfirmed: true, acceptsLegacyStop: false)
             }
             if connectionGuidance {
-                try Task.checkCancellation()
+                // A session-creation rejection must survive caller cancellation:
+                // it proves more than the local cancelled task flag does.
+                if !preserveConnectionRejection { try Task.checkCancellation() }
                 if let cameraError = Self.cameraConnectionError(response: response, httpError: error) {
                     throw cameraError
                 }
@@ -2516,7 +2602,8 @@ public actor DesktopBridgeClient {
         _ url: URL,
         method: String,
         payload: BridgeJSON? = nil,
-        timeoutInterval: TimeInterval = 10
+        timeoutInterval: TimeInterval = 10,
+        connectionRetirement: Bool = false
     ) async throws {
         try validateMutation(url: url, method: method)
         let ordinaryMutation = !["GET", "HEAD", "OPTIONS"].contains(method)
@@ -2530,11 +2617,26 @@ public actor DesktopBridgeClient {
             request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
             request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         }
-        let response = try await transport.send(request)
+        let response: CameraHTTPResponse
+        if connectionRetirement { response = try await transport.sendConnectionLifecycle(request) }
+        else { response = try await transport.send(request) }
         if scopedToSession, generation != sessionGeneration { throw DesktopBridgeError.sessionChanged }
+        if connectionRetirement {
+            try CameraHTTPResponseIntegrity.validate(response, requestMethod: method)
+            guard response.statusCode != 206, response.header("content-range") == nil else {
+                throw DesktopBridgeError.invalidResponse("Bridge session retirement requires a complete response.")
+            }
+        }
+        if connectionRetirement, (200..<300).contains(response.statusCode) {
+            guard response.statusCode == 204, response.body.isEmpty else {
+                throw DesktopBridgeError.invalidResponse("Bridge session retirement requires a complete HTTP 204 response.")
+            }
+        }
         guard (200..<300).contains(response.statusCode) else {
-            let error = Self.httpError(response: response, method: method, url: url)
-            if scopedToSession, revision == releaseRevision, Self.isShutterReleaseError(error) {
+            let error = Self.httpError(response: response, method: method, url: url,
+                                       preservingProtocolStrings: connectionRetirement)
+            if connectionRetirement { preserveConnectionRetirementSafetyWarning(error) }
+            if !connectionRetirement, scopedToSession, revision == releaseRevision, Self.isShutterReleaseError(error) {
                 try adoptShutterRelease(unconfirmed: true, acceptsLegacyStop: false)
             }
             throw error
