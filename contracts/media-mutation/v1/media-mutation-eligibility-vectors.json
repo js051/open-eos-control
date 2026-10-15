@@ -1,0 +1,325 @@
+{
+  "schemaVersion": 1,
+  "contract": "media-mutation-eligibility-v1",
+  "vectors": [
+    {
+      "id": "protection-supported",
+      "operation": "protection",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": true,
+      "item": {
+        "id": "item-a"
+      },
+      "eligible": true
+    },
+    {
+      "id": "protection-unsupported",
+      "operation": "protection",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": false,
+      "item": {
+        "id": "item-a"
+      },
+      "eligible": false
+    },
+    {
+      "id": "protection-unloaded",
+      "operation": "protection",
+      "requestedId": "item-a",
+      "loaded": false,
+      "supported": true,
+      "item": {
+        "id": "item-a"
+      },
+      "eligible": false
+    },
+    {
+      "id": "protection-explicit-veto",
+      "operation": "protection",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": true,
+      "item": {
+        "id": "item-a",
+        "protectionWritable": false
+      },
+      "eligible": false
+    },
+    {
+      "id": "protection-flag-does-not-grant",
+      "operation": "protection",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": false,
+      "item": {
+        "id": "item-a",
+        "protectionWritable": true
+      },
+      "eligible": false
+    },
+    {
+      "id": "rating-supported",
+      "operation": "rating",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": true,
+      "item": {
+        "id": "item-a"
+      },
+      "eligible": true
+    },
+    {
+      "id": "rating-unsupported",
+      "operation": "rating",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": false,
+      "item": {
+        "id": "item-a"
+      },
+      "eligible": false
+    },
+    {
+      "id": "rating-unloaded",
+      "operation": "rating",
+      "requestedId": "item-a",
+      "loaded": false,
+      "supported": true,
+      "item": {
+        "id": "item-a"
+      },
+      "eligible": false
+    },
+    {
+      "id": "rating-explicit-veto",
+      "operation": "rating",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": true,
+      "item": {
+        "id": "item-a",
+        "ratingWritable": false
+      },
+      "eligible": false
+    },
+    {
+      "id": "rating-flag-does-not-grant",
+      "operation": "rating",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": false,
+      "item": {
+        "id": "item-a",
+        "ratingWritable": true
+      },
+      "eligible": false
+    },
+    {
+      "id": "rotation-supported",
+      "operation": "rotation",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": true,
+      "item": {
+        "id": "item-a"
+      },
+      "eligible": true
+    },
+    {
+      "id": "rotation-unsupported",
+      "operation": "rotation",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": false,
+      "item": {
+        "id": "item-a"
+      },
+      "eligible": false
+    },
+    {
+      "id": "rotation-unloaded",
+      "operation": "rotation",
+      "requestedId": "item-a",
+      "loaded": false,
+      "supported": true,
+      "item": {
+        "id": "item-a"
+      },
+      "eligible": false
+    },
+    {
+      "id": "rotation-explicit-veto",
+      "operation": "rotation",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": true,
+      "item": {
+        "id": "item-a",
+        "rotationWritable": false
+      },
+      "eligible": false
+    },
+    {
+      "id": "rotation-flag-does-not-grant",
+      "operation": "rotation",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": false,
+      "item": {
+        "id": "item-a",
+        "rotationWritable": true
+      },
+      "eligible": false
+    },
+    {
+      "id": "archive-supported",
+      "operation": "archive",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": true,
+      "item": {
+        "id": "item-a",
+        "archived": false
+      },
+      "eligible": true
+    },
+    {
+      "id": "archive-unsupported",
+      "operation": "archive",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": false,
+      "item": {
+        "id": "item-a",
+        "archived": false
+      },
+      "eligible": false
+    },
+    {
+      "id": "archive-unloaded",
+      "operation": "archive",
+      "requestedId": "item-a",
+      "loaded": false,
+      "supported": true,
+      "item": {
+        "id": "item-a",
+        "archived": false
+      },
+      "eligible": false
+    },
+    {
+      "id": "archive-explicit-veto",
+      "operation": "archive",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": true,
+      "item": {
+        "id": "item-a",
+        "archived": false,
+        "archiveWritable": false
+      },
+      "eligible": false
+    },
+    {
+      "id": "archive-flag-does-not-grant",
+      "operation": "archive",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": false,
+      "item": {
+        "id": "item-a",
+        "archived": false,
+        "archiveWritable": true
+      },
+      "eligible": false
+    },
+    {
+      "id": "archive-unknown-missing",
+      "operation": "archive",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": true,
+      "item": {
+        "id": "item-a"
+      },
+      "eligible": false
+    },
+    {
+      "id": "archive-unknown-null",
+      "operation": "archive",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": true,
+      "item": {
+        "id": "item-a",
+        "archived": null
+      },
+      "eligible": false
+    },
+    {
+      "id": "archive-unknown-malformed",
+      "operation": "archive",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": true,
+      "item": {
+        "id": "item-a",
+        "archived": "false"
+      },
+      "eligible": false
+    },
+    {
+      "id": "unrelated-veto-not-global",
+      "operation": "rating",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": true,
+      "item": {
+        "id": "item-a",
+        "archiveWritable": false
+      },
+      "eligible": true
+    },
+    {
+      "id": "mismatched-item-id",
+      "operation": "rating",
+      "requestedId": "item-a",
+      "loaded": true,
+      "supported": true,
+      "item": {
+        "id": "other-item"
+      },
+      "eligible": false
+    }
+  ],
+  "snapshotVectors": [
+    {
+      "id": "current-loaded-veto-wins",
+      "selected": {
+        "id": "item-a",
+        "ratingWritable": true
+      },
+      "loaded": {
+        "id": "item-a",
+        "ratingWritable": false
+      },
+      "operation": "rating",
+      "eligible": false
+    },
+    {
+      "id": "current-loaded-archive-unknown-wins",
+      "selected": {
+        "id": "item-a",
+        "archived": true
+      },
+      "loaded": {
+        "id": "item-a",
+        "archived": null
+      },
+      "operation": "archive",
+      "eligible": false
+    }
+  ]
+}

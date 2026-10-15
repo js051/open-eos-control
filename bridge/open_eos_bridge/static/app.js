@@ -23,6 +23,8 @@
   if (!mediaLibrary) throw new Error("Open EOS media library module is unavailable.");
   const mediaBatch = globalThis.OpenEOSMediaBatch;
   if (!mediaBatch) throw new Error("Open EOS media batch module is unavailable.");
+  const mediaMutations = globalThis.OpenEOSMediaMutations;
+  if (!mediaMutations) throw new Error("Open EOS media mutations module is unavailable.");
   const mediaBatchDestination = globalThis.OpenEOSMediaBatchDestination;
   if (!mediaBatchDestination) throw new Error("Open EOS media batch destination module is unavailable.");
 
@@ -554,6 +556,39 @@
       mediaHistoryClearFailed: "History could not be cleared. Records may remain; reload history to check.",
       mediaBatchStart: "Save selected originals to folder…",
       mediaBatchUnavailable: "Batch saving needs a browser with folder access. You can still download originals individually.",
+      mediaMutationTitle: "Media metadata changes",
+      mediaMutationChoose: "Change selected files",
+      mediaMutationStart: "Apply to selected files",
+      mediaMutationProtect: "Protect",
+      mediaMutationUnprotect: "Unprotect",
+      mediaMutationArchive: "Archive",
+      mediaMutationUnarchive: "Unarchive",
+      mediaMutationRotation0: "Rotation: 0°",
+      mediaMutationRotation90: "Rotation: 90°",
+      mediaMutationRotation180: "Rotation: 180°",
+      mediaMutationRotation270: "Rotation: 270°",
+      mediaMutationSummary: "{confirmed} confirmed · {uncertain} uncertain · {failed} failed before sending · {notStarted} not started · {queued} queued · {running} running",
+      mediaMutationHelp: "Includes hidden selections. Unloaded or unsupported files stay in the results without a write. Up to 1,000 files, one at a time.",
+      mediaMutationNotice: "Confirmed requires the same file ID and requested value in readback. An uncertain result stops the batch. No automatic retry; inspect the file before starting another change.",
+      mediaMutationCancelling: "Remaining files are cancelled. The current write may still complete; confirmed results are retained.",
+      mediaMutationConfirmed: "Confirmed by readback",
+      mediaMutationUncertain: "Result uncertain; inspect before retrying",
+      mediaMutationFailed: "Failed before sending",
+      mediaMutationRunning: "Writing and verifying",
+      mediaMutationFinished: "Metadata batch ended. Review each file’s result.",
+      mediaMutationLimit: "Select at most 1,000 files. No changes were sent.",
+      mediaMutationInvalid: "The metadata operation could not be prepared. No changes were sent.",
+      mediaMutationUnavailable: "Not currently loaded",
+      mediaMutationUnsupported: "Not supported for this file or connection",
+      mediaMutationHidden: "Hidden by current filters",
+      mediaMutationRetired: "Connection changed",
+      mediaMutationCancelled: "Remaining changes cancelled",
+      mediaMutationRating0: "Rating: 0",
+      mediaMutationRating1: "Rating: 1",
+      mediaMutationRating2: "Rating: 2",
+      mediaMutationRating3: "Rating: 3",
+      mediaMutationRating4: "Rating: 4",
+      mediaMutationRating5: "Rating: 5",
       mediaBatchTitle: "Original file batch",
       mediaBatchChoosing: "Choose a folder. A new isolated batch folder will be created inside it.",
       mediaBatchDestination: "Destination: {name}",
@@ -1161,6 +1196,39 @@
       mediaHistoryClearFailed: "未能確認紀錄已清除；紀錄可能仍在，請重新載入查看。",
       mediaBatchStart: "將所選原檔儲存到資料夾…",
       mediaBatchUnavailable: "批次儲存需要支援資料夾存取的瀏覽器。仍可逐一下載原檔。",
+      mediaMutationTitle: "媒體資料批次變更",
+      mediaMutationChoose: "變更所選檔案",
+      mediaMutationStart: "套用至所選檔案",
+      mediaMutationProtect: "保護",
+      mediaMutationUnprotect: "取消保護",
+      mediaMutationArchive: "封存",
+      mediaMutationUnarchive: "取消封存",
+      mediaMutationRotation0: "旋轉：0°",
+      mediaMutationRotation90: "旋轉：90°",
+      mediaMutationRotation180: "旋轉：180°",
+      mediaMutationRotation270: "旋轉：270°",
+      mediaMutationSummary: "已確認 {confirmed} · 結果不確定 {uncertain} · 傳送前失敗 {failed} · 未開始 {notStarted} · 等待中 {queued} · 處理中 {running}",
+      mediaMutationHelp: "包含隱藏的選取項目。目前未載入或不支援的檔案會保留在結果中，不會寫入。最多 1,000 個檔案，逐一處理。",
+      mediaMutationNotice: "必須回讀相同檔案 ID 與指定值才會確認。結果不確定時會停止批次，不會自動重試；再次變更前請先檢查檔案。",
+      mediaMutationCancelling: "已取消後續檔案。目前的寫入仍可能完成；已確認結果會保留。",
+      mediaMutationConfirmed: "回讀已確認",
+      mediaMutationUncertain: "結果不確定，重試前請先檢查",
+      mediaMutationFailed: "傳送前失敗",
+      mediaMutationRunning: "正在寫入並確認",
+      mediaMutationFinished: "媒體資料批次已結束，請查看各檔案結果。",
+      mediaMutationLimit: "最多可選取 1,000 個檔案，尚未送出任何變更。",
+      mediaMutationInvalid: "無法準備媒體資料變更，尚未送出任何變更。",
+      mediaMutationUnavailable: "目前未載入",
+      mediaMutationUnsupported: "此檔案或連線不支援",
+      mediaMutationHidden: "目前篩選已隱藏",
+      mediaMutationRetired: "連線已變更",
+      mediaMutationCancelled: "已取消後續變更",
+      mediaMutationRating0: "評分：0",
+      mediaMutationRating1: "評分：1",
+      mediaMutationRating2: "評分：2",
+      mediaMutationRating3: "評分：3",
+      mediaMutationRating4: "評分：4",
+      mediaMutationRating5: "評分：5",
       mediaBatchTitle: "原檔批次儲存",
       mediaBatchChoosing: "請選擇資料夾，系統會在其中建立新的獨立批次資料夾。",
       mediaBatchDestination: "目的地：{name}",
@@ -1540,6 +1608,8 @@
     tapAction: "focus",
     media: [],
     mediaSelection: mediaBatch.createSelection(),
+    mediaMutationOwner: null,
+    mediaMutation: null,
     mediaBatchOwner: null,
     mediaBatch: null,
     mediaAutoImportOwner: null,
@@ -1773,6 +1843,15 @@
     mediaSelectFiltered: byId("media-select-filtered"),
     mediaSelectionClear: byId("media-selection-clear"),
     mediaSelectionSummary: byId("media-selection-summary"),
+    mediaMutationControls: byId("media-mutation-controls"),
+    mediaMutationOperation: byId("media-mutation-operation"),
+    mediaMutationStart: byId("media-mutation-start"),
+    mediaMutationPanel: byId("media-mutation-panel"),
+    mediaMutationSummary: byId("media-mutation-summary"),
+    mediaMutationRequested: byId("media-mutation-requested"),
+    mediaMutationNotice: byId("media-mutation-notice"),
+    mediaMutationList: byId("media-mutation-list"),
+    mediaMutationCancel: byId("media-mutation-cancel"),
     mediaBatchStart: byId("media-batch-start"),
     mediaBatchUnavailable: byId("media-batch-unavailable"),
     mediaBatchPanel: byId("media-batch-panel"),
@@ -1988,6 +2067,7 @@
     if (response.status === 204) return null;
     if (responseType === "blob") return response.blob();
     if (responseType === "text") return response.text();
+    if (responseType === "mediaMetadata") return mediaMutations.parseReadback(await response.text());
     return response.json();
   }
 
@@ -2394,6 +2474,7 @@
 
   async function disconnectCamera() {
     if (!state.session) return;
+    if (typeof cancelMediaMutation === "function") cancelMediaMutation();
     if (typeof stopMediaAutoImport === "function") stopMediaAutoImport("disconnected");
     const session = state.session;
     const sessionId = session.id;
@@ -2439,6 +2520,7 @@
 
   function resetSession() {
     state.mediaListingOwner?.cancel({ silent: true });
+    if (typeof cancelMediaMutation === "function") cancelMediaMutation();
     if (state.heldAutofocusOwner) {
       state.shutterDisconnectWarning = true;
       void stopHeldAutofocus({ owner: state.heldAutofocusOwner, automatic: true, keepalive: true });
@@ -2481,6 +2563,8 @@
     state.mediaSelection?.replaceLoaded([]);
     state.mediaBatchOwner = null;
     state.mediaBatch = null;
+    state.mediaMutationOwner = null;
+    state.mediaMutation = null;
     state.mediaAutoImportOwner = null;
     state.mediaAutoImport = null;
     state.mediaAutoImportThumbnailsDeferred = false;
@@ -2624,7 +2708,7 @@
 
   function mediaTransferActive() {
     return state.mediaDownloadPreparing || Boolean(state.mediaDownload) || Boolean(state.mediaUpload) ||
-      Boolean(state.mediaBatchOwner);
+      Boolean(state.mediaBatchOwner) || Boolean(state.mediaMutationOwner);
   }
 
   function cameraInteractionBusy() {
@@ -6010,7 +6094,7 @@
       card.className = "media-card";
       const selection = document.createElement("label");
       selection.className = "media-select";
-      selection.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
+      selection.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD) && !mediaMetadataSupported();
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.className = "media-select-checkbox";
@@ -6035,7 +6119,7 @@
       thumbnail.dataset.mediaId = item.id;
       if (previewSupported) {
         thumbnail.type = "button";
-        thumbnail.disabled = Boolean(state.mediaBatchOwner);
+        thumbnail.disabled = Boolean(state.mediaBatchOwner || state.mediaMutationOwner);
         thumbnail.setAttribute("aria-label", t("previewMedia", { name: item.name }));
         thumbnail.addEventListener("click", () => openMediaPreview(item));
       }
@@ -6090,9 +6174,10 @@
     if (!ui.mediaSelection || !state.mediaSelection) return;
     const selection = state.mediaSelection.snapshot(visibleItems.map((item) => item.id));
     const supported = featureSupported(FEATURES.MEDIA_DOWNLOAD);
+    const metadataSupported = typeof mediaMetadataSupported === "function" && mediaMetadataSupported();
     const folderAvailable = typeof window.showDirectoryPicker === "function";
     const busy = cameraInteractionBusy();
-    ui.mediaSelection.hidden = !supported;
+    ui.mediaSelection.hidden = !supported && !metadataSupported;
     ui.mediaSelectionSummary.textContent = t("mediaSelectionSummary", {
       selected: selection.length,
       hidden: selection.filter((entry) => entry.loaded && entry.hidden).length,
@@ -6101,7 +6186,9 @@
     ui.mediaSelectFiltered.disabled = !state.session || busy || !visibleItems.length;
     ui.mediaSelectionClear.disabled = busy || !selection.length;
     ui.mediaBatchStart.disabled = !state.session || !supported || busy || !selection.length || !folderAvailable;
-    ui.mediaBatchUnavailable.hidden = folderAvailable;
+    ui.mediaBatchUnavailable.hidden = folderAvailable || !supported;
+    ui.mediaBatchStart.hidden = !supported;
+    if (typeof renderMediaMutationControls === "function") renderMediaMutationControls(selection, busy);
     ui.mediaList.querySelectorAll(".media-select-checkbox").forEach((checkbox) => {
       checkbox.disabled = busy;
     });
@@ -6283,6 +6370,146 @@
       ui.mediaHistoryClear.disabled = false;
       ui.mediaHistoryStatus.textContent = t("mediaHistoryClearFailed");
     }
+  }
+
+  function selectedMediaMutation() {
+    const [suffix, rawValue] = ui.mediaMutationOperation.value.split(":");
+    return mediaMutations.operation(suffix, JSON.parse(rawValue));
+  }
+
+  function renderMediaMutationControls(selection, busy) {
+    if (!ui.mediaMutationControls) return;
+    ui.mediaMutationControls.hidden = !mediaMetadataSupported();
+    ui.mediaMutationOperation.disabled = busy || !state.session;
+    ui.mediaMutationOperation.querySelectorAll("option").forEach((option) => {
+      const [suffix, rawValue] = option.value.split(":");
+      option.disabled = !featureSupported(mediaMutations.operation(suffix, JSON.parse(rawValue)).feature);
+    });
+    let supported = false;
+    try { supported = featureSupported(selectedMediaMutation().feature); } catch (_) { /* Invalid selection stays disabled. */ }
+    ui.mediaMutationStart.disabled = !state.session || busy || !selection.length || !supported;
+  }
+
+  function ownsMediaMutation(owner) {
+    return state.mediaMutationOwner === owner && state.session === owner.session;
+  }
+
+  function renderMediaMutation() {
+    if (!ui.mediaMutationPanel) return;
+    const batch = state.mediaMutation;
+    ui.mediaMutationPanel.hidden = !batch;
+    if (!batch) return;
+    const keys = {
+      queued: ["queued", "mediaBatchQueued"], running: ["running", "mediaMutationRunning"],
+      confirmed: ["confirmed", "mediaMutationConfirmed"], uncertain: ["uncertain", "mediaMutationUncertain"],
+      "failed-not-sent": ["failed", "mediaMutationFailed"], "not-started": ["notStarted", "mediaBatchNotStarted"],
+    };
+    const counts = { confirmed: 0, uncertain: 0, failed: 0, notStarted: 0, queued: 0, running: 0 };
+    ui.mediaMutationList.replaceChildren();
+    for (const result of batch.queue.results) {
+      const [counter, label] = keys[result.status];
+      counts[counter] += 1;
+      const row = document.createElement("li");
+      row.dataset.mediaId = result.id;
+      row.dataset.status = result.status;
+      const name = document.createElement("strong");
+      name.textContent = result.item.name || result.id;
+      const identity = document.createElement("span");
+      identity.className = "supporting";
+      identity.textContent = result.id;
+      const status = document.createElement("span");
+      status.textContent = t(label);
+      const detail = document.createElement("span");
+      detail.className = "supporting";
+      const reasons = [];
+      if (!result.loaded) reasons.push(t("mediaMutationUnavailable"));
+      else if (result.hidden) reasons.push(t("mediaMutationHidden"));
+      if (["unsupported", "unsupported-item"].includes(result.reason)) reasons.push(t("mediaMutationUnsupported"));
+      if (result.reason === "cancelled") reasons.push(t("mediaMutationCancelled"));
+      if (result.reason === "retired") reasons.push(t("mediaMutationRetired"));
+      detail.textContent = reasons.join(" · ");
+      row.append(name, identity, status, detail);
+      ui.mediaMutationList.append(row);
+    }
+    const requested = batch.operation;
+    const operationKey = requested.suffix === "protection" ? (requested.value ? "mediaMutationProtect" : "mediaMutationUnprotect")
+      : requested.suffix === "archive" ? (requested.value ? "mediaMutationArchive" : "mediaMutationUnarchive")
+        : `mediaMutation${requested.suffix === "rating" ? "Rating" : "Rotation"}${requested.value}`;
+    ui.mediaMutationRequested.textContent = t(operationKey);
+    ui.mediaMutationSummary.textContent = t("mediaMutationSummary", counts);
+    ui.mediaMutationNotice.textContent = t(state.mediaMutationOwner?.controller.signal.aborted
+      ? "mediaMutationCancelling" : "mediaMutationNotice");
+    ui.mediaMutationCancel.hidden = !state.mediaMutationOwner;
+    ui.mediaMutationCancel.disabled = !state.mediaMutationOwner || state.mediaMutationOwner.controller.signal.aborted;
+  }
+
+  function cancelMediaMutation() {
+    const owner = state.mediaMutationOwner;
+    if (!owner || !ownsMediaMutation(owner)) return;
+    owner.controller.abort();
+    renderMediaMutation();
+  }
+
+  async function runMediaMutation(entries, requested) {
+    if (!state.session || cameraInteractionBusy() || state.mediaDetailsBusy) return;
+    let roster;
+    try { roster = mediaMutations.freezeRoster(entries); }
+    catch (error) { showToast(t(error instanceof RangeError ? "mediaMutationLimit" : "mediaMutationInvalid"), true); return; }
+    if (!roster.length) return;
+    const owner = { session: state.session, controller: new AbortController() };
+    const batch = { operation: requested, queue: { results: roster.map((entry) => ({ ...entry, status: "queued" })) } };
+    state.mediaListingOwner?.cancel({ silent: true });
+    state.mediaMutationOwner = owner;
+    state.mediaMutation = batch;
+    const applied = new Set();
+    renderMedia();
+    renderAvailability();
+    try {
+      const result = await mediaMutations.run(roster, requested, {
+        signal: owner.controller.signal,
+        isCurrent: () => ownsMediaMutation(owner),
+        preflight: (entry, spec) => mediaMutations.qualify(entry, spec, featureSupported(spec.feature)),
+        dispatch: (entry, spec, { signal }) => api(
+          `/v1/session/${encodeURIComponent(owner.session.id)}/media/${encodeURIComponent(entry.id)}/${spec.suffix}`,
+          { method: "PUT", json: spec.json, signal, responseType: "mediaMetadata", redirect: "error" },
+        ),
+        onUpdate: (queue) => {
+          if (!ownsMediaMutation(owner)) return;
+          batch.queue = queue;
+          for (const row of queue.results) {
+            if (row.status === "confirmed" && !applied.has(row.id)) {
+              applied.add(row.id);
+              // Publish only the verified requested field, never an ACK's other
+              // fields or a response's renamed/aliased identity.
+              replaceMediaItem(row.observed);
+            }
+          }
+          renderMediaMutation();
+          renderMediaDetails();
+        },
+      });
+      if (!ownsMediaMutation(owner)) return;
+      batch.queue = result;
+      const uncertain = result.results.some((row) => row.status === "uncertain");
+      showToast(t(uncertain ? "mediaMutationUncertain" : "mediaMutationFinished"), uncertain);
+    } finally {
+      if (ownsMediaMutation(owner)) {
+        state.mediaMutationOwner = null;
+        renderMedia();
+        renderAvailability();
+        renderMediaPreviewNavigation();
+      }
+    }
+  }
+
+  async function updateSelectedMediaMetadata() {
+    if (!state.session || cameraInteractionBusy()) return;
+    let requested;
+    try { requested = selectedMediaMutation(); }
+    catch (_) { showToast(t("mediaMutationInvalid"), true); return; }
+    state.mediaSelection.replaceLoaded(state.media);
+    const roster = state.mediaSelection.snapshot(displayedMedia().map((item) => item.id));
+    await runMediaMutation(roster, requested);
   }
 
   function renderMediaBatch() {
@@ -7209,7 +7436,7 @@
   async function loadMediaThumbnail(item) {
     if (
       !state.session ||
-      Boolean(state.mediaBatchOwner) ||
+      Boolean(state.mediaBatchOwner || state.mediaMutationOwner) ||
       !featureSupported(FEATURES.MEDIA_THUMBNAIL) || !mediaLibrary.canRequestThumbnail(item) ||
       state.mediaThumbnailUrls.has(item.id) ||
       state.mediaThumbnailLoads.has(item.id) ||
@@ -7514,6 +7741,7 @@
     state.mediaListingOwner?.cancel({ silent: true });
     clearMediaDetails();
     const generation = state.mediaDetailsGeneration;
+    const session = state.session;
     state.mediaDetailsItem = item;
     ui.mediaDetailsDialog.showModal();
     renderMediaDetails();
@@ -7522,18 +7750,20 @@
     renderMediaDetails();
     try {
       const updated = await api(
-        `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}/info`,
+        `/v1/session/${encodeURIComponent(session.id)}/media/${encodeURIComponent(item.id)}/info`,
+        { responseType: "mediaMetadata" },
       );
-      if (generation !== state.mediaDetailsGeneration || state.mediaDetailsItem?.id !== item.id) return;
+      if (state.session !== session || generation !== state.mediaDetailsGeneration || state.mediaDetailsItem?.id !== item.id) return;
+      if (updated?.id !== item.id) throw new Error(t("mediaMutationUncertain"));
       replaceMediaItem(updated);
       renderMedia();
     } catch (error) {
-      if (generation === state.mediaDetailsGeneration) {
+      if (state.session === session && generation === state.mediaDetailsGeneration) {
         const normalized = captureError(error);
         showToast(normalized.message, true);
       }
     } finally {
-      if (generation === state.mediaDetailsGeneration) {
+      if (state.session === session && generation === state.mediaDetailsGeneration) {
         state.mediaDetailsBusy = false;
         renderMediaDetails();
       }
@@ -7543,30 +7773,11 @@
   async function updateMediaMetadata(feature, suffix, json) {
     const item = state.mediaDetailsItem;
     if (!state.session || !item || !featureSupported(feature) || state.mediaDetailsBusy || cameraInteractionBusy()) return;
-    state.mediaListingOwner?.cancel({ silent: true });
-    const generation = state.mediaDetailsGeneration;
-    state.mediaDetailsBusy = true;
-    renderMediaDetails();
-    try {
-      const updated = await api(
-        `/v1/session/${encodeURIComponent(state.session.id)}/media/${encodeURIComponent(item.id)}/${suffix}`,
-        { method: "PUT", json },
-      );
-      if (generation !== state.mediaDetailsGeneration || state.mediaDetailsItem?.id !== item.id) return;
-      replaceMediaItem(updated);
-      renderMedia();
-      showToast(t("mediaMetadataUpdated", { name: item.name }));
-    } catch (error) {
-      if (generation === state.mediaDetailsGeneration) {
-        const normalized = captureError(error);
-        showToast(normalized.message, true);
-      }
-    } finally {
-      if (generation === state.mediaDetailsGeneration) {
-        state.mediaDetailsBusy = false;
-        renderMediaDetails();
-      }
-    }
+    let requested;
+    try { requested = mediaMutations.operation(suffix, json.value ?? json.degrees ?? json.enabled); }
+    catch (_) { showToast(t("mediaMutationInvalid"), true); return; }
+    if (requested.feature !== feature) return;
+    await runMediaMutation([{ id: item.id, item, loaded: true, hidden: false }], requested);
   }
 
   function closeMediaPreview() {
@@ -7579,7 +7790,7 @@
     if (
       !state.session ||
       Boolean(state.mediaAutoImportReading) ||
-      Boolean(state.mediaBatchOwner) ||
+      Boolean(state.mediaBatchOwner || state.mediaMutationOwner) ||
       (video && !featureSupported(FEATURES.MEDIA_DOWNLOAD)) ||
       (!video && (!mediaLibrary.isPhoto(item) || item.previewAvailable !== true || !featureSupported(FEATURES.MEDIA_PREVIEW)))
     ) return;
@@ -7656,9 +7867,9 @@
     if (typeof renderMediaAutoImport === "function") renderMediaAutoImport();
     const items = previewableMedia();
     const index = items.findIndex((item) => item.id === state.mediaPreviewItem?.id);
-    ui.mediaPreviewPrevious.disabled = Boolean(state.mediaBatchOwner || state.mediaAutoImportReading) || index <= 0;
-    ui.mediaPreviewNext.disabled = Boolean(state.mediaBatchOwner || state.mediaAutoImportReading) || index < 0 || index >= items.length - 1;
-    ui.mediaPreviewRetry.disabled = Boolean(state.mediaBatchOwner || state.mediaAutoImportReading);
+    ui.mediaPreviewPrevious.disabled = Boolean(state.mediaBatchOwner || state.mediaMutationOwner || state.mediaAutoImportReading) || index <= 0;
+    ui.mediaPreviewNext.disabled = Boolean(state.mediaBatchOwner || state.mediaMutationOwner || state.mediaAutoImportReading) || index < 0 || index >= items.length - 1;
+    ui.mediaPreviewRetry.disabled = Boolean(state.mediaBatchOwner || state.mediaMutationOwner || state.mediaAutoImportReading);
     ui.mediaPreviewFailureDownload.disabled = cameraInteractionBusy();
     const item = state.mediaPreviewItem;
     if (!item) return;
@@ -7700,6 +7911,7 @@
   function renderMediaTransfer() {
     renderMediaSelection();
     renderMediaBatch();
+    if (typeof renderMediaMutation === "function") renderMediaMutation();
     if (typeof renderMediaAutoImport === "function") renderMediaAutoImport();
     const transfer = state.mediaUpload || state.mediaDownload;
     const uploading = Boolean(state.mediaUpload);
@@ -8539,11 +8751,15 @@
     ui.mediaHistoryConfirmYes.addEventListener("click", clearMediaHistory);
     ui.mediaBatchStart.addEventListener("click", downloadSelectedMedia);
     ui.mediaBatchCancel.addEventListener("click", () => cancelMediaBatch());
+    ui.mediaMutationStart.addEventListener("click", () => void updateSelectedMediaMetadata());
+    ui.mediaMutationCancel.addEventListener("click", cancelMediaMutation);
+    ui.mediaMutationOperation.addEventListener("change", () => renderMediaSelection());
     ui.mediaAutoImportStart?.addEventListener("click", startMediaAutoImport);
     ui.mediaAutoImportStop?.addEventListener("click", () => stopMediaAutoImport());
     document.addEventListener?.("visibilitychange", () => {
       if (document.visibilityState !== "visible") {
         stopMediaAutoImport("backgrounded");
+        if (typeof cancelMediaMutation === "function") cancelMediaMutation();
         releaseHeldAutofocusForLifecycle();
         cancelCameraFocusInfo();
       }
@@ -8555,6 +8771,7 @@
     });
     window.addEventListener("pagehide", () => {
       stopMediaAutoImport("backgrounded");
+      if (typeof cancelMediaMutation === "function") cancelMediaMutation();
       releaseHeldAutofocusForLifecycle();
       cancelCameraFocusInfo();
     });
@@ -8730,6 +8947,7 @@
     });
     window.addEventListener("beforeunload", () => {
       state.mediaListingOwner?.cancel({ silent: true });
+      if (typeof cancelMediaMutation === "function") cancelMediaMutation();
       releaseHeldAutofocusForLifecycle();
       cancelCameraFocusInfo();
       cancelCameraScan();

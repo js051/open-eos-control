@@ -2160,3 +2160,9 @@ button.media-thumbnail:focus-visible {
 @media (max-width: 540px) {
   .viewfinder-column:has(> .camera-focus-legend:not([hidden])) { grid-template-rows: minmax(0, 1fr) auto 72px; }
 }
+
+#media-mutation-controls[hidden] { display: none; }
+#media-mutation-operation { max-width: 100%; min-height: 44px; }
+#media-mutation-help { flex-basis: 100%; }
+#media-mutation-list li[data-status="confirmed"] { border-color: var(--accent); }
+#media-mutation-list li[data-status="uncertain"], #media-mutation-list li[data-status="failed-not-sent"] { border-color: var(--danger); }

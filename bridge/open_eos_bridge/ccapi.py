@@ -2911,6 +2911,11 @@ class CcapiSession:
             return self._media_info(media_id)
 
     def set_media_protection(self, media_id: str, enabled: bool) -> MediaItem:
+        if type(enabled) is not bool:
+            raise BridgeError(
+                "INVALID_MEDIA_PROTECTION", "Media protection must be a boolean.", status_code=422,
+                feature=CameraFeature.MEDIA_PROTECT.value, engine=self.engine_name,
+            )
         return self._modify_media(
             media_id,
             action="protect",
@@ -2920,7 +2925,7 @@ class CcapiSession:
         )
 
     def set_media_rating(self, media_id: str, value: int) -> MediaItem:
-        if value not in range(6):
+        if type(value) is not int or value not in range(6):
             raise BridgeError(
                 "INVALID_MEDIA_RATING",
                 "Media rating must be from 0 through 5.",
@@ -2933,11 +2938,11 @@ class CcapiSession:
             action="rating",
             value="off" if value == 0 else str(value),
             feature=CameraFeature.MEDIA_RATING,
-            matches=lambda item: item.rating == value,
+            matches=lambda item: type(item.rating) is int and item.rating == value,
         )
 
     def set_media_rotation(self, media_id: str, degrees: int) -> MediaItem:
-        if degrees not in {0, 90, 180, 270}:
+        if type(degrees) is not int or degrees not in {0, 90, 180, 270}:
             raise BridgeError(
                 "INVALID_MEDIA_ROTATION",
                 "Media rotation must be 0, 90, 180, or 270 degrees.",
@@ -2950,10 +2955,15 @@ class CcapiSession:
             action="rotate",
             value=str(degrees),
             feature=CameraFeature.MEDIA_ROTATE,
-            matches=lambda item: item.rotation_degrees == degrees,
+            matches=lambda item: type(item.rotation_degrees) is int and item.rotation_degrees == degrees,
         )
 
     def set_media_archive(self, media_id: str, enabled: bool) -> MediaItem:
+        if type(enabled) is not bool:
+            raise BridgeError(
+                "INVALID_MEDIA_ARCHIVE", "Media archive state must be a boolean.", status_code=422,
+                feature=CameraFeature.MEDIA_ARCHIVE.value, engine=self.engine_name,
+            )
         return self._modify_media(
             media_id,
             action="archive",
@@ -2982,7 +2992,16 @@ class CcapiSession:
                 deadline if deadline is not None else time.monotonic() + MAX_MEDIA_INVENTORY_SECONDS,
             )
         else:
-            value = self._request_json("GET", f"{path}?kind=info")
+            response = self._request("GET", f"{path}?kind=info")
+            try:
+                value = json.loads(
+                    response.body, object_pairs_hook=_strict_json_object, parse_constant=_reject_media_json_constant,
+                )
+            except (UnicodeDecodeError, ValueError, RecursionError) as error:
+                raise BridgeError(
+                    "INVALID_CCAPI_MEDIA_INFO", "Camera media information contained invalid or ambiguous JSON.",
+                    status_code=502, feature=CameraFeature.MEDIA_BROWSER.value, engine=self.engine_name,
+                ) from error
         if not isinstance(value, dict):
             raise BridgeError(
                 "INVALID_CCAPI_MEDIA_INFO",
@@ -2990,6 +3009,13 @@ class CcapiSession:
                 status_code=502,
                 feature=CameraFeature.MEDIA_BROWSER.value,
                 engine=self.engine_name,
+            )
+        # Canon kind=info may omit identity because the request names one exact
+        # file. An explicit identity may never contradict that request.
+        if "id" in value and (not isinstance(value["id"], str) or value["id"] != media_id):
+            raise BridgeError(
+                "INVALID_CCAPI_MEDIA_INFO", "Camera media information returned a conflicting media identity.",
+                status_code=502, feature=CameraFeature.MEDIA_BROWSER.value, engine=self.engine_name,
             )
         base = self._media_cache.get(media_id) or MediaItem(
             id=media_id,
@@ -3028,6 +3054,14 @@ class CcapiSession:
                 "rating": _canon_rating(value.get("rating")),
                 "rotation_degrees": _canon_rotation(value.get("rotate")),
                 "archived": _canon_archive(value.get("archive")),
+                **{
+                    field: value[alias]
+                    for field, alias in (
+                        ("protection_writable", "protectionWritable"), ("rating_writable", "ratingWritable"),
+                        ("rotation_writable", "rotationWritable"), ("archive_writable", "archiveWritable"),
+                    )
+                    if type(value.get(alias)) is bool
+                },
                 **_media_folder_fields(path),
             }
         )
@@ -3048,12 +3082,17 @@ class CcapiSession:
             self._ensure_initialized()
             if not self._supports_media_modify():
                 raise unsupported(feature.value, self.engine_name)
-            path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
+            path = self._inventory_path(_decode_media_id(media_id))
+            if _media_id(path) != media_id or not _is_media_path(path):
+                raise BridgeError(
+                    "INVALID_MEDIA_ID", "Media modification requires an exact canonical media identity.",
+                    status_code=422, feature=feature.value, engine=self.engine_name,
+                )
             self._request_ok("PUT", path, {"action": action, "value": value}, expected_status=200)
             latest: MediaItem | None = None
             for attempt in range(3):
                 latest = self._media_info(media_id)
-                if matches(latest):
+                if latest.id == media_id and matches(latest):
                     self._observed.add(feature)
                     return latest
                 if attempt < 2:
@@ -3522,7 +3561,9 @@ class CcapiSession:
             if declared_length is not None and declared_length != len(payload):
                 raise self._inventory_incomplete("invalid or truncated JSON response length")
             try:
-                value = json.loads(payload, object_pairs_hook=_strict_json_object)
+                value = json.loads(
+                    payload, object_pairs_hook=_strict_json_object, parse_constant=_reject_media_json_constant,
+                )
             except (UnicodeDecodeError, ValueError, RecursionError) as error:
                 raise self._inventory_incomplete("invalid JSON response") from error
             self._inventory_remaining(deadline)
@@ -4995,6 +5036,12 @@ def _first_positive(value: dict[str, object], *keys: str) -> int | None:
     return None
 
 
+def _reject_media_json_constant(value: str) -> None:
+    # Python's decoder otherwise accepts NaN and infinities even in unrelated or
+    # nested fields. Invalid JSON cannot prove any media observation.
+    raise ValueError(f"Nonstandard JSON constant cannot provide media evidence: {value}")
+
+
 def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     value: dict[str, object] = {}
     for key, item in pairs:
@@ -5028,40 +5075,31 @@ def _optional_string(value: object) -> str | None:
 
 
 def _canon_protection(value: object) -> bool | None:
-    normalized = _optional_string(value)
-    if normalized == "enable":
+    if not isinstance(value, str):
+        return None
+    if value == "enable":
         return True
-    if normalized == "disable":
+    if value == "disable":
         return False
     return None
 
 
 def _canon_archive(value: object) -> bool | None:
-    normalized = _optional_string(value)
-    if normalized == "enable":
-        return True
-    if normalized == "disable":
-        return False
-    return None
+    return _canon_protection(value)
 
 
 def _canon_rating(value: object) -> int | None:
-    normalized = _optional_string(value)
-    if normalized == "off":
-        return 0
-    try:
-        rating = int(normalized) if normalized is not None else -1
-    except ValueError:
+    if not isinstance(value, str):
         return None
-    return rating if rating in range(1, 6) else None
+    if value == "off":
+        return 0
+    return int(value) if value in ("1", "2", "3", "4", "5") else None
 
 
 def _canon_rotation(value: object) -> int | None:
-    try:
-        degrees = int(value)
-    except (TypeError, ValueError):
+    if not isinstance(value, str):
         return None
-    return degrees if degrees in {0, 90, 180, 270} else None
+    return int(value) if value in ("0", "90", "180", "270") else None
 
 
 def _setting_value(settings: dict[str, object], key: str) -> str | None:

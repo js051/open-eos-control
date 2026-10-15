@@ -257,7 +257,9 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "FEATURES.MEDIA_RATING" in script
     assert "FEATURES.MEDIA_ROTATE" in script
     assert "FEATURES.MEDIA_ARCHIVE" in script
-    assert '{ method: "PUT", json }' in script
+    assert '{ method: "PUT", json: spec.json, signal, responseType: "mediaMetadata", redirect: "error" }' in script
+    assert "mediaMutations.run(roster, requested" in script
+    assert "mediaMutations.parseReadback(await response.text())" in script
     assert 'FEATURES.MEDIA_PROTECT, "protection", { enabled: true }' in script
     assert 'FEATURES.MEDIA_PROTECT, "protection", { enabled: false }' in script
     assert 'FEATURES.MEDIA_RATING, "rating", { value:' in script

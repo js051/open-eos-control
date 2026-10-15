@@ -510,6 +510,15 @@ class CameraFocusInfo(ApiModel):
     image_aspect_ratio: float = Field(gt=0, allow_inf_nan=False)
 
 
+def _media_metadata_integer(value: object, allowed: tuple[int, ...]) -> int:
+    """Parse only normalized media integers and their canonical ASCII strings."""
+    if type(value) is int and value in allowed:
+        return value
+    if isinstance(value, str) and value in tuple(str(item) for item in allowed):
+        return int(value)
+    raise ValueError("Media metadata must be an allowed integer or its canonical ASCII string.")
+
+
 class MediaItem(ApiModel):
     id: str
     name: str
@@ -520,12 +529,27 @@ class MediaItem(ApiModel):
     width_pixels: int | None = Field(default=None, gt=0)
     height_pixels: int | None = Field(default=None, gt=0)
     preview_available: bool = False
-    protected: bool | None = None
+    protected: StrictBool | None = None
     rating: int | None = Field(default=None, ge=0, le=5)
     rotation_degrees: Literal[0, 90, 180, 270] | None = None
-    archived: bool | None = None
+    archived: StrictBool | None = None
+    # Optional per-item vetoes; true/absence never grant transport capability.
+    protection_writable: StrictBool | None = None
+    rating_writable: StrictBool | None = None
+    rotation_writable: StrictBool | None = None
+    archive_writable: StrictBool | None = None
     folder_id: str | None = Field(default=None, max_length=MAX_FOLDER_ID_LENGTH)
     folder_label: str | None = Field(default=None, max_length=MAX_FOLDER_LABEL_LENGTH)
+
+    @field_validator("rating", mode="before")
+    @classmethod
+    def validate_rating(cls, value: object) -> int | None:
+        return None if value is None else _media_metadata_integer(value, (0, 1, 2, 3, 4, 5))
+
+    @field_validator("rotation_degrees", mode="before")
+    @classmethod
+    def validate_rotation(cls, value: object) -> int | None:
+        return None if value is None else _media_metadata_integer(value, (0, 90, 180, 270))
 
     @field_validator("folder_id", mode="before")
     @classmethod
@@ -546,19 +570,29 @@ class MediaItem(ApiModel):
 
 
 class MediaProtectionUpdate(ApiModel):
-    enabled: bool
+    enabled: StrictBool
 
 
 class MediaRatingUpdate(ApiModel):
     value: int = Field(ge=0, le=5)
 
+    @field_validator("value", mode="before")
+    @classmethod
+    def validate_value(cls, value: object) -> int:
+        return _media_metadata_integer(value, (0, 1, 2, 3, 4, 5))
+
 
 class MediaRotationUpdate(ApiModel):
     degrees: Literal[0, 90, 180, 270]
 
+    @field_validator("degrees", mode="before")
+    @classmethod
+    def validate_degrees(cls, value: object) -> int:
+        return _media_metadata_integer(value, (0, 90, 180, 270))
+
 
 class MediaArchiveUpdate(ApiModel):
-    enabled: bool
+    enabled: StrictBool
 
 
 class MediaList(ApiModel):
