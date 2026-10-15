@@ -457,13 +457,14 @@ enum CameraSession: Sendable {
     func uploadMedia(
         from fileURL: URL,
         contentType: String? = nil,
+        attempt: CameraMediaUploadAttempt,
         progress: @escaping CameraMediaProgressHandler = { _ in }
     ) async throws -> CameraMediaItem {
         switch self {
         case let .ccapi(client):
-            return try await client.uploadMedia(from: fileURL, contentType: contentType, progress: progress)
+            return try await client.uploadMedia(from: fileURL, contentType: contentType, attempt: attempt, progress: progress)
         case let .desktopBridge(client):
-            return try await client.uploadMedia(from: fileURL, contentType: contentType, progress: progress)
+            return try await client.uploadMedia(from: fileURL, contentType: contentType, attempt: attempt, progress: progress)
         }
     }
 

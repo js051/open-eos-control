@@ -46,6 +46,29 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertTrue(progress.values().contains { $0.bytesTransferred == Int64(payload.count) })
     }
 
+    func testUploadPreservesWhitespaceAndOpaqueReceiptIDsThroughTheActualClient() async throws {
+        for id in [" ", "x/%2f/e\u{301}"] {
+            let transport = MockCameraHTTPTransport()
+            await transport.enqueueJSON(path: "/health", body: health)
+            await transport.enqueueJSON(method: "POST", path: "/v1/session", status: 201,
+                body: #"{"id":"receipt-id","engine":"libgphoto2"}"#)
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let file = directory.appendingPathComponent("EXACT.JPG")
+            try Data([1, 2, 3, 4]).write(to: file)
+            await transport.enqueueUpload(path: "/v1/session/receipt-id/media?filename=EXACT.JPG",
+                body: try JSONSerialization.data(withJSONObject: ["id": id, "name": "EXACT.JPG", "kind": "photo", "sizeBytes": 4]))
+            let client = try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: transport)
+            try await client.initialize()
+            let attempt = CameraMediaUploadAttempt()
+            let item = try await client.uploadMedia(from: file, attempt: attempt)
+            XCTAssertEqual(Array(item.id.utf8), Array(id.utf8))
+            XCTAssertEqual(attempt.outcome, .verified)
+            XCTAssertEqual(Array(try XCTUnwrap(attempt.receipt).id.utf8), Array(id.utf8))
+        }
+    }
+
     func testDesktopBridgeRejectsUploadWhenReturnedNameOrSizeDoesNotMatchLocalFile() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/health", body: health)

@@ -2733,6 +2733,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     public func uploadMedia(
         from fileURL: URL,
         contentType: String? = nil,
+        attempt: CameraMediaUploadAttempt = CameraMediaUploadAttempt(),
         progress: @escaping CameraMediaProgressHandler = { _ in }
     ) async throws -> CameraMediaItem {
         throw CCAPIError.unsupported(.mediaUpload)

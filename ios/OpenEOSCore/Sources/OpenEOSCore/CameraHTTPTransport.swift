@@ -730,6 +730,16 @@ private final class CameraHTTPUploadTaskHandle: NSObject, URLSessionTaskDelegate
     }
 
     func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        // Never retransmit selected personal bytes to a redirect destination,
+        // even for 307/308. The first POST remains possibly dispatched.
+        completionHandler(nil)
+    }
+
+    func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
         didSendBodyData bytesSent: Int64,
@@ -787,13 +797,16 @@ private final class CameraHTTPUploadTaskHandle: NSObject, URLSessionTaskDelegate
         lock.unlock()
 
         activeSession?.finishTasksAndInvalidate()
-        if cancelled {
+        // A complete error-free response wins a racing cancel request. The
+        // caller still validates the exact receipt before declaring success.
+        // Partial/cancelled responses with an error remain uncertain.
+        if error == nil, let status {
+            progress(CameraMediaTransferProgress(bytesTransferred: totalBytes ?? 0, totalBytes: totalBytes))
+            continuation.resume(returning: CameraHTTPUploadResponse(statusCode: status, headers: headers, body: body))
+        } else if cancelled {
             continuation.resume(throwing: CancellationError())
         } else if let error {
             continuation.resume(throwing: error)
-        } else if let status {
-            progress(CameraMediaTransferProgress(bytesTransferred: totalBytes ?? 0, totalBytes: totalBytes))
-            continuation.resume(returning: CameraHTTPUploadResponse(statusCode: status, headers: headers, body: body))
         } else {
             continuation.resume(throwing: CCAPIError.invalidResponse("Upload ended without an HTTP response."))
         }

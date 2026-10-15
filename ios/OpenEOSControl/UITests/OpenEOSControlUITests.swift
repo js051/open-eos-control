@@ -1119,6 +1119,94 @@ final class OpenEOSControlUITests: XCTestCase {
         addScreenshot(name: "media-delete-confirmed")
     }
 
+    func testRealDocumentPickerCancellationAndReopeningAfterReconnectInBothLanguages() throws {
+        for (language, apple, locale, cancel) in [
+            ("english", "en", "en_US", "Cancel"),
+            ("traditionalChinese", "zh-Hant", "zh_TW", "取消"),
+        ] {
+            let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
+                environment: ["OEC_UPLOAD_JOURNEY_FIXTURE": "success"])
+            defer { app.terminate() }
+            XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
+            app.buttons["connect-button"].tap()
+            XCTAssertTrue(app.staticTexts["camera-model-status"].waitForExistence(timeout: 8))
+            openUploadFixtureGallery(app)
+            app.buttons["upload-media-button"].tap()
+            let picker = app.otherElements["media-upload-document-picker"]
+            XCTAssertTrue(picker.waitForExistence(timeout: 8), "This must be the actual OS document picker")
+            let cancelButton = app.buttons[cancel].firstMatch
+            XCTAssertTrue(waitForInteraction(cancelButton, timeout: 8))
+            cancelButton.tap()
+            XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
+            XCTAssertFalse(app.staticTexts["media-upload-complete"].exists)
+            XCTAssertFalse(app.staticTexts["media-upload-uncertain"].exists)
+            reconnectUploadFixture(app)
+            openUploadFixtureGallery(app)
+            app.buttons["upload-media-button"].tap()
+            XCTAssertTrue(picker.waitForExistence(timeout: 8))
+            XCTAssertTrue(waitForInteraction(cancelButton, timeout: 8))
+            cancelButton.tap()
+            XCTAssertTrue(picker.waitForNonExistence(timeout: 5))
+            XCTAssertFalse(app.staticTexts["media-upload-complete"].exists)
+            addScreenshot(name: "upload-picker-cancel-reconnect-\(apple)")
+        }
+    }
+
+    func testRealPickerSelectionCancelOrLostAckKeepsUncertaintyAcrossReconnect() throws {
+        for (language, apple, locale) in [("english", "en", "en_US"), ("traditionalChinese", "zh-Hant", "zh_TW")] {
+            for scenario in ["cancel", "lost-ack", "success"] {
+                let app = launch(appLanguage: language, appleLanguage: apple, locale: locale,
+                    environment: ["OEC_UPLOAD_JOURNEY_FIXTURE": scenario])
+                defer { app.terminate() }
+                XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
+                app.buttons["connect-button"].tap()
+                XCTAssertTrue(app.staticTexts["camera-model-status"].waitForExistence(timeout: 8))
+                openUploadFixtureGallery(app)
+                app.buttons["upload-media-button"].tap()
+                XCTAssertTrue(app.otherElements["media-upload-document-picker"].waitForExistence(timeout: 8))
+                // The DEBUG fixture seeds only this synthetic app-owned file and
+                // asks the real picker to open that directory. No delegate injection.
+                let source = app.cells.containing(NSPredicate(format: "label CONTAINS %@", "SYNTHETIC-UPLOAD")).firstMatch
+                XCTAssertTrue(source.waitForExistence(timeout: 8), "The OS provider must expose the seeded directory; missing provider access is a failed native gate")
+                source.tap()
+                if scenario == "cancel" {
+                    let cancel = app.buttons["cancel-media-upload-status"]
+                    XCTAssertTrue(waitForInteraction(cancel, timeout: 8)); cancel.tap()
+                }
+                let resultID = scenario == "success" ? "media-upload-complete" : "media-upload-uncertain"
+                XCTAssertTrue(app.staticTexts[resultID].waitForExistence(timeout: 8))
+                if scenario != "success" {
+                    XCTAssertFalse(app.staticTexts["media-upload-complete"].exists)
+                    XCTAssertTrue(app.staticTexts["media-upload-recovery"].exists)
+                    let review = app.buttons["media-upload-review-files"]
+                    XCTAssertTrue(waitForInteraction(review, timeout: 5)); review.tap()
+                    XCTAssertTrue(app.staticTexts["media-upload-uncertain"].exists, "A same-name list is not this upload's receipt")
+                }
+                reconnectUploadFixture(app)
+                openUploadFixtureGallery(app)
+                XCTAssertTrue(app.staticTexts[resultID].waitForExistence(timeout: 8))
+                XCTAssertTrue(app.staticTexts["media-upload-previous-connection"].exists)
+                XCTAssertFalse(app.buttons["media-upload-review-files"].exists, "Do not review an old attempt against the new camera")
+                addScreenshot(name: "upload-\(scenario)-reconnect-\(apple)")
+            }
+        }
+    }
+
+    private func openUploadFixtureGallery(_ app: XCUIApplication) {
+        openMoreActions(in: app)
+        XCTAssertTrue(tapCameraAction(app.buttons["camera-media-menu-button"], in: app))
+        XCTAssertTrue(waitForInteraction(app.buttons["upload-media-button"], timeout: 8))
+    }
+    private func reconnectUploadFixture(_ app: XCUIApplication) {
+        app.buttons["media-back-button"].tap()
+        openMoreActions(in: app)
+        XCTAssertTrue(tapCameraAction(app.buttons["disconnect-menu-button"], in: app))
+        XCTAssertTrue(waitForConnectionScreen(in: app, timeout: 8))
+        XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
+        app.buttons["connect-button"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["camera-model-status"], containing: "2", timeout: 8))
+    }
+
     func testOfflineMediaDownloadCompletesFromTheRowAction() throws {
         let app = launch(appLanguage: "english", appleLanguage: "en", locale: "en_US")
         XCTAssertTrue(app.buttons["offline-preview-button"].waitForExistence(timeout: 8))

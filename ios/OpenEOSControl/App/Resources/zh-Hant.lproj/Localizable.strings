@@ -279,7 +279,7 @@
 "cancel_media_upload" = "取消媒體上傳";
 "uploading_media" = "正在上傳 %@";
 "media_upload_progress_known" = "%@ / %@（%d%%）";
-"media_upload_progress_unknown" = "已上傳 %@";
+"media_upload_progress_unknown" = "已傳送 %@；等待確認";
 "upload_complete" = "已上傳 %@";
 "save_media" = "儲存或分享媒體";
 "delete_media" = "刪除媒體";
@@ -864,3 +864,12 @@
 "media_mutation_history_clear_title" = "清除此批次記錄？";
 "media_mutation_history_clear_confirm" = "只清除記錄";
 "media_mutation_history_clear_warning" = "這會永久移除此 app 執行期間的結果記錄，無法復原記錄。這不是復原操作：不會撤銷相機命令或已發生的變更。未確認的變更可能已生效；再次操作前請檢查相機。執行中的批次不能清除；其他批次會保留。";
+
+// Per-attempt upload evidence and manual recovery.
+"media_upload_not_sent" = "未送出：%@。未派送上傳要求。";
+"media_upload_uncertain" = "上傳結果未確認：%@。相機可能已接收檔案。";
+"media_upload_manual_recovery" = "再次選檔前，請先檢查原相機與資料夾。重新整理清單無法確認這次上傳；不會自動重送或刪檔。";
+"media_upload_previous_connection" = "這是先前連線的結果，不代表目前相機的狀態。";
+"media_upload_refresh_failed" = "媒體庫重新整理未完成；上方上傳結果不變。請手動重新整理媒體庫。";
+"media_upload_review_files" = "檢查相機檔案";
+"cancel_media_upload_refresh" = "取消媒體庫重新整理";

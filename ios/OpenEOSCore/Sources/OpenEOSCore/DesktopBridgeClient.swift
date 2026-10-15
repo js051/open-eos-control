@@ -1551,8 +1551,11 @@ public actor DesktopBridgeClient {
     public func uploadMedia(
         from fileURL: URL,
         contentType: String? = nil,
+        attempt: CameraMediaUploadAttempt = CameraMediaUploadAttempt(),
         progress: @escaping CameraMediaProgressHandler = { _ in }
     ) async throws -> CameraMediaItem {
+        let generation = sessionGeneration
+        let requestAttemptID = attempt.id
         let values = try fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
         guard values.isRegularFile == true, let fileSize = values.fileSize, fileSize > 0 else {
             throw DesktopBridgeError.invalidResponse("The selected upload is not a regular file.")
@@ -1560,7 +1563,7 @@ public actor DesktopBridgeClient {
         guard Int64(fileSize) <= Self.maximumUploadBytes else {
             throw DesktopBridgeError.invalidResponse("The selected upload exceeds the Desktop Bridge size limit.")
         }
-        let filename = fileURL.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filename = fileURL.lastPathComponent
         guard !filename.isEmpty, filename != ".", !filename.contains("/") else {
             throw DesktopBridgeError.invalidResponse("The selected upload has an invalid filename.")
         }
@@ -1572,7 +1575,12 @@ public actor DesktopBridgeClient {
         request.setValue(contentType ?? inferredContentType, forHTTPHeaderField: "Content-Type")
         request.setValue(String(fileSize), forHTTPHeaderField: "Content-Length")
         try validateMutation(url: url, method: "POST")
-        let response = try await transport.upload(request, from: fileURL) { value in
+        let staged = try CameraMediaUploadStagedFile.create(from: fileURL)
+        defer { withExtendedLifetime(staged) {} }
+        guard staged.size == Int64(fileSize) else { throw DesktopBridgeError.invalidResponse("The selected upload changed during staging.") }
+        try Task.checkCancellation()
+        try attempt.markDispatched()
+        let response = try await transport.upload(request, from: staged.url) { value in
             progress(
                 CameraMediaTransferProgress(
                     bytesTransferred: value.bytesTransferred,
@@ -1580,7 +1588,8 @@ public actor DesktopBridgeClient {
                 )
             )
         }
-        guard (200..<300).contains(response.statusCode) else {
+        guard generation == sessionGeneration, !isClosing else { throw DesktopBridgeError.sessionChanged }
+        guard response.statusCode == 201 else {
             throw Self.httpError(
                 statusCode: response.statusCode,
                 body: Data(response.body.prefix(Self.maximumErrorBodyBytes)),
@@ -1588,19 +1597,9 @@ public actor DesktopBridgeClient {
                 url: url
             )
         }
-        guard response.body.count <= Self.maximumErrorBodyBytes * 16,
-              let value = try? JSONSerialization.jsonObject(with: response.body),
-              let itemBody = value as? BridgeJSON,
-              let item = Self.parseMediaItem(itemBody) else {
-            throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid uploaded media information.")
-        }
-        guard item.name.caseInsensitiveCompare(filename) == .orderedSame,
-              item.sizeBytes == Int64(fileSize) else {
-            let returnedSize = item.sizeBytes.map(String.init) ?? "unknown"
-            throw DesktopBridgeError.invalidResponse(
-                "Desktop Bridge upload verification failed for \(filename): returned \(item.name) with size \(returnedSize)."
-            )
-        }
+        let item = try CameraMediaUploadReceipt.mediaItem(response, filename: filename, size: Int64(fileSize),
+            responseAttemptID: requestAttemptID, expectedAttemptID: attempt.id)
+        attempt.recordVerified(item)
         progress(CameraMediaTransferProgress(bytesTransferred: Int64(fileSize), totalBytes: Int64(fileSize)))
         return item
     }

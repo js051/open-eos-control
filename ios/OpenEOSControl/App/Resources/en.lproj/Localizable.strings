@@ -279,7 +279,7 @@
 "cancel_media_upload" = "Cancel media upload";
 "uploading_media" = "Uploading %@";
 "media_upload_progress_known" = "%@ / %@ (%d%%)";
-"media_upload_progress_unknown" = "%@ uploaded";
+"media_upload_progress_unknown" = "%@ sent; awaiting verification";
 "upload_complete" = "Uploaded %@";
 "save_media" = "Save or share media";
 "delete_media" = "Delete media";
@@ -864,3 +864,12 @@
 "media_mutation_history_clear_title" = "Clear this batch record?";
 "media_mutation_history_clear_confirm" = "Clear record only";
 "media_mutation_history_clear_warning" = "This permanently removes this app-session result record and cannot restore it. It is not an undo: camera commands and changes are not reversed. Unconfirmed changes may already have taken effect. Review the camera before another operation. Running batches cannot be cleared; other batches remain.";
+
+// Per-attempt upload evidence and manual recovery.
+"media_upload_not_sent" = "Not sent: %@. No upload request was dispatched.";
+"media_upload_uncertain" = "Upload outcome unconfirmed: %@. The camera may have accepted it.";
+"media_upload_manual_recovery" = "Check the original camera and folder before choosing the file again. Refreshing the list cannot confirm this attempt. Nothing is resent or deleted automatically.";
+"media_upload_previous_connection" = "Result from a previous connection. It does not describe the current camera.";
+"media_upload_refresh_failed" = "The gallery refresh did not finish. The upload result above is unchanged. Refresh the gallery manually.";
+"media_upload_review_files" = "Review camera files";
+"cancel_media_upload_refresh" = "Cancel gallery refresh";
