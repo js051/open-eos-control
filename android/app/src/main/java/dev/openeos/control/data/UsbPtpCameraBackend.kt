@@ -460,6 +460,58 @@ class UsbPtpCameraBackend(
         return CameraEvent()
     }
 
+    override fun maintenanceAccess(request: MaintenanceRequest, liveView: LiveViewRequest?): MaintenanceAccess {
+        require(request.action == MaintenanceAction.CLOCK_SYNC) { "USB does not advertise sleep or sensor cleaning." }
+        val owner = requireSession()
+        val property = canonClockPropertyCode(requireDeviceInfo()) ?: unsupported<Int>(CameraFeature.CAMERA_CLOCK_SYNC)
+        fun current() { check(session === owner && canonRemotePrepared) { "USB maintenance session is not prepared or has changed." } }
+        return MaintenanceAccess("USB PTP", restoreAvailable = false, stopEvents = {}, stopLiveView = {}, dispatch = { frozen, evidence ->
+            require(frozen == request); current()
+            val requested = requireNotNull(request.clock).epochMillis / 1_000L
+            require(requested in 0L..UINT32_MAX)
+            evidence.reference(MaintenanceClockReference(requested - 10, requested + 10, null, null))
+            canonEventMutex.withLock {
+                current(); currentCoroutineContext().ensureActive()
+                // Discard queued pre-write clock events; only the next same-property event is verification.
+                owner.executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+                current(); currentCoroutineContext().ensureActive(); evidence.beforeDispatch()
+                owner.executeDataOutOperation(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                    CanonEosPtp.uint32PropertyPayload(property, requested))
+                evidence.responseReceived()
+                currentCoroutineContext().ensureActive(); current()
+                var last: MaintenanceClockObservation? = null
+                withTimeoutOrNull(CANON_CLOCK_SYNC_VERIFY_TIMEOUT_MILLIS) {
+                    while (true) {
+                        currentCoroutineContext().ensureActive(); current()
+                        val payload = owner.executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+                        currentCoroutineContext().ensureActive(); current()
+                        CanonEosPtp.propertyUpdates(payload).lastOrNull { it.propertyCode == property && it.currentValue != null }
+                            ?.currentValue?.let { value ->
+                                last = MaintenanceClockObservation(value)
+                                if (abs(value - requested) <= CANON_CLOCK_SYNC_TOLERANCE_SECONDS) return@withTimeoutOrNull
+                            }
+                        delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
+                    }
+                }
+                val observation = last
+                if (observation == null) evidence.initialUnavailable()
+                else evidence.initialRead(MaintenanceReadback(observation))
+            }
+        }, read = { frozen ->
+            require(frozen == request); current()
+            // No prepare, property request, status, cached value, write, or live-view start.
+            canonEventMutex.withLock {
+                currentCoroutineContext().ensureActive(); current()
+                val payload = owner.executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+                currentCoroutineContext().ensureActive(); current()
+                val value = CanonEosPtp.propertyUpdates(payload)
+                    .lastOrNull { it.propertyCode == property && it.currentValue != null }?.currentValue
+                    ?: error("No fresh same-property USB clock observation.")
+                MaintenanceReadback(MaintenanceClockObservation(value))
+            }
+        }, restore = { error("Clock sync does not restore monitoring.") })
+    }
+
     override suspend fun syncCameraClock(): CameraStatus {
         val info = requireDeviceInfo()
         refreshCanonPropertyState(info)

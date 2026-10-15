@@ -102,7 +102,7 @@
     <string name="capture_photo">拍攝照片</string><string name="start_recording">開始錄影</string><string name="stop_recording">停止錄影</string><string name="recording">REC</string><string name="recording_time">REC %1$s</string>
     <string name="capture_not_supported">相機未公告支援拍照快門。</string><string name="recording_not_supported">相機未公告支援錄影控制。</string>
     <string name="fps_value">%1$d FPS</string><string name="fps_compact">%1$d FPS</string><string name="live_view_frame_rate">Live View 畫面更新率</string><string name="rtp_render_frame_rate">顯示幀率</string><string name="live_view_source">串流來源</string><string name="live_view_source_auto">自動</string><string name="live_view_source_rtp">RTP H.264</string><string name="live_view_source_multipart">Multipart JPEG</string><string name="live_view_source_jpeg">JPEG 輪詢</string><string name="live_view_source_usb">USB 預覽</string><string name="live_view_source_bridge">桌面橋接</string><string name="live_view_source_simulator">模擬器</string><string name="fps_control_description">Live View 畫面更新率，%1$d FPS</string><string name="fps_requested_observed">要求 %1$d · 實測 %2$.1f FPS</string><string name="decrease_fps">降低畫面更新率</string><string name="increase_fps">提高畫面更新率</string>
-    <string name="size">Live View 尺寸</string><string name="size_small">小</string><string name="size_medium">中</string><string name="size_large">大</string><string name="auto_refresh">自動更新</string><string name="composition_grid">構圖格線</string><string name="rtp_audio_monitor">相機聲音監聽</string><string name="rtp_audio_monitor_hint">播放相機 RTP 工作階段公告的聲音；每次連線預設靜音。</string><string name="rtp_audio_monitor_unavailable">相機已公告 RTP 音訊，但此裝置無法準備播放。</string><string name="rtp_audio_monitor_description">相機 RTP 聲音監聽</string><string name="no_settings">此模式沒有可用設定。</string><string name="sync_camera_clock">相機日期與時間</string><string name="sync_camera_clock_hint">使用此裝置的時間與時區設定相機，並回讀確認結果。</string><string name="camera_clock_synced_at">已於 %1$s 驗證</string><string name="sync_now">立即同步</string>
+    <string name="size">Live View 尺寸</string><string name="size_small">小</string><string name="size_medium">中</string><string name="size_large">大</string><string name="auto_refresh">自動更新</string><string name="composition_grid">構圖格線</string><string name="rtp_audio_monitor">相機聲音監聽</string><string name="rtp_audio_monitor_hint">播放相機 RTP 工作階段公告的聲音；每次連線預設靜音。</string><string name="rtp_audio_monitor_unavailable">相機已公告 RTP 音訊，但此裝置無法準備播放。</string><string name="rtp_audio_monitor_description">相機 RTP 聲音監聽</string><string name="no_settings">此模式沒有可用設定。</string><string name="sync_camera_clock">相機日期與時間</string><string name="sync_camera_clock_hint">請求同步此裝置的時間，分別保留回應與時鐘讀取證據；僅在傳輸支援時驗證時區與夏令時間。</string><string name="camera_clock_synced_at">已於 %1$s 驗證</string><string name="sync_now">立即同步</string>
     <string name="create_capture_directory">建立拍攝目錄</string><string name="create_capture_directory_hint">在相機中建立新目錄，並加入可選擇的拍攝目錄。</string><string name="directory_name">目錄名稱</string><string name="directory_name_rule">留空可使用相機預設名稱，或輸入剛好 5 個大寫英文字母、數字或底線。</string><string name="directory_created">已建立 %1$s</string><string name="create">建立</string>
     <string name="file_naming">檔名設定</string>
     <string name="file_naming_photo_summary">相片檔名：%1$s</string>
@@ -131,7 +131,7 @@
     <string name="network">網路</string><string name="camera_route">相機路由</string><string name="target_host">目標主機</string><string name="network_interface">網路介面</string><string name="network_handle">網路識別碼</string><string name="camera_network_available">相機網路可用</string>
     <string name="wifi_available">Wi-Fi 可用</string><string name="cellular_available">行動網路可用</string><string name="cellular_validated">行動網路已驗證可上網</string><string name="system_default_transport">系統預設傳輸</string><string name="system_default_interface">系統預設介面</string><string name="system_default_network_handle">系統預設網路識別碼</string><string name="system_default_validated">系統預設網路已驗證可上網</string><string name="wifi_cellular_coexistence">相機 Wi-Fi ＋行動網路</string><string name="system_network_none">無</string><string name="system_network_wifi">Wi-Fi</string><string name="system_network_cellular">行動網路</string><string name="system_network_ethernet">乙太網路</string><string name="system_network_vpn">VPN</string><string name="system_network_other">其他</string><string name="route_system_default">系統預設</string><string name="route_wifi_bound">已綁定相機 Wi-Fi</string><string name="yes">是</string><string name="no">否</string>
     <string name="language">語言</string><string name="language_system">自動（跟隨系統）</string><string name="language_english">English</string><string name="language_traditional_chinese">繁體中文</string>
-    <string name="setting_af_method">自動對焦方式</string><string name="setting_af_operation">自動對焦操作</string><string name="setting_continuous_af">連續自動對焦</string><string name="setting_drive_mode">驅動模式</string><string name="setting_metering_mode">測光模式</string><string name="setting_flash_mode">閃光燈模式</string><string name="setting_picture_style">相片風格</string><string name="setting_shooting_mode">拍攝模式</string><string name="setting_image_quality">影像畫質</string><string name="setting_image_quality_sd">SD 卡影像畫質</string><string name="setting_image_quality_cf">CF／CFexpress 卡影像畫質</string><string name="setting_movie_quality">短片畫質</string><string name="setting_movie_servo_af">短片伺服自動對焦</string><string name="setting_color_temperature">色溫</string><string name="setting_exposure_compensation">曝光補償</string><string name="setting_white_balance_shift_a">白平衡偏移 A</string><string name="setting_white_balance_shift_b">白平衡偏移 B</string><string name="setting_color_space">色彩空間</string><string name="setting_aspect_ratio">畫面比例</string><string name="setting_power_zoom_speed">電動變焦速度</string><string name="setting_auto_power_off">自動關閉電源</string><string name="camera_sleep">讓相機進入休眠</string><string name="camera_sleep_hint">結束 CCAPI 連線並立即讓相機進入省電休眠。</string><string name="camera_sleep_confirm_title">讓相機進入休眠？</string><string name="camera_sleep_confirm_message">Live View 與目前的相機連線將會結束。再次連線前，請先在相機上將其喚醒。</string><string name="sleep_now">立即休眠</string><string name="setting_capture_target">拍攝儲存位置</string><string name="setting_high_iso_noise_reduction">高 ISO 感光度消除雜訊</string><string name="setting_auto_lighting_optimizer">自動亮度優化</string><string name="setting_aeb">自動包圍曝光（AEB）</string><string name="setting_ae_mode">自動曝光模式</string>
+    <string name="setting_af_method">自動對焦方式</string><string name="setting_af_operation">自動對焦操作</string><string name="setting_continuous_af">連續自動對焦</string><string name="setting_drive_mode">驅動模式</string><string name="setting_metering_mode">測光模式</string><string name="setting_flash_mode">閃光燈模式</string><string name="setting_picture_style">相片風格</string><string name="setting_shooting_mode">拍攝模式</string><string name="setting_image_quality">影像畫質</string><string name="setting_image_quality_sd">SD 卡影像畫質</string><string name="setting_image_quality_cf">CF／CFexpress 卡影像畫質</string><string name="setting_movie_quality">短片畫質</string><string name="setting_movie_servo_af">短片伺服自動對焦</string><string name="setting_color_temperature">色溫</string><string name="setting_exposure_compensation">曝光補償</string><string name="setting_white_balance_shift_a">白平衡偏移 A</string><string name="setting_white_balance_shift_b">白平衡偏移 B</string><string name="setting_color_space">色彩空間</string><string name="setting_aspect_ratio">畫面比例</string><string name="setting_power_zoom_speed">電動變焦速度</string><string name="setting_auto_power_off">自動關閉電源</string><string name="camera_sleep">請求相機休眠</string><string name="camera_sleep_hint">請求休眠、保留結果並暫停監看；請自行確認相機實際狀態。</string><string name="camera_sleep_confirm_title">請求相機休眠？</string><string name="camera_sleep_confirm_message">送出請求前會暫停監看，保留結果且不會自動中斷連線。請自行確認並喚醒相機，再明確重新連線。</string><string name="sleep_now">請求休眠</string><string name="setting_capture_target">拍攝儲存位置</string><string name="setting_high_iso_noise_reduction">高 ISO 感光度消除雜訊</string><string name="setting_auto_lighting_optimizer">自動亮度優化</string><string name="setting_aeb">自動包圍曝光（AEB）</string><string name="setting_ae_mode">自動曝光模式</string>
     <string name="setting_image_quality_raw">RAW 畫質</string><string name="setting_image_quality_jpeg">JPEG 畫質</string><string name="setting_image_quality_heif">HEIF 畫質</string><string name="setting_white_balance_shift_ba">白平衡偏移 B/A</string><string name="setting_white_balance_shift_mg">白平衡偏移 M/G</string>
     <string name="preview_interface">離線預覽操作介面</string><string name="offline_preview">離線 UI 預覽</string><string name="offline_preview_hint">不連接相機也能查看與操作介面</string>
     <string name="open_latest_media">開啟最近一筆相機媒體</string><string name="open_latest_media_named">開啟最近一筆相機媒體：%1$s</string>
@@ -422,10 +422,10 @@
     <string name="camera_value_2_minutes">2 分鐘</string>
     <string name="camera_value_disable_touch">關閉觸控提示音</string>
     <string name="sensor_cleaning">清潔相機感光元件</string>
-    <string name="sensor_cleaning_hint">執行相機內建的感光元件清潔程序；清潔期間會暫停 Live View。</string>
+    <string name="sensor_cleaning_hint">請求相機執行內建感光元件清潔程序並暫停監看；收到回應不代表實際清潔已完成。</string>
     <string name="sensor_cleaning_confirm_title">清潔相機感光元件？</string>
-    <string name="sensor_cleaning_confirm_message">清潔期間無法拍照或錄影。</string>
-    <string name="sensor_cleaning_power_off">清潔完成後關閉相機</string>
+    <string name="sensor_cleaning_confirm_message">送出清潔請求前會暫停監看。請確認相機已準備好，再明確恢復控制或重新連線；不會自動恢復監看。</string>
+    <string name="sensor_cleaning_power_off">請求清潔後關閉相機</string>
     <string name="clean_now">立即清潔</string>
     <string name="media_actions">%1$s 的素材操作</string>
     <string name="media_protection">檔案保護</string>
@@ -826,4 +826,38 @@
     <string name="shooting_setting_cancelled">已停止等待。已送出的命令仍可能生效。</string>
     <string name="shooting_setting_previous_session">這是先前連線的紀錄；重新連線不會重送命令。</string>
     <string name="shooting_setting_read_current">僅讀取目前值</string>
+    <string name="maintenance_result">維護紀錄</string>
+    <string name="maintenance_not_sent">尚未送出命令。</string>
+    <string name="maintenance_unknown">命令回應不明。請勿重複操作。</string>
+    <string name="maintenance_response">已收到命令回應。</string>
+    <string name="maintenance_stops">事件停止：%1$s；Live View 停止：%2$s</string>
+    <string name="maintenance_completion_limit">連線可達或收到命令回應，不代表清潔或休眠已完成。監看維持暫停，直到明確恢復或重新連線。</string>
+    <string name="maintenance_clock_matched">首次時鐘讀取符合原始時間範圍，以及傳輸支援的時區和日光節約時間檢查。</string>
+    <string name="maintenance_clock_mismatch">首次時鐘讀取與原始要求不符。</string>
+    <string name="maintenance_clock_unavailable">無法完成首次時鐘驗證；已保留命令證據。</string>
+    <string name="maintenance_clock_not_read">尚未讀取首次時鐘。</string>
+    <string name="maintenance_initial_clock">首次觀察：%1$s</string>
+    <string name="maintenance_latest_clock">最近觀察時間：%1$s。這不會改變首次結果。</string>
+    <string name="maintenance_not_read">尚未檢查連線可達性。</string>
+    <string name="maintenance_reachable">必要讀取成功；當時可連到相機。</string>
+    <string name="maintenance_unavailable">無法取得必要讀取。這不能證明休眠或清潔已完成。</string>
+    <string name="maintenance_cancelled">已取消。送出的命令無法撤回；已收到的證據會保留。</string>
+    <string name="maintenance_retired">舊連線紀錄。復原讀取不會使用替換的相機或工作階段。</string>
+    <string name="maintenance_recover">讀取目前狀態（不寫入）</string>
+    <string name="maintenance_restore">恢復控制與監看</string>
+    <string name="maintenance_restore_title">相機已可恢復操作嗎？</string>
+    <string name="maintenance_restore_confirm">重新完成必要讀取後，恢復控制及原先啟用的監看。不會重送清潔命令，也不能驗證實體清潔已完成。</string>
+    <string name="maintenance_restored">已恢復控制與先前的監看。清潔完成與否仍未經驗證。</string>
+    <string name="maintenance_restore_unknown">恢復結果不明。監看仍維持暫停；請明確重新連線。</string>
+    <string name="maintenance_phase_not_required">不需要</string>
+    <string name="maintenance_phase_pending">待處理</string>
+    <string name="maintenance_phase_unknown">不明</string>
+    <string name="maintenance_phase_confirmed">已確認</string>
+    <string name="maintenance_power_choice">清潔後關閉電源：%1$s</string>
+    <string name="maintenance_clock_reference">原始時鐘範圍：%1$s 至 %2$s</string>
+    <string name="maintenance_clock_epoch_only">此傳輸只提供絕對時間證據；尚未驗證時區與日光節約時間。</string>
+    <string name="maintenance_clock_zone">UTC 時差：%1$d 分鐘；日光節約時間：%2$s</string>
+    <string name="maintenance_hold">相機控制與監看已暫停。請先查看維護紀錄，再明確恢復。休眠或關機後請明確重新連線。</string>
+    <string name="maintenance_review">查看維護紀錄</string>
+    <string name="maintenance_session_retirement_unconfirmed">本機連線已結束，但尚未確認桌面橋接工作階段已退役。重新連線前請先檢查桌面橋接；未自動重試。</string>
 </resources>

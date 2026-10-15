@@ -7,6 +7,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -16,6 +17,38 @@ import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 
 class UsbPtpCameraBackendTest {
+    @Test fun maintenanceUsbClockRetainsEpochOnlyProofAndRecoveryUsesGetEventOnly() = runTest {
+        val transport = CanonEosScriptedTransport()
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb"), PtpTransportFactory { transport })
+        backend.initialize(); backend.capabilities()
+        val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(TEST_CLOCK_EPOCH_SECONDS * 1_000, 28_800, false))
+        val access = backend.maintenanceAccess(request, null)
+        val attempt = dev.openeos.control.ui.MaintenanceAttempt(dev.openeos.control.ui.MaintenanceDraft(
+            dev.openeos.control.ui.MaintenanceOwner(Any(), 1), "synthetic", request), access, { true }, publish = {})
+        attempt.run()
+        assertEquals(MaintenanceCommandEvidence.RESPONSE_RECEIVED, attempt.snapshot().evidence.command)
+        assertEquals(MaintenanceClockEvidence.MATCHED, attempt.snapshot().evidence.clockRead)
+        assertNull(attempt.snapshot().evidence.clockReference?.utcOffsetMinutes)
+        assertNull(attempt.snapshot().evidence.clockReference?.daylightSaving)
+        val before = transport.sentContainers.size
+        attempt.recover()
+        assertTrue(transport.sentContainers.drop(before).all { it.code == CanonEosOperationCode.GET_EVENT })
+        assertEquals(MaintenanceClockEvidence.MATCHED, attempt.snapshot().evidence.clockRead)
+        backend.close()
+    }
+
+    @Test fun maintenanceUsbDoesNotPrepareRetiredSessionOrInventCleaningSupport() = runTest {
+        val transport = CanonEosScriptedTransport()
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb"), PtpTransportFactory { transport })
+        backend.initialize(); backend.capabilities()
+        val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(TEST_CLOCK_EPOCH_SECONDS * 1_000, 0, false))
+        val access = backend.maintenanceAccess(request, null)
+        assertTrue(runCatching { backend.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), null) }.isFailure)
+        backend.close(); val before = transport.sentContainers.size
+        assertTrue(runCatching { access.read(request) }.isFailure)
+        assertEquals(before, transport.sentContainers.size)
+    }
+
     @Test
     fun shootingSettingStandardWriteHasOneMutationAndFreshPropertyRead() = runTest {
         val transport = ScriptedTransport(advertiseCapture = false)

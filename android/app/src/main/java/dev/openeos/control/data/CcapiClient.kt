@@ -249,6 +249,8 @@ class CcapiClient(
     private var multipartLiveViewSession: CcapiMultipartLiveViewSession? = null
     // Owned before sending a start: a missing response cannot prove that the camera stayed stopped.
     @Volatile private var pendingLiveViewStop: (suspend () -> Unit)? = null
+    @Volatile private var pendingLiveViewLocalClose: (suspend () -> Unit)? = null
+    @Volatile private var pendingLiveViewMaintenanceOwned = false
     private var simulatorEventSequence = 0L
     private var mediaDescendingOrderSupported: Boolean? = null
     private val mediaOrderingInfoCache = object : LinkedHashMap<String, MediaOrderingInfo>(32, 0.75f, true) {
@@ -264,8 +266,32 @@ class CcapiClient(
     fun currentLiveViewSource(): LiveViewSource? = activeLiveViewSource
 
     val liveViewStopRequired: Boolean get() = pendingLiveViewStop != null
+    val maintenanceStopOwned: Boolean get() = pendingLiveViewStop != null && pendingLiveViewMaintenanceOwned
+    var maintenanceSessionOwned: Boolean = false
+        private set
+
+    suspend fun retireMaintenanceLocally() {
+        activeEventCall.getAndSet(null)?.cancel()
+        pendingLiveViewLocalClose?.invoke()
+        pendingLiveViewLocalClose = null
+        closeCcapiMultipartSession(multipartLiveViewSession)
+        multipartLiveViewSession = null
+        nativeLiveViewSession?.close()
+        nativeLiveViewSession = null
+        // No remote Stop, event DELETE, retry, or mode write during lifecycle retirement.
+    }
+
+    suspend fun closeMaintenanceSession(): Boolean = maintenanceCloseOnce(liveViewStopRequired,
+        releasePhysical = { maintenancePhysicalReleaseOnce(
+            autofocus = { heldAutofocus.retryStop() },
+            shutter = { if (heldShutter.hasPendingRelease) retryShutterRelease() }) },
+        stop = { maintenanceStopRecoveryScope { stopLiveView() } }, retireLocal = { retireMaintenanceLocally() })
 
     suspend fun close() {
+        if (maintenanceSessionOwned) {
+            check(!closeMaintenanceSession()) { "Live View Stop remains unconfirmed after local retirement." }
+            return
+        }
         runCatching { heldAutofocus.retryStop() }
         runCatching { stopEventPolling() }
         runCatching { retryShutterRelease() }
@@ -1330,6 +1356,115 @@ class CcapiClient(
             }
         }
 
+    /** One selected route per intent. Recovery bypasses cached status/capability aggregators. */
+    fun maintenanceAccess(request: MaintenanceRequest, liveView: LiveViewRequest?): MaintenanceAccess {
+        val clockOperations = if (isRealCamera) cameraClockOperations() else null
+        val clockRead = clockOperations?.first?.path ?: "/ccapi/ver100/functions/datetime".takeUnless { isRealCamera }
+        val clockWrite = clockOperations?.second?.path ?: "/ccapi/ver100/functions/datetime".takeUnless { isRealCamera }
+        val cleaning = if (isRealCamera) sensorCleaningOperation()?.path else "/ccapi/sensor-cleaning"
+        val sleep = if (isRealCamera) cameraSleepWritePath else "/ccapi/camera-sleep"
+        val originalStop = pendingLiveViewStop
+        val originalSource = activeLiveViewSource
+        val restoreRequest = liveView?.copy(source = originalSource ?: liveView.source, size = activeLiveViewSize)
+        val stopEventsPath = if (isRealCamera) eventPollingOperations()?.second?.path else null
+        val probe = if (isRealCamera) (apiOperation("GET", "/devicestatus/batterylist")
+            ?: apiOperation("GET", "/devicestatus/battery"))?.path else "/ccapi/status"
+        when (request.action) {
+            MaintenanceAction.CLOCK_SYNC -> check(clockRead != null && clockWrite != null)
+            MaintenanceAction.SENSOR_CLEANING -> check(cleaning != null)
+            MaintenanceAction.SLEEP -> check(sleep != null)
+        }
+        if (request.needsStop) maintenanceSessionOwned = true
+        return MaintenanceAccess("Canon CCAPI", eventStopRequired = stopEventsPath != null,
+            liveViewStopRequired = pendingLiveViewStop != null, stopEvents = {
+            activeEventCall.getAndSet(null)?.cancel()
+            stopEventsPath?.let { path -> maintenanceJson(Request.Builder().url("$baseUrl$path").delete().build(), 204, empty = true) }
+        }, stopLiveView = {
+            check(pendingLiveViewStop === originalStop) { "Live View stop owner changed." }
+            if (originalStop != null) pendingLiveViewMaintenanceOwned = true
+            maintenanceIoScope { stopLiveView() }
+        }, dispatch = { frozen, evidence ->
+            require(frozen == request)
+            requireShutterReleased()
+            check(isRecording != true && !bulbExposureActive) { "Stop recording and Bulb before maintenance." }
+            val builder = Request.Builder()
+            val expected: Int
+            when (request.action) {
+                MaintenanceAction.CLOCK_SYNC -> {
+                    val target = requireNotNull(request.clock)
+                    val instant = java.time.Instant.ofEpochMilli(target.epochMillis)
+                    val time = instant.atZone(java.time.ZoneOffset.ofTotalSeconds(target.offsetSeconds))
+                    evidence.reference(MaintenanceClockReference(instant.epochSecond - 10, instant.epochSecond + 10,
+                        target.offsetSeconds / 60, target.daylightSaving))
+                    builder.url("$baseUrl${requireNotNull(clockWrite)}").put(JSONObject()
+                        .put("datetime", CANON_DATETIME_FORMATTER.format(time)).put("dst", target.daylightSaving)
+                        .toString().toRequestBody(jsonMediaType))
+                    expected = 200
+                }
+                MaintenanceAction.SENSOR_CLEANING -> {
+                    builder.url("$baseUrl${requireNotNull(cleaning)}").post(JSONObject().put("autopoweroff", request.autoPowerOff)
+                        .toString().toRequestBody(jsonMediaType)); expected = if (isRealCamera) 200 else 204
+                }
+                MaintenanceAction.SLEEP -> {
+                    val payload = if (isRealCamera) JSONObject().put("value", AUTO_POWER_OFF_IMMEDIATELY) else JSONObject()
+                    builder.url("$baseUrl${requireNotNull(sleep)}")
+                    if (isRealCamera) builder.put(payload.toString().toRequestBody(jsonMediaType))
+                    else builder.post(payload.toString().toRequestBody(jsonMediaType))
+                    expected = if (isRealCamera) 202 else 204
+                }
+            }
+            maintenanceJson(builder.build(), expected, evidence)
+        }, read = { frozen ->
+            require(frozen == request)
+            if (request.action == MaintenanceAction.CLOCK_SYNC) {
+                val body = maintenanceJson(Request.Builder().url("$baseUrl${requireNotNull(clockRead)}")
+                    .header("Cache-Control", "no-cache, no-store").get().build(), 200)
+                val (clock, daylight) = parseCameraClock(requireNotNull(body))
+                MaintenanceReadback(MaintenanceClockObservation(clock.toEpochSecond(), clock.offset.totalSeconds / 60, daylight))
+            } else {
+                val body = maintenanceJson(Request.Builder().url("$baseUrl${requireNotNull(probe) { "No required maintenance probe advertised." }}")
+                    .header("Cache-Control", "no-cache, no-store").get().build(), 200)
+                if (isRealCamera) {
+                    val required = requireNotNull(body)
+                    val list = when {
+                        probe?.endsWith("/batterylist") == true || required.has("batterylist") -> requireNotNull(required.optJSONArray("batterylist"))
+                        required.has("battery") -> requireNotNull(required.optJSONArray("battery"))
+                        else -> null
+                    }
+                    val levels = if (list != null) (0 until list.length()).map { list.optJSONObject(it)?.opt("level") }
+                        else listOf(required.opt("level"))
+                    check(validMaintenanceBatteryLevels(levels)) { "Required battery observation is malformed." }
+                }
+                else check(body?.opt("connected") == true)
+                MaintenanceReadback()
+            }
+        }, restore = {
+            requireShutterReleased(); check(isRecording != true && !bulbExposureActive)
+            if (restoreRequest != null) maintenanceIoScope { startLiveView(restoreRequest) }
+        })
+    }
+
+    private suspend fun maintenanceJson(request: Request, expected: Int? = null,
+        evidence: MaintenanceEvidence? = null, empty: Boolean = false): JSONObject? = withContext(Dispatchers.IO) {
+        currentCoroutineContext()[MaintenanceIoContext]?.requireActive?.invoke()
+        val call = newCameraCall(request, true)
+        val watchers = maintenanceCancellationWatchers { call.cancel() }
+        try {
+            currentCoroutineContext().ensureActive(); evidence?.beforeDispatch()
+            call.execute().use { response ->
+                requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                    response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                check(expected == null || response.code == expected) { "Maintenance response status was not accepted." }
+                val text = response.body?.let { body -> body.byteStream().use { readShootingSettingResponseText(it, body.contentLength()) } }.orEmpty()
+                if (empty) requireMaintenanceEmptyResponse(response.code, response.headers("Content-Length"), response.headers("Transfer-Encoding"), text)
+                val body = if (text.isEmpty()) null else JSONObject(text)
+                if (evidence?.request?.action == MaintenanceAction.CLOCK_SYNC) parseCameraClock(requireNotNull(body))
+                evidence?.responseReceived()
+                body
+            }
+        } finally { watchers.forEach { it.cancel() } }
+    }
+
     suspend fun sleepCamera() {
         if (isRealCamera) {
             runCatching { stopEventPolling() }
@@ -2171,6 +2306,9 @@ class CcapiClient(
         requireLiveViewAllowed()
         if (isRealCamera) {
             latestLiveViewGeometry = null
+            check(currentCoroutineContext()[MaintenanceIoContext] == null || request.source != LiveViewSource.AUTO) {
+                "Maintenance restoration requires the frozen active Live View source."
+            }
             val sources = when (request.source) {
                 LiveViewSource.AUTO -> buildList {
                     if (supportsRtpLiveView()) add(LiveViewSource.CCAPI_RTP)
@@ -2209,9 +2347,15 @@ class CcapiClient(
         }
     }
 
-    suspend fun stopLiveView() = withContext(NonCancellable) {
+    suspend fun stopLiveView() {
+        if (currentCoroutineContext()[MaintenanceIoContext] != null && pendingLiveViewStop != null) pendingLiveViewMaintenanceOwned = true
+        if (maintenanceStopOwned) maintenanceStopRecoveryScope { stopLiveViewOwned() }
+        else withContext(NonCancellable) { stopLiveViewOwned() }
+    }
+
+    private suspend fun stopLiveViewOwned() {
         latestLiveViewGeometry = null
-        val stop = pendingLiveViewStop ?: return@withContext
+        val stop = pendingLiveViewStop ?: return
         try {
             stop()
         } catch (exception: Exception) {
@@ -2219,6 +2363,8 @@ class CcapiClient(
             throw CcapiLiveViewReleaseException(exception)
         }
         pendingLiveViewStop = null
+        pendingLiveViewLocalClose = null
+        pendingLiveViewMaintenanceOwned = false
         activeLiveViewSource = null
         activeJpegLiveViewOperations = null
         activeMultipartLiveViewOperations = null
@@ -2226,13 +2372,18 @@ class CcapiClient(
 
     private suspend fun withLiveViewStartCleanup(
         stop: suspend () -> Unit,
+        localClose: suspend () -> Unit = {},
         start: suspend () -> Unit,
     ) {
         check(pendingLiveViewStop == null) { "Live View must be stopped before starting again." }
         pendingLiveViewStop = stop
+        pendingLiveViewLocalClose = localClose
+        pendingLiveViewMaintenanceOwned = currentCoroutineContext()[MaintenanceIoContext] != null
         try {
             start()
         } catch (failure: Throwable) {
+            // Maintenance restoration never dispatches an automatic cleanup/retry after an uncertain Start.
+            if (currentCoroutineContext()[MaintenanceIoContext] != null) throw failure
             try {
                 stopLiveView()
             } catch (releaseFailure: CcapiLiveViewReleaseException) {
@@ -2812,7 +2963,7 @@ class CcapiClient(
         }) {
             activeJpegLiveViewOperations = operations
             startCcapiLiveView(request, operations.startLiveView.path)
-            if (operations.stopMethod == CcapiLiveViewStopMethod.POST_OFF) {
+            if (operations.stopMethod == CcapiLiveViewStopMethod.POST_OFF && currentCoroutineContext()[MaintenanceIoContext] == null) {
                 try {
                     validateJpegLiveViewFrame(request)
                 } catch (exception: Exception) {
@@ -2862,7 +3013,7 @@ class CcapiClient(
             postOk(path, requestedPayload)
             liveViewSizeControlSupported = true
         } catch (exception: CcapiHttpException) {
-            if (exception.statusCode != 400) throw exception
+            if (currentCoroutineContext()[MaintenanceIoContext] != null || exception.statusCode != 400) throw exception
             try {
                 postOk(path, JSONObject().put("cameradisplay", "on"))
                 liveViewSizeControlSupported = false
@@ -2902,12 +3053,17 @@ class CcapiClient(
         val operation = multipartLiveViewOperations()
             ?: error("Camera did not advertise a complete Canon multipart Live View lifecycle.")
         var openedSession: CcapiMultipartLiveViewSession? = null
-        withLiveViewStartCleanup(stop = {
+        withLiveViewStartCleanup(localClose = {
+            closeCcapiMultipartSession(openedSession)
+            closeCcapiMultipartSession(multipartLiveViewSession)
+            multipartLiveViewSession = null
+        }, stop = {
             closeCcapiMultipartSession(openedSession)
             closeCcapiMultipartSession(multipartLiveViewSession)
             multipartLiveViewSession = null
             // Canon's multipart DELETE closes the stream; the general stop owns Live View itself.
-            runCatching { deleteOk(operation.closeStream.path) }
+            if (currentCoroutineContext()[MaintenanceIoContext] != null) deleteOk(operation.closeStream.path)
+            else runCatching { deleteOk(operation.closeStream.path) }
             stopCcapiLiveView(operation.stopLiveView, operation.stopMethod)
         }) {
             activeMultipartLiveViewOperations = operation
@@ -2922,13 +3078,18 @@ class CcapiClient(
             val session = withContext(Dispatchers.IO) {
                 var lastFailure: CcapiHttpException? = null
                 repeat(MULTIPART_START_RETRY_DELAYS_MILLIS.size + 1) { attempt ->
-                    val call = multipartHttpClient.newCall(streamRequest)
+                    val maintenance = currentCoroutineContext()[MaintenanceIoContext]
+                    maintenance?.requireActive?.invoke()
+                    val streamClient = if (maintenance == null) multipartHttpClient else captureConfigurationHttpClient.newBuilder()
+                        .callTimeout(0, TimeUnit.MILLISECONDS).readTimeout(0, TimeUnit.MILLISECONDS).build()
+                    val call = streamClient.newCall(streamRequest)
                     try {
                         val result = withTimeout(MULTIPART_OPEN_TIMEOUT_MILLIS) {
                             val cancelCall = AtomicBoolean(true)
                             val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
                                 try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
                             }
+                            val ownerWatchers = if (maintenance != null) maintenanceCancellationWatchers { if (cancelCall.get()) call.cancel() } else emptyList()
                             try {
                                 val response = call.execute()
                                 if (response.code == 200) {
@@ -2954,7 +3115,7 @@ class CcapiClient(
                                 }
                             } finally {
                                 cancelCall.set(false)
-                                watcher.cancel()
+                                watcher.cancel(); ownerWatchers.forEach { it.cancel() }
                             }
                         }
                         return@withContext result
@@ -2964,7 +3125,7 @@ class CcapiClient(
                         if (exception is TimeoutCancellationException) {
                             throw IOException("Timed out opening the Canon multipart Live View stream.", exception)
                         }
-                        if (exception !is CcapiHttpException || exception.statusCode != 503 ||
+                        if (maintenance != null || exception !is CcapiHttpException || exception.statusCode != 503 ||
                             !exception.message.orEmpty().contains("live view not started", ignoreCase = true) ||
                             attempt >= MULTIPART_START_RETRY_DELAYS_MILLIS.size
                         ) throw exception
@@ -3003,7 +3164,10 @@ class CcapiClient(
         val description = CcapiRtpSessionDescriptionParser.parse(getText(descriptionPath))
         val session = checkNotNull(rtpSessionFactory).create(description, checkNotNull(rtpDestinationAddress))
         session.setTargetFps(request.fps)
-        withLiveViewStartCleanup(stop = {
+        withLiveViewStartCleanup(localClose = {
+            session.close()
+            if (nativeLiveViewSession === session) nativeLiveViewSession = null
+        }, stop = {
             try {
                 postOk(controlPath, JSONObject().put("action", "stop").put("ipaddress", ""))
             } finally {
@@ -4182,14 +4346,25 @@ class CcapiClient(
 
     private suspend fun getText(path: String): String = withContext(Dispatchers.IO) {
         val request = Request.Builder().url("$baseUrl$path").get().header("Accept", "text/plain").build()
-        val call = newCameraCall(request)
+        val maintenance = currentCoroutineContext()[MaintenanceIoContext]
+        maintenance?.requireActive?.invoke()
+        val call = newCameraCall(request, maintenance != null)
         val cancelCall = AtomicBoolean(true)
         val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
         }
+        val ownerWatchers = if (maintenance != null) maintenanceCancellationWatchers { if (cancelCall.get()) call.cancel() } else emptyList()
         try {
             call.execute().use { response ->
-                val body = response.body?.string().orEmpty()
+                val body = response.body?.let { body ->
+                    if (maintenance == null) body.string() else {
+                        requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                            response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                        body.byteStream().use { readStrictMediaJsonText(it, body.contentLength(), 65_536) }.also {
+                            check(body.contentLength() < 0 || it.toByteArray(Charsets.UTF_8).size.toLong() == body.contentLength())
+                        }
+                    }
+                }.orEmpty()
                 if (!response.isSuccessful) {
                     throw CcapiHttpException(
                         statusCode = response.code,
@@ -4203,7 +4378,7 @@ class CcapiClient(
             throw exception
         } finally {
             cancelCall.set(false)
-            watcher.cancel()
+            watcher.cancel(); ownerWatchers.forEach { it.cancel() }
         }
     }
 
@@ -4286,6 +4461,9 @@ class CcapiClient(
     private suspend fun requestJson(request: Request, recordingEvidence: RecordingRequestEvidence? = null, strictMediaJsonLimit: Int? = null,
         captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null,
         captureRecovery: Boolean = false, shootingRead: Boolean = false): JSONObject = withContext(Dispatchers.IO) {
+        if (currentCoroutineContext()[MaintenanceIoContext] != null) {
+            return@withContext requireNotNull(maintenanceJson(request)) { "Maintenance dependency returned no JSON." }
+        }
         val shootingEvidence = currentCoroutineContext()[ShootingSettingWriteContext]?.evidence
             ?.takeIf { request.method != "GET" && request.method != "HEAD" }
         val call = newCameraCall(request, captureEvidence != null || captureRecovery || shootingEvidence != null)
@@ -4377,6 +4555,10 @@ class CcapiClient(
         expectedStatusCode: Int? = null,
         recordingEvidence: RecordingRequestEvidence? = null,
     ): Unit = withContext(Dispatchers.IO) {
+        if (currentCoroutineContext()[MaintenanceIoContext] != null) {
+            maintenanceJson(request, expectedStatusCode ?: 204, empty = true)
+            return@withContext
+        }
         recordingEvidence?.let {
             currentCoroutineContext().ensureActive()
             it.beginRequest()

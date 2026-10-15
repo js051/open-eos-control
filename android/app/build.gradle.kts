@@ -30,6 +30,7 @@ val unitContractFixtures = listOf(
     "../../contracts/capture-configuration/v1/capture-configuration-vectors.json",
     "../../contracts/capture-configuration/v1/exact-value-vectors.json",
     "../../contracts/shooting-setting/v1/shooting-setting-vectors.json",
+    "../../contracts/maintenance-lifecycle/v1/maintenance-vectors.json",
 )
 val androidContractFixtures = listOf(
     "../../contracts/live-view-lut/v1/numeric-vectors.json",

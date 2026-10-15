@@ -37,6 +37,200 @@ class DesktopBridgeClientTest {
         server.shutdown()
     }
 
+    @Test fun maintenanceUsesOnlyNewOutcomeAndNeverFallsBackToLegacyMutation() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
+        val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(1_700_000_000_000, 0, false))
+        val attempt = dev.openeos.control.ui.MaintenanceAttempt(dev.openeos.control.ui.MaintenanceDraft(
+            dev.openeos.control.ui.MaintenanceOwner(Any(), 1), "synthetic", request), client.maintenanceAccess(request, null), { true }, publish = {})
+        attempt.run(); assertEquals(MaintenanceCommandEvidence.UNKNOWN, attempt.snapshot().evidence.command)
+        assertEquals(3, server.requestCount); repeat(2) { server.takeRequest() }
+        val write = server.takeRequest(); assertEquals("POST", write.method)
+        assertEquals("/v1/session/session-1/maintenance/clock-sync/outcome", write.path)
+        assertEquals(false, JSONObject(write.body.readUtf8()).getBoolean("autoPowerOff"))
+    }
+
+    @Test fun maintenanceClockOutcomePreservesResponseWhenClockReadIsMalformed() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"version":1,"engine":"libgphoto2","operation":"clock-sync","autoPowerOff":false,"responseEvidence":"response-received","clockReadEvidence":"matched","clockReference":null,"clockObservation":{}}"""))
+        val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(1_700_000_000_000, 0, false))
+        val attempt = dev.openeos.control.ui.MaintenanceAttempt(dev.openeos.control.ui.MaintenanceDraft(
+            dev.openeos.control.ui.MaintenanceOwner(Any(), 1), "synthetic", request), client.maintenanceAccess(request, null), { true }, publish = {})
+        attempt.run(); assertEquals(MaintenanceCommandEvidence.RESPONSE_RECEIVED, attempt.snapshot().evidence.command)
+        assertEquals(MaintenanceClockEvidence.UNAVAILABLE, attempt.snapshot().evidence.clockRead)
+        assertEquals(3, server.requestCount)
+        server.enqueue(jsonResponse("""{"version":1,"engine":"libgphoto2","operation":"clock-sync","observationEvidence":"observed","clockObservation":{"epochSeconds":1700000000,"utcOffsetMinutes":null,"daylightSaving":null}}"""))
+        attempt.recover(); assertEquals(MaintenanceClockEvidence.UNAVAILABLE, attempt.snapshot().evidence.clockRead)
+        repeat(3) { server.takeRequest() }; val read = server.takeRequest()
+        assertEquals("GET", read.method); assertEquals("/v1/session/session-1/maintenance/clock-sync", read.path)
+        assertEquals("no-cache, no-store", read.getHeader("Cache-Control"))
+    }
+
+    @Test fun maintenanceRawDecimalExponentAndOverflowTokensNeverBecomeIntegerProof() = runTest {
+        for (token in listOf("1.0", "1e0", "18446744073709551616")) {
+            server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+            val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+            val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(1_700_000_000_000, 0, false))
+            val access = client.maintenanceAccess(request, null)
+            server.enqueue(jsonResponse("""{"version":$token,"engine":"libgphoto2","operation":"clock-sync","autoPowerOff":false,"responseEvidence":"response-received"}"""))
+            val base = MaintenanceEvidence(request)
+            assertTrue(runCatching { access.dispatch(request, base) }.isFailure)
+            assertEquals(MaintenanceCommandEvidence.UNKNOWN, base.snapshot().command)
+            server.enqueue(jsonResponse("""{"version":1,"engine":"libgphoto2","operation":"clock-sync","autoPowerOff":false,"responseEvidence":"response-received","clockReadEvidence":"matched","clockReference":{"earliestEpochSeconds":0,"latestEpochSeconds":10,"utcOffsetMinutes":null,"daylightSaving":null},"clockObservation":{"epochSeconds":$token,"utcOffsetMinutes":null,"daylightSaving":null}}"""))
+            val clock = MaintenanceEvidence(request); access.dispatch(request, clock)
+            assertEquals(MaintenanceCommandEvidence.RESPONSE_RECEIVED, clock.snapshot().command)
+            assertEquals(MaintenanceClockEvidence.UNAVAILABLE, clock.snapshot().clockRead)
+        }
+    }
+
+    @Test fun maintenanceControlUsesDedicatedStopStartRoutesAndStrictTypedProof() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}"""))
+        val preview = LiveViewRequest(source = LiveViewSource.AUTO)
+        client.startLiveView(preview)
+        val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), preview)
+        val guard = MaintenanceIoContext(kotlin.coroutines.coroutineContext) {}
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}"""))
+        kotlinx.coroutines.withContext(guard) { access.stopLiveView() }
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false,"source":"LIBGPHOTO2_JPEG"}"""))
+        kotlinx.coroutines.withContext(guard) { access.restore() }
+        repeat(3) { server.takeRequest() }
+        assertEquals("/v1/session/session-1/maintenance/control/liveview/stop", server.takeRequest().path)
+        assertEquals("/v1/session/session-1/maintenance/control/liveview/start", server.takeRequest().path)
+        assertTrue(client.liveViewStopRequired) // Normal active responsibility is retained.
+    }
+
+    @Test fun unknownMaintenanceRestoreRetainsStrictRetryStopAndCloseWithoutGenericCleanup() = runTest {
+        var authReplays = 0
+        val http = okhttp3.OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).authenticator { _, response ->
+            authReplays++; response.request.newBuilder().header("Authorization", "synthetic-replay").build()
+        }.build()
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString(), httpClient = http); client.initialize()
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}"""))
+        val preview = LiveViewRequest(); client.startLiveView(preview)
+        val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), preview)
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")); access.stopLiveView()
+        server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+        assertTrue(runCatching { access.restore() }.isFailure); assertTrue(client.maintenanceStopOwned)
+        repeat(5) { server.takeRequest() }
+        val strictClient = client.javaClass.getDeclaredField("captureConfigurationHttpClient").apply { isAccessible = true }.get(client) as okhttp3.OkHttpClient
+        assertEquals(15_000, strictClient.callTimeoutMillis)
+        for (code in listOf(302, 401)) {
+            server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", server.url("/forbidden-stop-replay")).setBody("{}"))
+            val before = server.requestCount
+            assertTrue(runCatching { client.stopLiveView() }.isFailure)
+            assertEquals(before + 1, server.requestCount); assertTrue(client.maintenanceStopOwned)
+            assertEquals("/v1/session/session-1/maintenance/control/liveview/stop", server.takeRequest().path)
+        }
+        server.enqueue(MockResponse().setResponseCode(403).setBody("{}"))
+        server.enqueue(MockResponse().setResponseCode(204))
+        val beforeClose = server.requestCount; assertTrue(client.closeMaintenanceSession())
+        assertEquals(beforeClose + 2, server.requestCount)
+        assertEquals("/v1/session/session-1/maintenance/control/liveview/stop", server.takeRequest().path)
+        val retirement = server.takeRequest()
+        assertEquals("DELETE", retirement.method)
+        assertEquals("/v1/session/session-1/maintenance/control/session", retirement.path)
+        assertEquals(0, authReplays)
+        assertTrue(runCatching { client.closeMaintenanceSession() }.isFailure)
+        assertEquals(beforeClose + 2, server.requestCount)
+    }
+
+    @Test fun restoredMaintenanceSessionCloseReleasesNewBulbBeforeStrictStopAndLocalRetire() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}"""))
+        val preview = LiveViewRequest(); client.startLiveView(preview)
+        val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), preview)
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")); access.stopLiveView()
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}""")); access.restore()
+        server.enqueue(jsonResponse("""{"bulbExposureActive":true,"shutterReleaseUnconfirmed":false}""")); client.startBulbExposure()
+        repeat(6) { server.takeRequest() }
+        server.enqueue(jsonResponse("""{"bulbExposureActive":false,"shutterReleaseUnconfirmed":false}"""))
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        assertFalse(client.closeMaintenanceSession())
+        assertEquals(listOf("/v1/session/session-1/bulb/stop", "/v1/session/session-1/maintenance/control/liveview/stop",
+            "/v1/session/session-1/maintenance/control/session"), (0 until 3).map { server.takeRequest().path })
+        assertEquals(9, server.requestCount)
+    }
+
+    @Test fun maintenanceLocalRetireRouteFailureDoesNotUseGenericDeleteOrRetry() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SLEEP), null)
+        server.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
+        val failure = runCatching { client.closeMaintenanceSession() }.exceptionOrNull()
+        assertTrue(failure is MaintenanceRetirementUnconfirmedException)
+        assertFalse((failure as MaintenanceRetirementUnconfirmedException).stopUnconfirmed)
+        assertEquals(3, server.requestCount); repeat(2) { server.takeRequest() }
+        assertEquals("/v1/session/session-1/maintenance/control/session", server.takeRequest().path)
+    }
+
+    @Test fun sameSessionWarningRevisionSupersedesStrictStopAndStartResponses() = runTest {
+        lateinit var client: DesktopBridgeClient
+        var bumpWarning = false
+        val http = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
+            val response = chain.proceed(chain.request())
+            if (bumpWarning && chain.request().url.encodedPath.contains("/maintenance/control/liveview/")) {
+                // Synthetic same-session warning arriving while the control response is in flight.
+                client.javaClass.getDeclaredField("liveViewRevision").apply {
+                    isAccessible = true; setLong(client, getLong(client) + 1)
+                }
+            }
+            response
+        }.build()
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        client = DesktopBridgeClient(server.url("/").toString(), httpClient = http); client.initialize()
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}""")); client.startLiveView(LiveViewRequest())
+        val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), LiveViewRequest())
+        bumpWarning = true
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}"""))
+        assertTrue(runCatching { access.stopLiveView() }.isFailure); assertTrue(client.maintenanceStopOwned)
+        bumpWarning = false
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")); client.stopLiveView()
+        bumpWarning = true
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}"""))
+        assertTrue(runCatching { access.restore() }.isFailure); assertTrue(client.maintenanceStopOwned)
+        bumpWarning = false
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")); client.stopLiveView()
+        assertFalse(client.liveViewStopRequired)
+    }
+
+    @Test fun maintenanceEventStopRejectsRedirectOrWrongStatusWithoutMainAction() = runTest {
+        for (code in listOf(200, 201, 202, 302)) {
+            server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+            val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+            client.javaClass.getDeclaredField("eventPollingSupported").apply { isAccessible = true; setBoolean(client, true) }
+            server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", server.url("/forbidden-replay")).setBody("{}"))
+            val request = MaintenanceRequest(MaintenanceAction.SLEEP)
+            val attempt = dev.openeos.control.ui.MaintenanceAttempt(dev.openeos.control.ui.MaintenanceDraft(
+                dev.openeos.control.ui.MaintenanceOwner(Any(), 1), "stop-$code", request), client.maintenanceAccess(request, null), { true }, publish = {})
+            val before = server.requestCount; attempt.run(); assertEquals(before + 1, server.requestCount)
+            assertEquals(MaintenanceCommandEvidence.NOT_SENT, attempt.snapshot().evidence.command)
+            assertEquals(MaintenanceStopEvidence.UNKNOWN, attempt.snapshot().evidence.eventStop)
+        }
+    }
+
+    @Test fun maintenanceKeepPowerRestoreWithNoPriorPreviewNeverStartsLiveView() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"version":1,"engine":"libgphoto2","operation":"sensor-cleaning","autoPowerOff":false,"responseEvidence":"response-received","clockReadEvidence":"not-applicable","clockReference":null,"clockObservation":null}"""))
+        val reachable = """{"version":1,"engine":"libgphoto2","operation":"sensor-cleaning","observationEvidence":"reachable","clockObservation":null}"""
+        server.enqueue(jsonResponse(reachable)); server.enqueue(jsonResponse(reachable))
+        val request = MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING)
+        val attempt = dev.openeos.control.ui.MaintenanceAttempt(dev.openeos.control.ui.MaintenanceDraft(
+            dev.openeos.control.ui.MaintenanceOwner(Any(), 1), "synthetic", request), client.maintenanceAccess(request, null), { true }, publish = {})
+        attempt.run(); assertTrue(attempt.restore()); assertEquals(5, server.requestCount)
+        val requests = (0 until 5).map { server.takeRequest() }
+        assertEquals(0, requests.count { it.path?.contains("liveview") == true })
+        assertEquals(1, requests.count { it.path?.endsWith("/outcome") == true })
+        assertEquals(2, requests.count { it.path?.endsWith("/maintenance/sensor-cleaning") == true && it.method == "GET" })
+    }
+
     @Test
     fun freshMediaMetadataPreservesMimeAliasesAndRejectsTheirDisagreement() = runTest {
         server.enqueue(jsonResponse(HEALTH_JSON))

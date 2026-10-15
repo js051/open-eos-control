@@ -191,6 +191,9 @@ data class CameraUiState(
     val focusPoint: FocusPoint? = null,
     val focusFeedback: FocusFeedback? = null,
     val lastClockSyncAtMillis: Long? = null,
+    val maintenanceReceipt: MaintenanceReceipt? = null,
+    val maintenanceHistory: List<MaintenanceReceipt> = emptyList(),
+    val maintenanceSuspended: Boolean = false,
     val lastCreatedDirectoryName: String? = null,
     val shootingSettingReceipt: ShootingSettingReceipt? = null,
     val shootingSettingHistory: List<ShootingSettingReceipt> = emptyList(),
@@ -208,7 +211,7 @@ data class CameraUiState(
         capabilities?.matrix?.supports(feature) ?: false
 
     val busy: Boolean
-        get() = pendingOperations.isNotEmpty() || bulbExposureActive || shutterReleaseUnconfirmed
+        get() = pendingOperations.isNotEmpty() || bulbExposureActive || shutterReleaseUnconfirmed || maintenanceSuspended
 
     val needsLiveViewStopRecovery: Boolean
         get() = liveViewStopUnconfirmed || status?.liveViewStopUnconfirmed == true
@@ -238,8 +241,14 @@ data class CameraUiState(
 
     fun isBusy(operation: CameraOperation): Boolean =
         operation in pendingOperations ||
+            ((maintenanceSuspended || CameraOperation.MAINTENANCE in pendingOperations) && operation !in setOf(CameraOperation.MAINTENANCE, CameraOperation.CONNECT,
+                CameraOperation.STATUS, CameraOperation.USB, CameraOperation.BRIDGE, CameraOperation.SHUTTER_RELEASE) &&
+                !(operation == CameraOperation.RECORDING && recordingStopAvailable) &&
+                !(operation == CameraOperation.CAPTURE && bulbExposureActive) &&
+                !(operation == CameraOperation.LIVE_VIEW && maintenanceSuspended && needsLiveViewStopRecovery &&
+                    CameraOperation.MAINTENANCE !in pendingOperations)) ||
             (pendingRecordingCommand != null && operation in setOf(CameraOperation.CAPTURE, CameraOperation.SETTING,
-                CameraOperation.POWER, CameraOperation.MAINTENANCE)) ||
+                CameraOperation.POWER, CameraOperation.MAINTENANCE, CameraOperation.CLOCK)) ||
             (CameraOperation.MEDIA in pendingOperations && foregroundJpegImport.phase in FOREGROUND_IMPORT_ACTIVE_PHASES &&
                 operation in FOREGROUND_IMPORT_CONTROL_OPERATIONS &&
                 !(operation == CameraOperation.RECORDING && recordingStopAvailable) &&
@@ -298,7 +307,7 @@ internal fun CameraUiState.dismissVisibleCameraMessage(): CameraUiState = when {
 internal val HELD_AF_INTERLOCK_OPERATIONS = setOf(
     CameraOperation.CONNECT,
     CameraOperation.FOCUS, CameraOperation.CAPTURE, CameraOperation.RECORDING, CameraOperation.SETTING,
-    CameraOperation.MAINTENANCE, CameraOperation.POWER,
+    CameraOperation.MAINTENANCE, CameraOperation.POWER, CameraOperation.CLOCK,
 )
 
 internal fun CameraUiState.showShutterAutofocus(): Boolean = connected && captureMode == CaptureMode.PHOTO &&

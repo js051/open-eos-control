@@ -14,6 +14,11 @@ import android.provider.OpenableColumns
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.openeos.control.data.MaintenanceAction
+import dev.openeos.control.data.MaintenanceRequest
+import dev.openeos.control.data.MaintenanceClockTarget
+import dev.openeos.control.data.MaintenanceClockEvidence
+import dev.openeos.control.data.MaintenanceCommandEvidence
 import dev.openeos.control.R
 import dev.openeos.control.data.CaptureConfigurationOperation
 import dev.openeos.control.data.CaptureConfigurationReadback
@@ -322,6 +327,13 @@ class CameraViewModel(
     }
     @Volatile private var mediaSaveRequest: MediaSaveRequest? = null
     private var mediaUploadJob: Job? = null
+    private var maintenanceAttempt: MaintenanceAttempt? = null
+    private var activeMaintenanceAttempt: MaintenanceAttempt? = null
+    private val maintenanceAttempts = linkedMapOf<String, MaintenanceAttempt>()
+    private val maintenanceEventRestore = linkedMapOf<String, Boolean>()
+    private val maintenanceDrafts = MaintenanceDraftLedger()
+    private var maintenanceJob: Job? = null
+    private var maintenanceStopRecoveryJob: Job? = null
     private var shootingSettingAttempt: ShootingSettingAttempt? = null
     private var activeShootingSettingAttempt: ShootingSettingAttempt? = null
     private val shootingSettingAttempts = linkedMapOf<String, ShootingSettingAttempt>()
@@ -707,6 +719,8 @@ class CameraViewModel(
     }
 
     fun closeSettingPicker() {
+        maintenanceStopRecoveryJob?.cancel()
+        activeMaintenanceAttempt?.let { cancelMaintenance(it.id) }
         activeShootingSettingAttempt?.let { cancelShootingSetting(it.id) }
         _uiState.update { it.copy(activeSettingPicker = null) }
     }
@@ -1031,9 +1045,11 @@ class CameraViewModel(
         val shutterWarning = previousState.needsShutterDisconnectWarning()
         activeCaptureConfigurationAttempt?.cancel()
         activeShootingSettingAttempt?.cancel()
+        maintenanceAttempts.values.toList().forEach(MaintenanceAttempt::retire)
         mediaDeleteControl?.cancel()
         mediaUploadAttempt?.cancel()
         cameraSessionGeneration += 1
+        val disconnectGeneration = cameraSessionGeneration
         val operationJobs = cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)
         cameraOperationJobs.clear()
         liveViewReconciliationJobs.clear()
@@ -1075,8 +1091,15 @@ class CameraViewModel(
             uploadJob?.join()
             uploadCleanupJob?.join()
             focusJob?.join()
-            val unconfirmed = repository.disconnect()
-            if (unconfirmed) _uiState.update { it.copy(liveViewDisconnectWarning = true) }
+            try {
+                val unconfirmed = repository.disconnect()
+                if (unconfirmed && cameraSessionGeneration == disconnectGeneration) _uiState.update { it.copy(liveViewDisconnectWarning = true) }
+            } catch (failure: MaintenanceRetirementUnconfirmedException) {
+                if (cameraSessionGeneration == disconnectGeneration) _uiState.update { it.copy(
+                    error = if (failure.retirementUnconfirmed) appContext.getString(R.string.maintenance_session_retirement_unconfirmed) else it.error,
+                    shutterDisconnectWarning = it.shutterDisconnectWarning || failure.physicalReleaseUnconfirmed,
+                    liveViewDisconnectWarning = it.liveViewDisconnectWarning || failure.stopUnconfirmed) }
+            }
         }
         disconnectJob = job
         job.invokeOnCompletion { if (disconnectJob === job) disconnectJob = null }
@@ -1139,6 +1162,8 @@ class CameraViewModel(
     }
 
     fun setAppForeground(foreground: Boolean) {
+        if (!foreground) maintenanceStopRecoveryJob?.cancel()
+        if (!foreground) activeMaintenanceAttempt?.let { cancelMaintenance(it.id) }
         if (!foreground) stopForegroundImport(ForegroundImportStopReason.BACKGROUND)
         if (!foreground) stopHeldAutofocus()
         if (appInForeground == foreground) return
@@ -1148,6 +1173,7 @@ class CameraViewModel(
     }
 
     private fun queueLiveViewReconciliation(restart: Boolean = false) {
+        if (_uiState.value.maintenanceSuspended) return
         invalidateCameraFocusInfo()
         if (!appInForeground || !_uiState.value.liveViewAutoRefresh) {
             liveViewGeneration += 1
@@ -1230,7 +1256,25 @@ class CameraViewModel(
         restartLiveView()
     }
 
-    fun restartLiveView() = queueLiveViewReconciliation(restart = true)
+    fun restartLiveView() {
+        if (!_uiState.value.maintenanceSuspended) { queueLiveViewReconciliation(restart = true); return }
+        val state = _uiState.value
+        if (!maintenanceMayRetryStop(state.maintenanceSuspended, state.needsLiveViewStopRecovery,
+                state.pendingOperations.isNotEmpty(), state.connected && !state.previewMode && appInForeground &&
+                    !state.bulbExposureActive && !state.shutterReleaseUnconfirmed)) return
+        val stop = repository.maintenanceStopRecoveryAccess()
+        val generation = cameraSessionGeneration
+        val job = launchCameraOperation(CameraOperation.LIVE_VIEW, onRegistered = { maintenanceStopRecoveryJob = it }) {
+            stop()
+            coroutineContext.ensureActive()
+            if (generation == cameraSessionGeneration && _uiState.value.info === state.info) {
+                _uiState.update { it.copy(liveViewStopUnconfirmed = false,
+                    status = it.status?.copy(liveViewStopUnconfirmed = false), liveViewAutoRefresh = false) }
+                // This explicit Stop does not release maintenance hold, restore events, or replay the action.
+            }
+        }
+        job?.invokeOnCompletion { if (maintenanceStopRecoveryJob === job) maintenanceStopRecoveryJob = null }
+    }
 
     private suspend fun reconcileLiveView(
         restart: Boolean = false,
@@ -1239,6 +1283,7 @@ class CameraViewModel(
         coroutineContext.ensureActive()
         if (generation != cameraSessionGeneration) return@withLock
         val state = _uiState.value
+        if (state.maintenanceSuspended) return@withLock
         if (
             !state.connected || state.previewMode ||
                 (!state.supports(CameraFeature.LIVE_VIEW) && !repository.isLiveViewStopRequired())
@@ -1436,17 +1481,127 @@ class CameraViewModel(
         } }
     }
 
-    fun syncCameraClock() = runCamera(CameraOperation.CLOCK) {
+    fun syncCameraClock() = submitMaintenance(MaintenanceDraft(
+        MaintenanceOwner(_uiState.value.info, _uiState.value.mediaSessionGeneration), UUID.randomUUID().toString(),
+        MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget.now())))
+
+    fun submitMaintenance(draft: MaintenanceDraft) {
         val state = _uiState.value
-        if (state.previewMode || !state.supports(CameraFeature.CAMERA_CLOCK_SYNC)) return@runCamera
-        val revision = cameraStateRevision
-        val status = latestCameraStatus(repository.syncCameraClock(), revision)
-        _uiState.update {
-            it.copy(
-                status = status,
-                lastClockSyncAtMillis = System.currentTimeMillis(),
-            )
+        val feature = when (draft.request.action) {
+            MaintenanceAction.CLOCK_SYNC -> CameraFeature.CAMERA_CLOCK_SYNC
+            MaintenanceAction.SENSOR_CLEANING -> CameraFeature.SENSOR_CLEANING
+            MaintenanceAction.SLEEP -> CameraFeature.CAMERA_SLEEP
         }
+        if (!state.connected || state.previewMode || state.busy || maintenanceJob != null ||
+            state.recordingStopAvailable || state.bulbExposureActive || state.shutterReleaseUnconfirmed || state.needsLiveViewStopRecovery ||
+            state.autofocusHoldState != AutofocusHoldState.IDLE || !state.supports(feature) ||
+            !draft.owner.matches(state.info, state.mediaSessionGeneration)) return
+        val access = try { repository.maintenanceAccess(draft.request, eventPollingJob != null) } catch (_: Exception) { return }
+        if (!maintenanceDrafts.claim(draft)) return
+        val generation = cameraSessionGeneration
+        fun owns() = generation == cameraSessionGeneration && draft.owner.matches(_uiState.value.info, _uiState.value.mediaSessionGeneration)
+        lateinit var attempt: MaintenanceAttempt
+        attempt = MaintenanceAttempt(draft, access, ::owns, canRestore = {
+            val latest = _uiState.value
+            owns() && maintenanceAttempt === attempt && !latest.recordingStopAvailable && !latest.bulbExposureActive &&
+                !latest.shutterReleaseUnconfirmed && maintenanceRestoreStopSafe(latest.needsLiveViewStopRecovery,
+                    repository.isLiveViewStopRequired(), repository.isLiveViewRunning(), afterRestore = false) &&
+                latest.autofocusHoldState == AutofocusHoldState.IDLE && appInForeground
+        }) { receipt ->
+            _uiState.update { current ->
+                val history = current.maintenanceHistory.map { if (it.id == receipt.id) receipt else it }
+                if (owns() && maintenanceAttempt === attempt && !receipt.cancelled && !receipt.retired) {
+                    current.copy(maintenanceReceipt = receipt, maintenanceHistory = history,
+                        lastClockSyncAtMillis = if (receipt.evidence.command == MaintenanceCommandEvidence.RESPONSE_RECEIVED &&
+                            receipt.evidence.clockRead == MaintenanceClockEvidence.MATCHED) draft.request.clock?.epochMillis
+                            ?: current.lastClockSyncAtMillis else current.lastClockSyncAtMillis)
+                } else current.copy(maintenanceHistory = history)
+            }
+        }
+        maintenanceAttempt = attempt
+        maintenanceAttempts[attempt.id] = attempt
+        maintenanceEventRestore[attempt.id] = eventPollingJob != null
+        _uiState.update { it.copy(maintenanceReceipt = attempt.snapshot(),
+            maintenanceHistory = maintenanceHistory(it.maintenanceHistory, attempt.snapshot()),
+            maintenanceSuspended = it.maintenanceSuspended || draft.request.needsStop) }
+        maintenanceAttempts.keys.retainAll(_uiState.value.maintenanceHistory.mapTo(hashSetOf()) { it.id })
+        maintenanceEventRestore.keys.retainAll(maintenanceAttempts.keys)
+        val retiredJobs = if (draft.request.needsStop) {
+            val jobs = listOfNotNull(eventPollingJob, liveViewJob, focusInfoJob) + liveViewReconciliationJobs.toList() +
+                liveViewFrameReads.map { it.job }
+            stopLiveViewLoop(); stopEventPollingLoop(); stopCameraFocusInfoLoop(); detachNativeLiveViewListener()
+            repository.setNativeLiveViewRenderingEnabled(false)
+            jobs.forEach(Job::cancel)
+            cancelMediaDownload(); cancelMediaThumbnailLoads()
+            _uiState.update { it.copy(liveViewBitmap = null, liveViewFrameUrl = null, nativeLiveViewSession = null) }
+            jobs
+        } else emptyList()
+        val job = launchCameraOperation(CameraOperation.MAINTENANCE, onRegistered = {
+            maintenanceJob = it; activeMaintenanceAttempt = attempt
+        }) {
+            retiredJobs.forEach { it.join() }
+            attempt.run()
+            publishMaintenanceStopWarning(attempt, generation)
+        }
+        job?.invokeOnCompletion {
+            attempt.finishBeforeStart()
+            if (maintenanceJob === job) { maintenanceJob = null; if (activeMaintenanceAttempt === attempt) activeMaintenanceAttempt = null }
+        }
+        if (job == null) attempt.finishBeforeStart()
+    }
+
+    private fun publishMaintenanceStopWarning(attempt: MaintenanceAttempt, generation: Long) {
+        if (generation != cameraSessionGeneration || maintenanceAttempt !== attempt ||
+            !attempt.draft.owner.matches(_uiState.value.info, _uiState.value.mediaSessionGeneration)) return
+        val evidence = attempt.snapshot().evidence
+        if (evidence.liveViewStop == MaintenanceStopEvidence.UNKNOWN ||
+            (evidence.restore == MaintenanceRestoreEvidence.UNKNOWN && repository.isLiveViewStopRequired())) {
+            _uiState.update { it.copy(liveViewStopUnconfirmed = true) }
+        }
+    }
+
+    fun cancelMaintenance(id: String) {
+        val attempt = activeMaintenanceAttempt?.takeIf { it.id == id } ?: return
+        if (!attempt.draft.owner.matches(_uiState.value.info, _uiState.value.mediaSessionGeneration)) return
+        attempt.cancel(); maintenanceJob?.cancel()
+    }
+
+    fun recoverMaintenance(id: String) = continueMaintenance(id, restore = false)
+    fun restoreMaintenance(id: String) = continueMaintenance(id, restore = true)
+
+    private fun continueMaintenance(id: String, restore: Boolean) {
+        val attempt = maintenanceAttempts[id] ?: return
+        val state = _uiState.value
+        if (!state.connected || state.previewMode || maintenanceJob != null || state.pendingOperations.isNotEmpty() ||
+            state.maintenanceHistory.none { it.id == id } || !attempt.draft.owner.matches(state.info, state.mediaSessionGeneration)) return
+        if (restore && (maintenanceAttempt !== attempt || !canRestoreMaintenance(attempt.snapshot(), true) ||
+                state.recordingStopAvailable || state.bulbExposureActive || state.shutterReleaseUnconfirmed ||
+                state.needsLiveViewStopRecovery || repository.isLiveViewStopRequired() || state.autofocusHoldState != AutofocusHoldState.IDLE || !appInForeground)) return
+        val generation = cameraSessionGeneration
+        val job = launchCameraOperation(CameraOperation.MAINTENANCE, onRegistered = {
+            maintenanceJob = it; activeMaintenanceAttempt = attempt
+        }) {
+            if (!restore) attempt.recover()
+            else if (attempt.restore() && generation == cameraSessionGeneration && maintenanceAttempt === attempt &&
+                !attempt.snapshot().cancelled && !attempt.snapshot().retired && !_uiState.value.recordingStopAvailable &&
+                !_uiState.value.bulbExposureActive && !_uiState.value.shutterReleaseUnconfirmed &&
+                maintenanceRestoreStopSafe(_uiState.value.needsLiveViewStopRecovery,
+                    repository.isLiveViewStopRequired(), repository.isLiveViewRunning(), afterRestore = true) &&
+                attempt.draft.owner.matches(_uiState.value.info, _uiState.value.mediaSessionGeneration)) {
+                _uiState.update { it.copy(maintenanceSuspended = false, liveViewAutoRefresh = repository.isLiveViewRunning()) }
+                val native = repository.nativeLiveViewSession()
+                configureNativeLiveViewSession(native, _uiState.value.liveViewFrameRateFps)
+                _uiState.update { it.copy(nativeLiveViewSession = native) }
+                if (maintenanceEventRestore[id] == true) startEventPollingIfSupported()
+                if (native == null && repository.isLiveViewRunning()) {
+                    refreshLiveViewFrameInternal(reportErrors = true); startLiveViewLoopIfNeeded()
+                }
+            }
+            if (restore) publishMaintenanceStopWarning(attempt, generation)
+        }
+        job?.invokeOnCompletion { if (maintenanceJob === job) {
+            maintenanceJob = null; if (activeMaintenanceAttempt === attempt) activeMaintenanceAttempt = null
+        } }
     }
 
     fun createDirectory(name: String) = submitCaptureConfiguration(CaptureConfigurationDraft(
@@ -1547,84 +1702,13 @@ class CameraViewModel(
         } }
     }
 
-    fun sleepCamera() {
-        val state = _uiState.value
-        if (
-            !state.connected ||
-            state.previewMode ||
-            !state.supports(CameraFeature.CAMERA_SLEEP) ||
-            state.recordingStopAvailable ||
-            state.bulbExposureActive ||
-            state.busy
-        ) return
+    fun sleepCamera() = submitMaintenance(MaintenanceDraft(
+        MaintenanceOwner(_uiState.value.info, _uiState.value.mediaSessionGeneration), UUID.randomUUID().toString(),
+        MaintenanceRequest(MaintenanceAction.SLEEP)))
 
-        stopLiveViewLoop()
-        stopEventPollingLoop()
-        detachNativeLiveViewListener()
-        cancelMediaDownload()
-        val uploadJob = mediaUploadJob
-        mediaUploadJob = null
-        uploadJob?.cancel()
-        cancelMediaThumbnailLoads()
-        runCamera(
-            operation = CameraOperation.POWER,
-            onError = {
-                if (_uiState.value.connected) {
-                    startEventPollingIfSupported()
-                    restartLiveView()
-                }
-            },
-        ) {
-            uploadJob?.join()
-            repository.sleepCamera()
-            runCatching { repository.disconnect() }
-            closeMediaStream()
-            resetFrameMetrics()
-            lastPhotoShootingMode = null
-            _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
-        }
-    }
-
-    fun cleanSensor(autoPowerOff: Boolean) {
-        val state = _uiState.value
-        if (
-            !state.connected ||
-            state.previewMode ||
-            !state.supports(CameraFeature.SENSOR_CLEANING) ||
-            state.recordingStopAvailable ||
-            state.bulbExposureActive ||
-            state.busy
-        ) return
-
-        val restoreLiveView = state.supports(CameraFeature.LIVE_VIEW)
-        var restoreSessionWork = false
-        stopLiveViewLoop()
-        stopEventPollingLoop()
-        detachNativeLiveViewListener()
-        runCamera(
-            operation = CameraOperation.MAINTENANCE,
-            onError = { restoreSessionWork = true },
-            afterFinally = {
-                if (restoreSessionWork && _uiState.value.connected) {
-                    startEventPollingIfSupported()
-                    if (restoreLiveView) restartLiveView()
-                }
-            },
-        ) {
-            repository.cleanSensor(autoPowerOff)
-            if (autoPowerOff) {
-                runCatching { repository.disconnect() }
-                closeMediaStream()
-                resetFrameMetrics()
-                lastPhotoShootingMode = null
-                _uiState.update { it.withClearedSession(baseUrl = it.baseUrl, error = null) }
-            } else {
-                val (status, capabilities) = readCameraStateSnapshot()
-                _uiState.update { it.copy(status = status, capabilities = capabilities) }
-                restoreSessionWork = true
-            }
-        }
-    }
+    fun cleanSensor(autoPowerOff: Boolean) = submitMaintenance(MaintenanceDraft(
+        MaintenanceOwner(_uiState.value.info, _uiState.value.mediaSessionGeneration), UUID.randomUUID().toString(),
+        MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING, autoPowerOff = autoPowerOff)))
 
     fun toggleRecording() {
         // An unresolved result keeps deliberate Stop available even if capability/temperature changes.
@@ -3649,6 +3733,7 @@ class CameraViewModel(
             _uiState.update { it.copy(recordingDisconnectWarning = recordingWarning) }
             activeCaptureConfigurationAttempt?.cancel()
             activeShootingSettingAttempt?.cancel()
+        maintenanceAttempts.values.toList().forEach(MaintenanceAttempt::retire)
             mediaDeleteControl?.cancel()
             mediaUploadAttempt?.cancel()
             cameraSessionGeneration += 1
@@ -3726,7 +3811,7 @@ class CameraViewModel(
                         else it.copy(pendingOperations = it.pendingOperations - operation)
                     }
                     afterFinally()
-                    if (operation in LIVE_VIEW_INTERLOCK_OPERATIONS) queueLiveViewReconciliation()
+                    if (operation in LIVE_VIEW_INTERLOCK_OPERATIONS && operation != CameraOperation.MAINTENANCE) queueLiveViewReconciliation()
                 }
             }
         }
@@ -3776,7 +3861,7 @@ class CameraViewModel(
     }
 
     private fun canReadCameraFocusInfo(state: CameraUiState): Boolean =
-        state.connected && !state.previewMode && appInForeground && state.uiMode != UiMode.MEDIA &&
+        state.connected && !state.previewMode && !state.maintenanceSuspended && appInForeground && state.uiMode != UiMode.MEDIA &&
             state.liveViewAutoRefresh && state.liveViewTemperatureAllowed && repository.isLiveViewRunning() &&
             !state.isBusy(CameraOperation.LIVE_VIEW) && CameraOperation.CAPTURE !in state.pendingOperations &&
             state.capabilities?.liveView?.focusInfoSupported == true
@@ -3869,7 +3954,7 @@ class CameraViewModel(
 
     private suspend fun readLiveViewFrameInternal(reportErrors: Boolean) {
         if (
-            !appInForeground || !_uiState.value.liveViewAutoRefresh || !repository.isLiveViewRunning() ||
+            !appInForeground || _uiState.value.maintenanceSuspended || !_uiState.value.liveViewAutoRefresh || !repository.isLiveViewRunning() ||
             !_uiState.value.connected || _uiState.value.shutterReleaseUnconfirmed ||
             _uiState.value.previewMode ||
             !_uiState.value.supports(CameraFeature.LIVE_VIEW)
@@ -3968,7 +4053,7 @@ class CameraViewModel(
         liveViewJob?.cancel()
         val state = _uiState.value
         if (
-            !state.connected || state.shutterReleaseUnconfirmed ||
+            !state.connected || state.shutterReleaseUnconfirmed || state.maintenanceSuspended ||
             !appInForeground || !repository.isLiveViewRunning() ||
             state.previewMode ||
             !state.liveViewAutoRefresh ||
@@ -4022,7 +4107,7 @@ class CameraViewModel(
     private fun startEventPollingIfSupported() {
         stopEventPollingLoop()
         val state = _uiState.value
-        if (!state.connected || state.previewMode || !state.supports(CameraFeature.EVENT_POLLING)) return
+        if (!state.connected || state.previewMode || state.maintenanceSuspended || !state.supports(CameraFeature.EVENT_POLLING)) return
         val generation = eventPollingGeneration
         eventPollingJob = viewModelScope.launch {
             var consecutiveFailures = 0
@@ -4170,11 +4255,13 @@ class CameraViewModel(
     }
 
     override fun onCleared() {
+        val retireMaintenanceWithoutCommands = repository.maintenanceRetirementAccess(_uiState.value.maintenanceSuspended)
         val handoffCleanup = handoffOwner.cancelUnlaunched()
         foregroundImportPreferences?.unregisterOnSharedPreferenceChangeListener(foregroundImportWarningListener)
         val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
         activeCaptureConfigurationAttempt?.cancel()
         activeShootingSettingAttempt?.cancel()
+        maintenanceAttempts.values.toList().forEach(MaintenanceAttempt::retire)
         mediaDeleteControl?.cancel()
         mediaUploadAttempt?.cancel()
         cameraSessionGeneration += 1
@@ -4207,7 +4294,8 @@ class CameraViewModel(
             uploadJob?.join()
             uploadCleanupJob?.join()
             focusJob?.join()
-            repository.disconnect()
+            if (retireMaintenanceWithoutCommands != null) retireMaintenanceWithoutCommands()
+            else repository.disconnect()
         }
         super.onCleared()
     }
@@ -4283,6 +4371,8 @@ class CameraViewModel(
         focusPoint = null,
         focusFeedback = null,
         lastClockSyncAtMillis = null,
+        maintenanceReceipt = null,
+        maintenanceSuspended = false,
         lastCreatedDirectoryName = null,
         captureConfigurationReceipt = null,
         shootingSettingReceipt = null,
