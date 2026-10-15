@@ -140,6 +140,8 @@ class DesktopBridgeClient(
     @Volatile private var closingMediaSession: BridgeShutterReleaseSession? = null
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private var sessionId: String? = null
+    @Volatile var connectionRetirementUnconfirmed: Boolean = false
+        private set
     @Volatile private var shutterSession: BridgeShutterReleaseSession? = null
     @Volatile private var heldAutofocusSession: BridgeHeldAutofocusSession? = null
     private class MaintenanceBridgeOwnerContext(val owner: BridgeShutterReleaseSession) :
@@ -179,6 +181,7 @@ class DesktopBridgeClient(
     }
 
     suspend fun initialize() {
+        if (connectionRetirementUnconfirmed) throw ConnectionRetirementBlockedException()
         check(sessionId == null) { "Desktop bridge session is already initialized." }
         observedFeatures.clear()
         observedFeatures.add(CameraFeature.DESKTOP_BRIDGE)
@@ -194,18 +197,37 @@ class DesktopBridgeClient(
         val payload = JSONObject().put("engine", cameraEngine ?: "auto")
         cameraId?.takeIf(String::isNotBlank)?.let { payload.put("cameraId", it) }
         profileHint?.takeIf(String::isNotBlank)?.let { payload.put("profileHint", it) }
-        val created = postJson(endpoint("v1", "session"), payload, cameraDiscovery = true)
-        sessionId = created.requireString("id", "Desktop bridge did not return a session ID.")
-        val session = BridgeShutterReleaseSession(requireNotNull(sessionId))
-        shutterSession = session
-        heldAutofocusSession = BridgeHeldAutofocusSession(command = { ownerId, start ->
-            focusCommand(session, ownerId, start)
-        }, onTransition = session::invalidateObservations)
-        sessionEngine = mediaDeleteBridgeEngine(created.opt("engine"), created.optJSONObject("camera")?.opt("engine"))
-        sessionCameraModel = created.optJSONObject("camera")
-            ?.optNullableString("model")
-            ?.trim()
-            ?.takeIf(String::isNotEmpty)
+        var creationDispatched = false
+        try {
+            acquireConnectionResource(acquire = {
+                creationDispatched = true
+                postJson(endpoint("v1", "session"), payload, cameraDiscovery = true, connectionSetup = true)
+            }, retain = { created ->
+                sessionId = bridgeCreatedSessionId(created.opt("id"))
+                    ?: error("Desktop bridge did not return a valid session ID.")
+                val session = BridgeShutterReleaseSession(requireNotNull(sessionId))
+                shutterSession = session
+                heldAutofocusSession = BridgeHeldAutofocusSession(command = { ownerId, start ->
+                    focusCommand(session, ownerId, start)
+                }, onTransition = session::invalidateObservations)
+                sessionEngine = mediaDeleteBridgeEngine(created.opt("engine"), created.optJSONObject("camera")?.opt("engine"))
+                sessionCameraModel = created.optJSONObject("camera")
+                    ?.optNullableString("model")
+                    ?.trim()
+                    ?.takeIf(String::isNotEmpty)
+            })
+        } catch (exception: Exception) {
+            // A known HTTP rejection did not acquire an owner. A lost/malformed creation
+            // response can hide one, so retain uncertainty without replaying POST.
+            if (creationDispatched && sessionId == null &&
+                !(exception is DesktopBridgeException && bridgeSessionCreationRejected(
+                    exception.statusCode, exception.code, exception.engine))) {
+                connectionRetirementUnconfirmed = true
+                if (exception is ShutterReleaseException || exception is AutofocusReleaseException) throw exception
+                throw ConnectionRetirementUnconfirmedException(exception)
+            }
+            throw exception
+        }
     }
 
     suspend fun retireMaintenanceLocally() { shutterSession?.let { retireMaintenanceOwnerLocally(it) } }
@@ -235,6 +257,8 @@ class DesktopBridgeClient(
                     .delete().build(), owner, expected = 204, empty = true)
             }, retireLocal = { retireMaintenanceOwnerLocally(owner) })
     }
+
+    suspend fun closeConnectionAttempt() = withContext(ConnectionAttemptCleanup) { close() }
 
     suspend fun close() {
         if (maintenanceSessionOwned) {
@@ -1838,6 +1862,7 @@ class DesktopBridgeClient(
 
     private suspend fun postJson(
         url: HttpUrl, payload: JSONObject, shutterStart: Boolean = false, cameraDiscovery: Boolean = false,
+        connectionSetup: Boolean = false,
         recordingEvidence: RecordingRequestEvidence? = null,
         captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null,
         captureOwner: BridgeShutterReleaseSession? = null,
@@ -1847,6 +1872,7 @@ class DesktopBridgeClient(
             .tag(BridgeShutterStart::class.java, if (shutterStart) BridgeShutterStart else null)
             .post(payload.toString().toRequestBody(jsonMediaType))
             .build(), cameraDiscovery = cameraDiscovery, recordingEvidence = recordingEvidence,
+        connectionSetup = connectionSetup,
         captureEvidence = captureEvidence, captureResponse = captureResponse, captureOwner = captureOwner,
     )
 
@@ -1872,6 +1898,7 @@ class DesktopBridgeClient(
         observeStatus: Boolean = true,
         recoveryRead: Boolean = false,
         cameraDiscovery: Boolean = false,
+        connectionSetup: Boolean = false,
         recordingEvidence: RecordingRequestEvidence? = null,
         maxResponseBytes: Int? = null,
         strictMediaJsonLimit: Int? = null,
@@ -1892,7 +1919,13 @@ class DesktopBridgeClient(
         val focusRevision = focusSession?.revision
         val recordingIo = currentCoroutineContext()[RecordingIoContext] != null
         val call = newBridgeCall(request, captureEvidence != null || captureRecovery || recordingIo)
-        val jsonLimit = strictMediaJsonLimit ?: 65_536.takeIf { captureEvidence != null || recordingIo }
+        val jsonLimit = strictMediaJsonLimit ?: 65_536.takeIf { captureEvidence != null || recordingIo || connectionSetup }
+        if (connectionSetup) {
+            // Bound protected acquisition, including a continuously paced response body.
+            val maximum = TimeUnit.SECONDS.toNanos(15)
+            val configured = call.timeout().timeoutNanos()
+            if (configured == 0L || configured > maximum) call.timeout().timeout(maximum, TimeUnit.NANOSECONDS)
+        }
         if (recoveryRead) {
             // Bound only the additional release-proof read, including a continuously paced body.
             // This is an app recovery policy, not a camera timing guarantee or a release ACK.
@@ -2040,7 +2073,7 @@ class DesktopBridgeClient(
         val session = sessionForRequest(request)
         val revision = session?.revision
         val call = newBridgeCall(request)
-        if (recoveryCleanup) {
+        if (recoveryCleanup || currentCoroutineContext()[ConnectionAttemptCleanup.Key] != null) {
             // Share the release-recovery budget, including continuously paced response bodies,
             // without extending a shorter transport deadline or changing ordinary requests.
             val maximum = TimeUnit.SECONDS.toNanos(RECOVERY_STATUS_CALL_TIMEOUT_SECONDS)
@@ -2056,6 +2089,11 @@ class DesktopBridgeClient(
                 val body = response.body?.string().orEmpty()
                 session?.let(::requireCurrentSession)
                 if (!response.isSuccessful) throw bridgeError(response.code, body, request.url.encodedPath, session, revision)
+                if (request.method == "DELETE" && session != null &&
+                    request.url.encodedPath == endpoint("v1", "session", session.id).encodedPath) {
+                    check(bridgeSessionRetirementAcknowledged(response.code, body)) { "Desktop Bridge session retirement was not acknowledged." }
+                }
+
             }
         } catch (exception: Exception) {
             currentCoroutineContext().ensureActive()

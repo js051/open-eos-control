@@ -20,6 +20,21 @@ import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 
 class UsbPtpCameraBackendTest {
+    @Test fun cancelledTransportAcquisitionClosesHandleBeforeAnyPtpCommand() = runTest {
+        val transport = ScriptedTransport()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb"), PtpTransportFactory {
+            entered.complete(Unit)
+            withContext(kotlinx.coroutines.NonCancellable) { release.await() }
+            transport
+        })
+        val attempt = launch(start = CoroutineStart.UNDISPATCHED) { backend.initialize() }
+        entered.await(); attempt.cancel(); release.complete(Unit); attempt.join()
+        assertTrue(transport.closed)
+        assertTrue(transport.sentContainers.isEmpty())
+    }
+
     @Test fun cancelledUsbStopAfterAckKeepsSameSessionStopRouteWhenCapabilitiesDisappear() = runTest {
         val transport = CanonEosScriptedTransport(advertiseRecordingRead = true)
         val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb"), PtpTransportFactory { transport })

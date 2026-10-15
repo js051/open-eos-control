@@ -367,6 +367,12 @@ internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit
             )
             state.needsLiveViewStopRecovery -> stringResource(R.string.live_view_stop_unconfirmed)
             state.liveViewStopPending -> stringResource(R.string.live_view_stop_pending)
+            state.connectionRetirementUnconfirmed -> listOfNotNull(
+                stringResource(R.string.shutter_disconnect_warning).takeIf { state.shutterDisconnectWarning },
+                stringResource(R.string.live_view_disconnect_warning).takeIf { state.liveViewDisconnectWarning },
+                stringResource(R.string.recording_disconnect_warning).takeIf { state.recordingDisconnectWarning },
+                stringResource(R.string.connection_retirement_unconfirmed),
+            ).joinToString("\n")
             state.error != null && (state.connected || state.connectionRecovery == null) -> state.error
             state.recordingStartNotConfirmed -> stringResource(R.string.recording_start_not_confirmed)
             state.recordingDisconnectWarning -> stringResource(R.string.recording_disconnect_warning)
@@ -375,7 +381,8 @@ internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit
             else -> null
         },
         onDismiss,
-        dismissible = !state.shutterReleaseUnconfirmed && !state.needsLiveViewStopRecovery && !state.liveViewStopPending,
+        dismissible = !state.shutterReleaseUnconfirmed && !state.needsLiveViewStopRecovery && !state.liveViewStopPending &&
+            !state.connectionRetirementUnconfirmed,
     )
     }
 }

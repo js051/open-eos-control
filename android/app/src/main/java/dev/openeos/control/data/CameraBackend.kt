@@ -78,6 +78,9 @@ interface CameraControlBackend {
 
     suspend fun initialize()
     suspend fun close() = Unit
+    suspend fun closeConnectionAttempt() = close()
+    val connectionRetirementUnconfirmed: Boolean
+        get() = false
     /** Local teardown only while a maintenance hold forbids implicit camera/session cleanup. */
     suspend fun retireMaintenanceLocally() { nativeLiveViewSession?.close() }
     suspend fun info(): CameraInfo
@@ -420,6 +423,11 @@ class DesktopBridgeCameraBackend(
     override suspend fun initialize() = client.initialize()
 
     override suspend fun close() = client.close()
+
+    override suspend fun closeConnectionAttempt() = client.closeConnectionAttempt()
+
+    override val connectionRetirementUnconfirmed: Boolean
+        get() = client.connectionRetirementUnconfirmed
 
     override suspend fun retireMaintenanceLocally() = client.retireMaintenanceLocally()
 

@@ -306,6 +306,7 @@ class CameraViewModel(
     }
     private var httpMediaPreviewRead: HttpMediaPreviewRead? = null
     private var disconnectJob: Job? = null
+    private var observedConnectionRetirementRevision = 0L
     private val liveViewReconciliationJobs = mutableSetOf<Job>()
     private var eventMediaJob: Job? = null
     private var mediaUploadCleanupJob: Job? = null
@@ -1049,6 +1050,17 @@ class CameraViewModel(
             .apply()
     }
 
+    private fun publishConnectionRetirementWarning() {
+        val revision = repository.connectionRetirementRevision
+        if (revision <= observedConnectionRetirementRevision) return
+        observedConnectionRetirementRevision = revision
+        val warnings = repository.connectionRetirementSafetyWarnings
+        _uiState.update { it.copy(connectionRetirementUnconfirmed = true,
+            shutterDisconnectWarning = it.shutterDisconnectWarning || dev.openeos.control.data.PreviousConnectionSafetyWarning.SHUTTER in warnings,
+            liveViewDisconnectWarning = it.liveViewDisconnectWarning || dev.openeos.control.data.PreviousConnectionSafetyWarning.LIVE_VIEW in warnings,
+            recordingDisconnectWarning = it.recordingDisconnectWarning || dev.openeos.control.data.PreviousConnectionSafetyWarning.RECORDING in warnings) }
+    }
+
     fun disconnect() {
         handoffOwner.cancelUnlaunched(CameraImportHandoffOrigin.CAMERA)
         val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
@@ -1115,7 +1127,14 @@ class CameraViewModel(
             }
         }
         disconnectJob = job
-        job.invokeOnCompletion { if (disconnectJob === job) disconnectJob = null }
+        _uiState.update { it.copy(connectionTeardownPending = true) }
+        job.invokeOnCompletion {
+            publishConnectionRetirementWarning()
+            if (disconnectJob === job) {
+                disconnectJob = null
+                _uiState.update { it.copy(connectionTeardownPending = false) }
+            }
+        }
         job.start()
         _uiState.update {
             it.withClearedSession(baseUrl = it.baseUrl, error = null).copy(
@@ -3813,6 +3832,11 @@ class CameraViewModel(
             } catch (exception: Exception) {
                 if (generation != cameraSessionGeneration ||
                     (operation == CameraOperation.FOCUS && _uiState.value.info !== connection)) return@operation
+                if (exception is dev.openeos.control.data.ConnectionRetirementBlockedException ||
+                    exception is dev.openeos.control.data.ConnectionRetirementPendingException) {
+                    publishConnectionRetirementWarning()
+                    return@operation
+                }
                 val safetyFailure = exception is ShutterReleaseException || exception is AutofocusReleaseException ||
                     exception is dev.openeos.control.data.CcapiLiveViewReleaseException
                 val recovery = if (connectionAttempt != null && !safetyFailure) {
@@ -3836,6 +3860,7 @@ class CameraViewModel(
                     )
                 }
             } finally {
+                publishConnectionRetirementWarning()
                 if (generation == cameraSessionGeneration &&
                     (operation != CameraOperation.FOCUS || _uiState.value.info === connection)) {
                     cameraStateRevision += 1

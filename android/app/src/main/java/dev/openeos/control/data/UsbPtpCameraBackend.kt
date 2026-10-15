@@ -70,9 +70,11 @@ class UsbPtpCameraBackend(
 
     override suspend fun initialize() {
         if (session != null) return
-        val transport = transportFactory.open(connection)
-        val newSession = PtpSession(transport)
+        var acquiredSession: PtpSession? = null
         try {
+            acquireConnectionResource(acquire = { transportFactory.open(connection) },
+                retain = { acquiredSession = PtpSession(it) })
+            val newSession = requireNotNull(acquiredSession)
             val info = newSession.initialize()
             deviceInfo = info
             session = newSession
@@ -80,12 +82,24 @@ class UsbPtpCameraBackend(
             loadPropertyDescriptors(newSession, info)
             observedFeatures.addAll(setOf(CameraFeature.USB_DIAGNOSTICS, CameraFeature.CAMERA_IDENTITY))
         } catch (exception: Exception) {
-            runCatching { newSession.shutdown() }
+            // Cancellation can occur after the OS opens a handle or during PTP setup.
+            // Retire exactly that acquired owner, even before it became the active session.
+            val cleanupFailure = withContext(NonCancellable) {
+                runCatching { acquiredSession?.shutdownConnectionAttempt() }.exceptionOrNull()
+            }
+            if (session === acquiredSession) session = null
+            if (cleanupFailure != null) throw ConnectionRetirementUnconfirmedException(exception).also {
+                it.addSuppressed(cleanupFailure)
+            }
             throw exception
         }
     }
 
-    override suspend fun close() {
+    override suspend fun close() = closeInternal(strictConnectionAttempt = false)
+
+    override suspend fun closeConnectionAttempt() = closeInternal(strictConnectionAttempt = true)
+
+    private suspend fun closeInternal(strictConnectionAttempt: Boolean) {
         synchronized(mediaFolderLock) {
             resetObservedMediaFolders(null)
             observedFeatures.clear()
@@ -133,7 +147,7 @@ class UsbPtpCameraBackend(
             // Cleanup may observe its own features; never clear a replacement session's set.
             if (mediaFolderContext == null) observedFeatures.clear()
         }
-        current?.shutdown()
+        if (strictConnectionAttempt) current?.shutdownConnectionAttempt() else current?.shutdown()
     }
 
     override suspend fun info(): CameraInfo {
