@@ -561,7 +561,7 @@ private struct MonitoringAssistView: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
     @Environment(\.dismiss) private var dismiss
-    @State private var showingLutImporter = false
+    @State private var lutPickerTicket: CubeLutPickerTicket?
 
     private let zebraValues = [0, 70, 75, 80, 85, 90, 95, 100]
 
@@ -616,7 +616,7 @@ private struct MonitoringAssistView: View {
                         .lineLimit(2)
                         HStack(spacing: 8) {
                             Button {
-                                showingLutImporter = true
+                                lutPickerTicket = CubeLutPickerTicket(id: camera.beginCubeLutPicker())
                             } label: {
                                 Label("load_cube_lut", systemImage: "square.and.arrow.down")
                                     .frame(minHeight: 44)
@@ -636,6 +636,27 @@ private struct MonitoringAssistView: View {
                                 .accessibilityLabel(Text("remove_cube_lut"))
                                 .accessibilityIdentifier("monitor-lut-remove")
                             }
+                        }
+                        if camera.isImportingCubeLut {
+                            HStack {
+                                ProgressView("lut_import_loading")
+                                    .accessibilityIdentifier("monitor-lut-import-loading")
+                                Spacer(minLength: 8)
+                                Button("cancel") { camera.cancelCubeLutImport() }
+                                    .accessibilityIdentifier("monitor-lut-import-cancel")
+                            }
+                        }
+                        if camera.isRetiringCubeLutRead {
+                            Text("lut_import_stopping")
+                                .font(.caption)
+                                .foregroundStyle(Color.cameraSecondaryText)
+                                .accessibilityIdentifier("monitor-lut-import-stopping")
+                        }
+                        if let error = camera.cubeLutImportError {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(Color.cameraWarning)
+                                .accessibilityIdentifier("monitor-lut-import-error")
                         }
                     }
                     .accessibilityElement(children: .contain)
@@ -708,17 +729,27 @@ private struct MonitoringAssistView: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .fileImporter(
-            isPresented: $showingLutImporter,
-            allowedContentTypes: [UTType(filenameExtension: "cube") ?? .plainText, .plainText]
-        ) { result in
-            switch result {
-            case let .success(url):
-                Task { await camera.importCubeLut(from: url) }
-            case let .failure(error):
-                camera.reportCubeLutImportError(error)
+        .sheet(item: lutPickerPresentation) { ticket in
+            CubeLutDocumentPicker(ticket: ticket) { owner, result in
+                // Never dismiss a newer presentation for an old callback.
+                if lutPickerTicket?.id == owner { lutPickerTicket = nil }
+                if let selection = camera.completeCubeLutPicker(result, owner: owner) {
+                    Task { await camera.importCubeLut(selection) }
+                }
             }
         }
+    }
+
+    private var lutPickerPresentation: Binding<CubeLutPickerTicket?> {
+        let presentedID = lutPickerTicket?.id
+        return Binding(get: { lutPickerTicket }, set: { value in
+            // A delayed SwiftUI dismissal cannot clear a replacement picker.
+            if value == nil {
+                if lutPickerTicket?.id == presentedID { lutPickerTicket = nil }
+            } else {
+                lutPickerTicket = value
+            }
+        })
     }
 
     private var pixelAnalysisAvailable: Bool {

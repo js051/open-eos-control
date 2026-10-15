@@ -1032,3 +1032,6 @@
 "native_presentation_stalled" = "原生輸出已停止更新";
 
 "camera_audio_retiring" = "音訊正在停止，原生輸出仍待退場；無法確認裝置實際發聲。";
+
+"lut_import_loading" = "正在匯入 3D LUT…";
+"lut_import_stopping" = "正在等待先前的檔案讀取結束…";

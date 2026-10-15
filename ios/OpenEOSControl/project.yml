@@ -46,6 +46,9 @@ targets:
       - path: ../../contracts/media-delivery/v1/outcome-vectors.json
         createIntermediateGroups: false
         buildPhase: resources
+      - path: ../../contracts/lut-import/v1/utf8-vectors.json
+        createIntermediateGroups: false
+        buildPhase: resources
       - path: ../../contracts/live-view-lut/v1/numeric-vectors.json
         createIntermediateGroups: false
         buildPhase: resources

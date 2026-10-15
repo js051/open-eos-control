@@ -579,6 +579,180 @@ final class AsyncUIOwnershipTests: XCTestCase {
         XCTAssertTrue(state.lastError?.contains("not valid UTF-8") == true)
     }
 
+    func testAcceptedSelectionOwnsBeforeItsTaskStartsAndCannotBeResurrected() async throws {
+        for remove in [false, true] {
+            try await withFixture { fixture in
+                let state = fixture.state
+                let seed = lut("seed")
+                state.monitorSettings.cubeLut = seed
+                let accepted = try XCTUnwrap(state.acceptCubeLutSelection(from: URL(fileURLWithPath: "/synthetic/old.cube")))
+                XCTAssertTrue(state.isImportingCubeLut)
+                if remove { state.clearCubeLut() } else { state.cancelCubeLutImport() }
+                XCTAssertFalse(state.isImportingCubeLut)
+                await state.importCubeLut(accepted)
+                XCTAssertEqual(state.monitorSettings.cubeLut, remove ? nil : seed)
+                XCTAssertNil(state.cubeLutImportError)
+                let requests = await fixture.importer.requests()
+                XCTAssertTrue(requests.isEmpty, "Retired accepted selection must not open a file")
+            }
+        }
+    }
+
+    func testLatestAcceptedSelectionWinsWhenTasksStartInReverseOrder() async throws {
+        try await withFixture { fixture in
+            let state = fixture.state
+            let old = try XCTUnwrap(state.acceptCubeLutSelection(from: URL(fileURLWithPath: "/synthetic/old.cube")))
+            let latest = try XCTUnwrap(state.acceptCubeLutSelection(from: URL(fileURLWithPath: "/synthetic/latest.cube")))
+            await fixture.importer.enqueue("latest", outcome: .success(lut("latest")))
+            let task = fixture.importLut(latest)
+            try await waitForGate("latest", in: fixture.importer)
+            await state.importCubeLut(old)
+            XCTAssertTrue(state.isImportingCubeLut)
+            let requests = await fixture.importer.requests()
+            XCTAssertEqual(requests.map(\.lastPathComponent), ["latest.cube"])
+            await fixture.importer.release("latest")
+            await task.value
+            XCTAssertEqual(state.monitorSettings.cubeLut?.name, "latest")
+            XCTAssertFalse(state.isImportingCubeLut)
+        }
+    }
+
+    func testExplicitCancelRetiresNonCooperativeReadWithoutClearingAppliedLut() async throws {
+        for fails in [false, true] {
+            try await withFixture { fixture in
+                let state = fixture.state
+                let seed = lut("seed")
+                state.monitorSettings.cubeLut = seed
+                await fixture.importer.enqueue("old", outcome: fails ? .failure("retired failure") : .success(lut("old")))
+                let old = fixture.importLut("old")
+                try await waitForGate("old", in: fixture.importer)
+                XCTAssertTrue(state.isImportingCubeLut)
+                state.cancelCubeLutImport()
+                XCTAssertFalse(state.isImportingCubeLut)
+                XCTAssertEqual(state.monitorSettings.cubeLut, seed)
+                state.reportCubeLutRenderFailure()
+                let warning = state.lastError
+                await fixture.importer.release("old")
+                await old.value
+                XCTAssertEqual(state.monitorSettings.cubeLut, seed)
+                XCTAssertEqual(state.lastError, warning)
+                XCTAssertNil(state.cubeLutImportError)
+                XCTAssertFalse(state.isImportingCubeLut)
+                try await completeImport("retry", lut: lut("retry"), fixture: fixture)
+                XCTAssertEqual(state.monitorSettings.cubeLut?.name, "retry")
+            }
+        }
+    }
+
+    func testPickerOpenNullAndUserCancellationPreserveAcceptedWorkAcrossBackground() async throws {
+        let results: [Result<URL?, Error>] = [
+            .success(nil), .failure(CancellationError()), .failure(CocoaError(.userCancelled)),
+        ]
+        for result in results {
+            try await withFixture { fixture in
+                let state = fixture.state
+                let seed = lut("seed")
+                state.monitorSettings.cubeLut = seed
+                await fixture.importer.enqueue("latest", outcome: .success(lut("latest")))
+                let latest = fixture.importLut("latest")
+                try await waitForGate("latest", in: fixture.importer)
+                let picker = state.beginCubeLutPicker()
+                state.setApplicationActive(false)
+                XCTAssertTrue(state.isImportingCubeLut)
+                XCTAssertNil(state.completeCubeLutPicker(result, owner: picker))
+                XCTAssertTrue(state.isImportingCubeLut)
+                XCTAssertNil(state.cubeLutImportError)
+                XCTAssertEqual(state.monitorSettings.cubeLut, seed)
+                state.setApplicationActive(true)
+                await fixture.importer.release("latest")
+                await latest.value
+                XCTAssertEqual(state.monitorSettings.cubeLut?.name, "latest")
+                XCTAssertFalse(state.isImportingCubeLut)
+            }
+        }
+    }
+
+    func testStalePickerSuccessFailureAndCancellationCannotRetireANewerAcceptedSelection() async throws {
+        let results: [Result<URL?, Error>] = [
+            .success(URL(fileURLWithPath: "/synthetic/stale.cube")),
+            .failure(AsyncUIFailure(message: "stale picker failure")), .success(nil),
+        ]
+        for result in results {
+            try await withFixture { fixture in
+                let state = fixture.state
+                let picker = state.beginCubeLutPicker()
+                let newerPicker = state.beginCubeLutPicker()
+                XCTAssertNil(state.completeCubeLutPicker(result, owner: picker))
+                let accepted = try XCTUnwrap(state.completeCubeLutPicker(
+                    .success(URL(fileURLWithPath: "/synthetic/latest.cube")), owner: newerPicker))
+                state.reportCubeLutRenderFailure()
+                let warning = state.lastError
+                XCTAssertNil(state.completeCubeLutPicker(result, owner: newerPicker))
+                XCTAssertTrue(state.isImportingCubeLut)
+                XCTAssertEqual(state.lastError, warning)
+                XCTAssertNil(state.cubeLutImportError)
+                await fixture.importer.enqueue("latest", outcome: .success(lut("latest")))
+                let task = fixture.importLut(accepted)
+                try await waitForGate("latest", in: fixture.importer)
+                await fixture.importer.release("latest")
+                await task.value
+                XCTAssertEqual(state.monitorSettings.cubeLut?.name, "latest")
+            }
+        }
+    }
+
+    func testCurrentPickerFailureRetiresPendingReadAndRetryClearsOnlyItsError() async throws {
+        try await withFixture { fixture in
+            let state = fixture.state
+            let seed = lut("seed")
+            state.monitorSettings.cubeLut = seed
+            await fixture.importer.enqueue("old", outcome: .success(lut("old")))
+            let old = fixture.importLut("old")
+            try await waitForGate("old", in: fixture.importer)
+            let picker = state.beginCubeLutPicker()
+            XCTAssertNil(state.completeCubeLutPicker(.failure(AsyncUIFailure(message: "picker unavailable")), owner: picker))
+            XCTAssertFalse(state.isImportingCubeLut)
+            let failure = state.cubeLutImportError
+            XCTAssertTrue(failure?.contains("picker unavailable") == true)
+            await fixture.importer.release("old")
+            await old.value
+            XCTAssertEqual(state.monitorSettings.cubeLut, seed)
+            XCTAssertEqual(state.cubeLutImportError, failure)
+            try await completeImport("retry", lut: lut("retry"), fixture: fixture)
+            XCTAssertNil(state.cubeLutImportError)
+            XCTAssertNil(state.lastError)
+        }
+    }
+
+    func testPickerCoordinatorKeepsItsImmutableTicketAndDeliversOnlyOnce() {
+        let owner = UUID()
+        var delivered: [UUID] = []
+        let coordinator = CubeLutDocumentPicker.Coordinator(owner: owner) { ticket, _ in delivered.append(ticket) }
+        coordinator.finish(.success(nil))
+        coordinator.finish(.failure(AsyncUIFailure(message: "late failure")))
+        coordinator.finish(.success(URL(fileURLWithPath: "/synthetic/late.cube")))
+        XCTAssertEqual(delivered, [owner])
+    }
+
+    func testDisconnectedDiagnosticsNeverIncludeLutProviderErrorCanaries() async throws {
+        for mode in [AppConnectionMode.ccapi, .desktopBridge] {
+            try await withFixture { fixture in
+                let state = fixture.state
+                state.connectionMode = mode
+                let canaries = ["SYNTHETIC_LUT_FILENAME_ONLY.cube", "SYNTHETIC_LUT_TITLE_ONLY", "/synthetic/lut-private/location"]
+                state.monitorSettings.cubeLut = lut(canaries[1])
+                state.reportCubeLutImportError(AsyncUIFailure(message: canaries.joined(separator: " ")))
+                let report = try await state.diagnosticReport()
+                for canary in canaries {
+                    XCTAssertTrue(state.cubeLutImportError?.contains(canary) == true)
+                    XCTAssertFalse(report.text.contains(canary))
+                }
+                XCTAssertTrue(report.text.contains("LUT_IMPORT_FAILED"))
+                XCTAssertTrue(report.text.contains("monitorLut=loaded (2x2x2)"))
+            }
+        }
+    }
+
     private func cameras(_ owner: String) -> [DesktopBridgeCamera] {
         ["first", "second"].map {
             DesktopBridgeCamera(id: "\(owner)-\($0)", model: "Synthetic \(owner) \($0)",
@@ -747,6 +921,12 @@ private final class AsyncUIFixture {
         let url = URL(fileURLWithPath: "/synthetic/\(name).cube")
         let task = Task { await state.importCubeLut(from: url) }
         if preCanceled { task.cancel() }
+        tasks.append(task)
+        return task
+    }
+
+    func importLut(_ selection: CubeLutImportSelection) -> Task<Void, Never> {
+        let task = Task { await state.importCubeLut(selection) }
         tasks.append(task)
         return task
     }

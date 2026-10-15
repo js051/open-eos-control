@@ -1032,3 +1032,6 @@
 "native_presentation_stalled" = "Native output stopped progressing";
 
 "camera_audio_retiring" = "Audio is stopping. Native output retirement is pending; device audibility is unknown.";
+
+"lut_import_loading" = "Importing 3D LUT…";
+"lut_import_stopping" = "Waiting for the previous file read to finish…";
