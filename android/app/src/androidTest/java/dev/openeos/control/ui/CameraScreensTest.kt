@@ -1833,6 +1833,7 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.camera_value_aperture_priority_ae))
             .assertIsDisplayed()
             .performClick()
+        compose.onNodeWithTag("shooting-setting-apply-shootingmode").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("shootingmode" to "AV", request)
         }
@@ -1841,6 +1842,7 @@ class CameraScreensTest {
             .assertIsDisplayed()
         compose.onNodeWithTag("advanced-setting-values-aspectratio").performScrollToIndex(3)
         compose.onNodeWithText("16:9").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("shooting-setting-apply-aspectratio").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("aspectratio" to "16:9", request)
         }
@@ -1854,6 +1856,7 @@ class CameraScreensTest {
             .assertIsDisplayed()
         compose.onNodeWithTag("advanced-setting-values-zoomspeed").performScrollToIndex(11)
         compose.onNodeWithText("12").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("shooting-setting-apply-zoomspeed").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("zoomspeed" to "12", request)
         }
@@ -1863,6 +1866,7 @@ class CameraScreensTest {
         compose.onNodeWithTag("advanced-setting-value-alomode-High")
             .assertIsDisplayed()
             .performClick()
+        compose.onNodeWithTag("shooting-setting-apply-alomode").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("alomode" to "High", request)
         }
@@ -1876,6 +1880,7 @@ class CameraScreensTest {
             .assertIsDisplayed()
             .performClick()
 
+        compose.onNodeWithTag("shooting-setting-apply-drivemode").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("drivemode" to "Super high speed continuous shooting", request)
         }
@@ -1885,6 +1890,7 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.camera_value_phone))
             .assertIsDisplayed()
             .performClick()
+        compose.onNodeWithTag("shooting-setting-apply-capturetarget").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("capturetarget" to "Phone", request)
         }
@@ -1892,6 +1898,7 @@ class CameraScreensTest {
             .performScrollTo()
             .assertIsDisplayed()
         compose.onNodeWithText("SD").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("shooting-setting-apply-capturestorage").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("capturestorage" to "SD", request)
         }
@@ -1933,7 +1940,7 @@ class CameraScreensTest {
                 ),
             )
         }
-        compose.onNodeWithTag("advanced-setting-text-apply-ownername")
+        compose.onNodeWithTag("shooting-setting-apply-ownername")
             .assertIsEnabled()
             .performClick()
 
@@ -2003,6 +2010,7 @@ class CameraScreensTest {
         compose.onNodeWithTag("advanced-setting-value-beep-disabletouch")
             .assertIsDisplayed()
             .performClick()
+        compose.onNodeWithTag("shooting-setting-apply-beep").performScrollTo().performClick()
         compose.runOnIdle { assertEquals("beep" to "disabletouch", request) }
 
         compose.onNodeWithTag("advanced-setting-displayoff").performScrollTo().assertIsDisplayed()
@@ -2011,6 +2019,7 @@ class CameraScreensTest {
         compose.onNodeWithTag("advanced-setting-value-displayoff-120")
             .assertIsDisplayed()
             .performClick()
+        compose.onNodeWithTag("shooting-setting-apply-displayoff").performScrollTo().performClick()
         compose.runOnIdle { assertEquals("displayoff" to "120", request) }
 
         compose.runOnIdle {
@@ -3428,8 +3437,45 @@ class CameraScreensTest {
         }
         compose.onNodeWithTag("capture-mode-PHOTO").assertIsDisplayed().assertIsSelected()
         compose.onNodeWithTag("capture-mode-VIDEO").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(null, selectedMode) }
+        compose.onNodeWithTag("shooting-setting-apply-capture-mode").performClick()
         compose.runOnIdle { assertEquals(CaptureMode.VIDEO, selectedMode) }
         compose.onNodeWithText(resourceText(R.string.capture_not_supported)).assertIsDisplayed()
+    }
+
+    @Test
+    fun captureModeSelectionRequiresApplyAndSameValueTapCreatesNewRevision() {
+        val base = connectedState()
+        val state = mutableStateOf(base.copy(capabilities = base.capabilities?.copy(
+            advancedSettings = listOf(CameraSettingControl("moviemode", "Movie mode", "off", listOf("off", "on"))))))
+        val submitted = mutableListOf<ShootingSettingDraft>()
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(state.value, noOpActions().copy(submitShootingSetting = { submitted += it }))
+            }
+        }
+        compose.onNodeWithTag("capture-mode-VIDEO").performClick()
+        compose.runOnIdle {
+            assertTrue(submitted.isEmpty())
+            assertEquals(CaptureMode.PHOTO, state.value.captureMode)
+        }
+        compose.onNodeWithTag("shooting-setting-apply-capture-mode").performClick().assertIsNotEnabled()
+        compose.runOnIdle {
+            assertEquals(1, submitted.size)
+            assertEquals("moviemode", submitted.single().request.key)
+            assertEquals("on", submitted.single().request.requestedValue)
+            assertEquals(CaptureMode.PHOTO, state.value.captureMode)
+        }
+        compose.onNodeWithTag("capture-mode-VIDEO").performClick()
+        compose.onNodeWithTag("shooting-setting-apply-capture-mode").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertEquals(2, submitted.size)
+            assertTrue(submitted.last().revision > submitted.first().revision)
+            assertEquals(submitted.first().token, submitted.last().token)
+            state.value = state.value.copy(status = state.value.status?.copy(recording = true))
+        }
+        compose.onNodeWithTag("capture-mode-PHOTO").assertIsNotEnabled()
+        compose.onNodeWithTag("shooting-setting-apply-capture-mode").assertIsNotEnabled()
     }
 
     @Test
@@ -3827,9 +3873,13 @@ class CameraScreensTest {
 
         compose.onNodeWithText("ISO").performClick()
         compose.onNodeWithText("1600").performClick()
+        compose.runOnIdle { assertEquals(null, selectedIso) }
+        compose.onNodeWithTag("shooting-setting-apply-iso").performClick()
         compose.runOnIdle { assertEquals("1600", selectedIso) }
         compose.onNodeWithTag("exposure-picker-SHUTTER").performClick()
         compose.onNodeWithText("1/60").performClick()
+        compose.runOnIdle { assertEquals(null, selectedShutter) }
+        compose.onNodeWithTag("shooting-setting-apply-shutter").performClick()
         compose.runOnIdle { assertEquals("1/60", selectedShutter) }
         compose.onNodeWithTag("exposure-picker-ISO").assertIsDisplayed()
     }
@@ -3885,7 +3935,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun exposureDialLocksDuringWriteAndReturnsToConfirmedValueAfterFailure() {
+    fun exposureDialLocksDuringWriteAndRetainsDraftAfterFailure() {
         val state = mutableStateOf(connectedState().copy(activeSettingPicker = SettingPicker.ISO))
         var selectedIso: String? = null
         compose.setContent {
@@ -3899,6 +3949,8 @@ class CameraScreensTest {
 
         compose.onNodeWithTag("exposure-option-3").assertIsSelected()
         compose.onNodeWithTag("exposure-option-4").performClick().assertIsSelected()
+        compose.runOnIdle { assertEquals(null, selectedIso) }
+        compose.onNodeWithTag("shooting-setting-apply-iso").performClick()
         compose.runOnIdle {
             assertEquals("1600", selectedIso)
             state.value = state.value.copy(pendingOperations = setOf(CameraOperation.SETTING))
@@ -3908,7 +3960,8 @@ class CameraScreensTest {
 
         compose.runOnIdle { state.value = state.value.copy(pendingOperations = emptySet()) }
         compose.waitForIdle()
-        compose.onNodeWithTag("exposure-option-3").assertIsSelected()
+        compose.onNodeWithTag("exposure-option-4").assertIsSelected()
+        compose.onNodeWithTag("shooting-setting-apply-iso").assertIsNotEnabled()
     }
 
     @Test

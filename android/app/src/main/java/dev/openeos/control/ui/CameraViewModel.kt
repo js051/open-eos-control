@@ -20,6 +20,9 @@ import dev.openeos.control.data.CaptureConfigurationReadback
 import dev.openeos.control.data.CaptureConfigurationReadEvidence
 import dev.openeos.control.data.CaptureConfigurationRequest
 import dev.openeos.control.data.CaptureConfigurationWriteEvidence
+import dev.openeos.control.data.ShootingSettingRequest
+import dev.openeos.control.data.ShootingSettingObservation
+import dev.openeos.control.data.acceptsShootingSettingValue
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.AutofocusReleaseException
 import dev.openeos.control.data.ShutterReleaseException
@@ -319,6 +322,11 @@ class CameraViewModel(
     }
     @Volatile private var mediaSaveRequest: MediaSaveRequest? = null
     private var mediaUploadJob: Job? = null
+    private var shootingSettingAttempt: ShootingSettingAttempt? = null
+    private var activeShootingSettingAttempt: ShootingSettingAttempt? = null
+    private val shootingSettingAttempts = linkedMapOf<String, ShootingSettingAttempt>()
+    private val shootingSettingDrafts = ShootingSettingDraftLedger()
+    private var shootingSettingJob: Job? = null
     private var captureConfigurationAttempt: CaptureConfigurationAttempt? = null
     private var activeCaptureConfigurationAttempt: CaptureConfigurationAttempt? = null
     private val captureConfigurationAttempts = linkedMapOf<String, CaptureConfigurationAttempt>()
@@ -698,7 +706,10 @@ class CameraViewModel(
         _uiState.update { it.copy(activeSettingPicker = picker) }
     }
 
-    fun closeSettingPicker() = _uiState.update { it.copy(activeSettingPicker = null) }
+    fun closeSettingPicker() {
+        activeShootingSettingAttempt?.let { cancelShootingSetting(it.id) }
+        _uiState.update { it.copy(activeSettingPicker = null) }
+    }
 
     fun setConnectionTarget(target: ConnectionTarget) {
         if (_uiState.value.connected || _uiState.value.connectionTarget == target) return
@@ -1019,6 +1030,7 @@ class CameraViewModel(
         val liveViewWarning = previousState.liveViewDisconnectWarning || previousState.needsLiveViewStopRecovery
         val shutterWarning = previousState.needsShutterDisconnectWarning()
         activeCaptureConfigurationAttempt?.cancel()
+        activeShootingSettingAttempt?.cancel()
         mediaDeleteControl?.cancel()
         mediaUploadAttempt?.cancel()
         cameraSessionGeneration += 1
@@ -1310,70 +1322,118 @@ class CameraViewModel(
 
     fun setIso(value: String) {
         if (updatePreviewExposure { it.copy(iso = value) }) return
-        updateStatus(CameraOperation.SETTING) { repository.setIso(value) }
+        setCameraSetting("iso", value)
     }
 
     fun setShutter(value: String) {
         if (updatePreviewExposure { it.copy(shutter = value) }) return
-        updateStatus(CameraOperation.SETTING) { repository.setShutter(value) }
+        setCameraSetting("shutter", value)
     }
 
     fun setAperture(value: String) {
         if (updatePreviewExposure { it.copy(aperture = value) }) return
-        updateStatus(CameraOperation.SETTING) { repository.setAperture(value) }
+        setCameraSetting("aperture", value)
     }
 
     fun setWhiteBalance(value: String) {
         if (updatePreviewExposure { it.copy(whiteBalance = value) }) return
-        updateStatus(CameraOperation.SETTING) { repository.setWhiteBalance(value) }
+        setCameraSetting("whitebalance", value)
     }
 
     fun setCameraSetting(key: String, value: String) {
-        if (_uiState.value.isBusy(CameraOperation.SETTING)) return
-        val selectedCaptureMode = when {
-            key.isMovieModeKey() && value.equals("on", ignoreCase = true) -> CaptureMode.VIDEO
-            key.isMovieModeKey() && value.equals("off", ignoreCase = true) -> CaptureMode.PHOTO
-            key.isShootingModeKey() -> captureModeForShootingValue(value)
-            else -> null
+        val state = _uiState.value
+        if (state.previewMode) {
+            val observed = runCatching { ShootingSettingObservation(key, value) }.getOrNull() ?: return
+            adoptShootingSettingObservation(observed)
+            return
         }
-        runCamera(CameraOperation.SETTING) {
-            if (_uiState.value.previewMode) {
-                if (key.isShootingModeKey() && selectedCaptureMode == CaptureMode.PHOTO) {
-                    lastPhotoShootingMode = value
-                }
-                _uiState.update { state ->
-                    state.copy(
-                        captureMode = selectedCaptureMode ?: state.captureMode,
-                        capabilities = state.capabilities?.copy(
-                            advancedSettings = state.capabilities.advancedSettings.map { setting ->
-                                if (setting.key == key) setting.copy(value = value) else setting
-                            },
-                        ),
-                    )
-                }
-                return@runCamera
+        val request = runCatching { ShootingSettingRequest(key, value) }.getOrNull() ?: return
+        submitShootingSetting(ShootingSettingDraft(ShootingSettingOwner(state.info, state.mediaSessionGeneration),
+            UUID.randomUUID().toString(), 0L, request))
+    }
+
+    fun submitShootingSetting(draft: ShootingSettingDraft) {
+        val state = _uiState.value
+        if (!state.connected || state.previewMode || state.busy || state.isBusy(CameraOperation.SETTING) || shootingSettingJob != null ||
+            !draft.owner.matches(state.info, state.mediaSessionGeneration)) return
+        if (draft.request.key.isCaptureModeKey() && !captureModeSwitchEnabled(state)) return
+        val control = state.shootingSettingControl(draft.request.key) ?: return
+        if (!acceptsShootingSettingValue(control, draft.request.requestedValue)) return
+        val access = try { repository.shootingSettingAccess(draft.request) } catch (_: Exception) {
+            _uiState.update { it.copy(error = "This setting does not expose a safe scoped read/write route.", errorOperation = CameraOperation.SETTING) }
+            return
+        }
+        if (!shootingSettingDrafts.claim(draft)) return
+        val generation = cameraSessionGeneration
+        fun owns() = generation == cameraSessionGeneration && draft.owner.matches(_uiState.value.info, _uiState.value.mediaSessionGeneration)
+        lateinit var attempt: ShootingSettingAttempt
+        attempt = ShootingSettingAttempt(draft, access, ::owns) { receipt ->
+            _uiState.update { current ->
+                val history = current.shootingSettingHistory.map { if (it.id == receipt.id) receipt else it }
+                if (owns() && shootingSettingAttempt === attempt) current.copy(shootingSettingReceipt = receipt, shootingSettingHistory = history)
+                else current.copy(shootingSettingHistory = history)
             }
+        }
+        shootingSettingAttempt = attempt
+        shootingSettingAttempts[attempt.id] = attempt
+        _uiState.update { it.copy(shootingSettingReceipt = attempt.snapshot(),
+            shootingSettingHistory = shootingSettingHistory(it.shootingSettingHistory, attempt.snapshot())) }
+        shootingSettingAttempts.keys.retainAll(_uiState.value.shootingSettingHistory.mapTo(hashSetOf()) { it.id })
+        val job = launchCameraOperation(CameraOperation.SETTING, onRegistered = {
+            shootingSettingJob = it; activeShootingSettingAttempt = attempt
+        }) {
             val revision = cameraStateRevision
-            val response = repository.setCameraSetting(key, value)
-            val capabilities = repository.refreshCapabilities()
-            val status = latestCameraStatus(response, revision)
-            val captureMode = if (key.isCaptureModeKey()) {
-                captureModeFrom(capabilities)
-            } else {
-                selectedCaptureMode ?: captureModeFrom(capabilities)
+            val observed = attempt.run()
+            if (observed != null && owns() && !attempt.snapshot().cancelled && revision == cameraStateRevision) {
+                adoptShootingSettingObservation(observed)
             }
-            if (key.isShootingModeKey() && selectedCaptureMode == CaptureMode.PHOTO) {
-                lastPhotoShootingMode = value
-            }
-            _uiState.update {
-                it.copy(
-                    status = status,
-                    capabilities = capabilities,
-                    captureMode = captureMode ?: it.captureMode,
-                )
-            }
-            if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
         }
+        job?.invokeOnCompletion {
+            attempt.finishBeforeStart()
+            if (shootingSettingJob === job) {
+                shootingSettingJob = null
+                if (activeShootingSettingAttempt === attempt) activeShootingSettingAttempt = null
+            }
+        }
+        if (job == null) attempt.finishBeforeStart()
+    }
+
+    private fun adoptShootingSettingObservation(observed: ShootingSettingObservation) {
+        _uiState.update { current ->
+            val updated = current.withShootingSettingObservation(observed)
+            updated.copy(captureMode = if (observed.key.isCaptureModeKey())
+                updated.capabilities?.let(::captureModeFrom) ?: updated.captureMode else updated.captureMode)
+        }
+    }
+
+    fun cancelShootingSetting(id: String) {
+        val attempt = activeShootingSettingAttempt?.takeIf { it.id == id } ?: return
+        if (!attempt.draft.owner.matches(_uiState.value.info, _uiState.value.mediaSessionGeneration)) return
+        attempt.cancel()
+        shootingSettingJob?.cancel()
+    }
+
+    fun recoverShootingSetting(id: String) {
+        val attempt = shootingSettingAttempts[id] ?: return
+        val state = _uiState.value
+        if (!state.connected || state.busy || state.isBusy(CameraOperation.SETTING) || shootingSettingJob != null ||
+            state.shootingSettingHistory.none { it.id == id } ||
+            !attempt.draft.owner.matches(state.info, state.mediaSessionGeneration)) return
+        val generation = cameraSessionGeneration
+        val job = launchCameraOperation(CameraOperation.SETTING, onRegistered = {
+            shootingSettingJob = it; activeShootingSettingAttempt = attempt
+        }) {
+            val revision = cameraStateRevision
+            val observed = attempt.recover()
+            if (observed != null && generation == cameraSessionGeneration && revision == cameraStateRevision &&
+                attempt.draft.owner.matches(_uiState.value.info, _uiState.value.mediaSessionGeneration)) {
+                adoptShootingSettingObservation(observed)
+            }
+        }
+        job?.invokeOnCompletion { if (shootingSettingJob === job) {
+            shootingSettingJob = null
+            if (activeShootingSettingAttempt === attempt) activeShootingSettingAttempt = null
+        } }
     }
 
     fun syncCameraClock() = runCamera(CameraOperation.CLOCK) {
@@ -3588,6 +3648,7 @@ class CameraViewModel(
             val recordingWarning = retireRecordingAttempt(_uiState.value)
             _uiState.update { it.copy(recordingDisconnectWarning = recordingWarning) }
             activeCaptureConfigurationAttempt?.cancel()
+            activeShootingSettingAttempt?.cancel()
             mediaDeleteControl?.cancel()
             mediaUploadAttempt?.cancel()
             cameraSessionGeneration += 1
@@ -4113,6 +4174,7 @@ class CameraViewModel(
         foregroundImportPreferences?.unregisterOnSharedPreferenceChangeListener(foregroundImportWarningListener)
         val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
         activeCaptureConfigurationAttempt?.cancel()
+        activeShootingSettingAttempt?.cancel()
         mediaDeleteControl?.cancel()
         mediaUploadAttempt?.cancel()
         cameraSessionGeneration += 1
@@ -4223,6 +4285,7 @@ class CameraViewModel(
         lastClockSyncAtMillis = null,
         lastCreatedDirectoryName = null,
         captureConfigurationReceipt = null,
+        shootingSettingReceipt = null,
         operatorConfirmedFeatures = emptySet(),
         error = error,
         errorOperation = null,

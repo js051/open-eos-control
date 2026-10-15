@@ -82,6 +82,13 @@ interface CameraControlBackend {
     suspend fun setExposure(iso: String? = null, shutter: String? = null, aperture: String? = null): CameraStatus
     suspend fun setWhiteBalance(value: String): CameraStatus
     suspend fun setSetting(key: String, value: String): CameraStatus
+    suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence): Unit =
+        unsupported(CameraFeature.ADVANCED_SETTINGS)
+    suspend fun readShootingSetting(request: ShootingSettingRequest): ShootingSettingObservation =
+        unsupported(CameraFeature.ADVANCED_SETTINGS)
+    fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess = ShootingSettingAccess(transport.label,
+        write = { frozen, evidence -> require(frozen == request); writeShootingSetting(frozen, evidence) },
+        read = { frozen -> require(frozen == request); readShootingSetting(frozen) })
     suspend fun syncCameraClock(): CameraStatus = unsupported(CameraFeature.CAMERA_CLOCK_SYNC)
     suspend fun createDirectory(name: String): String = unsupported(CameraFeature.DIRECTORY_CONTROL)
     suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming =
@@ -228,6 +235,11 @@ class CcapiCameraBackend(
     override suspend fun setWhiteBalance(value: String): CameraStatus = client.setWhiteBalance(value)
 
     override suspend fun setSetting(key: String, value: String): CameraStatus = client.setSetting(key, value)
+    override suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence) =
+        client.writeShootingSetting(request, evidence)
+    override suspend fun readShootingSetting(request: ShootingSettingRequest): ShootingSettingObservation =
+        client.readShootingSetting(request)
+    override fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess = client.shootingSettingAccess(request)
 
     override suspend fun syncCameraClock(): CameraStatus = client.syncCameraClock()
 
@@ -391,6 +403,11 @@ class DesktopBridgeCameraBackend(
     override suspend fun setWhiteBalance(value: String): CameraStatus = client.setWhiteBalance(value)
 
     override suspend fun setSetting(key: String, value: String): CameraStatus = client.setSetting(key, value)
+    override suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence) =
+        client.writeShootingSetting(request, evidence)
+    override suspend fun readShootingSetting(request: ShootingSettingRequest): ShootingSettingObservation =
+        client.readShootingSetting(request)
+    override fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess = client.shootingSettingAccess(request)
 
     override suspend fun syncCameraClock(): CameraStatus = client.syncCameraClock()
 

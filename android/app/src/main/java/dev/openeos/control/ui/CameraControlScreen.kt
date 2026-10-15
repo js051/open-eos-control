@@ -1,5 +1,10 @@
 package dev.openeos.control.ui
 
+import dev.openeos.control.data.ShootingSettingRequest
+import dev.openeos.control.data.ShootingSettingWriteEvidence
+import dev.openeos.control.data.ShootingSettingReadEvidence
+import dev.openeos.control.data.acceptsShootingSettingValue
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import dev.openeos.control.data.CaptureConfigurationOperation
 import dev.openeos.control.data.CaptureConfigurationRequest
 import dev.openeos.control.data.CaptureConfigurationWriteEvidence
@@ -390,37 +395,52 @@ private fun CaptureCapabilityWarning(
 
 @Composable
 private fun CaptureModeSelector(state: CameraUiState, actions: CameraActions) {
-    val enabled = captureModeSwitchEnabled(state)
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(CAPTURE_MODE_SELECTOR_HEIGHT)
-            .testTag("capture-mode-selector"),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(
-            Modifier
-                .width(208.dp)
-                .height(48.dp)
-                .selectableGroup(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            CaptureModeOption(
-                label = stringResource(R.string.photo),
-                mode = CaptureMode.PHOTO,
-                selected = state.captureMode == CaptureMode.PHOTO,
-                enabled = enabled,
-                onSelect = actions.setCaptureMode,
-                modifier = Modifier.weight(1f),
-            )
-            CaptureModeOption(
-                label = stringResource(R.string.video),
-                mode = CaptureMode.VIDEO,
-                selected = state.captureMode == CaptureMode.VIDEO,
-                enabled = enabled,
-                onSelect = actions.setCaptureMode,
-                modifier = Modifier.weight(1f),
-            )
+    val enabled = captureModeSwitchEnabled(state) && !state.busy
+    val owner = remember(state.info, state.mediaSessionGeneration) { ShootingSettingOwner(state.info, state.mediaSessionGeneration) }
+    val token = remember(owner) { java.util.UUID.randomUUID().toString() }
+    var draftMode by remember(owner) { mutableStateOf(state.captureMode) }
+    var revision by remember(owner) { mutableStateOf(0L) }
+    var edited by remember(owner) { mutableStateOf(false) }
+    var submittedRevision by remember(owner) { mutableStateOf<Long?>(null) }
+    var preferredPhotoValue by remember(owner) { mutableStateOf<String?>(null) }
+    val setting = state.capabilities?.captureModeSetting()
+    LaunchedEffect(setting?.value, state.captureMode) {
+        if (setting?.currentCaptureMode() == CaptureMode.PHOTO) preferredPhotoValue = setting.value
+        if (!edited) draftMode = state.captureMode
+    }
+    val receipt = state.shootingSettingReceipt
+    LaunchedEffect(receipt) {
+        if (receipt != null && canConsumeShootingSettingDraft(receipt, token, revision, state.info, state.mediaSessionGeneration)) {
+            edited = false
+            draftMode = setting?.copy(value = receipt.evidence.observedValue ?: setting.value)?.currentCaptureMode() ?: state.captureMode
+        }
+    }
+    val target = setting?.valueForCaptureMode(draftMode, preferredPhotoValue)
+    val select: (CaptureMode) -> Unit = { mode ->
+        draftMode = mode; revision += 1; edited = true
+    }
+    Box(Modifier.fillMaxWidth().height(CAPTURE_MODE_SELECTOR_HEIGHT).testTag("capture-mode-selector"),
+        contentAlignment = Alignment.Center) {
+        Row(Modifier.width(if (edited) 312.dp else 208.dp).height(48.dp).selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            CaptureModeOption(stringResource(R.string.photo), CaptureMode.PHOTO, draftMode == CaptureMode.PHOTO,
+                enabled, select, Modifier.weight(1f))
+            CaptureModeOption(stringResource(R.string.video), CaptureMode.VIDEO, draftMode == CaptureMode.VIDEO,
+                enabled, select, Modifier.weight(1f))
+            if (edited) {
+                Button(onClick = {
+                    submittedRevision = revision
+                    val submit = actions.submitShootingSetting
+                    if (state.previewMode || setting == null || submit == null) {
+                        actions.setCaptureMode(draftMode)
+                        edited = false
+                    } else if (target != null) {
+                        submit(ShootingSettingDraft(owner, token, revision, ShootingSettingRequest(setting.key, target)))
+                    }
+                }, enabled = enabled && submittedRevision != revision &&
+                    (setting == null || target != null && acceptsShootingSettingValue(setting, target)),
+                    modifier = Modifier.testTag("shooting-setting-apply-capture-mode")) { Text(stringResource(R.string.apply)) }
+            }
         }
     }
 }
@@ -545,6 +565,20 @@ private fun ExposureSettingsSheet(state: CameraUiState, actions: CameraActions) 
         }
         else -> return
     }
+    val owner = remember(state.info, state.mediaSessionGeneration) { ShootingSettingOwner(state.info, state.mediaSessionGeneration) }
+    val token = remember(owner, picker) { java.util.UUID.randomUUID().toString() }
+    var draft by remember(owner, picker) { mutableStateOf(current) }
+    var revision by remember(owner, picker) { mutableStateOf(0L) }
+    var edited by remember(owner, picker) { mutableStateOf(false) }
+    var submittedRevision by remember(owner, picker) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(current) { if (!edited) draft = current }
+    val receipt = state.shootingSettingReceipt
+    LaunchedEffect(receipt) {
+        if (receipt != null && canConsumeShootingSettingDraft(receipt, token, revision, state.info, state.mediaSessionGeneration)) {
+            edited = false
+            draft = receipt.evidence.observedValue
+        }
+    }
     CameraSettingsSurface(
         onDismissRequest = actions.closePicker,
     ) {
@@ -559,8 +593,21 @@ private fun ExposureSettingsSheet(state: CameraUiState, actions: CameraActions) 
                 isApplying = state.isBusy(CameraOperation.SETTING),
                 actions = actions,
             )
-            key(picker) {
-                ExposureDial(title, valueKey, values, current, state.isBusy(CameraOperation.SETTING), onSelect)
+            key(owner, picker) {
+                ExposureDial(title, valueKey, values, draft, state.isBusy(CameraOperation.SETTING)) { value ->
+                    draft = value; revision += 1; edited = true
+                }
+            }
+            Button(onClick = {
+                val value = draft ?: return@Button
+                submittedRevision = revision
+                val submit = actions.submitShootingSetting
+                if (submit == null || state.previewMode) onSelect(value) else submit(ShootingSettingDraft(owner, token, revision,
+                    ShootingSettingRequest(valueKey, value)))
+            }, enabled = !state.busy && edited && draft in values && submittedRevision != revision,
+                modifier = Modifier.testTag("shooting-setting-apply-$valueKey")) { Text(stringResource(R.string.apply)) }
+            receipt?.takeIf { it.draft.request.key == valueKey }?.let {
+                ShootingSettingReceiptView(it, state, actions)
             }
         }
     }
@@ -642,7 +689,10 @@ private fun ExposureDial(
     val initialIndex = values.indexOf(current).coerceAtLeast(0)
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val scope = rememberCoroutineScope()
-    var selectedIndex by remember(values, current) { mutableIntStateOf(initialIndex) }
+    var selectedIndex by remember { mutableIntStateOf(initialIndex) }
+    val dragged by listState.interactionSource.collectIsDraggedAsState()
+    var userScrolled by remember { mutableStateOf(false) }
+    LaunchedEffect(dragged) { if (dragged) userScrolled = true }
 
     LaunchedEffect(isApplying, current, values) {
         if (!isApplying) {
@@ -659,6 +709,8 @@ private fun ExposureDial(
             .distinctUntilChanged()
             .filter { scrolling -> !scrolling }
             .collect {
+                if (!userScrolled) return@collect
+                userScrolled = false
                 val viewportCenter = (listState.layoutInfo.viewportStartOffset + listState.layoutInfo.viewportEndOffset) / 2
                 val centered = listState.layoutInfo.visibleItemsInfo.minByOrNull { item ->
                     abs((item.offset + item.size / 2) - viewportCenter)
@@ -1456,6 +1508,10 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         }
                     }
                 }
+                state.shootingSettingHistory.filter { it.id != state.shootingSettingReceipt?.id ||
+                    settings.none { setting -> setting.key == it.draft.request.key } }.forEach { receipt ->
+                    ShootingSettingReceiptView(receipt, state, actions)
+                }
                 state.captureConfigurationReceipt?.let { receipt ->
                     CaptureConfigurationReceiptView(receipt, !state.busy,
                         actions.cancelCaptureConfiguration, actions.recoverCaptureConfiguration)
@@ -1628,7 +1684,9 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                     AdvancedSettingRow(
                         setting = setting,
                         actions = actions,
-                        enabled = !state.previewMode && !state.isBusy(CameraOperation.SETTING),
+                        state = state,
+                        enabled = !state.busy && !state.isBusy(CameraOperation.SETTING) &&
+                            (!setting.key.isCaptureModeKey() || captureModeSwitchEnabled(state)),
                     )
                 }
             }
@@ -1938,156 +1996,91 @@ private fun FocusDriveDirectionRow(
 }
 
 @Composable
-private fun AdvancedSettingRow(
-    setting: CameraSettingControl,
-    actions: CameraActions,
-    enabled: Boolean,
-) {
-    if (setting.inputKind == CameraSettingInputKind.TEXT) {
-        TextSettingRow(setting, actions, enabled)
-        return
+private fun AdvancedSettingRow(setting: CameraSettingControl, actions: CameraActions, state: CameraUiState, enabled: Boolean) {
+    val owner = remember(state.info, state.mediaSessionGeneration) { ShootingSettingOwner(state.info, state.mediaSessionGeneration) }
+    val token = remember(owner, setting.key) { java.util.UUID.randomUUID().toString() }
+    var draft by remember(owner, setting.key) { mutableStateOf(setting.value) }
+    var revision by remember(owner, setting.key) { mutableStateOf(0L) }
+    var edited by remember(owner, setting.key) { mutableStateOf(false) }
+    var submittedRevision by remember(owner, setting.key) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(setting.value) { if (!edited) draft = setting.value }
+    val receipt = state.shootingSettingReceipt
+    LaunchedEffect(receipt) {
+        if (receipt != null && canConsumeShootingSettingDraft(receipt, token, revision, state.info, state.mediaSessionGeneration)) {
+            draft = requireNotNull(receipt.evidence.observedValue)
+            edited = false
+        }
     }
-    if (setting.key.lowercase() in RANGE_SETTING_KEYS) {
-        RangeSettingRow(setting, actions)
-        return
-    }
-    val selectedIndex = setting.values.indexOf(setting.value).coerceAtLeast(0)
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex)
-    LaunchedEffect(setting.key, setting.value, setting.values) {
-        listState.scrollToItem(selectedIndex)
-    }
-    Column(
-        modifier = Modifier.testTag("advanced-setting-${setting.key}"),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
+    val edit: (String) -> Unit = { value -> draft = value; revision += 1; edited = true }
+    Column(Modifier.testTag("advanced-setting-${setting.key}"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(cameraSettingLabel(setting), color = AppText, fontWeight = FontWeight.SemiBold)
-        LazyRow(
-            state = listState,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.testTag("advanced-setting-values-${setting.key}"),
-        ) {
-            items(setting.values) { value ->
-                Box(
-                    Modifier
-                        .testTag("advanced-setting-value-${setting.key}-$value")
-                        .height(48.dp)
-                        .background(if (value == setting.value) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp))
-                        .clickable { actions.setCameraSetting(setting.key, value) }
-                        .padding(horizontal = 14.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        localizedCameraValue(setting.key, value),
-                        color = if (value == setting.value) AppBackground else AppText,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+        Text(stringResource(R.string.shooting_setting_current, setting.value), color = AppSubtleText)
+        when {
+            setting.inputKind == CameraSettingInputKind.TEXT -> {
+                val maximum = setting.maxLength ?: 0
+                OutlinedTextField(value = draft, onValueChange = { edit(it) }, enabled = enabled,
+                    singleLine = true, isError = !acceptsShootingSettingValue(setting, draft),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    supportingText = { Text(stringResource(R.string.setting_ascii_text_hint, maximum)) },
+                    modifier = Modifier.fillMaxWidth().testTag("advanced-setting-text-${setting.key}"))
+            }
+            setting.key.lowercase() in RANGE_SETTING_KEYS && setting.values.size > 1 -> {
+                val selected = setting.values.indexOf(draft)
+                Text(if (setting.key.equals("zoom", ignoreCase = true)) stringResource(R.string.zoom_value, draft) else draft, color = AppAccent)
+                Slider(value = selected.coerceAtLeast(0).toFloat(),
+                    onValueChange = { index -> edit(setting.values[index.roundToInt().coerceIn(setting.values.indices)]) },
+                    enabled = enabled, valueRange = 0f..setting.values.lastIndex.toFloat(),
+                    steps = if (setting.values.size <= 101) (setting.values.size - 2).coerceAtLeast(0) else 0,
+                    modifier = Modifier.fillMaxWidth().testTag("advanced-setting-values-${setting.key}"))
+            }
+            else -> LazyRow(modifier = Modifier.testTag("advanced-setting-values-${setting.key}"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(setting.values, key = { it }) { value ->
+                    Box(Modifier.testTag("advanced-setting-value-${setting.key}-$value").height(48.dp)
+                        .background(if (value == draft) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp))
+                        .clickable(enabled = enabled) { edit(value) }.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+                        Text(localizedCameraValue(setting.key, value), color = if (value == draft) AppBackground else AppText)
+                    }
                 }
             }
         }
+        Button(onClick = {
+            submittedRevision = revision
+            val submit = actions.submitShootingSetting
+            if (submit == null || state.previewMode) actions.setCameraSetting(setting.key, draft) else submit(ShootingSettingDraft(owner, token, revision,
+                ShootingSettingRequest(setting.key, draft)))
+        }, enabled = enabled && edited && acceptsShootingSettingValue(setting, draft) && submittedRevision != revision,
+            modifier = Modifier.testTag("shooting-setting-apply-${setting.key}")) { Text(stringResource(R.string.apply)) }
+        receipt?.takeIf { it.draft.request.key == setting.key }?.let { ShootingSettingReceiptView(it, state, actions) }
     }
 }
 
 @Composable
-private fun TextSettingRow(
-    setting: CameraSettingControl,
-    actions: CameraActions,
-    enabled: Boolean,
-) {
-    val maxLength = setting.maxLength ?: return
-    var confirmedValue by remember(setting.key) { mutableStateOf(setting.value) }
-    var draft by remember(setting.key) { mutableStateOf(setting.value) }
-    LaunchedEffect(setting.value) {
-        if (draft == confirmedValue) draft = setting.value
-        confirmedValue = setting.value
-    }
-    val valid = draft.length <= maxLength && draft.all { it.code in 0x20..0x7E }
-    Column(
-        modifier = Modifier.testTag("advanced-setting-${setting.key}"),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(cameraSettingLabel(setting), color = AppText, fontWeight = FontWeight.SemiBold)
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { raw ->
-                    draft = raw.filter { it.code in 0x20..0x7E }.take(maxLength)
-                },
-                enabled = enabled,
-                singleLine = true,
-                isError = !valid,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                supportingText = {
-                    Text(stringResource(R.string.setting_ascii_text_hint, maxLength))
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("advanced-setting-text-${setting.key}"),
-            )
-            Button(
-                onClick = { actions.setCameraSetting(setting.key, draft) },
-                enabled = enabled && valid && draft != setting.value,
-                colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
-                shape = RoundedCornerShape(6.dp),
-                modifier = Modifier
-                    .height(48.dp)
-                    .testTag("advanced-setting-text-apply-${setting.key}"),
-            ) {
-                Text(stringResource(R.string.apply))
-            }
+private fun ShootingSettingReceiptView(receipt: ShootingSettingReceipt, state: CameraUiState, actions: CameraActions) {
+    val evidence = receipt.evidence
+    val ownerCurrent = receipt.draft.owner.matches(state.info, state.mediaSessionGeneration)
+    Column(Modifier.testTag("shooting-setting-receipt-${receipt.id}"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(stringResource(R.string.shooting_setting_requested, evidence.request.key, evidence.request.requestedValue), color = AppSubtleText)
+        Text(stringResource(when (evidence.writeEvidence) {
+            ShootingSettingWriteEvidence.NOT_SENT -> R.string.shooting_setting_not_sent
+            ShootingSettingWriteEvidence.UNKNOWN -> R.string.shooting_setting_unknown
+            ShootingSettingWriteEvidence.RESPONSE_RECEIVED -> R.string.shooting_setting_response_received
+        }), color = AppSubtleText)
+        Text(stringResource(when (evidence.readbackEvidence) {
+            ShootingSettingReadEvidence.NOT_READ -> R.string.shooting_setting_not_read
+            ShootingSettingReadEvidence.UNAVAILABLE -> R.string.shooting_setting_unavailable
+            ShootingSettingReadEvidence.MISMATCH -> R.string.shooting_setting_mismatch
+            ShootingSettingReadEvidence.MATCHED -> R.string.shooting_setting_matched
+        }), color = AppSubtleText)
+        evidence.observedValue?.let { Text(stringResource(R.string.shooting_setting_current, it), color = AppSubtleText) }
+        if (receipt.cancelled) Text(stringResource(R.string.shooting_setting_cancelled), color = AppSubtleText)
+        if (!ownerCurrent) Text(stringResource(R.string.shooting_setting_previous_session), color = AppSubtleText)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (receipt.running || receipt.recovering) TextButton(onClick = { actions.cancelShootingSetting(receipt.id) },
+                enabled = ownerCurrent) { Text(stringResource(R.string.cancel)) }
+            else TextButton(onClick = { actions.recoverShootingSetting(receipt.id) },
+                enabled = ownerCurrent && state.connected && !state.busy && !state.isBusy(CameraOperation.SETTING),
+                modifier = Modifier.testTag("shooting-setting-recover-${receipt.id}")) { Text(stringResource(R.string.shooting_setting_read_current)) }
         }
-    }
-}
-
-@Composable
-private fun RangeSettingRow(setting: CameraSettingControl, actions: CameraActions) {
-    val currentIndex = setting.values.indexOf(setting.value).coerceAtLeast(0)
-    val settingLabel = cameraSettingLabel(setting)
-    var pendingIndex by remember(setting.key) { mutableFloatStateOf(currentIndex.toFloat()) }
-    LaunchedEffect(setting.value, setting.values) {
-        pendingIndex = currentIndex.toFloat()
-    }
-    val selectedIndex = pendingIndex.roundToInt().coerceIn(setting.values.indices)
-    val selectedValue = setting.values[selectedIndex]
-    val selectedValueLabel = if (setting.key.equals("zoom", ignoreCase = true)) {
-        stringResource(R.string.zoom_value, selectedValue)
-    } else {
-        selectedValue
-    }
-    Column(
-        modifier = Modifier.testTag("advanced-setting-${setting.key}"),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                settingLabel,
-                color = AppText,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
-            Text(selectedValueLabel, color = AppAccent, fontWeight = FontWeight.Bold)
-        }
-        Slider(
-            value = pendingIndex,
-            onValueChange = { pendingIndex = it },
-            onValueChangeFinished = {
-                if (selectedValue != setting.value) actions.setCameraSetting(setting.key, selectedValue)
-            },
-            valueRange = 0f..setting.values.lastIndex.toFloat(),
-            steps = if (setting.values.size <= 101) {
-                (setting.values.size - 2).coerceAtLeast(0)
-            } else {
-                0
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .testTag("advanced-setting-values-${setting.key}")
-                .semantics { contentDescription = "$settingLabel $selectedValueLabel" },
-        )
     }
 }
 

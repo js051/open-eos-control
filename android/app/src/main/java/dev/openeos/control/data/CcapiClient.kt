@@ -222,6 +222,7 @@ class CcapiClient(
     private val heldShutter = ShutterReleaseSession()
     private var latestTemperatureStatus: CameraTemperatureStatus? = null
     private val settingPathsByKey = mutableMapOf<String, String>()
+    private val settingReadPathsByKey = mutableMapOf<String, String>()
     private val settingValuesByKey = mutableMapOf<String, Set<String>>()
     private val structuredSettingPathsByKey = mutableMapOf<String, String>()
     private val structuredSettingValuesByKey = mutableMapOf<String, Set<String>>()
@@ -992,45 +993,140 @@ class CcapiClient(
     }
 
     suspend fun setSetting(key: String, value: String): CameraStatus {
-        val status = if (isRealCamera) {
+        writeSetting(key, value)
+        return status()
+    }
+
+    fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess {
+        val route = resolveShootingSettingRoute(request)
+        return ShootingSettingAccess("Canon CCAPI", write = { frozen, evidence ->
+            require(frozen == request); writeShootingSetting(frozen, evidence, route)
+        }, read = { frozen -> require(frozen == request); readShootingSetting(frozen, route) })
+    }
+
+    private fun resolveShootingSettingRoute(request: ShootingSettingRequest): ShootingSettingRoute? {
+        if (!isRealCamera) return null
+        val base = request.key.splitStructuredSettingKey()?.first
+        val actual = base ?: shootingSettingAliases(request.key).firstOrNull { it in settingReadPathsByKey }
+            ?: error("The setting has no advertised read route.")
+        val read = requireNotNull(settingReadPathsByKey[actual])
+        val write = structuredSettingPathsByKey[request.key] ?: requireNotNull(settingPathsByKey[actual])
+        return ShootingSettingRoute(actual, read, write, actual.takeIf { read.endsWith("/shooting/settings") })
+    }
+
+    suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence) =
+        writeShootingSetting(request, evidence, resolveShootingSettingRoute(request))
+
+    private suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence, route: ShootingSettingRoute?) {
+        require(evidence.request == request)
+        withContext(ShootingSettingWriteContext(evidence, route)) {
+            val key = request.key
+            val value = request.requestedValue
+            if (isRealCamera) {
+                val fresh = freshShootingSetting(request, route)
+                require(acceptsShootingSettingValue(fresh, value)) { "The requested value is no longer advertised." }
+                route?.key?.let { settingValuesByKey[it] = fresh.values.toSet() }
+            }
+            when (key) {
+                "iso", "shutter", "aperture", "whitebalance" -> if (isRealCamera) {
+                    putSettingValue(shootingSettingAliases(key), value)
+                } else if (key == "whitebalance") {
+                    patchJson("/ccapi/white-balance", JSONObject().put("white_balance", value))
+                } else patchJson("/ccapi/exposure", JSONObject().put(key, value))
+                else -> writeSetting(key, value)
+            }
+            observedFeatures.add(featureForSetting(key))
+        }
+    }
+
+    /** One cache-bypassing GET for the selected advertised resource. Never enumerates contents. */
+    suspend fun readShootingSetting(request: ShootingSettingRequest): ShootingSettingObservation =
+        readShootingSetting(request, resolveShootingSettingRoute(request))
+
+    private suspend fun readShootingSetting(request: ShootingSettingRequest, route: ShootingSettingRoute?): ShootingSettingObservation {
+        val setting = freshShootingSetting(request, route)
+        return ShootingSettingObservation(request.key, setting.value)
+    }
+
+    private suspend fun freshShootingSetting(request: ShootingSettingRequest, route: ShootingSettingRoute?): CameraSettingControl {
+        val key = request.key
+        val body = if (isRealCamera) {
+            val frozen = requireNotNull(route)
+            val response = getJson(frozen.readPath, strictMediaJsonLimit = 65_536, fresh = true, shootingRead = true)
+            if (frozen.aggregateKey == null) response else requireNotNull(response.optJSONObject(frozen.aggregateKey))
+        } else {
+            val capabilities = getJson("/ccapi/capabilities", strictMediaJsonLimit = 65_536, fresh = true, shootingRead = true)
+            if (key in setOf("iso", "shutter", "aperture", "whitebalance")) {
+                val exposure = getJson("/ccapi/status", strictMediaJsonLimit = 65_536, fresh = true, shootingRead = true).getJSONObject("exposure")
+                val field = if (key == "whitebalance") "white_balance" else key
+                JSONObject().put("value", exposure.opt(field)).put("ability", capabilities.optJSONArray(field))
+            } else requireNotNull(capabilities.optJSONObject(key))
+        }
+        val structured = key.splitStructuredSettingKey()
+        val integer = key == ZOOM_SETTING_KEY || key in SOUND_RECORDING_LEVEL_SETTING_KEYS ||
+            key in FOCUS_BRACKETING_INTEGER_SETTING_KEYS || structured?.first == WB_SHIFT_SETTING_KEY
+        val rawValue = if (structured != null) body.optJSONObject("value")?.opt(structured.second)
+            else if (key == MOVIE_MODE_SETTING_KEY) body.opt("status") ?: body.opt("value") else body.opt("value")
+        val current = if (integer) rawValue.toExactJsonInt()?.toString() else rawValue as? String
+        val rawAbility = if (structured != null) body.optJSONObject("ability")?.opt(structured.second) else body.opt("ability")
+        val choices = if (key == MOVIE_MODE_SETTING_KEY && rawAbility == null) MOVIE_MODE_VALUES.toList()
+        else if (integer && rawAbility is JSONObject) rawAbility.toBoundedIntegerRangeValues(1024)
+        else if (rawAbility is org.json.JSONArray && rawAbility.length() <= 1024) (0 until rawAbility.length()).map { index ->
+            val raw = rawAbility.opt(index)
+            if (integer) raw.toExactJsonInt()?.toString() ?: raw as? String ?: error("Invalid numeric setting ability.")
+            else raw as? String ?: error("Invalid setting ability.")
+        } else error("The camera did not return a fresh setting ability.")
+        return CameraSettingControl(key, key, requireNotNull(current), choices).also {
+            require(acceptsShootingSettingObservation(it)) { "The camera did not return a valid current setting." }
+        }
+    }
+
+    private fun shootingSettingAliases(key: String): List<String> = when (key) {
+        "shutter" -> listOf("tv", "shutterspeed", "shutter")
+        "aperture" -> listOf("av", "aperture")
+        "whitebalance" -> listOf("wb", "whitebalance", "white_balance")
+        else -> listOf(key)
+    }
+
+    private suspend fun writeSetting(key: String, value: String) {
+        if (isRealCamera) {
             when {
                 key.equals(ZOOM_SETTING_KEY, ignoreCase = true) -> postZoomValue(value)
                 key.equals(MOVIE_MODE_SETTING_KEY, ignoreCase = true) -> postMovieModeValue(value)
                 key.lowercase() in CARD_SELECTION_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
                 key.lowercase() in DEVICE_FUNCTION_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
                 key.lowercase() in SOUND_RECORDING_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
                 key.lowercase() in SOUND_RECORDING_LEVEL_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putIntegerSettingValue(key.lowercase(), value)
                 }
                 key.lowercase() in FOCUS_BRACKETING_STRING_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
                 key.lowercase() in FOCUS_BRACKETING_INTEGER_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putIntegerSettingValue(key.lowercase(), value)
                 }
                 key.lowercase() in MOVIE_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
                 key.equals(DIRECTORY_SELECTION_SETTING_KEY, ignoreCase = true) -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putSettingValue(listOf(DIRECTORY_SELECTION_SETTING_KEY), value)
                 }
                 else -> putSettingValue(listOf(key), value)
             }
-            status()
         } else {
             when {
                 key.equals(ZOOM_SETTING_KEY, ignoreCase = true) -> {
@@ -1122,10 +1218,8 @@ class CcapiClient(
                     "${featureForSetting(key).label} is not supported by the simulator.",
                 )
             }
-            status()
         }
         observedFeatures.add(featureForSetting(key))
-        return status
     }
 
     suspend fun createDirectory(name: String, evidence: CaptureConfigurationEvidence = CaptureConfigurationEvidence(
@@ -3557,6 +3651,7 @@ class CcapiClient(
 
     private suspend fun loadShootingSettings(directoryReadback: ((CaptureConfigurationReadback?) -> Unit)? = null): JSONObject? {
         settingPathsByKey.clear()
+        settingReadPathsByKey.clear()
         settingValuesByKey.clear()
         structuredSettingPathsByKey.clear()
         structuredSettingValuesByKey.clear()
@@ -3596,6 +3691,8 @@ class CcapiClient(
                     (!enforceAdvertisedOperations || apiOperations.contains(CcapiApiOperation("PUT", settingPath)))
                 ) {
                     settingPathsByKey.putIfAbsent(key, settingPath)
+                    settingReadPathsByKey.putIfAbsent(key, if (!enforceAdvertisedOperations ||
+                        apiOperations.contains(CcapiApiOperation("GET", settingPath))) settingPath else path)
                     val setting = settings.optJSONObject(key)
                     val values = setting?.optJSONArray("ability")
                         ?.toStringList()
@@ -3659,6 +3756,7 @@ class CcapiClient(
                     ?: return@let
                 val values = setting.getJSONArray("ability").toStringList().toSet()
                 settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                 settingValuesByKey[key] = values
                 merged.put(key, setting)
             }
@@ -3689,6 +3787,7 @@ class CcapiClient(
             if (zoom != null) {
                 val values = zoom.getJSONArray("ability").toStringList().toSet()
                 settingPathsByKey[ZOOM_SETTING_KEY] = write.path
+                settingReadPathsByKey[ZOOM_SETTING_KEY] = read.path
                 settingValuesByKey[ZOOM_SETTING_KEY] = values
                 merged.put(ZOOM_SETTING_KEY, zoom)
             }
@@ -3704,6 +3803,7 @@ class CcapiClient(
             }
             if (movieMode != null) {
                 settingPathsByKey[MOVIE_MODE_SETTING_KEY] = write.path
+                settingReadPathsByKey[MOVIE_MODE_SETTING_KEY] = read.path
                 settingValuesByKey[MOVIE_MODE_SETTING_KEY] = MOVIE_MODE_VALUES
                 merged.put(MOVIE_MODE_SETTING_KEY, movieMode)
             }
@@ -3721,6 +3821,7 @@ class CcapiClient(
                 if (cardSelection != null) {
                     val values = cardSelection.getJSONArray("ability").toStringList().toSet()
                     settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                     settingValuesByKey[key] = values
                     merged.put(key, cardSelection)
                     observedFeatures.add(CameraFeature.CARD_SELECTION_CONTROL)
@@ -3746,6 +3847,7 @@ class CcapiClient(
                     val current = setting.getString("value")
                     if (settingValues.size >= 2 && current in settingValues) {
                         settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                         settingValuesByKey[key] = settingValues.toSet()
                         merged.put(
                             key,
@@ -3769,6 +3871,7 @@ class CcapiClient(
                 }
                 if (setting != null) {
                     settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                     settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
                     merged.put(key, setting)
                     observedFeatures.add(CameraFeature.SOUND_RECORDING_CONTROL)
@@ -3788,6 +3891,7 @@ class CcapiClient(
                 if (soundRecordingLevel != null) {
                     val values = soundRecordingLevel.getJSONArray("ability").toStringList().toSet()
                     settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                     settingValuesByKey[key] = values
                     merged.put(key, soundRecordingLevel)
                     observedFeatures.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
@@ -3808,6 +3912,7 @@ class CcapiClient(
                 }
                 if (setting != null) {
                     settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                     settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
                     merged.put(key, setting)
                     if (key == FOCUS_BRACKETING_SETTING_KEY) {
@@ -3829,6 +3934,7 @@ class CcapiClient(
                     }
                     if (setting != null) {
                         settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                         settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
                         merged.put(key, setting)
                     }
@@ -3847,6 +3953,7 @@ class CcapiClient(
                 }
                 if (setting != null) {
                     settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                     settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
                     merged.put(key, setting)
                     observedFeatures.add(CameraFeature.MOVIE_SETTINGS_CONTROL)
@@ -3868,6 +3975,7 @@ class CcapiClient(
             if (selection != null) {
                 val values = selection.getJSONArray("ability").toStringList().toSet()
                 settingPathsByKey[DIRECTORY_SELECTION_SETTING_KEY] = operations.write.path
+                settingReadPathsByKey[DIRECTORY_SELECTION_SETTING_KEY] = operations.read.path
                 settingValuesByKey[DIRECTORY_SELECTION_SETTING_KEY] = values
                 merged.put(DIRECTORY_SELECTION_SETTING_KEY, selection)
                 observedFeatures.add(CameraFeature.DIRECTORY_CONTROL)
@@ -3921,7 +4029,7 @@ class CcapiClient(
 
     private suspend fun postZoomValue(value: String) {
         if (!settingsLoaded) loadShootingSettings()
-        val path = settingPathsByKey[ZOOM_SETTING_KEY]
+        val path = currentCoroutineContext()[ShootingSettingWriteContext]?.route?.writePath ?: settingPathsByKey[ZOOM_SETTING_KEY]
             ?: error("Camera did not advertise writable Canon zoom control.")
         if (value !in settingValuesByKey[ZOOM_SETTING_KEY].orEmpty()) {
             error("Value '$value' is not advertised for zoom.")
@@ -3934,7 +4042,7 @@ class CcapiClient(
 
     private suspend fun postMovieModeValue(value: String) {
         if (!settingsLoaded) loadShootingSettings()
-        val path = settingPathsByKey[MOVIE_MODE_SETTING_KEY]
+        val path = currentCoroutineContext()[ShootingSettingWriteContext]?.route?.writePath ?: settingPathsByKey[MOVIE_MODE_SETTING_KEY]
             ?: error("Camera did not advertise writable Canon movie mode control.")
         if (value !in settingValuesByKey[MOVIE_MODE_SETTING_KEY].orEmpty()) {
             error("Value '$value' is not advertised for movie mode.")
@@ -3944,7 +4052,7 @@ class CcapiClient(
 
     private suspend fun putIntegerSettingValue(key: String, value: String) {
         if (!settingsLoaded) loadShootingSettings()
-        val path = settingPathsByKey[key]
+        val path = currentCoroutineContext()[ShootingSettingWriteContext]?.route?.writePath ?: settingPathsByKey[key]
             ?: error("Camera did not advertise writable ${key.toSettingLabel()} control.")
         if (value !in settingValuesByKey[key].orEmpty()) {
             error("Value '$value' is not advertised for ${key.toSettingLabel()}.")
@@ -3979,12 +4087,18 @@ class CcapiClient(
             .mapNotNull(settingPathsByKey::get)
             .distinct()
 
+        if (currentCoroutineContext()[ShootingSettingWriteContext] != null) {
+            val frozen = requireNotNull(currentCoroutineContext()[ShootingSettingWriteContext]?.route)
+            putOk(frozen.writePath, JSONObject().put("value", value))
+            return
+        }
         val errors = mutableListOf<String>()
         paths.forEach { path ->
             try {
                 putOk(path, JSONObject().put("value", value))
                 return
             } catch (exception: Exception) {
+                if (exception is CancellationException) throw exception
                 errors.add("$path: ${exception.message ?: exception.javaClass.simpleName}")
             }
         }
@@ -3998,11 +4112,40 @@ class CcapiClient(
     private suspend fun putStructuredSettingValue(key: String, value: String) {
         val (baseKey, field) = key.splitStructuredSettingKey()
             ?: error("Unsupported structured camera setting '$key'.")
-        val advertisedValues = structuredSettingValuesByKey[key].orEmpty()
+        var scopedCurrent: JSONObject? = null
+        var scopedValues: Set<String>? = null
+        if (currentCoroutineContext()[ShootingSettingWriteContext] != null) {
+            val frozen = requireNotNull(currentCoroutineContext()[ShootingSettingWriteContext]?.route)
+            val response = getJson(frozen.readPath, strictMediaJsonLimit = 65_536, fresh = true, shootingRead = true)
+            val fresh = if (frozen.aggregateKey == null) response else requireNotNull(response.optJSONObject(frozen.aggregateKey))
+            val current = requireNotNull(fresh.optJSONObject("value"))
+            val ability = requireNotNull(fresh.optJSONObject("ability"))
+            val fields = if (baseKey == WB_SHIFT_SETTING_KEY) WB_SHIFT_FIELDS.toSet() else current.keys().asSequence().toSet()
+            require(fields.isNotEmpty() && field in fields &&
+                (baseKey == WB_SHIFT_SETTING_KEY || fields.all { it in IMAGE_QUALITY_FIELDS }) &&
+                current.keys().asSequence().toSet() == fields && ability.keys().asSequence().toSet() == fields)
+            fields.forEach { sibling ->
+                val observed = if (baseKey == WB_SHIFT_SETTING_KEY) current.opt(sibling).toExactJsonInt()?.toString()
+                    else current.opt(sibling) as? String
+                val allowed = if (baseKey == WB_SHIFT_SETTING_KEY) ability.optJSONObject(sibling)?.toBoundedIntegerRangeValues(1024)
+                    else ability.optJSONArray(sibling)?.let { array ->
+                        require(array.length() <= 1024)
+                        (0 until array.length()).map { array.opt(it) as? String ?: error("Invalid sibling ability.") }
+                    }
+                require(observed != null && allowed != null && allowed.isNotEmpty() && allowed.distinct().size == allowed.size &&
+                    observed in allowed && allowed.all { it.isNotEmpty() && validShootingSettingText(it) }) { "Invalid fresh structured sibling." }
+            }
+            val values = if (baseKey == WB_SHIFT_SETTING_KEY) ability.optJSONObject(field)?.toBoundedIntegerRangeValues()
+                else ability.optJSONArray(field)?.toStringList()
+            require(values != null && value in values) { "The requested structured value is no longer advertised." }
+            scopedCurrent = current
+            scopedValues = values.toSet()
+        }
+        val advertisedValues = scopedValues ?: structuredSettingValuesByKey[key].orEmpty()
         if (value !in advertisedValues) {
             error("Value '$value' is not advertised for $key.")
         }
-        val current = structuredSettingCurrentValues[baseKey]
+        val current = scopedCurrent ?: structuredSettingCurrentValues[baseKey]
             ?: error("Camera did not return the current value for $baseKey.")
         val encodedValue: Any = if (baseKey == WB_SHIFT_SETTING_KEY) {
             WB_SHIFT_FIELDS.forEach { requiredField ->
@@ -4022,9 +4165,9 @@ class CcapiClient(
                 error("At least one still image format must remain enabled.")
             }
         }
-        val path = structuredSettingPathsByKey.getValue(key)
+        val path = currentCoroutineContext()[ShootingSettingWriteContext]?.route?.writePath ?: structuredSettingPathsByKey.getValue(key)
         putOk(path, JSONObject().put("value", updated))
-        structuredSettingCurrentValues[baseKey] = updated
+        if (currentCoroutineContext()[ShootingSettingWriteContext] == null) structuredSettingCurrentValues[baseKey] = updated
     }
 
     private fun writableSetting(settings: JSONObject?, candidateKeys: List<String>): JSONObject? {
@@ -4033,8 +4176,8 @@ class CcapiClient(
         return settings.optJSONObject(key)
     }
 
-    private suspend fun getJson(path: String, strictMediaJsonLimit: Int? = null, fresh: Boolean = false): JSONObject = requestJson(
-        Request.Builder().url("$baseUrl$path").apply { if (fresh) header("Cache-Control", "no-cache, no-store") }.get().build(), strictMediaJsonLimit = strictMediaJsonLimit, captureRecovery = fresh,
+    private suspend fun getJson(path: String, strictMediaJsonLimit: Int? = null, fresh: Boolean = false, shootingRead: Boolean = false): JSONObject = requestJson(
+        Request.Builder().url("$baseUrl$path").apply { if (fresh) header("Cache-Control", "no-cache, no-store") }.get().build(), strictMediaJsonLimit = strictMediaJsonLimit, captureRecovery = fresh, shootingRead = shootingRead,
     )
 
     private suspend fun getText(path: String): String = withContext(Dispatchers.IO) {
@@ -4142,8 +4285,10 @@ class CcapiClient(
 
     private suspend fun requestJson(request: Request, recordingEvidence: RecordingRequestEvidence? = null, strictMediaJsonLimit: Int? = null,
         captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null,
-        captureRecovery: Boolean = false): JSONObject = withContext(Dispatchers.IO) {
-        val call = newCameraCall(request, captureEvidence != null || captureRecovery)
+        captureRecovery: Boolean = false, shootingRead: Boolean = false): JSONObject = withContext(Dispatchers.IO) {
+        val shootingEvidence = currentCoroutineContext()[ShootingSettingWriteContext]?.evidence
+            ?.takeIf { request.method != "GET" && request.method != "HEAD" }
+        val call = newCameraCall(request, captureEvidence != null || captureRecovery || shootingEvidence != null)
         val jsonLimit = strictMediaJsonLimit ?: 65_536.takeIf { captureEvidence != null }
         val readOnly = request.method == "GET" || request.method == "HEAD"
         val cancelCall = AtomicBoolean(true)
@@ -4159,10 +4304,11 @@ class CcapiClient(
                 currentCoroutineContext().ensureActive()
                 it.beforeDispatch("${request.method} ${request.url.encodedPath}")
             }
+            shootingEvidence?.let { currentCoroutineContext().ensureActive(); it.beforeDispatch() }
             call.execute().use { response ->
                 recordingEvidence?.rejected = !response.isSuccessful
                 val body = response.body?.let {
-                    if (captureEvidence != null || captureRecovery) it.byteStream().use { input -> readCaptureConfigurationJsonText(input, it.contentLength()) }
+                    if (captureEvidence != null || captureRecovery || shootingEvidence != null) it.byteStream().use { input -> readCaptureConfigurationJsonText(input, it.contentLength()) }
                     else if (jsonLimit == null) it.string()
                     else it.byteStream().use { input -> readStrictMediaJsonText(input, it.contentLength(), jsonLimit) }
                 }.orEmpty()
@@ -4174,7 +4320,15 @@ class CcapiClient(
                     )
                 }
                 if (strictMediaJsonLimit != null) StrictMediaJson(body).validate()
-                JSONObject(body).also { captureResponse?.invoke(it) }
+                JSONObject(body).also {
+                    if (shootingEvidence != null || shootingRead) {
+                        if (shootingRead) check(response.code == 200)
+                        requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                            response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                        shootingEvidence?.responseReceived()
+                    }
+                    captureResponse?.invoke(it)
+                }
             }
         } catch (exception: Exception) {
             if (readOnly) currentCoroutineContext().ensureActive()
@@ -4227,9 +4381,17 @@ class CcapiClient(
             currentCoroutineContext().ensureActive()
             it.beginRequest()
         }
-        newCameraCall(request).execute().use { response ->
+        val shootingEvidence = currentCoroutineContext()[ShootingSettingWriteContext]?.evidence
+        shootingEvidence?.let { currentCoroutineContext().ensureActive(); it.beforeDispatch() }
+        val call = newCameraCall(request, shootingEvidence != null)
+        val watcher = if (shootingEvidence != null) launch(start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { call.cancel() }
+        } else null
+        try { call.execute().use { response ->
             recordingEvidence?.rejected = !response.isSuccessful
-            val body = response.body?.string().orEmpty()
+            val body = response.body?.let { body -> if (shootingEvidence == null) body.string() else
+                body.byteStream().use { readShootingSettingResponseText(it, body.contentLength()) }
+            }.orEmpty()
             if (!response.isSuccessful) {
                 throw CcapiHttpException(
                     statusCode = response.code,
@@ -4243,7 +4405,12 @@ class CcapiClient(
                         "expected HTTP $expectedStatusCode.\nBody: $body",
                 )
             }
-        }
+            if (shootingEvidence != null) {
+                requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                    response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                shootingEvidence.responseReceived()
+            }
+        } } finally { watcher?.cancel() }
     }
 
     private suspend fun requestLiveViewFrame(request: Request, sourceUrl: String): LiveViewFrame =

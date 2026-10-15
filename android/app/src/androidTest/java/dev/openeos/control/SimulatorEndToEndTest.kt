@@ -60,6 +60,7 @@ class SimulatorEndToEndTest {
         compose.onNodeWithTag("exposure-control-ISO").performClick()
         waitForNode("exposure-option-4")
         compose.onNodeWithTag("exposure-option-4").performClick()
+        compose.onNodeWithTag("shooting-setting-apply-iso").performClick()
         waitForSimulatorState { state -> state.getJSONObject("exposure").getString("iso") == "1600" }
         compose.onNodeWithContentDescription(text(R.string.dismiss)).performClick()
 
@@ -111,6 +112,7 @@ class SimulatorEndToEndTest {
 
         waitForEnabledNode("capture-mode-VIDEO")
         compose.onNodeWithTag("capture-mode-VIDEO").performClick()
+        compose.onNodeWithTag("shooting-setting-apply-capture-mode").performClick()
         waitForSimulatorState { state ->
             state.getString("movie_mode") == "on" && state.getInt("movie_mode_update_count") == 1
         }
@@ -154,6 +156,7 @@ class SimulatorEndToEndTest {
 
         waitForEnabledNode("capture-mode-PHOTO")
         compose.onNodeWithTag("capture-mode-PHOTO").performClick()
+        compose.onNodeWithTag("shooting-setting-apply-capture-mode").performClick()
         waitForSimulatorState { state ->
             state.getString("movie_mode") == "off" && state.getInt("movie_mode_update_count") == 2
         }
@@ -215,6 +218,7 @@ class SimulatorEndToEndTest {
         compose.onNodeWithTag("exposure-control-ISO").performClick()
         waitForNode("exposure-option-4")
         compose.onNodeWithTag("exposure-option-4").performClick()
+        compose.onNodeWithTag("shooting-setting-apply-iso").performClick()
         waitForSimulatorState { state -> state.getJSONObject("exposure").getString("iso") == "1600" }
         compose.onNodeWithContentDescription(text(R.string.dismiss)).performClick()
 
@@ -296,6 +300,7 @@ class SimulatorEndToEndTest {
         compose.onNodeWithTag("advanced-setting-value-$key-$value")
             .performScrollTo()
             .performClick()
+        compose.onNodeWithTag("shooting-setting-apply-$key").performScrollTo().performClick()
         waitForSimulatorState { state ->
             state.getJSONObject(stateKey).let { setting ->
                 setting.getString("value") == value && setting.getInt("update_count") == 1
