@@ -488,9 +488,12 @@ final class MediaBatchDeliveryTests: XCTestCase {
     func testRetiredSuccessErrorProgressAndDeferCannotAffectSameIDReplacementBatch() async throws {
         for bridge in [false, true] {
             for failure in [false, true] {
-                let oldPeer = BatchMediaPeer(items: [item("collision", name: "OLD.JPG")])
+                let root = singleDeliveryRoot()
+                defer { try? FileManager.default.removeItem(at: root) }
+                let store = MediaDeliveryStore(root: root)
+                let oldPeer = BatchMediaPeer(items: [item("collision", name: "OLD.JPG"), item("NEVER")])
                 let newPeer = BatchMediaPeer(items: [item("collision", name: "NEW.JPG")])
-                let state = makeState([oldPeer, newPeer], bridge: bridge)
+                let state = makeState([oldPeer, newPeer], bridge: bridge, deliveryStore: store)
                 defer { state.requestDisconnect(); Task { await oldPeer.releaseAll(); await newPeer.releaseAll() } }
                 try await connectAndLoad(state)
                 state.selectMediaItems(state.mediaItems)
@@ -518,6 +521,11 @@ final class MediaBatchDeliveryTests: XCTestCase {
                 XCTAssertNil(state.lastError)
                 XCTAssertTrue(state.isBusy(.media), "Old defer cannot release the replacement's MEDIA ownership")
                 XCTAssertNotNil(state.mediaBatchTask)
+                let retiredHistory = await store.snapshot()
+                XCTAssertEqual(retiredHistory.plannedBatches[0].rows.map { $0.receipt?.status }, [.cancelled, nil])
+                XCTAssertEqual(retiredHistory.plannedBatches[1].rows[0].receipt?.status, .started)
+                let oldDownloads = await oldPeer.downloadIDs()
+                XCTAssertEqual(oldDownloads, [Data("collision".utf8)])
                 await newPeer.release("replacement")
                 await newTask.value
                 XCTAssertEqual(state.mediaBatchState, .completed)
@@ -2000,6 +2008,276 @@ final class MediaBatchDeliveryTests: XCTestCase {
         XCTAssertEqual(secondDownloads, [Data("REUSED".utf8)])
     }
 
+    // Native execution pending: these exercise production App/Store paths through
+    // synthetic CCAPI and Bridge transports; they are not camera-device evidence.
+    func testManualPreparedThenRetiredAdmissionContinuesOnlyExplicitlyReboundUnfinishedRows() async throws {
+        for bridge in [false, true] {
+            let root = singleDeliveryRoot()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let store = MediaDeliveryStore(root: root)
+            let first = BatchMediaPeer(items: [item("A"), item("REUSED", name: "SAME.JPG"), item("C", name: "SAME.JPG")])
+            let second = BatchMediaPeer(items: [item("REUSED", name: "SAME.JPG"), item("C", name: "SAME.JPG")])
+            let gate = DeliveryReplyGate(stage: .itemStarted, after: 1)
+            let state = makeState([first, second], bridge: bridge, deliveryStore: store, deliveryDelay: { await gate.enter($0) })
+            defer { state.requestDisconnect(); Task { await gate.release(); await first.releaseAll(); await second.releaseAll() } }
+            try await connectAndLoad(state)
+            state.selectMediaItems(state.mediaItems)
+            XCTAssertTrue(state.startMediaBatchDownload())
+            let oldTask = try XCTUnwrap(state.mediaBatchTask)
+            try await waitUntil { await gate.waiting }
+            let admitted = await store.snapshot()
+            let old = try XCTUnwrap(admitted.plannedBatches.first)
+            XCTAssertEqual(old.rows.map { $0.receipt?.status }, [.prepared, .started, nil])
+            XCTAssertEqual(old.rows[0].receipt?.availability, .available)
+            let coldAdmission = await MediaDeliveryStore(root: root).snapshot()
+            XCTAssertEqual(coldAdmission.plannedBatches[0].rows.map { $0.receipt?.status }, [.prepared, .unknown, nil])
+            let prepared = try XCTUnwrap(old.rows[0].receipt)
+            let temporary = try XCTUnwrap(state.makeMediaBatchExportPayload())
+            let retained = try await store.acquireShare(receiptIDs: [prepared.id])
+            await state.disconnect()
+            try await connectAndLoad(state)
+            let beforeReply = await second.downloadIDs()
+            XCTAssertTrue(beforeReply.isEmpty, "Reconnect and matching names cannot authorize a GET")
+            await gate.release()
+            try await awaitContinuationTask(oldTask)
+            XCTAssertEqual(state.mediaBatchState, .idle)
+            XCTAssertFalse(state.isBusy(.media))
+            let settled = await store.snapshot()
+            let rows = try XCTUnwrap(settled.plannedBatches.first?.rows)
+            XCTAssertEqual(rows.map { $0.receipt?.status }, [.prepared, .cancelled, nil])
+            XCTAssertEqual(rows.map(\.canContinue), [false, true, true])
+            XCTAssertEqual(rows[0].receipt?.completedAt, prepared.completedAt)
+            XCTAssertEqual(try Data(contentsOf: retained[0].fileURL), BatchMediaPeer.original)
+            XCTAssertEqual(try Data(contentsOf: temporary.fileURLs[0]), BatchMediaPeer.original)
+            XCTAssertFalse(state.beginMediaWorklistContinuation(origins: [.init(batchID: old.id, rowID: rows[0].id)]))
+            let origins = rows.dropFirst().map { MediaDeliveryOrigin(batchID: old.id, rowID: $0.id) }
+            XCTAssertTrue(state.beginMediaWorklistContinuation(origins: origins))
+            XCTAssertTrue(state.mediaWorklistContinuation!.rows.allSatisfy { $0.item == nil }, "Even equal names and wire IDs require fresh explicit binding")
+            XCTAssertFalse(state.confirmMediaWorklistContinuation(confirmedMappingAndShare: true, acknowledgedUnknown: false))
+            for (index, origin) in origins.enumerated() {
+                XCTAssertTrue(state.bindMediaWorklistOriginal(origin: origin, identity: mediaItemIdentity(state.mediaItems[index])))
+            }
+            XCTAssertFalse(state.confirmMediaWorklistContinuation(confirmedMappingAndShare: false, acknowledgedUnknown: false))
+            XCTAssertTrue(state.confirmMediaWorklistContinuation(confirmedMappingAndShare: true, acknowledgedUnknown: false))
+            try await awaitContinuationTask(try XCTUnwrap(state.mediaBatchTask))
+            XCTAssertEqual(state.mediaBatchState, .completed)
+            let final = await MediaDeliveryStore(root: root).snapshot()
+            XCTAssertEqual(final.plannedBatches.count, 2)
+            XCTAssertEqual(final.plannedBatches[0].rows.map { $0.receipt?.status }, [.prepared, .cancelled, nil])
+            XCTAssertEqual(final.plannedBatches[1].rows.map(\.origin), origins.map { Optional.some($0) })
+            XCTAssertTrue(final.plannedBatches[1].rows.allSatisfy { $0.receipt?.status == .prepared })
+            XCTAssertTrue(final.records.allSatisfy { $0.status != .started && $0.status != .unknown })
+            let oldDownloads = await first.downloadIDs()
+            let newDownloads = await second.downloadIDs()
+            XCTAssertEqual(oldDownloads, [Data("A".utf8)])
+            XCTAssertEqual(newDownloads, [Data("REUSED".utf8), Data("C".utf8)])
+            XCTAssertEqual(try Data(contentsOf: retained[0].fileURL), BatchMediaPeer.original)
+        }
+    }
+
+    func testManualClearBeforeTaskOrAtAdmissionNeverRecreatesHistoryAndStillFinishesSelectedOriginals() async throws {
+        for stage in [nil, MediaDeliveryReplyStage.batchStarted, .batchPlanned, .itemStarted] as [MediaDeliveryReplyStage?] {
+            let root = singleDeliveryRoot()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let store = MediaDeliveryStore(root: root)
+            let gate = DeliveryReplyGate(stage: stage ?? .batchStarted)
+            let peer = BatchMediaPeer(items: [item("A"), item("B")])
+            let state = makeState([peer], deliveryStore: store, deliveryDelay: { if stage != nil { await gate.enter($0) } })
+            defer { state.requestDisconnect(); Task { await gate.release(); await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            await state.refreshMediaDeliveryHistory()
+            let previousEpoch = state.mediaDeliverySnapshot.epoch
+            state.selectMediaItems(state.mediaItems)
+            XCTAssertTrue(state.startMediaBatchDownload())
+            let task = try XCTUnwrap(state.mediaBatchTask)
+            if stage != nil { try await waitUntil { await gate.waiting } }
+            await state.clearMediaDeliveryHistory()
+            let clearedEpoch = state.mediaDeliverySnapshot.epoch
+            XCTAssertNotEqual(clearedEpoch, previousEpoch)
+            await gate.release()
+            try await awaitContinuationTask(task)
+            XCTAssertEqual(state.mediaBatchState, .completed)
+            XCTAssertEqual(state.mediaBatchResults.map(\.status), [.ready, .ready])
+            XCTAssertTrue(state.mediaBatchWorklistWarning)
+            XCTAssertFalse(state.mediaDeliveryHistoryWarning, "An intentional clear must not be overwritten by a stale history warning")
+            let history = await store.snapshot()
+            XCTAssertEqual(history.epoch, clearedEpoch)
+            XCTAssertTrue(history.records.isEmpty)
+            XCTAssertTrue(history.plannedBatches.isEmpty)
+            XCTAssertEqual(state.makeMediaBatchExportPayload()?.fileURLs.count, 2)
+            let downloads = await peer.downloadIDs()
+            XCTAssertEqual(downloads, [Data("A".utf8), Data("B".utf8)])
+        }
+    }
+
+    func testRetiredManualAdmissionAfterClearCannotMutateReplacementHistoryOrOwner() async throws {
+        let root = singleDeliveryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MediaDeliveryStore(root: root)
+        let gate = DeliveryReplyGate(stage: .itemStarted)
+        let first = BatchMediaPeer(items: [item("REUSED", name: "SAME.JPG")])
+        let second = BatchMediaPeer(items: [item("REUSED", name: "SAME.JPG")])
+        let state = makeState([first, second], deliveryStore: store, deliveryDelay: { await gate.enter($0) })
+        defer { state.requestDisconnect(); Task { await gate.release(); await first.releaseAll(); await second.releaseAll() } }
+        try await connectAndLoad(state)
+        state.selectMediaItems(state.mediaItems)
+        XCTAssertTrue(state.startMediaBatchDownload())
+        let oldTask = try XCTUnwrap(state.mediaBatchTask)
+        try await waitUntil { await gate.waiting }
+        await state.clearMediaDeliveryHistory()
+        await state.disconnect()
+        try await connectAndLoad(state)
+        state.selectMediaItems(state.mediaItems)
+        await second.enqueueDownload(gate: "new-owner")
+        XCTAssertTrue(state.startMediaBatchDownload())
+        let newTask = try XCTUnwrap(state.mediaBatchTask)
+        try await waitForGate("new-owner", peer: second)
+        let currentID = state.mediaBatchResults[0].id
+        let before = try Data(contentsOf: root.appendingPathComponent("manifest.json"))
+        await gate.release()
+        try await awaitContinuationTask(oldTask)
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("manifest.json")), before)
+        XCTAssertEqual(state.mediaBatchResults[0].id, currentID)
+        XCTAssertEqual(state.mediaBatchResults[0].status, .downloading)
+        XCTAssertTrue(state.isBusy(.media))
+        XCTAssertEqual(state.mediaBatchState, .running)
+        XCTAssertFalse(state.mediaDeliveryHistoryWarning)
+        XCTAssertFalse(state.mediaBatchWorklistWarning)
+        await second.release("new-owner")
+        try await awaitContinuationTask(newTask)
+        let history = await store.snapshot()
+        XCTAssertEqual(history.plannedBatches.count, 1)
+        XCTAssertEqual(history.records.map(\.status), [.prepared])
+        let firstDownloads = await first.downloadIDs()
+        let secondDownloads = await second.downloadIDs()
+        XCTAssertTrue(firstDownloads.isEmpty)
+        XCTAssertEqual(secondDownloads, [Data("REUSED".utf8)])
+    }
+
+    func testRetiredManualSettlementSuccessOrWriteFailureNeverReleasesNewOwner() async throws {
+        for failSettlement in [false, true] {
+            let root = singleDeliveryRoot()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let fault = WorklistCommitFault()
+            let store = MediaDeliveryStore(root: root, faultInjector: { try fault.check($0) })
+            let gate = DeliveryReplyGate(stage: .itemStarted, after: 1)
+            let first = BatchMediaPeer(items: [item("KEEP"), item("REUSED"), item("QUEUED")])
+            let second = BatchMediaPeer(items: [item("REUSED")])
+            let state = makeState([first, second], deliveryStore: store, deliveryDelay: { await gate.enter($0) })
+            defer { state.requestDisconnect(); Task { await gate.release(); await first.releaseAll(); await second.releaseAll() } }
+            try await connectAndLoad(state)
+            state.selectMediaItems(state.mediaItems)
+            XCTAssertTrue(state.startMediaBatchDownload())
+            let oldTask = try XCTUnwrap(state.mediaBatchTask)
+            try await waitUntil { await gate.waiting }
+            let oldSnapshot = await store.snapshot()
+            let old = try XCTUnwrap(oldSnapshot.plannedBatches.first)
+            let kept = try await store.acquireShare(receiptIDs: [try XCTUnwrap(old.rows[0].receipt?.id)])
+            await state.disconnect()
+            try await connectAndLoad(state)
+            state.selectMediaItems(state.mediaItems)
+            await second.enqueueDownload(gate: "replacement")
+            XCTAssertTrue(state.startMediaBatchDownload())
+            let newTask = try XCTUnwrap(state.mediaBatchTask)
+            try await waitForGate("replacement", peer: second)
+            let replacementID = state.mediaBatchResults[0].id
+            let before = try Data(contentsOf: root.appendingPathComponent("manifest.json"))
+            if failSettlement { fault.arm() }
+            await gate.release()
+            try await awaitContinuationTask(oldTask)
+            let after = try Data(contentsOf: root.appendingPathComponent("manifest.json"))
+            if failSettlement { XCTAssertEqual(after, before) }
+            else { XCTAssertNotEqual(after, before, "The old admitted row must durably settle") }
+            XCTAssertEqual(state.mediaDeliveryHistoryWarning, failSettlement)
+            XCTAssertEqual(state.mediaBatchResults[0].id, replacementID)
+            XCTAssertEqual(state.mediaBatchResults[0].status, .downloading)
+            XCTAssertEqual(state.mediaBatchState, .running)
+            XCTAssertTrue(state.isBusy(.media))
+            XCTAssertNotNil(state.mediaBatchTask)
+            XCTAssertFalse(state.mediaBatchWorklistWarning)
+            let live = await store.snapshot()
+            XCTAssertEqual(live.plannedBatches[0].rows.map { $0.receipt?.status }, [.prepared, failSettlement ? .started : .cancelled, nil])
+            XCTAssertEqual(live.plannedBatches[0].rows[1].canContinue, !failSettlement,
+                "A failed terminal write cannot claim durable cancellation")
+            let cold = await MediaDeliveryStore(root: root).snapshot()
+            XCTAssertEqual(cold.plannedBatches[0].rows.map { $0.receipt?.status }, [.prepared, failSettlement ? .unknown : .cancelled, nil])
+            XCTAssertEqual(cold.plannedBatches[0].rows[1].requiresUnknownAcknowledgement, failSettlement)
+            XCTAssertEqual(try Data(contentsOf: kept[0].fileURL), BatchMediaPeer.original)
+            await second.release("replacement")
+            try await awaitContinuationTask(newTask)
+            XCTAssertEqual(state.mediaBatchState, .completed)
+            XCTAssertEqual(state.mediaDeliveryHistoryWarning, failSettlement)
+            let downloads = await first.downloadIDs()
+            XCTAssertEqual(downloads, [Data("KEEP".utf8)])
+        }
+    }
+
+    func testManualCancellationAfterFinalRetentionPreservesPreparedCopyAndCancelledBatch() async throws {
+        for directTaskCancellation in [false, true] {
+            let root = singleDeliveryRoot()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let store = MediaDeliveryStore(root: root)
+            let gate = DeliveryReplyGate(stage: .originalRetained)
+            let peer = BatchMediaPeer(items: [item("KEEP")])
+            let state = makeState([peer], deliveryStore: store, deliveryDelay: { await gate.enter($0) })
+            defer { state.requestDisconnect(); Task { await gate.release(); await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            state.selectMediaItems(state.mediaItems)
+            XCTAssertTrue(state.startMediaBatchDownload())
+            let task = try XCTUnwrap(state.mediaBatchTask)
+            try await waitUntil { await gate.waiting }
+            let before = try Data(contentsOf: root.appendingPathComponent("manifest.json"))
+            if directTaskCancellation { task.cancel() }
+            else { state.cancelMediaBatchDownload() }
+            await gate.release()
+            try await awaitContinuationTask(task)
+            XCTAssertEqual(state.mediaBatchState, .cancelled)
+            XCTAssertEqual(state.mediaBatchResults.map(\.status), [.ready])
+            XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("manifest.json")), before)
+            let payload = try XCTUnwrap(state.makeMediaBatchExportPayload())
+            XCTAssertEqual(try Data(contentsOf: payload.fileURLs[0]), BatchMediaPeer.original)
+            let history = await store.snapshot()
+            XCTAssertEqual(history.records.map(\.status), [.prepared])
+            XCTAssertEqual(history.records.map(\.availability), [.available])
+            XCTAssertFalse(history.plannedBatches[0].rows[0].canContinue)
+            XCTAssertFalse(state.isBusy(.media))
+            let downloads = await peer.downloadIDs()
+            XCTAssertEqual(downloads, [Data("KEEP".utf8)])
+        }
+    }
+
+    func testManualStoreCancellationDuringAdmissionNeverFallsBackToOriginalGET() async throws {
+        for stage in [MediaDeliveryReplyStage.batchStarted, .batchPlanned] {
+            for failure in [SingleDeliveryFault.Failure.cancellation, .urlCancelled, .storeCancelled] {
+                let root = singleDeliveryRoot()
+                defer { try? FileManager.default.removeItem(at: root) }
+                let fault = SingleDeliveryFault()
+                let store = MediaDeliveryStore(root: root, faultInjector: { try fault.check($0) })
+                let gate = DeliveryReplyGate(stage: stage)
+                let peer = BatchMediaPeer(items: [item("A"), item("B")])
+                let state = makeState([peer], deliveryStore: store, deliveryDelay: { await gate.enter($0) })
+                defer { state.requestDisconnect(); Task { await gate.release(); await peer.releaseAll() } }
+                try await connectAndLoad(state)
+                state.selectMediaItems(state.mediaItems)
+                XCTAssertTrue(state.startMediaBatchDownload())
+                let task = try XCTUnwrap(state.mediaBatchTask)
+                try await waitUntil { await gate.waiting }
+                fault.arm(.beforeManifestReplace, failure: failure)
+                await gate.release()
+                try await awaitContinuationTask(task)
+                XCTAssertFalse(task.isCancelled)
+                XCTAssertEqual(state.mediaBatchState, .cancelled)
+                XCTAssertEqual(state.mediaBatchResults.map(\.status), [.notStarted, .notStarted])
+                XCTAssertNil(state.makeMediaBatchExportPayload())
+                let history = await store.snapshot()
+                XCTAssertEqual(history.plannedBatches.count, stage == .batchStarted ? 0 : 1)
+                XCTAssertTrue(history.records.isEmpty)
+                let downloads = await peer.downloadIDs()
+                XCTAssertTrue(downloads.isEmpty)
+            }
+        }
+    }
+
     private func bindContinuation(_ state: CameraAppState, batch: MediaDeliveryPlannedBatch) throws {
         let origins = batch.rowIDs.map { MediaDeliveryOrigin(batchID: batch.ticket.batchID, rowID: $0) }
         XCTAssertTrue(state.beginMediaWorklistContinuation(origins: origins))
@@ -2273,13 +2551,15 @@ private final class WorklistCommitFault: @unchecked Sendable {
 private actor DeliveryReplyGate {
     private let stage: MediaDeliveryReplyStage
     private var armed = true
+    private var remaining: Int
     private var continuation: CheckedContinuation<Void, Never>?
     private(set) var waiting = false
 
-    init(stage: MediaDeliveryReplyStage) { self.stage = stage }
+    init(stage: MediaDeliveryReplyStage, after: Int = 0) { self.stage = stage; self.remaining = after }
 
     func enter(_ current: MediaDeliveryReplyStage) async {
         guard armed, current == stage else { return }
+        if remaining > 0 { remaining -= 1; return }
         armed = false
         await withCheckedContinuation { continuation in
             self.continuation = continuation

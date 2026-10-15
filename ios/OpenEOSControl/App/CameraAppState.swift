@@ -3454,7 +3454,8 @@ final class CameraAppState: ObservableObject {
         mediaBatchState = .running
         mediaBatchTask = Task { [weak self] in
             await self?.performMediaBatchDownload(results, session: session, token: token,
-                generation: draft.sessionGeneration, continuation: draft, acknowledgedUnknown: acknowledgedUnknown)
+                generation: draft.sessionGeneration, historyGeneration: draft.historyGeneration,
+                continuation: draft, acknowledgedUnknown: acknowledgedUnknown)
         }
         return true
     }
@@ -3641,6 +3642,7 @@ final class CameraAppState: ObservableObject {
         mediaBatchContinuationActive = false
         let token = UUID()
         let generation = sessionGeneration
+        let historyGeneration = mediaDeliveryClearGeneration
         // Selection, metadata, session object and generation are frozen together.
         let results = selectedMediaItems.map { MediaBatchResult(item: $0) }
         mediaBatchToken = token
@@ -3653,7 +3655,8 @@ final class CameraAppState: ObservableObject {
         mediaDeliveryHistoryWarning = mediaDeliveryRecordingWarning || mediaDeliverySnapshot.warning != nil
         mediaBatchState = .running
         mediaBatchTask = Task { [weak self] in
-            await self?.performMediaBatchDownload(results, session: session, token: token, generation: generation)
+            await self?.performMediaBatchDownload(results, session: session, token: token, generation: generation,
+                historyGeneration: historyGeneration)
         }
         return true
     }
@@ -3750,7 +3753,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func performMediaBatchDownload(
-        _ results: [MediaBatchResult], session: CameraSession, token: UUID, generation: UUID,
+        _ results: [MediaBatchResult], session: CameraSession, token: UUID, generation: UUID, historyGeneration: UUID,
         continuation: MediaWorklistContinuationDraft? = nil, acknowledgedUnknown: Bool = false
     ) async {
         guard ownsMediaBatch(token: token, generation: generation) else { return }
@@ -3764,7 +3767,7 @@ final class CameraAppState: ObservableObject {
                 end(.media)
             }
         }
-        func checkContinuationOwner() throws {
+        func checkBatchOwner() throws {
             try Task.checkCancellation()
             guard ownsMediaBatch(token: token, generation: generation), !mediaBatchCancellationRequested else {
                 throw CancellationError()
@@ -3777,34 +3780,60 @@ final class CameraAppState: ObservableObject {
                       }) else { throw CancellationError() }
             }
         }
+        func isCancellation(_ error: Error) -> Bool {
+            Task.isCancelled || mediaBatchCancellationRequested || error is CancellationError
+                || (error as? URLError)?.code == .cancelled || (error as? MediaDeliveryStoreError) == .cancelled
+        }
+        func warnAboutHistory() {
+            guard mediaDeliveryClearGeneration == historyGeneration else { return }
+            // History is installation-wide: a failed old-row settlement is still
+            // relevant after reconnect, but must never change the new MEDIA owner.
+            mediaDeliveryRecordingWarning = true
+            mediaDeliveryHistoryWarning = true
+        }
+        func refreshCurrentHistory() async {
+            guard mediaDeliveryClearGeneration == historyGeneration else { return }
+            await refreshMediaDeliveryHistory()
+        }
         var deliveryTicket: MediaDeliveryTicket?
         var plannedRowIDs: [UUID]?
         if let mediaDeliveryStore {
             do {
-                try checkContinuationOwner()
-                let plan: MediaDeliveryPlannedBatch
+                try checkBatchOwner()
+                let plan: MediaDeliveryPlannedBatch?
                 if let continuation {
                     plan = try await mediaDeliveryStore.beginContinuationBatch(
                         origins: continuation.rows.map(\.origin), filenames: results.map { $0.item.name },
                         expectedEpoch: continuation.epoch, acknowledgedUnknown: acknowledgedUnknown)
-                } else {
-                    plan = try await mediaDeliveryStore.beginPlannedBatch(filenames: results.map { $0.item.name })
-                }
-                deliveryTicket = plan.ticket
-                plannedRowIDs = plan.rowIDs
-                await mediaDeliveryReplyDelay?(.batchPlanned)
+                } else if mediaDeliveryClearGeneration == historyGeneration {
+                    // Capture an actor-owned epoch before admitting the roster.
+                    // A clear during either await must not recreate old history.
+                    let history = try await mediaDeliveryStore.beginBatch()
+                    await mediaDeliveryReplyDelay?(.batchStarted)
+                    try checkBatchOwner()
+                    if mediaDeliveryClearGeneration == historyGeneration {
+                        plan = try await mediaDeliveryStore.beginPlannedBatch(
+                            filenames: results.map { $0.item.name }, expectedHistory: history)
+                    } else { plan = nil }
+                } else { plan = nil }
+                deliveryTicket = plan?.ticket
+                plannedRowIDs = plan?.rowIDs
+                if plan != nil { await mediaDeliveryReplyDelay?(.batchPlanned) }
+                else { mediaBatchWorklistWarning = true }
             }
             catch {
-                if ownsMediaBatch(token: token, generation: generation) {
-                    mediaDeliveryRecordingWarning = true
-                    mediaDeliveryHistoryWarning = true
-                    mediaBatchWorklistWarning = true
-                    if continuation != nil {
-                        mediaWorklistContinuationUnavailable = true
-                        mediaBatchState = Task.isCancelled || mediaBatchCancellationRequested ? .cancelled : .failed
-                    }
+                guard ownsMediaBatch(token: token, generation: generation) else { return }
+                if isCancellation(error) {
+                    mediaBatchState = .cancelled
+                    return
                 }
-                if continuation != nil { return }
+                warnAboutHistory()
+                mediaBatchWorklistWarning = true
+                if continuation != nil {
+                    mediaWorklistContinuationUnavailable = true
+                    mediaBatchState = .failed
+                    return
+                }
             }
         } else if continuation != nil {
             mediaWorklistContinuationUnavailable = true
@@ -3816,7 +3845,7 @@ final class CameraAppState: ObservableObject {
         }
         for (index, entry) in results.enumerated() {
             guard ownsMediaBatch(token: token, generation: generation) else { return }
-            do { try checkContinuationOwner() }
+            do { try checkBatchOwner() }
             catch { mediaBatchState = .cancelled; return }
             var deliveryReceiptID: UUID?
             if let mediaDeliveryStore, let ticket = deliveryTicket, let rowIDs = plannedRowIDs {
@@ -3827,10 +3856,9 @@ final class CameraAppState: ObservableObject {
                 }
                 catch {
                     guard ownsMediaBatch(token: token, generation: generation) else { return }
-                    mediaDeliveryRecordingWarning = true
-                    mediaDeliveryHistoryWarning = true
+                    warnAboutHistory()
                     mediaBatchWorklistWarning = true
-                    if Task.isCancelled || mediaBatchCancellationRequested {
+                    if isCancellation(error) {
                         mediaBatchState = .cancelled
                         return
                     }
@@ -3855,8 +3883,10 @@ final class CameraAppState: ObservableObject {
                 // Admission may have committed before a session replacement
                 // retired this reply. No GET was sent: settle only the captured
                 // old row so its live store cannot remain permanently started.
-                if continuation != nil, let mediaDeliveryStore, let deliveryTicket, let deliveryReceiptID {
-                    try? await mediaDeliveryStore.finishFailure(deliveryTicket, receiptID: deliveryReceiptID, cancelled: true)
+                if let mediaDeliveryStore, let deliveryTicket, let deliveryReceiptID {
+                    do { try await mediaDeliveryStore.finishFailure(deliveryTicket, receiptID: deliveryReceiptID, cancelled: true) }
+                    catch { warnAboutHistory() }
+                    await refreshCurrentHistory()
                 }
                 return
             }
@@ -3868,13 +3898,13 @@ final class CameraAppState: ObservableObject {
                 // The local lease also retains an incomplete destination until
                 // the request settles, including after disconnect or cancellation.
                 let ownedFile = try MediaBatchOwnedFile.create(filename: entry.item.name)
-                try checkContinuationOwner()
+                try checkBatchOwner()
                 if continuation != nil {
                     guard let mediaDeliveryStore, let deliveryTicket, let deliveryReceiptID else {
                         throw MediaDeliveryStoreError.invalidTicket
                     }
                     try await mediaDeliveryStore.validatePlannedDownload(deliveryTicket, rowID: deliveryReceiptID)
-                    try checkContinuationOwner()
+                    try checkBatchOwner()
                 }
                 let download = try await session.downloadMedia(entry.item, to: ownedFile.fileURL) { [weak self] progress in
                     Task { @MainActor in
@@ -3884,7 +3914,7 @@ final class CameraAppState: ObservableObject {
                         self.mediaBatchProgress = progress
                     }
                 }
-                try checkContinuationOwner()
+                try checkBatchOwner()
                 let values = try ownedFile.fileURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
                 guard download.fileURL == ownedFile.fileURL,
                       mediaItemIdentity(download.item) == mediaItemIdentity(entry.item),
@@ -3903,43 +3933,30 @@ final class CameraAppState: ObservableObject {
                         try await mediaDeliveryStore.finishPrepared(deliveryTicket, receiptID: deliveryReceiptID,
                             source: ownedFile, actualBytes: download.bytesTransferred)
                         await mediaDeliveryReplyDelay?(.originalRetained)
-                    } catch {
-                        if ownsMediaBatch(token: token, generation: generation) {
-                            mediaDeliveryRecordingWarning = true
-                            mediaDeliveryHistoryWarning = true
-                        }
-                    }
-                    if ownsMediaBatch(token: token, generation: generation) {
-                        await refreshMediaDeliveryHistory()
-                    }
+                    } catch { warnAboutHistory() }
+                    await refreshCurrentHistory()
                 }
             } catch {
-                let cancelled = Task.isCancelled || mediaBatchCancellationRequested || error is CancellationError
-                    || (error as? URLError)?.code == .cancelled
+                let cancelled = isCancellation(error)
                 if let mediaDeliveryStore, let deliveryTicket, let deliveryReceiptID {
                     do { try await mediaDeliveryStore.finishFailure(deliveryTicket, receiptID: deliveryReceiptID, cancelled: cancelled) }
-                    catch {
-                        if ownsMediaBatch(token: token, generation: generation) {
-                            mediaDeliveryRecordingWarning = true
-                            mediaDeliveryHistoryWarning = true
-                        }
-                    }
+                    catch { warnAboutHistory() }
+                    await refreshCurrentHistory()
                 }
                 guard ownsMediaBatch(token: token, generation: generation) else { return }
                 mediaBatchItemToken = nil
                 mediaBatchResults[index].status = cancelled ? .cancelledOrUnknown : .failed
                 mediaBatchResults[index].errorMessage = cancelled ? nil : error.localizedDescription
                 mediaBatchState = cancelled ? .cancelled : .failed
-                if continuation != nil { await refreshMediaDeliveryHistory() }
                 return // Earlier ready files survive. Later entries remain not started.
             }
             await Task.yield()
         }
         guard ownsMediaBatch(token: token, generation: generation) else { return }
-        if continuation != nil {
-            do { try checkContinuationOwner() }
-            catch { mediaBatchState = .cancelled; return }
-        }
+        // A cancellation while the final retained receipt was returning is
+        // terminal too; the already-published original remains ready to share.
+        do { try checkBatchOwner() }
+        catch { mediaBatchState = .cancelled; return }
         mediaBatchState = .completed
     }
 

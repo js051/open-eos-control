@@ -1951,6 +1951,81 @@ final class MediaDeliveryStoreTests: XCTestCase {
             "ios_picker_cancel", "ios_picker_teardown", "ios_picker_source_unavailable"])
     }
 
+    func testManualRosterAdmissionUsesCapturedEpochAndCannotReviveClearedHistory() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let history = try await store.beginBatch()
+        try await store.clear()
+        let cleared = try Data(contentsOf: fixture.manifestURL)
+        await expect(.invalidTicket) {
+            _ = try await store.beginPlannedBatch(filenames: ["OLD.JPG"], expectedHistory: history)
+        }
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), cleared)
+        let snapshot = await store.snapshot()
+        XCTAssertTrue(snapshot.plannedBatches.isEmpty)
+        XCTAssertTrue(snapshot.records.isEmpty)
+        let fresh = try await store.beginBatch()
+        let plan = try await store.beginPlannedBatch(filenames: ["NEW.JPG"], expectedHistory: fresh)
+        XCTAssertEqual(plan.rowIDs.count, 1)
+    }
+
+    func testManualPlanAndItemCancellationBeforeEntryOrAtomicReplaceCannotAdmitRows() async throws {
+        for itemAdmission in [false, true] {
+            for cancelAtCommit in [false, true] {
+                let fixture = try DeliveryFixture()
+                defer { fixture.remove() }
+                let faults = DeliveryFaults()
+                let store = fixture.store(faults: faults)
+                let history = try await store.beginBatch()
+                let plan: MediaDeliveryPlannedBatch?
+                if itemAdmission { plan = try await store.beginPlannedBatch(filenames: ["KEEP-QUEUED.JPG"]) }
+                else { plan = nil }
+                let previous = try Data(contentsOf: fixture.manifestURL)
+                if cancelAtCommit {
+                    faults.arm(.beforeManifestReplace, action: { withUnsafeCurrentTask { $0?.cancel() } })
+                }
+                let admission = Task {
+                    if !cancelAtCommit { withUnsafeCurrentTask { $0?.cancel() } }
+                    if let plan { _ = try await store.beginPlannedItem(plan.ticket, rowID: plan.rowIDs[0]) }
+                    else { _ = try await store.beginPlannedBatch(filenames: ["NOT-ADMITTED.JPG"], expectedHistory: history) }
+                }
+                do { try await admission.value; XCTFail("Cancelled admission must leave the last atomic manifest intact") }
+                catch { XCTAssertTrue(error is CancellationError) }
+                XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), previous)
+                let snapshot = await store.snapshot()
+                XCTAssertEqual(snapshot.plannedBatches.count, itemAdmission ? 1 : 0)
+                XCTAssertTrue(snapshot.records.isEmpty)
+                XCTAssertTrue(snapshot.plannedBatches.flatMap(\.rows).allSatisfy { $0.receipt == nil })
+                XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: fixture.root.path), ["manifest.json"])
+            }
+        }
+    }
+
+    func testLatePlannedTerminalCallbacksCannotDowngradePreparedOrTargetSameNamedReplacement() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let old = try await store.beginPlannedBatch(filenames: ["SAME.JPG", "SAME.JPG"])
+        let ready = try await store.beginPlannedItem(old.ticket, rowID: old.rowIDs[0])
+        let source = try original(Data([1, 2, 3]))
+        try await store.finishPrepared(old.ticket, receiptID: ready, source: source, actualBytes: 3)
+        let cancelled = try await store.beginPlannedItem(old.ticket, rowID: old.rowIDs[1])
+        try await store.finishFailure(old.ticket, receiptID: cancelled, cancelled: true)
+        let current = try await store.beginPlannedBatch(filenames: ["SAME.JPG"])
+        let active = try await store.beginPlannedItem(current.ticket, rowID: current.rowIDs[0])
+        let before = try Data(contentsOf: fixture.manifestURL)
+        for receipt in [ready, cancelled, active] {
+            await expect(.invalidReceipt) { try await store.finishFailure(old.ticket, receiptID: receipt, cancelled: true) }
+        }
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), before)
+        let snapshot = await store.snapshot()
+        XCTAssertEqual(snapshot.records.map(\.status), [.prepared, .cancelled, .started])
+        XCTAssertEqual(snapshot.records.first?.availability, .available)
+        let shared = try await store.acquireShare(receiptIDs: [ready])
+        XCTAssertEqual(try Data(contentsOf: shared[0].fileURL), Data([1, 2, 3]))
+    }
+
     private func original(_ bytes: Data) throws -> MediaBatchOwnedFile {
         let file = try MediaBatchOwnedFile.create(filename: "SYNTHETIC-ORIGINAL.JPG")
         try bytes.write(to: file.fileURL)
