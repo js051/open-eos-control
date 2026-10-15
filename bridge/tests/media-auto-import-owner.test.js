@@ -145,7 +145,8 @@ function fixture(options = {}) {
   for (const name of ["releaseHeldAutofocusForLifecycle", "cancelCameraFocusInfo", "stopLiveLoop", "stopLocalVideo", "cancelEventLoop", "cancelMediaDownload", "cancelMediaUpload",
     "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh", "closeMediaPreview",
     "closeMediaDetails", "releaseObjectUrl", "clearBulbTimer", "renderHealth"]) context[name] = () => {};
-  const names = ["recordingRecoveryActive", "mediaTransferActive", "cameraInteractionBusy", "mediaAutoImportEligible", "ownsMediaAutoImport",
+  state.mediaDisplayZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const names = ["refreshMediaDateZone", "recordingRecoveryActive", "mediaTransferActive", "cameraInteractionBusy", "mediaAutoImportEligible", "ownsMediaAutoImport",
     "mediaAutoImportManualBusy", "assertMediaAutoImportCurrent", "withMediaAutoImportRead", "requireMediaAutoImportResponse",
     "readMediaAutoImportInventory", "readMediaAutoImportMetadata", "mediaAutoImportHistoryCall", "transferMediaAutoImportItem",
     "finishMediaAutoImportOwner", "scheduleMediaAutoImport", "stepMediaAutoImport", "startMediaAutoImport", "stopMediaAutoImport", "renderMediaAutoImport", "resetSession",

@@ -34,57 +34,96 @@
     return date;
   }
 
-  function localDateKey(date) {
-    return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
-      .map((part, index) => String(part).padStart(index === 0 ? 4 : 2, "0"))
-      .join("-");
+  const zoneFormatters = new Map();
+
+  function currentDisplayZone() {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   }
 
-  function parseMediaDate(value) {
+  function zonedCalendar(date, displayZone) {
+    try {
+      let formatter = zoneFormatters.get(displayZone);
+      if (!formatter) {
+        formatter = new Intl.DateTimeFormat("en-GB-u-ca-gregory-nu-latn", {
+          timeZone: displayZone, year: "numeric", month: "2-digit", day: "2-digit",
+          hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", era: "short",
+        });
+        if (zoneFormatters.size >= 16) zoneFormatters.delete(zoneFormatters.keys().next().value);
+        zoneFormatters.set(displayZone, formatter);
+      }
+      const parts = Object.fromEntries(formatter.formatToParts(date).map(({ type, value }) => [type, value]));
+      const values = [parts.year, parts.month, parts.day, parts.hour, parts.minute, parts.second].map(Number);
+      if (parts.era !== "AD" || !validCalendarDate(...values.slice(0, 3))) return null;
+      return values;
+    } catch (_) { return null; }
+  }
+
+  function parseMediaDate(value, displayZone = currentDisplayZone()) {
     if (typeof value !== "string") return null;
     const raw = value.trim();
-    const calendar = CALENDAR_DATE.exec(raw);
+    if (raw.length > 128) return null;
+    const named = /^(.*)\[([A-Za-z0-9_+./-]{1,64})\]$/.exec(raw);
+    const source = named ? named[1] : raw;
+    const calendar = CALENDAR_DATE.exec(source);
     if (calendar) {
+      if (named) return null;
       const [, year, month, day] = calendar.map(Number);
       if (!validCalendarDate(year, month, day)) return null;
-      // A date-only value is a literal day, not a camera or browser timezone.
-      // Format this carrier with timeZone: "UTC" and omit its invented midnight.
-      const date = utcDate(year, month, day);
-      return { date, timestamp: date.getTime(), dateKey: raw, hasTime: false };
+      // This Date is a UTC formatting carrier only. It is never an instant key.
+      return { kind: "date-only", date: utcDate(year, month, day), timestamp: null,
+        dateKey: source, timeKey: null, timeOrder: null, hasTime: false, formatZone: "UTC" };
     }
-    const parts = ISO_DATE_TIME.exec(raw) || PTP_DATE_TIME.exec(raw);
+    const parts = ISO_DATE_TIME.exec(source) || PTP_DATE_TIME.exec(source);
     if (!parts) return null;
     const [, yearText, monthText, dayText, hourText, minuteText, secondText, fraction, zone] = parts;
     const [year, month, day, hour, minute, second] = [yearText, monthText, dayText, hourText, minuteText, secondText || "0"].map(Number);
-    if (!validCalendarDate(year, month, day) || hour > 23 || minute > 59 || second > 59) return null;
+    if (!validCalendarDate(year, month, day) || hour > 23 || minute > 59 || second > 59 || (named && !zone)) return null;
     const millisecond = Number((fraction || "").padEnd(3, "0").slice(0, 3));
-    let date;
+    let components = [year, month, day, hour, minute, second];
+    let date = utcDate(...components, millisecond);
+    let timestamp = null;
     if (zone) {
       let offsetMinutes = 0;
       if (zone !== "Z") {
         const offset = zone.slice(1).replace(":", "");
         const offsetHour = Number(offset.slice(0, 2));
         const offsetMinute = Number(offset.slice(2));
-        if (offsetHour > 23 || offsetMinute > 59) return null;
+        if (offsetHour > 18 || offsetMinute > 59 || (offsetHour === 18 && offsetMinute !== 0)) return null;
         offsetMinutes = (offsetHour * 60 + offsetMinute) * (zone[0] === "-" ? -1 : 1);
       }
-      date = new Date(utcDate(year, month, day, hour, minute, second, millisecond).getTime() - offsetMinutes * 60_000);
-    } else {
-      // Floating camera values retain the browser's existing local-time and DST
-      // interpretation; they do not establish the camera's actual timezone.
-      date = new Date(0);
-      date.setFullYear(year, month - 1, day);
-      date.setHours(hour, minute, second, millisecond);
+      date = new Date(date.getTime() - offsetMinutes * 60_000);
+      if (date.getUTCFullYear() < 1 || date.getUTCFullYear() > 9999) return null;
+      timestamp = date.getTime();
+      if (named) {
+        const namedCalendar = zonedCalendar(date, named[2]);
+        if (!namedCalendar || utcDate(...namedCalendar, millisecond).getTime() - timestamp !== offsetMinutes * 60_000) return null;
+      }
+      components = zonedCalendar(date, displayZone);
+      if (!components) return null;
     }
-    return { date, timestamp: date.getTime(), dateKey: localDateKey(date), hasTime: true };
+    const [displayYear, displayMonth, displayDay, displayHour, displayMinute, displaySecond] = components;
+    const pad = (number, length = 2) => String(number).padStart(length, "0");
+    return { kind: zone ? "instant" : "floating", date, timestamp,
+      dateKey: `${pad(displayYear, 4)}-${pad(displayMonth)}-${pad(displayDay)}`,
+      timeKey: `${pad(displayHour)}:${pad(displayMinute)}:${pad(displaySecond)}.${pad(millisecond, 3)}`,
+      timeOrder: timestamp ?? ((hour * 60 + minute) * 60 + second) * 1000 + millisecond,
+      hasTime: true, formatZone: zone ? displayZone : "UTC" };
   }
 
-  function mediaDateForItem(item) {
-    return parseMediaDate(item?.captureTime);
+  function mediaDateForItem(item, displayZone = currentDisplayZone()) {
+    return parseMediaDate(item?.captureTime, displayZone);
   }
 
   function mediaTime(item) {
+    // Only an explicitly offset source may become an absolute timestamp.
     return mediaDateForItem(item)?.timestamp ?? null;
+  }
+
+  function selectReviewItem(items, knownIds = new Set(), kind = "recent") {
+    if (!["recent", "photo", "video"].includes(kind)) return null;
+    return (Array.isArray(items) ? items : []).find((item) =>
+      !knownIds.has(item.id) && (kind === "recent" || isVideo(item) === (kind === "video")),
+    ) || null;
   }
 
   function validateDateRange(value) {
@@ -101,8 +140,8 @@
     return { valid: true, range: { start, end }, error: null };
   }
 
-  function countUnknownDates(items) {
-    return items.reduce((count, item) => count + (mediaDateForItem(item) === null ? 1 : 0), 0);
+  function countUnknownDates(items, displayZone = currentDisplayZone()) {
+    return items.reduce((count, item) => count + (mediaDateForItem(item, displayZone) === null ? 1 : 0), 0);
   }
 
   function normalizeRating(value) {
@@ -187,16 +226,18 @@
     });
   }
 
-  function itemsForDisplay(items, filter, sort, locale, range = null, ratingFilter = "all", folderFilter = { kind: "all" }) {
+  function itemsForDisplay(items, filter, sort, locale, range = null, ratingFilter = "all", folderFilter = { kind: "all" }, displayZone = currentDisplayZone()) {
     const activeRange = range === null ? null : validateDateRange(range);
     if (activeRange && !activeRange.valid) throw new RangeError(`Invalid media date range: ${activeRange.error}`);
+    const needsDates = activeRange || sort === "newest" || sort === "oldest";
+    const dates = new Map(needsDates ? items.map((item) => [item, mediaDateForItem(item, displayZone)]) : []);
     const filtered = items.filter((item) => {
       if (filter === "video" && !isVideo(item)) return false;
       if (filter === "photo" && isVideo(item)) return false;
       if (!ratingMatchesFilter(item?.rating, ratingFilter)) return false;
       if (!folderMatchesFilter(item, folderFilter)) return false;
       if (activeRange) {
-        const date = mediaDateForItem(item);
+        const date = dates.get(item);
         if (!date || date.dateKey < activeRange.range.start || date.dateKey > activeRange.range.end) return false;
       }
       return true;
@@ -219,25 +260,22 @@
       if (sort === "name") {
         return nameOrder || String(left.id).localeCompare(String(right.id), locale, { numeric: true });
       }
-      const leftDate = mediaDateForItem(left);
-      const rightDate = mediaDateForItem(right);
-      const leftTime = leftDate?.timestamp ?? null;
-      const rightTime = rightDate?.timestamp ?? null;
-      if (leftTime === null && rightTime !== null) return 1;
-      if (leftTime !== null && rightTime === null) return -1;
-      // Date-only carriers use UTC but represent literal days. Group by the
-      // displayed day before comparing instants so those groups cannot split.
-      if (leftDate && rightDate && leftDate.dateKey !== rightDate.dateKey) {
-        const dayOrder = leftDate.dateKey < rightDate.dateKey ? -1 : 1;
-        return sort === "oldest" ? dayOrder : -dayOrder;
+      const leftDate = dates.get(left);
+      const rightDate = dates.get(right);
+      if (!leftDate && rightDate) return 1;
+      if (leftDate && !rightDate) return -1;
+      if (leftDate && rightDate) {
+        const direction = sort === "oldest" ? 1 : -1;
+        if (leftDate.dateKey !== rightDate.dateKey) {
+          return direction * (leftDate.dateKey < rightDate.dateKey ? -1 : 1);
+        }
+        // A total tuple order: never compare a fabricated midnight with an instant.
+        const precision = { instant: 0, floating: 1, "date-only": 2 };
+        const precisionOrder = precision[leftDate.kind] - precision[rightDate.kind];
+        if (precisionOrder) return precisionOrder;
+        if (leftDate.timeOrder !== rightDate.timeOrder) return direction * (leftDate.timeOrder - rightDate.timeOrder);
       }
-      if (leftTime !== null && rightTime !== null && leftTime !== rightTime) {
-        return sort === "oldest" ? leftTime - rightTime : rightTime - leftTime;
-      }
-      if (leftTime === null && rightTime === null) {
-        const stableNameOrder = nameOrder || String(left.id).localeCompare(String(right.id), locale, { numeric: true });
-        return sort === "oldest" ? stableNameOrder : -stableNameOrder;
-      }
+      // Equal precision/time and all unknown values retain camera response order.
       return leftEntry.index - rightEntry.index;
     }).map(({ item }) => item);
   }
@@ -331,6 +369,7 @@
     parseMediaDate,
     mediaDateForItem,
     mediaTime,
+    selectReviewItem,
     validateDateRange,
     countUnknownDates,
     normalizeRating,

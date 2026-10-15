@@ -35,3 +35,19 @@ AF telemetry 僅來自相機的有限回應：最多 256 KiB、512 個框，僅 
 本文件記錄功能範圍及判準。新 AF 實作的編譯、受控測試、CI 與真機結果應以本批驗證紀錄的 exact head 為準；source review 不能替代 runtime。沒有真機 AF／鏡頭回報、held AF 放開或 Bridge 主機消失的實測，就不能聲稱物理相機已停止或已合焦。
 
 其餘對齊工作應以完整流程收斂：mobile native RTP 的像素監看、iOS 明確外部目的地與完成語義、PC 素材清單的漸進／取消，以及各 transport 的可證能力。Research 與平台專屬項保留明確限制，不以虛構 backend 支援或隱藏失敗追求表面一致。
+
+
+## 2026-10-15 素材日期／拍後選片對齊增補
+
+上方 2026-10-13 表格是歷史基線，不能用它推定較新候選的完成度。三個開發分支已各自繼續 AF、逐頁載入／取消、外部目的地／交付結果及 native RTP LUT 工作；不同分支的共享契約或綠燈，不等於三端實作已同步合併或實機驗收。
+
+本次獨立修正群採同一個 `contracts/media-date-review/v1/date-review-vectors.json`（48 日期向量、3 展示時區、9 排序案例、4 拍後選片案例）：
+
+- 日期區分明確 offset instant、浮動時間、純日期、unknown；不捏造裝置時區、午夜 instant 或日期精度。
+- 日期篩選／排序／群組／詳細資訊使用同一 viewer-zone snapshot。時區變更保留使用者選取的 literal 日期、素材 ID 與傳輸 owner。
+- 日期排序採固定精度分組及 loaded-order ties，unknown 在兩個方向皆最後，避免混合精度比較循環。
+- 拍後照片／影片先排除已觀察 ID，再篩種類並保留相機順序。一般最近素材可含兩種。未增加 shutter／REC 重送或整卡 baseline。
+- PC 實際 JavaScript、Android 純 Kotlin 各執行相同固定預期；iOS 已接相同 fixture XCTest，但其本地來源檢查不能替代 Swift／SDK／UI 執行。
+- 正式 Android JSON resource loader、平台 UI／時區事件、實體相機日期格式與返回順序仍分別待驗；不由純邏輯結果推定完成。
+
+本群未處理或消除既有 native RTP GPU／錄影切換驗收失敗，也不將單項待驗設成其他三端功能開發的前置 gate。平台 transport 差異、direct USB 研究項、真正 decoder／GPU／讀回及實機效能，繼續如實列出。
