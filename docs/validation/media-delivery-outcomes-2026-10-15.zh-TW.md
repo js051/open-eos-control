@@ -34,7 +34,7 @@
 
 新增原生測試來源涵蓋：持久 admission、同名不同來源、完整／部分／重複 provider 回報、取消／teardown、冷啟不明、清除晚回呼、容量、未知欄位拒絕、終態寫入故障、來源在 admission 中被替換、schema 5 與前景 Files 相容，以及共用 picker vectors 驅動真 controller/store。
 
-本地沒有 Swift/Xcode/UIKit，這批新 Swift 測試為 NOT_RUN。真 Files／iCloud／第三方 provider、撤權、離線、滿碟、強制結束與外部檔案 bytes 仍待具名裝置驗收。RTP 候選正在跑的 CI 不能替本群未提交變更背書。
+本地沒有 Swift/Xcode/UIKit，這批新 Swift 測試為 NOT_RUN。真 Files／iCloud／第三方 provider、撤權、離線、滿碟、強制結束與外部檔案 bytes 仍待具名裝置驗收。較早 RTP 候選的 CI 已失敗終止，不能替本群較新的本地提交背書。
 
 ## 仍需保持的邊界
 

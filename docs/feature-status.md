@@ -144,7 +144,7 @@ Canon's current public SDK page lists EOS R6 Mark III for CCAPI and describes re
 
 ### Native RTP LUT candidate, 2026-10-14
 
-The older monitoring rows above are not a current acceptance record for native RTP. The new branch-local native LUT work and earlier sampled-scope work are distinguished in the [native RTP validation contract](validation/native-rtp-lut-2026-10-14.md). Native compilation of the new work, physical-camera color/performance, transport-specific delivery and combined-tree integration remain unverified.
+The older monitoring rows above are not a current acceptance record for native RTP. The new branch-local native LUT work and earlier sampled-scope work are distinguished in the [native RTP validation contract](validation/native-rtp-lut-2026-10-14.md). The [2026-10-15 exact-head follow-up](validation/native-rtp-followup-2026-10-15.md) records successful native compilation but failed rendering/UI acceptance. The local extended-range LUT correction is not yet natively validated. Physical-camera color/performance, transport-specific delivery and combined-tree integration remain unverified.
 
 ### Delivery-outcome parity candidate, 2026-10-15
 
