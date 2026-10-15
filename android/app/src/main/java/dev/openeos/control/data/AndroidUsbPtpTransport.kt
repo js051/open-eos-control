@@ -44,27 +44,32 @@ class AndroidUsbPtpTransport private constructor(
         count
     }
 
-    override suspend fun send(container: PtpContainer) = withContext(Dispatchers.IO) {
+    override suspend fun send(container: PtpContainer) = send(container) {}
+
+    override suspend fun send(container: PtpContainer, beforeDispatch: () -> Unit) = withContext(Dispatchers.IO) {
         checkOpen()
-        writeAll(PtpCodec.encode(container))
+        val encoded = PtpCodec.encode(container)
+        currentCoroutineContext().ensureActive()
+        beforeDispatch()
+        writeAll(encoded)
     }
 
     override suspend fun receive(maxPayloadBytes: Int): PtpContainer = withContext(Dispatchers.IO) {
+        receiveContainer(maxPayloadBytes)
+    }
+
+    override suspend fun receiveObserved(onReceived: (PtpContainer) -> Unit): PtpContainer = withContext(Dispatchers.IO) {
+        receiveContainer(DEFAULT_PTP_METADATA_BYTES).also(onReceived)
+    }
+
+    private suspend fun receiveContainer(maxPayloadBytes: Int): PtpContainer {
         checkOpen()
         val header = readHeader()
         if (header.payloadLength > maxPayloadBytes.toLong()) {
-            throw PtpProtocolException(
-                "PTP ${header.type.name.lowercase()} payload is ${header.payloadLength} bytes; " +
-                    "the metadata limit is $maxPayloadBytes bytes."
-            )
+            throw PtpProtocolException("PTP response exceeded its metadata limit.")
         }
         val payload = readExact(header.payloadLength.toInt())
-        PtpContainer(
-            type = header.type,
-            code = header.code,
-            transactionId = header.transactionId,
-            payload = payload,
-        )
+        return PtpContainer(header.type, header.code, header.transactionId, payload)
     }
 
     override suspend fun receiveTo(

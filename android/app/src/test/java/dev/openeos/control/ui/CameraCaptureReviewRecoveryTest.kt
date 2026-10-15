@@ -334,6 +334,8 @@ class CameraCaptureReviewRecoveryTest {
     }
 
     private suspend fun assertMalformedListingEvidence(native: Boolean, invalid: List<String>, empty: String) {
+        // This test checks response shapes, not traversal. An empty one-page card must not advertise 1000 pages.
+        if (native) peer.pageCount.set(1)
         connect(native)
         val old = viewModel.uiState.value.captureReviewItem
         for ((index, body) in invalid.withIndex()) {
@@ -352,6 +354,7 @@ class CameraCaptureReviewRecoveryTest {
         assertTrue(pumpUntil(advanceTime = true) { viewModel.uiState.value.captureReviewStatus == CaptureReviewStatus.NOT_READY })
         assertEquals(CaptureReviewObservation.NO_CANDIDATE_OBSERVED, viewModel.uiState.value.captureReviewObservation)
         assertEquals(CaptureReviewEvidence(4, 0, CaptureReviewRead.SUCCESS), viewModel.uiState.value.captureReviewEvidence)
+        if (native) assertTrue(peer.pages.all { it == 1 })
         assertSame(old, viewModel.uiState.value.captureReviewItem)
         assertEquals(writes, peer.writes.toList())
         assertEquals(1, peer.captureWrites.get())

@@ -42,6 +42,8 @@ interface UsbHostCaptureStore {
     ): CameraMediaDownloadResult
 
     suspend fun delete(item: CameraMediaItem)
+    suspend fun delete(item: CameraMediaItem, evidence: MediaDeleteEvidence): Unit =
+        throw UnsupportedOperationException("Host store does not provide deletion receipts.")
 }
 
 class AndroidUsbHostCaptureStore(context: Context) : UsbHostCaptureStore {
@@ -173,9 +175,14 @@ class AndroidUsbHostCaptureStore(context: Context) : UsbHostCaptureStore {
         )
     }
 
-    override suspend fun delete(item: CameraMediaItem) = withContext(Dispatchers.IO) {
+    override suspend fun delete(item: CameraMediaItem) = delete(item, MediaDeleteEvidence())
+
+    override suspend fun delete(item: CameraMediaItem, evidence: MediaDeleteEvidence) = withContext(Dispatchers.IO) {
         val file = requireFile(item)
-        if (!file.delete()) throw PtpProtocolException("Could not delete host capture ${item.name}.")
+        currentCoroutineContext().ensureActive()
+        evidence.beforeDispatch()
+        if (!file.delete()) throw PtpProtocolException("Host capture deletion was not confirmed.")
+        evidence.onConfirmed()
     }
 
     private fun ensureDirectory() {

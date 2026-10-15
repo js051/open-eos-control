@@ -841,6 +841,7 @@ class UsbPtpCameraBackend(
                 ratingWritable = objectInfo.objectFormat in ratedFormats,
                 streamAvailable = streamAvailable,
                 folder = snapshot.folderFor(objectInfo),
+                deleteWritable = false.takeIf { storageSnapshot.any { storage -> storage.storageId == objectInfo.storageId && storage.accessCapability == 1 } },
             )
         }
         if (handles.isNotEmpty() && items.isEmpty() && firstFailure != null && hostItems.isEmpty()) throw firstFailure!!
@@ -1175,6 +1176,7 @@ class UsbPtpCameraBackend(
                 ratingWritable = rating != null,
                 streamAvailable = item.streamAvailable,
                 folder = observedMediaFolder(context, objectInfo),
+                deleteWritable = false.takeIf { storageSnapshot.any { storage -> storage.storageId == objectInfo.storageId && storage.accessCapability == 1 } },
             )
         }
     }
@@ -1255,6 +1257,7 @@ class UsbPtpCameraBackend(
                         ratingWritable = true,
                         streamAvailable = item.streamAvailable,
                         folder = observedMediaFolder(context, objectInfo),
+                        deleteWritable = false.takeIf { storageSnapshot.any { storage -> storage.storageId == objectInfo.storageId && storage.accessCapability == 1 } },
                     )
                 }
             }
@@ -1266,14 +1269,31 @@ class UsbPtpCameraBackend(
         )
     }
 
-    override suspend fun deleteMedia(item: CameraMediaItem) {
+    override suspend fun deleteMedia(item: CameraMediaItem) = deleteMedia(item, MediaDeleteEvidence())
+
+    override suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence) {
+        check(item.protected != true && item.deleteWritable != false) { "This media item cannot be deleted." }
         hostCaptureStore?.takeIf { it.owns(item) }?.let { store ->
-            store.delete(item)
+            store.delete(item, evidence)
             observedFeatures.add(CameraFeature.MEDIA_DELETE)
             return
         }
+        val handle = mediaDeletePtpHandle(item.id)
         requireOperation(PtpOperationCode.DELETE_OBJECT, CameraFeature.MEDIA_DELETE)
-        requireSession().deleteObject(item.ptpHandle())
+        val ptp = requireSession()
+        val context = captureMediaFolderContext(ptp)
+        val guarded = evidence.copy(beforeDispatch = {
+            synchronized(mediaFolderLock) {
+                if (mediaFolderContext?.session !== context.session) throw CancellationException("USB media session changed.")
+            }
+            val known = cachedMediaInfo(context, handle)
+            check(known?.protectionStatus != PtpProtectionStatus.READ_ONLY) { "Known protected media cannot be deleted." }
+            check(storageSnapshot.none { it.storageId == known?.storageId && it.accessCapability == 1 }) {
+                "Known read-only storage does not permit deletion."
+            }
+            evidence.beforeDispatch()
+        })
+        ptp.deleteObject(handle, evidence = guarded)
         observedFeatures.add(CameraFeature.MEDIA_DELETE)
     }
 
@@ -2396,6 +2416,7 @@ private fun PtpObjectInfo.toMediaItem(
     ratingWritable: Boolean? = null,
     streamAvailable: Boolean = false,
     folder: CameraMediaFolder? = null,
+    deleteWritable: Boolean? = null,
 ): CameraMediaItem = CameraMediaItem(
     id = "ptp:${handle.toString(16).uppercase(Locale.ROOT).padStart(8, '0')}",
     name = filename,
@@ -2416,6 +2437,7 @@ private fun PtpObjectInfo.toMediaItem(
     widthPixels = imageWidth.takeIf { it in 1..Int.MAX_VALUE.toLong() }?.toInt(),
     heightPixels = imageHeight.takeIf { it in 1..Int.MAX_VALUE.toLong() }?.toInt(),
     folder = folder,
+    deleteWritable = deleteWritable,
 )
 
 private fun CameraMediaItem.ptpHandle(): Long {

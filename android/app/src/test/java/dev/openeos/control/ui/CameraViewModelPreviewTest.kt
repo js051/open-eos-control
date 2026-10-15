@@ -296,9 +296,10 @@ class CameraViewModelPreviewTest {
     fun previewMediaDeleteRemovesOnlyConfirmedItemLocally() = runTest(dispatcher) {
         val viewModel = CameraViewModel()
         viewModel.enterOfflinePreview()
-        val item = viewModel.uiState.value.mediaItems.first()
+        val item = viewModel.uiState.value.mediaItems.first { it.protected == false }
 
         viewModel.deleteMedia(item)
+        advanceUntilIdle()
 
         assertFalse(viewModel.uiState.value.mediaItems.any { it.id == item.id })
         assertEquals(item.name, viewModel.uiState.value.lastDeletedMediaName)
@@ -377,13 +378,25 @@ class CameraViewModelPreviewTest {
         assertEquals(2, viewModel.uiState.value.lastMediaBatchResult?.succeededItems)
         assertEquals(MediaBatchOperation.UNPROTECT, viewModel.uiState.value.lastMediaBatchResult?.operation)
 
-        viewModel.deleteMediaBatch(selected)
+        viewModel.deleteMediaBatch(viewModel.uiState.value.mediaItems.filter { current -> selected.any { it.id == current.id } })
         advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value.mediaItems.none { current -> selected.any { it.id == current.id } })
         assertEquals(2, viewModel.uiState.value.lastMediaBatchResult?.succeededItems)
         assertEquals(MediaBatchOperation.DELETE, viewModel.uiState.value.lastMediaBatchResult?.operation)
     }
+    @Test
+    fun protectedPreviewDeletionIsSkippedWithoutRemovingMedia() = runTest(dispatcher) {
+        val viewModel = CameraViewModel()
+        viewModel.enterOfflinePreview()
+        val protected = viewModel.uiState.value.mediaItems.first { it.protected == true }
+        viewModel.deleteMedia(protected)
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.mediaItems.any { it.id == protected.id })
+        assertEquals(dev.openeos.control.data.MediaDeleteOutcome.SKIPPED,
+            viewModel.uiState.value.mediaDeleteReceipt?.rows?.single()?.outcome)
+    }
+
     @Test
     fun delayedOwnerBoundMetadataSelectionCannotModifyReplacementPreviewWithReusedIds() = runTest(dispatcher) {
         val model = CameraViewModel()

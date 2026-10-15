@@ -23,8 +23,10 @@ class CameraMediaGalleryStoreTest {
     @Test fun originalMimeTypesIgnoreGenericCameraResponse() {
         val item = CameraMediaItem("test", "IMG_0001.CR3", "image", contentType = "application/octet-stream")
         assertEquals("image/x-canon-cr3", galleryMimeType(item))
-        assertEquals("video/mp4", galleryMimeType(item.copy(name = "MVI_0001.MP4")))
+        assertEquals("video/mp4", galleryMimeType(item.copy(name = "MVI_0001.MP4", kind = "video")))
         assertEquals("image/jpeg", galleryMimeType(item.copy(name = "IMG_0001.JPG")))
         assertNull(galleryMimeType(item.copy(name = "IMG_0001.XMP")))
+        // An explicit image-kind/video-extension conflict must remain rejected.
+        assertNull(galleryMimeType(item.copy(name = "MVI_0001.MP4", kind = "image")))
     }
 }

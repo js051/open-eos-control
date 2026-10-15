@@ -242,8 +242,15 @@ object PtpCodec {
 
 interface PtpTransport {
     suspend fun send(container: PtpContainer)
+    suspend fun send(container: PtpContainer, beforeDispatch: () -> Unit) {
+        currentCoroutineContext().ensureActive()
+        beforeDispatch()
+        send(container)
+    }
 
     suspend fun receive(maxPayloadBytes: Int = DEFAULT_PTP_METADATA_BYTES): PtpContainer
+    suspend fun receiveObserved(onReceived: (PtpContainer) -> Unit): PtpContainer =
+        receive().also(onReceived)
 
     suspend fun receiveTo(
         destination: OutputStream,
@@ -624,8 +631,28 @@ class PtpSession(
         executeOperation(PtpOperationCode.INITIATE_CAPTURE, listOf(storageId, objectFormat))
     }
 
-    suspend fun deleteObject(handle: Long, objectFormat: Long = 0L) {
-        executeOperation(PtpOperationCode.DELETE_OBJECT, listOf(handle, objectFormat))
+    suspend fun deleteObject(handle: Long, objectFormat: Long = 0L, evidence: MediaDeleteEvidence = MediaDeleteEvidence()) {
+        requireObjectHandle(handle, "DeleteObject")
+        require(objectFormat == 0L) { "DeleteObject only accepts a concrete item, without format-wide deletion." }
+        mutex.withLock {
+            requireOpen()
+            val transactionId = takeTransactionId()
+            transport.send(PtpCodec.command(PtpOperationCode.DELETE_OBJECT, transactionId, listOf(handle, 0L)), evidence.beforeDispatch)
+            while (true) {
+                val container = transport.receiveObserved { received ->
+                    if (received.type == PtpContainerType.EVENT) return@receiveObserved
+                    validateTransaction(received.header, transactionId)
+                    check(received.type == PtpContainerType.RESPONSE) { "DeleteObject returned an unexpected container." }
+                    // Validate framing too; a malformed response cannot become a rejection or ACK.
+                    PtpCodec.responseParameters(received)
+                    if (received.code == PtpResponseCode.OK) evidence.onConfirmed()
+                    // No deletion-specific non-OK refusal allowlist is established here. General,
+                    // partial-completion, reserved and vendor responses stay uncertain, never continue a batch.
+                    checkResponse(received.code, PtpOperationCode.DELETE_OBJECT)
+                }
+                if (container.type == PtpContainerType.RESPONSE) break
+            }
+        }
     }
 
     suspend fun setObjectProtection(handle: Long, protected: Boolean) {

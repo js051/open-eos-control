@@ -1795,6 +1795,7 @@ class CcapiClient(
             sizeBytes = body.optLong("filesize").takeIf { it > 0L } ?: item.sizeBytes,
             captureTime = body.optString("lastmodifieddate").takeIf { it.isNotBlank() } ?: item.captureTime,
             protected = canonicalMediaMetadataFlag(body.opt("protect")),
+            deleteWritable = if (body.has("deleteWritable")) normalizedMediaMetadataBoolean(body.opt("deleteWritable")) else item.deleteWritable,
             archived = canonicalMediaMetadataFlag(body.opt("archive")),
             rating = canonicalMediaMetadataRating(body.opt("rating")),
             rotationDegrees = canonicalMediaMetadataRotation(body.opt("rotate")),
@@ -1995,7 +1996,8 @@ class CcapiClient(
         }
     }
 
-    suspend fun deleteMedia(item: CameraMediaItem) {
+    suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence = MediaDeleteEvidence()) {
+        check(item.protected != true && item.deleteWritable != false) { "This media item cannot be deleted." }
         val path = if (isRealCamera) {
             if (enforceAdvertisedOperations && !supportsMediaDelete()) {
                 error("Camera did not advertise media deletion.")
@@ -2005,7 +2007,8 @@ class CcapiClient(
             val encodedId = URLEncoder.encode(item.id, StandardCharsets.UTF_8.name()).replace("+", "%20")
             "/ccapi/media/$encodedId"
         }
-        deleteOk(path)
+        executeMediaDeleteHttp(mutationHttpClient, Request.Builder().url("$baseUrl$path").delete().build(), evidence,
+            checkOwner = { requireShutterReleased() })
         observedFeatures.add(CameraFeature.MEDIA_DELETE)
     }
 
@@ -2949,6 +2952,7 @@ class CcapiClient(
             protectionWritable = normalizedMediaMetadataBoolean(item.opt("protectionWritable")),
             archiveWritable = normalizedMediaMetadataBoolean(item.opt("archiveWritable")),
             rotationWritable = normalizedMediaMetadataBoolean(item.opt("rotationWritable")),
+            deleteWritable = normalizedMediaMetadataBoolean(item.opt("deleteWritable")),
             streamAvailable = cameraMediaHasVideoTransportHint(kind, name) && cameraMediaIsVideo(kind, name, contentType),
             contentType = contentType,
             widthPixels = item.optInt("width_pixels").takeIf { item.has("width_pixels") && it > 0 },
@@ -3240,13 +3244,7 @@ class CcapiClient(
             contentPaths(strict = true)
             return 0
         }
-        val count = when (val value = opt("pagenumber")) {
-            is Int -> value.toLong()
-            is Long -> value
-            else -> error("Camera returned an invalid media page count.")
-        }
-        check(count in 0..Int.MAX_VALUE.toLong()) { "Camera returned an invalid media page count." }
-        return count.toInt()
+        return validatedMediaPageCount(opt("pagenumber"))
     }
 
     private suspend fun getContentPage(

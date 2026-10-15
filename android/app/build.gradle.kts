@@ -15,6 +15,42 @@ if (!developmentSigningEnabled && developmentSigningEnvironment.values.any { !it
     throw GradleException("Android development signing requires all OEC_ANDROID_SIGNING_* values.")
 }
 
+// Explicit flat fixture manifests preserve existing loader names and exclude documentation by construction.
+val unitContractFixtures = listOf(
+    "../../contracts/media-delivery/v1/outcome-vectors.json",
+    "../../contracts/media-type/v1/media-type-vectors.json",
+    "../../contracts/media-date-review/v1/date-review-vectors.json",
+    "../../contracts/capture-review-evidence/v1/review-evidence-vectors.json",
+    "../../contracts/live-view-lut/v1/numeric-vectors.json",
+    "../../contracts/jpeg-original/v1/jpeg-original-vectors.json",
+    "../../contracts/media-mutation/v1/media-mutation-vectors.json",
+    "../../contracts/media-mutation/v1/media-mutation-eligibility-vectors.json",
+    "../../contracts/media-upload/v1/upload-outcome-vectors.json",
+    "../../contracts/media-delete/v1/delete-outcome-vectors.json",
+)
+val androidContractFixtures = listOf(
+    "../../contracts/live-view-lut/v1/numeric-vectors.json",
+    "../../contracts/jpeg-original/v1/jpeg-original-vectors.json",
+)
+fun checkContractFixtures(paths: List<String>) {
+    check(paths.map { file(it).name }.distinct().size == paths.size) { "Duplicate flat contract fixture filename." }
+    paths.forEach { check(file(it).isFile) { "Missing contract fixture: $it" } }
+}
+val unitContractDirectory = layout.buildDirectory.dir("generated/contract-fixtures/unit")
+val androidContractDirectory = layout.buildDirectory.dir("generated/contract-fixtures/androidTest")
+val prepareUnitContractFixtures = tasks.register<Sync>("prepareUnitContractFixtures") {
+    from(unitContractFixtures.map { file(it) })
+    into(unitContractDirectory)
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    doFirst { checkContractFixtures(unitContractFixtures) }
+}
+val prepareAndroidContractFixtures = tasks.register<Sync>("prepareAndroidContractFixtures") {
+    from(androidContractFixtures.map { file(it) })
+    into(androidContractDirectory)
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    doFirst { checkContractFixtures(androidContractFixtures) }
+}
+
 android {
     namespace = "dev.openeos.control"
     compileSdk = 35
@@ -69,20 +105,14 @@ android {
         compose = true
     }
 
-    // Bounded synthetic contracts are consumed by all platform tests.
-    sourceSets.getByName("test").resources.srcDir("../../contracts/media-delivery/v1")
-    sourceSets.getByName("test").resources.srcDir("../../contracts/media-type/v1")
-    sourceSets.getByName("test").resources.srcDir("../../contracts/media-date-review/v1")
-    sourceSets.getByName("test").resources.srcDir("../../contracts/capture-review-evidence/v1")
-    sourceSets.getByName("test").resources.srcDir("../../contracts/live-view-lut/v1")
-    sourceSets.getByName("test").resources.srcDir("../../contracts/jpeg-original/v1")
-    sourceSets.getByName("test").resources.srcDir("../../contracts/media-mutation/v1")
-    sourceSets.getByName("test").resources.srcDir("../../contracts/media-upload/v1")
-    // Contract documentation is not a classpath resource; avoid duplicate README names.
-    sourceSets.getByName("test").resources.exclude("README.md")
-    sourceSets.getByName("androidTest").assets.srcDir("../../contracts/live-view-lut/v1")
-    sourceSets.getByName("androidTest").assets.srcDir("../../contracts/jpeg-original/v1")
+    // Sync uses standard CopySpec filtering. Android SourceDirectorySet exclude APIs are not assumed.
+    sourceSets.getByName("test").resources.srcDir(unitContractDirectory)
+    sourceSets.getByName("androidTest").assets.srcDir(androidContractDirectory)
+
 }
+
+// Both fixture outputs must exist before Android's variant merge/resource tasks start.
+tasks.named("preBuild") { dependsOn(prepareUnitContractFixtures, prepareAndroidContractFixtures) }
 
 kotlin {
     compilerOptions {

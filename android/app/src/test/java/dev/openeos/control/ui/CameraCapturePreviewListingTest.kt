@@ -379,7 +379,10 @@ private class PreviewListingPeer {
                     (path.startsWith("/ccapi/media/") || path.startsWith("$CONTENTS/")) && url.queryParameter("kind") == "info" -> {
                         infoReads.incrementAndGet()
                         val id = url.pathSegments.last().removeSuffix(".JPG")
-                        json(item(id).put("lastmodifieddate", if (id == "new") "2026-09-01T00:00:03Z" else "2026-09-01T00:00:01Z").toString())
+                        val metadata = item(id)
+                        // Native explicit identity must match its full contents resource. Simulator IDs stay short.
+                        if (path.startsWith("$CONTENTS/")) metadata.put("id", path)
+                        json(metadata.put("lastmodifieddate", if (id == "new") "2026-09-01T00:00:03Z" else "2026-09-01T00:00:01Z").toString())
                     }
                     (path.startsWith("/ccapi/media/") || path.startsWith("$CONTENTS/")) && url.queryParameter("kind") == "display" -> {
                         previewReads += path

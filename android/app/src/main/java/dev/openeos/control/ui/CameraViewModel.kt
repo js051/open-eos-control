@@ -26,6 +26,7 @@ import dev.openeos.control.data.RecordingCommand
 import dev.openeos.control.data.CameraFeature
 import dev.openeos.control.data.CameraFileNamingField
 import dev.openeos.control.data.canStartMediaUpload
+import dev.openeos.control.data.MediaDeleteOutcome
 import dev.openeos.control.data.MediaUploadAttempt
 import dev.openeos.control.data.MediaUploadEvidence
 import dev.openeos.control.data.MediaUploadStatus
@@ -313,6 +314,8 @@ class CameraViewModel(
     }
     @Volatile private var mediaSaveRequest: MediaSaveRequest? = null
     private var mediaUploadJob: Job? = null
+    @Volatile private var mediaDeleteControl: MediaDeleteBatchControl? = null
+    @Volatile private var mediaDeleteJob: Job? = null
     @Volatile private var mediaUploadAttempt: MediaUploadAttempt? = null
     private var mediaLibraryJob: Job? = null
     private var mediaLibraryGeneration = 0L
@@ -946,6 +949,7 @@ class CameraViewModel(
             it.copy(
                 transport = session.transport,
                 info = session.info,
+                mediaDeleteReceipt = null,
                 activeMediaUploadName = null,
                 mediaUploadProgress = null,
                 lastUploadedMediaName = null,
@@ -1004,6 +1008,7 @@ class CameraViewModel(
         val recordingWarning = retireRecordingAttempt(previousState)
         val liveViewWarning = previousState.liveViewDisconnectWarning || previousState.needsLiveViewStopRecovery
         val shutterWarning = previousState.needsShutterDisconnectWarning()
+        mediaDeleteControl?.cancel()
         mediaUploadAttempt?.cancel()
         cameraSessionGeneration += 1
         val operationJobs = cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)
@@ -3217,53 +3222,100 @@ class CameraViewModel(
         job.cancel()
     }
 
-    fun deleteMedia(item: CameraMediaItem) {
-        val state = _uiState.value
-        if (state.isBusy(CameraOperation.MEDIA) || !state.supports(CameraFeature.MEDIA_DELETE)) return
-        _uiState.update { it.copy(lastMediaBatchResult = null, mediaMetadataBatch = null) }
-        if (state.previewMode) {
-            applyDeletedMedia(item)
-            refreshCaptureReview(_uiState.value.mediaItems)
-            return
-        }
-        runCamera(CameraOperation.MEDIA) {
-            repository.deleteMedia(item)
-            applyDeletedMedia(item)
-            refreshCaptureReview()
-        }
-    }
+    fun deleteMedia(item: CameraMediaItem) = deleteMediaBatch(listOf(item))
 
     fun deleteMediaBatch(items: List<CameraMediaItem>) {
         val state = _uiState.value
-        val selectedItems = items.distinctBy(CameraMediaItem::id)
-        if (
-            selectedItems.isEmpty() ||
-            state.isBusy(CameraOperation.MEDIA) ||
-            !state.supports(CameraFeature.MEDIA_DELETE)
-        ) return
-        _uiState.update { it.copy(lastMediaBatchResult = null, mediaMetadataBatch = null) }
-        runCamera(CameraOperation.MEDIA) {
-            val result = executeMediaBatch(
-                items = selectedItems,
-                operation = MediaBatchOperation.DELETE,
-                onProgress = { progress ->
-                    _uiState.update { current -> current.copy(mediaBatchProgress = progress) }
+        if (items.isEmpty() || state.isBusy(CameraOperation.MEDIA) || mediaDeleteJob != null ||
+            !state.supports(CameraFeature.MEDIA_DELETE)) return
+        if (items.distinctBy(CameraMediaItem::id).size > MAX_MEDIA_DELETE_ITEMS) {
+            _uiState.update { it.copy(error = "Select at most $MAX_MEDIA_DELETE_ITEMS items for one deletion.",
+                errorOperation = CameraOperation.MEDIA) }
+            return
+        }
+        val selection = items as? MediaDeleteSelection ?: MediaDeleteSelection(items,
+            MediaDeleteOwner(state.info, state.mediaSessionGeneration),
+            state.transport ?: CameraTransport.CCAPI_NETWORK.takeIf { state.previewMode }, bridgeEngine = state.info?.bridgeEngine, bridgeEndpoint = state.info?.bridgeEndpoint)
+        if (!selection.claimConfirmation(state.info, state.mediaSessionGeneration, state.isBusy(CameraOperation.MEDIA))) return
+        val generation = cameraSessionGeneration
+        val control = MediaDeleteBatchControl()
+        mediaDeleteControl = control
+        fun isCurrent(): Boolean = generation == cameraSessionGeneration &&
+            selection.owner.matches(_uiState.value.info, _uiState.value.mediaSessionGeneration)
+        fun currentItem(request: MediaDeleteRequest): CameraMediaItem? {
+            val current = _uiState.value
+            // A retained preview/review is historical evidence, not a currently loaded deletion row.
+            return current.mediaItems.firstOrNull { it.id == request.id }
+        }
+        var receipt = MediaDeleteReceipt(selection.attemptId, selection.owner,
+            selection.requests.map { MediaDeleteRow(it) }, running = true)
+        fun publish(updated: MediaDeleteReceipt) {
+            receipt = updated
+            _uiState.update { current -> current.copy(
+                mediaDeleteReceipt = if (isCurrent()) updated else current.mediaDeleteReceipt,
+                mediaDeleteHistory = retainMediaDeleteReceipt(current.mediaDeleteHistory, updated),
+                mediaBatchProgress = if (isCurrent()) null else current.mediaBatchProgress,
+                lastMediaBatchResult = if (isCurrent() && !updated.running) MediaBatchResult(
+                    MediaBatchOperation.DELETE, updated.rows.size, updated.confirmed,
+                    updated.rows.filter { it.outcome == MediaDeleteOutcome.REJECTED }.map { it.request.name })
+                    else current.lastMediaBatchResult,
+            ) }
+        }
+        _uiState.update { it.copy(lastMediaBatchResult = null, lastDeletedMediaName = null, mediaMetadataBatch = null) }
+        publish(receipt)
+        val job = launchCameraOperation(CameraOperation.MEDIA, onRegistered = { mediaDeleteJob = it }) {
+            executeMediaDeleteBatch(selection.attemptId, selection.owner, selection.requests, control,
+                isCurrent = ::isCurrent,
+                preflight = { request ->
+                    val current = _uiState.value
+                    val item = currentItem(request)
+                    mediaDeletePreflight(request, current.supports(CameraFeature.MEDIA_DELETE), item?.id,
+                        item?.let { mediaDeleteSource(it.id, current.transport ?: CameraTransport.CCAPI_NETWORK.takeIf { current.previewMode }, current.info?.bridgeEngine, current.info?.bridgeEndpoint) }, item?.protected, item?.deleteWritable)
                 },
-            ) { item ->
-                if (!state.previewMode) repository.deleteMedia(item)
-                applyDeletedMedia(item)
-            }
-            if (result.succeededItems > 0) {
+                action = { request, evidence ->
+                    val item = currentItem(request) ?: error("Selected media is no longer loaded.")
+                    if (state.previewMode) { evidence.beforeDispatch(); evidence.onConfirmed() }
+                    else repository.deleteMedia(item, evidence)
+                },
+                onConfirmed = { request ->
+                    if (isCurrent()) {
+                        val item = selection.first { it.id == request.id }
+                        transitionMediaState { current -> if (isCurrent()) current.withDeletedMedia(item) else current }
+                    }
+                },
+                onChanged = ::publish,
+            )
+            if (isCurrent() && receipt.confirmed > 0) {
                 if (state.previewMode) refreshCaptureReview(_uiState.value.mediaItems) else refreshCaptureReview()
             }
-            _uiState.update {
-                it.copy(
-                    mediaBatchProgress = null,
-                    lastMediaBatchResult = result,
-                    lastDeletedMediaName = null,
-                )
-            }
         }
+        // Also covers cancellation while launchCameraOperation is joining old media reads.
+        job?.invokeOnCompletion {
+            if (receipt.running) publish(receipt.copy(running = false, rows = receipt.rows.map { row ->
+                if (row.outcome == MediaDeleteOutcome.NOT_STARTED) row.copy(reason =
+                    if (isCurrent()) MediaDeleteReason.CANCELLED else MediaDeleteReason.OWNER_CHANGED) else row
+            }))
+            if (mediaDeleteJob === job) mediaDeleteJob = null
+            if (mediaDeleteControl === control) mediaDeleteControl = null
+        }
+        if (job == null) {
+            publish(receipt.copy(running = false))
+            if (mediaDeleteControl === control) mediaDeleteControl = null
+        }
+    }
+
+    fun cancelMediaDeletion(owner: MediaDeleteOwner) {
+        val state = _uiState.value
+        if (!owner.matches(state.info, state.mediaSessionGeneration)) return
+        mediaDeleteControl?.cancel()
+        mediaDeleteJob?.cancel()
+    }
+
+    fun inspectMediaDeletion(owner: MediaDeleteOwner) {
+        val state = _uiState.value
+        if (!owner.matches(state.info, state.mediaSessionGeneration) || state.isBusy(CameraOperation.MEDIA)) return
+        // Only the existing user-selected scope is refreshed. Absence never edits any receipt.
+        refreshMedia()
     }
 
     fun tapFocus(x: Double, y: Double) {
@@ -3454,6 +3506,7 @@ class CameraViewModel(
             val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
             val recordingWarning = retireRecordingAttempt(_uiState.value)
             _uiState.update { it.copy(recordingDisconnectWarning = recordingWarning) }
+            mediaDeleteControl?.cancel()
             mediaUploadAttempt?.cancel()
             cameraSessionGeneration += 1
             cancelDownloadContinuation()
@@ -3977,6 +4030,7 @@ class CameraViewModel(
         val handoffCleanup = handoffOwner.cancelUnlaunched()
         foregroundImportPreferences?.unregisterOnSharedPreferenceChangeListener(foregroundImportWarningListener)
         val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
+        mediaDeleteControl?.cancel()
         mediaUploadAttempt?.cancel()
         cameraSessionGeneration += 1
         val operationJobs = cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)
@@ -4069,6 +4123,7 @@ class CameraViewModel(
         lastMediaBatchResult = null,
         mediaMetadataBatch = null,
         previousMediaMetadataBatch = mediaMetadataBatch?.retiredMetadataReceipt() ?: previousMediaMetadataBatch,
+        mediaDeleteReceipt = null,
         cameraImportPreparing = false,
         pendingCameraImportHandoff = null,
         lastCameraImportReceiptSummary = null,

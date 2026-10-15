@@ -3,6 +3,7 @@ package dev.openeos.control.ui
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
@@ -2825,7 +2826,7 @@ class CameraScreensTest {
     fun mediaDeleteRequiresConfirmationBeforeDispatchingCameraAction() {
         var deletedName: String? = null
         val state = CameraUiState().withOfflinePreview().copy(previewMode = false, uiMode = UiMode.MEDIA)
-        val actions = noOpActions().copy(deleteMedia = { deletedName = it.name })
+        val actions = noOpActions().copy(deleteMediaBatch = { deletedName = it.single().name })
         compose.setContent {
             MaterialTheme(colorScheme = OpenEosColorScheme) {
                 MediaScreen(state, actions)
@@ -2916,6 +2917,103 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.delete_selected_media_confirmation, 2)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.delete)).performClick()
         compose.runOnIdle { assertEquals(items, deleted) }
+    }
+
+    @Test
+    fun confirmedDeleteConsumesOnlyOriginalSelectionAndRetainsRejectedDeleteEntry() {
+        val items = listOf(CameraMediaItem("card-a/A", "SAME.JPG", "image", protected = false),
+            CameraMediaItem("card-b/A", "SAME.JPG", "image", protected = false))
+        val initial = CameraUiState().withOfflinePreview().copy(previewMode = false, uiMode = UiMode.MEDIA,
+            transport = dev.openeos.control.data.CameraTransport.CCAPI_NETWORK, mediaItems = items)
+        val state = mutableStateOf(initial)
+        var selection: MediaDeleteSelection? = null
+        val actions = noOpActions().copy(deleteMediaBatch = { selection = it as MediaDeleteSelection })
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state.value, actions) } }
+        compose.onAllNodesWithContentDescription(resourceText(R.string.select_media_item, "SAME.JPG"))[0]
+            .performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.onAllNodesWithContentDescription(resourceText(R.string.select_media_item, "SAME.JPG"))[1].performClick()
+        compose.onNodeWithContentDescription(resourceText(R.string.delete_selected_media, 2)).performClick()
+        compose.onNodeWithText(resourceText(R.string.delete)).performClick()
+        compose.runOnIdle {
+            val frozen = requireNotNull(selection)
+            val receipt = MediaDeleteReceipt(frozen.attemptId, frozen.owner, listOf(
+                MediaDeleteRow(frozen.requests[0], dev.openeos.control.data.MediaDeleteOutcome.CONFIRMED),
+                MediaDeleteRow(frozen.requests[1], dev.openeos.control.data.MediaDeleteOutcome.REJECTED)))
+            state.value = state.value.copy(mediaItems = listOf(items[1]), mediaDeleteReceipt = receipt,
+                mediaDeleteHistory = listOf(receipt))
+        }
+        compose.onNodeWithText(resourceText(R.string.media_selected_count, 1)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.delete_selected_media, 1)).assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithContentDescription(resourceText(R.string.delete_selected_media, 1)).performClick()
+        compose.onNodeWithText("card-b/A").assertIsDisplayed()
+        compose.onNodeWithText("card-a/A").assertDoesNotExist()
+    }
+
+    @Test
+    fun leavingAndReturningToMediaCannotReuseSelectionEpochForLateDeleteReceipt() {
+        val item = CameraMediaItem("same-owner/A", "SYNTHETIC.JPG", "image", protected = false)
+        val initial = CameraUiState().withOfflinePreview().copy(previewMode = false, uiMode = UiMode.MEDIA,
+            transport = dev.openeos.control.data.CameraTransport.CCAPI_NETWORK, mediaItems = listOf(item))
+        val state = mutableStateOf(initial)
+        val inMedia = mutableStateOf(true)
+        var opening: MediaDeleteSelection? = null
+        val actions = noOpActions().copy(deleteMediaBatch = { opening = it as MediaDeleteSelection })
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) {
+            if (inMedia.value) MediaScreen(state.value, actions) else Text("SYNTHETIC CONTROL")
+        } }
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, item.name))
+            .performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.onNodeWithContentDescription(resourceText(R.string.delete_selected_media, 1)).performClick()
+        compose.onNodeWithText(resourceText(R.string.delete)).performClick()
+        val oldSelection = requireNotNull(opening)
+        // Actually dispose and recreate the media composition under the same owner/generation.
+        compose.runOnIdle { inMedia.value = false }
+        compose.onNodeWithText("SYNTHETIC CONTROL").assertIsDisplayed()
+        compose.runOnIdle { inMedia.value = true }
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, item.name))
+            .performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.runOnIdle {
+            val receipt = MediaDeleteReceipt(oldSelection.attemptId, oldSelection.owner, listOf(
+                MediaDeleteRow(oldSelection.requests.single(), dev.openeos.control.data.MediaDeleteOutcome.CONFIRMED)))
+            state.value = state.value.copy(mediaDeleteReceipt = receipt, mediaDeleteHistory = listOf(receipt))
+        }
+        compose.onNodeWithText(resourceText(R.string.media_selected_count, 1)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.delete_selected_media, 1)).performClick()
+        compose.onNodeWithText(resourceText(R.string.delete)).performClick()
+        compose.runOnIdle {
+            org.junit.Assert.assertNotEquals(oldSelection.requests.single().selectionToken,
+                requireNotNull(opening).requests.single().selectionToken)
+        }
+    }
+
+    @Test
+    fun bridgeHostConfirmationShowsTheFrozenConnectedEndpointAndRemoteLocation() {
+        val item = CameraMediaItem("gphoto2-host:U1lOVEhFVElDLkpQRw", "SYNTHETIC.JPG", "image")
+        val info = requireNotNull(CameraUiState().withOfflinePreview().info).copy(
+            bridgeEngine = "libgphoto2", bridgeEndpoint = "https://bridge.example:8443")
+        val selection = MediaDeleteSelection(listOf(item), MediaDeleteOwner(info, 9),
+            dev.openeos.control.data.CameraTransport.DESKTOP_BRIDGE,
+            bridgeEngine = info.bridgeEngine, bridgeEndpoint = info.bridgeEndpoint)
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) {
+            MediaDeleteConfirmation(selection, true, {}, {})
+        } }
+        compose.onNodeWithText(resourceText(R.string.media_delete_bridge_endpoint,
+            "https://bridge.example:8443", "libgphoto2")).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.media_delete_source_desktop)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.media_delete_source_android)).assertDoesNotExist()
+        compose.onNodeWithText(resourceText(R.string.media_delete_source_camera)).assertDoesNotExist()
+    }
+
+    @Test
+    fun hostCaptureConfirmationNamesAndroidPrivateStorage() {
+        val item = CameraMediaItem("usb-host:SYNTHETIC.JPG", "SYNTHETIC.JPG", "image")
+        val state = CameraUiState().withOfflinePreview().copy(previewMode = false, uiMode = UiMode.MEDIA,
+            transport = dev.openeos.control.data.CameraTransport.USB_PTP, mediaItems = listOf(item))
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, noOpActions()) } }
+        compose.onNodeWithContentDescription(resourceText(R.string.media_actions, item.name)).performClick()
+        compose.onNodeWithText(resourceText(R.string.delete_media, item.name)).performScrollTo().performClick()
+        compose.onNodeWithText(resourceText(R.string.media_delete_source_android)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.media_delete_source_camera)).assertDoesNotExist()
     }
 
     @Test

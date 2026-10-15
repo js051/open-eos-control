@@ -155,6 +155,8 @@ interface CameraControlBackend {
     suspend fun setMediaRotation(item: CameraMediaItem, degrees: Int): CameraMediaItem =
         unsupported(CameraFeature.MEDIA_ROTATE)
     suspend fun deleteMedia(item: CameraMediaItem) = unsupported<Unit>(CameraFeature.MEDIA_DELETE)
+    suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence): Unit =
+        unsupported(CameraFeature.MEDIA_DELETE)
     fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): String
     suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): LiveViewFrame
     suspend fun liveViewFocusInfo(): CameraFocusInfo? = null
@@ -317,6 +319,7 @@ class CcapiCameraBackend(
         client.setMediaRotation(item, degrees)
 
     override suspend fun deleteMedia(item: CameraMediaItem) = client.deleteMedia(item)
+    override suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence) = client.deleteMedia(item, evidence)
 
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String = client.liveViewFrameUrl(cacheKey, request)
 
@@ -463,6 +466,7 @@ class DesktopBridgeCameraBackend(
         client.setMediaRotation(item, degrees)
 
     override suspend fun deleteMedia(item: CameraMediaItem) = client.deleteMedia(item)
+    override suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence) = client.deleteMedia(item, evidence)
 
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String = client.liveViewFrameUrl(cacheKey)
 
