@@ -3597,7 +3597,8 @@ class CcapiClientTest {
 
         assertEquals("/ccapi/ver100/shooting/control/recbutton", recordRequest.path)
         assertEquals("POST", recordRequest.method)
-        assertTrue(status.recording == true)
+        assertNull("Command ACK is not a fresh REC observation", status.recording)
+        assertNull(status.recordingObservation)
     }
 
     @Test

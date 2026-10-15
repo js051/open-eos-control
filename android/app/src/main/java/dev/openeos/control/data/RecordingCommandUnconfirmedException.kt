@@ -10,26 +10,51 @@ internal class RecordingCommandUnconfirmedException(
     cause: Exception,
 ) : Exception("Recording command result is unknown. Check the camera or explicitly stop recording.", cause)
 
-/** Per-call evidence survives prompt cancellation without turning cancellation into an ACK.
- * Only the actual REC HTTP boundary may mark attempted, never discovery or temperature reads.
- */
+/** One admitted request only. Evidence is retained even if prompt cancellation discards its return. */
 internal class RecordingRequestEvidence(val command: RecordingCommand) : AbstractCoroutineContextElement(Key) {
     companion object Key : CoroutineContext.Key<RecordingRequestEvidence>
     @Volatile var attempted = false
         private set
-    @Volatile var rejected = false
+    @Volatile private var response = RecordingResponseEvidence.NOT_SENT
+    var rejected: Boolean
+        get() = response == RecordingResponseEvidence.REJECTED
+        set(value) { if (value) reject() }
     private var retired = false
-    val unresolved: Boolean get() = attempted && !rejected
-
-    /** Shares the retirement lock so a passed cancellation check cannot admit an old owner. */
+    var onAdmission: (() -> Long)? = null
+    @Volatile var observationFloor: Long = 0
+    @Volatile var observation: RecordingObservation? = null
+        private set
+    @Synchronized fun beginObservationRead() {
+        observationFloor = maxOf(observationFloor, observation?.sequence ?: 0L)
+        observation = null
+    }
+    @Synchronized fun observe(value: RecordingObservation?) {
+        if (value?.explicit == true && value.sequence > observationFloor &&
+            value.sequence > (observation?.sequence ?: 0)) observation = value
+    }
+    val unresolved: Boolean get() = response in setOf(RecordingResponseEvidence.UNKNOWN, RecordingResponseEvidence.RESPONSE_RECEIVED)
+    @Synchronized fun responseEvidence(): RecordingResponseEvidence = response
     @Synchronized fun beginRequest() {
         if (retired) throw CancellationException("Recording request owner was retired before admission.")
+        check(response == RecordingResponseEvidence.NOT_SENT) { "A recording command cannot be replayed." }
+        onAdmission?.let { observationFloor = it() }
         attempted = true
+        response = RecordingResponseEvidence.UNKNOWN
     }
-
-    /** Either sees an admitted request or prevents all later admission; never sends a command. */
-    @Synchronized fun retire(): Boolean {
-        retired = true
-        return unresolved
+    @Synchronized fun acknowledge() {
+        check(attempted)
+        if (response == RecordingResponseEvidence.UNKNOWN) response = RecordingResponseEvidence.RESPONSE_RECEIVED
     }
+    @Synchronized fun remoteNoOp() {
+        check(attempted && response == RecordingResponseEvidence.UNKNOWN)
+        response = RecordingResponseEvidence.NOT_REQUIRED
+    }
+    @Synchronized fun noOp() {
+        check(!attempted && response == RecordingResponseEvidence.NOT_SENT)
+        response = RecordingResponseEvidence.NOT_REQUIRED
+    }
+    @Synchronized private fun reject() {
+        if (response == RecordingResponseEvidence.UNKNOWN) response = RecordingResponseEvidence.REJECTED
+    }
+    @Synchronized fun retire(): Boolean { retired = true; return unresolved }
 }

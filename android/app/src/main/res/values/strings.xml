@@ -1097,4 +1097,12 @@
     <string name="maintenance_hold">Camera controls and monitoring are paused. Review the maintenance record before restoring. Sleep or power-off requires a deliberate reconnect.</string>
     <string name="maintenance_review">Review maintenance record</string>
     <string name="maintenance_session_retirement_unconfirmed">Local connection ended. Bridge session retirement is unconfirmed. Check the desktop bridge before reconnecting; no retry was sent.</string>
+    <string name="recording_response_received">Response received</string>
+    <string name="recording_response_unknown">Response unknown</string>
+    <string name="recording_response_rejected">Command rejected</string>
+    <string name="recording_response_not_sent">No camera command sent</string>
+    <string name="recording_observed_active">Fresh camera observation: recording</string>
+    <string name="recording_observed_stopped">Fresh camera observation: stopped</string>
+    <string name="recording_observed_unavailable">Current recording state unavailable</string>
+    <string name="recording_receipt_details">%1$s: %2$s. %3$s. Refresh reads the state without repeating the command.</string>
 </resources>

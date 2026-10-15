@@ -334,6 +334,23 @@ class CameraConnectionRecoveryUiTest {
         compose.runOnIdle { assertEquals(1, permissions); assertEquals(1, connections) }
     }
 
+    @Test fun retainedRecordingStopAndDedicatedReadCoexistWithLaterErrorOnDisconnectedStatus() {
+        val ready = CameraUiState().withOfflinePreview()
+        val state = ready.copy(status = ready.status!!.copy(connected = false), capabilities = null,
+            captureMode = CaptureMode.PHOTO, error = "Synthetic later failure",
+            recordingReceipt = dev.openeos.control.data.RecordingReceipt(
+                dev.openeos.control.data.RecordingCommand.START, dev.openeos.control.data.RecordingResponseEvidence.UNKNOWN))
+        var reads = 0
+        var stops = 0
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) {
+            CameraErrorPresentation(state, {}, onRefresh = { reads++ }, onStopRecording = { stops++ })
+        } }
+        compose.onNodeWithText("Synthetic later failure").assertIsDisplayed()
+        compose.onNodeWithTag("recording-owned-stop").assertIsDisplayed().assertIsEnabled().performClick()
+        compose.onNodeWithTag("recording-status-refresh").assertIsDisplayed().assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(1, reads); assertEquals(1, stops) }
+    }
+
     @Test fun inlineRecoverySuppressesDuplicateErrorButKeepsShutterWarnings() {
         val state = mutableStateOf(CameraUiState(error = "Synthetic connection error", connectionRecovery = ConnectionRecovery(
             ConnectionAttemptTarget.CCAPI, ConnectionFailureReason.TIMEOUT,

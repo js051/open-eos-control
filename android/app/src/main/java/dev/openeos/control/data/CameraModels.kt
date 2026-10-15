@@ -435,6 +435,7 @@ data class CameraStatus(
     val temperature: CameraTemperatureStatus? = null,
     // Only explicit Bridge evidence establishes this state; absent legacy fields stay unknown.
     val heldAutofocusActive: Boolean? = null,
+    val recordingObservation: RecordingObservation? = null,
 )
 
 data class CameraEvent(

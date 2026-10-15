@@ -11,6 +11,7 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -127,6 +128,7 @@ fun OpenEosControlApp(
         cancelConnectionAttempt = viewModel::cancelConnectionAttempt,
         disconnect = viewModel::disconnect,
         refresh = viewModel::refresh,
+        refreshRecordingStatus = viewModel::refreshRecordingStatus,
         refreshUsb = { viewModel.refreshUsbDiagnostics(context) },
         requestUsbPermission = { viewModel.requestUsbPermission(context, it) },
         connectUsb = viewModel::connectUsb,
@@ -274,7 +276,7 @@ fun OpenEosControlApp(
                                 ) FOREGROUND_IMPORT_BAR_HEIGHT else 0.dp,
                             ),
                     ) {
-                        CameraErrorPresentation(state, actions.clearError, actions.refresh)
+                        CameraErrorPresentation(state, actions.clearError, actions.refreshRecordingStatus, actions.toggleRecording)
                     }
                 }
             }
@@ -321,8 +323,31 @@ fun OpenEosControlApp(
 }
 
 @Composable
-internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit, onRefresh: () -> Unit = {}) {
-    if (state.pendingRecordingCommand != null && !state.shutterReleaseUnconfirmed) {
+internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit, onRefresh: () -> Unit = {},
+    onStopRecording: () -> Unit = {}) {
+    val recordingReceipt = state.recordingReceipt?.takeIf { !it.retired && it.sameOwner }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    if (recordingReceipt != null) {
+        val response = stringResource(when (recordingReceipt.response) {
+            dev.openeos.control.data.RecordingResponseEvidence.RESPONSE_RECEIVED -> R.string.recording_response_received
+            dev.openeos.control.data.RecordingResponseEvidence.UNKNOWN -> R.string.recording_response_unknown
+            dev.openeos.control.data.RecordingResponseEvidence.REJECTED -> R.string.recording_response_rejected
+            else -> R.string.recording_response_not_sent
+        })
+        val observation = stringResource(when (recordingReceipt.observation?.takeIf { recordingReceipt.canPublish }?.recording) {
+            true -> R.string.recording_observed_active
+            false -> R.string.recording_observed_stopped
+            null -> R.string.recording_observed_unavailable
+        })
+        PersistentCameraWarning(stringResource(R.string.recording_receipt_details,
+            stringResource(if (recordingReceipt.command == dev.openeos.control.data.RecordingCommand.START)
+                R.string.start_recording else R.string.stop_recording), response, observation),
+            onRefresh = onRefresh,
+            refreshEnabled = state.info != null && !state.isBusy(CameraOperation.STATUS) && !state.isBusy(CameraOperation.RECORDING),
+            onStopRecording = onStopRecording.takeIf { state.recordingStopAvailable },
+            stopEnabled = state.info != null && !state.isBusy(CameraOperation.RECORDING))
+    }
+    if (recordingReceipt == null && state.pendingRecordingCommand != null && !state.shutterReleaseUnconfirmed) {
         PersistentCameraWarning(
             stringResource(when {
                 state.recordingCommandUnconfirmed -> R.string.recording_command_unconfirmed
@@ -332,7 +357,6 @@ internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit
             onRefresh = onRefresh,
             refreshEnabled = state.connected && !state.isBusy(CameraOperation.STATUS) && !state.isBusy(CameraOperation.RECORDING),
         )
-        return
     }
     ErrorBanner(
         when {
@@ -351,6 +375,7 @@ internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit
         onDismiss,
         dismissible = !state.shutterReleaseUnconfirmed && !state.needsLiveViewStopRecovery,
     )
+    }
 }
 
 @Composable
@@ -403,6 +428,7 @@ data class CameraActions(
     val cancelConnectionAttempt: () -> Unit = {},
     val disconnect: () -> Unit,
     val refresh: () -> Unit,
+    val refreshRecordingStatus: () -> Unit = refresh,
     val refreshUsb: () -> Unit,
     val requestUsbPermission: (String) -> Unit,
     val connectUsb: (String, Int, Int) -> Unit,

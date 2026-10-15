@@ -241,17 +241,17 @@ class CameraRecordingMediaJourneyTest {
         assertEquals("Read-only recovery must not replay Start", writesAfterStart, camera.mutations.toList())
         compose.onNodeWithContentDescription(text(R.string.stop_recording)).assertIsEnabled().performClick()
         compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
-            model.uiState.value.pendingRecordingCommand == dev.openeos.control.data.RecordingCommand.STOP &&
+            model.uiState.value.recordingReceipt?.command == dev.openeos.control.data.RecordingCommand.STOP &&
                 !model.uiState.value.busy
         }
-        assertEquals("Unresolved Stop must not start a media review", 0, postStopListings.get())
+        assertEquals("Stop ACK without fresh false must not start a media review", 0, postStopListings.get())
         val writesAfterStop = camera.mutations.toList()
         failRecordingReadback.set(false)
         compose.onNodeWithTag("recording-status-refresh").assertIsDisplayed().assertIsEnabled().performClick()
         awaitReviewedMovie()
         assertNull(model.uiState.value.pendingRecordingCommand)
         assertEquals(false, model.uiState.value.status?.recording)
-        compose.onNodeWithTag("recording-status-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("recording-status-refresh").assertIsDisplayed()
         assertEquals("Recovery only reads status and the new-media listing", writesAfterStop, camera.mutations.toList())
         openReviewedMovieAndSave()
         assertOnlyOneRecordingPair()
