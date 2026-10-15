@@ -550,10 +550,18 @@ class CcapiMultipartSession:
         self._latest_frame: bytes | None = None
         self._produced_generation = 0
         self._consumed_generation = 0
+        self._frame_epoch = 0
         self._terminal_error: Exception | None = None
         self._closed = False
         self._worker = threading.Thread(target=self._drain, name="ccapi-multipart-live-view", daemon=True)
         self._worker.start()
+
+    def discard_pending_frames(self) -> None:
+        with self._condition:
+            self._frame_epoch += 1
+            self._consumed_generation = self._produced_generation
+            self._latest_frame = None
+            self._condition.notify_all()
 
     def next_frame(self, timeout: float = 15.0) -> bytes:
         deadline = time.monotonic() + timeout
@@ -583,7 +591,7 @@ class CcapiMultipartSession:
         with self._condition:
             while (
                 not self._closed
-                and self._produced_generation == 0
+                and self._latest_frame is None
                 and self._terminal_error is None
             ):
                 remaining = deadline - time.monotonic()
@@ -591,8 +599,7 @@ class CcapiMultipartSession:
                     raise _multipart_error("Timed out waiting for the first Canon multipart Live View frame.")
                 self._condition.wait(remaining)
             self._check_usable_locked()
-            if self._produced_generation > 0:
-                assert self._latest_frame is not None
+            if self._latest_frame is not None:
                 return self._latest_frame
             if self._terminal_error is not None:
                 if isinstance(self._terminal_error, BridgeError):
@@ -628,10 +635,23 @@ class CcapiMultipartSession:
                 with self._condition:
                     if self._closed:
                         return
-                frame = reader.next_frame()
-                if frame is None:
-                    raise _multipart_error("Canon multipart Live View stream ended unexpectedly.")
+                    epoch = self._frame_epoch
+                try:
+                    frame = reader.next_frame()
+                except Exception:
+                    with self._condition:
+                        if self._closed:
+                            return
+                        if epoch != self._frame_epoch:
+                            continue
+                    raise
                 with self._condition:
+                    if self._closed:
+                        return
+                    if epoch != self._frame_epoch:
+                        continue
+                    if frame is None:
+                        raise _multipart_error("Canon multipart Live View stream ended unexpectedly.")
                     self._latest_frame = frame
                     self._produced_generation += 1
                     self._condition.notify_all()
@@ -2735,19 +2755,32 @@ class CcapiSession:
                     engine=self.engine_name,
                 )
             read, write = operations
-            self._request_ok("PUT", write.path, {"value": str(value)})
-            readback = self._parse_live_view_magnification(self._request_json("GET", read.path))
-            if readback is None or readback[0] != value:
-                raise BridgeError(
-                    "INVALID_CCAPI_RESPONSE",
-                    "Canon Live View magnification did not match the requested value after readback.",
-                    status_code=502,
-                    feature=CameraFeature.LIVE_VIEW_MAGNIFICATION.value,
-                    engine=self.engine_name,
-                )
-            self._live_view_magnification = readback
-            self._observed.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
-            return LiveViewMagnificationResult(accepted=True, value=readback[0])
+            # The camera may apply the mutation even when its acknowledgement or
+            # readback is lost. Retire coordinates before dispatch, never rollback.
+            # This session lock also serializes geometry reads and coordinate sends.
+            self._latest_live_view_geometry = None
+            readers = tuple(reader for reader in (self._rtp_session, self._multipart_session) if reader is not None)
+            for reader in readers:
+                reader.discard_pending_frames()
+            try:
+                self._request_ok("PUT", write.path, {"value": str(value)})
+                readback = self._parse_live_view_magnification(self._request_json("GET", read.path))
+                if readback is None or readback[0] != value:
+                    raise BridgeError(
+                        "INVALID_CCAPI_RESPONSE",
+                        "Canon Live View magnification did not match the requested value after readback.",
+                        status_code=502,
+                        feature=CameraFeature.LIVE_VIEW_MAGNIFICATION.value,
+                        engine=self.engine_name,
+                    )
+                self._live_view_magnification = readback
+                self._observed.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+                return LiveViewMagnificationResult(accepted=True, value=readback[0])
+            finally:
+                # Also retire output produced while the camera mutation was in
+                # flight. A new browser generation cannot relabel that mailbox.
+                for reader in readers:
+                    reader.discard_pending_frames()
 
     def tap_focus(self, x: float, y: float) -> FocusResult:
         with self._lock:
@@ -5318,6 +5351,13 @@ class CcapiSession:
             headers={"Accept": "application/octet-stream,*/*", "Cache-Control": "no-cache"},
             max_bytes=MAX_LIVE_VIEW_SCAN_BYTES,
         )
+        if response.status != 200 or any(key.casefold() == "content-range" for key in response.headers):
+            raise BridgeError(
+                "LIVE_VIEW_COORDINATES_UNAVAILABLE",
+                "Canon image position metadata requires a complete HTTP 200 response.",
+                status_code=409,
+                engine=self.engine_name,
+            )
         _, geometry = _parse_detailed_live_view(response.body)
         if geometry is None:
             raise BridgeError(
@@ -5569,6 +5609,13 @@ def _parse_detailed_live_view(value: bytes) -> tuple[bytes | None, CcapiLiveView
             status_code=502,
             engine=ENGINE_NAME,
         )
+    if offset != len(value):
+        raise BridgeError(
+            "INVALID_LIVE_VIEW_FRAME",
+            "Detailed Live View response contained an incomplete Canon packet sequence.",
+            status_code=502,
+            engine=ENGINE_NAME,
+        )
     return image, geometry
 
 
@@ -5589,7 +5636,7 @@ def _parse_live_view_geometry(value: bytes) -> CcapiLiveViewGeometry | None:
             if all(isinstance(image_info.get(key), int) and not isinstance(image_info.get(key), bool) for key in keys):
                 width = image_info["positionwidth"]
                 height = image_info["positionheight"]
-                if width > 0 and height > 0:
+                if image_info["positionx"] >= 0 and image_info["positiony"] >= 0 and width > 0 and height > 0:
                     return CcapiLiveViewGeometry(
                         position_x=image_info["positionx"],
                         position_y=image_info["positiony"],

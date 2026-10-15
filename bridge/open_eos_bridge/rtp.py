@@ -401,6 +401,8 @@ class H264RtpDepacketizer:
 
 
 class H264FrameDecoder(Protocol):
+    def reset_for_frame_epoch(self) -> None: ...
+
     def decode(self, access_unit: H264AccessUnit, *, emit_frame: bool) -> bytes | None: ...
 
     def close(self) -> None: ...
@@ -415,6 +417,13 @@ class PyAvH264FrameDecoder:
         self._jpeg_quality = min(max(jpeg_quality, 1), 95)
         self._sps: bytes | None = None
         self._pps: bytes | None = None
+        self._waiting_for_key_frame = True
+
+    def reset_for_frame_epoch(self) -> None:
+        # Only the owning receiver worker calls this, never the camera-command
+        # thread. A fresh context discards delayed decoded output; retain stream
+        # parameter sets but require a new keyframe before producing pixels.
+        self._codec = self._av.CodecContext.create("h264", "r")
         self._waiting_for_key_frame = True
 
     def decode(self, access_unit: H264AccessUnit, *, emit_frame: bool) -> bytes | None:
@@ -515,6 +524,8 @@ class RtpLiveViewSession(Protocol):
 
     def read_frame(self, timeout: float = 5.0) -> bytes: ...
 
+    def discard_pending_frames(self) -> None: ...
+
     def read_audio(self, after_generation: int = 0, timeout: float = 1.0) -> RtpAudioChunk | None: ...
 
     def close(self) -> None: ...
@@ -565,6 +576,7 @@ class UdpH264RtpSession:
         self._latest_frame: bytes | None = None
         self._frame_generation = 0
         self._delivered_generation = 0
+        self._frame_epoch = 0
         self._last_emitted_at: float | None = None
         self._last_error: str | None = None
 
@@ -778,6 +790,14 @@ class UdpH264RtpSession:
                 detail = f" Last decoder error: {self._last_error}" if self._last_error else ""
                 raise RtpError(f"Canon RTP session closed before its first decoded frame.{detail}")
 
+    def discard_pending_frames(self) -> None:
+        with self._condition:
+            self._frame_epoch += 1
+            self._delivered_generation = self._frame_generation
+            self._latest_frame = None
+            self._last_emitted_at = None
+            self._condition.notify_all()
+
     def read_frame(self, timeout: float = 5.0) -> bytes:
         deadline = time.monotonic() + max(timeout, 0.0)
         with self._condition:
@@ -860,6 +880,7 @@ class UdpH264RtpSession:
 
     def _receive_loop(self) -> None:
         depacketizer = H264RtpDepacketizer(self.description.video.payload_type)
+        decoder_epoch = 0
         while True:
             with self._condition:
                 if self._closed:
@@ -867,10 +888,26 @@ class UdpH264RtpSession:
                 receiver = self._socket
                 decoder = self._decoder
                 target_fps = self._target_fps
+                epoch = self._frame_epoch
             if receiver is None or decoder is None:
                 return
+            if decoder_epoch != epoch:
+                try:
+                    decoder.reset_for_frame_epoch()
+                except Exception as error:
+                    with self._condition:
+                        if not self._closed and epoch == self._frame_epoch:
+                            self._last_error = f"Canon RTP decoder reset failed: {error}"
+                    return
+                depacketizer = H264RtpDepacketizer(self.description.video.payload_type)
+                decoder_epoch = epoch
             try:
                 datagram, _ = receiver.recvfrom(MAX_DATAGRAM_BYTES)
+                with self._condition:
+                    if self._closed:
+                        return
+                    if epoch != self._frame_epoch:
+                        continue
                 access_unit = depacketizer.accept(datagram)
                 if access_unit is None:
                     continue
@@ -885,6 +922,8 @@ class UdpH264RtpSession:
                 with self._condition:
                     if self._closed:
                         return
+                    if epoch != self._frame_epoch:
+                        continue
                     self._latest_frame = frame
                     self._frame_generation += 1
                     self._last_emitted_at = time.monotonic()
@@ -896,7 +935,8 @@ class UdpH264RtpSession:
                 with self._condition:
                     if self._closed:
                         return
-                    self._last_error = str(error)
+                    if epoch == self._frame_epoch:
+                        self._last_error = str(error)
 
     def _receive_audio_loop(self) -> None:
         audio = self.description.audio

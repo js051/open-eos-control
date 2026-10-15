@@ -811,6 +811,9 @@ class FakeRtpSession:
     def set_target_fps(self, fps: int) -> None:
         self.target_fps = fps
 
+    def discard_pending_frames(self) -> None:
+        pass
+
     def read_frame(self, timeout: float = 5.0) -> bytes:
         assert timeout == 5.0
         return RTP_JPEG
