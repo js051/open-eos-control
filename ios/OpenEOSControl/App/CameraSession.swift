@@ -399,6 +399,20 @@ enum CameraSession: Sendable {
         }
     }
 
+    func mutateMedia(_ item: CameraMediaItem, target: CameraMediaMutation,
+                     attempt: CameraMediaMutationAttempt) async throws -> CameraMediaItem {
+        switch (self, target) {
+        case let (.ccapi(client), .rating(value)): return try await client.setMediaRating(item, rating: value, attempt: attempt)
+        case let (.ccapi(client), .protection(value)): return try await client.setMediaProtection(item, enabled: value, attempt: attempt)
+        case let (.ccapi(client), .rotation(value)): return try await client.setMediaRotation(item, degrees: value, attempt: attempt)
+        case let (.ccapi(client), .archive(value)): return try await client.setMediaArchive(item, enabled: value, attempt: attempt)
+        case let (.desktopBridge(client), .rating(value)): return try await client.setMediaRating(item, rating: value, attempt: attempt)
+        case let (.desktopBridge(client), .protection(value)): return try await client.setMediaProtection(item, enabled: value, attempt: attempt)
+        case let (.desktopBridge(client), .rotation(value)): return try await client.setMediaRotation(item, degrees: value, attempt: attempt)
+        case let (.desktopBridge(client), .archive(value)): return try await client.setMediaArchive(item, enabled: value, attempt: attempt)
+        }
+    }
+
     func setMediaProtection(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
         switch self {
         case let .ccapi(client): return try await client.setMediaProtection(item, enabled: enabled)

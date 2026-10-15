@@ -513,10 +513,10 @@ final class MediaResponseOwnershipTests: XCTestCase {
     private func perform(_ operation: OwnershipOperation, state: CameraAppState, item: CameraMediaItem) async {
         switch operation {
         case .info: await state.loadMediaInfo(item)
-        case .protection: await state.setMediaProtection(item, enabled: true)
-        case .rating: await state.setMediaRating(item, rating: 5)
-        case .rotation: await state.setMediaRotation(item, degrees: 270)
-        case .archive: await state.setMediaArchive(item, enabled: true)
+        case .protection: await state.setMediaProtection(item, enabled: true, owner: state.mediaLibrarySessionID)
+        case .rating: await state.setMediaRating(item, rating: 5, owner: state.mediaLibrarySessionID)
+        case .rotation: await state.setMediaRotation(item, degrees: 270, owner: state.mediaLibrarySessionID)
+        case .archive: await state.setMediaArchive(item, enabled: true, owner: state.mediaLibrarySessionID)
         case .delete: await state.deleteMedia(item)
         default: XCTFail("Unexpected app operation")
         }

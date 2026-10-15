@@ -322,7 +322,7 @@ final class MediaBatchDeliveryTests: XCTestCase {
             state.selectMediaItems(state.mediaItems)
             let latestIdentity = state.latestMediaItem.map(mediaItemIdentity)
 
-            await state.setMediaRating(composed, rating: 5)
+            await state.setMediaRating(composed, rating: 5, owner: state.mediaLibrarySessionID)
             XCTAssertNil(state.lastError)
             XCTAssertEqual(state.mediaItems.map(mediaItemIdentity), expectedIDs)
             XCTAssertEqual(state.selectedMediaItems.map(mediaItemIdentity), expectedIDs)
@@ -330,7 +330,7 @@ final class MediaBatchDeliveryTests: XCTestCase {
             XCTAssertEqual(state.selectedMediaItems.map(\.rating), [5, 0])
             XCTAssertEqual(state.latestMediaItem.map(mediaItemIdentity), latestIdentity)
 
-            await state.setMediaProtection(decomposed, enabled: true)
+            await state.setMediaProtection(decomposed, enabled: true, owner: state.mediaLibrarySessionID)
             XCTAssertNil(state.lastError)
             XCTAssertEqual(state.mediaItems.map(mediaItemIdentity), expectedIDs)
             XCTAssertEqual(state.mediaItems.map { $0.protected == true }, [false, true])

@@ -41,7 +41,7 @@ struct BridgeMediaListingDecoder {
         let object: [String: Any]
         do {
             // Reuse grammar/duplicate-key validation only, without inventory evidence.
-            object = try decodeForegroundJSONObject(data)
+            object = try CameraMediaMetadataJSON.decode(data)
         } catch { throw invalid("Listing record is not valid JSON.") }
         guard let type = object["type"] as? String,
               let id = object["requestId"] as? String, !id.isEmpty, id.utf8.count <= 256,

@@ -1,0 +1,2593 @@
+{
+  "schemaVersion": 1,
+  "contract": "media-mutation-evidence-v1",
+  "limits": {
+    "maximumUniqueItems": 1000,
+    "maximumWritesPerItem": 1,
+    "maximumConcurrentWrites": 1
+  },
+  "operations": [
+    "protection",
+    "rating",
+    "rotation",
+    "archive"
+  ],
+  "metadataVectors": [
+    {
+      "id": "normalized-rating-integer-0",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "0",
+      "known": true,
+      "value": 0
+    },
+    {
+      "id": "normalized-rating-string-0",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"0\"",
+      "known": true,
+      "value": 0
+    },
+    {
+      "id": "normalized-rating-integer-1",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "1",
+      "known": true,
+      "value": 1
+    },
+    {
+      "id": "normalized-rating-string-1",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"1\"",
+      "known": true,
+      "value": 1
+    },
+    {
+      "id": "normalized-rating-integer-2",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "2",
+      "known": true,
+      "value": 2
+    },
+    {
+      "id": "normalized-rating-string-2",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"2\"",
+      "known": true,
+      "value": 2
+    },
+    {
+      "id": "normalized-rating-integer-3",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "3",
+      "known": true,
+      "value": 3
+    },
+    {
+      "id": "normalized-rating-string-3",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"3\"",
+      "known": true,
+      "value": 3
+    },
+    {
+      "id": "normalized-rating-integer-4",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "4",
+      "known": true,
+      "value": 4
+    },
+    {
+      "id": "normalized-rating-string-4",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"4\"",
+      "known": true,
+      "value": 4
+    },
+    {
+      "id": "normalized-rating-integer-5",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "5",
+      "known": true,
+      "value": 5
+    },
+    {
+      "id": "normalized-rating-string-5",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"5\"",
+      "known": true,
+      "value": 5
+    },
+    {
+      "id": "normalized-rating-missing",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": null,
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-null",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "null",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-true",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "true",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-false",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "false",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-object",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "{}",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-array",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "[]",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-fraction",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "3.7",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-whole-decimal",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "3.0",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-exponent",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "3e0",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-precise-fraction",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "3.0000000000000000001",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-negative",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "-1",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-over-limit",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "6",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-overflow",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "4294967296",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-long-overflow",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "18446744073709551616",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-bad-string-0",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-bad-string-1",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"bad\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-bad-string-2",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"+3\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-bad-string-3",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"03\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-bad-string-4",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"-0\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-bad-string-5",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\" 3\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-bad-string-6",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"3 \"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-bad-string-7",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"３\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-bad-string-8",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"٣\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-bad-string-9",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"3.0\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-bad-string-10",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"3e0\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-bad-string-11",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"\\t3\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rating-off",
+      "profile": "normalized",
+      "field": "rating",
+      "rawValueJSON": "\"off\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-off",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"off\"",
+      "known": true,
+      "value": 0
+    },
+    {
+      "id": "canon-rating-star-1",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"1\"",
+      "known": true,
+      "value": 1
+    },
+    {
+      "id": "canon-rating-star-2",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"2\"",
+      "known": true,
+      "value": 2
+    },
+    {
+      "id": "canon-rating-star-3",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"3\"",
+      "known": true,
+      "value": 3
+    },
+    {
+      "id": "canon-rating-star-4",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"4\"",
+      "known": true,
+      "value": 4
+    },
+    {
+      "id": "canon-rating-star-5",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"5\"",
+      "known": true,
+      "value": 5
+    },
+    {
+      "id": "canon-rating-missing",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": null,
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-null",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "null",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-true",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "true",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-false",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "false",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-object",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "{}",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-array",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "[]",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-fraction",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "3.7",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-whole-decimal",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "3.0",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-exponent",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "3e0",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-precise-fraction",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "3.0000000000000000001",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-negative",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "-1",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-over-limit",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "6",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-overflow",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "4294967296",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-long-overflow",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "18446744073709551616",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-bad-string-0",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-bad-string-1",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"bad\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-bad-string-2",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"+3\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-bad-string-3",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"03\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-bad-string-4",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"-0\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-bad-string-5",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\" 3\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-bad-string-6",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"3 \"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-bad-string-7",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"３\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-bad-string-8",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"٣\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-bad-string-9",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"3.0\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-bad-string-10",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"3e0\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-bad-string-11",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"\\t3\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-numeric-three",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "3",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-numeric-zero",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "0",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-zero-string",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"0\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-uppercase-off",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\"OFF\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rating-padded-off",
+      "profile": "canon",
+      "field": "rating",
+      "rawValueJSON": "\" off \"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-integer-0",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "0",
+      "known": true,
+      "value": 0
+    },
+    {
+      "id": "normalized-rotation-string-0",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"0\"",
+      "known": true,
+      "value": 0
+    },
+    {
+      "id": "normalized-rotation-integer-90",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "90",
+      "known": true,
+      "value": 90
+    },
+    {
+      "id": "normalized-rotation-string-90",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"90\"",
+      "known": true,
+      "value": 90
+    },
+    {
+      "id": "normalized-rotation-integer-180",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "180",
+      "known": true,
+      "value": 180
+    },
+    {
+      "id": "normalized-rotation-string-180",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"180\"",
+      "known": true,
+      "value": 180
+    },
+    {
+      "id": "normalized-rotation-integer-270",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "270",
+      "known": true,
+      "value": 270
+    },
+    {
+      "id": "normalized-rotation-string-270",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"270\"",
+      "known": true,
+      "value": 270
+    },
+    {
+      "id": "normalized-rotation-missing",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": null,
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-null",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "null",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-true",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "true",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-false",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "false",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-object",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "{}",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-array",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "[]",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-fraction",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "90.5",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-whole-decimal",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "90.0",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-exponent",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "9e1",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-precise-fraction",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "90.0000000000000000001",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-negative",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "-90",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-full-turn",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "360",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-overflow",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "4294967296",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-bad-string-0",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-bad-string-1",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"bad\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-bad-string-2",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"+90\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-bad-string-3",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"090\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-bad-string-4",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"-0\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-bad-string-5",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\" 90\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-bad-string-6",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"90 \"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-bad-string-7",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"９０\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-bad-string-8",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"٩٠\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-bad-string-9",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"90.0\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-rotation-bad-string-10",
+      "profile": "normalized",
+      "field": "rotation",
+      "rawValueJSON": "\"9e1\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-string-0",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"0\"",
+      "known": true,
+      "value": 0
+    },
+    {
+      "id": "canon-rotation-string-90",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"90\"",
+      "known": true,
+      "value": 90
+    },
+    {
+      "id": "canon-rotation-string-180",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"180\"",
+      "known": true,
+      "value": 180
+    },
+    {
+      "id": "canon-rotation-string-270",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"270\"",
+      "known": true,
+      "value": 270
+    },
+    {
+      "id": "canon-rotation-missing",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": null,
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-null",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "null",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-true",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "true",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-false",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "false",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-object",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "{}",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-array",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "[]",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-fraction",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "90.5",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-whole-decimal",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "90.0",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-exponent",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "9e1",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-precise-fraction",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "90.0000000000000000001",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-negative",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "-90",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-full-turn",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "360",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-overflow",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "4294967296",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-bad-string-0",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-bad-string-1",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"bad\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-bad-string-2",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"+90\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-bad-string-3",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"090\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-bad-string-4",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"-0\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-bad-string-5",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\" 90\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-bad-string-6",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"90 \"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-bad-string-7",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"９０\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-bad-string-8",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"٩٠\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-bad-string-9",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"90.0\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-bad-string-10",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "\"9e1\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-numeric-ninety",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "90",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-rotation-numeric-zero",
+      "profile": "canon",
+      "field": "rotation",
+      "rawValueJSON": "0",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-protection-true",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "true",
+      "known": true,
+      "value": true
+    },
+    {
+      "id": "normalized-protection-false",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "false",
+      "known": true,
+      "value": false
+    },
+    {
+      "id": "normalized-protection-numeric-zero",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "0",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-protection-numeric-one",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "1",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-protection-numeric-two",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "2",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-protection-true-string",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "\"true\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-protection-false-string",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "\"false\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-protection-enable",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "\"enable\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-protection-disable",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "\"disable\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-protection-missing",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": null,
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-protection-null",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "null",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-protection-empty",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "\"\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-protection-object",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "{}",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-protection-array",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "[]",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-protection-garbage",
+      "profile": "normalized",
+      "field": "protection",
+      "rawValueJSON": "\"bad\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-enable",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "\"enable\"",
+      "known": true,
+      "value": true
+    },
+    {
+      "id": "canon-protection-disable",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "\"disable\"",
+      "known": true,
+      "value": false
+    },
+    {
+      "id": "canon-protection-true",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "true",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-false",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "false",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-numeric-zero",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "0",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-numeric-one",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "1",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-true-string",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "\"true\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-false-string",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "\"false\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-padded-enable",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "\" enable \"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-uppercase-enable",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "\"ENABLE\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-missing",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": null,
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-null",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "null",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-empty",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "\"\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-object",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "{}",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-array",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "[]",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-protection-garbage",
+      "profile": "canon",
+      "field": "protection",
+      "rawValueJSON": "\"bad\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-archive-true",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "true",
+      "known": true,
+      "value": true
+    },
+    {
+      "id": "normalized-archive-false",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "false",
+      "known": true,
+      "value": false
+    },
+    {
+      "id": "normalized-archive-numeric-zero",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "0",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-archive-numeric-one",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "1",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-archive-numeric-two",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "2",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-archive-true-string",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "\"true\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-archive-false-string",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "\"false\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-archive-enable",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "\"enable\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-archive-disable",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "\"disable\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-archive-missing",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": null,
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-archive-null",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "null",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-archive-empty",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "\"\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-archive-object",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "{}",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-archive-array",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "[]",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "normalized-archive-garbage",
+      "profile": "normalized",
+      "field": "archive",
+      "rawValueJSON": "\"bad\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-enable",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "\"enable\"",
+      "known": true,
+      "value": true
+    },
+    {
+      "id": "canon-archive-disable",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "\"disable\"",
+      "known": true,
+      "value": false
+    },
+    {
+      "id": "canon-archive-true",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "true",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-false",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "false",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-numeric-zero",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "0",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-numeric-one",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "1",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-true-string",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "\"true\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-false-string",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "\"false\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-padded-enable",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "\" enable \"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-uppercase-enable",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "\"ENABLE\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-missing",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": null,
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-null",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "null",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-empty",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "\"\"",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-object",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "{}",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-array",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "[]",
+      "known": false,
+      "value": null
+    },
+    {
+      "id": "canon-archive-garbage",
+      "profile": "canon",
+      "field": "archive",
+      "rawValueJSON": "\"bad\"",
+      "known": false,
+      "value": null
+    }
+  ],
+  "readbackVectors": [
+    {
+      "id": "normalized-rating-confirmed",
+      "profile": "normalized",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "3",
+      "outcome": "confirmed"
+    },
+    {
+      "id": "normalized-rating-wrong-value",
+      "profile": "normalized",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "2",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rating-missing-value",
+      "profile": "normalized",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": null,
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rating-malformed-value",
+      "profile": "normalized",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "{}",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rating-wrong-id",
+      "profile": "normalized",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-b",
+      "rawValueJSON": "3",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rating-missing-id",
+      "profile": "normalized",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": false,
+      "returnedId": null,
+      "rawValueJSON": "3",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rating-null-id",
+      "profile": "normalized",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": null,
+      "rawValueJSON": "3",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rating-boolean-id",
+      "profile": "normalized",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": true,
+      "rawValueJSON": "3",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rotation-confirmed",
+      "profile": "normalized",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "90",
+      "outcome": "confirmed"
+    },
+    {
+      "id": "normalized-rotation-wrong-value",
+      "profile": "normalized",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "180",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rotation-missing-value",
+      "profile": "normalized",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": null,
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rotation-malformed-value",
+      "profile": "normalized",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "{}",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rotation-wrong-id",
+      "profile": "normalized",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-b",
+      "rawValueJSON": "90",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rotation-missing-id",
+      "profile": "normalized",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": false,
+      "returnedId": null,
+      "rawValueJSON": "90",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rotation-null-id",
+      "profile": "normalized",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": null,
+      "rawValueJSON": "90",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rotation-boolean-id",
+      "profile": "normalized",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": true,
+      "rawValueJSON": "90",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-protection-confirmed",
+      "profile": "normalized",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "true",
+      "outcome": "confirmed"
+    },
+    {
+      "id": "normalized-protection-wrong-value",
+      "profile": "normalized",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "false",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-protection-missing-value",
+      "profile": "normalized",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": null,
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-protection-malformed-value",
+      "profile": "normalized",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "{}",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-protection-wrong-id",
+      "profile": "normalized",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-b",
+      "rawValueJSON": "true",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-protection-missing-id",
+      "profile": "normalized",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": false,
+      "returnedId": null,
+      "rawValueJSON": "true",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-protection-null-id",
+      "profile": "normalized",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": null,
+      "rawValueJSON": "true",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-protection-boolean-id",
+      "profile": "normalized",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": true,
+      "rawValueJSON": "true",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-archive-confirmed",
+      "profile": "normalized",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "false",
+      "outcome": "confirmed"
+    },
+    {
+      "id": "normalized-archive-wrong-value",
+      "profile": "normalized",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "true",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-archive-missing-value",
+      "profile": "normalized",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": null,
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-archive-malformed-value",
+      "profile": "normalized",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "{}",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-archive-wrong-id",
+      "profile": "normalized",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-b",
+      "rawValueJSON": "false",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-archive-missing-id",
+      "profile": "normalized",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": false,
+      "returnedId": null,
+      "rawValueJSON": "false",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-archive-null-id",
+      "profile": "normalized",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": null,
+      "rawValueJSON": "false",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-archive-boolean-id",
+      "profile": "normalized",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": true,
+      "rawValueJSON": "false",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-rating-confirmed",
+      "profile": "canon",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "\"3\"",
+      "outcome": "confirmed"
+    },
+    {
+      "id": "canon-rating-wrong-value",
+      "profile": "canon",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "\"2\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-rating-missing-value",
+      "profile": "canon",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": null,
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-rating-malformed-value",
+      "profile": "canon",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "{}",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-rating-wrong-id",
+      "profile": "canon",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-b",
+      "rawValueJSON": "\"3\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-rating-missing-id",
+      "profile": "canon",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": false,
+      "returnedId": null,
+      "rawValueJSON": "\"3\"",
+      "outcome": "confirmed"
+    },
+    {
+      "id": "canon-rating-null-id",
+      "profile": "canon",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": null,
+      "rawValueJSON": "\"3\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-rating-boolean-id",
+      "profile": "canon",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": true,
+      "rawValueJSON": "\"3\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-rotation-confirmed",
+      "profile": "canon",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "\"90\"",
+      "outcome": "confirmed"
+    },
+    {
+      "id": "canon-rotation-wrong-value",
+      "profile": "canon",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "\"180\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-rotation-missing-value",
+      "profile": "canon",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": null,
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-rotation-malformed-value",
+      "profile": "canon",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "{}",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-rotation-wrong-id",
+      "profile": "canon",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-b",
+      "rawValueJSON": "\"90\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-rotation-missing-id",
+      "profile": "canon",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": false,
+      "returnedId": null,
+      "rawValueJSON": "\"90\"",
+      "outcome": "confirmed"
+    },
+    {
+      "id": "canon-rotation-null-id",
+      "profile": "canon",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": null,
+      "rawValueJSON": "\"90\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-rotation-boolean-id",
+      "profile": "canon",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": true,
+      "rawValueJSON": "\"90\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-protection-confirmed",
+      "profile": "canon",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "\"enable\"",
+      "outcome": "confirmed"
+    },
+    {
+      "id": "canon-protection-wrong-value",
+      "profile": "canon",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "\"disable\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-protection-missing-value",
+      "profile": "canon",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": null,
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-protection-malformed-value",
+      "profile": "canon",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "{}",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-protection-wrong-id",
+      "profile": "canon",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-b",
+      "rawValueJSON": "\"enable\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-protection-missing-id",
+      "profile": "canon",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": false,
+      "returnedId": null,
+      "rawValueJSON": "\"enable\"",
+      "outcome": "confirmed"
+    },
+    {
+      "id": "canon-protection-null-id",
+      "profile": "canon",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": null,
+      "rawValueJSON": "\"enable\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-protection-boolean-id",
+      "profile": "canon",
+      "operation": "protection",
+      "target": true,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": true,
+      "rawValueJSON": "\"enable\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-archive-confirmed",
+      "profile": "canon",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "\"disable\"",
+      "outcome": "confirmed"
+    },
+    {
+      "id": "canon-archive-wrong-value",
+      "profile": "canon",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "\"enable\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-archive-missing-value",
+      "profile": "canon",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": null,
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-archive-malformed-value",
+      "profile": "canon",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-a",
+      "rawValueJSON": "{}",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-archive-wrong-id",
+      "profile": "canon",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": "item-b",
+      "rawValueJSON": "\"disable\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-archive-missing-id",
+      "profile": "canon",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": false,
+      "returnedId": null,
+      "rawValueJSON": "\"disable\"",
+      "outcome": "confirmed"
+    },
+    {
+      "id": "canon-archive-null-id",
+      "profile": "canon",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": null,
+      "rawValueJSON": "\"disable\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-archive-boolean-id",
+      "profile": "canon",
+      "operation": "archive",
+      "target": false,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": true,
+      "rawValueJSON": "\"disable\"",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "normalized-rating-unicode-different-bytes",
+      "profile": "normalized",
+      "operation": "rating",
+      "target": 3,
+      "requestedId": "item-é",
+      "returnedIdPresent": true,
+      "returnedId": "item-é",
+      "rawValueJSON": "3",
+      "outcome": "uncertain"
+    },
+    {
+      "id": "canon-rotation-explicit-leading-space-id",
+      "profile": "canon",
+      "operation": "rotation",
+      "target": 90,
+      "requestedId": "item-a",
+      "returnedIdPresent": true,
+      "returnedId": " item-a",
+      "rawValueJSON": "\"90\"",
+      "outcome": "uncertain"
+    }
+  ],
+  "batchVectors": [
+    {
+      "id": "all-confirmed",
+      "events": [
+        "confirmed",
+        "confirmed",
+        "confirmed"
+      ],
+      "outcomes": [
+        "confirmed",
+        "confirmed",
+        "confirmed"
+      ],
+      "dispatchedIndices": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "id": "preflight-failure-continues",
+      "events": [
+        "failed-not-sent",
+        "confirmed",
+        "confirmed"
+      ],
+      "outcomes": [
+        "failed-not-sent",
+        "confirmed",
+        "confirmed"
+      ],
+      "dispatchedIndices": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "unloaded-retained",
+      "events": [
+        "not-started",
+        "confirmed",
+        "not-started"
+      ],
+      "outcomes": [
+        "not-started",
+        "confirmed",
+        "not-started"
+      ],
+      "dispatchedIndices": [
+        1
+      ]
+    },
+    {
+      "id": "uncertain-stops",
+      "events": [
+        "confirmed",
+        "uncertain",
+        "confirmed"
+      ],
+      "outcomes": [
+        "confirmed",
+        "uncertain",
+        "not-started"
+      ],
+      "dispatchedIndices": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": "cancel-before-first",
+      "events": [
+        "cancel-before",
+        "confirmed",
+        "confirmed"
+      ],
+      "outcomes": [
+        "not-started",
+        "not-started",
+        "not-started"
+      ],
+      "dispatchedIndices": []
+    },
+    {
+      "id": "cancel-after-first",
+      "events": [
+        "confirmed",
+        "cancel-before",
+        "confirmed"
+      ],
+      "outcomes": [
+        "confirmed",
+        "not-started",
+        "not-started"
+      ],
+      "dispatchedIndices": [
+        0
+      ]
+    },
+    {
+      "id": "cancel-during-late-confirmed",
+      "events": [
+        "cancel-during-confirmed",
+        "confirmed",
+        "confirmed"
+      ],
+      "outcomes": [
+        "confirmed",
+        "not-started",
+        "not-started"
+      ],
+      "dispatchedIndices": [
+        0
+      ]
+    },
+    {
+      "id": "cancel-during-error",
+      "events": [
+        "confirmed",
+        "cancel-during-error",
+        "confirmed"
+      ],
+      "outcomes": [
+        "confirmed",
+        "uncertain",
+        "not-started"
+      ],
+      "dispatchedIndices": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": "owner-lost-in-flight",
+      "events": [
+        "owner-lost-during",
+        "confirmed",
+        "confirmed"
+      ],
+      "outcomes": [
+        "uncertain",
+        "not-started",
+        "not-started"
+      ],
+      "dispatchedIndices": [
+        0
+      ]
+    },
+    {
+      "id": "mismatched-readback-is-uncertain",
+      "events": [
+        "confirmed",
+        "uncertain",
+        "failed-not-sent"
+      ],
+      "outcomes": [
+        "confirmed",
+        "uncertain",
+        "not-started"
+      ],
+      "dispatchedIndices": [
+        0,
+        1
+      ]
+    }
+  ],
+  "rosterVectors": [
+    {
+      "id": "first-exact-identity-wins",
+      "selectedIds": [
+        "a",
+        "b",
+        "a",
+        "c"
+      ],
+      "loadedIds": [
+        "a",
+        "b",
+        "c"
+      ],
+      "visibleIds": [
+        "a",
+        "c"
+      ],
+      "rosterIds": [
+        "a",
+        "b",
+        "c"
+      ],
+      "eligibleIds": [
+        "a",
+        "b",
+        "c"
+      ],
+      "hiddenCount": 1,
+      "unloadedCount": 0
+    },
+    {
+      "id": "missing-row-preserved",
+      "selectedIds": [
+        "a",
+        "gone",
+        "b"
+      ],
+      "loadedIds": [
+        "a",
+        "b"
+      ],
+      "visibleIds": [
+        "a"
+      ],
+      "rosterIds": [
+        "a",
+        "gone",
+        "b"
+      ],
+      "eligibleIds": [
+        "a",
+        "b"
+      ],
+      "hiddenCount": 1,
+      "unloadedCount": 1
+    },
+    {
+      "id": "unicode-distinct-identities",
+      "selectedIds": [
+        "é",
+        "é"
+      ],
+      "loadedIds": [
+        "é",
+        "é"
+      ],
+      "visibleIds": [
+        "é"
+      ],
+      "rosterIds": [
+        "é",
+        "é"
+      ],
+      "eligibleIds": [
+        "é",
+        "é"
+      ],
+      "hiddenCount": 1,
+      "unloadedCount": 0
+    }
+  ]
+}

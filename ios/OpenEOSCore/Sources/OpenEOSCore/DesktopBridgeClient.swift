@@ -1274,7 +1274,7 @@ public actor DesktopBridgeClient {
                 throw Self.httpError(response: buffered, method: "GET", url: url)
             }
             guard mediaType == nil || mediaType == "application/json",
-                  let body = try JSONSerialization.jsonObject(with: data) as? BridgeJSON,
+                  let body = try CameraMediaMetadataJSON.decode(data) as BridgeJSON?,
                   let raw = body["items"] as? [Any] else {
                 throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid media JSON.")
             }
@@ -1301,46 +1301,51 @@ public actor DesktopBridgeClient {
     }
 
     public func mediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {
-        let body = try await getJSON(sessionEndpoint(["media", item.id, "info"]))
+        let body = try await requestJSON(url: sessionEndpoint(["media", item.id, "info"]), method: "GET", payload: nil, maximumBytes: 1_048_576, mediaMetadata: true)
         guard let updated = Self.parseMediaItem(body), updated.id.utf8.elementsEqual(item.id.utf8) else {
             throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid media information.")
         }
         return updated
     }
 
-    public func setMediaProtection(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
-        try await updateMediaMetadata(item, endpoint: "protection", payload: ["enabled": enabled])
+    public func setMediaProtection(_ item: CameraMediaItem, enabled: Bool, attempt: CameraMediaMutationAttempt? = nil) async throws -> CameraMediaItem {
+        try await updateMediaMetadata(item, endpoint: "protection", payload: ["enabled": enabled], target: .protection(enabled), attempt: attempt)
     }
 
-    public func setMediaRating(_ item: CameraMediaItem, rating: Int) async throws -> CameraMediaItem {
+    public func setMediaRating(_ item: CameraMediaItem, rating: Int, attempt: CameraMediaMutationAttempt? = nil) async throws -> CameraMediaItem {
         guard (0...5).contains(rating) else {
             throw DesktopBridgeError.invalidResponse("Media rating must be from 0 through 5.")
         }
-        return try await updateMediaMetadata(item, endpoint: "rating", payload: ["value": rating])
+        return try await updateMediaMetadata(item, endpoint: "rating", payload: ["value": rating], target: .rating(rating), attempt: attempt)
     }
 
-    public func setMediaRotation(_ item: CameraMediaItem, degrees: Int) async throws -> CameraMediaItem {
+    public func setMediaRotation(_ item: CameraMediaItem, degrees: Int, attempt: CameraMediaMutationAttempt? = nil) async throws -> CameraMediaItem {
         guard Self.mediaRotations.contains(degrees) else {
             throw DesktopBridgeError.invalidResponse("Media rotation must be 0, 90, 180, or 270 degrees.")
         }
-        return try await updateMediaMetadata(item, endpoint: "rotation", payload: ["degrees": degrees])
+        return try await updateMediaMetadata(item, endpoint: "rotation", payload: ["degrees": degrees], target: .rotation(degrees), attempt: attempt)
     }
 
-    public func setMediaArchive(_ item: CameraMediaItem, enabled: Bool) async throws -> CameraMediaItem {
-        try await updateMediaMetadata(item, endpoint: "archive", payload: ["enabled": enabled])
+    public func setMediaArchive(_ item: CameraMediaItem, enabled: Bool, attempt: CameraMediaMutationAttempt? = nil) async throws -> CameraMediaItem {
+        try await updateMediaMetadata(item, endpoint: "archive", payload: ["enabled": enabled], target: .archive(enabled), attempt: attempt)
     }
 
     private func updateMediaMetadata(
         _ item: CameraMediaItem,
         endpoint: String,
-        payload: BridgeJSON
+        payload: BridgeJSON,
+        target: CameraMediaMutation,
+        attempt: CameraMediaMutationAttempt?
     ) async throws -> CameraMediaItem {
+        guard target.isWritable(item) else { throw DesktopBridgeError.invalidResponse("This media item is not writable.") }
         let body = try await requestJSON(
             url: sessionEndpoint(["media", item.id, endpoint]),
             method: "PUT",
-            payload: payload
+            payload: payload,
+            maximumBytes: 1_048_576,
+            mediaMetadata: true, mediaMutationAttempt: attempt
         )
-        guard let updated = Self.parseMediaItem(body), updated.id.utf8.elementsEqual(item.id.utf8) else {
+        guard let updated = Self.parseMediaItem(body), target.confirms(updated, original: item) else {
             throw DesktopBridgeError.invalidResponse(
                 "Desktop Bridge returned invalid media information after updating \(item.name)."
             )
@@ -1824,7 +1829,9 @@ public actor DesktopBridgeClient {
         maximumBytes: Int? = nil,
         shutterOperation: Bool = false,
         connectionGuidance: Bool = false,
-        recordingCommand: Bool? = nil
+        recordingCommand: Bool? = nil,
+        mediaMetadata: Bool = false,
+        mediaMutationAttempt: CameraMediaMutationAttempt? = nil
     ) async throws -> BridgeJSON {
         try validateMutation(url: url, method: method, shutterOperation: shutterOperation)
         let ordinaryMutation = !["GET", "HEAD", "OPTIONS"].contains(method) && !shutterOperation
@@ -1862,6 +1869,8 @@ public actor DesktopBridgeClient {
                 recordingBodyComplete = exchange.bodyComplete
                 recordingResponseCancelled = exchange.cancelled
             } else {
+                if mediaMetadata { try Task.checkCancellation() }
+                try mediaMutationAttempt?.markDispatched()
                 response = try await transport.send(request)
             }
         } catch {
@@ -1919,7 +1928,7 @@ public actor DesktopBridgeClient {
             )
         }
         guard
-            let value = try? JSONSerialization.jsonObject(with: response.body),
+            let value = try? (mediaMetadata ? CameraMediaMetadataJSON.decode(response.body) : JSONSerialization.jsonObject(with: response.body)),
             let object = value as? BridgeJSON
         else {
             if let recordingCommand {
@@ -2147,9 +2156,9 @@ public actor DesktopBridgeClient {
         let contentType: String?
         do { contentType = try CameraMediaType.declaredMIME(in: item) }
         catch { return nil }
-        let rating = item.int("rating").flatMap { (0...5).contains($0) ? $0 : nil }
-        let rotation = item.int("rotationDegrees").flatMap { mediaRotations.contains($0) ? $0 : nil }
-        let archived = item.optionalBool("archived")
+        let rating = CameraMediaMetadataValue.integer(item["rating"], allowed: Array(0...5))
+        let rotation = CameraMediaMetadataValue.integer(item["rotationDegrees"], allowed: [0, 90, 180, 270])
+        let archived = CameraMediaMetadataValue.boolean(item["archived"])
         let folder: CameraMediaFolder?
         if let id = item.string("folderId"), let label = item.string("folderLabel") {
             folder = CameraMediaFolder(id: id, label: label)
@@ -2163,14 +2172,19 @@ public actor DesktopBridgeClient {
             sizeBytes: item.int64("sizeBytes"),
             captureTime: item.nonEmptyString("captureTime"),
             previewAvailable: item.optionalBool("previewAvailable") ?? false,
-            protected: item.optionalBool("protected"),
+            protected: CameraMediaMetadataValue.boolean(item["protected"]),
             rating: rating,
             rotationDegrees: rotation,
             archived: archived,
             contentType: contentType,
             widthPixels: item.int("widthPixels").flatMap { $0 > 0 ? $0 : nil },
             heightPixels: item.int("heightPixels").flatMap { $0 > 0 ? $0 : nil },
-            folder: folder
+            folder: folder,
+            writable: CameraMediaMetadataValue.boolean(item["writable"]),
+            ratingWritable: CameraMediaMetadataValue.boolean(item["ratingWritable"]),
+            protectionWritable: CameraMediaMetadataValue.boolean(item["protectionWritable"]),
+            rotationWritable: CameraMediaMetadataValue.boolean(item["rotationWritable"]),
+            archiveWritable: CameraMediaMetadataValue.boolean(item["archiveWritable"])
         )
     }
 
