@@ -373,10 +373,12 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "function updateFileNaming(field, value, source)" in script
     assert "fileNamingDrafts: {}" in script
     assert "state.fileNamingDrafts[field] ?? current" in script
-    assert "delete state.fileNamingDrafts[field]" in script
+    assert "permission.canConsumeDraft && record.field" in script
+    assert "delete state.fileNamingDrafts[record.field]" in script
     assert 'button.dataset.cameraCommand = "file-naming"' in script
     assert 'file-naming/${encodeURIComponent(field)}' in script
-    assert '{ method: "PUT", json: { value } }' in script
+    assert 'method: field ? "PUT" : "POST"' in script
+    assert 'payload: field ? { value: requestedValue } : { name: requestedValue }' in script
     assert "featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)" in script
     assert "featureSupported(FEATURES.SHUTTER_HALF_PRESS)" in script
     assert "featureSupported(FEATURES.BULB_EXPOSURE)" in script

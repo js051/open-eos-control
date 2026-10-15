@@ -53,6 +53,7 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
         page = client.get("/")
         script = client.get("/app/app.js")
         media_transfer = client.get("/app/media-transfer.js")
+        capture_configuration = client.get("/app/capture-configuration.js")
         styles = client.get("/app/styles.css")
         icon = client.get("/app/app-icon.png")
         protected_api = client.get("/v1/cameras")
@@ -71,7 +72,11 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
     assert "CAMERA_SLEEP" in script.text
     assert "/power/sleep" in script.text
     assert "DIRECTORY_CONTROL" in script.text
-    assert "/directories" in script.text
+    assert '"directories"' in script.text
+    assert 'src="/app/capture-configuration.js"' in page.text
+    assert capture_configuration.status_code == 200
+    assert "validReceipt" in capture_configuration.text
+    assert "CAPTURE_CONFIG_READBACK_FAILED" in capture_configuration.text
     assert "MEDIA_UPLOAD" in script.text
     assert "async function sendMediaUpload" in script.text
     assert 'redirect: "error", cache: "no-store", credentials: "omit"' in script.text
