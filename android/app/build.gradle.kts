@@ -75,9 +75,11 @@ android {
     sourceSets.getByName("test").resources.srcDir("../../contracts/media-date-review/v1")
     sourceSets.getByName("test").resources.srcDir("../../contracts/capture-review-evidence/v1")
     sourceSets.getByName("test").resources.srcDir("../../contracts/live-view-lut/v1")
+    sourceSets.getByName("test").resources.srcDir("../../contracts/jpeg-original/v1")
     // Contract documentation is not a classpath resource; avoid duplicate README names.
     sourceSets.getByName("test").resources.exclude("README.md")
     sourceSets.getByName("androidTest").assets.srcDir("../../contracts/live-view-lut/v1")
+    sourceSets.getByName("androidTest").assets.srcDir("../../contracts/jpeg-original/v1")
 }
 
 kotlin {
