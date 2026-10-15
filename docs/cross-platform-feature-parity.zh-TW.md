@@ -51,3 +51,7 @@ AF telemetry 僅來自相機的有限回應：最多 256 KiB、512 個框，僅 
 - 正式 Android JSON resource loader、平台 UI／時區事件、實體相機日期格式與返回順序仍分別待驗；不由純邏輯結果推定完成。
 
 本群未處理或消除既有 native RTP GPU／錄影切換驗收失敗，也不將單項待驗設成其他三端功能開發的前置 gate。平台 transport 差異、direct USB 研究項、真正 decoder／GPU／讀回及實機效能，繼續如實列出。
+
+### 2026-10-15 拍後唯讀查找證據增補（本地 implemented）
+
+三端共同契約加入 found／no-candidate-observed／unread 與本輪成功／失敗讀取計數、最後完成讀取。混合結果不再遺失最後失敗，取消／owner 替換不得發布半輪證據，HTTP 成功但無合法清單不得偽裝成空卡。PC 已執行 production-function 及完整本地回歸；native／瀏覽器 exact-head 仍待補驗。共享向量或共同提交不等於原生／實機功能全對齊。詳見 docs/validation/pc-capture-review-evidence-20261015.md。
