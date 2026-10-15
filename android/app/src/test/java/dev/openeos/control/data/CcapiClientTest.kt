@@ -54,6 +54,47 @@ class CcapiClientTest {
     }
 
     @Test
+    fun mediaClassificationPreservesLiteralIdentityAndExplicitMimeAliases() = runTest {
+        for (alias in CAMERA_MEDIA_MIME_ALIASES) {
+            server.enqueue(jsonResponse("""{"items":[{"id":"SYNTHETIC ","name":"FRAME.JPG ","kind":"image","$alias":" "}]}"""))
+            val item = client.listMedia().single()
+            assertEquals("SYNTHETIC ", item.id)
+            assertEquals("FRAME.JPG ", item.name)
+            assertEquals(" ", item.contentType)
+            assertFalse(item.isAutomaticJpegEligible)
+        }
+        val original = CameraMediaItem("SYNTHETIC", "FRAME.JPG", "image", contentType = "image/jpeg")
+        server.enqueue(jsonResponse("""{"filesize":100,"mimeType":"video/mp4"}"""))
+        val conflict = client.mediaInfo(original)
+        assertEquals(CameraMediaClassification.CONFLICT, conflict.mediaClassification)
+        assertFalse(automaticJpegMetadataAdmitted(original, conflict, fresh = true))
+        server.enqueue(jsonResponse("""{"filesize":100,"content_type":"image/jpeg","mimetype":null}"""))
+        assertEquals(CameraMediaClassification.UNKNOWN, client.mediaInfo(original).mediaClassification)
+        server.enqueue(jsonResponse("""{"filesize":100,"id":"OTHER","name":"OTHER.JPG","kind":"raw"}"""))
+        val changed = client.mediaInfo(original)
+        assertEquals("OTHER", changed.id)
+        assertEquals("OTHER.JPG", changed.name)
+        assertEquals("raw", changed.kind)
+        assertFalse(automaticJpegMetadataAdmitted(original, changed, fresh = true))
+        server.enqueue(jsonResponse("""{"filesize":0}"""))
+        val unready = client.mediaInfo(original.copy(kind = "raw", sizeBytes = null, contentType = "image/png"))
+        assertEquals("image", unready.kind)
+        assertNull(unready.sizeBytes)
+        assertNull(unready.contentType)
+    }
+
+    @Test
+    fun unknownAndConflictingMediaNeverIssueThumbnailPreviewOrStreamRequests() = runTest {
+        for (item in listOf(CameraMediaItem("unknown", "FILE.bin", "other"),
+            CameraMediaItem("conflict", "FRAME.JPG", "image", contentType = "video/mp4"))) {
+            assertTrue(runCatching { client.mediaThumbnail(item) }.exceptionOrNull() is IllegalArgumentException)
+            assertTrue(runCatching { client.mediaPreview(item) }.exceptionOrNull() is IllegalArgumentException)
+            assertTrue(runCatching { client.openMediaStream(item) }.exceptionOrNull() is IllegalArgumentException)
+        }
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
     fun infoMapsCameraIdentity() = runTest {
         server.enqueue(jsonResponse(INFO_JSON))
 

@@ -3,6 +3,7 @@ package dev.openeos.control.ui
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.CameraMediaFolder
 import dev.openeos.control.data.isVideoMedia
+import dev.openeos.control.data.isPhotoMedia
 import java.math.BigInteger
 import java.time.Instant
 import java.time.LocalDate
@@ -147,7 +148,7 @@ internal fun mediaItemsForDisplay(
         folderFilter.includes(item) && ratingFilter.includes(item) &&
             (dateRange == null || dateRange.includes(item.captureTime, displayZone)) && when (filter) {
             MediaFilter.ALL -> true
-            MediaFilter.PHOTOS -> !item.isVideo
+            MediaFilter.PHOTOS -> item.isPhoto
             MediaFilter.VIDEOS -> item.isVideo
         }
     }
@@ -161,6 +162,9 @@ internal fun mediaItemsForDisplay(
             .takeIf { it != 0 } ?: left.index.compareTo(right.index)
     }.map { it.value }
 }
+
+internal val CameraMediaItem.isPhoto: Boolean
+    get() = isPhotoMedia
 
 internal val CameraMediaItem.isVideo: Boolean
     get() = isVideoMedia

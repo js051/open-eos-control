@@ -145,6 +145,7 @@ def main():
         for name in ["MediaCaptureDate", "MediaLibrary", "MediaReviewSelection"]
     ]
     sources += [
+        "android/app/src/main/java/dev/openeos/control/data/CameraMediaClassification.kt",
         "android/app/src/test/java/dev/openeos/control/ui/MediaDateReviewFixture.kt",
         "android/app/src/test/java/dev/openeos/control/ui/CaptureReviewEvidenceFixture.kt",
     ]

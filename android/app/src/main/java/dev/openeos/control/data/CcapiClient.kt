@@ -1636,6 +1636,7 @@ class CcapiClient(
     }
 
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
+        require(item.isVisualMedia) { "Thumbnails require an unambiguous photo or video item." }
         val (bytes, contentType) = mediaImageRepresentation(
             item = item,
             kind = "thumbnail",
@@ -1652,7 +1653,7 @@ class CcapiClient(
         } else {
             item.kind.isCcapiPreviewKind()
         }
-        require(previewEligible) {
+        require(item.isPhotoMedia && previewEligible) {
             "CCAPI display preview is available only for JPEG or CR3 items."
         }
         val (bytes, contentType) = mediaImageRepresentation(
@@ -1680,6 +1681,9 @@ class CcapiClient(
             }
         } else {
             item
+        }
+        require(playbackItem.id == item.id && playbackItem.name == item.name && playbackItem.isVideoMedia) {
+            "Camera changed the media identity or type before playback."
         }
         val path = mediaItemPath(playbackItem)
         val paths = if (isRealCamera) listOf(path, "$path?kind=main", "$path?type=main") else listOf(path)
@@ -1780,6 +1784,7 @@ class CcapiClient(
     }
 
     private fun parseMediaInfo(item: CameraMediaItem, body: JSONObject): CameraMediaItem {
+        val canonicalName = if (isRealCamera) mediaItemPath(item).substringAfterLast('/') else item.name
         val ratingValue = body.optString("rating").let { value ->
             when (value) {
                 "off" -> 0
@@ -1787,6 +1792,11 @@ class CcapiClient(
             }
         }
         return item.copy(
+            // Canon may omit identity/type fields. Explicit returned evidence must not be hidden.
+            id = if (body.has("id")) body.opt("id") as? String ?: "" else item.id,
+            name = if (body.has("name")) body.opt("name") as? String ?: "" else canonicalName,
+            kind = if (body.has("kind")) body.opt("kind") as? String ?: "" else canonicalName.mediaKind(),
+            contentType = body.cameraMediaContentType(),
             sizeBytes = body.optLong("filesize").takeIf { it > 0L } ?: item.sizeBytes,
             captureTime = body.optString("lastmodifieddate").takeIf { it.isNotBlank() } ?: item.captureTime,
             protected = when (body.optString("protect")) {
@@ -2917,10 +2927,11 @@ class CcapiClient(
     }
 
     private fun parseSimulatorMediaItem(item: JSONObject): CameraMediaItem? {
-        val id = item.optString("id").trim()
-        val name = item.optString("name").trim()
+        val id = item.optString("id")
+        val name = item.optString("name")
         if (id.isBlank() || name.isBlank()) return null
         val kind = item.optString("kind", "other")
+        val contentType = item.cameraMediaContentType()
         return CameraMediaItem(
             id = id,
             name = name,
@@ -2933,8 +2944,8 @@ class CcapiClient(
             rating = item.normalizedMediaRating(),
             rotationDegrees = item.optInt("rotate").takeIf { item.has("rotate") && it in MEDIA_ROTATIONS },
             ratingWritable = true,
-            streamAvailable = cameraMediaIsVideo(kind, name),
-            contentType = item.optString("content_type").takeIf { it.isNotBlank() },
+            streamAvailable = cameraMediaHasVideoTransportHint(kind, name) && cameraMediaIsVideo(kind, name, contentType),
+            contentType = contentType,
             widthPixels = item.optInt("width_pixels").takeIf { item.has("width_pixels") && it > 0 },
             heightPixels = item.optInt("height_pixels").takeIf { item.has("height_pixels") && it > 0 },
         )

@@ -148,6 +148,8 @@ internal class ForegroundJpegImportRunner(
         try {
             io.awaitAvailable()
             currentCoroutineContext().ensureActive()
+            // Recheck the immutable, freshly validated item at the original-transfer boundary.
+            check(isJpegImportCandidate(item)) { "Automatic delivery requires an eligible JPEG item." }
             io.saveOriginal(item, receipt)
             currentCoroutineContext().ensureActive()
         } catch (timeout: TimeoutCancellationException) {

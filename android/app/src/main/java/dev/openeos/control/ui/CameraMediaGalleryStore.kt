@@ -9,6 +9,8 @@ import android.webkit.MimeTypeMap
 import androidx.annotation.RequiresApi
 import dev.openeos.control.data.CameraMediaDownloadResult
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.isPhotoMedia
+import dev.openeos.control.data.isVideoMedia
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -39,6 +41,8 @@ internal fun galleryMimeType(item: CameraMediaItem): String? = when (item.name.s
     "avi" -> "video/x-msvideo"
     "mkv" -> "video/x-matroska"
     else -> null
+}?.takeIf { mime ->
+    (mime.startsWith("image/") && item.isPhotoMedia) || (mime.startsWith("video/") && item.isVideoMedia)
 }
 
 internal fun canSaveMediaToGallery(item: CameraMediaItem): Boolean =
