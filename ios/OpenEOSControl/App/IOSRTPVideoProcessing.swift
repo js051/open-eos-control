@@ -181,11 +181,7 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
         do {
             guard let device = MTLCreateSystemDefaultDevice() else { return .unavailable }
             if context == nil {
-                context = CIContext(mtlDevice: device, options: [
-                    .workingColorSpace: nativeRTPPreviewColorSpace,
-                    .outputColorSpace: nativeRTPPreviewColorSpace,
-                    .cacheIntermediates: false,
-                ])
+                context = nativeRTPPreviewContext(device: device)
             }
             let size = CGSize(width: CGFloat(dimensions.width), height: CGFloat(dimensions.height))
             if pool == nil || poolSize != size {
@@ -257,6 +253,17 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
 }
 
 private let nativeRTPPreviewColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+// LUT node values may exceed the display range. Preserve them until after interpolation.
+// Extended sRGB keeps the same encoded coordinates as the CPU/browser preview contract.
+private let nativeRTPLutWorkingColorSpace = CGColorSpace(name: CGColorSpace.extendedSRGB)!
+
+func nativeRTPPreviewContext(device: MTLDevice) -> CIContext {
+    CIContext(mtlDevice: device, options: [
+        .workingColorSpace: nativeRTPLutWorkingColorSpace,
+        .outputColorSpace: nativeRTPPreviewColorSpace,
+        .cacheIntermediates: false,
+    ])
+}
 
 func nativeRTPPreviewColorSupported(format: CMVideoFormatDescription, sps: Data) -> Bool {
     // Baseline/Main/Extended/High profiles are 8-bit; High10/422/444 and unknown profiles are not guessed.
@@ -277,7 +284,8 @@ func nativeRTPPreviewColorSupported(format: CMVideoFormatDescription, sps: Data)
 /// Numeric LUT coordinates use SDR sRGB preview values, matching the CPU/browser oracle.
 func nativeRTPApplyLut(_ input: CIImage, lut: CubeLut) -> CIImage? {
     guard let normalize = CIFilter(name: "CIColorMatrix"), let clamp = CIFilter(name: "CIColorClamp"),
-          let cube = CIFilter(name: "CIColorCubeWithColorSpace") else { return nil }
+          let cube = CIFilter(name: "CIColorCubeWithColorSpace"),
+          let outputClamp = CIFilter(name: "CIColorClamp") else { return nil }
     guard (2...64).contains(lut.size), lut.domainMin.count == 3, lut.domainMax.count == 3,
           lut.values.count == lut.size * lut.size * lut.size * 3,
           lut.values.allSatisfy({ $0.isFinite }),
@@ -300,6 +308,11 @@ func nativeRTPApplyLut(_ input: CIImage, lut: CubeLut) -> CIImage? {
     cube.setValue(clamped, forKey: kCIInputImageKey)
     cube.setValue(lut.size, forKey: "inputCubeDimension")
     cube.setValue(lut.rgbaData, forKey: "inputCubeData")
-    cube.setValue(nativeRTPPreviewColorSpace, forKey: "inputColorSpace")
-    return cube.outputImage?.cropped(to: input.extent)
+    cube.setValue(nativeRTPLutWorkingColorSpace, forKey: "inputColorSpace")
+    guard let interpolated = cube.outputImage else { return nil }
+    // Clamp the interpolated result, never each table entry. Early clipping changes nonlinear LUTs.
+    outputClamp.setValue(interpolated, forKey: kCIInputImageKey)
+    outputClamp.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputMinComponents")
+    outputClamp.setValue(CIVector(x: 1, y: 1, z: 1, w: 1), forKey: "inputMaxComponents")
+    return outputClamp.outputImage?.cropped(to: input.extent)
 }

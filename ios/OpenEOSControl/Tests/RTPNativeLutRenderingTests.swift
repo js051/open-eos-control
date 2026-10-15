@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreImage
+import Metal
 import OpenEOSCore
 import UIKit
 import XCTest
@@ -95,8 +96,36 @@ final class RTPNativeLutRenderingTests: XCTestCase {
                 green: Float(original[row][1]) / 255, blue: Float(original[row][2]) / 255)
             for channel in 0..<3 {
                 XCTAssertLessThanOrEqual(abs(Float(transformed[row][channel]) - expected[channel] * 255), 6,
-                    "Native color-space/domain/trilinear behavior must agree with the CPU preview contract")
+                    "Native color-space/domain/trilinear mismatch: quadrant=\(row), channel=\(channel), " +
+                    "input=\(original[row]), actual=\(transformed[row]), expected=\(expected.map { $0 * 255 })")
             }
+        }
+    }
+
+    func testGpuPreservesNegativeAndOverRangeCubeNodesUntilAfterInterpolation() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice(), "The native LUT requires a real Metal device")
+        let context = nativeRTPPreviewContext(device: device)
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let samples: [[UInt8]] = [[64, 128, 192], [128, 128, 128], [192, 128, 64], [0, 255, 255]]
+        let source = samples.flatMap { $0 + [255] }
+        let input = CIImage(bitmapData: Data(source), bytesPerRow: samples.count * 4,
+            size: CGSize(width: CGFloat(samples.count), height: 1), format: .RGBA8, colorSpace: space)
+        let transform = lut { [2 * $0 - 0.5, 0.25, 1.5 - 2 * $2] }
+        let filtered = try XCTUnwrap(nativeRTPApplyLut(input, lut: transform))
+        var output = [UInt8](repeating: 0, count: source.count)
+        output.withUnsafeMutableBytes { bytes in
+            context.render(filtered, toBitmap: bytes.baseAddress!, rowBytes: samples.count * 4,
+                bounds: input.extent, format: .RGBA8, colorSpace: space)
+        }
+        for (index, sample) in samples.enumerated() {
+            let expected = transform.sample(red: Float(sample[0]) / 255,
+                green: Float(sample[1]) / 255, blue: Float(sample[2]) / 255)
+            for channel in 0..<3 {
+                XCTAssertLessThanOrEqual(abs(Float(output[index * 4 + channel]) - expected[channel] * 255), 3,
+                    "Extended-node interpolation mismatch: sample=\(index), channel=\(channel), " +
+                    "actual=\(output[index * 4 + channel]), expected=\(expected[channel] * 255)")
+            }
+            XCTAssertEqual(output[index * 4 + 3], 255)
         }
     }
 

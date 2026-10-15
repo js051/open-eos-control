@@ -1597,12 +1597,23 @@ final class OpenEOSControlUITests: XCTestCase {
                 let alert = app.alerts.firstMatch
                 let alertExists = alert.exists
                 fields.append("alert-exists=\(alertExists)")
+                // Keep failure-only terminal evidence usable when the result bundle
+                // cannot be exported. Never print arbitrary alert/error prose: it
+                // can contain camera routes or identifiers, even when truncated.
+                var terminalFields = fields
                 if alertExists {
                     for index in 0..<2 {
                         let text = alert.staticTexts.element(boundBy: index)
-                        if text.exists { fields.append("alert-text-\(index)=\(String(text.label.prefix(512)))") }
+                        let exists = text.exists
+                        terminalFields.append("alert-text-\(index)-exists=\(exists)")
+                        if exists {
+                            let label = String(text.label.prefix(512))
+                            fields.append("alert-text-\(index)=\(label)")
+                            terminalFields.append("alert-text-\(index)-kind=\(Self.recordingModeFailureAlertKind(label))")
+                        }
                     }
                 }
+                print("[OEC_RECORDING_MODE_FAILURE] " + terminalFields.joined(separator: " "))
                 let attachment = XCTAttachment(string: fields.joined(separator: "\n"))
                 attachment.name = "recording-mode-failure-\(language)"
                 attachment.lifetime = .keepAlways
@@ -1920,6 +1931,25 @@ final class OpenEOSControlUITests: XCTestCase {
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    // Exact closed classifications only; an unknown error remains unknown.
+    // This observes a failed synthetic journey without retrying a camera command.
+    private static func recordingModeFailureAlertKind(_ label: String) -> String {
+        switch label {
+        case "Camera operation failed", "相機操作失敗":
+            return "operation-failed-title"
+        case "Camera settings changed while refreshing. Refresh settings before retrying.":
+            return "settings-refresh-invalidated"
+        case "The camera did not advertise value 'on' for setting 'moviemode'.":
+            return "movie-mode-on-not-advertised"
+        case "Release the shutter before another camera operation.":
+            return "shutter-release-required"
+        case "The CCAPI client has not finished discovery.":
+            return "discovery-incomplete"
+        default:
+            return "unclassified"
+        }
     }
 
     private enum LiveViewTapSelection: String, CaseIterable {
