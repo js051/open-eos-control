@@ -814,3 +814,5 @@
 "media_files_export_history_help" = "這些是整批觀察結果，不是逐檔目的地收據。所有嘗試合計最多保留 100 個來源名稱；中斷的嘗試保留為結果不明。再次明確選擇原檔與目的地才會建立新嘗試，不會自動續傳。";
 "media_files_export_history_sources" = "%d 個來源名稱（沒有目的地對應）";
 "media_files_export_history_started" = "匯出已開始，尚待最終結果。";
+
+"media_time_zone_unknown" = "時區未知";

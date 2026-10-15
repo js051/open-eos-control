@@ -814,3 +814,5 @@
 "media_files_export_history_help" = "These are batch-level observations, not individual destination receipts. Up to 100 source labels are retained across attempts. An interrupted attempt is unknown. Selecting originals and a destination again creates a new attempt; nothing resumes automatically.";
 "media_files_export_history_sources" = "%d source labels (no destination mapping)";
 "media_files_export_history_started" = "Export started; final result is pending.";
+
+"media_time_zone_unknown" = "Time zone unknown";

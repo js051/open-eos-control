@@ -252,6 +252,9 @@ final class CameraAppState: ObservableObject {
     private let defaults: UserDefaults
     @Published private(set) var mediaLibrarySessionID = UUID()
     @Published private(set) var mediaDateRange: MediaDateRange?
+    // All gallery derivations use this captured (not autoupdating) zone. Range
+    // endpoints are literal days, so changing this never alters their meaning.
+    @Published private(set) var mediaDateDisplayZone = TimeZone.current
     @Published private(set) var mediaRatingFilter = MediaRatingFilter.all
     @Published private(set) var mediaFolderFilter = MediaFolderFilter.all
     private var session: CameraSession? {
@@ -716,6 +719,11 @@ final class CameraAppState: ObservableObject {
         }
     }
 
+    func refreshMediaDateDisplayZone(_ timeZone: TimeZone = .current) {
+        let snapshot = TimeZone(identifier: timeZone.identifier) ?? timeZone
+        if mediaDateDisplayZone != snapshot { mediaDateDisplayZone = snapshot }
+    }
+
     @discardableResult
     func setMediaDateRange(_ range: MediaDateRange?, owner: UUID) -> Bool {
         guard owner == mediaLibrarySessionID else { return false }
@@ -1039,6 +1047,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func setApplicationActive(_ active: Bool) {
+        if active { refreshMediaDateDisplayZone() }
         applicationActive = active
         rtpController.setApplicationActive(active)
         if !active {

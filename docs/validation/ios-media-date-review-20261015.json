@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "dateUTC": "2026-10-15",
+  "baseCommit": "9ed86312c93eedadc390102bebcd4da188806f90",
+  "status": "implemented-source-checks-passed-native-not-run",
+  "scope": "iOS media date precision, coherent viewer-zone projection/literal range, camera-order recent and after-capture review",
+  "sourceChecks": {
+    "pytest": {
+      "command": "python -m pytest -q scripts/validation/tests scripts/ci/tests/test_ios_files_export_history.py scripts/ci/tests/test_ios_recording_mode_diagnostics.py",
+      "result": "PASS",
+      "tests": 45,
+      "newDateReviewSourceChecks": 8
+    },
+    "ruff": {
+      "cwd": "bridge",
+      "command": "ruff check --no-cache . ../scripts/validation",
+      "result": "PASS"
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "result": "PASS"
+    },
+    "parentCombinedSourceChecks": {
+      "command": "python -m pytest -o addopts= -q -p no:cacheprovider scripts/validation/tests scripts/ci/tests scripts/contracts/tests",
+      "result": "PASS",
+      "tests": 88,
+      "warnings": 1,
+      "warning": "Existing PytestReturnNotNoneWarning from test_export_ios_ui_evidence.py::test_tree",
+      "scope": "Python/source/fixture checks, not production Swift execution"
+    }
+  },
+  "native": {
+    "status": "NOT_RUN",
+    "reason": "Neither swift nor xcodebuild is available on PATH in the authorized local workspace; no tools downloaded and no CI started. Source checks do not execute production Swift or native UI.",
+    "newXCTestMethods": 11,
+    "sharedContractXCTestMethods": 8,
+    "newOwnershipMethods": 1,
+    "newReviewJourneyMethods": 2,
+    "pendingTestMethodsInAffectedSuites": {
+      "MediaDateReviewContractTests": 8,
+      "MediaDateFilterOwnershipTests": 8,
+      "CaptureMediaJourneyTests": 55,
+      "MediaLibraryTests": 47
+    },
+    "pendingScenarios": {
+      "fixedParseProjections": 144,
+      "fixedSortCases": 9,
+      "fixedReviewCases": 4,
+      "totalOrderDistinctTriples": 2016
+    },
+    "additionalPendingCases": [
+      "Gregorian AD 1 and 9999 instant/display bounds",
+      "Gregorian 1582 cutover and leap years",
+      "negative epoch and truncated fractional milliseconds",
+      "UTC-only date-picker carriers for a skipped day",
+      "named-zone/explicit-offset agreement",
+      "range and selection ownership on timezone refresh/resume",
+      "unknown-date first photo ahead of future video and dated photo; zero shutter/REC resend",
+      "20,000 unknown rows keep loaded order and one group",
+      "synthetic GMT+0800 bracket is rejected even if Foundation can construct it"
+    ],
+    "uiSimulatorPhysicalDevice": "NOT_RUN"
+  },
+  "invariants": {
+    "originalMetadataAndIDs": "unchanged",
+    "reviewOwnerSessionGenerationCancellationAndRetry": "unchanged; source guard retained",
+    "foregroundCompleteInventoryNewIDJPEGFreshMetadataStableSize": "unchanged; protected source hashes checked",
+    "range": "literal start/end day keys drive gallery filter; original Date/timeZone DST boundary API remains; editor uses explicit UTC day carriers",
+    "zone": "all gallery summaries, filter/sort/groups/cards/details/worklist labels use CameraAppState.mediaDateDisplayZone; system timezone notification and resume refresh same snapshot",
+    "resourceMapping": "individual JSON resource only; no README bundle flattening",
+    "commitPushCI": "Implementation worker did not commit/push/trigger CI. Parent local commits/outgoing scans are recorded separately; no push or new CI in this cohort.",
+    "dateSortCost": "metadata parsed once per admitted loaded index only for date sort or active range; comparator uses cached projection",
+    "groupCost": "last group checked by index; no held struct copy during append",
+    "displayPrecision": "card/detail presentation uses minutes; timeKey and sort precision remain milliseconds",
+    "namedZones": "knownTimeZoneIdentifiers plus UTC/GMT; explicit offset must match at the actual instant"
+  },
+  "sha256": {
+    "ios/OpenEOSControl/App/CameraAppState.swift": "9f8a7e99a897b6aea25d233b419b231243b51cde20b37dc67f6b2e741f91ec71",
+    "ios/OpenEOSControl/App/MediaLibrary.swift": "a5024651871650ce81616976466660d769575e3a1b5518f1cebc634c79da740d",
+    "ios/OpenEOSControl/App/MediaView.swift": "5e29f60fc0ba614bf21ac4892619f4582582639add06bd093f6d2d126e09a22b",
+    "ios/OpenEOSControl/App/MediaWorklistContinuationView.swift": "ab1336aaef59243fb4ab86a54f084f56b7a06f6b03aa526c4a86f0f509afdd5b",
+    "ios/OpenEOSControl/App/Resources/en.lproj/Localizable.strings": "aba2f53f85cb80d441d9ea372e250de5fa67eb6e9b84572ee0f903c7635912af",
+    "ios/OpenEOSControl/App/Resources/zh-Hant.lproj/Localizable.strings": "2f205ee4aae5b6ecbddf8d197e197c948b7e4c815404c359b0c2ef85dbf3bef8",
+    "ios/OpenEOSControl/App/RootView.swift": "4c834513bbb1b8b1644d8262031c3f1ca8174b83ec5730c7dead6a80d63932b8",
+    "ios/OpenEOSControl/Tests/CaptureMediaJourneyTests.swift": "50bc1d968903d2998dcaab346e76f3824510b005785bf163b04ac1eff4a47d9f",
+    "ios/OpenEOSControl/Tests/MediaDateFilterOwnershipTests.swift": "cc021725e34dbc2e235038f5b20e73c5af9066a8ab23723e7f89afe7adeb455f",
+    "ios/OpenEOSControl/Tests/MediaLibraryTests.swift": "c71ccecda53de7656b5a513b2efddbf15f1b27e0838304dacce3a9b5ff67ad21",
+    "ios/OpenEOSControl/project.yml": "20cf09b0525ace877e45fa9ddaae8db7ef90bab171b4c4d6dd8f0d4d8be7c2a4",
+    "ios/OpenEOSControl/App/MediaCaptureDate.swift": "8390e4d7eb29cea7dc9a6a16ed5f2e0365221e31d20662952e9812d3ee49fb80",
+    "ios/OpenEOSControl/Tests/MediaDateReviewContractTests.swift": "4482b0a3d50b977b47a54c42df459d70b8a971c87aefcdfdcbe96e0e3971c3b3",
+    "scripts/validation/tests/test_media_date_review_source.py": "e5c8ed16e196eda70566200c38f9b7bff731f7a536200f79d3cc069583f08452",
+    "contracts/media-date-review/v1/date-review-vectors.json": "8eb57e04446478fe523c1e8cd08c0cc57b524d9fcb7f63845fc28d6d02f57e9a",
+    "contracts/media-date-review/v1/README.md": "e3338cb0001f0f9b0872a1453f4767a400252ba711322522ba527926c16719f7"
+  },
+  "unchangedProtectedSources": {
+    "ios/OpenEOSControl/App/ForegroundMediaPlan.swift": "a18f9c81c3b692b3c0937ec9812210c6e238910a5934f80715078e80a8eacf0b",
+    "ios/OpenEOSControl/App/ForegroundMediaController.swift": "89232bd68b24c2558fbf902ab62ac9527e5cbb0aea3a776f3e455ba91f7f9c6f",
+    "ios/OpenEOSControl/App/ForegroundFilesDelivery.swift": "14fbda59dd5e37be464242504d2a39d7d7e42f93418e8d8aad933d1ed2c72a04",
+    "ios/OpenEOSControl/App/MediaFilesExport.swift": "d8484af0578856a1d209922b74538781377441613de988c5088444cd810b2a11",
+    "ios/OpenEOSControl/App/MediaDeliveryStore.swift": "204d278067584174e21e8f38d1d2e8156299c3e779ab2af123b419b36f179192",
+    "ios/OpenEOSControl/App/IOSRTPVideoProcessing.swift": "2f743fe0856df88e1298795b78c21d5bf1cd178af2b27bfb4baecc540cc66830",
+    "ios/OpenEOSControl/App/CubeLut.swift": "d54255b145b6370002163b6d69e136fc2427412c59eaf037ee5dea26d3ddd0e3"
+  },
+  "releaseAssessment": {
+    "publishedBaseline": "v0.12.0 Development Preview",
+    "verifiedAtUTC": "2026-10-15T03:54:34Z",
+    "developmentVersion": "0.13.0 unchanged",
+    "directCohortImpact": "patch",
+    "cumulativeImpactSincePublishedBaseline": "minor",
+    "nativeAndPhysicalEvidence": "pending"
+  }
+}

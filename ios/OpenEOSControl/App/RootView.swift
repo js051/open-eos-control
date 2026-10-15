@@ -64,6 +64,9 @@ struct RootView: View {
             camera.setApplicationActive(scenePhase == .active)
         }
         .onChange(of: scenePhase) { _, phase in camera.setApplicationActive(phase == .active) }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
+            camera.refreshMediaDateDisplayZone()
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             updateControlRotation()
         }

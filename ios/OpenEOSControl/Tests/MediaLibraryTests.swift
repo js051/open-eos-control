@@ -9,14 +9,14 @@ final class MediaLibraryTests: XCTestCase {
         XCTAssertEqual(CameraAppState.latestMediaRequestItemCount, 8)
     }
 
-    func testLatestMediaItemUsesNewestKnownCaptureDate() {
+    func testLatestMediaItemRetainsCameraOrderRegardlessOfCaptureDate() {
         let items = [
             media("old", "IMG_1.JPG", "2026-08-14T10:00:00Z"),
             media("new", "IMG_2.JPG", "2026-08-15T10:00:00Z"),
             media("unknown", "IMG_3.JPG", nil),
         ]
 
-        XCTAssertEqual(selectLatestMediaItem(items)?.id, "new")
+        XCTAssertEqual(selectLatestMediaItem(items)?.id, "old")
     }
 
     func testLatestMediaItemPreservesCameraOrderWhenDatesAreUnavailable() {
@@ -41,7 +41,7 @@ final class MediaLibraryTests: XCTestCase {
         )
     }
 
-    func testCaptureReviewExcludesEveryKnownItemBeforeComparingDates() {
+    func testCaptureReviewExcludesEveryKnownItemBeforeRetainingCameraOrder() {
         let a = media("A", "A.JPG", "2030-01-01T00:00:00Z")
         let b = media("B", "B.JPG", "2029-01-01T00:00:00Z")
         let new = media("N", "N.JPG", "2020-01-01T00:00:00Z")
@@ -69,7 +69,7 @@ final class MediaLibraryTests: XCTestCase {
         XCTAssertTrue(batch.hasMore)
     }
 
-    func testRecordingReviewExcludesKnownVideoAndEveryPhotoBeforeComparingDates() {
+    func testRecordingReviewExcludesKnownVideoAndEveryPhotoBeforeRetainingCameraOrder() {
         let photo = media("photo", "OLD.JPG", "2040-01-01T00:00:00Z")
         let old = CameraMediaItem(id: "old", name: "OLD.MP4", kind: "video", captureTime: "2030-01-01T00:00:00Z")
         let new = CameraMediaItem(id: "new", name: "NEW.MP4", kind: "video", captureTime: "2020-01-01T00:00:00Z")
@@ -142,7 +142,7 @@ final class MediaLibraryTests: XCTestCase {
         )
     }
 
-    func testDateSortPreservesEqualDatedPairsAndUsesNaturalFallbackWithoutDates() {
+    func testDateSortPreservesEqualDatedPairsAndUnknownLoadedOrder() {
         let items = [
             media("unknown-10", "IMG_10.JPG", nil),
             media("unknown-9", "IMG_9.JPG", nil),
@@ -156,7 +156,7 @@ final class MediaLibraryTests: XCTestCase {
         )
         XCTAssertEqual(
             mediaItemsForDisplay(items, filter: .all, sort: .oldest).map(\.id),
-            ["raw", "jpeg", "unknown-9", "unknown-10"]
+            ["raw", "jpeg", "unknown-10", "unknown-9"]
         )
     }
 
@@ -343,8 +343,13 @@ final class MediaLibraryTests: XCTestCase {
             media("previous", "OLD.JPG", "20260813T120000"),
         ]
 
-        XCTAssertEqual(mediaCaptureDate(items[0]), day)
-        XCTAssertEqual(mediaCaptureDate(items[1]), day)
+        for item in items.prefix(2) {
+            let date = mediaCaptureDate(item, displayZone: calendar.timeZone)
+            XCTAssertEqual(date.kind, .floating)
+            XCTAssertEqual(date.dateKey, "2026-08-14")
+            XCTAssertEqual(date.timeKey, "12:00:00.000")
+            XCTAssertNil(date.instantMillis)
+        }
         XCTAssertEqual(
             mediaItemsForDisplay(items, filter: .all, sort: .camera, dateRange: range),
             [items[0], items[1]]

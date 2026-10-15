@@ -27,7 +27,8 @@ struct MediaView: View {
     @State private var dateFilterOwner: UUID?
     @State private var dateFilterStart = Date()
     @State private var dateFilterEnd = Date()
-    @State private var dateFilterTimeZone = TimeZone.current
+    // The picker edits literal dates using a UTC carrier, never a capture instant.
+    private let dateFilterTimeZone = MediaCaptureDate.carrierTimeZone
 
     private struct ThumbnailDemand: Hashable {
         let id: String
@@ -96,6 +97,7 @@ struct MediaView: View {
         .safeAreaPadding(.top, 2)
         .background(Color.cameraBackground)
         .task {
+            camera.refreshMediaDateDisplayZone()
             if camera.mediaItems.isEmpty { camera.startMediaLibraryLoad() }
         }
         .fileImporter(
@@ -354,9 +356,10 @@ struct MediaView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Button {
                     dateFilterOwner = camera.mediaLibrarySessionID
-                    dateFilterTimeZone = camera.mediaDateRange?.timeZone ?? .current
-                    dateFilterStart = camera.mediaDateRange?.startDate ?? Date()
-                    dateFilterEnd = camera.mediaDateRange?.endDate ?? dateFilterStart
+                    let today = MediaCaptureDate.dayKey(at: Date(), in: camera.mediaDateDisplayZone)
+                        .flatMap(MediaCaptureDate.dayCarrier) ?? Date()
+                    dateFilterStart = camera.mediaDateRange?.startDayCarrier ?? today
+                    dateFilterEnd = camera.mediaDateRange?.endDayCarrier ?? today
                     isDateFilterPresented = true
                 } label: {
                     Label(language.string("media_date_range"), systemImage: "calendar")
@@ -492,8 +495,9 @@ struct MediaView: View {
                    let progress = camera.mediaDownloadProgress {
                     mediaDownloadProgress(progress)
                 }
-                if let captureTime = mediaCaptureDate(item) {
-                    Text(captureTime.formatted(date: .omitted, time: .shortened))
+                if let captureText = mediaCaptureDate(item, displayZone: camera.mediaDateDisplayZone)
+                    .cardText(unknownTimeZone: language.string("media_time_zone_unknown")) {
+                    Text(captureText)
                         .font(.caption2)
                         .foregroundStyle(Color.cameraSecondaryText)
                 }
@@ -702,7 +706,7 @@ struct MediaView: View {
     }
 
     private var dateFilterCalendar: Calendar {
-        var calendar = Calendar(identifier: .gregorian)
+        var calendar = Calendar(identifier: .iso8601)
         calendar.timeZone = dateFilterTimeZone
         return calendar
     }
@@ -719,7 +723,7 @@ struct MediaView: View {
                         .accessibilityIdentifier("media-date-start")
                     DatePicker(language.string("media_date_end"), selection: $dateFilterEnd, displayedComponents: .date)
                         .accessibilityIdentifier("media-date-end")
-                    Text(language.format("media_date_timezone", dateFilterTimeZone.identifier))
+                    Text(language.format("media_date_timezone", camera.mediaDateDisplayZone.identifier))
                     if dateFilterDraft == nil {
                         Text(language.string("media_date_invalid"))
                             .foregroundStyle(.red)
@@ -839,7 +843,7 @@ struct MediaView: View {
     private var folderFilterSummary: String {
         let summary = mediaFolderFilterSummary(camera.mediaItems, filter: mediaFilter,
             dateRange: camera.mediaDateRange, ratingFilter: camera.mediaRatingFilter,
-            folderFilter: camera.mediaFolderFilter)
+            folderFilter: camera.mediaFolderFilter, displayZone: camera.mediaDateDisplayZone)
         return language.format("media_folder_summary", summary.matchedCount, summary.loadedCount,
             summary.unknownFolderCount) + " " + language.string("media_folder_loaded_only")
     }
@@ -890,32 +894,28 @@ struct MediaView: View {
 
     private var ratingFilterSummary: String {
         let summary = mediaRatingFilterSummary(camera.mediaItems, filter: mediaFilter,
-            dateRange: camera.mediaDateRange, ratingFilter: camera.mediaRatingFilter, folderFilter: camera.mediaFolderFilter)
+            dateRange: camera.mediaDateRange, ratingFilter: camera.mediaRatingFilter, folderFilter: camera.mediaFolderFilter, displayZone: camera.mediaDateDisplayZone)
         return language.format("media_rating_summary", summary.matchedCount, summary.loadedCount,
                                summary.unknownRatingCount) + " " + language.string("media_rating_loaded_only")
     }
 
     private func dateRangeLabel(_ range: MediaDateRange) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = language.locale
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = range.timeZone
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return language.format("media_date_range_applied", formatter.string(from: range.startDate),
-                               formatter.string(from: range.endDate), range.timeZone.identifier)
+        // Rebase presentation/filtering to the same snapshot without changing
+        // the user's literal endpoints or any selected media/transfer owner.
+        language.format("media_date_range_applied", range.startDayKey,
+                        range.endDayKey, camera.mediaDateDisplayZone.identifier)
     }
 
     private var dateFilterSummary: String {
         let summary = mediaDateFilterSummary(camera.mediaItems, filter: mediaFilter, dateRange: camera.mediaDateRange,
-            ratingFilter: camera.mediaRatingFilter, folderFilter: camera.mediaFolderFilter)
+            ratingFilter: camera.mediaRatingFilter, folderFilter: camera.mediaFolderFilter, displayZone: camera.mediaDateDisplayZone)
         return language.format("media_date_summary", summary.matchedCount, summary.loadedCount,
                                summary.unknownDateCount) + " " + language.string("media_date_loaded_only")
     }
 
     private var displayedMedia: [CameraMediaItem] {
         mediaItemsForDisplay(camera.mediaItems, filter: mediaFilter, sort: mediaSort, dateRange: camera.mediaDateRange,
-            ratingFilter: camera.mediaRatingFilter, folderFilter: camera.mediaFolderFilter)
+            ratingFilter: camera.mediaRatingFilter, folderFilter: camera.mediaFolderFilter, displayZone: camera.mediaDateDisplayZone)
     }
 
     private var mediaLibrarySummary: String {
@@ -948,15 +948,16 @@ struct MediaView: View {
                 ? []
                 : [MediaGroup(id: "camera", title: nil, items: displayedMedia)]
         }
+        if mediaSort == .newest || mediaSort == .oldest {
+            return mediaDateGroups(displayedMedia, displayZone: camera.mediaDateDisplayZone)
+                .enumerated().map { index, group in
+                    let title = group.dayKey ?? language.string("media_unknown_date")
+                    return MediaGroup(id: "\(index)-\(title)", title: title, items: group.items)
+                }
+        }
         var groups: [MediaGroup] = []
         for item in displayedMedia {
-            let title: String
-            if mediaSort == .name {
-                title = item.name.first.map { String($0).uppercased() } ?? "#"
-            } else {
-                title = mediaCaptureDate(item)?.formatted(date: .abbreviated, time: .omitted)
-                    ?? language.string("media_unknown_date")
-            }
+            let title = item.name.first.map { String($0).uppercased() } ?? "#"
             if groups.last?.title == title {
                 groups[groups.count - 1].items.append(item)
             } else {
@@ -1016,11 +1017,9 @@ private struct MediaMetadataView: View {
                             value: ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
                         )
                     }
-                    if let date = mediaCaptureDate(item) {
-                        metadataHeader(
-                            language.string("media_captured_at"),
-                            value: date.formatted(date: .abbreviated, time: .shortened)
-                        )
+                    if let dateText = mediaCaptureDate(item, displayZone: camera.mediaDateDisplayZone)
+                        .detailText(unknownTimeZone: language.string("media_time_zone_unknown")) {
+                        metadataHeader(language.string("media_captured_at"), value: dateText)
                     }
 
                     if camera.supports(.mediaProtect) {
@@ -1127,7 +1126,8 @@ private struct MediaMetadataView: View {
         HStack {
             Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Color.cameraText)
             Spacer()
-            Text(value).font(.caption).foregroundStyle(Color.cameraSecondaryText).lineLimit(1)
+            Text(value).font(.caption).foregroundStyle(Color.cameraSecondaryText)
+                .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
         }
     }
 
