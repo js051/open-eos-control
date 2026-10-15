@@ -1035,3 +1035,10 @@
 
 "lut_import_loading" = "Importing 3D LUT…";
 "lut_import_stopping" = "Waiting for the previous file read to finish…";
+
+// Connecting attempt cancellation and exact-owner retirement.
+"connection_cancel" = "Cancel connection";
+"connection_waiting_cleanup" = "Waiting for previous connection cleanup…";
+"connection_cancelled_help" = "Connection cancelled. You can edit the settings and retry when ready. No retry starts automatically.";
+"connection_cleanup_pending" = "The previous connection is still being cleaned up. Settings can be edited now; camera scanning is paused and an explicit retry waits for this cleanup. Local cancellation does not confirm that the camera was released.";
+"connection_cleanup_unconfirmed" = "The previous Bridge session cleanup was not confirmed. New connections and camera scanning are blocked. Check the original camera, restart that Bridge, then reopen this app before retrying.";

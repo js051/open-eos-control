@@ -1035,3 +1035,10 @@
 
 "lut_import_loading" = "正在匯入 3D LUT…";
 "lut_import_stopping" = "正在等待先前的檔案讀取結束…";
+
+// Connecting attempt cancellation and exact-owner retirement.
+"connection_cancel" = "取消連線";
+"connection_waiting_cleanup" = "等待前次連線清理⋯";
+"connection_cancelled_help" = "已取消本次連線。可先修改設定，再自行按下重試；不會自動重新連線。";
+"connection_cleanup_pending" = "前次連線仍在清理中。現在可修改設定；相機掃描暫停，按下重試後會等待這次清理結束。本機取消不代表相機已確認釋放。";
+"connection_cleanup_unconfirmed" = "尚未確認前次 Bridge 工作階段已清理，已阻擋新連線與相機掃描。請先檢查原本的相機、重新啟動該 Bridge，再重新開啟本 App 後重試。";

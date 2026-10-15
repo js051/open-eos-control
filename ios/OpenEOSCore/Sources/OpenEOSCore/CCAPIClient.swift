@@ -598,9 +598,17 @@ public actor CCAPIClient: CameraForegroundMediaReading {
 
     public func connectSnapshot() async throws -> CameraSnapshot {
         try await initialize()
+        try Task.checkCancellation()
+        guard !closing else { throw CancellationError() }
         let cameraInfo = try await readInfo(preservingConnectionEvidence: true)
+        try Task.checkCancellation()
+        guard !closing else { throw CancellationError() }
         let cameraStatus = try await status()
+        try Task.checkCancellation()
+        guard !closing else { throw CancellationError() }
         let cameraCapabilities = try await capabilities()
+        try Task.checkCancellation()
+        guard !closing else { throw CancellationError() }
         return CameraSnapshot(info: cameraInfo, status: cameraStatus, capabilities: cameraCapabilities)
     }
 

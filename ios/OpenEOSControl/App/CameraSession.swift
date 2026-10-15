@@ -91,6 +91,20 @@ enum CameraSession: Sendable {
         }
     }
 
+    func connectionRetirementUnconfirmed() async -> Bool {
+        switch self {
+        case .ccapi: return false // No server-side session allocation in CCAPI discovery.
+        case let .desktopBridge(client): return await client.connectionRetirementUnconfirmed
+        }
+    }
+
+    func connectionRetirementSafetyWarnings() async -> Set<DesktopBridgeClient.ConnectionRetirementSafetyWarning> {
+        switch self {
+        case .ccapi: return []
+        case let .desktopBridge(client): return await client.connectionRetirementSafetyWarnings
+        }
+    }
+
     func capabilities() async throws -> CameraCapabilities {
         switch self {
         case let .ccapi(client): return try await client.capabilities()
