@@ -2168,3 +2168,16 @@ button.media-thumbnail:focus-visible {
 #media-mutation-list li[data-status="uncertain"], #media-mutation-list li[data-status="failed-not-sent"] { border-color: var(--danger); }
 
 #media-upload-outcome .button { max-width: 100%; min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
+
+.rtp-audio-status {
+  position: absolute;
+  right: 12px;
+  bottom: 52px;
+  max-width: min(80%, 320px);
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #111c;
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+}

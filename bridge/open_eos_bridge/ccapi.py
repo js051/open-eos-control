@@ -3226,17 +3226,21 @@ class CcapiSession:
                     "Canon RTP Live View with an advertised audio stream must be active before requesting audio.",
                 )
             audio_status = getattr(session, "audio_status", {})
-            if not isinstance(audio_status, dict) or not audio_status.get("available"):
+            if not isinstance(audio_status, dict) or not audio_status.get(
+                "decodingAvailable", audio_status.get("available")
+            ):
                 reason = audio_status.get("reason") if isinstance(audio_status, dict) else None
                 raise unsupported(RTP_AUDIO_FEATURE, self.engine_name, str(reason) if reason else None)
             reader = getattr(session, "read_audio", None)
             if not callable(reader):
                 raise unsupported(RTP_AUDIO_FEATURE, self.engine_name, "The active RTP receiver has no audio path.")
         try:
-            return reader(after_generation=after_generation, timeout=timeout)
-        except (RtpError, OSError, RuntimeError) as error:
+            chunk = reader(after_generation=after_generation, timeout=timeout)
             with self._lock:
-                self._last_error = str(error)
+                if self._rtp_session is not session or not self._live_view_active or self._closed:
+                    return None
+            return chunk
+        except (RtpError, OSError, RuntimeError) as error:
             raise BridgeError(
                 "CCAPI_RTP_AUDIO_FAILED",
                 str(error),

@@ -24,7 +24,7 @@ const realFunctions = [
   "captureModeFromCamera", "shutterReleaseUnconfirmed", "bulbControlLocked",
   "localPreviewSelected", "previewActive", "changePreviewInput", "clampFps", "toggleLiveView", "startLiveView", "liveViewControlRequest", "stopLiveView",
   "stopLiveLoop", "changeLiveSource", "currentRtpAudioStatus", "refreshRtpAudioStatus",
-  "renderRtpAudio", "toggleRtpAudio", "pollRtpAudio", "stopRtpAudioSources", "stopRtpAudio",
+  "renderRtpAudio", "ownsRtpAudio", "armRtpAudioWatchdog", "checkRtpAudioProgress", "toggleRtpAudio", "pollRtpAudio", "stopRtpAudioSources", "stopRtpAudio",
   "adoptCameraStatus", "liveViewStopRequired", "maintenanceStopRetryAvailable", "renderAvailability", "setOperationState",
 ];
 const stateStart = app.indexOf("  const state = {");
@@ -60,15 +60,15 @@ function harness() {
   let liveSource = "CCAPI_RTP";
   let delayNextStatus = false;
   class FakeAudioContext {
-    constructor() {this.resumeGate = deferred(); this.closeCount = 0; contexts.push(this);}
+    constructor() {this.state = "running"; this.resumeGate = deferred(); this.closeCount = 0; contexts.push(this);}
     resume() {return this.resumeGate.promise;}
-    close() {this.closeCount += 1; return Promise.resolve();}
+    close() {this.closeCount += 1; this.state = "closed"; return Promise.resolve();}
   }
   const sandbox = {
-    console, Headers, AbortController, Date, Set, Map, Number, Error, encodeURIComponent, setTimeout, clearTimeout,
+    console, Headers, AbortController, Date, Set, Map, Number, Error, encodeURIComponent, setTimeout, clearTimeout, performance,
     ui, window: {AudioContext: FakeAudioContext}, navigator: {mediaDevices: {}},
     localVideo: {supportState: () => ({available: true})},
-    document: {querySelector: () => element(), querySelectorAll: () => []},
+    document: {visibilityState: "visible", querySelector: () => element(), querySelectorAll: () => []},
     readLanguagePreference: () => "en",
     FEATURES: new Proxy({}, {get: (_, name) => name}),
     t: key => key,
@@ -81,7 +81,7 @@ function harness() {
     effectiveTapAction: () => null, validCcapiUrl: () => true,
     liveCapabilities: () => sandbox.state.capabilities?.liveView || {},
     mediaBatch: require("../open_eos_bridge/static/media-batch.js"),
-    rtpAudio: {readPcmResponse: () => {throw new Error("Audio fixture must stay pending");}},
+    rtpAudio: require("../open_eos_bridge/static/rtp-audio.js"),
     renderLiveState: () => sandbox.renderRtpAudio(),
     fetch: async (url, options) => {
       requests.push({url, method: options.method, signal: options.signal});
@@ -211,7 +211,7 @@ test("same-owner RTP status succeeds and ordinary unmute/mute retains normal con
   assert.equal(h.state.status, fresh);
   const start = h.toggleRtpAudio();
   assert.equal(h.state.rtpAudioBusy, true);
-  assert.equal(h.ui.rtpAudioButton.disabled, true);
+  assert.equal(h.ui.rtpAudioButton.disabled, false, "pending start remains cancellable");
   assertNormalLiveControls(h);
   await nextTask();
   h.contexts[0].resumeGate.resolve();
@@ -306,6 +306,7 @@ test("same-owner resume rejection closes its context and permits a fresh unmute"
   assert.equal(h.contexts[0].closeCount, 1);
   assert.equal(audioRequests(h).length, 0);
   assert.deepEqual(h.toasts.at(-1), { message: "Synthetic current resume failure", error: true });
+  await flush(); // A new output context waits for the previous close promise to fulfill.
   const retry = h.toggleRtpAudio();
   h.contexts[1].resumeGate.resolve();
   await retry;
@@ -353,6 +354,7 @@ for (const newState of ["pending", "playing", "failed"]) {
       if (newState === "playing") h.contexts[1].resumeGate.resolve();
       if (newState === "failed") h.contexts[1].resumeGate.reject(new Error("Synthetic new resume failure"));
       if (newState !== "pending") await newStart;
+      await flush(); // Settle the current context's own resource-release confirmation before testing an old resume.
       const before = {
         toasts: h.toasts.slice(), renders: h.audioRenders.length,
         context: h.state.rtpAudioContext, error: h.state.rtpAudioError,
@@ -396,12 +398,14 @@ test("Stop closes a still-pending context without waiting for resume to settle",
   await pending;
 });
 
-test("repeated unmute while resume is pending opens only one context", async t => {
+test("second speaker gesture cancels a pending resume without opening another context", async t => {
   const h = await liveHarness(t);
   const pending = h.toggleRtpAudio();
   const duplicate = h.toggleRtpAudio();
   assert.equal(h.contexts.length, 1);
   h.contexts[0].resumeGate.resolve();
   await Promise.all([pending, duplicate]);
-  assert.equal(audioRequests(h).length, 1);
+  assert.equal(audioRequests(h).length, 0);
+  assert.equal(h.contexts[0].closeCount, 1);
+  assert.equal(h.state.rtpAudioEnabled, false);
 });

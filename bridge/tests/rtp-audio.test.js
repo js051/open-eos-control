@@ -37,6 +37,7 @@ assert.equal(rtpAudio.scheduleTiming(10, 10.1, 0.02, true).reset, true);
     headers: {
       "Content-Type": "audio/pcm;rate=48000;channels=2;format=s16le",
       "X-Open-EOS-Audio-Generation": "7",
+      "X-Open-EOS-Audio-Age-Ms": "0",
       "X-Open-EOS-Audio-Sample-Rate": "48000",
       "X-Open-EOS-Audio-Channels": "2",
       "X-Open-EOS-Audio-Frames": "2",
@@ -57,6 +58,7 @@ assert.equal(rtpAudio.scheduleTiming(10, 10.1, 0.02, true).reset, true);
     headers: {
       "Content-Type": "audio/pcm",
       "X-Open-EOS-Audio-Generation": "1",
+      "X-Open-EOS-Audio-Age-Ms": "0",
       "X-Open-EOS-Audio-Sample-Rate": "48000",
       "X-Open-EOS-Audio-Channels": "2",
       "X-Open-EOS-Audio-Frames": "2",

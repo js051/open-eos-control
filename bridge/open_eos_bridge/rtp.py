@@ -6,7 +6,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from io import BytesIO
 from typing import Protocol
 from urllib.parse import urlsplit
@@ -20,6 +20,8 @@ CANON_AUDIO_CLOCK_RATE = 48_000
 AUDIO_CHANNELS = 2
 AUDIO_SAMPLE_BYTES = 2
 AUDIO_QUEUE_CHUNKS = 96
+MAX_DECODED_AUDIO_AGE_SECONDS = 1.0
+MAX_AUDIO_CHUNK_FRAMES = CANON_AUDIO_CLOCK_RATE // 4
 ANNEX_B_START_CODE = b"\x00\x00\x00\x01"
 _RTP_RECEIVER_OWNERS_LOCK = threading.Lock()
 _RTP_RECEIVER_OWNERS: dict[tuple[str, ...], object] = {}
@@ -87,6 +89,7 @@ class RtpAudioChunk:
     channels: int
     sample_frames: int
     discontinuity: bool = False
+    decoded_at_monotonic: float = field(default_factory=time.monotonic)
 
 
 @dataclass(frozen=True)
@@ -542,8 +545,11 @@ class UdpH264RtpSession:
         self._audio_decoder: LatmAudioDecoder | None = None
         self._audio_chunks: deque[RtpAudioChunk] = deque(maxlen=AUDIO_QUEUE_CHUNKS)
         self._audio_generation = 0
+        self._audio_input_access_units = 0
+        self._audio_decoded_sample_frames = 0
         self._audio_last_bytes = 0
         self._audio_last_frame_at_millis: int | None = None
+        self._audio_last_decoded_at: float | None = None
         self._audio_last_error: str | None = None
         self._audio_supported, self._audio_support_reason = latm_audio_support(description.audio)
         if self._audio_supported and audio_decoder_factory is None:
@@ -576,21 +582,32 @@ class UdpH264RtpSession:
         with self._condition:
             audio = self.description.audio
             active = self._audio_thread is not None and not self._closed
+            self._expire_audio_chunks()
+            fresh = active and bool(self._audio_chunks)
             return {
                 "advertised": audio is not None,
-                "available": active,
+                "available": fresh,
+                "decodingAvailable": active,
                 "active": active,
+                "decodedFresh": fresh,
+                "decodedAgeMs": (max(0, int((time.monotonic() - self._audio_last_decoded_at) * 1000))
+                                 if self._audio_last_decoded_at is not None else None),
+                "outputProgressSupported": False,
+                "physicalAudibilityConfirmed": False,
                 "codec": audio.codec if audio is not None else None,
                 "clockRate": audio.clock_rate if audio is not None else None,
                 "sampleRate": CANON_AUDIO_CLOCK_RATE if active else None,
                 "channels": AUDIO_CHANNELS if active else audio.channels if audio is not None else None,
                 "generation": self._audio_generation,
+                "decoderInputAccessUnits": self._audio_input_access_units,
+                "decodedSampleFrames": self._audio_decoded_sample_frames,
                 "lastBytes": self._audio_last_bytes,
                 "lastFrameAtMillis": self._audio_last_frame_at_millis,
                 "source": (
                     f"rtp://{self.destination_address}:{audio.port}" if audio is not None else None
                 ),
-                "reason": None if active else self._audio_support_reason,
+                "reason": (None if fresh else "Waiting for fresh decoded Canon RTP audio."
+                           if active else self._audio_support_reason),
                 "lastError": self._audio_last_error,
             }
 
@@ -786,6 +803,14 @@ class UdpH264RtpSession:
             and 0 <= time.monotonic() - self._last_emitted_at < MAX_DECODED_FRAME_AGE_SECONDS
         )
 
+    def _expire_audio_chunks(self) -> None:
+        # Called with the condition lock; wall-clock changes cannot renew PCM.
+        now = time.monotonic()
+        while self._audio_chunks and not (
+            0 <= now - self._audio_chunks[0].decoded_at_monotonic < MAX_DECODED_AUDIO_AGE_SECONDS
+        ):
+            self._audio_chunks.popleft()
+
     def read_audio(self, after_generation: int = 0, timeout: float = 1.0) -> RtpAudioChunk | None:
         if after_generation < 0:
             raise RtpError("Canon RTP audio generation must be non-negative.")
@@ -793,33 +818,32 @@ class UdpH264RtpSession:
         with self._condition:
             if self._audio_thread is None:
                 raise RtpError(self._audio_support_reason)
-            while not self._closed and (
-                not self._audio_chunks or self._audio_chunks[-1].generation <= after_generation
-            ):
+            while not self._closed:
+                self._expire_audio_chunks()
+                if self._audio_chunks and self._audio_chunks[-1].generation > after_generation:
+                    chunk = self._audio_chunks[-1] if after_generation == 0 else next(
+                        candidate for candidate in self._audio_chunks if candidate.generation > after_generation
+                    )
+                    discontinuity = chunk.discontinuity or (
+                        after_generation > 0 and chunk.generation != after_generation + 1
+                    )
+                    return replace(chunk, discontinuity=discontinuity)
+                if self._audio_thread is None:
+                    raise RtpError("Canon RTP audio receiver stopped.")
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     if self._audio_last_error:
                         raise RtpError(f"Canon RTP audio decoder error: {self._audio_last_error}")
                     return None
                 self._condition.wait(remaining)
-            if self._closed:
-                raise RtpError("Canon RTP audio session is closed.")
-            chunk = self._audio_chunks[-1] if after_generation == 0 else next(
-                (candidate for candidate in self._audio_chunks if candidate.generation > after_generation),
-                None,
-            )
-            if chunk is None:
-                return None
-            discontinuity = chunk.discontinuity or (
-                after_generation > 0 and chunk.generation != after_generation + 1
-            )
-            return replace(chunk, discontinuity=discontinuity)
+            raise RtpError("Canon RTP audio session is closed.")
 
     def close(self) -> None:
         with self._condition:
             if self._closed:
                 return
             self._closed = True
+            self._audio_chunks.clear()
             receiver, thread = self._socket, self._thread
             audio_receiver, audio_thread = self._audio_socket, self._audio_thread
             self._socket = self._audio_socket = None
@@ -893,14 +917,27 @@ class UdpH264RtpSession:
                 access_unit = depacketizer.accept(datagram)
                 if access_unit is None:
                     continue
+                with self._condition:
+                    if self._closed:
+                        return
+                    self._audio_input_access_units += 1
                 decoder_discontinuity = decoder_discontinuity or access_unit.discontinuity
+                decode_started = time.monotonic()
                 pcm = decoder.decode(access_unit)
                 if pcm is None:
                     continue
+                decoded_at = time.monotonic()
+                if not 0 <= decoded_at - decode_started < MAX_DECODED_AUDIO_AGE_SECONDS:
+                    raise RtpError("Canon RTP audio decode exceeded the fresh PCM deadline.")
+                if (pcm.sample_rate != CANON_AUDIO_CLOCK_RATE or pcm.channels != AUDIO_CHANNELS
+                        or not 0 < pcm.sample_frames <= MAX_AUDIO_CHUNK_FRAMES
+                        or len(pcm.content) != pcm.sample_frames * AUDIO_CHANNELS * AUDIO_SAMPLE_BYTES):
+                    raise RtpError("Canon RTP audio decoder returned empty, malformed or oversized PCM.")
                 with self._condition:
                     if self._closed:
                         return
                     self._audio_generation += 1
+                    self._audio_decoded_sample_frames += pcm.sample_frames
                     chunk = RtpAudioChunk(
                         content=pcm.content,
                         generation=self._audio_generation,
@@ -908,8 +945,11 @@ class UdpH264RtpSession:
                         channels=pcm.channels,
                         sample_frames=pcm.sample_frames,
                         discontinuity=decoder_discontinuity,
+                        decoded_at_monotonic=decoded_at,
                     )
+                    self._expire_audio_chunks()
                     self._audio_chunks.append(chunk)
+                    self._audio_last_decoded_at = decoded_at
                     self._audio_last_bytes = len(pcm.content)
                     self._audio_last_frame_at_millis = int(time.time() * 1000)
                     self._audio_last_error = None
