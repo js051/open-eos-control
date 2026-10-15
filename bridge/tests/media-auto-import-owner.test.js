@@ -152,7 +152,7 @@ function fixture(options = {}) {
   const names = ["refreshMediaDateZone", "recordingRecoveryActive", "mediaTransferActive", "cameraInteractionBusy", "mediaAutoImportEligible", "ownsMediaAutoImport",
     "mediaAutoImportManualBusy", "assertMediaAutoImportCurrent", "withMediaAutoImportRead", "requireMediaAutoImportResponse",
     "readMediaAutoImportInventory", "readMediaAutoImportMetadata", "mediaAutoImportHistoryCall", "transferMediaAutoImportItem",
-    "finishMediaAutoImportOwner", "scheduleMediaAutoImport", "stepMediaAutoImport", "startMediaAutoImport", "stopMediaAutoImport", "renderMediaAutoImport", "resetSession",
+    "finishMediaAutoImportOwner", "scheduleMediaAutoImport", "stepMediaAutoImport", "startMediaAutoImport", "stopMediaAutoImport", "renderMediaAutoImport", "cancelSetting", "resetSession",
     "loadMediaThumbnail", "observeMediaThumbnail", "retryMediaAutoImportThumbnails", "loadLatestMediaThumbnail"];
   const eventsStart = source.indexOf('    ui.mediaAutoImportStart?.addEventListener');
   const eventsEnd = source.indexOf('    ui.mediaScopeControl.addEventListener', eventsStart);

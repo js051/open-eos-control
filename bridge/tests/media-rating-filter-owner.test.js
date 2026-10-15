@@ -43,7 +43,7 @@ function fixture() {
     "releaseObjectUrl", "clearBulbTimer", "renderAvailability", "renderHealth"]) context[name] = () => {};
   context.closeMediaPreview = () => { calls.push("close-preview"); state.mediaPreviewItem = null; };
   vm.runInContext(["displayedMedia", "renderMediaRatingFilter", "openMediaRatingFilter", "applyMediaRatingFilter",
-    "clearMediaRatingFilter", "previewableMedia", "mediaDateGroup", "resetSession"].map(extract).join("\n"), context);
+    "clearMediaRatingFilter", "previewableMedia", "mediaDateGroup", "cancelSetting", "resetSession"].map(extract).join("\n"), context);
   return context;
 }
 function apply(context, filter) {

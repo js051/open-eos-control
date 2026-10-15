@@ -304,6 +304,7 @@ async function run() {
     await page.click('.exposure-control[data-setting-key="iso"]');
     await page.waitForSelector("#setting-dialog[open]");
     await page.getByRole("button", { name: "800", exact: true }).click();
+    await page.locator("#setting-dialog .button.primary").click();
     await waitForBridgeState(
       origin,
       (backend) => backend.values["/main/imgsettings/iso"] === "800" &&
@@ -758,6 +759,7 @@ async function run() {
     );
 
     await page.click("#video-mode-button");
+    if (await page.locator("#mode-apply-button").isVisible()) await page.click("#mode-apply-button");
     await page.click("#shutter-button");
     await waitForBridgeState(
       origin,
@@ -772,8 +774,10 @@ async function run() {
       "video recording stop to release the camera recorder",
     );
     await page.click("#photo-mode-button");
+    if (await page.locator("#mode-apply-button").isVisible()) await page.click("#mode-apply-button");
 
     await page.selectOption('#advanced-settings select[data-setting-key="shootingmode"]', "Bulb");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="shootingmode"]');
     await waitForBridgeState(
       origin,
       (candidate) => candidate.values["/main/capturesettings/autoexposuremode"] === "Bulb",
@@ -813,6 +817,7 @@ async function run() {
     );
     assert.ok(bulbPress >= bulbStart && bulbRelease > bulbPress);
     await page.selectOption('#advanced-settings select[data-setting-key="shootingmode"]', "Manual");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="shootingmode"]');
     await waitForBridgeState(
       origin,
       (candidate) => candidate.values["/main/capturesettings/autoexposuremode"] === "Manual",

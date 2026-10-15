@@ -19,6 +19,7 @@
   if (!mediaTransfer) throw new Error("Open EOS media transfer module is unavailable.");
   const mediaUpload = globalThis.OpenEOSMediaUpload;
   const captureConfiguration = globalThis.OpenEOSCaptureConfiguration;
+  const shootingSettings = globalThis.OpenEOSShootingSettings;
   if (!mediaUpload) throw new Error("Open EOS media upload module is unavailable.");
   const mediaListing = globalThis.OpenEOSMediaListing;
   if (!mediaListing) throw new Error("Open EOS media listing module is unavailable.");
@@ -268,6 +269,12 @@
       fileNamingRule: "Use Canon's exact uppercase ASCII length and range.",
       apply: "Apply",
       fileNamingUpdated: "File naming updated",
+      "settingHistory": "Shooting setting receipts",
+      "settingWrite_not-sent": "Not sent",
+      "settingWrite_unknown": "Write result unknown",
+      "settingWrite_response-received": "Transport response received",
+      "settingNeedsReadback": "Setting response retained; inspect or read back before another write.",
+      "settingEvidenceBoundary": "A transport response is not an exact camera acknowledgment. A later matching read does not prove this write caused it.",
       "captureConfigurationHistory": "Capture configuration receipts",
       "configWrite_not-sent": "Write not sent",
       "configWrite_unknown": "Write result unknown; do not repeat blindly",
@@ -794,6 +801,12 @@
       fileNamingRule: "請使用 Canon 規定長度與範圍的大寫 ASCII 字元。",
       apply: "套用",
       fileNamingUpdated: "已更新檔名設定",
+      "settingHistory": "拍攝設定收據",
+      "settingWrite_not-sent": "尚未送出",
+      "settingWrite_unknown": "寫入結果不確定",
+      "settingWrite_response-received": "已收到傳輸回應",
+      "settingNeedsReadback": "已保留設定結果；再次寫入前請查看或唯讀讀回。",
+      "settingEvidenceBoundary": "傳輸回應不等於相機精確確認；稍後讀到相同值也不能證明是本次寫入造成。",
       "captureConfigurationHistory": "拍前設定收據",
       "configWrite_not-sent": "尚未送出寫入",
       "configWrite_unknown": "寫入結果未知，請勿盲目重送",
@@ -1638,6 +1651,13 @@
     captureConfigurationHistory: [],
     captureConfigurationOwner: null,
     settingDrafts: {},
+    settingDraftRevisions: {},
+    settingConsumedDrafts: {},
+    settingSequence: 0,
+    settingHistory: [],
+    settingOwner: null,
+    settingEditor: 0,
+    settingObservationRevision: 0,
     operatorConfirmedFeatures: new Set(),
     lastClockSyncAt: null,
     lastCreatedDirectoryName: null,
@@ -1851,6 +1871,7 @@
     exposureStrip: byId("exposure-strip"),
     photoModeButton: byId("photo-mode-button"),
     videoModeButton: byId("video-mode-button"),
+    modeApplyButton: byId("mode-apply-button"),
     shutterButton: byId("shutter-button"),
     shutterLabel: byId("shutter-label"),
     shutterAFControl: byId("shutter-af-control"),
@@ -2510,7 +2531,7 @@
   async function refreshSession({ quiet = false, eventGeneration = null } = {}) {
     // A status read admitted inside a command can predate its ACK. Existing
     // event refresh already waits for this boundary; diagnostics must too.
-    if (!state.session || state.recordingCommandOwner?.session === state.session || state.heldAutofocusOwner) return false;
+    if (!state.session || state.settingOwner || state.recordingCommandOwner?.session === state.session || state.heldAutofocusOwner) return false;
     if (state.mediaListingOwner) {
       if (quiet) return false;
       state.mediaListingOwner.cancel({ silent: true });
@@ -2580,11 +2601,12 @@
 
   async function refreshCapabilityEvidence() {
     const session = state.session;
-    if (!session) return;
+    if (!session || state.settingOwner) return;
+    const settingRevision = state.settingObservationRevision || 0;
     try {
       const capabilities = await api(`/v1/session/${encodeURIComponent(session.id)}/capabilities`);
-      // The connection object owns this response, even if a later connection reuses its ID.
-      if (state.session !== session) return;
+      // Connection and mutation generation own this read, even if IDs are reused.
+      if (state.session !== session || (state.settingObservationRevision || 0) !== settingRevision || state.settingOwner) return;
       state.capabilities = capabilities;
     } catch (_) {
       // Evidence refresh must not turn an already successful camera operation into a failure.
@@ -2679,7 +2701,12 @@
     state.captureConfigurationDraftRevisions = {};
     state.captureConfigurationConsumedDrafts = {};
     state.fileNamingDrafts = {};
+    cancelSetting({ retire: true });
+    state.settingOwner = null;
     state.settingDrafts = {};
+    state.settingDraftRevisions = {};
+    state.settingConsumedDrafts = {};
+    state.settingEditor += 1;
     state.operatorConfirmedFeatures.clear();
     state.lastClockSyncAt = null;
     state.lastCreatedDirectoryName = null;
@@ -3168,6 +3195,7 @@
     }
     if (fileNamingSupported) renderFileNamingSettings();
     renderCaptureConfigurationHistory();
+    renderSettingHistory();
     if (sensorCleaningSupported) {
       const row = document.createElement("div");
       row.className = "settings-command";
@@ -3261,11 +3289,12 @@
         button.dataset.cameraCommand = "setting";
         button.dataset.settingKey = setting.key;
         button.textContent = t("apply");
-        const refresh = () => {
+        const refresh = (event) => {
           state.settingDrafts[setting.key] = input.value;
+          if (event) editSettingDraft(setting.key, input.value);
           input.disabled = cameraInteractionBusy();
           button.disabled = cameraInteractionBusy()
-            || !textSettingValueValid(setting, input.value)
+            || !settingDraftAvailable(setting.key) || !textSettingValueValid(setting, input.value)
             || input.value === setting.value;
         };
         input.addEventListener("input", refresh);
@@ -3295,21 +3324,34 @@
         range.min = "0";
         range.max = String(setting.values.length - 1);
         range.step = "1";
-        range.value = String(Math.max(0, setting.values.indexOf(setting.value)));
+        const selectedValue = state.settingDrafts[setting.key] ?? setting.value;
+        range.value = String(Math.max(0, setting.values.indexOf(selectedValue)));
         range.dataset.settingKey = setting.key;
         range.disabled = cameraInteractionBusy();
         range.setAttribute("aria-label", settingLabel(setting));
         const output = document.createElement("output");
         const updateOutput = () => {
-          output.textContent = settingValueLabel(setting, setting.values[Number(range.value)]);
+          const pending = state.settingDrafts[setting.key];
+          const unavailable = pending !== undefined && !setting.values.includes(pending);
+          output.textContent = unavailable ? `${settingValueLabel(setting, pending)} · ${t("unsupported")}` :
+            settingValueLabel(setting, setting.values[Number(range.value)]);
+          range.setAttribute("aria-valuetext", output.textContent);
         };
         updateOutput();
-        range.addEventListener("input", updateOutput);
-        range.addEventListener("change", () => {
-          const value = setting.values[Number(range.value)];
-          if (value !== setting.value) updateSetting(setting, value, range);
+        range.addEventListener("input", () => {
+          editSettingDraft(setting.key, setting.values[Number(range.value)]);
+          updateOutput();
         });
-        control.append(range, output);
+        const apply = document.createElement("button"); apply.type = "button"; apply.className = "button secondary";
+        apply.dataset.cameraCommand = "setting"; apply.dataset.settingKey = setting.key; apply.textContent = t("apply");
+        apply.disabled = cameraInteractionBusy() || !settingDraftAvailable(setting.key) ||
+          !shootingSettings.accepts(setting, selectedValue) || selectedValue === setting.value;
+        range.addEventListener("change", () => {
+          editSettingDraft(setting.key, setting.values[Number(range.value)]);
+          renderAvailability();
+        });
+        apply.addEventListener("click", () => updateSetting(setting, state.settingDrafts[setting.key] ?? setting.value, apply));
+        control.append(range, output, apply);
         label.append(text, control);
         ui.advancedSettings.append(label);
         return;
@@ -3323,9 +3365,23 @@
         option.textContent = settingValueLabel(setting, value);
         select.append(option);
       });
-      select.value = setting.value;
-      select.addEventListener("change", () => updateSetting(setting, select.value, select));
-      label.append(text, select);
+      const selected = state.settingDrafts[setting.key] ?? setting.value;
+      if (!setting.values.includes(selected)) {
+        const option = document.createElement("option"); option.value = selected; option.disabled = true;
+        option.textContent = `${settingValueLabel(setting, selected)} · ${t("unsupported")}`;
+        select.append(option);
+      }
+      select.value = selected;
+      const apply = document.createElement("button"); apply.type = "button"; apply.className = "button secondary";
+      apply.dataset.cameraCommand = "setting"; apply.dataset.settingKey = setting.key; apply.textContent = t("apply");
+      apply.disabled = cameraInteractionBusy() || !settingDraftAvailable(setting.key) ||
+        !shootingSettings.accepts(setting, selected) || selected === setting.value;
+      select.addEventListener("change", () => {
+        editSettingDraft(setting.key, select.value);
+        renderAvailability();
+      });
+      apply.addEventListener("click", () => updateSetting(setting, state.settingDrafts[setting.key] ?? setting.value, apply));
+      label.append(text, select, apply);
       ui.advancedSettings.append(label);
     });
   }
@@ -3846,61 +3902,200 @@
   }
 
   function openSettingDialog(setting) {
+    const editor = ++state.settingEditor;
     ui.settingDialogGroup.textContent = CORE_SETTINGS.includes(setting.key) ? t("exposure") : t("cameraSetting");
     ui.settingDialogTitle.textContent = settingLabel(setting);
     ui.settingOptions.replaceChildren();
-    const current = currentSettingValue(setting);
+    const current = state.settingDrafts[setting.key] ?? currentSettingValue(setting);
+    const apply = document.createElement("button"); apply.type = "button";
+    apply.className = "button primary"; apply.textContent = t("apply");
+    const refresh = () => {
+      const value = state.settingDrafts[setting.key] ?? current;
+      apply.disabled = cameraInteractionBusy() || !settingDraftAvailable(setting.key) ||
+        !shootingSettings.accepts(settingByKey(setting.key), value) || value === currentSettingValue(setting);
+      ui.settingOptions.querySelectorAll("button[data-setting-value]").forEach((button) => {
+        const selected = button.dataset.settingValue === value;
+        button.classList.toggle("active", selected); button.setAttribute("aria-pressed", String(selected));
+        button.disabled = cameraInteractionBusy();
+      });
+    };
     setting.values.forEach((value) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "setting-option";
-      button.textContent = settingValueLabel(setting, value);
-      button.classList.toggle("active", value === current);
-      button.setAttribute("aria-pressed", String(value === current));
-      button.addEventListener("click", async () => {
-        await updateSetting(setting, value, button);
-        if (!state.lastError) ui.settingDialog.close();
+      const button = document.createElement("button"); button.type = "button"; button.className = "setting-option";
+      button.dataset.settingValue = value; button.textContent = settingValueLabel(setting, value);
+      button.addEventListener("click", () => {
+        if (editor !== state.settingEditor || cameraInteractionBusy()) return;
+        editSettingDraft(setting.key, value); refresh();
       });
       ui.settingOptions.append(button);
     });
-    ui.settingDialog.showModal();
+    apply.addEventListener("click", async () => {
+      if (editor !== state.settingEditor) return;
+      const value = state.settingDrafts[setting.key] ?? current;
+      const matched = await updateSetting(setting, value, apply, editor);
+      if (editor !== state.settingEditor) return;
+      if (matched) ui.settingDialog.close(); else refresh();
+    });
+    ui.settingOptions.append(apply); refresh(); ui.settingDialog.showModal();
     requestAnimationFrame(() => ui.settingOptions.querySelector(".active")?.scrollIntoView({ block: "center" }));
   }
 
-  async function updateSetting(setting, value, source) {
-    if (!state.session || cameraInteractionBusy()) return false;
-    const session = state.session;
+  function editSettingDraft(key, value) {
+    state.settingDrafts[key] = value;
+    state.settingDraftRevisions[key] = (state.settingDraftRevisions[key] || 0) + 1;
+  }
+
+  function settingDraftAvailable(key) {
+    return state.settingConsumedDrafts[key] !== (state.settingDraftRevisions[key] || 0);
+  }
+
+  function settingCurrent(record) {
+    return record.owner === state.session && record.generation === state.refreshGeneration &&
+      state.settingOwner === record && !record.retired;
+  }
+
+  function cancelSetting({ retire = false } = {}) {
+    const record = state.settingOwner;
+    if (!record) return;
+    record.cancelled = true;
+    record.retired ||= retire;
+    record.controller.abort();
+    if (!retire) renderAdvancedSettings();
+  }
+
+  function publishSetting(record) {
+    if (!settingCurrent(record) || record.controller.signal.aborted ||
+        (record.editor !== null && record.editor !== state.settingEditor) || !record.setting) return false;
+    const index = state.capabilities?.settings?.findIndex((item) => item.key === record.key) ?? -1;
+    if (index >= 0) state.capabilities.settings[index] = { ...record.setting, values: [...record.setting.values] };
+    const exposureKey = { iso: "iso", shutter: "shutter", aperture: "aperture", whitebalance: "whiteBalance" }[record.key];
+    if (exposureKey && state.status?.exposure) state.status.exposure[exposureKey] = record.setting.value;
+    if (record.key === "shootingmode" && state.status) state.status.mode = record.setting.value;
+    const permission = shootingSettings.ownership({ sameOwner: true, sameAttempt: true,
+      sameDraftRevision: record.draftRevision === (state.settingDraftRevisions[record.key] || 0),
+      cancelled: record.cancelled, responseReceived: record.writeEvidence === "response-received",
+      readbackMatched: record.readbackEvidence === "matched" });
+    if (permission.canConsumeDraft) delete state.settingDrafts[record.key];
+    return permission.canConsumeDraft;
+  }
+
+  function renderSettingHistory() {
+    if (!state.settingHistory.length) return;
+    const section = document.createElement("section");
+    section.dataset.settingHistory = "true";
+    const title = document.createElement("h3"); title.textContent = t("settingHistory"); section.append(title);
+    for (const record of [...state.settingHistory].reverse()) {
+      const row = document.createElement("div"); row.className = "settings-command";
+      const copy = document.createElement("span"), title = document.createElement("strong"), detail = document.createElement("small");
+      title.textContent = `${settingLabel(record.key)}: ${JSON.stringify(record.requestedValue)}`;
+      detail.textContent = `${record.engine} · ${t(`settingWrite_${record.writeEvidence}`)} · ${t(`configRead_${record.readbackEvidence}`)}` +
+        (record.setting ? ` · ${t("configObservedValue")}: ${JSON.stringify(record.setting.value)}` : "") +
+        (record.cancelled ? ` · ${t("configCancelled")}` : "");
+      copy.append(title, detail);
+      const actions = document.createElement("div"); actions.className = "settings-command-actions";
+      const button = document.createElement("button"); button.type = "button";
+      button.dataset.settingOutcomeId = String(record.id);
+      button.dataset.settingOutcomeAction = state.settingOwner === record ? "cancel" : "recover";
+      button.textContent = t(state.settingOwner === record ? "cancel" : "configReadOnlyRecovery");
+      button.disabled = state.settingOwner === record ? record.controller.signal.aborted :
+        cameraInteractionBusy() || record.owner !== state.session || record.retired;
+      button.addEventListener("click", () => state.settingOwner === record ? cancelSetting() : recoverSetting(record));
+      actions.append(button);
+      if (state.settingOwner !== record) {
+        const prepare = document.createElement("button"); prepare.type = "button";
+        prepare.textContent = t("configPrepareAnother"); prepare.dataset.settingOutcomeAction = "prepare";
+        prepare.dataset.settingOutcomeId = String(record.id);
+        prepare.disabled = cameraInteractionBusy() || record.owner !== state.session || record.retired;
+        prepare.addEventListener("click", () => {
+          if (cameraInteractionBusy() || record.owner !== state.session || record.retired) return;
+          editSettingDraft(record.key, state.settingDrafts[record.key] ?? record.requestedValue);
+          renderAdvancedSettings();
+        });
+        actions.append(prepare);
+      }
+      row.append(copy, actions); section.append(row);
+    }
+    const warning = document.createElement("small"); warning.textContent = t("settingEvidenceBoundary");
+    section.append(warning); ui.advancedSettings.append(section);
+  }
+
+  function renderSettingButtonAvailability(button, interactionBusy, bulbActive) {
+    if (!button.dataset.settingOutcomeAction) return false;
+    const record = state.settingHistory.find((item) => String(item.id) === button.dataset.settingOutcomeId);
+    button.disabled = !record || record.owner !== state.session || record.retired ||
+      (button.dataset.settingOutcomeAction === "cancel" ? state.settingOwner !== record || record.controller.signal.aborted :
+        interactionBusy || bulbActive);
+    return true;
+  }
+
+  async function updateSetting(setting, value, source, editor = null) {
+    const fresh = settingByKey(setting.key);
+    if (!state.session || cameraInteractionBusy() || bulbControlLocked() ||
+        !settingDraftAvailable(setting.key) || !shootingSettings.accepts(fresh, value)) return false;
+    const owner = state.session;
     beginCameraInteraction();
-    const generation = state.refreshGeneration;
-    const isCurrent = () => state.session === session && state.refreshGeneration === generation;
-    const liveViewStatusRevision = state.liveViewStopRevision || 0;
-    state.lastError = null;
-    source.disabled = true;
-    setOperationState(t("busy"));
-    renderAvailability();
+    const record = { id: ++state.settingSequence, owner, engine: owner.engine, token: state.token,
+      key: setting.key, requestedValue: value, draftRevision: state.settingDraftRevisions[setting.key] || 0,
+      editor, generation: state.refreshGeneration, controller: new AbortController(), retired: false, cancelled: false,
+      writeEvidence: "not-sent", readbackEvidence: "not-read", setting: null };
+    state.settingOwner = record;
+    state.settingObservationRevision = (state.settingObservationRevision || 0) + 1;
+    state.settingConsumedDrafts[record.key] = record.draftRevision;
+    state.settingHistory.push(record); state.settingHistory = state.settingHistory.slice(-20);
+    state.lastError = null; source.disabled = true;
+    const timer = setTimeout(() => record.controller.abort(), 60000);
+    setOperationState(t("busy")); renderAdvancedSettings(); renderAvailability();
     try {
-      const status = await api(
-        `/v1/session/${encodeURIComponent(session.id)}/settings/${encodeURIComponent(setting.key)}`,
-        { method: "POST", json: { value } },
-      );
-      if (!isCurrent()) return false;
-      adoptCameraStatus(status, session, liveViewStatusRevision);
-      setting.value = value;
-      if (setting.inputKind === "text") delete state.settingDrafts[setting.key];
-      setOperationState(t("ready"));
-      showToast(t("settingUpdated", { label: settingLabel(setting), value: settingValueLabel(setting, value) }));
-      return true;
-    } catch (error) {
-      if (!isCurrent()) return false;
-      const normalized = captureError(error);
-      setOperationState(normalized.message, true);
-      showToast(normalized.message, true);
+      record.writeEvidence = "unknown";
+      const response = await captureConfiguration.transfer(
+        `/v1/session/${encodeURIComponent(owner.id)}/settings/${encodeURIComponent(record.key)}/outcome`,
+        { method: "POST", payload: { value }, token: record.token, signal: record.controller.signal, strictSettings: true });
+      Object.assign(record, shootingSettings.parseOutcome({ status: response.status, engine: record.engine,
+        key: record.key, requestedValue: value, response: response.body }));
+      const consumed = publishSetting(record);
+      if (settingCurrent(record) && !record.controller.signal.aborted) {
+        setOperationState(t(record.readbackEvidence === "matched" ? "ready" : "settingNeedsReadback"));
+      }
+      return consumed;
+    } catch (_) {
+      record.readbackEvidence = "unavailable";
+      if (settingCurrent(record) && !record.controller.signal.aborted) setOperationState(t("settingNeedsReadback"), true);
       return false;
     } finally {
-      if (!isCurrent()) return false;
-      state.busy = false;
-      source.disabled = false;
-      renderSession();
+      clearTimeout(timer);
+      if (settingCurrent(record)) {
+        state.refreshGeneration += 1;
+        state.settingOwner = null; state.busy = false; source.disabled = false; renderSession();
+      }
+    }
+  }
+
+  async function recoverSetting(record) {
+    if (!state.settingHistory.includes(record) || cameraInteractionBusy() || bulbControlLocked() ||
+        record.owner !== state.session || record.retired) return false;
+    beginCameraInteraction();
+    record.generation = state.refreshGeneration; record.controller = new AbortController(); record.editor = null;
+    state.settingOwner = record;
+    state.settingObservationRevision = (state.settingObservationRevision || 0) + 1;
+    const timer = setTimeout(() => record.controller.abort(), 30000);
+    renderAdvancedSettings(); renderAvailability();
+    try {
+      const response = await captureConfiguration.transfer(
+        `/v1/session/${encodeURIComponent(record.owner.id)}/settings/${encodeURIComponent(record.key)}`,
+        { method: "GET", token: record.token, signal: record.controller.signal, strictSettings: true });
+      record.setting = shootingSettings.parseObservation({ status: response.status, engine: record.engine,
+        key: record.key, response: response.body });
+      record.readbackEvidence = record.setting ? record.setting.value === record.requestedValue ? "matched" : "mismatch" : "unavailable";
+      // A later matching read never upgrades the independent writeEvidence.
+      publishSetting(record);
+      return Boolean(record.setting);
+    } catch (_) {
+      record.readbackEvidence = "unavailable"; record.setting = null; return false;
+    } finally {
+      clearTimeout(timer);
+      if (settingCurrent(record)) {
+        state.refreshGeneration += 1;
+        state.settingOwner = null; state.busy = false; renderSession();
+      }
     }
   }
 
@@ -3915,6 +4110,13 @@
     const bulb = bulbActive || (state.captureMode === "photo" && isBulbMode());
     if (!featureSupported(FEATURES.VIDEO_RECORDING) && !recording && !stopOnly && state.captureMode === "video") {
       state.captureMode = "photo";
+    }
+    if (ui.modeApplyButton) {
+      const setting = state.capabilities?.settings?.find((item) => item.key === "moviemode"), draft = state.settingDrafts?.moviemode;
+      ui.modeApplyButton.hidden = !setting || draft === undefined || draft === setting.value;
+      ui.modeApplyButton.textContent = `${t("apply")} ${t(draft === "on" ? "video" : "photo")}`;
+      ui.modeApplyButton.disabled = recording || stopOnly || bulbActive || cameraInteractionBusy() || !setting ||
+        !settingDraftAvailable("moviemode") || !shootingSettings.accepts(setting, draft);
     }
     ui.photoModeButton.classList.toggle("active", state.captureMode === "photo");
     ui.videoModeButton.classList.toggle("active", state.captureMode === "video");
@@ -3937,22 +4139,23 @@
   }
 
   async function selectCaptureMode(mode) {
+    if (cameraInteractionBusy() || bulbControlLocked()) return;
     if (mode === "video" && !featureSupported(FEATURES.VIDEO_RECORDING)) return;
     if ((state.status?.recording || recordingRecoveryActive()) && mode !== "video") return;
     const movieMode = settingByKey("moviemode");
     if (movieMode) {
       const desired = mode === "video" ? "on" : "off";
       if (!movieMode.values.includes(desired)) return;
-      if (movieMode.value !== desired) {
-        const source = mode === "video" ? ui.videoModeButton : ui.photoModeButton;
-        const updated = await updateSetting(movieMode, desired, source);
-        if (!updated) return;
-      }
-    }
-    state.captureMode = mode;
-    renderCaptureMode();
-    renderAdvancedSettings();
-    renderAvailability();
+      editSettingDraft(movieMode.key, desired);
+    } else state.captureMode = mode; // Local UI mode only, no camera write.
+    renderCaptureMode(); renderAdvancedSettings(); renderAvailability();
+  }
+
+  async function applyCaptureMode() {
+    if (cameraInteractionBusy() || bulbControlLocked() || state.status?.recording || recordingRecoveryActive()) return false;
+    const setting = state.capabilities?.settings?.find((item) => item.key === "moviemode"), value = state.settingDrafts?.moviemode;
+    if (!setting || !["on", "off"].includes(value) || setting.value === value) return false;
+    return updateSetting(setting, value, ui.modeApplyButton);
   }
 
   function shutterAFSupported() {
@@ -5326,7 +5529,7 @@
 
   async function refreshRtpAudioStatus() {
     const session = state.session;
-    if (!session || !state.liveActive || state.activeLiveSource !== "CCAPI_RTP" || localPreviewSelected()) {
+    if (!session || state.settingOwner || !state.liveActive || state.activeLiveSource !== "CCAPI_RTP" || localPreviewSelected()) {
       renderRtpAudio();
       return;
     }
@@ -6114,6 +6317,11 @@
     if (ui.connectionFixButton) ui.connectionFixButton.disabled = state.busy || Boolean(state.scanAttempt);
     ui.refreshButton.disabled = !connected || interactionBusy;
     ui.disconnectButton.disabled = !connected || state.busy;
+    if (ui.modeApplyButton) {
+      const setting = state.capabilities?.settings?.find((item) => item.key === "moviemode"), value = state.settingDrafts?.moviemode;
+      ui.modeApplyButton.disabled = interactionBusy || bulbActive || recording || stopOnly || !setting ||
+        !settingDraftAvailable("moviemode") || !shootingSettings.accepts(setting, value);
+    }
     ui.photoModeButton.disabled = interactionBusy || bulbActive || recording || stopOnly;
     ui.videoModeButton.disabled = interactionBusy || bulbActive || !videoAvailable;
     ui.videoModeButton.hidden = !videoAvailable;
@@ -6180,17 +6388,19 @@
     document.querySelectorAll("#advanced-settings select, #advanced-settings input[type=range]").forEach((control) => {
       control.disabled = interactionBusy || bulbActive;
     });
-    document.querySelectorAll("#advanced-settings .settings-command button").forEach((button) => {
+    [...new Set([...document.querySelectorAll("#advanced-settings .settings-command button"),
+      ...document.querySelectorAll("#advanced-settings button[data-camera-command=setting]")])].forEach((button) => {
+      if (button.dataset.settingOutcomeAction && renderSettingButtonAvailability(button, interactionBusy, bulbActive)) return;
       if ((button.dataset.captureConfigurationAction || ["directory", "file-naming"].includes(button.dataset.cameraCommand)) &&
           renderCaptureConfigurationButtonAvailability(button, interactionBusy, bulbActive)) return;
       const command = button.dataset.cameraCommand;
       if (command === "setting") {
         const setting = settingByKey(button.dataset.settingKey);
         const input = button.parentElement?.querySelector('input[type="text"]');
-        const value = input?.value ?? "";
+        const value = input?.value ?? state.settingDrafts[setting?.key] ?? setting?.value ?? "";
         if (input) input.disabled = interactionBusy || bulbActive;
         button.disabled = interactionBusy || bulbActive || !setting
-          || !textSettingValueValid(setting, value)
+          || !settingDraftAvailable(setting.key) || !shootingSettings.accepts(setting, value)
           || value === setting.value;
         return;
       }
@@ -9097,6 +9307,7 @@
     });
     ui.photoModeButton.addEventListener("click", () => selectCaptureMode("photo"));
     ui.videoModeButton.addEventListener("click", () => selectCaptureMode("video"));
+    ui.modeApplyButton.addEventListener("click", () => applyCaptureMode());
     ui.shutterAFToggle.addEventListener("change", () => {
       if (canChangeShutterAF() && (ui.shutterAFToggle.checked || shutterAFSupported())) {
         state.shutterAutofocus = ui.shutterAFToggle.checked;
@@ -9434,6 +9645,10 @@
     ui.diagnosticsRefreshButton.addEventListener("click", () => refreshSession({ quiet: true }));
     ui.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);
     ui.copyPhysicalValidationButton.addEventListener("click", copyPhysicalValidation);
+    ui.settingDialog.addEventListener("close", () => {
+      const editor = state.settingEditor++;
+      if (state.settingOwner?.editor === editor) cancelSetting();
+    });
     ui.settingDialogClose.addEventListener("click", () => ui.settingDialog.close());
     ui.settingDialog.addEventListener("click", (event) => {
       if (event.target === ui.settingDialog) ui.settingDialog.close();

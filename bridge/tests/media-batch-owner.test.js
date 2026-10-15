@@ -233,7 +233,7 @@ function fixture(options = {}) {
   vm.runInContext("let mediaHistoryWarning = false; let mediaHistoryViewGeneration = 0; let mediaHistoryClearOwner = null; let mediaContinuationDraft = null;\n" +
     ["mediaContinuationSelection", "updateMediaContinuationAvailability", "continueMediaHistory", "mediaHistoryCall", "refreshMediaHistory", "openMediaHistory", "clearMediaHistory", "mediaTransferActive", "cameraInteractionBusy", "displayedMedia", "renderMediaSelection",
     "renderMediaBatch", "ownsMediaBatch", "assertMediaBatchCurrent", "transferMediaBatchItem",
-    "downloadSelectedMedia", "cancelMediaBatch", "cancelMediaDownload", "resetSession"].map(extract).join("\n") + "\n" + extractHistoryEvents(), context);
+    "downloadSelectedMedia", "cancelMediaBatch", "cancelMediaDownload", "cancelSetting", "resetSession"].map(extract).join("\n") + "\n" + extractHistoryEvents(), context);
   context.renderMediaTransfer = () => context.renderMediaBatch();
   return { ...context, context, state, ui, calls, entered, root, items, historyRows, historyPlans, historyTicket, historyPlan, historyWarning };
 }
