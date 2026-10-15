@@ -353,6 +353,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     private let requestedMode: CCAPIConnectionMode
     private let rtpDestinationAddress: String?
     private let rtpSessionFactory: (any CCAPIRTPSessionFactory)?
+    private let decodedJPEGValidator: (@Sendable (Data) -> Bool)?
     private var resolvedMode: CCAPIConnectionMode
     private var initialized = false
     private var apiVersionPrefixes = ["/ccapi/ver100"]
@@ -431,6 +432,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     private var liveViewReleaseTask: Task<Void, Error>?
     private var rtpSession: (any CCAPIRTPSession)?
     private var multipartSession: CCAPIMultipartLiveViewSession?
+    private var pendingJPEGFrame: LiveViewFrame?
     private var pendingMultipartFrame: Data?
     private var nativeGeometryCacheKey: Int64 = 0
     private var latestLiveViewGeometry: CCAPILiveViewGeometry?
@@ -446,6 +448,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         password: String = "",
         rtpDestinationAddress: String? = nil,
         rtpSessionFactory: (any CCAPIRTPSessionFactory)? = nil,
+        decodedJPEGValidator: (@Sendable (Data) -> Bool)? = nil,
         transport: (any CameraHTTPTransport)? = nil
     ) throws {
         guard var components = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -472,6 +475,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         resolvedMode = mode
         self.rtpDestinationAddress = rtpDestinationAddress
         self.rtpSessionFactory = rtpSessionFactory
+        self.decodedJPEGValidator = decodedJPEGValidator
         self.transport = transport ?? URLSessionCameraHTTPTransport()
         if !username.isEmpty {
             let token = Data("\(username):\(password)".utf8).base64EncodedString()
@@ -1837,7 +1841,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         // Local resources retire even if another control is still settling or its
         // Stop failed. No ordinary Stop/event helper is a fallback on this path.
         let native = rtpSession; rtpSession = nil
-        multipartSession?.close(); multipartSession = nil; pendingMultipartFrame = nil
+        multipartSession?.close(); multipartSession = nil; pendingMultipartFrame = nil; pendingJPEGFrame = nil
         activeLiveViewSource = nil; latestLiveViewGeometry = nil
         if let native { await native.close() }
         retiredLiveViewSource = pendingLiveViewStop?.source
@@ -1880,7 +1884,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         defer { if maintenanceLiveViewControlID == id { maintenanceLiveViewControlID = nil } }
         let native = rtpSession
         rtpSession = nil; multipartSession?.close(); multipartSession = nil
-        pendingMultipartFrame = nil; activeLiveViewSource = nil; latestLiveViewGeometry = nil
+        pendingMultipartFrame = nil; pendingJPEGFrame = nil; activeLiveViewSource = nil; latestLiveViewGeometry = nil
         if let native { await native.close() }
         do {
             if let closeStream = stop.closeStream {
@@ -1979,6 +1983,14 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             pendingLiveViewStop = stop; liveViewStopRevision = UUID()
             let revision = liveViewStopRevision
             _ = try await maintenanceLiveViewTransfer(start, expectedStatus: 200, attempt: attempt)
+            if let native = candidateNative {
+                try await native.waitUntilReady()
+                try checkMaintenanceLiveViewOwner(id, attempt: attempt)
+            }
+            if frozen.source == .ccapiJPEGPolling {
+                pendingJPEGFrame = try await firstJPEGFrame(owner: stop.id, maintenance: true)
+                try checkMaintenanceLiveViewOwner(id, attempt: attempt)
+            }
             if let read = multipartRead {
                 let readinessDeadline = ContinuousClock.now.advanced(by: .seconds(15))
                 let stream = try await transport.openMaintenanceStream(read)
@@ -1989,6 +2001,8 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 let session = CCAPIMultipartLiveViewSession(response: stream, boundary: boundary)
                 candidateMultipart = session; openedStream = nil
                 let frame = try await Self.maintenanceFirstFrame(session, deadline: readinessDeadline)
+                try validateLiveViewJPEG(frame)
+                try session.checkUsable()
                 try checkMaintenanceLiveViewOwner(id, attempt: attempt)
                 pendingMultipartFrame = frame
             }
@@ -2509,8 +2523,11 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 return
             } catch {
                 let primary = error
-                do { try await releasePendingLiveView() }
-                catch {
+                let admitted = pendingLiveViewStop != nil
+                do {
+                    guard !liveViewStopUnconfirmed else { throw CCAPIError.liveViewStopUnconfirmed }
+                    try await releasePendingLiveView()
+                } catch {
                     if CameraConnectionFailureReason.isCancellation(primary) { throw primary }
                     try Task.checkCancellation()
                     throw CCAPIError.liveViewStopUnconfirmed
@@ -2518,18 +2535,52 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 if CameraConnectionFailureReason.isCancellation(primary) { throw primary }
                 try checkLiveViewStart()
                 lastError = primary
-                guard request.source == .auto else { throw primary }
+                let fallback = CameraLiveViewLifecyclePolicy.evaluate([
+                    "sameOwner": !closing, "sameAttempt": liveViewStartID == id,
+                    "cancelled": Task.isCancelled, "retired": closing,
+                    "foregroundRequired": false, "foreground": true,
+                    "startAdmitted": admitted, "startAcknowledged": false,
+                    "stopEvidence": admitted ? "confirmed" : "not-needed",
+                    "sourceMode": request.source == .auto ? "AUTO" : "explicit",
+                    "terminal": true, "frameEvidence": "none"])
+                guard fallback["canFallback"] == true else { throw primary }
             }
         }
         throw lastError ?? CCAPIError.unsupported(.liveView)
     }
 
+    private enum FirstJPEGFrameFailure: LocalizedError {
+        case sizeUnsupported
+        var errorDescription: String? { "Canon JPEG Live View did not support the requested image size." }
+    }
+
     private func startJPEGLiveView(_ request: LiveViewRequest) async throws {
         guard let operations = jpegLiveViewOperations() else { throw CCAPIError.unsupported(.liveView) }
-        let stop = try makeLiveViewStop(source: .ccapiJPEGPolling, operation: operations.stop)
-        try await startCCAPILiveView(request, path: operations.start.path, stop: stop)
-        pendingMultipartFrame = nil
-        activeLiveViewSource = .ccapiJPEGPolling
+        var candidate = request
+        while true {
+            let stop = try makeLiveViewStop(source: .ccapiJPEGPolling, operation: operations.stop)
+            try await startCCAPILiveView(candidate, path: operations.start.path, stop: stop)
+            pendingMultipartFrame = nil; pendingJPEGFrame = nil
+            do {
+                // Never call public Start/Stop from the current Start task.
+                let first = try await firstJPEGFrame(owner: stop.id)
+                try checkLiveViewStart()
+                try requireLiveViewInputReady(owner: stop.id, decoded: decodedJPEGValidator != nil)
+                pendingJPEGFrame = first
+                activeLiveViewSource = .ccapiJPEGPolling
+                return
+            } catch FirstJPEGFrameFailure.sizeUnsupported {
+                guard !liveViewSizeFallbackAttempted, activeLiveViewSize != .small else { throw FirstJPEGFrameFailure.sizeUnsupported }
+                let rejectedSize = activeLiveViewSize
+                // This is a new size attempt, only after the captured original Stop ACK.
+                // Unknown cleanup escapes to the outer handler and cannot replay Start.
+                try await releasePendingLiveView()
+                try checkLiveViewStart()
+                liveViewSizeFallbackAttempted = true
+                rejectedLiveViewSizes.insert(rejectedSize)
+                candidate = LiveViewRequest(fps: request.fps, size: .small, source: request.source)
+            }
+        }
     }
 
     private func startCCAPILiveView(_ request: LiveViewRequest, path: String, stop: LiveViewStopObligation) async throws {
@@ -2607,7 +2658,10 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             candidateSession = session
             stream = nil
             let firstFrame = try await session.validatedFirstFrame()
+            try validateLiveViewJPEG(firstFrame)
+            try session.checkUsable()
             try checkLiveViewStart()
+            try requireLiveViewInputReady(owner: stop.id, decoded: decodedJPEGValidator != nil)
             multipartSession?.close()
             multipartSession = session
             candidateSession = nil
@@ -2754,15 +2808,27 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         try await task.value
     }
 
-    private func sendLiveViewStop(_ stop: LiveViewStopObligation) async throws {
-        // Close local resources even if the wire acknowledgement is lost.
+    /// Local-only retirement is safe even when another physical control defers
+    /// camera Stop. No acknowledgement is invented and the frozen duty survives.
+    public func retireLiveViewReader() async {
+        liveViewStartTask?.cancel()
+        await closeLiveViewResources()
+    }
+
+    private func closeLiveViewResources() async {
         let native = rtpSession
         rtpSession = nil
         multipartSession?.close()
         multipartSession = nil
-        pendingMultipartFrame = nil
+        pendingMultipartFrame = nil; pendingJPEGFrame = nil
         activeLiveViewSource = nil
+        latestLiveViewGeometry = nil
         if let native { await native.close() }
+    }
+
+    private func sendLiveViewStop(_ stop: LiveViewStopObligation) async throws {
+        // Close local resources even if the wire acknowledgement is lost.
+        await closeLiveViewResources()
         // Reader DELETE is best effort; only the general Live View stop discharges
         // multipart responsibility, including firmware which returns reader 503.
         if let closeStream = stop.closeStream { _ = try? await transport.send(closeStream) }
@@ -2857,6 +2923,11 @@ public actor CCAPIClient: CameraForegroundMediaReading {
 
     public func liveViewFrame(cacheKey: Int64) async throws -> LiveViewFrame {
         try await ensureInitialized()
+        let owner = pendingLiveViewStop?.id
+        if activeLiveViewSource == .ccapiJPEGPolling, let first = pendingJPEGFrame {
+            pendingJPEGFrame = nil
+            return first
+        }
         if activeLiveViewSource == .ccapiMultipart {
             guard let multipartSession else {
                 throw CCAPIError.invalidResponse("Canon multipart Live View session is missing.")
@@ -2864,10 +2935,14 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             let frame: Data
             if let pendingMultipartFrame {
                 frame = pendingMultipartFrame
-                self.pendingMultipartFrame = nil
+                self.pendingMultipartFrame = nil; pendingJPEGFrame = nil
             } else {
                 frame = try await multipartSession.nextFrame()
             }
+            try Task.checkCancellation()
+            guard pendingLiveViewStop?.id == owner, activeLiveViewSource == .ccapiMultipart else { throw CancellationError() }
+            try multipartSession.checkUsable()
+            try validateLiveViewJPEG(frame)
             observedFeatures.formUnion([.liveView, .liveViewMultipart])
             guard let sourceURL = URL(
                 string: baseURLString + (multipartLiveViewOperations()?.openStream.path ?? "")
@@ -2885,6 +2960,40 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 "CCAPI RTP Live View renders through the native H.264 surface, not the JPEG frame reader."
             )
         }
+        return try await readJPEGLiveViewFrame(cacheKey: cacheKey, owner: owner, allowSizeFallback: true)
+    }
+
+    private func requireLiveViewInputReady(owner: UUID, decoded: Bool) throws {
+        let policy = CameraLiveViewLifecyclePolicy.evaluate([
+            "sameOwner": pendingLiveViewStop?.id == owner, "sameAttempt": liveViewStartID != nil,
+            "cancelled": Task.isCancelled, "retired": closing,
+            "foregroundRequired": false, "foreground": true,
+            "startAdmitted": true, "startAcknowledged": true, "stopEvidence": "pending",
+            "sourceMode": "explicit", "terminal": false,
+            "frameEvidence": decoded ? "decoded-frame" : "encoded-frame"])
+        guard policy["canPublishInputReady"] == true else { throw CancellationError() }
+    }
+
+    private func validateLiveViewJPEG(_ frame: Data) throws {
+        if let decodedJPEGValidator, !decodedJPEGValidator(frame) {
+            throw CCAPIError.invalidResponse("Live View JPEG could not be decoded.")
+        }
+    }
+
+    private func firstJPEGFrame(owner: UUID, maintenance: Bool = false) async throws -> LiveViewFrame {
+        try await withThrowingTaskGroup(of: LiveViewFrame.self) { group in
+            group.addTask { try await self.readJPEGLiveViewFrame(cacheKey: 0, owner: owner, allowSizeFallback: false, maintenance: maintenance) }
+            group.addTask {
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+                throw CCAPIError.invalidResponse("Canon JPEG Live View did not return a valid first frame within 5 seconds.")
+            }
+            defer { group.cancelAll() }
+            guard let frame = try await group.next() else { throw CancellationError() }
+            return frame
+        }
+    }
+
+    private func readJPEGLiveViewFrame(cacheKey: Int64, owner: UUID?, allowSizeFallback: Bool, maintenance: Bool = false) async throws -> LiveViewFrame {
         let paths: [String]
         if resolvedMode == .simulator {
             paths = ["/ccapi/liveview/frame"]
@@ -2895,12 +3004,14 @@ public actor CCAPIClient: CameraForegroundMediaReading {
 
         var failures: [String] = []
         var liveViewSizeRejected = false
-        for attempt in 0...Self.jpegFrameBusyRetryNanoseconds.count {
+        let attempts = maintenance ? 0 : Self.jpegFrameBusyRetryNanoseconds.count
+        let framePaths = maintenance ? Array(paths.prefix(1)) : paths
+        for attempt in 0...attempts {
             var transientBusy = false
-            for path in paths {
+            for path in framePaths {
                 try Task.checkCancellation()
                 let sourceURL = try URLForPath(path, cacheKey: cacheKey)
-                var request = request(url: sourceURL, method: .get)
+                var request = request(url: sourceURL, method: .get, timeoutInterval: 5)
                 request.setValue("multipart/x-mixed-replace,image/jpeg,image/*,*/*", forHTTPHeaderField: "Accept")
                 request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
                 request.setValue("no-cache", forHTTPHeaderField: "Pragma")
@@ -2910,8 +3021,24 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                     if isDetailedFrame {
                         latestLiveViewGeometry = nil
                     }
-                    let response = try await transport.send(request)
+                    let response: CameraHTTPResponse
+                    if maintenance { response = try await transport.sendMaintenanceLiveViewFrame(request) }
+                    else { response = try await transport.sendLiveViewFrame(request) }
+                    guard response.body.count <= CCAPIMultipartLiveView.maximumFrameBytes else {
+                        throw CCAPIError.invalidResponse("Live View JPEG exceeded the frame safety limit.")
+                    }
+                    if maintenance {
+                        try CameraHTTPResponseIntegrity.validate(response, requestMethod: "GET")
+                        guard response.statusCode == 200, response.header("content-range") == nil else {
+                            throw CCAPIError.invalidResponse("Maintenance Live View requires one complete HTTP 200 image response.")
+                        }
+                    }
+                    try Task.checkCancellation()
+                    guard pendingLiveViewStop?.id == owner else { throw CancellationError() }
                     try validate(response, request: request)
+                    guard response.statusCode == 200, response.header("content-range") == nil else {
+                        throw CCAPIError.invalidResponse("Live View requires a complete HTTP 200 image response.")
+                    }
                     let contentType = response.header("content-type")
                     if Self.isTextContentType(contentType) {
                         throw CCAPIError.invalidResponse("Live View returned \(contentType ?? "text") instead of image bytes.")
@@ -2931,11 +3058,12 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                     } else {
                         frame = try JPEGFrameParser.validatedImageData(response.body, contentType: contentType)
                     }
+                    try validateLiveViewJPEG(frame)
                     observedFeatures.formUnion([.liveView, .liveViewJPEGPolling])
                     return LiveViewFrame(data: frame, contentType: contentType, sourceURL: sourceURL)
                 } catch {
-                    if error is CancellationError { throw error }
-                    liveViewSizeRejected = liveViewSizeRejected || shouldDowngradeLiveViewSize(for: error)
+                    if error is CancellationError || maintenance { throw error }
+                    liveViewSizeRejected = liveViewSizeRejected || isLiveViewSizeRejection(error)
                     failures.append("\(sourceURL.absoluteString): \(error.localizedDescription)")
                     if shouldRetryBusyLiveViewFrame(error) {
                         transientBusy = true
@@ -2950,7 +3078,12 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             break
         }
         if liveViewSizeRejected {
-            return try await retryJPEGLiveViewAtSmallSize(cacheKey: cacheKey)
+            if !allowSizeFallback, !maintenance { throw FirstJPEGFrameFailure.sizeUnsupported }
+            if allowSizeFallback, activeLiveViewSource == .ccapiJPEGPolling,
+               !liveViewSizeFallbackAttempted, activeLiveViewSize != .small,
+               requestedLiveViewRequest?.source == .auto || requestedLiveViewRequest?.source == .ccapiJPEGPolling {
+                return try await retryJPEGLiveViewAtSmallSize(cacheKey: cacheKey)
+            }
         }
         throw CCAPIError.invalidResponse(
             "Live View failed on every advertised JPEG endpoint.\n" + failures.map { "- \($0)" }.joined(separator: "\n")
@@ -4319,6 +4452,9 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 operation: CCAPIOperation(method: .post, path: controlPath))
             try await sendLiveViewStart(stop: stop, path: controlPath, method: .post,
                 json: ["action": "start", "ipaddress": rtpDestinationAddress])
+            try await session.waitUntilReady()
+            try checkLiveViewStart()
+            try requireLiveViewInputReady(owner: stop.id, decoded: true)
             rtpSession = session
             activeLiveViewSource = .ccapiRTP
             observedFeatures.formUnion([.liveView, .liveViewRTP])
@@ -4328,13 +4464,8 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         }
     }
 
-    private func shouldDowngradeLiveViewSize(for error: Error) -> Bool {
-        guard activeLiveViewSource == .ccapiJPEGPolling,
-              !liveViewSizeFallbackAttempted,
-              activeLiveViewSize != .small,
-              requestedLiveViewRequest?.source == .auto || requestedLiveViewRequest?.source == .ccapiJPEGPolling,
-              case let CCAPIError.http(statusCode, _, _, body) = error,
-              statusCode == 503 else { return false }
+    private func isLiveViewSizeRejection(_ error: Error) -> Bool {
+        guard case let CCAPIError.http(statusCode, _, _, body) = error, statusCode == 503 else { return false }
         return body.range(of: "mode not supported", options: .caseInsensitive) != nil
     }
 
@@ -5970,6 +6101,8 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     private func beginCameraMutation() throws {
         try Task.checkCancellation()
         guard !closing, bulbStartTask == nil, shortControlTask == nil,
+              liveViewStartTask == nil, liveViewStopTask == nil, liveViewReleaseTask == nil,
+              maintenanceLiveViewControlID == nil,
               shutterReleaseTask == nil, pendingShutterRelease == nil else {
             throw CCAPIError.invalidResponse("Release the shutter before another camera operation.")
         }

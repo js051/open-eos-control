@@ -110,6 +110,7 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
     private var lastAudioStatusPublishedAt = Date.distantPast
     private var activeAudioSessionID: UUID?
     private var deliveryOwner = UUID()
+    private var terminalVideoFailure: String?
     private let videoConsumer: (@MainActor @Sendable (CCAPIH264AccessUnit) -> Void)?
     private let flushRenderer: @MainActor @Sendable (AVSampleBufferDisplayLayer, Bool, @escaping @Sendable () -> Void) -> Void
     private let audioPipeline = IOSCcapiRTPAudioPipeline()
@@ -223,6 +224,19 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
         guard displayLayer === layer else { return }
         resetRenderer(removingImage: true)
         displayLayer = nil
+    }
+
+    /// iOS 17.4+ can verify renderer pixels. Earlier OS versions can only prove
+    /// decoded startup input + successful native submission; never claim presented pixels.
+    @MainActor
+    func hasUsableRendererOutput() -> Bool {
+        guard renderingEnabled, let displayLayer, let renderedSessionID,
+              audioStateLock.synchronized({ deliveryOwner == renderedSessionID && applicationActive }),
+              pixelReadbackBarrier == nil else { return false }
+        let renderer = displayLayer.sampleBufferRenderer
+        guard renderer.status != .failed, !renderer.requiresFlushToResumeDecoding else { return false }
+        if #available(iOS 17.4, *) { return renderer.displayedPixelBuffer() != nil }
+        return true
     }
 
     @MainActor
@@ -432,6 +446,8 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
                             self.pixelMonitor.frameSubmitted(layer: layer, owner: sessionID, format: frame.format,
                                 suppliedBuffer: IOSRTPPixelMonitor.supported ? nil : frame.pixelBuffer)
                             self.emit(.frame(encodedBytes: accessUnit.encodedByteCount, at: Date()), owner: sessionID)
+                        case .decoded:
+                            break // Only the isolated startup decoder requests decode-only output.
                         case .backpressure:
                             break // A dropped output never queues or replays compressed data.
                         case .unsupportedColor, .unavailable, .failed:
@@ -472,9 +488,14 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
         }
     }
 
+    func currentVideoFailure() -> String? { audioStateLock.synchronized { terminalVideoFailure } }
+
     fileprivate func emit(_ event: IOSCcapiRTPEvent, owner: UUID) {
         let delivery = IOSCcapiRTPDelivery(owner: owner, event: event)
         guard accepts(delivery) else { return }
+        if case let .failed(message) = event {
+            audioStateLock.synchronized { if deliveryOwner == owner { terminalVideoFailure = message } }
+        }
         let handler = handlerLock.synchronized { eventHandler }
         handler?(delivery)
     }
@@ -487,6 +508,7 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
         audioStateLock.synchronized {
             activeAudioSessionID = sessionID
             deliveryOwner = sessionID
+            terminalVideoFailure = nil
             audioRequested = false
             queuedAudioAccessUnits = 0
             lastAudioStatusPublishedAt = .distantPast
@@ -721,6 +743,12 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
     private var targetFPS = 30
     private var closed = false
     private var lastSubmittedAt: UInt64 = 0
+    private let readiness = CCAPIRTPReadinessGate()
+    private let readinessDecoder = IOSRTPVideoProcessor()
+    private var readinessProbeSubmitted = false
+    private var decodedFirstFrame = false
+    private var lastValidVideoAt: UInt64?
+    private var videoFailureReported = false
     private var videoDelivery = IOSRTPVideoDeliveryGate()
     private var latestSPS: Data?
     private var latestPPS: Data?
@@ -755,7 +783,7 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
                 kind: "video",
                 onFailure: { [weak self] error in
                     guard let self else { return }
-                    self.sink.emit(.failed("Canon RTP video listener failed: \(error.localizedDescription)"), owner: self.sessionID)
+                    self.failVideo("Canon RTP video listener failed: \(error.localizedDescription)")
                 },
                 onConnection: { [weak self] connection in self?.acceptVideo(connection) }
             )
@@ -847,6 +875,19 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
         }
     }
 
+    func waitUntilReady() async throws {
+        try await withTaskCancellationHandler {
+            try await readiness.wait()
+            // A failed candidate is distinct from cancellation, so confirmed
+            // original cleanup can still permit AUTO to select the next source.
+            let terminal = stateLock.synchronized { (closed, videoFailureReported) }
+            if terminal.1 {
+                throw CCAPIError.invalidResponse("Canon RTP source failed before first-frame readiness could be published.")
+            }
+            if terminal.0 { throw CancellationError() }
+        } onCancel: { self.closeSynchronously() }
+    }
+
     func setTargetFPS(_ fps: Int) async {
         stateLock.synchronized { targetFPS = min(max(fps, 1), 30) }
     }
@@ -855,7 +896,7 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
         closeSynchronously()
     }
 
-    private func closeSynchronously() {
+    private func closeSynchronously(retireDelivery: Bool = true) {
         let resources = stateLock.synchronized { () -> (NWListener?, NWListener?, [NWConnection]) in
             if closed { return (nil, nil, []) }
             closed = true
@@ -865,18 +906,21 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
             connections = []
             return resources
         }
+        readiness.fail(CancellationError())
+        readinessDecoder.invalidate()
         resources.0?.cancel()
         resources.1?.cancel()
         resources.2.forEach { $0.cancel() }
-        sink.endAudioSession(sessionID: sessionID)
+        if retireDelivery { sink.endAudioSession(sessionID: sessionID) }
     }
 
     private func acceptVideo(_ connection: NWConnection) {
-        guard !stateLock.synchronized({ closed }) else {
-            connection.cancel()
-            return
+        let accepted = stateLock.synchronized { () -> Bool in
+            guard !closed else { return false }
+            connections.append(connection)
+            return true
         }
-        stateLock.synchronized { connections.append(connection) }
+        guard accepted else { connection.cancel(); return }
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             guard let self, let connection else { return }
             switch state {
@@ -884,7 +928,7 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
                 self.receiveVideo(on: connection)
             case let .failed(error):
                 if !self.stateLock.synchronized({ self.closed }) {
-                    self.sink.emit(.failed("Canon RTP receive failed: \(error.localizedDescription)"), owner: self.sessionID)
+                    self.failVideo("Canon RTP receive failed: \(error.localizedDescription)")
                 }
             default:
                 break
@@ -899,35 +943,55 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
             if let data, data.count <= 65_535, let accessUnit = self.depacketizer.accept(data) {
                 if let sps = accessUnit.sequenceParameterSet { self.latestSPS = sps }
                 if let pps = accessUnit.pictureParameterSet { self.latestPPS = pps }
-                let now = DispatchTime.now().uptimeNanoseconds
-                let targetFPS = self.stateLock.synchronized { self.targetFPS }
-                let interval = 1_000_000_000 / UInt64(max(targetFPS, 1))
-                let present = accessUnit.keyFrame || self.lastSubmittedAt == 0 || now - self.lastSubmittedAt >= interval
-                let ticket = self.stateLock.synchronized { () -> IOSRTPVideoDeliveryGate.Ticket? in
-                    guard !self.closed else { return nil }
-                    return self.videoDelivery.admit(keyFrame: accessUnit.keyFrame)
-                }
-                if let ticket {
-                    if present { self.lastSubmittedAt = now }
-                    let latestSPS = self.latestSPS
-                    let latestPPS = self.latestPPS
-                    Task { @MainActor [weak self] in
-                        guard let self else { return }
-                        defer { self.stateLock.synchronized { self.videoDelivery.complete() } }
-                        self.sink.enqueue(
-                            accessUnit,
-                            sequenceParameterSet: latestSPS,
-                            pictureParameterSet: latestPPS,
-                            sessionID: self.sessionID,
-                            presentFrame: present,
-                            deliverySequence: ticket.sequence
-                        )
+                // Parameter-set-only/SEI traffic is not a fresh video picture.
+                if accessUnit.nalUnits.contains(where: { nal in
+                    guard let first = nal.first, nal.count > 1 else { return false }
+                    return [UInt8(1), UInt8(5)].contains(first & 0x1f)
+                }) {
+                    let now = DispatchTime.now().uptimeNanoseconds
+                    let probe = self.stateLock.synchronized { () -> Bool in
+                        guard !self.closed, !self.videoFailureReported else { return false }
+                        if self.decodedFirstFrame { self.lastValidVideoAt = now }
+                        guard !self.readinessProbeSubmitted, accessUnit.keyFrame,
+                              self.latestSPS != nil, self.latestPPS != nil else { return false }
+                        self.readinessProbeSubmitted = true
+                        return true
+                    }
+                    if probe, let sps = self.latestSPS, let pps = self.latestPPS {
+                        Task { @MainActor [weak self] in
+                            self?.decodeFirstFrame(accessUnit, sps: sps, pps: pps)
+                        }
+                    }
+                    let targetFPS = self.stateLock.synchronized { self.targetFPS }
+                    let interval = 1_000_000_000 / UInt64(max(targetFPS, 1))
+                    let present = accessUnit.keyFrame || self.lastSubmittedAt == 0 || now - self.lastSubmittedAt >= interval
+                    let ticket = self.stateLock.synchronized { () -> IOSRTPVideoDeliveryGate.Ticket? in
+                        guard !self.closed else { return nil }
+                        return self.videoDelivery.admit(keyFrame: accessUnit.keyFrame)
+                    }
+                    if let ticket {
+                        if present { self.lastSubmittedAt = now }
+                        let latestSPS = self.latestSPS
+                        let latestPPS = self.latestPPS
+                        Task { @MainActor [weak self] in
+                            guard let self else { return }
+                            defer { self.stateLock.synchronized { self.videoDelivery.complete() } }
+                            guard !self.stateLock.synchronized({ self.closed }) else { return }
+                            self.sink.enqueue(
+                                accessUnit,
+                                sequenceParameterSet: latestSPS,
+                                pictureParameterSet: latestPPS,
+                                sessionID: self.sessionID,
+                                presentFrame: present,
+                                deliverySequence: ticket.sequence
+                            )
+                        }
                     }
                 }
             }
             if let error {
                 if !self.stateLock.synchronized({ self.closed }) {
-                    self.sink.emit(.failed("Canon RTP receive failed: \(error.localizedDescription)"), owner: self.sessionID)
+                    self.failVideo("Canon RTP receive failed: \(error.localizedDescription)")
                 }
                 return
             }
@@ -935,12 +999,63 @@ private final class IOSCcapiRTPSession: CCAPIRTPSession, @unchecked Sendable {
         }
     }
 
-    private func acceptAudio(_ connection: NWConnection) {
-        guard !stateLock.synchronized({ closed }) else {
-            connection.cancel()
-            return
+    @MainActor
+    private func decodeFirstFrame(_ accessUnit: CCAPIH264AccessUnit, sps: Data, pps: Data) {
+        guard !stateLock.synchronized({ closed || videoFailureReported }) else { return }
+        do {
+            let format = try IOSCcapiRTPController.makeFormatDescription(sps: sps, pps: pps)
+            let sample = try IOSCcapiRTPController.makeSampleBuffer(accessUnit: accessUnit, formatDescription: format)
+            let accepted = readinessDecoder.submit(sample, format: format, lut: nil, sps: sps, decodeOnly: true) { [weak self] result in
+                guard let self, !self.stateLock.synchronized({ self.closed || self.videoFailureReported }) else { return }
+                defer { self.readinessDecoder.invalidate() }
+                guard case .decoded = result else {
+                    self.failVideo("Canon RTP could not decode the first video frame.")
+                    return
+                }
+                self.stateLock.synchronized {
+                    self.decodedFirstFrame = true
+                    self.lastValidVideoAt = DispatchTime.now().uptimeNanoseconds
+                }
+                self.readiness.decodedFrame()
+                self.scheduleVideoWatchdog()
+            }
+            if !accepted { failVideo("Canon RTP first-frame decoder was unavailable.") }
+        } catch { failVideo("Canon RTP first-frame decode failed: \(error.localizedDescription)") }
+    }
+
+    private func scheduleVideoWatchdog() {
+        queue.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            let state = self.stateLock.synchronized { (self.closed, self.videoFailureReported, self.lastValidVideoAt) }
+            guard !state.0, !state.1, let last = state.2 else { return }
+            if DispatchTime.now().uptimeNanoseconds - last >= 5_000_000_000 {
+                self.failVideo("Canon RTP stopped returning valid video frames. Start Live View again after Stop is confirmed.")
+            } else { self.scheduleVideoWatchdog() }
         }
-        stateLock.synchronized { connections.append(connection) }
+    }
+
+    private func failVideo(_ message: String) {
+        let report = stateLock.synchronized { () -> Bool in
+            guard !closed, !videoFailureReported else { return false }
+            videoFailureReported = true
+            return true
+        }
+        guard report else { return }
+        readiness.fail(CCAPIError.invalidResponse(message))
+        readinessDecoder.invalidate()
+        // Keep this exact delivery identity until the failure is consumed, while
+        // retiring sockets immediately even if camera Stop must be deferred.
+        closeSynchronously(retireDelivery: false)
+        sink.emit(.failed(message), owner: sessionID)
+    }
+
+    private func acceptAudio(_ connection: NWConnection) {
+        let accepted = stateLock.synchronized { () -> Bool in
+            guard !closed else { return false }
+            connections.append(connection)
+            return true
+        }
+        guard accepted else { connection.cancel(); return }
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             guard let self, let connection else { return }
             switch state {

@@ -27,6 +27,7 @@ struct IOSNativeProcessedFrame: @unchecked Sendable {
 }
 
 enum IOSNativeVideoResult: @unchecked Sendable {
+    case decoded // Decode-only readiness, never renderer/presentation evidence.
     case frame(IOSNativeProcessedFrame)
     case backpressure
     case unsupportedColor
@@ -101,13 +102,13 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
 
     @MainActor
     func submit(_ sampleBuffer: CMSampleBuffer, format: CMVideoFormatDescription, lut: CubeLut?,
-                sps: Data, present: Bool = true, completion: @escaping @MainActor @Sendable (IOSNativeVideoResult) -> Void) -> Bool {
+                sps: Data, present: Bool = true, decodeOnly: Bool = false, completion: @escaping @MainActor @Sendable (IOSNativeVideoResult) -> Void) -> Bool {
         lock.lock()
         guard inFlight == nil else { lock.unlock(); return false }
         let ticket = Ticket(generation: generation, id: UUID())
         inFlight = ticket
         lock.unlock()
-        let request = Request(sample: sampleBuffer, format: format, lut: lut, sps: sps, present: present)
+        let request = Request(sample: sampleBuffer, format: format, lut: lut, sps: sps, present: present, decodeOnly: decodeOnly)
         queue.async { [self] in
             if resourceGeneration != ticket.generation {
                 resetResources()
@@ -143,10 +144,11 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
         let lut: CubeLut?
         let sps: Data
         let present: Bool
+        let decodeOnly: Bool
     }
 
     private func process(_ request: Request) -> IOSNativeVideoResult {
-        guard nativeRTPPreviewColorSupported(format: request.format, sps: request.sps) else { return .unsupportedColor }
+        guard request.decodeOnly || nativeRTPPreviewColorSupported(format: request.format, sps: request.sps) else { return .unsupportedColor }
         let dimensions = CMVideoFormatDescriptionGetDimensions(request.format)
         guard dimensions.width > 0, dimensions.height > 0,
               dimensions.width <= 8192, dimensions.height <= 8192,
@@ -174,6 +176,7 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
             }
         guard status == noErr, decodedOutput.status == noErr else { return .failed }
         guard request.present, let decoded = decodedOutput.buffer else { return .backpressure }
+        if request.decodeOnly { return .decoded }
         guard CVPixelBufferGetPixelFormatType(decoded) == kCVPixelFormatType_32BGRA,
               CVPixelBufferGetWidth(decoded) == Int(dimensions.width),
               CVPixelBufferGetHeight(decoded) == Int(dimensions.height) else { return .unsupportedColor }

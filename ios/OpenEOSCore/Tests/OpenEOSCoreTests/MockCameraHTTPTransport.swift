@@ -46,6 +46,7 @@ actor MockCameraHTTPTransport: CameraHTTPTransport {
     private var downloadStubs: [DownloadStub] = []
     private var uploadStubs: [UploadStub] = []
     private var recorded: [RecordedRequest] = []
+    private var liveStreamPaths = Set<String>()
     private var downloadFiles: [URL] = []
 
     func enqueue(
@@ -56,6 +57,21 @@ actor MockCameraHTTPTransport: CameraHTTPTransport {
         body: Data = Data("{}".utf8)
     ) {
         stubs.append(Stub(method: method, path: path, response: CameraHTTPResponse(statusCode: status, headers: headers, body: body)))
+    }
+
+    func enqueueLiveStream(path: String, headers: [String: String], body: Data) {
+        liveStreamPaths.insert(path)
+        enqueue(path: path, headers: headers, body: body)
+    }
+
+    func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
+        let path = Self.record(request).path
+        let response = try await send(request)
+        let output = AsyncThrowingStream<Data, Error>.makeStream()
+        if !response.body.isEmpty { output.continuation.yield(response.body) }
+        if response.statusCode != 200 || !liveStreamPaths.contains(path) { output.continuation.finish() }
+        return CameraHTTPStreamResponse(statusCode: response.statusCode, headers: response.headers,
+            chunks: output.stream, cancel: { output.continuation.finish(throwing: CancellationError()) })
     }
 
     func enqueueJSON(method: String = "GET", path: String, status: Int = 200, body: String) {

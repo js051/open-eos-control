@@ -3,7 +3,8 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Scoped to camera maintenance on the existing HTTP transport. One body
+/// Scoped to camera maintenance and read-only Live View frames on the existing
+/// HTTP transport. One body
 /// source, no redirect/authentication replay, bounded complete response evidence.
 /// This does not assert physical-camera or native wire acceptance without tests.
 final class CameraHTTPMaintenanceTask: NSObject, URLSessionDataDelegate, @unchecked Sendable {
@@ -19,8 +20,10 @@ final class CameraHTTPMaintenanceTask: NSObject, URLSessionDataDelegate, @unchec
     private var suppliedBody = false
     private var cancelled = false
     private static let maximumBytes = 64 * 1024
+    private let maximumResponseBytes: Int
 
-    init(configuration: URLSessionConfiguration) {
+    init(configuration: URLSessionConfiguration, maximumResponseBytes: Int = 64 * 1024) {
+        self.maximumResponseBytes = maximumResponseBytes
         self.configuration = configuration.copy() as! URLSessionConfiguration
         super.init()
     }
@@ -86,10 +89,10 @@ final class CameraHTTPMaintenanceTask: NSObject, URLSessionDataDelegate, @unchec
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         lock.lock()
-        let accepted = data.count <= Self.maximumBytes - body.count
+        let accepted = data.count <= maximumResponseBytes - body.count
         if accepted { body.append(data) }
         lock.unlock()
-        if !accepted { finish(error: CCAPIError.invalidResponse("Camera maintenance response exceeded 64 KiB.")) }
+        if !accepted { finish(error: CCAPIError.invalidResponse("Camera maintenance response exceeded its configured byte limit.")) }
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) { finish(error: error) }
     private func finish(error: Error?) {

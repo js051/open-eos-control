@@ -140,6 +140,11 @@ struct CCAPIMultipartParser {
         return frames
     }
 
+    var isClosed: Bool {
+        if case .closed = state { return true }
+        return false
+    }
+
     mutating func finish() throws {
         _ = try append(Data())
         guard case .closed = state, buffer.isEmpty else {
@@ -166,62 +171,79 @@ struct CCAPIMultipartParser {
 }
 
 final class CCAPIMultipartLiveViewSession: @unchecked Sendable {
-    private static let firstFrameTimeoutNanoseconds: UInt64 = 5_000_000_000
-
-    private var iterator: AsyncThrowingStream<Data, Error>.Iterator
-    private let continuation: AsyncThrowingStream<Data, Error>.Continuation
-    private let worker: Task<Void, Never>
     private let response: CameraHTTPStreamResponse
+    private let lock = NSLock()
+    private var frame: Data?
+    private var terminal: Error?
+    private var worker: Task<Void, Never>?
 
     init(response: CameraHTTPStreamResponse, boundary: String) {
         self.response = response
-        let output = AsyncThrowingStream<Data, Error>.makeStream(bufferingPolicy: .bufferingNewest(1))
-        iterator = output.stream.makeAsyncIterator()
-        continuation = output.continuation
-        worker = Task {
+        worker = Task { [weak self] in
             var parser = CCAPIMultipartParser(boundary: boundary)
             do {
                 for try await chunk in response.chunks {
                     try Task.checkCancellation()
-                    for frame in try parser.append(chunk) {
-                        output.continuation.yield(frame)
+                    for frame in try parser.append(chunk) { self?.receive(frame) }
+                    if parser.isClosed {
+                        self?.finish(CCAPIError.invalidResponse("Canon multipart Live View stream closed."))
+                        response.cancel()
+                        return
                     }
                 }
                 try parser.finish()
-                output.continuation.finish()
-            } catch {
-                output.continuation.finish(throwing: error)
-            }
+                self?.finish(CCAPIError.invalidResponse("Canon multipart Live View stream ended."))
+            } catch { self?.finish(error) }
         }
     }
 
-    func nextFrame() async throws -> Data {
-        guard let frame = try await iterator.next() else {
-            throw CCAPIError.invalidResponse("Canon multipart Live View stream ended before the next frame.")
-        }
-        return frame
+    private func receive(_ value: Data) {
+        lock.lock(); defer { lock.unlock() }
+        guard terminal == nil else { return }
+        frame = value // Bounded newest-frame mailbox; never replay an already consumed frame.
     }
 
-    func validatedFirstFrame() async throws -> Data {
-        try await withThrowingTaskGroup(of: Data.self) { group in
-            group.addTask { [self] in try await nextFrame() }
-            group.addTask {
-                try await Task.sleep(nanoseconds: Self.firstFrameTimeoutNanoseconds)
-                throw CCAPIError.invalidResponse(
-                    "Canon multipart Live View did not return a valid JPEG frame within 5 seconds."
-                )
+    private func finish(_ error: Error) {
+        lock.lock(); defer { lock.unlock() }
+        if terminal == nil { terminal = error }
+    }
+
+    private func takeFrame() throws -> Data? {
+        lock.lock(); defer { lock.unlock() }
+        if let terminal { throw terminal }
+        if let frame { self.frame = nil; return frame }
+        return nil
+    }
+
+    func nextFrame(timeoutNanoseconds: UInt64 = 5_000_000_000) async throws -> Data {
+        let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(clamping: timeoutNanoseconds)))
+        while true {
+            try Task.checkCancellation()
+            if let frame = try takeFrame() { return frame }
+            guard ContinuousClock.now < deadline else {
+                let error = CCAPIError.invalidResponse("Canon multipart Live View did not return a valid JPEG frame within the frame deadline.")
+                finish(error)
+                worker?.cancel(); response.cancel()
+                throw error
             }
-            defer { group.cancelAll() }
-            guard let frame = try await group.next() else {
-                throw CCAPIError.invalidResponse("Canon multipart Live View did not return a first frame.")
-            }
-            return frame
+            // Cancelling one UI reader does not consume or terminate the stream iterator.
+            try await Task.sleep(nanoseconds: min(timeoutNanoseconds, 10_000_000))
         }
     }
+
+    func checkUsable() throws {
+        lock.lock(); defer { lock.unlock() }
+        if let terminal { throw terminal }
+    }
+
+    func validatedFirstFrame() async throws -> Data { try await nextFrame() }
 
     func close() {
-        worker.cancel()
+        lock.lock()
+        frame = nil
+        terminal = CancellationError()
+        lock.unlock()
+        worker?.cancel()
         response.cancel()
-        continuation.finish(throwing: CancellationError())
     }
 }

@@ -1018,3 +1018,9 @@
 "recording_observed_active" = "freshly observed recording";
 "recording_observed_stopped" = "freshly observed stopped";
 "recording_observed_unavailable" = "unavailable";
+
+"live_view_retiring" = "Live View has ended locally. Waiting for the camera's Stop acknowledgement.";
+"live_view_restart_required" = "Live View ended. Start a new view when you are ready.";
+"live_view_start_again" = "Start Live View again";
+"live_view_render_stalled" = "Live View did not produce usable renderer output. Confirm Stop before starting again.";
+"live_view_stop_pending" = "Live View cleanup is still required. Release the active camera control, then retry Stop.";

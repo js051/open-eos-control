@@ -1,0 +1,2381 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "frame-none-ack-False-terminal-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": false,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "none"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-none-ack-False-terminal-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": false,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "none"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-none-ack-True-terminal-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "none"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-none-ack-True-terminal-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "none"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-encoded-frame-ack-False-terminal-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": false,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "encoded-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-encoded-frame-ack-False-terminal-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": false,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "encoded-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-encoded-frame-ack-True-terminal-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "encoded-frame"
+      },
+      "expected": {
+        "canPublishInputReady": true,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-encoded-frame-ack-True-terminal-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "encoded-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-decoded-frame-ack-False-terminal-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": false,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "decoded-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-decoded-frame-ack-False-terminal-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": false,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "decoded-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-decoded-frame-ack-True-terminal-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "decoded-frame"
+      },
+      "expected": {
+        "canPublishInputReady": true,
+        "canPublishDecoded": true,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-decoded-frame-ack-True-terminal-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "decoded-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-presented-frame-ack-False-terminal-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": false,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-presented-frame-ack-False-terminal-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": false,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-presented-frame-ack-True-terminal-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": true,
+        "canPublishDecoded": true,
+        "canPublishPresented": true,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-presented-frame-ack-True-terminal-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-invalid-ack-False-terminal-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": false,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "invalid"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-invalid-ack-False-terminal-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": false,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "invalid"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-invalid-ack-True-terminal-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "invalid"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "frame-invalid-ack-True-terminal-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "invalid"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-AUTO-False-not-needed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "not-needed",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-AUTO-False-not-needed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "not-needed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": true,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-AUTO-False-pending-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-AUTO-False-pending-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-AUTO-False-confirmed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-AUTO-False-confirmed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": true,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-AUTO-False-unconfirmed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-AUTO-False-unconfirmed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-AUTO-True-not-needed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "not-needed",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-AUTO-True-not-needed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "not-needed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-AUTO-True-pending-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": true,
+        "canPublishDecoded": true,
+        "canPublishPresented": true,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-AUTO-True-pending-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-AUTO-True-confirmed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-AUTO-True-confirmed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": true,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-AUTO-True-unconfirmed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-AUTO-True-unconfirmed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-explicit-False-not-needed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "not-needed",
+        "sourceMode": "explicit",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-explicit-False-not-needed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "not-needed",
+        "sourceMode": "explicit",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-explicit-False-pending-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "explicit",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-explicit-False-pending-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "explicit",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-explicit-False-confirmed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "explicit",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-explicit-False-confirmed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "explicit",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-explicit-False-unconfirmed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "explicit",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-explicit-False-unconfirmed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "explicit",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-explicit-True-not-needed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "not-needed",
+        "sourceMode": "explicit",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-explicit-True-not-needed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "not-needed",
+        "sourceMode": "explicit",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-explicit-True-pending-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "explicit",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": true,
+        "canPublishDecoded": true,
+        "canPublishPresented": true,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-explicit-True-pending-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "explicit",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-explicit-True-confirmed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "explicit",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-explicit-True-confirmed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "explicit",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-explicit-True-unconfirmed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "explicit",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-explicit-True-unconfirmed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "explicit",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-False-not-needed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "not-needed",
+        "sourceMode": "UNKNOWN",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-False-not-needed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "not-needed",
+        "sourceMode": "UNKNOWN",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-False-pending-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "UNKNOWN",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-False-pending-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "UNKNOWN",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-False-confirmed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "UNKNOWN",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-False-confirmed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "UNKNOWN",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-False-unconfirmed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "UNKNOWN",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-False-unconfirmed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": false,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "UNKNOWN",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-True-not-needed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "not-needed",
+        "sourceMode": "UNKNOWN",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-True-not-needed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "not-needed",
+        "sourceMode": "UNKNOWN",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-True-pending-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "UNKNOWN",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": true,
+        "canPublishDecoded": true,
+        "canPublishPresented": true,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-True-pending-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "UNKNOWN",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-True-confirmed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "UNKNOWN",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-True-confirmed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "UNKNOWN",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-True-unconfirmed-False",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "UNKNOWN",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "cleanup-UNKNOWN-True-unconfirmed-True",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "UNKNOWN",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "owner-sameOwner-False-pending",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "owner-sameOwner-True-confirmed",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "owner-sameOwner-True-unconfirmed",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "owner-sameAttempt-False-pending",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "owner-sameAttempt-True-confirmed",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "owner-sameAttempt-True-unconfirmed",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "owner-cancelled-False-pending",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "owner-cancelled-True-confirmed",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "owner-cancelled-True-unconfirmed",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": true,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "owner-retired-False-pending",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "owner-retired-True-confirmed",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "owner-retired-True-unconfirmed",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": true,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "owner-foreground-False-pending",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": false,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "owner-foreground-True-confirmed",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": false,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "confirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "owner-foreground-True-unconfirmed",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": false,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "unconfirmed",
+        "sourceMode": "AUTO",
+        "terminal": true,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "desktop-hidden-policy-can-publish",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": false,
+        "foreground": false,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "decoded-frame"
+      },
+      "expected": {
+        "canPublishInputReady": true,
+        "canPublishDecoded": true,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "mobile-hidden-retains-stop",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": false,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "wrong-type-sameOwner-1",
+      "input": {
+        "sameOwner": 1,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "none"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "wrong-type-sameAttempt-'true'",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": "true",
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "none"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "wrong-type-startAdmitted-1",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": 1,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "none"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": false
+      }
+    },
+    {
+      "name": "wrong-type-startAcknowledged-'true'",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": "true",
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "none"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "wrong-type-foreground-1",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": 1,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "none"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "wrong-type-frameEvidence-None",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": null
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "wrong-type-frameEvidence-[]",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": []
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "wrong-type-frameEvidence-{}",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "pending",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": {}
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "wrong-type-stopEvidence-None",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": null,
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "none"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "invalid-stop-presented-None",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": null,
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "invalid-stop-presented-'UNKNOWN'",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "UNKNOWN",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "invalid-stop-presented-''",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": "",
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "invalid-stop-presented-[]",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": [],
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    },
+    {
+      "name": "invalid-stop-presented-{}",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "cancelled": false,
+        "retired": false,
+        "foregroundRequired": true,
+        "foreground": true,
+        "startAdmitted": true,
+        "startAcknowledged": true,
+        "stopEvidence": {},
+        "sourceMode": "AUTO",
+        "terminal": false,
+        "frameEvidence": "presented-frame"
+      },
+      "expected": {
+        "canPublishInputReady": false,
+        "canPublishDecoded": false,
+        "canPublishPresented": false,
+        "canFallback": false,
+        "stopRequired": true
+      }
+    }
+  ]
+}
