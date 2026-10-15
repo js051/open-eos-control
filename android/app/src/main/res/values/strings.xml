@@ -1114,4 +1114,6 @@
     <string name="cube_lut_import_stopping">Import cancelled. Waiting for its background work to stop…</string>
     <string name="cancel_cube_lut_import">Cancel LUT import</string>
     <string name="cube_lut_picker_recovery">Waiting for an earlier file picker. Finish or cancel it to choose again. If it is gone, remove this app from Recent apps and reopen. The earlier selection will not be imported.</string>
+    <string name="connection_retirement_pending">The previous connection is still closing. You can edit settings; an explicit retry waits for cleanup.</string>
+    <string name="connection_retirement_unconfirmed">Previous connection cleanup is unconfirmed. Close the previous camera or desktop bridge session, then restart this app before connecting again. No automatic retry was sent.</string>
 </resources>

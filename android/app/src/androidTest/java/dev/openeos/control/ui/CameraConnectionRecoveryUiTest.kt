@@ -121,6 +121,37 @@ class CameraConnectionRecoveryUiTest {
         compose.onNodeWithTag("connection-connect").performScrollTo().assertIsNotEnabled()
     }
 
+    @Test fun cleanupPendingAllowsEditsAndExplicitRetryButUnknownCleanupBlocksConnection() {
+        val state = mutableStateOf(CameraUiState(connectionTeardownPending = true))
+        var connections = 0
+        val actions = connectionRecoveryTestActions().copy(
+            setBaseUrl = { state.value = state.value.copy(baseUrl = it) },
+            connect = { connections++ },
+        )
+        compose.setContent { ConnectionRecoveryTestContent(state.value, actions) }
+        compose.onNodeWithTag("connection-retirement-pending").assertIsDisplayed()
+        compose.onNodeWithTag("connection-camera-url").performScrollTo().assertIsEnabled()
+            .performTextReplacement("http://synthetic-new.example")
+        compose.runOnIdle { assertEquals(0, connections) }
+        compose.onNodeWithTag("connection-connect").performScrollTo().assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertEquals(1, connections)
+            state.value = state.value.copy(connectionTeardownPending = false, connectionRetirementUnconfirmed = true)
+        }
+        compose.onNodeWithTag("connection-retirement-pending").assertDoesNotExist()
+        compose.onNodeWithTag("connection-connect").assertIsNotEnabled()
+        compose.onNodeWithTag("connection-camera-url").performScrollTo().assertIsEnabled()
+    }
+
+    @Test fun bridgeScanRemainsBlockedDuringTeardownAndUnknownRetirement() {
+        val state = mutableStateOf(CameraUiState(connectionTarget = ConnectionTarget.DESKTOP_BRIDGE,
+            connectionTeardownPending = true))
+        compose.setContent { ConnectionRecoveryTestContent(state.value, connectionRecoveryTestActions()) }
+        compose.onNodeWithTag("connection-bridge-scan").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle { state.value = state.value.copy(connectionTeardownPending = false, connectionRetirementUnconfirmed = true) }
+        compose.onNodeWithTag("connection-bridge-scan").assertIsNotEnabled()
+    }
+
     @Test fun authenticationFailureOpensEditableFieldsAndDismissDoesNotRetry() {
         val state = mutableStateOf(CameraUiState(connectionRecovery = ConnectionRecovery(
             ConnectionAttemptTarget.CCAPI, ConnectionFailureReason.AUTHENTICATION_REJECTED,

@@ -105,6 +105,9 @@ data class CameraUiState(
     val bridgeCameras: List<DesktopBridgeCamera> = emptyList(),
     val bridgeScanCompleted: Boolean = false,
     val connectionRecovery: ConnectionRecovery? = null,
+    val connectionTeardownPending: Boolean = false,
+    // Historical warning, separate from the current attempt's recovery and safety state.
+    val connectionRetirementUnconfirmed: Boolean = false,
     val selectedBridgeCameraId: String? = null,
     val previewMode: Boolean = false,
     val transport: CameraTransport? = null,
@@ -249,6 +252,8 @@ data class CameraUiState(
 
     fun isBusy(operation: CameraOperation): Boolean =
         operation in pendingOperations ||
+            (connectionRetirementUnconfirmed && operation in setOf(CameraOperation.CONNECT, CameraOperation.BRIDGE)) ||
+            (operation == CameraOperation.BRIDGE && (connectionTeardownPending || CameraOperation.CONNECT in pendingOperations)) ||
             (operation == CameraOperation.CAPTURE && (CameraOperation.RECORDING in pendingOperations || recordingStopAvailable) && !bulbExposureActive) ||
             (operation == CameraOperation.RECORDING && CameraOperation.CAPTURE in pendingOperations && !recordingStopAvailable) ||
             ((maintenanceSuspended || CameraOperation.MAINTENANCE in pendingOperations) && operation !in setOf(CameraOperation.MAINTENANCE, CameraOperation.CONNECT,
@@ -306,7 +311,7 @@ internal fun CameraUiState.adoptLiveViewStopWarning(status: CameraStatus): Camer
     if (status.liveViewStopUnconfirmed == true) copy(liveViewStopUnconfirmed = true) else this
 
 internal fun CameraUiState.dismissVisibleCameraMessage(): CameraUiState = when {
-    shutterReleaseUnconfirmed || needsLiveViewStopRecovery || pendingRecordingCommand != null -> this
+    shutterReleaseUnconfirmed || needsLiveViewStopRecovery || pendingRecordingCommand != null || connectionRetirementUnconfirmed -> this
     error != null || connectionRecovery != null -> copy(error = null, errorOperation = null, connectionRecovery = null)
     recordingStartNotConfirmed -> copy(recordingStartNotConfirmed = false)
     recordingDisconnectWarning -> copy(recordingDisconnectWarning = false)

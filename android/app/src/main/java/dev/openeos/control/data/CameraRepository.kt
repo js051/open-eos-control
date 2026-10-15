@@ -25,6 +25,10 @@ class CameraRepository(
     private var liveViewAttemptGeneration = 0L
     private var activeInfo: CameraInfo? = null
     private val connectionMutex = Mutex()
+    @Volatile var connectionRetirementRevision: Long = 0L
+        private set
+    @Volatile internal var connectionRetirementSafetyWarnings: Set<PreviousConnectionSafetyWarning> = emptySet()
+        private set
     private val liveViewStarter = LiveViewStartOperation()
 
     internal fun cancelPendingLiveViewStart() = liveViewStarter.retire()
@@ -108,9 +112,15 @@ class CameraRepository(
     suspend fun discoverBridgeCameras(
         baseUrl: String,
         token: String = "",
-    ): List<DesktopBridgeCamera> = backendFactory.discoverDesktopBridge(
-        CameraConnection.DesktopBridge(baseUrl = baseUrl, token = token)
-    )
+    ): List<DesktopBridgeCamera> {
+        // Local Bridge engine discovery can touch a USB owner. Never queue a stale scan.
+        if (!connectionMutex.tryLock()) throw ConnectionRetirementPendingException()
+        try {
+            if (connectionRetirementRevision != 0L) throw ConnectionRetirementBlockedException()
+            if (active) throw ConnectionRetirementPendingException()
+            return backendFactory.discoverDesktopBridge(CameraConnection.DesktopBridge(baseUrl = baseUrl, token = token))
+        } finally { connectionMutex.unlock() }
+    }
 
     suspend fun connectBridge(
         baseUrl: String,
@@ -135,7 +145,9 @@ class CameraRepository(
         request: LiveViewRequest,
         startLiveView: Boolean,
     ): CameraSession = connectionMutex.withLock {
+        if (connectionRetirementRevision != 0L) throw ConnectionRetirementBlockedException()
         if (active) disconnectLocked()
+        if (connectionRetirementRevision != 0L) throw ConnectionRetirementBlockedException()
         try {
             backend = backendFactory.create(connection)
             backend.initialize()
@@ -187,7 +199,15 @@ class CameraRepository(
             )
         } catch (exception: Exception) {
             // Cancellation still owns any partly initialized backend until cleanup completes.
-            withContext(NonCancellable) { runCatching { backend.close() } }
+            connectionRetirementSafetyWarnings += previousConnectionSafetyWarnings(exception)
+            if (exception is ConnectionRetirementUnconfirmedException || backend.connectionRetirementUnconfirmed)
+                connectionRetirementRevision += 1
+            withContext(NonCancellable) {
+                runCatching { backend.closeConnectionAttempt() }.onFailure { failure ->
+                    connectionRetirementRevision += 1
+                    connectionRetirementSafetyWarnings += previousConnectionSafetyWarnings(failure)
+                }
+            }
             active = false
             liveViewRunning = false
             activeInfo = null
@@ -242,8 +262,10 @@ class CameraRepository(
                 // A backend without Live View still needs its session closed.
             }
             backend.close()
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
+            connectionRetirementSafetyWarnings += previousConnectionSafetyWarnings(failure)
             liveViewStopUnconfirmed = liveViewStopUnconfirmed || hadLiveView
+            connectionRetirementRevision += 1
             // Session retirement cannot prove that an unreachable camera stopped.
         } finally {
             active = false

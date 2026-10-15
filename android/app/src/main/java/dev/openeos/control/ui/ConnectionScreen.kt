@@ -99,6 +99,10 @@ fun ConnectionScreen(state: CameraUiState, actions: CameraActions) {
                 }
                 Text(stringResource(R.string.connect_title), color = AppText, fontWeight = FontWeight.Bold)
                 Text(stringResource(R.string.connect_subtitle), color = AppSubtleText)
+                if (state.connectionTeardownPending) {
+                    Text(stringResource(R.string.connection_retirement_pending), color = AppSubtleText,
+                        modifier = Modifier.testTag("connection-retirement-pending"))
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(
                         onClick = actions.openDownloadHistory,
@@ -229,7 +233,7 @@ private fun CcapiConnectionControls(
     ) {
         Icon(painterResource(LucideR.drawable.lucide_ic_wifi), null, Modifier.size(20.dp))
         Spacer(Modifier.size(8.dp))
-        Text(stringResource(if (state.isBusy(CameraOperation.CONNECT)) R.string.connecting else R.string.connect))
+        Text(stringResource(if (CameraOperation.CONNECT in state.pendingOperations) R.string.connecting else R.string.connect))
     }
 }
 
@@ -266,7 +270,7 @@ private fun DesktopBridgeConnectionControls(state: CameraUiState, actions: Camer
         Spacer(Modifier.size(8.dp))
         Text(
             stringResource(
-                if (state.isBusy(CameraOperation.BRIDGE)) R.string.scanning_desktop_bridge else R.string.scan_desktop_bridge
+                if (CameraOperation.BRIDGE in state.pendingOperations) R.string.scanning_desktop_bridge else R.string.scan_desktop_bridge
             )
         )
     }
@@ -305,7 +309,7 @@ private fun DesktopBridgeConnectionControls(state: CameraUiState, actions: Camer
         Spacer(Modifier.size(8.dp))
         Text(
             stringResource(
-                if (state.isBusy(CameraOperation.CONNECT)) R.string.connecting else R.string.connect_desktop_bridge
+                if (CameraOperation.CONNECT in state.pendingOperations) R.string.connecting else R.string.connect_desktop_bridge
             )
         )
     }
@@ -381,7 +385,7 @@ private fun UsbConnectionControls(state: CameraUiState, actions: CameraActions) 
                     Spacer(Modifier.size(8.dp))
                     Text(
                         stringResource(
-                            if (state.isBusy(CameraOperation.CONNECT)) R.string.connecting else R.string.connect_usb_camera
+                            if (CameraOperation.CONNECT in state.pendingOperations) R.string.connecting else R.string.connect_usb_camera
                         )
                     )
                 }

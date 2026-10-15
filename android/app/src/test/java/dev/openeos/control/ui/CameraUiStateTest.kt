@@ -12,6 +12,23 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraUiStateTest {
+    @Test fun uncertainPreviousConnectionBlocksConnectAndCannotBeDismissedIntoPermission() {
+        val state = CameraUiState(connectionRetirementUnconfirmed = true)
+        assertTrue(state.isBusy(CameraOperation.CONNECT))
+        assertTrue(state.isBusy(CameraOperation.BRIDGE))
+        assertFalse(state.isBusy(CameraOperation.USB))
+        assertTrue(state.dismissVisibleCameraMessage().connectionRetirementUnconfirmed)
+        assertTrue(state.copy(error = "synthetic current error").dismissVisibleCameraMessage().connectionRetirementUnconfirmed)
+    }
+
+    @Test fun teardownPendingKeepsExplicitRetryAvailableWithoutClaimingItAlreadyFinished() {
+        val state = CameraUiState(connectionTeardownPending = true)
+        assertFalse(state.connected)
+        assertFalse(state.isBusy(CameraOperation.CONNECT))
+        assertTrue(state.connectionTeardownPending)
+        assertTrue(state.isBusy(CameraOperation.BRIDGE))
+    }
+
     @Test fun captureAndRecordingAdmissionAreMutuallyExclusiveButReleaseStaysAvailable() {
         val state = CameraUiState().withOfflinePreview()
         assertTrue(state.copy(pendingOperations = setOf(CameraOperation.RECORDING)).isBusy(CameraOperation.CAPTURE))

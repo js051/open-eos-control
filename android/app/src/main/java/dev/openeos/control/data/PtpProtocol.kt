@@ -468,6 +468,7 @@ class PtpSession(
     private val mutex = Mutex()
     private var nextTransactionId = 1L
     private var sessionOpen = false
+    private var sessionOpenAttempted = false
     private var cachedDeviceInfo: PtpDeviceInfo? = null
 
     suspend fun initialize(): PtpDeviceInfo = mutex.withLock {
@@ -478,12 +479,19 @@ class PtpSession(
             expectData = true,
         ) ?: throw PtpProtocolException("GetDeviceInfo completed without a data container.")
         val info = PtpDatasets.deviceInfo(infoPayload)
-        executeLocked(
-            operationCode = PtpOperationCode.OPEN_SESSION,
-            parameters = listOf(sessionId),
-            transactionId = 0L,
-            expectData = false,
-        )
+        try {
+            executeLocked(
+                operationCode = PtpOperationCode.OPEN_SESSION,
+                parameters = listOf(sessionId),
+                transactionId = 0L,
+                expectData = false,
+                beforeDispatch = { sessionOpenAttempted = true },
+            )
+        } catch (failure: PtpResponseException) {
+            // A complete rejection did not open our session; do not close an existing owner.
+            sessionOpenAttempted = false
+            throw failure
+        }
         sessionOpen = true
         cachedDeviceInfo = info
         info
@@ -842,6 +850,28 @@ class PtpSession(
         }
     }
 
+    /** Strict retirement for an abandoned setup; ordinary shutdown keeps its best-effort policy. */
+    suspend fun shutdownConnectionAttempt() {
+        mutex.withLock {
+            try {
+                if (sessionOpen || sessionOpenAttempted) {
+                    try {
+                        executeLocked(PtpOperationCode.CLOSE_SESSION,
+                            transactionId = takeTransactionId(), expectData = false)
+                    } catch (failure: PtpResponseException) {
+                        // A definite no-session response also confirms the original owner is retired.
+                        if (failure.responseCode != PtpResponseCode.SESSION_NOT_OPEN) throw failure
+                    }
+                }
+            } finally {
+                sessionOpen = false
+                sessionOpenAttempted = false
+                cachedDeviceInfo = null
+                transport.close()
+            }
+        }
+    }
+
     suspend fun shutdown() {
         mutex.withLock {
             try {
@@ -856,6 +886,7 @@ class PtpSession(
                 }
             } finally {
                 sessionOpen = false
+                sessionOpenAttempted = false
                 cachedDeviceInfo = null
                 transport.close()
             }
@@ -864,6 +895,7 @@ class PtpSession(
 
     fun abort() {
         sessionOpen = false
+        sessionOpenAttempted = false
         cachedDeviceInfo = null
         transport.close()
     }
@@ -893,8 +925,10 @@ class PtpSession(
         transactionId: Long,
         expectData: Boolean,
         maxPayloadBytes: Int = DEFAULT_PTP_METADATA_BYTES,
+        beforeDispatch: (() -> Unit)? = null,
     ): ByteArray? {
-        transport.send(PtpCodec.command(operationCode, transactionId, parameters))
+        val command = PtpCodec.command(operationCode, transactionId, parameters)
+        if (beforeDispatch == null) transport.send(command) else transport.send(command, beforeDispatch)
         var data: ByteArray? = null
         while (true) {
             val container = transport.receive(maxPayloadBytes)

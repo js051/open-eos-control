@@ -17,7 +17,7 @@ def fixture_paths(name):
 
 class AndroidFixturePackagingTest(unittest.TestCase):
     def test_both_explicit_manifests_have_unique_existing_only_json_fixtures(self):
-        for name, count in [("unitContractFixtures", 12), ("androidContractFixtures", 2)]:
+        for name, count in [("unitContractFixtures", 19), ("androidContractFixtures", 3)]:
             paths = fixture_paths(name)
             self.assertEqual(count, len(paths))
             self.assertEqual(len(paths), len({path.name for path in paths}))

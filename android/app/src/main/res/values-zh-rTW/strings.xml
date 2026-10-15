@@ -877,4 +877,6 @@
     <string name="cube_lut_import_stopping">已取消匯入。正在等待先前的讀取或解析結束…</string>
     <string name="cancel_cube_lut_import">取消 LUT 匯入</string>
     <string name="cube_lut_picker_recovery">正在等待先前的選檔視窗。請完成或取消選檔，才能再次選擇。若該視窗已消失，請從最近使用的應用程式移除此 App 後重新開啟。先前的選擇不會匯入。</string>
+    <string name="connection_retirement_pending">前一個連線仍在清理。可先修改設定；手動重試會等待清理結束。</string>
+    <string name="connection_retirement_unconfirmed">無法確認前一個連線已完成清理。請先關閉前一台相機或桌面橋接器連線，再重新啟動此應用程式後連線。系統未自動重試。</string>
 </resources>
