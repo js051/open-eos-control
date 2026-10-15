@@ -328,6 +328,7 @@ class CameraRepository(
         backend.setMediaRotation(item, degrees)
 
     suspend fun deleteMedia(item: CameraMediaItem) = backend.deleteMedia(item)
+    suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence) = backend.deleteMedia(item, evidence)
 
     suspend fun restartLiveView(): LiveViewRequest = setLiveViewEnabled(true, restart = true)
 

@@ -59,6 +59,18 @@ class DesktopBridgeClientTest {
     }
 
     @Test
+    fun missingCreatedSessionEngineIsNotInferredFromApiDisplayName() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        val session = JSONObject(SESSION_JSON)
+        session.getJSONObject("camera").remove("engine")
+        server.enqueue(jsonResponse(session.toString()))
+        server.enqueue(jsonResponse(INFO_JSON))
+        val client = DesktopBridgeClient(server.url("/").toString(), cameraEngine = "libgphoto2")
+        client.initialize()
+        assertNull(client.info().bridgeEngine)
+    }
+
+    @Test
     fun unknownAndConflictingMediaNeverIssueThumbnailPreviewOrStreamRequests() = runTest {
         val client = DesktopBridgeClient(server.url("/").toString())
         for (item in listOf(CameraMediaItem("unknown", "FILE.bin", "other"),
@@ -84,6 +96,9 @@ class DesktopBridgeClientTest {
         val cameras = client.discoverCameras()
         client.initialize()
         val info = client.info()
+        // Use the actual returned engine, not the requested edsdk hint or api display string.
+        assertEquals("libgphoto2", info.bridgeEngine)
+        assertEquals(server.url("/").toString().trimEnd('/'), info.bridgeEndpoint)
         val initialStatus = client.status()
         val capabilities = client.capabilities()
         val exposureStatus = client.setExposure(iso = "800")

@@ -114,6 +114,9 @@ fun ConnectionScreen(state: CameraUiState, actions: CameraActions) {
                     }
                 }
 
+                // Retired deletion receipts remain readable without reconnecting or granting dispatch authority.
+                if (state.mediaDeleteHistory.isNotEmpty()) MediaDeleteReceipts(state, actions)
+
                 ConnectionChoiceSegment(
                     firstLabel = stringResource(R.string.direct_camera),
                     secondLabel = stringResource(R.string.desktop_bridge),

@@ -41,7 +41,9 @@ import dev.openeos.control.data.DownloadContinuationStatus
 import dev.openeos.control.data.continuationStatus
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** A process history remains accessible without a camera, picker grant, or media query. */
 @Composable
@@ -60,7 +62,7 @@ internal fun DownloadHistoryDialog(
     val legacyEntries = state.entries
     val dateFormat = remember { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT) }
     LaunchedEffect(state.warning) {
-        if (state.warning != null) listState.scrollToItem(3)
+        if (state.warning != null) withContext(Dispatchers.Main.immediate) { listState.scrollToItem(3) }
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
@@ -171,7 +173,11 @@ internal fun DownloadHistoryDialog(
                         onClear()
                         // A repeated failed clear can have the same warning value. It must still
                         // bring that result into view when the user has scrolled to older records.
-                        scope.launch { listState.scrollToItem(if (state.warning != null) 3 else 0) }
+                        scope.launch {
+                            withContext(Dispatchers.Main.immediate) {
+                                listState.scrollToItem(if (state.warning != null) 3 else 0)
+                            }
+                        }
                     },
                     modifier = Modifier.testTag("download-history-clear-confirm-button"),
                 ) { Text(stringResource(R.string.download_history_clear)) }

@@ -26,6 +26,7 @@ internal fun CameraUiState.withOfflinePreview(): CameraUiState = copy(
     mediaFolderFilter = MediaFolderFilter.All,
     mediaSessionGeneration = mediaSessionGeneration + 1,
     transport = null,
+    mediaDeleteReceipt = null,
     info = CameraInfo(
         connected = true,
         model = CameraProfile.R6_MARK_III.modelName,

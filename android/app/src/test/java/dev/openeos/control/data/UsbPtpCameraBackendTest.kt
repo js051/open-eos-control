@@ -3492,6 +3492,12 @@ class UsbPtpCameraBackendTest {
             check(items.remove(item.id) != null)
         }
 
+        override suspend fun delete(item: CameraMediaItem, evidence: MediaDeleteEvidence) {
+            evidence.beforeDispatch()
+            delete(item)
+            evidence.onConfirmed()
+        }
+
         fun bytes(item: CameraMediaItem): ByteArray = requireEntry(item).second
 
         private fun requireEntry(item: CameraMediaItem): Pair<CameraMediaItem, ByteArray> =

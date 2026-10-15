@@ -134,6 +134,7 @@ class DesktopBridgeClient(
     private val liveViewStateLock = Any()
     val liveViewStopRequired: Boolean
         get() = liveViewStopOwner?.let { it.session === shutterSession && !it.session.closed } == true
+    private var sessionEngine: String? = null
     private var sessionCameraModel: String? = null
     private var eventPollingSupported = false
     private var shutterAutofocusSupported = false
@@ -160,6 +161,7 @@ class DesktopBridgeClient(
         focusInfoSupported = false
         liveViewMagnifications = emptyList()
         sessionCameraModel = null
+        sessionEngine = null
         validateService()
         val payload = JSONObject().put("engine", cameraEngine ?: "auto")
         cameraId?.takeIf(String::isNotBlank)?.let { payload.put("cameraId", it) }
@@ -171,6 +173,7 @@ class DesktopBridgeClient(
         heldAutofocusSession = BridgeHeldAutofocusSession(command = { ownerId, start ->
             focusCommand(session, ownerId, start)
         }, onTransition = session::invalidateObservations)
+        sessionEngine = mediaDeleteBridgeEngine(created.opt("engine"), created.optJSONObject("camera")?.opt("engine"))
         sessionCameraModel = created.optJSONObject("camera")
             ?.optNullableString("model")
             ?.trim()
@@ -210,6 +213,7 @@ class DesktopBridgeClient(
                         heldAutofocusSession = null
                         sessionId = null
                         sessionCameraModel = null
+                        sessionEngine = null
                         eventPollingSupported = false
                         shutterAutofocusSupported = false
                         heldAutofocusSupported = false
@@ -232,6 +236,8 @@ class DesktopBridgeClient(
             manufacturer = body.optNullableString("manufacturer"),
             deviceVersion = body.optNullableString("deviceVersion"),
             engineVersion = body.optNullableString("engineVersion"),
+            bridgeEngine = sessionEngine,
+            bridgeEndpoint = mediaDeleteEndpoint(rootUrl.toString()),
         ).also { info ->
             sessionCameraModel = info.model
             observedFeatures.add(CameraFeature.CAMERA_IDENTITY)
@@ -1331,13 +1337,14 @@ class DesktopBridgeClient(
         }
     }
 
-    suspend fun deleteMedia(item: CameraMediaItem) {
-        requestOk(
-            Request.Builder()
-                .url(sessionEndpoint("media", item.id))
-                .delete()
-                .build(),
-        )
+    suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence = MediaDeleteEvidence()) {
+        check(item.protected != true && item.deleteWritable != false) { "This media item cannot be deleted." }
+        val request = Request.Builder().url(sessionEndpoint("media", item.id)).delete().build()
+        val session = sessionForRequest(request)
+        executeMediaDeleteHttp(mutationHttpClient, request, evidence, checkOwner = {
+            session?.let(::requireCurrentSession)
+            requireBridgeRequestAllowed(request)
+        })
         observedFeatures.add(CameraFeature.MEDIA_DELETE)
     }
 
@@ -1399,6 +1406,7 @@ class DesktopBridgeClient(
             protectionWritable = normalizedMediaMetadataBoolean(item.opt("protectionWritable")),
             archiveWritable = normalizedMediaMetadataBoolean(item.opt("archiveWritable")),
             rotationWritable = normalizedMediaMetadataBoolean(item.opt("rotationWritable")),
+            deleteWritable = normalizedMediaMetadataBoolean(item.opt("deleteWritable")),
             streamAvailable = cameraMediaHasVideoTransportHint(kind, name) && cameraMediaIsVideo(kind, name, contentType),
             contentType = contentType,
             widthPixels = item.optNullableInt("widthPixels")?.takeIf { it > 0 },
@@ -1728,10 +1736,10 @@ class DesktopBridgeClient(
     private object BridgeShutterStart
     private object BridgeFocusStart
 
-    private fun newBridgeCall(request: Request): Call {
+    private fun requireBridgeRequestAllowed(request: Request) {
         val session = sessionForRequest(request)
         session?.let(::requireCurrentSession)
-        if (request.method in setOf("GET", "HEAD")) return httpClient.newCall(request)
+        if (request.method in setOf("GET", "HEAD")) return
         val path = request.url.encodedPath
         val root = session?.let { endpoint("v1", "session", it.id).encodedPath }
         val stopOnly = (request.method == "POST" && path in setOf(
@@ -1744,6 +1752,11 @@ class DesktopBridgeClient(
         if (session?.unconfirmed == true && request.tag(BridgeShutterStart::class.java) == null) {
             if (!stopOnly) throw ShutterReleaseException(IllegalStateException("Retry stopping the camera control before another Bridge operation."))
         }
+    }
+
+    private fun newBridgeCall(request: Request): Call {
+        requireBridgeRequestAllowed(request)
+        if (request.method in setOf("GET", "HEAD")) return httpClient.newCall(request)
         val oneShot = request.body?.let { body ->
             object : RequestBody() {
                 override fun contentType() = body.contentType()

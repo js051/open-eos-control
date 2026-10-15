@@ -52,6 +52,7 @@ import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraFeature
+import dev.openeos.control.data.MediaDeleteOutcome
 import dev.openeos.control.data.MediaUploadStatus
 import dev.openeos.control.data.CameraMediaItem
 import dev.openeos.control.data.MediaMetadataField
@@ -79,8 +80,8 @@ private class MediaScreenSessionKey(private val info: CameraInfo?, private val g
 
 @Composable
 private fun MediaScreenContent(state: CameraUiState, actions: CameraActions, currentOwner: () -> MediaMetadataOwner) {
-    var pendingDelete by remember { mutableStateOf<CameraMediaItem?>(null) }
-    var pendingBatchDelete by remember { mutableStateOf<List<CameraMediaItem>?>(null) }
+    var pendingDelete by remember { mutableStateOf<MediaDeleteSelection?>(null) }
+    var pendingBatchDelete by remember { mutableStateOf<MediaDeleteSelection?>(null) }
     var activeMetadataItemId by remember { mutableStateOf<String?>(null) }
     var batchMetadataSelection by remember { mutableStateOf<MediaMetadataSelection?>(null) }
     var mediaFilter by remember { mutableStateOf(MediaFilter.ALL) }
@@ -88,12 +89,25 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions, cur
     var dateDialogVisible by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     var selectedSnapshots by remember { mutableStateOf(emptyMap<String, CameraMediaItem>()) }
+    var selectionTokens by remember { mutableStateOf(emptyMap<String, String>()) }
     fun updateSelection(ids: Set<String>) {
+        selectionTokens = ids.associateWith { selectionTokens[it] ?: newMediaDeleteSelectionToken() }
         val currentItems = state.mediaItems.associateBy(CameraMediaItem::id)
         selectedSnapshots = ids.mapNotNull { id ->
             (currentItems[id] ?: selectedSnapshots[id])?.let { id to it }
         }.toMap()
         selectedIds = ids.filterTo(linkedSetOf()) { it in selectedSnapshots }
+    }
+    LaunchedEffect(state.mediaDeleteHistory) {
+        var remaining = selectionTokens
+        state.mediaDeleteHistory.forEach { receipt ->
+            remaining = consumeConfirmedDeleteSelection(remaining, receipt, state.info, state.mediaSessionGeneration)
+        }
+        if (remaining != selectionTokens) {
+            selectionTokens = remaining
+            selectedIds = selectedIds.intersect(remaining.keys)
+            selectedSnapshots = selectedSnapshots.filterKeys { it in selectedIds }
+        }
     }
     var selectionDrag by remember { mutableStateOf<MediaSelectionDrag?>(null) }
     val displayZone = rememberMediaDisplayZone()
@@ -196,56 +210,17 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions, cur
         )
     }
 
-    pendingDelete?.let { item ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text(stringResource(R.string.delete_media_title)) },
-            text = { Text(stringResource(R.string.delete_media_confirmation, item.name)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        pendingDelete = null
-                        actions.deleteMedia(item)
-                    },
-                ) {
-                    Text(stringResource(R.string.delete), color = AppRecord)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
+    fun dispatchDeletion(selection: MediaDeleteSelection) {
+        val owner = currentOwner()
+        if (selection.owner.matches(owner.connection, owner.generation)) actions.deleteMediaBatch(selection)
     }
-
-    pendingBatchDelete?.let { items ->
-        AlertDialog(
-            onDismissRequest = { pendingBatchDelete = null },
-            title = { Text(stringResource(R.string.delete_selected_media_title, items.size)) },
-            text = {
-                Column {
-                    Text(stringResource(R.string.delete_selected_media_confirmation, items.size))
-                    val hidden = items.count { it.id !in displayedIds }
-                    if (hidden > 0) Text(stringResource(R.string.media_hidden_selected, hidden))
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        pendingBatchDelete = null
-                        actions.deleteMediaBatch(items)
-                    },
-                ) {
-                    Text(stringResource(R.string.delete), color = AppRecord)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingBatchDelete = null }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
+    pendingDelete?.let { selection ->
+        MediaDeleteConfirmation(selection, single = true, onDismiss = { pendingDelete = null },
+            onConfirm = { pendingDelete = null; dispatchDeletion(selection) })
+    }
+    pendingBatchDelete?.let { selection ->
+        MediaDeleteConfirmation(selection, single = false, onDismiss = { pendingBatchDelete = null },
+            onConfirm = { pendingBatchDelete = null; dispatchDeletion(selection) })
     }
 
     batchMetadataSelection?.let { frozenItems ->
@@ -319,7 +294,8 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions, cur
                 },
                 onDelete = {
                     activeMetadataItemId = null
-                    pendingDelete = item
+                    pendingDelete = MediaDeleteSelection(listOf(item),
+                        MediaDeleteOwner(state.info, state.mediaSessionGeneration), state.transport, selectionTokens, bridgeEngine = state.info?.bridgeEngine, bridgeEndpoint = state.info?.bridgeEndpoint)
                 },
             )
         } else {
@@ -350,7 +326,7 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions, cur
                         state.supports(CameraFeature.MEDIA_ARCHIVE) ||
                         state.supports(CameraFeature.MEDIA_RATING) ||
                         state.supports(CameraFeature.MEDIA_ROTATE),
-                    deleteSupported = unloadedSelectedCount == 0 && !state.previewMode && state.supports(CameraFeature.MEDIA_DELETE),
+                    deleteSupported = selectedIds.size <= MAX_MEDIA_DELETE_ITEMS && !state.previewMode && state.supports(CameraFeature.MEDIA_DELETE),
                     onExit = { updateSelection(emptySet()) },
                     onToggleSelectAll = {
                         updateSelection(if (allDisplayedSelected) selectedIds - displayedIds else selectedIds + displayedIds)
@@ -363,7 +339,8 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions, cur
                         batchMetadataSelection = MediaMetadataSelection(selectedIds.mapNotNull(selectedSnapshots::get),
                             MediaMetadataOwner(state.info, state.mediaSessionGeneration))
                     },
-                    onDelete = { pendingBatchDelete = selectedItems },
+                    onDelete = { pendingBatchDelete = MediaDeleteSelection(selectedIds.mapNotNull(selectedSnapshots::get),
+                        MediaDeleteOwner(state.info, state.mediaSessionGeneration), state.transport, selectionTokens, hiddenSelectedCount, unloadedSelectedCount, bridgeEngine = state.info?.bridgeEngine, bridgeEndpoint = state.info?.bridgeEndpoint) },
                 )
             } else {
                 ToolIconButton(
@@ -691,7 +668,10 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions, cur
             }
         }
 
-        state.lastMediaBatchResult?.takeIf { state.mediaMetadataBatch == null }?.let { result ->
+        if (selectedIds.size > MAX_MEDIA_DELETE_ITEMS) Text(stringResource(R.string.media_delete_limit), color = AppWarning)
+        MediaDeleteReceipts(state, actions)
+
+        state.lastMediaBatchResult?.takeIf { state.mediaMetadataBatch == null && it.operation != MediaBatchOperation.DELETE }?.let { result ->
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text(
                     if (result.operation == MediaBatchOperation.DOWNLOAD && result.failedItems > 0) {
