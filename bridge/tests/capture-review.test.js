@@ -88,6 +88,7 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
     showToast: (message) => feedback.push(message),
     captureError: (error) => ({ code: error.code, message: error.message, status: error.status, feature: error.feature, engine: error.engine }),
     window: {},
+    mediaHistoryCall: async () => ({ ok: true, ticket: {}, receipt: {}, updated: true }),
     saveMediaBlob: (blob, name) => saved.push({ blob, name }),
     api: async (url, options = {}) => {
       requests.push({ url, method: options.method || "GET", json: options.json, signal: options.signal });
@@ -676,21 +677,23 @@ test("download owner preserves a newer pending destination when the old picker c
   const newDestination = deferred();
   const writers = [syntheticWriter(), syntheticWriter()];
   let pickerCalls = 0;
+  let writerCalls = 0;
   let clearedRenders = 0;
   subject.clearScheduledMediaTransferRender = () => { clearedRenders += 1; };
   subject.window.showSaveFilePicker = async () => {
     const index = pickerCalls++;
     return { createWritable: async () => {
+      writerCalls += 1;
       await [oldDestination, newDestination][index].promise;
       return writers[index];
     } };
   };
   subject.api = async (url) => { subject.requests.push({ url, method: "GET" }); return originalResponse(); };
   const oldDownload = subject.downloadMedia({ ...OLD_A, sizeBytes: 0 });
-  await eventually(() => pickerCalls === 1, "the old picker");
+  await eventually(() => writerCalls === 1, "the old destination creation");
   replaceDownloadSession(subject);
   const newDownload = subject.downloadMedia({ ...NEW_C, sizeBytes: 0 });
-  await eventually(() => pickerCalls === 2, "the replacement picker");
+  await eventually(() => writerCalls === 2, "the replacement destination creation");
   const newOwner = subject.state.mediaDownloadOwner;
   const feedback = subject.feedback.slice();
   oldDestination.resolve();
@@ -1420,3 +1423,314 @@ test("accepted shutter status admitted before Live View Stop revokes its legacy 
   assert.deepEqual(s.requests.map(request => request.url.split("/").slice(-2).join("/")),
     ["capture/still", "liveview/stop"]);
 });
+
+// Cross-platform vectors compare evidence, never force native enum spellings.
+const deliveryContractBytes = fs.readFileSync(path.join(__dirname, "../../contracts/media-delivery/v1/outcome-vectors.json"));
+const deliveryContract = JSON.parse(deliveryContractBytes);
+const deliveryVector = (id) => {
+  const vector = deliveryContract.vectors.find((entry) => entry.id === id);
+  assert.ok(vector, `Missing delivery vector ${id}`);
+  return vector.expected;
+};
+
+test("shared delivery vectors remain bounded, synthetic and explicit about evidence", () => {
+  assert.equal(deliveryContract.version, 1);
+  assert.equal(deliveryContract.limits.maximumVectors, 32);
+  assert.equal(deliveryContract.limits.maximumEventsPerVector, 12);
+  assert.equal(deliveryContract.limits.maximumRows, 100);
+  assert.equal(deliveryContract.limits.maximumJSONBytes, 32768);
+  assert.ok(deliveryContractBytes.length <= deliveryContract.limits.maximumJSONBytes);
+  assert.ok(deliveryContract.vectors.length <= deliveryContract.limits.maximumVectors);
+  assert.equal(new Set(deliveryContract.vectors.map((entry) => entry.id)).size, deliveryContract.vectors.length);
+  for (const vector of deliveryContract.vectors) {
+    assert.match(vector.id, /^[a-z0-9_]{1,64}$/);
+    assert.ok(vector.events.length > 0 && vector.events.length <= deliveryContract.limits.maximumEventsPerVector);
+    assert.equal(typeof vector.expected.observation, "string");
+    assert.equal(typeof vector.expected.checkpoint, "string");
+    assert.equal(typeof vector.expected.continuation, "string");
+  }
+  assert.equal(deliveryContract.invariants.cloudSyncConfirmed, false);
+  assert.equal(deliveryContract.invariants.automaticResumeOnRead, false);
+  assert.equal(deliveryContract.invariants.persistDestinationLocator, false);
+  assert.equal(deliveryVector("ios_picker_full").perFileMappingConfirmed, false);
+  assert.equal(deliveryVector("ios_picker_full").saveConfirmed, false);
+});
+
+for (const route of ["blob", "writer"]) {
+  test(`delivery contract: ${route} reports only its observed handoff or close checkpoint`, async () => {
+    const expected = deliveryVector(route === "blob" ? "pc_blob_handoff" : "pc_writer_close");
+    const subject = context();
+    const writer = syntheticWriter();
+    if (route === "writer") subject.window.showSaveFilePicker = async () => ({ createWritable: async () => writer });
+    subject.api = async (url) => { subject.requests.push({ url, method: "GET" }); return originalResponse(); };
+    await subject.downloadMedia({ ...NEW_C, sizeBytes: route === "writer" ? null : 18 });
+    assert.equal(subject.requests.length, 1);
+    assert.equal(subject.feedback.includes("downloaded"), expected.saveConfirmed);
+    assert.equal(subject.feedback.includes("downloadHandedOff"), expected.checkpoint === "browser_handoff");
+    assert.equal(writer.output.closed, expected.checkpoint === "stream_close");
+    assert.equal(writer.output.aborted, false);
+    assert.equal(subject.saved.length, route === "blob" ? 1 : 0);
+  });
+}
+
+for (const silent of [false, true]) {
+  test(`delivery contract: confirmed close survives ${silent ? "silent retirement" : "user cancellation"}`, async () => {
+    const expected = deliveryVector("close_after_cancel");
+    const subject = context();
+    const writer = syntheticWriter();
+    const close = deferred();
+    let closing = false;
+    writer.close = async () => { closing = true; await close.promise; writer.output.closed = true; };
+    subject.window.showSaveFilePicker = async () => ({ createWritable: async () => writer });
+    subject.api = async (url) => { subject.requests.push({ url, method: "GET" }); return originalResponse(); };
+    const download = subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+    await eventually(() => closing, "single-file close pending");
+    subject.cancelMediaDownload({ silent });
+    const feedback = subject.feedback.slice();
+    close.resolve();
+    await download;
+    assert.equal(writer.output.closed, expected.saveConfirmed);
+    assert.equal(writer.output.aborted, expected.deleteCompletedOutput);
+    assert.equal(subject.requests.length, 1, "Cancellation must not create another attempt");
+    assert.equal(subject.feedback.includes("downloadCancelled"), false);
+    if (silent) assert.deepEqual(subject.feedback, feedback, "Late commit cannot overwrite another operation's feedback");
+    else assert.equal(subject.feedback.includes("downloaded"), true);
+  });
+}
+
+test("delivery contract: rejected close stays unconfirmed even when abort succeeds", async () => {
+  const expected = deliveryVector("pc_close_rejected_abort_succeeded");
+  const subject = context();
+  const writer = syntheticWriter();
+  writer.close = async () => { throw new Error("Synthetic close response lost"); };
+  subject.window.showSaveFilePicker = async () => ({ createWritable: async () => writer });
+  subject.api = async (url) => { subject.requests.push({ url, method: "GET" }); return originalResponse(); };
+  await subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  assert.equal(subject.feedback.includes("downloadUnconfirmed"), expected.inspectDestination);
+  assert.equal(subject.feedback.includes("downloaded"), expected.saveConfirmed);
+  assert.equal(subject.feedback.includes("downloadHandedOff"), false);
+  assert.equal(writer.output.aborted, true);
+  assert.equal(subject.requests.length, 1);
+});
+
+test("delivery contract: failed cleanup keeps a visible unconfirmed result and never retries", async () => {
+  const expected = deliveryVector("cleanup_failed");
+  const subject = context();
+  const writer = syntheticWriter();
+  let aborts = 0;
+  writer.write = async () => { throw new Error("Synthetic writer stopped"); };
+  writer.abort = async () => { aborts++; throw new Error("Synthetic abort refused"); };
+  subject.window.showSaveFilePicker = async () => ({ createWritable: async () => writer });
+  subject.api = async (url) => { subject.requests.push({ url, method: "GET" }); return originalResponse(); };
+  await subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  assert.equal(subject.feedback.includes("downloadUnconfirmed"), expected.inspectDestination);
+  assert.equal(subject.feedback.includes("downloaded"), expected.saveConfirmed);
+  assert.equal(writer.output.closed, false);
+  assert.equal(aborts, 1);
+  assert.equal(subject.requests.length, 1);
+});
+
+function installSingleFileHistory(subject, overrides = {}) {
+  const calls = [];
+  const warnings = [{ hidden: true, textContent: "" }];
+  const ticket = { batchId: "synthetic-batch", epoch: 0 };
+  const receipt = { receiptId: "synthetic-observation", batchId: ticket.batchId, epoch: 0 };
+  subject.document = { querySelectorAll: () => warnings };
+  subject.mediaHistoryWarning = false;
+  subject.mediaHistoryStore = Object.fromEntries(Object.entries({
+    createBatchTicket: async () => ({ ok: true, ticket }),
+    startAttempt: async () => ({ ok: true, receipt }),
+    finishAttempt: async () => ({ ok: true, updated: true }),
+    ...overrides,
+  }).map(([name, operation]) => [name, async (...args) => {
+    calls.push({ name, args });
+    return operation(...args);
+  }]));
+  vm.runInContext(productionFunction("mediaHistoryCall"), subject);
+  return { calls, warnings, ticket, receipt };
+}
+
+for (const route of ["blob", "writer"]) {
+  test(`single-file ${route} observation is admitted before I/O and records only its real checkpoint`, async () => {
+    const subject = context();
+    const order = [];
+    const admission = deferred();
+    const writer = syntheticWriter();
+    const history = installSingleFileHistory(subject, {
+      createBatchTicket: async () => { order.push("ticket"); return { ok: true, ticket: {} }; },
+      startAttempt: async () => { order.push("admission"); await admission.promise; return { ok: true, receipt: {} }; },
+    });
+    if (route === "writer") subject.window.showSaveFilePicker = () => {
+      order.push("picker");
+      return Promise.resolve({ createWritable: async () => { order.push("writer"); return writer; } });
+    };
+    subject.api = async (url) => { order.push("GET"); subject.requests.push({ url }); return originalResponse(); };
+    const download = subject.downloadMedia({ ...NEW_C, sizeBytes: route === "writer" ? null : 18 });
+    assert.deepEqual(order, route === "writer" ? ["picker"] : [], "The user-gesture picker is invoked synchronously before history");
+    await eventually(() => order.includes("admission"), "single-file admission");
+    assert.deepEqual(order, route === "writer" ? ["picker", "ticket", "admission"] : ["ticket", "admission"]);
+    admission.resolve();
+    await download;
+    assert.deepEqual(order.slice(-2), route === "writer" ? ["writer", "GET"] : ["admission", "GET"]);
+    assert.deepEqual(history.calls.map(call => call.name), ["createBatchTicket", "startAttempt", "finishAttempt"]);
+    const start = history.calls[1].args[1];
+    assert.equal(start.destination, route === "writer" ? "browser-file" : "browser-download");
+    assert.deepEqual(Object.keys(start).sort(), ["destination", "filename"], "No handles, camera IDs or URLs cross the history boundary");
+    const finish = history.calls[2].args[1];
+    assert.equal(finish.outcome, route === "writer" ? "close-confirmed" : "handoff-requested");
+    assert.equal(finish.outcomeUnknown, route === "blob");
+    assert.equal(finish.bytesTransferred, 18);
+    assert.equal(subject.requests.length, 1);
+  });
+}
+
+test("single-file cancelled picker creates no history, destination writer or original request", async () => {
+  const subject = context();
+  const history = installSingleFileHistory(subject);
+  subject.window.showSaveFilePicker = async () => { throw mediaTransfer.cancellationError(); };
+  await subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  assert.deepEqual(history.calls, []);
+  assert.deepEqual(subject.requests, []);
+});
+
+test("single-file retired picker discards a late handle without opening or admitting it", async () => {
+  const subject = context();
+  const history = installSingleFileHistory(subject);
+  const picker = deferred();
+  let opened = 0;
+  subject.window.showSaveFilePicker = () => picker.promise;
+  const download = subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  replaceDownloadSession(subject);
+  picker.resolve({ createWritable: async () => { opened++; return syntheticWriter(); } });
+  await download;
+  assert.equal(opened, 0);
+  assert.deepEqual(history.calls, []);
+  assert.deepEqual(subject.requests, []);
+});
+
+test("single-file cancellation while admission waits records cancellation without writer or GET", async () => {
+  const subject = context();
+  const gate = deferred();
+  let opened = 0;
+  const history = installSingleFileHistory(subject, { startAttempt: async () => {
+    await gate.promise; return { ok: true, receipt: {} };
+  } });
+  subject.window.showSaveFilePicker = async () => ({ createWritable: async () => { opened++; return syntheticWriter(); } });
+  const download = subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  await eventually(() => history.calls.length === 2, "admission to wait");
+  subject.cancelMediaDownload({ silent: true });
+  gate.resolve();
+  await download;
+  assert.equal(opened, 0);
+  assert.deepEqual(subject.requests, []);
+  assert.equal(history.calls[2].args[1].outcome, "cancelled-or-unknown");
+  assert.equal(history.calls[2].args[1].outcomeUnknown, false);
+});
+
+for (const route of ["blob", "writer"]) {
+  for (const failedOperation of ["createBatchTicket", "startAttempt", "finishAttempt"]) {
+    test(`single-file ${route} ${failedOperation} failure stops before I/O or preserves the real terminal result`, async () => {
+      const subject = context();
+      const writer = syntheticWriter();
+      let opens = 0;
+      const history = installSingleFileHistory(subject, { [failedOperation]: async () => { throw new Error("Synthetic unavailable history"); } });
+      if (route === "writer") subject.window.showSaveFilePicker = async () => ({ createWritable: async () => { opens++; return writer; } });
+      subject.api = async (url) => { subject.requests.push({ url }); return originalResponse(); };
+      await subject.downloadMedia({ ...NEW_C, sizeBytes: route === "writer" ? null : 18 });
+      const terminal = failedOperation === "finishAttempt";
+      assert.equal(subject.requests.length, terminal ? 1 : 0);
+      assert.equal(opens, terminal && route === "writer" ? 1 : 0);
+      assert.equal(subject.saved.length, terminal && route === "blob" ? 1 : 0);
+      assert.equal(subject.feedback.includes(route === "writer" ? "downloaded" : "downloadHandedOff"), terminal);
+      assert.equal(subject.feedback.includes("mediaSingleAdmissionFailed"), !terminal);
+      assert.equal(writer.output.aborted, false);
+      assert.equal(history.warnings[0].hidden, false);
+      assert.equal(history.calls.filter(call => call.name === failedOperation).length, 1);
+      assert.equal(history.calls.filter(call => call.name === "finishAttempt").length, terminal ? 1 : 0);
+    });
+  }
+}
+
+for (const route of ["blob", "writer"]) {
+  for (const [operation, code] of [["createBatchTicket", "unavailable"], ["startAttempt", "capacity-exceeded"],
+    ["startAttempt", "transaction-failed"], ["startAttempt", "transaction-unconfirmed"], ["startAttempt", "stale-ticket"]]) {
+    test(`single-file ${route} ${code} admission opens no writer and requests no original`, async () => {
+      const subject = context();
+      let opens = 0, pickers = 0;
+      const history = installSingleFileHistory(subject, { [operation]: async () => ({ ok: false, code }) });
+      if (route === "writer") subject.window.showSaveFilePicker = async () => {
+        pickers++;
+        return { createWritable: async () => { opens++; return syntheticWriter(); } };
+      };
+      await subject.downloadMedia({ ...NEW_C, sizeBytes: route === "writer" ? null : 18 });
+      assert.equal(pickers, route === "writer" ? 1 : 0);
+      assert.equal(opens, 0);
+      assert.deepEqual(subject.requests, []);
+      assert.deepEqual(subject.saved, []);
+      assert.equal(subject.feedback.includes("mediaSingleAdmissionFailed"), true);
+      assert.equal(history.calls.filter(call => call.name === operation).length, 1);
+      assert.equal(history.calls.some(call => call.name === "finishAttempt"), false);
+      for (const call of history.calls.filter(call => call.name === "startAttempt")) {
+        assert.deepEqual(Object.keys(call.args[1]).sort(), ["destination", "filename"]);
+      }
+    });
+  }
+}
+
+test("single-file late close records close-confirmed after silent session replacement", async () => {
+  const subject = context();
+  const close = deferred();
+  let closing = false;
+  const writer = syntheticWriter();
+  writer.close = async () => { closing = true; await close.promise; writer.output.closed = true; };
+  const history = installSingleFileHistory(subject);
+  subject.window.showSaveFilePicker = async () => ({ createWritable: async () => writer });
+  subject.api = async (url) => { subject.requests.push({ url }); return originalResponse(); };
+  const download = subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  await eventually(() => closing, "close to wait");
+  replaceDownloadSession(subject);
+  const feedback = subject.feedback.slice();
+  close.resolve();
+  await download;
+  assert.equal(history.calls.at(-1).args[1].outcome, "close-confirmed");
+  assert.equal(history.calls.at(-1).args[1].outcomeUnknown, false);
+  assert.equal(writer.output.aborted, false);
+  assert.deepEqual(subject.feedback, feedback);
+});
+
+test("single-file cleared observation is not recreated by a late successful close", async () => {
+  const subject = context();
+  const history = installSingleFileHistory(subject, { finishAttempt: async () => ({ ok: false, code: "stale-ticket" }) });
+  subject.window.showSaveFilePicker = async () => ({ createWritable: async () => syntheticWriter() });
+  subject.api = async () => originalResponse();
+  await subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+  assert.deepEqual(history.calls.map(call => call.name), ["createBatchTicket", "startAttempt", "finishAttempt"]);
+  assert.equal(history.calls.at(-1).args[1].outcome, "close-confirmed");
+  assert.equal(subject.feedback.includes("downloaded"), true);
+  assert.equal(history.warnings[0].hidden, true);
+});
+
+for (const stage of ["creation", "close", "cleanup"]) {
+  test(`single-file ${stage} uncertainty is persisted without a false save or automatic retry`, async () => {
+    const subject = context();
+    const history = installSingleFileHistory(subject);
+    const writer = syntheticWriter();
+    if (stage === "close") writer.close = async () => { throw new Error("Synthetic close lost"); };
+    if (stage === "cleanup") {
+      writer.write = async () => { throw new Error("Synthetic write failed"); };
+      writer.abort = async () => { throw new Error("Synthetic cleanup unknown"); };
+    }
+    subject.window.showSaveFilePicker = async () => ({ createWritable: async () => {
+      if (stage === "creation") throw new Error("Synthetic creation result lost");
+      return writer;
+    } });
+    subject.api = async (url) => { subject.requests.push({ url }); return originalResponse(); };
+    await subject.downloadMedia({ ...NEW_C, sizeBytes: null });
+    const terminal = history.calls.at(-1).args[1];
+    assert.equal(terminal.outcome, "failed");
+    assert.equal(terminal.outcomeUnknown, true);
+    assert.equal(terminal.mayRemain, true);
+    assert.equal(subject.feedback.includes("downloadUnconfirmed"), true);
+    assert.equal(subject.requests.length, stage === "creation" ? 0 : 1);
+  });
+}
