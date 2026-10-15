@@ -28,6 +28,9 @@
   function createSelection() {
     let loaded = new Map();
     const selected = new Map();
+    const selectionTokens = new Map();
+    let selectionRevision = 0;
+    const touch = (id) => selectionTokens.set(id, ++selectionRevision);
     return Object.freeze({
       replaceLoaded(items) {
         loaded = itemMap(items);
@@ -38,23 +41,31 @@
         }
       },
       setSelected(id, value) {
-        if (!value) return selected.delete(id);
+        if (!value) { selectionTokens.delete(id); return selected.delete(id); }
         if (!loaded.has(id)) return false;
+        touch(id);
         selected.set(id, loaded.get(id));
         return true;
       },
       setMany(ids, value) {
         for (const id of ids) {
-          if (!value) selected.delete(id);
-          else if (loaded.has(id)) selected.set(id, loaded.get(id));
+          if (!value) { selectionTokens.delete(id); selected.delete(id); }
+          else if (loaded.has(id)) { touch(id); selected.set(id, loaded.get(id)); }
         }
       },
       has(id) { return selected.has(id); },
+      token(id) { return selectionTokens.get(id) ?? null; },
+      consumeIfToken(id, token) {
+        if (token == null || selectionTokens.get(id) !== token) return false;
+        selectionTokens.delete(id);
+        return selected.delete(id);
+      },
       remove(id) {
+        selectionTokens.delete(id);
         loaded.delete(id);
         return selected.delete(id);
       },
-      clear() { selected.clear(); },
+      clear() { selectionTokens.clear(); selected.clear(); },
       snapshot(visibleIds = null) {
         const visible = visibleIds === null ? null : new Set(visibleIds);
         return Object.freeze(Array.from(selected, ([id, item]) => Object.freeze({

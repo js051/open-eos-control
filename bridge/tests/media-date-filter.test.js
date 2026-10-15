@@ -31,7 +31,7 @@ function fixture() {
   ui.mediaDateDialog.showModal = function () { this.open = true; };
   ui.mediaDateDialog.close = function () { this.open = false; state.mediaDateDialogSession = null; };
   const calls = [];
-  const s = vm.createContext({ state, ui, mediaLibrary, calls, Intl, Date,
+  const s = vm.createContext({ state, ui, mediaLibrary, calls, Intl, Date, Headers, AbortController,
     FEATURES: { MEDIA_BROWSER: "browser", MEDIA_DOWNLOAD: "download", MEDIA_PREVIEW: "preview" },
     featureSupported: () => true, resolvedLanguage: () => "en-US", mediaIsVideo: mediaLibrary.isVideo,
     t: (key, args = {}) => `${key}:${JSON.stringify(args)}`,
@@ -47,7 +47,7 @@ function fixture() {
   const names = ["displayedMedia", "renderMediaSummary", "mediaDisplayTimeZone", "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel",
     "openMediaDateFilter", "applyMediaDateFilter", "clearMediaDateFilter", "previewableMedia", "mediaDateGroup",
     "formatMediaTime", "formatDate", "formatMediaSize", "renderMediaPreviewNavigation", "openAdjacentMedia", "resetSession",
-    "deleteMedia"];
+    "deleteMedia", "runMediaDelete", "sendMediaDelete", "mediaDeleteRows", "mediaDeleteConfirmation", "mediaDeleteOwnerDescription", "applyConfirmedMediaDelete"];
   vm.runInContext(names.map(extract).join("\n"), s);
   s.renderMedia = () => { calls.push(["render-media"]); s.renderMediaSummary(); };
   return s;
@@ -136,6 +136,10 @@ test("same-session deletion keeps the active date range and updates filtered cou
   const s = fixture(); apply(s);
   const range = s.state.mediaDateRange;
   const target = s.state.media[0];
+  target.id = "ccapi:A.JPG";
+  s.state.session.engine = "ccapi";
+  s.renderMediaDeleteHistory = () => {};
+  s.renderMediaDetails = () => {};
   s.state.mediaScope = "all";
   s.state.mediaPreviewItem = target;
   s.state.mediaThumbnailUrls = new Map();
@@ -145,12 +149,15 @@ test("same-session deletion keeps the active date range and updates filtered cou
   let settleDelete;
   s.window = { confirm: () => true };
   s.showToast = () => {};
-  s.api = (url, options) => {
-    requests.push({ url, method: options.method });
-    return new Promise((resolve) => { settleDelete = resolve; });
-  };
+  const deletePolicy = require("../open_eos_bridge/static/media-delete.js");
+  s.mediaDelete = { ...deletePolicy, transferHttp: (url, options) => deletePolicy.transferHttp(url, {
+    ...options, fetchImpl: (target, init) => {
+      requests.push({ url: target, method: init.method });
+      return new Promise((resolve) => { settleDelete = () => resolve(new Response(null, { status: 204 })); });
+    },
+  }) };
   const pending = s.deleteMedia(target, s.ui.mediaDetailsDelete);
-  assert.deepEqual(ids(s), ["A.JPG", "A.CR3"], "Pending deletion keeps both filtered items");
+  assert.deepEqual(ids(s), ["ccapi:A.JPG", "A.CR3"], "Pending deletion keeps both filtered items");
   settleDelete({});
   await pending;
   assert.equal(s.state.mediaDateRange, range);
@@ -164,7 +171,7 @@ test("same-session deletion keeps the active date range and updates filtered cou
   assert.match(s.ui.mediaPreviewMeta.textContent, /"position":1,"total":1/);
   assert.equal(s.ui.mediaPreviewPrevious.disabled, true);
   assert.equal(s.ui.mediaPreviewNext.disabled, true);
-  assert.deepEqual(requests, [{ url: "/v1/session/synthetic-A/media/A.JPG", method: "DELETE" }],
+  assert.deepEqual(requests, [{ url: "/v1/session/synthetic-A/media/ccapi%3AA.JPG", method: "DELETE" }],
     "Filtering, settlement and remaining-preview rendering add no requests");
 });
 test("explicit capture-review item outside range stays isolated 1/1 with exact target", () => {

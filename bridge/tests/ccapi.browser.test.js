@@ -797,11 +797,13 @@ async function verifyRecordingReviewJourneys(browser, bridgeOrigin, simulatorOri
       if (!url.pathname.startsWith("/v1/session")) return;
       requests.push({ method: request.method(), pathname: url.pathname, limit: url.searchParams.get("limit") });
     });
-    const notReady = language === "en" ? "New video is not visible yet" : "尚未找到新可見影片";
+    const notReady = language === "en"
+      ? "No new video was observed in the completed checks. Check again without sending another REC command."
+      : "已完成的查找尚未觀察到新影片。可重新查找，不會再次送出錄影命令。";
     const found = language === "en" ? "A newly visible video was found" : "已找到新可見影片";
     const waitForNotReady = () => page.waitForFunction((text) => {
       const retry = document.querySelector("#latest-media-retry");
-      return document.querySelector("#latest-media-review-status")?.textContent.includes(text) &&
+      return document.querySelector("#latest-media-review-status")?.textContent === text &&
         retry && !retry.hidden && !retry.disabled;
     }, notReady);
     try {
