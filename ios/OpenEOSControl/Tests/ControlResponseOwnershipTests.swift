@@ -22,7 +22,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
     func testRetiredCapabilityAndSensorSnapshotReadbacksCannotPublishOrRecoverReplacement() async throws {
         let boundaries: [(ControlOwnerAction, ControlOwnerWire)] = [
             (.directory, .capabilities), (.naming, .namingReadback), (.setting, .capabilities),
-            (.clean, .info), (.clean, .status), (.clean, .capabilities),
+            (.clean, .info),
         ]
         for bridge in [false, true] {
             for (action, boundary) in boundaries {
@@ -105,7 +105,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
                 switch action {
                 case .clock:
                     XCTAssertNotNil(state.lastClockSyncAt)
-                    XCTAssertEqual(state.status?.mode, "current command")
+                    XCTAssertEqual(state.maintenanceRecord?.outcome.clockReadEvidence, .matched)
                 case .directory:
                     XCTAssertEqual(state.lastCreatedDirectoryName, "ABCDE")
                     XCTAssertEqual(state.capabilities?.setting("directoryselection")?.value, "101ABCDE")
@@ -130,13 +130,16 @@ final class ControlResponseOwnershipTests: XCTestCase {
                 case .recordingStop:
                     XCTAssertFalse(state.recording)
                 case .sleep, .cleanAndPowerOff:
-                    XCTAssertFalse(state.connected)
+                    XCTAssertTrue(state.connected)
                     XCTAssertNil(state.activeLiveViewSource)
-                    await assertOriginalClose(peer, bridge: bridge)
+                    XCTAssertTrue(state.maintenanceControlsPaused)
+                    let closed = await peer.count(.close)
+                    XCTAssertEqual(closed, 0, "Sleep evidence must not trigger automatic DELETE")
                 case .clean:
                     XCTAssertTrue(state.connected)
-                    XCTAssertEqual(state.status?.mode, "current command")
-                    XCTAssertNotNil(state.activeLiveViewSource)
+                    XCTAssertEqual(state.maintenanceRecord?.outcome.commandEvidence, .responded)
+                    XCTAssertNil(state.activeLiveViewSource)
+                    XCTAssertTrue(state.maintenanceControlsPaused)
                 }
                 if !bridge, action == .autofocus || action == .halfPress {
                     let releases = await peer.count(.shutterRelease)
@@ -158,11 +161,12 @@ final class ControlResponseOwnershipTests: XCTestCase {
                 XCTAssertTrue(state.connected)
                 XCTAssertFalse(state.isBusy(action.category))
                 if action == .sleep || action == .clean || action == .cleanAndPowerOff {
-                    // Existing recovery starts Live View and may clear its error.
-                    XCTAssertNotNil(state.activeLiveViewSource)
+                    XCTAssertNil(state.activeLiveViewSource)
+                    XCTAssertNotNil(state.lastError)
+                    XCTAssertTrue(state.maintenanceControlsPaused)
                     if bridge {
                         let starts = await peer.count(.liveViewStart)
-                        XCTAssertEqual(starts, 2, "The current owner must retain maintenance recovery")
+                        XCTAssertEqual(starts, 1, "A failed maintenance command cannot automatically restore")
                     }
                 } else {
                     XCTAssertNotNil(state.lastError, "Current \(action) must still report failure")
@@ -178,7 +182,7 @@ final class ControlResponseOwnershipTests: XCTestCase {
     func testCurrentOwnerReadbackFailuresAreReportedWithoutReplayingTheirCommand() async throws {
         let boundaries: [(ControlOwnerAction, ControlOwnerWire)] = [
             (.directory, .capabilities), (.naming, .namingReadback), (.setting, .capabilities),
-            (.clean, .info), (.clean, .status), (.clean, .capabilities),
+            (.clean, .info),
         ]
         for bridge in [false, true] {
             for (action, boundary) in boundaries {
@@ -209,30 +213,27 @@ final class ControlResponseOwnershipTests: XCTestCase {
         }
     }
 
-    func testCurrentOwnerMaintenanceRecoveryRestartsItsOwnEventLoop() async throws {
-        let cases: [(ControlOwnerAction, Bool)] = [(.sleep, true), (.clean, false), (.clean, true), (.cleanAndPowerOff, true)]
+    func testCurrentOwnerMaintenanceRestoresEventLoopOnlyAfterExplicitSuccessfulRestore() async throws {
         for bridge in [false, true] {
-            for (action, fails) in cases {
-                let peer = ControlOwnerPeer(owner: "current", events: true)
-                let state = makeState([peer], bridge: bridge)
-                defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
-                await peer.enqueue(.events, gate: "original-event")
-                try await connectAndPrepare(state)
-                try await waitForGate("original-event", peer: peer)
-                await peer.enqueue(.events, gate: "recovered-event")
-                await peer.enqueue(.events, gate: "next-event")
-                await peer.enqueue(action.wire(bridge: bridge), error: fails ? .networkConnectionLost : nil)
-                await perform(action, state: state)
-                try await waitForGate("recovered-event", peer: peer)
-                XCTAssertTrue(state.connected)
-                XCTAssertNotNil(state.activeLiveViewSource)
-                XCTAssertFalse(state.isBusy(action.category))
-                await peer.setMode("current recovery event")
-                await peer.release("original-event")
-                await peer.release("recovered-event")
-                try await waitForGate("next-event", peer: peer)
-                XCTAssertEqual(state.status?.mode, "current recovery event")
-            }
+            let peer = ControlOwnerPeer(owner: "current", events: true)
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            await peer.enqueue(.events, gate: "original-event")
+            try await connectAndPrepare(state)
+            try await waitForGate("original-event", peer: peer)
+            await state.cleanSensor(autoPowerOff: false)
+            XCTAssertTrue(state.maintenanceControlsPaused)
+            XCTAssertNil(state.activeLiveViewSource)
+            let before = await peer.count(.events)
+            await state.recoverMaintenance()
+            let afterRead = await peer.count(.events)
+            XCTAssertEqual(before, afterRead, "Read-only recovery cannot restart events")
+            await peer.enqueue(.events, gate: "restored-event")
+            let id = try XCTUnwrap(state.maintenanceRecord?.id)
+            await state.restoreMaintenance(id)
+            try await waitForGate("restored-event", peer: peer)
+            XCTAssertFalse(state.maintenanceControlsPaused)
+            XCTAssertNotNil(state.activeLiveViewSource)
         }
     }
 
@@ -245,7 +246,11 @@ final class ControlResponseOwnershipTests: XCTestCase {
             try await connectAndPrepare(state)
             await oldPeer.enqueue(.liveViewStart, gate: "old-recovery", error: fails ? .networkConnectionLost : nil)
             var oldFinished = false
-            let old = Task { await state.cleanSensor(autoPowerOff: false); oldFinished = true }
+            let old = Task {
+                await state.cleanSensor(autoPowerOff: false)
+                if let id = state.maintenanceRecord?.id { await state.restoreMaintenance(id) }
+                oldFinished = true
+            }
             try await waitForGate("old-recovery", peer: oldPeer)
             // Disconnect owns the pending Start and must drain it before the next
             // camera is admitted. Releasing only after await disconnect deadlocks
@@ -846,7 +851,7 @@ private enum ControlOwnerAction: CaseIterable {
 
 private enum ControlOwnerWire: Hashable, Sendable {
     case health, open, close, info, status, capabilities, events, stopEvents, media, liveViewStart, liveViewStop
-    case clock, directory, naming, directoryReadback, namingReadback, sleep, clean, autofocus, halfPress, shutterRelease
+    case clock, clockRead, directory, naming, directoryReadback, namingReadback, sleep, clean, autofocus, halfPress, shutterRelease
     case recordingStart, recordingStop, tap, whiteBalance, drive, magnification, setting
 }
 
@@ -866,6 +871,7 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
     private var directory = "100EOSXX"
     private var naming = "IMG_"
     private var magnification = 1
+    private var clockBody: [String: Any] = [:]
     private var plans: [ControlOwnerWire: [Plan]] = [:]
     private var gates: [String: CheckedContinuation<Void, Never>] = [:]
     private var requests: [ControlOwnerWire] = []
@@ -907,7 +913,11 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case .open:
             object = ["id": owner, "engine": "ccapi"]
         case .info:
-            object = ["connected": true, "model": "Synthetic control \(owner)", "serial": "SYNTHETIC-\(owner)", "api": "fixture"]
+            if path.contains("/maintenance/") {
+                object = ["version": 1, "engine": "ccapi", "operation": "sensor-cleaning", "observationEvidence": "reachable", "clockObservation": NSNull()]
+            } else {
+                object = ["connected": true, "model": "Synthetic control \(owner)", "serial": "SYNTHETIC-\(owner)", "api": "fixture"]
+            }
         case .status:
             object = statusJSON()
         case .capabilities:
@@ -923,7 +933,19 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             object = ["changedKeys": ["mode"], "keys": ["mode"], "sequence": count(.events)]
         case .media:
             object = ["items": []]
-        case .clock, .autofocus, .halfPress:
+        case .clock:
+            mode = "\(owner) command"
+            if simulator {
+                clockBody = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+                object = clockBody
+            } else {
+                let epoch = Int(Date().timeIntervalSince1970)
+                object = ["version": 1, "engine": "ccapi", "operation": "clock-sync", "autoPowerOff": false, "responseEvidence": "response-received",
+                    "clockReference": ["earliestEpochSeconds": epoch - 10, "latestEpochSeconds": epoch + 10, "utcOffsetMinutes": 0, "daylightSaving": false],
+                    "clockObservation": ["epochSeconds": epoch, "utcOffsetMinutes": 0, "daylightSaving": false], "clockReadEvidence": "matched"]
+            }
+        case .clockRead: object = clockBody
+        case .autofocus, .halfPress:
             mode = "\(owner) command"
             object = statusJSON()
         case .directory:
@@ -935,8 +957,14 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case .naming:
             naming = "NEW_"
             object = namingJSON()
-        case .clean:
+        case .clean, .sleep:
             mode = "\(owner) command"
+            if !simulator {
+                let payload = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+                object = ["version": 1, "engine": "ccapi", "operation": wire == .clean ? "sensor-cleaning" : "sleep",
+                    "autoPowerOff": payload["autoPowerOff"]!, "responseEvidence": "response-received", "clockReadEvidence": "not-applicable",
+                    "clockReference": NSNull(), "clockObservation": NSNull()]
+            }
         case .recordingStart, .recordingStop:
             recording = wire == .recordingStart
             object = statusJSON()
@@ -956,10 +984,10 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             magnification = 5
             object = ["accepted": true, "value": magnification]
         case .liveViewStart:
-            object = ["active": true]
+            object = ["active": true, "source": "CCAPI_JPEG_POLLING", "size": "MEDIUM", "requestedFps": 6]
         case .liveViewStop:
             object = ["active": false, "liveViewStopUnconfirmed": false]
-        case .close, .stopEvents, .sleep, .shutterRelease:
+        case .close, .stopEvents, .shutterRelease:
             break
         }
         if let gate = plan.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
@@ -978,7 +1006,8 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             if let gate = readback.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
             if let error = readback.error { throw URLError(error) }
         }
-        return CameraHTTPResponse(statusCode: 200, body: try JSONSerialization.data(withJSONObject: object))
+        let empty = wire == .stopEvents || (simulator && (wire == .clean || wire == .sleep))
+        return CameraHTTPResponse(statusCode: empty ? 204 : 200, body: empty ? Data() : try JSONSerialization.data(withJSONObject: object))
     }
 
     func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse {
@@ -999,15 +1028,17 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case ("GET", "/capture-configuration/create-directory"): return .directoryReadback
         case ("GET", "/capture-configuration/set-file-naming"): return .namingReadback
         case ("GET", "/events"): return .events
-        case ("DELETE", "/events"): return .stopEvents
+        case ("DELETE", "/events"), ("DELETE", "/maintenance/control/events"): return .stopEvents
         case ("GET", "/media"): return .media
-        case ("POST", "/liveview/start"): return .liveViewStart
-        case ("POST", "/liveview/stop"): return .liveViewStop
-        case ("POST", "/clock/sync"): return .clock
+        case ("POST", "/liveview/start"), ("POST", "/maintenance/control/liveview/start"): return .liveViewStart
+        case ("POST", "/liveview/stop"), ("POST", "/maintenance/control/liveview/stop"): return .liveViewStop
+        case ("POST", "/clock/sync"), ("POST", "/maintenance/clock-sync/outcome"), ("PUT", "/ver100/functions/datetime"): return .clock
+        case ("GET", "/ver100/functions/datetime"): return .clockRead
+        case ("GET", "/maintenance/sensor-cleaning"): return .info
         case ("POST", "/directory"), ("POST", "/directories"): return .directory
         case ("PUT", "/file-naming/still-user-setting-1"): return .naming
-        case ("POST", "/camera-sleep"), ("POST", "/power/sleep"): return .sleep
-        case ("POST", "/sensor-cleaning"), ("POST", "/maintenance/sensor-cleaning"): return .clean
+        case ("POST", "/camera-sleep"), ("POST", "/power/sleep"), ("POST", "/maintenance/sleep/outcome"): return .sleep
+        case ("POST", "/sensor-cleaning"), ("POST", "/maintenance/sensor-cleaning"), ("POST", "/maintenance/sensor-cleaning/outcome"): return .clean
         case ("POST", "/focus/auto"): return .autofocus
         case ("POST", "/shutter/half-press"): return .halfPress
         case ("POST", "/shutter/release"): return .shutterRelease

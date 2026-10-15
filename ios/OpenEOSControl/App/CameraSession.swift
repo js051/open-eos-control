@@ -155,6 +155,27 @@ enum CameraSession: Sendable {
         }
     }
 
+    func performMaintenance(_ attempt: CameraMaintenanceAttempt) async throws {
+        switch self {
+        case let .ccapi(client): try await client.performMaintenance(attempt)
+        case let .desktopBridge(client): try await client.performMaintenance(attempt)
+        }
+    }
+
+    func restoreMaintenanceLiveView(_ attempt: CameraMaintenanceAttempt) async throws {
+        switch self {
+        case let .ccapi(client): try await client.restoreMaintenanceLiveView(attempt)
+        case let .desktopBridge(client): try await client.restoreMaintenanceLiveView(attempt)
+        }
+    }
+
+    func observeMaintenance(_ attempt: CameraMaintenanceAttempt) async throws {
+        switch self {
+        case let .ccapi(client): try await client.observeMaintenance(attempt)
+        case let .desktopBridge(client): try await client.observeMaintenance(attempt)
+        }
+    }
+
     func syncCameraClock() async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.syncCameraClock()
@@ -298,6 +319,13 @@ enum CameraSession: Sendable {
         switch self {
         case let .ccapi(client): await client.stopLiveView()
         case let .desktopBridge(client): await client.stopLiveView()
+        }
+    }
+
+    func maintenanceRetirementUnconfirmed() async -> Bool {
+        switch self {
+        case .ccapi: return false
+        case let .desktopBridge(client): return await client.maintenanceRetirementUnconfirmed
         }
     }
 

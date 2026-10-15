@@ -406,11 +406,18 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         let source: LiveViewSource
         let stop: URLRequest
         let closeStream: URLRequest?
+        var maintenanceOwned = false
     }
     private var pendingLiveViewStop: LiveViewStopObligation?
     private var liveViewStopUnconfirmed = false
     private var retiredLiveViewSource: LiveViewSource?
     private var liveViewMaintenanceInFlight = false
+    private let maintenanceSessionOwner = UUID()
+    private var maintenanceLifecycleOwned = false
+    private var maintenanceEventStopRequired = false
+    private var activeMaintenanceAttempt: CameraMaintenanceAttempt?
+    private var maintenanceLiveViewControlID: UUID?
+    private var liveViewStopRevision = UUID()
     private var liveViewStartTask: Task<Void, Error>?
     private var liveViewStartID: UUID?
     private var liveViewStopTask: Task<Void, Error>?
@@ -600,6 +607,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     }
 
     private func finishClose() async -> CameraShutterReleaseState {
+        if maintenanceLifecycleOwned { return await finishMaintenanceClose() }
         // Cancel the owned pending request, then settle it before final release.
         // A transport that ignores cancellation must still finish first.
         if let bulbStartTask {
@@ -677,6 +685,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         try await ensureInitialized()
         if resolvedMode == .simulator {
             let status = try parseSimulatorStatus(await requestJSON(path: "/ccapi/status"))
+            if let observed = status.recording { recording = observed }
             latestTemperatureStatus = status.temperature
             observedFeatures.formUnion([.batteryStatus, .storageStatus])
             if status.recordableShots != nil || status.remainingRecordingSeconds != nil {
@@ -921,6 +930,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
 
     public func pollEvent() async throws -> CameraEvent {
         try await ensureInitialized()
+        if maintenanceLifecycleOwned { maintenanceEventStopRequired = true }
         let changedKeys: [String]
         if resolvedMode == .simulator {
             let value = try await requestJSON(
@@ -1647,6 +1657,384 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         return try await status()
     }
 
+    /// Evidence-aware maintenance never bundles status, reconnect or restoration.
+    public func performMaintenance(_ attempt: CameraMaintenanceAttempt) async throws {
+        try attempt.validate()
+        try attempt.bindOwner(maintenanceSessionOwner)
+        try beginCameraMutation()
+        guard !liveViewMaintenanceInFlight else {
+            cameraMutationCount -= 1
+            throw CCAPIError.invalidResponse("Camera maintenance is already in progress.")
+        }
+        liveViewMaintenanceInFlight = true
+        defer { cameraMutationCount -= 1; liveViewMaintenanceInFlight = false }
+        // The explicit connection flow owns discovery. Maintenance cannot hide
+        // initialization or optional-status probes in its preparation phase.
+        guard initialized, !closing else { throw CancellationError() }
+        let intent = attempt.snapshot
+        activeMaintenanceAttempt = attempt
+        defer { if activeMaintenanceAttempt === attempt { activeMaintenanceAttempt = nil } }
+        if intent.operation != .clockSync { maintenanceLifecycleOwned = true }
+        if intent.operation == .clockSync {
+            let path: String
+            if resolvedMode == .simulator { path = "/ccapi/ver100/functions/datetime" }
+            else {
+                guard let operations = cameraClockOperations() else { throw CCAPIError.unsupported(.cameraClockSync) }
+                path = operations.write.path
+            }
+            try attempt.configureReadPath(path)
+            let requested = Date(), zone = TimeZone.current
+            let epoch = Int64(requested.timeIntervalSince1970)
+            attempt.reference(CameraMaintenanceClockReference(earliestEpochSeconds: epoch - 10,
+                latestEpochSeconds: epoch + 10, utcOffsetMinutes: zone.secondsFromGMT(for: requested) / 60,
+                daylightSaving: zone.isDaylightSavingTime(for: requested)))
+            let response = try await maintenanceRequest(path: path, method: .put,
+                json: ["datetime": CameraMaintenanceClock.formatter(timeZone: zone).string(from: requested),
+                       "dst": zone.isDaylightSavingTime(for: requested)], expectedStatus: 200, attempt: attempt)
+            guard CameraMaintenanceClock.parseCanon(try decodeMaintenanceJSONObject(response.body)) != nil else {
+                throw CCAPIError.invalidResponse("Camera clock command response was invalid.")
+            }
+            attempt.responded()
+            // Preserve response before cancellation or the independent read.
+            try Task.checkCancellation()
+            guard !closing else { throw CancellationError() }
+            attempt.verificationUnavailable()
+            try await observeMaintenance(attempt, verifyingClock: true)
+        } else {
+            let readPath = resolvedMode == .simulator ? "/ccapi/info"
+                : operation(.get, suffix: "/deviceinformation")?.path ?? versionedPaths("/deviceinformation").first
+            guard let readPath else { throw CCAPIError.invalidResponse("No required maintenance observation route.") }
+            try attempt.configureReadPath(readPath)
+            let path: String, method: HTTPMethod, payload: JSONDictionary, expected: Int
+            if intent.operation == .sensorCleaning {
+                if resolvedMode == .simulator { path = "/ccapi/sensor-cleaning"; expected = 204 }
+                else {
+                    guard let operation = operation(.post, suffix: "/functions/sensorcleaning") else { throw CCAPIError.unsupported(.sensorCleaning) }
+                    path = operation.path; expected = 200
+                }
+                method = .post; payload = ["autopoweroff": intent.autoPowerOff]
+            } else {
+                if resolvedMode == .simulator { path = "/ccapi/camera-sleep"; method = .post; payload = [:]; expected = 204 }
+                else {
+                    // Freeze the previously advertised capability/path; one
+                    // required strict read revalidates "immediately" before any Stop.
+                    guard let frozenSleepPath = cameraSleepPath,
+                          operations.contains(CCAPIOperation(method: .get, path: frozenSleepPath)),
+                          operations.contains(CCAPIOperation(method: .put, path: frozenSleepPath)) else {
+                        throw CCAPIError.unsupported(.cameraSleep)
+                    }
+                    let sleepSetting = try await maintenanceRequest(path: frozenSleepPath, method: .get,
+                        json: nil, expectedStatus: 200)
+                    try attempt.checkActive()
+                    guard let setting = Self.validatedStringAbilitySetting(try decodeMaintenanceJSONObject(sleepSetting.body),
+                            allowedValues: Self.autoPowerOffSettingValues.union([Self.autoPowerOffImmediately])),
+                          setting.array("ability")?.strings.contains(Self.autoPowerOffImmediately) == true else {
+                        throw CCAPIError.unsupported(.cameraSleep)
+                    }
+                    path = frozenSleepPath; method = .put; payload = ["value": Self.autoPowerOffImmediately]; expected = 202
+                }
+            }
+            attempt.configureLiveViewRestoreRequest(activeLiveViewSource.map {
+                LiveViewRequest(fps: requestedLiveViewRequest?.fps ?? 6, size: activeLiveViewSize, source: $0)
+            }, includesSize: liveViewSizeControlSupported)
+            let events = resolvedMode == .simulator ? nil : eventPollingOperations()
+            maintenanceEventStopRequired = events != nil
+            let needsStop = liveViewStopState().stopRequired || activeLiveViewSource != nil || events != nil
+            attempt.stop(needsStop ? .pending : .notRequired)
+            do {
+                if let events {
+                    _ = try await maintenanceRequest(path: events.stop.path, method: .delete, json: nil, expectedStatus: 204)
+                    maintenanceEventStopRequired = false
+                }
+                try await stopMaintenanceLiveView(attempt)
+                try attempt.checkActive()
+                attempt.stop(needsStop ? .confirmed : .notRequired)
+            } catch { attempt.stop(.unknown); throw error }
+            try Task.checkCancellation()
+            guard !closing else { throw CancellationError() }
+            _ = try await maintenanceRequest(path: path, method: method, json: payload, expectedStatus: expected, attempt: attempt)
+            attempt.responded()
+            try Task.checkCancellation()
+            guard !closing else { throw CancellationError() }
+        }
+        observedFeatures.insert(intent.operation.feature)
+    }
+
+    /// Exactly one required GET. No discovery, optional-status synthesis,
+    /// command dispatch, event restart, or Live View start is allowed here.
+    public func observeMaintenance(_ attempt: CameraMaintenanceAttempt, verifyingClock: Bool = false) async throws {
+        try Task.checkCancellation()
+        try attempt.bindOwner(maintenanceSessionOwner)
+        guard initialized, !closing, let path = attempt.observationPath else { throw CancellationError() }
+        attempt.observationUnavailable()
+        let response = try await maintenanceRequest(path: path, method: .get, json: nil, expectedStatus: 200)
+        let body = try decodeMaintenanceJSONObject(response.body)
+        if attempt.snapshot.operation == .clockSync {
+            guard let clock = CameraMaintenanceClock.parseCanon(body) else {
+                throw CCAPIError.invalidResponse("Camera clock observation was invalid.")
+            }
+            attempt.observe(clock, verifying: verifyingClock)
+        } else {
+            let name = body[resolvedMode == .simulator ? "model" : "productname"] as? String
+            let connected = body["connected"] as? NSNumber
+            let simulatorReachable = resolvedMode != .simulator
+                || (connected.map { CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue } ?? false)
+            guard let name, !name.isEmpty, simulatorReachable else {
+                throw CCAPIError.invalidResponse("Camera identity observation was invalid.")
+            }
+            attempt.reachable()
+        }
+        try Task.checkCancellation()
+        guard !closing else { throw CancellationError() }
+    }
+
+    private func maintenanceRequest(path: String, method: HTTPMethod, json: JSONDictionary?,
+        expectedStatus: Int, attempt: CameraMaintenanceAttempt? = nil) async throws -> CameraHTTPResponse {
+        let request = try request(path: path, method: method, json: json, timeoutInterval: 15)
+        try Task.checkCancellation()
+        guard !closing else { throw CancellationError() }
+        if let attempt { try requireMaintenanceMutationSafety(attempt); try attempt.markDispatched() }
+        let response = try await transport.sendMaintenance(request)
+        try CameraHTTPResponseIntegrity.validate(response, requestMethod: method.rawValue)
+        guard response.body.count <= 64 * 1024, response.statusCode == expectedStatus,
+              response.header("content-range") == nil else {
+            throw CCAPIError.invalidResponse("Maintenance requires a complete expected response within 64 KiB.")
+        }
+        return response
+    }
+
+    private func finishMaintenanceClose() async -> CameraShutterReleaseState {
+        activeMaintenanceAttempt?.cancel()
+        // Restored controls may have acquired Bulb/held-AF responsibilities. Keep
+        // their original owner cleanup before retiring any local resources.
+        if let start = bulbStartTask { start.cancel(); _ = await start.result }
+        if let control = shortControlTask { control.cancel(); _ = await control.result }
+        try? await releasePendingShutter()
+        if let start = liveViewStartTask { start.cancel(); _ = await start.result }
+        if let stop = liveViewStopTask { _ = await stop.result }
+        // A failed physical release must not be bypassed by Live View/event Stop.
+        let releaseSafe = pendingShutterRelease == nil && !shutterReleaseUnconfirmed
+        let cleanup = CameraMaintenanceAttempt(operation: .sensorCleaning)
+        if releaseSafe, maintenanceEventStopRequired, resolvedMode != .simulator, let events = eventPollingOperations() {
+            do {
+                let request = try request(path: events.stop.path, method: .delete, timeoutInterval: 15)
+                _ = try await maintenanceLiveViewTransfer(request, expectedStatus: 204, attempt: cleanup, allowClosing: true)
+                maintenanceEventStopRequired = false
+            } catch { liveViewStopUnconfirmed = true }
+        }
+        if releaseSafe, pendingLiveViewStop != nil {
+            do { try await stopMaintenanceLiveView(cleanup, allowClosing: true) }
+            catch { liveViewStopUnconfirmed = true }
+        }
+        // Local resources retire even if another control is still settling or its
+        // Stop failed. No ordinary Stop/event helper is a fallback on this path.
+        let native = rtpSession; rtpSession = nil
+        multipartSession?.close(); multipartSession = nil; pendingMultipartFrame = nil
+        activeLiveViewSource = nil; latestLiveViewGeometry = nil
+        if let native { await native.close() }
+        retiredLiveViewSource = pendingLiveViewStop?.source
+        if pendingLiveViewStop != nil || maintenanceEventStopRequired { liveViewStopUnconfirmed = true }
+        pendingLiveViewStop = nil; liveViewStopRevision = UUID()
+        let unconfirmed = pendingShutterRelease != nil || shutterReleaseUnconfirmed
+        pendingShutterRelease = nil; bulbExposureActive = false; shutterReleaseUnconfirmed = unconfirmed
+        return CameraShutterReleaseState(releaseRequired: false, releaseUnconfirmed: unconfirmed,
+                                        bulbExposureActive: unconfirmed ? nil : false)
+    }
+
+    private func maintenanceLiveViewTransfer(_ captured: URLRequest, expectedStatus: Int,
+                                              attempt: CameraMaintenanceAttempt, allowClosing: Bool = false) async throws -> CameraHTTPResponse {
+        var request = captured
+        request.timeoutInterval = 15
+        try attempt.checkActive()
+        guard !closing || allowClosing else { throw CancellationError() }
+        let response = try await transport.sendMaintenance(request)
+        try CameraHTTPResponseIntegrity.validate(response, requestMethod: request.httpMethod ?? "POST")
+        guard response.statusCode == expectedStatus, response.body.count <= 64 * 1024,
+              response.header("content-range") == nil else {
+            throw CCAPIError.invalidResponse("Maintenance Live View control was not confirmed.")
+        }
+        try attempt.checkActive()
+        guard !closing || allowClosing else { throw CancellationError() }
+        return response
+    }
+
+    private func stopMaintenanceLiveView(_ attempt: CameraMaintenanceAttempt, allowClosing: Bool = false) async throws {
+        try attempt.checkActive()
+        guard (!closing || allowClosing), maintenanceLiveViewControlID == nil, liveViewStartTask == nil,
+              liveViewStopTask == nil, liveViewReleaseTask == nil else { throw CCAPIError.liveViewStopUnconfirmed }
+        guard var stop = pendingLiveViewStop else {
+            if resolvedMode == .simulator { activeLiveViewSource = nil }
+            return
+        }
+        stop.maintenanceOwned = true; pendingLiveViewStop = stop
+        let id = UUID(), revision = liveViewStopRevision
+        maintenanceLiveViewControlID = id
+        defer { if maintenanceLiveViewControlID == id { maintenanceLiveViewControlID = nil } }
+        let native = rtpSession
+        rtpSession = nil; multipartSession?.close(); multipartSession = nil
+        pendingMultipartFrame = nil; activeLiveViewSource = nil; latestLiveViewGeometry = nil
+        if let native { await native.close() }
+        do {
+            if let closeStream = stop.closeStream {
+                _ = try await maintenanceLiveViewTransfer(closeStream, expectedStatus: 204, attempt: attempt, allowClosing: allowClosing)
+            }
+            _ = try await maintenanceLiveViewTransfer(stop.stop,
+                expectedStatus: stop.stop.httpMethod == "DELETE" ? 204 : 200, attempt: attempt, allowClosing: allowClosing)
+            guard (!closing || allowClosing), maintenanceLiveViewControlID == id, pendingLiveViewStop?.id == stop.id,
+                  liveViewStopRevision == revision else { throw CCAPIError.liveViewStopUnconfirmed }
+            pendingLiveViewStop = nil; liveViewStopUnconfirmed = false; liveViewStopRevision = UUID()
+        } catch {
+            if pendingLiveViewStop?.id == stop.id {
+                liveViewStopUnconfirmed = true; liveViewStopRevision = UUID()
+            }
+            throw error
+        }
+    }
+
+    /// Restores only the exact source and effective size captured before Stop.
+    /// No discovery, AUTO/size fallback, detached cleanup, or command retry.
+    public func restoreMaintenanceLiveView(_ attempt: CameraMaintenanceAttempt) async throws {
+        try attempt.bindOwner(maintenanceSessionOwner)
+        try attempt.validateRestore()
+        activeMaintenanceAttempt = attempt
+        defer { if activeMaintenanceAttempt === attempt { activeMaintenanceAttempt = nil } }
+        guard initialized, !closing, !liveViewMaintenanceInFlight, maintenanceLiveViewControlID == nil,
+              liveViewStartTask == nil, liveViewStopTask == nil, liveViewReleaseTask == nil,
+              pendingLiveViewStop == nil, !liveViewStopUnconfirmed,
+              let frozen = attempt.liveViewRestoreRequest, frozen.source != .auto else {
+            throw CCAPIError.liveViewStopUnconfirmed
+        }
+        try beginCameraMutation()
+        let id = UUID()
+        maintenanceLiveViewControlID = id; liveViewMaintenanceInFlight = true
+        defer {
+            cameraMutationCount -= 1
+            if maintenanceLiveViewControlID == id { maintenanceLiveViewControlID = nil; liveViewMaintenanceInFlight = false }
+        }
+        try requireTemperatureAllowsLiveView()
+        try checkMaintenanceLiveViewOwner(id, attempt: attempt)
+        if resolvedMode == .simulator {
+            try requireMaintenanceMutationSafety(attempt)
+            guard frozen.source == .simulatorFrame else { throw CCAPIError.unsupported(.liveView) }
+            activeLiveViewSource = .simulatorFrame; requestedLiveViewRequest = frozen; return
+        }
+        var stop: LiveViewStopObligation
+        let start: URLRequest
+        var multipartRead: URLRequest?
+        var candidateNative: (any CCAPIRTPSession)?
+        var candidateMultipart: CCAPIMultipartLiveViewSession?
+        var openedStream: CameraHTTPStreamResponse?
+        let liveViewPayload: JSONDictionary = attempt.liveViewRestoreIncludesSize
+            ? ["cameradisplay": "on", "liveviewsize": frozen.size.rawValue] : ["cameradisplay": "on"]
+        switch frozen.source {
+        case .ccapiJPEGPolling:
+            guard let operations = jpegLiveViewOperations() else { throw CCAPIError.unsupported(.liveView) }
+            stop = try makeLiveViewStop(source: frozen.source, operation: operations.stop)
+            start = try request(path: operations.start.path, method: .post,
+                json: liveViewPayload, timeoutInterval: 15)
+        case .ccapiMultipart:
+            guard let operations = multipartLiveViewOperations() else { throw CCAPIError.unsupported(.liveViewMultipart) }
+            stop = try makeLiveViewStop(source: frozen.source, operation: operations.stopLiveView, closeStream: operations.closeStream)
+            start = try request(path: operations.startLiveView.path, method: .post,
+                json: liveViewPayload, timeoutInterval: 15)
+            var read = try request(path: operations.openStream.path, method: .get, timeoutInterval: 15)
+            read.setValue("multipart/x-mixed-replace", forHTTPHeaderField: "Accept")
+            multipartRead = read
+        case .ccapiRTP:
+            guard supportsRTPLiveView(), let rtpDestinationAddress, let rtpSessionFactory else {
+                throw CCAPIError.unsupported(.liveViewRTP)
+            }
+            let descriptionRequest = try request(path: apiPath(.get, suffix: "/shooting/liveview/rtpsessiondesc"), method: .get, timeoutInterval: 15)
+            let response = try await maintenanceLiveViewTransfer(descriptionRequest, expectedStatus: 200, attempt: attempt)
+            guard let text = String(data: response.body, encoding: .utf8), response.body.count <= Self.maximumRTPSessionDescriptionBytes else {
+                throw CCAPIError.invalidResponse("Invalid RTP description.")
+            }
+            let description = try CCAPIRTPSessionDescriptionParser.parse(text)
+            let path = apiPath(.post, suffix: "/shooting/liveview/rtp")
+            stop = try makeLiveViewStop(source: frozen.source, operation: CCAPIOperation(method: .post, path: path))
+            start = try request(path: path, method: .post,
+                json: ["action": "start", "ipaddress": rtpDestinationAddress], timeoutInterval: 15)
+            candidateNative = try await rtpSessionFactory.makeSession(description: description, destinationAddress: rtpDestinationAddress)
+        default: throw CCAPIError.unsupported(.liveView)
+        }
+        do {
+            try checkMaintenanceLiveViewOwner(id, attempt: attempt)
+            if let native = candidateNative {
+                await native.setTargetFPS(frozen.fps)
+                try checkMaintenanceLiveViewOwner(id, attempt: attempt)
+                try await native.start()
+                try checkMaintenanceLiveViewOwner(id, attempt: attempt)
+            }
+            try requireMaintenanceMutationSafety(attempt)
+            // Retain cleanup responsibility before dispatch, including lost/cancelled Start.
+            stop.maintenanceOwned = true
+            pendingLiveViewStop = stop; liveViewStopRevision = UUID()
+            let revision = liveViewStopRevision
+            _ = try await maintenanceLiveViewTransfer(start, expectedStatus: 200, attempt: attempt)
+            if let read = multipartRead {
+                let readinessDeadline = ContinuousClock.now.advanced(by: .seconds(15))
+                let stream = try await transport.openMaintenanceStream(read)
+                openedStream = stream
+                try checkMaintenanceLiveViewOwner(id, attempt: attempt)
+                guard stream.statusCode == 200 else { throw CCAPIError.liveViewStopUnconfirmed }
+                let boundary = try CCAPIMultipartLiveView.boundary(from: stream.header("content-type"))
+                let session = CCAPIMultipartLiveViewSession(response: stream, boundary: boundary)
+                candidateMultipart = session; openedStream = nil
+                let frame = try await Self.maintenanceFirstFrame(session, deadline: readinessDeadline)
+                try checkMaintenanceLiveViewOwner(id, attempt: attempt)
+                pendingMultipartFrame = frame
+            }
+            try checkMaintenanceLiveViewOwner(id, attempt: attempt)
+            try requireMaintenanceMutationSafety(attempt)
+            guard pendingLiveViewStop?.id == stop.id, liveViewStopRevision == revision, !liveViewStopUnconfirmed else {
+                throw CCAPIError.liveViewStopUnconfirmed
+            }
+            rtpSession = candidateNative; multipartSession = candidateMultipart
+            candidateNative = nil; candidateMultipart = nil
+            activeLiveViewSource = frozen.source; activeLiveViewSize = frozen.size
+            requestedLiveViewRequest = frozen; liveViewSizeFallbackAttempted = true
+            latestLiveViewGeometry = nil
+        } catch {
+            openedStream?.cancel(); candidateMultipart?.close()
+            if let native = candidateNative { await native.close() }
+            if pendingLiveViewStop?.id == stop.id {
+                liveViewStopUnconfirmed = true; liveViewStopRevision = UUID(); activeLiveViewSource = nil
+            }
+            // Cancellation/lost Start never sends hidden compensating mutations.
+            throw error
+        }
+    }
+
+    private func requireMaintenanceMutationSafety(_ attempt: CameraMaintenanceAttempt) throws {
+        try attempt.checkMutationSafety()
+        guard recording != true, recordingCommandEvidence == nil,
+              pendingShutterRelease == nil, !bulbExposureActive, !shutterReleaseUnconfirmed,
+              bulbStartTask == nil, shortControlTask == nil, shutterReleaseTask == nil else {
+            throw CCAPIError.invalidResponse("Recording or shutter recovery blocks camera maintenance.")
+        }
+    }
+
+    private func checkMaintenanceLiveViewOwner(_ id: UUID, attempt: CameraMaintenanceAttempt) throws {
+        try attempt.checkActive()
+        guard !closing, maintenanceLiveViewControlID == id, liveViewMaintenanceInFlight else { throw CancellationError() }
+    }
+
+    private static func maintenanceFirstFrame(_ session: CCAPIMultipartLiveViewSession, deadline: ContinuousClock.Instant) async throws -> Data {
+        try await withTaskCancellationHandler {
+            try await withThrowingTaskGroup(of: Data.self) { group in
+                group.addTask { try await session.validatedFirstFrame() }
+                group.addTask {
+                    try await ContinuousClock().sleep(until: deadline)
+                    session.close()
+                    throw URLError(.timedOut)
+                }
+                defer { group.cancelAll() }
+                guard let frame = try await group.next() else { throw CancellationError() }
+                return frame
+            }
+        } onCancel: { session.close() }
+    }
+
     public func halfPressShutter() async throws -> CameraStatus {
         try beginCameraMutation()
         defer { cameraMutationCount -= 1 }
@@ -1823,7 +2211,13 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             request.httpBody = release.payload
         }
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        let response = try await transport.send(request)
+        let response: CameraHTTPResponse
+        if maintenanceLifecycleOwned && closing {
+            request.timeoutInterval = 15
+            response = try await transport.sendMaintenance(request)
+        } else {
+            response = try await transport.send(request)
+        }
         try validate(response, request: request)
         if release.simulator { _ = try decodeJSONObject(response.body) }
     }
@@ -2284,6 +2678,10 @@ public actor CCAPIClient: CameraForegroundMediaReading {
 
     /// Stop only. A failed acknowledgement retains the original request for a later retry.
     public func retryLiveViewStop() async throws {
+        guard maintenanceLiveViewControlID == nil else { throw CCAPIError.liveViewStopUnconfirmed }
+        if pendingLiveViewStop?.maintenanceOwned == true {
+            return try await stopMaintenanceLiveView(CameraMaintenanceAttempt(operation: .sensorCleaning))
+        }
         if let task = liveViewStopTask { return try await task.value }
         let task = Task.detached { try await self.performLiveViewStop() }
         liveViewStopTask = task
@@ -2329,12 +2727,17 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             throw CCAPIError.liveViewStopUnconfirmed
         }
         pendingLiveViewStop = stop
+        liveViewStopRevision = UUID()
         let response = try await transport.send(start)
         try validate(response, request: start)
         try checkLiveViewStart()
     }
 
     private func releasePendingLiveView() async throws {
+        guard maintenanceLiveViewControlID == nil else { throw CCAPIError.liveViewStopUnconfirmed }
+        if pendingLiveViewStop?.maintenanceOwned == true {
+            return try await stopMaintenanceLiveView(CameraMaintenanceAttempt(operation: .sensorCleaning))
+        }
         if let task = liveViewReleaseTask { return try await task.value }
         guard let stop = pendingLiveViewStop else { return }
         let task = Task.detached { try await self.sendLiveViewStop(stop) }
@@ -2362,7 +2765,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             pendingLiveViewStop = nil
             liveViewStopUnconfirmed = false
         } catch {
-            if pendingLiveViewStop?.id == stop.id { liveViewStopUnconfirmed = true }
+            if pendingLiveViewStop?.id == stop.id { liveViewStopUnconfirmed = true; liveViewStopRevision = UUID() }
             throw CCAPIError.liveViewStopUnconfirmed
         }
     }

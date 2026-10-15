@@ -118,6 +118,7 @@ final class CameraAppState: ObservableObject {
             } else if snapshot?.status.recording == true {
                 captureMode = .video
             }
+            revokeUnsafeMaintenanceMutation()
         }
     }
     @Published private(set) var isPreview = false
@@ -139,9 +140,13 @@ final class CameraAppState: ObservableObject {
         let commandID: UUID
         let starting: Bool
     }
-    @Published private(set) var recordingReadbackRecovery: RecordingReadbackRecovery?
+    @Published private(set) var recordingReadbackRecovery: RecordingReadbackRecovery? {
+        didSet { revokeUnsafeMaintenanceMutation() }
+    }
     // A missing command response is not an ACK. Cached status cannot settle it.
-    @Published private(set) var recordingCommandRecovery: RecordingReadbackRecovery?
+    @Published private(set) var recordingCommandRecovery: RecordingReadbackRecovery? {
+        didSet { revokeUnsafeMaintenanceMutation() }
+    }
     var recordingRecovery: RecordingReadbackRecovery? { recordingCommandRecovery ?? recordingReadbackRecovery }
     @Published var activeSheet: CameraSheet? {
         didSet { if activeSheet != nil { releaseHeldAutofocus(); invalidateCameraFocusInfo() } }
@@ -170,12 +175,13 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var shutterFlash = false
     @Published private(set) var bulbStartedAt: Date?
     @Published private(set) var shutterReleaseState = CameraShutterReleaseState.idle {
-        didSet { shutterReleaseObservationRevision &+= 1 }
+        didSet { shutterReleaseObservationRevision &+= 1; revokeUnsafeMaintenanceMutation() }
     }
     @Published private(set) var previousShutterReleaseWarnings = Set<UUID>()
     @Published private(set) var previousRecordingWarnings = Set<UUID>()
     @Published private(set) var liveViewStopState = CameraLiveViewStopState.idle
     @Published private(set) var previousLiveViewWarnings = Set<UUID>()
+    @Published private(set) var previousMaintenanceRetirementWarnings = Set<UUID>()
     private var acknowledgedPreviousLiveViewWarnings = Set<UUID>()
     var canRetryLiveViewStop: Bool { session != nil && liveViewStopState.stopUnconfirmed && !isBusy(.liveView) && foregroundLiveViewRestartOwner == nil && foregroundMediaIOOwner == nil }
     private var acknowledgedPreviousRecordingWarnings = Set<UUID>()
@@ -276,6 +282,13 @@ final class CameraAppState: ObservableObject {
     private var mediaUploadAttempt: CameraMediaUploadAttempt?
     private var mediaUploadOwner: UUID?
     @Published private(set) var deletedMediaName: String?
+    @Published private(set) var maintenanceHistory: [MaintenanceRecord] = []
+    @Published private(set) var maintenanceCurrentID: UUID?
+    @Published private(set) var maintenanceControlsPaused = false
+    private var maintenanceActiveID: UUID?
+    private var maintenanceTask: Task<String?, Never>?
+    private var maintenanceAttempts: [UUID: CameraMaintenanceAttempt] = [:]
+    private var maintenanceRestoreOwner: UUID?
     @Published private(set) var lastClockSyncAt: Date?
     @Published private(set) var lastCreatedDirectoryName: String?
     @Published private(set) var shootingSettingHistory: [ShootingSettingRecord] = []
@@ -307,6 +320,7 @@ final class CameraAppState: ObservableObject {
         didSet {
             retireShootingSetting()
             retireCaptureConfiguration()
+            retireMaintenance()
             singleMediaMetadataAttempt?.cancel()
             singleMediaMetadataAttempt = nil
             retireMediaMetadataBatch()
@@ -617,6 +631,7 @@ final class CameraAppState: ObservableObject {
     private func invalidateConnectionGuidance() {
         retireShootingSetting()
         retireCaptureConfiguration()
+        retireMaintenance()
         connectionConfigurationOwner = UUID()
         connectionRecovery = nil
     }
@@ -875,6 +890,7 @@ final class CameraAppState: ObservableObject {
             self?.preservePreviousReleaseWarning(result, generation: generation)
             let liveView = await closingSession.liveViewStopState()
             if liveView.stopUnconfirmed { self?.preservePreviousLiveViewWarning(generation: generation) }
+            if await closingSession.maintenanceRetirementUnconfirmed() { self?.previousMaintenanceRetirementWarnings.insert(generation) }
         }
     }
 
@@ -893,6 +909,8 @@ final class CameraAppState: ObservableObject {
         acknowledgedPreviousRecordingWarnings.formUnion(previousRecordingWarnings)
         previousRecordingWarnings.removeAll()
     }
+
+    func dismissMaintenanceRetirementWarning() { previousMaintenanceRetirementWarnings.removeAll() }
 
     func confirmPreviousLiveViewStopped() {
         acknowledgedPreviousLiveViewWarnings.formUnion(previousLiveViewWarnings)
@@ -936,6 +954,7 @@ final class CameraAppState: ObservableObject {
         heldAutofocusTask = nil
         heldAutofocusPressed = false
         sessionGeneration = UUID()
+        maintenanceControlsPaused = false
         recordingReadbackRecovery = nil
         recordingCommandRecovery = nil
         pendingLiveViewStartTask?.cancel()
@@ -1095,7 +1114,7 @@ final class CameraAppState: ObservableObject {
     func setAutoRefresh(_ enabled: Bool) async {
         autoRefresh = enabled
         if !enabled { invalidateCameraFocusInfo() }
-        let mayRender = enabled && applicationActive && !shutterReleaseRequired
+        let mayRender = enabled && applicationActive && !shutterReleaseRequired && !maintenanceControlsPaused
         rtpController.setRenderingEnabled(mayRender)
         if mayRender {
             if activeLiveViewSource == .ccapiRTP {
@@ -1130,6 +1149,7 @@ final class CameraAppState: ObservableObject {
             if mediaBatchContinuationActive { cancelMediaBatchDownload() }
             cancelMediaMetadataBatch()
             cancelMediaDelete()
+            cancelMaintenance()
             foregroundMedia.stop(reason: .background)
             stopLiveViewLoop()
         } else if let session {
@@ -1138,7 +1158,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func startLiveView() async {
-        guard applicationActive, let session, supports(.liveView), liveViewTemperatureAllowed,
+        guard !maintenanceControlsPaused, applicationActive, let session, supports(.liveView), liveViewTemperatureAllowed,
               !liveViewStopState.stopUnconfirmed, begin(.liveView) else { return }
         let generation = sessionGeneration
         let id = UUID()
@@ -1207,6 +1227,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func restartLiveView() async {
+        guard !maintenanceControlsPaused else { return }
         if liveViewStopState.stopUnconfirmed { await retryLiveViewStop(); return }
         guard !shutterReleaseRequired, foregroundMediaIOOwner == nil,
               foregroundLiveViewRestartOwner == nil else { return }
@@ -1335,20 +1356,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func syncCameraClock() async {
-        guard !isPreview, supports(.cameraClockSync), begin(.clock) else { return }
-        let generation = sessionGeneration
-        defer { end(.clock, generation: generation) }
-        guard let session else { return }
-        do {
-            let status = try await session.syncCameraClock()
-            guard generation == sessionGeneration else { return }
-            updateStatus(status)
-            lastClockSyncAt = Date()
-            lastError = nil
-        } catch {
-            guard generation == sessionGeneration else { return }
-            record(error)
-        }
+        await performMaintenance(operation: .clockSync)
     }
 
     var captureConfigurationRecord: CaptureConfigurationRecord? {
@@ -1525,83 +1533,211 @@ final class CameraAppState: ObservableObject {
         }
     }
 
-    func sleepCamera() async {
-        guard
-            !isPreview,
-            supports(.cameraSleep),
-            !recordingStopRequired,
-            !bulbExposureActive,
-            busyOperations.isEmpty,
-            begin(.power)
-        else { return }
-        let generation = sessionGeneration
-        defer { end(.power, generation: generation) }
-        guard let session else { return }
-
-        let wasLiveViewActive = activeLiveViewSource != nil
-        stopLiveViewLoop()
-        stopEventLoop()
-        resetMediaDownloadState()
-        resetMediaUploadState()
-        do {
-            try await session.sleepCamera()
-            guard generation == sessionGeneration else { return }
-            await disconnect()
-        } catch {
-            let stopState = await session.liveViewStopState()
-            guard generation == sessionGeneration else { return }
-            liveViewStopState = stopState
-            if stopState.stopUnconfirmed { activeLiveViewSource = nil }
-            record(error)
-            beginEventLoop(session: session)
-            if wasLiveViewActive, !liveViewStopState.stopUnconfirmed { await startLiveView() }
-        }
+    var maintenanceRecord: MaintenanceRecord? {
+        maintenanceHistory.first { $0.id == maintenanceCurrentID }
     }
 
-    func cleanSensor(autoPowerOff: Bool) async {
-        guard
-            !isPreview,
-            supports(.sensorCleaning),
-            !recordingStopRequired,
-            !bulbExposureActive,
-            busyOperations.isEmpty,
-            begin(.maintenance)
-        else { return }
-        let generation = sessionGeneration
-        defer { end(.maintenance, generation: generation) }
-        guard let session else { return }
+    func maintenanceConfirmation(for operation: CameraMaintenanceOperation) -> MaintenanceConfirmation {
+        MaintenanceConfirmation(owner: sessionGeneration, configurationOwner: connectionConfigurationOwner, operation: operation)
+    }
 
-        let wasLiveViewActive = activeLiveViewSource != nil
-        stopLiveViewLoop()
-        stopEventLoop()
-        do {
-            try await session.cleanSensor(autoPowerOff: autoPowerOff)
-            let stopState = await session.liveViewStopState()
-            guard generation == sessionGeneration else { return }
-            liveViewStopState = stopState
-            if autoPowerOff {
-                await disconnect()
-            } else {
-                let refreshedSnapshot = try await session.connectSnapshot()
-                guard generation == sessionGeneration else { return }
-                snapshot = refreshedSnapshot
-                clampLiveViewRequest()
-                beginEventLoop(session: session)
-                activeLiveViewSource = nil
-                if wasLiveViewActive, !liveViewStopState.stopUnconfirmed { await startLiveView() }
-                guard generation == sessionGeneration else { return }
-                lastError = nil
-            }
-        } catch {
-            let stopState = await session.liveViewStopState()
-            guard generation == sessionGeneration else { return }
-            liveViewStopState = stopState
-            if stopState.stopUnconfirmed { activeLiveViewSource = nil }
-            record(error)
-            beginEventLoop(session: session)
-            activeLiveViewSource = nil
-            if wasLiveViewActive, !liveViewStopState.stopUnconfirmed { await startLiveView() }
+    var canStartMaintenance: Bool {
+        !isPreview && session != nil && !recordingStopRequired && !bulbExposureActive
+            && !shutterReleaseRequired && !liveViewStopState.stopUnconfirmed
+            && busyOperations.isEmpty && maintenanceTask == nil
+            && (!maintenanceControlsPaused || maintenanceRecord?.outcome.commandEvidence == .notSent)
+    }
+
+    func sleepCamera(confirmation: MaintenanceConfirmation? = nil) async {
+        await performMaintenance(operation: .sleep, confirmation: confirmation)
+    }
+
+    func cleanSensor(autoPowerOff: Bool, confirmation: MaintenanceConfirmation? = nil) async {
+        await performMaintenance(operation: .sensorCleaning, autoPowerOff: autoPowerOff, confirmation: confirmation)
+    }
+
+    private func sameMaintenanceOwner(_ record: MaintenanceRecord) -> Bool {
+        record.owner == sessionGeneration && record.configurationOwner == connectionConfigurationOwner && !record.retired
+    }
+
+    private func performMaintenance(operation: CameraMaintenanceOperation, autoPowerOff: Bool = false,
+                                    confirmation: MaintenanceConfirmation? = nil) async {
+        if let confirmation {
+            guard confirmation.owner == sessionGeneration, confirmation.configurationOwner == connectionConfigurationOwner,
+                  confirmation.operation == operation else { return }
         }
+        guard canStartMaintenance, supports(operation.feature), let session,
+              begin(operation == .clockSync ? .clock : operation == .sleep ? .power : .maintenance) else { return }
+        let attempt = CameraMaintenanceAttempt(operation: operation, autoPowerOff: autoPowerOff)
+        let record = MaintenanceRecord(owner: sessionGeneration, configurationOwner: connectionConfigurationOwner,
+            backend: connectionMode.rawValue, hadLiveView: activeLiveViewSource != nil, outcome: attempt.snapshot)
+        maintenanceHistory.append(record)
+        if maintenanceHistory.count > 20 {
+            let removed = maintenanceHistory.removeFirst(); maintenanceAttempts.removeValue(forKey: removed.id)
+        }
+        maintenanceAttempts[record.id] = attempt
+        maintenanceCurrentID = record.id; maintenanceActiveID = record.id
+        if operation != .clockSync {
+            maintenanceControlsPaused = true
+            pauseLiveViewForBulb(); stopEventLoop(); activeLiveViewSource = nil
+            rtpAudioRequested = false; rtpController.setAudioEnabled(false)
+            resetMediaDownloadState(); resetMediaUploadState()
+        }
+        let task = Task<String?, Never> { [weak self] in
+            do {
+                try await session.performMaintenance(attempt)
+                if operation == .sensorCleaning && !autoPowerOff {
+                    guard let self, self.sameMaintenanceOwner(record), self.maintenanceActiveID == record.id else { return nil }
+                    try Task.checkCancellation()
+                    try await session.observeMaintenance(attempt)
+                }
+                return nil
+            } catch { return error.localizedDescription }
+        }
+        maintenanceTask = task
+        let failure = await withTaskCancellationHandler(operation: { await task.value }, onCancel: {
+            attempt.cancel(); task.cancel()
+        })
+        let stop = await session.liveViewStopState()
+        finishMaintenance(record, attempt: attempt, failure: failure, cancelled: task.isCancelled, stop: stop)
+    }
+
+    private func revokeUnsafeMaintenanceMutation() {
+        guard recordingStopRequired || bulbExposureActive || shutterReleaseRequired || shutterReleaseUnconfirmed,
+              let id = maintenanceActiveID else { return }
+        maintenanceAttempts[id]?.revokeMutationSafety()
+    }
+
+    func cancelMaintenance() {
+        guard let id = maintenanceActiveID else { return }
+        maintenanceAttempts[id]?.cancel(); maintenanceTask?.cancel()
+        if let index = maintenanceHistory.firstIndex(where: { $0.id == id }) { maintenanceHistory[index].cancelled = true }
+    }
+
+    private func retireMaintenance() {
+        cancelMaintenance()
+        for index in maintenanceHistory.indices { maintenanceHistory[index].retired = true }
+        if let record = maintenanceHistory.first(where: { $0.id == maintenanceActiveID }) {
+            busyOperations.remove(record.outcome.operation == .clockSync ? .clock : record.outcome.operation == .sleep ? .power : .maintenance)
+        }
+        maintenanceActiveID = nil; maintenanceTask = nil; maintenanceRestoreOwner = nil
+        // Retain the selected receipt for inspection; no recovery may cross owners.
+    }
+
+    func canRecoverMaintenance(_ id: UUID) -> Bool {
+        guard let record = maintenanceHistory.first(where: { $0.id == id }) else { return false }
+        return CameraMaintenancePolicy.canRecover(sameOwner: sameMaintenanceOwner(record),
+            active: maintenanceTask != nil || !busyOperations.isEmpty, hasRecord: maintenanceAttempts[id] != nil)
+    }
+
+    func recoverMaintenance(_ requestedID: UUID? = nil) async {
+        guard let id = requestedID ?? maintenanceCurrentID, canRecoverMaintenance(id), let session,
+              let record = maintenanceHistory.first(where: { $0.id == id }), let attempt = maintenanceAttempts[id] else { return }
+        maintenanceActiveID = id
+        if let index = maintenanceHistory.firstIndex(where: { $0.id == id }) {
+            maintenanceHistory[index].running = true; maintenanceHistory[index].reading = true
+        }
+        let task = Task<String?, Never> {
+            do { try await session.observeMaintenance(attempt); return nil }
+            catch { return error.localizedDescription }
+        }
+        maintenanceTask = task
+        let failure = await withTaskCancellationHandler(operation: { await task.value }, onCancel: { task.cancel() })
+        finishMaintenance(record, attempt: attempt, failure: failure, cancelled: task.isCancelled,
+                          stop: await session.liveViewStopState())
+    }
+
+    func canRestoreMaintenance(_ id: UUID) -> Bool {
+        guard let record = maintenanceHistory.first(where: { $0.id == id }), maintenanceControlsPaused,
+              maintenanceTask == nil, busyOperations.isEmpty, record.outcome.restoreEvidence != .confirmed else { return false }
+        return CameraMaintenancePolicy.canRestore(sameOwner: sameMaintenanceOwner(record),
+            sameAttempt: maintenanceCurrentID == id, cancelled: record.cancelled, retired: record.retired,
+            responseReceived: record.outcome.commandEvidence == .responded,
+            stopConfirmed: [.notRequired, .confirmed].contains(record.outcome.stopEvidence),
+            operation: record.outcome.operation, autoPowerOff: record.outcome.autoPowerOff,
+            wasLive: record.hadLiveView, freshReachable: record.outcome.observationEvidence == .reachable,
+            safetyClear: !recordingStopRequired && !shutterReleaseRequired && !bulbExposureActive && !liveViewStopState.stopUnconfirmed)
+    }
+
+    /// This separately requested action rechecks reachability before explicitly
+    /// starting Live View. The read-only recovery above never calls this path.
+    func restoreMaintenance(_ id: UUID) async {
+        guard canRestoreMaintenance(id), let session,
+              let record = maintenanceHistory.first(where: { $0.id == id }), let attempt = maintenanceAttempts[id] else { return }
+        maintenanceActiveID = id; maintenanceRestoreOwner = id; attempt.restore(.pending)
+        if let index = maintenanceHistory.firstIndex(where: { $0.id == id }) {
+            maintenanceHistory[index].running = true; maintenanceHistory[index].restoring = true
+        }
+        let task = Task<String?, Never> { [weak self] in
+            do {
+                try await session.observeMaintenance(attempt)
+                try Task.checkCancellation()
+                guard let self, self.sameMaintenanceOwner(record), self.maintenanceActiveID == id,
+                      attempt.snapshot.observationEvidence == .reachable,
+                      !self.recordingStopRequired, !self.bulbExposureActive, !self.shutterReleaseRequired,
+                      !self.liveViewStopState.stopUnconfirmed else { throw CancellationError() }
+                if record.hadLiveView {
+                    try await session.restoreMaintenanceLiveView(attempt)
+                    let source = await session.currentLiveViewSource()
+                    let size = await session.currentLiveViewSize()
+                    let nativeURL = await session.currentNativeLiveViewSourceURL()
+                    let stop = await session.liveViewStopState()
+                    try Task.checkCancellation()
+                    guard self.sameMaintenanceOwner(record), self.maintenanceActiveID == id,
+                          !self.liveViewStopState.stopUnconfirmed, !stop.stopUnconfirmed,
+                          !self.recordingStopRequired, !self.bulbExposureActive, !self.shutterReleaseRequired,
+                          let source else { throw CancellationError() }
+                    self.activeLiveViewSource = source
+                    self.liveViewStopState = stop
+                    if let size { self.liveViewSize = size }
+                    if source == .ccapiRTP {
+                        self.resetLiveViewMetrics(); self.nativeLiveViewSize = nil; self.liveViewData = nil
+                        self.frameContentType = "video/H264"; self.frameSourceURL = nativeURL
+                    }
+                }
+                attempt.restore(.confirmed)
+                self.maintenanceControlsPaused = false
+                if record.hadLiveView {
+                    self.startCameraFocusInfoLoop(session: session)
+                    if self.activeLiveViewSource == .ccapiRTP {
+                        self.rtpController.setRenderingEnabled(self.autoRefresh && self.applicationActive)
+                    } else if self.autoRefresh { self.beginLiveViewLoop(session: session) }
+                }
+                self.beginEventLoop(session: session)
+                return nil
+            } catch { attempt.restore(.unknown); return error.localizedDescription }
+        }
+        maintenanceTask = task
+        let failure = await withTaskCancellationHandler(operation: { await task.value }, onCancel: { task.cancel() })
+        finishMaintenance(record, attempt: attempt, failure: failure, cancelled: task.isCancelled,
+                          stop: await session.liveViewStopState())
+    }
+
+    private func finishMaintenance(_ record: MaintenanceRecord, attempt: CameraMaintenanceAttempt,
+                                   failure: String?, cancelled: Bool, stop: CameraLiveViewStopState) {
+        guard let index = maintenanceHistory.firstIndex(where: { $0.id == record.id }) else { return }
+        maintenanceHistory[index].outcome = attempt.snapshot
+        maintenanceHistory[index].running = false; maintenanceHistory[index].reading = false; maintenanceHistory[index].restoring = false
+        maintenanceHistory[index].cancelled = maintenanceHistory[index].cancelled || cancelled
+        let sameOwner = sameMaintenanceOwner(maintenanceHistory[index])
+        guard sameOwner, maintenanceActiveID == record.id else { return }
+        maintenanceTask = nil; maintenanceActiveID = nil; maintenanceRestoreOwner = nil
+        end(record.outcome.operation == .clockSync ? .clock : record.outcome.operation == .sleep ? .power : .maintenance, generation: record.owner)
+        // Cancellation may leave a real Stop obligation. Latch it for this owner,
+        // but an older false result can never clear a newer Stop warning.
+        if stop.stopUnconfirmed || !liveViewStopState.stopUnconfirmed { liveViewStopState = stop }
+        if stop.stopUnconfirmed { activeLiveViewSource = nil; stopLiveViewLoop() }
+        guard !cancelled else { return }
+        if attempt.snapshot.commandEvidence == .responded, attempt.snapshot.clockReadEvidence == .matched {
+            lastClockSyncAt = attempt.snapshot.commandResponseAt
+        }
+        let incompleteClock = attempt.snapshot.operation == .clockSync
+            && attempt.snapshot.commandEvidence == .responded && attempt.snapshot.clockReadEvidence != .matched
+        let unavailableRead = attempt.snapshot.observationEvidence == .unavailable
+        lastError = failure != nil || incompleteClock || unavailableRead
+            ? NSLocalizedString("maintenance_partial_failure", comment: "") : nil
+        // Sleep/auto-off never disconnect implicitly or claim physical completion.
+        // Monitoring stays paused until an explicit same-owner restore or reconnect.
     }
 
     func toggleBulbExposure() async {
@@ -1814,7 +1950,7 @@ final class CameraAppState: ObservableObject {
 
     private func startCameraFocusInfoLoop(session: CameraSession) {
         stopCameraFocusInfoLoop()
-        guard capabilities?.liveView.focusInfoSupported == true else { return }
+        guard !maintenanceControlsPaused, capabilities?.liveView.focusInfoSupported == true else { return }
         let generation = sessionGeneration
         focusInfoTask = Task { [weak self] in
             guard let self else { return }
@@ -4359,6 +4495,8 @@ final class CameraAppState: ObservableObject {
     }
 
     private func begin(_ operation: CameraOperation) -> Bool {
+        if maintenanceTask != nil && !(operation == .liveView && maintenanceRestoreOwner == maintenanceActiveID) { return false }
+        if maintenanceControlsPaused && ![.refresh, .liveView, .maintenance, .power].contains(operation) { return false }
         if shootingSettingTask != nil, operation == .directory || operation == .setting || operation == .refresh { return false }
         if captureConfigurationTask != nil, operation == .directory || operation == .setting { return false }
         if foregroundMediaIOOwner != nil { return false }
@@ -4447,7 +4585,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func beginLiveViewLoop(session: CameraSession) {
-        guard applicationActive, !shutterReleaseRequired || heldAutofocusPressed else { return }
+        guard !maintenanceControlsPaused, applicationActive, !shutterReleaseRequired || heldAutofocusPressed else { return }
         let generation = sessionGeneration
         stopLiveViewLoop()
         resetLiveViewMetrics()
@@ -4504,7 +4642,7 @@ final class CameraAppState: ObservableObject {
 
     private func beginEventLoop(session: CameraSession) {
         stopEventLoop()
-        guard supports(.eventPolling), !isPreview else { return }
+        guard !maintenanceControlsPaused, supports(.eventPolling), !isPreview else { return }
         let generation = eventGeneration
         eventTask = Task { [weak self] in
             guard let self else { return }
@@ -4683,7 +4821,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func resumeLiveViewAfterBulb(session: CameraSession, generation: UUID) {
-        guard generation == sessionGeneration, applicationActive, !shutterReleaseRequired,
+        guard generation == sessionGeneration, !maintenanceControlsPaused, applicationActive, !shutterReleaseRequired,
               liveViewTemperatureAllowed else { return }
         rtpController.setRenderingEnabled(autoRefresh)
         guard autoRefresh, activeLiveViewSource != nil else { return }
