@@ -2483,6 +2483,7 @@ class CameraViewModel(
                     },
                     onPublished = { evidence -> recordPublishedJpeg(connection, item, evidence) },
                     onPublicationObserverFailure = deliveredJpegStore::markRegistrationUnavailable,
+                    requireAutomaticJpeg = true,
                     download = download,
                 )
             }

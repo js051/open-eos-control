@@ -172,10 +172,11 @@ class CcapiClient(
         .cache(null)
         .addNetworkInterceptor { chain ->
             val response = chain.proceed(chain.request())
-            if (!response.isSuccessful) {
+            if (!automaticJpegOriginalResponseAdmitted(response.code, response.headers("Content-Range").isNotEmpty())) {
                 // Fail before OkHttp's follow-up interceptor can repeat a 503/Retry-After: 0.
+                // Even a complete-looking JPEG in a 206/201/range response is not an original.
                 response.close()
-                throw IOException("Original media request failed: HTTP ${response.code}.")
+                throw IOException("Original media request did not return a complete HTTP 200 response.")
             }
             response
         }
@@ -3381,6 +3382,13 @@ class CcapiClient(
                         continue
                     }
 
+                    if (singleAttempt && !automaticJpegOriginalResponseAdmitted(
+                            response.code, response.headers("Content-Range").isNotEmpty())) {
+                        // Application interceptors can transform a response after the network
+                        // interceptor. Recheck before peeking, writing, or reporting progress.
+                        response.close()
+                        throw IOException("Original media request did not return a complete HTTP 200 response.")
+                    }
                     if (!response.isSuccessful) {
                         response.use {
                             val preview = response.body?.string().orEmpty().take(MAX_ERROR_BODY_CHARS)
@@ -3390,6 +3398,10 @@ class CcapiClient(
                     }
 
                     val contentType = response.header("content-type")
+                    if (singleAttempt && !automaticJpegResponseHeadersAdmitted(response.headers("content-type"))) {
+                        response.close()
+                        throw InvalidAutomaticJpegException("conflicting original response content type")
+                    }
                     val previewBytes = try {
                         response.peekBody(MEDIA_SNIFF_BYTES).bytes()
                     } catch (exception: Exception) {
