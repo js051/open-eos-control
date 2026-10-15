@@ -15,6 +15,11 @@ import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.R
+import dev.openeos.control.data.CaptureConfigurationOperation
+import dev.openeos.control.data.CaptureConfigurationReadback
+import dev.openeos.control.data.CaptureConfigurationReadEvidence
+import dev.openeos.control.data.CaptureConfigurationRequest
+import dev.openeos.control.data.CaptureConfigurationWriteEvidence
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.AutofocusReleaseException
 import dev.openeos.control.data.ShutterReleaseException
@@ -314,6 +319,11 @@ class CameraViewModel(
     }
     @Volatile private var mediaSaveRequest: MediaSaveRequest? = null
     private var mediaUploadJob: Job? = null
+    private var captureConfigurationAttempt: CaptureConfigurationAttempt? = null
+    private var activeCaptureConfigurationAttempt: CaptureConfigurationAttempt? = null
+    private val captureConfigurationAttempts = linkedMapOf<String, CaptureConfigurationAttempt>()
+    private var captureConfigurationJob: Job? = null
+    private val consumedCaptureConfigurationDrafts = CaptureConfigurationDraftLedger()
     @Volatile private var mediaDeleteControl: MediaDeleteBatchControl? = null
     @Volatile private var mediaDeleteJob: Job? = null
     @Volatile private var mediaUploadAttempt: MediaUploadAttempt? = null
@@ -1008,6 +1018,7 @@ class CameraViewModel(
         val recordingWarning = retireRecordingAttempt(previousState)
         val liveViewWarning = previousState.liveViewDisconnectWarning || previousState.needsLiveViewStopRecovery
         val shutterWarning = previousState.needsShutterDisconnectWarning()
+        activeCaptureConfigurationAttempt?.cancel()
         mediaDeleteControl?.cancel()
         mediaUploadAttempt?.cancel()
         cameraSessionGeneration += 1
@@ -1378,32 +1389,102 @@ class CameraViewModel(
         }
     }
 
-    fun createDirectory(name: String) = runCamera(CameraOperation.DIRECTORY) {
+    fun createDirectory(name: String) = submitCaptureConfiguration(CaptureConfigurationDraft(
+        CaptureConfigurationOwner(_uiState.value.info, _uiState.value.mediaSessionGeneration),
+        UUID.randomUUID().toString(), 0, CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, name)))
+
+    fun setFileNaming(field: CameraFileNamingField, value: String) = submitCaptureConfiguration(CaptureConfigurationDraft(
+        CaptureConfigurationOwner(_uiState.value.info, _uiState.value.mediaSessionGeneration),
+        UUID.randomUUID().toString(), 0, CaptureConfigurationRequest(CaptureConfigurationOperation.SET_FILE_NAMING, value, field)))
+
+    fun submitCaptureConfiguration(draft: CaptureConfigurationDraft) {
         val state = _uiState.value
-        if (state.previewMode || !state.supports(CameraFeature.DIRECTORY_CONTROL)) return@runCamera
-        val created = repository.createDirectory(name)
-        val capabilities = repository.refreshCapabilities()
-        _uiState.update {
-            it.copy(
-                capabilities = capabilities,
-                lastCreatedDirectoryName = created,
-            )
+        if (!state.connected || state.previewMode || state.busy || captureConfigurationJob != null ||
+            !draft.owner.matches(state.info, state.mediaSessionGeneration)) return
+        val request = draft.request
+        when (request.operation) {
+            CaptureConfigurationOperation.CREATE_DIRECTORY -> if (!state.supports(CameraFeature.DIRECTORY_CONTROL) ||
+                !Regex("^(?:[A-Z0-9_]{5})?$").matches(request.requestedValue)) return
+            CaptureConfigurationOperation.SET_FILE_NAMING -> if (!state.supports(CameraFeature.FILE_NAMING_CONTROL) ||
+                state.capabilities?.fileNaming?.accepts(requireNotNull(request.field), request.requestedValue) != true) return
         }
+        if (!consumedCaptureConfigurationDrafts.claim(draft)) return
+        val generation = cameraSessionGeneration
+        val access = repository.captureConfigurationAccess()
+        lateinit var attempt: CaptureConfigurationAttempt
+        fun owns(): Boolean = generation == cameraSessionGeneration &&
+            draft.owner.matches(_uiState.value.info, _uiState.value.mediaSessionGeneration)
+        attempt = CaptureConfigurationAttempt(draft, access, ::owns) { receipt ->
+            _uiState.update { current ->
+                // Late results may settle an existing bounded row only. They never reinsert
+                // evicted history or mutate a replacement session's receipt, locks or editor.
+                val history = current.captureConfigurationHistory.map { if (it.id == receipt.id) receipt else it }
+                if (!canPublishCaptureConfiguration(receipt, captureConfigurationAttempt?.id,
+                    current.info, current.mediaSessionGeneration) || generation != cameraSessionGeneration) {
+                    current.copy(captureConfigurationHistory = history)
+                } else current.copy(captureConfigurationHistory = history, captureConfigurationReceipt = receipt,
+                    lastCreatedDirectoryName = captureConfigurationDirectorySummary(receipt, current.lastCreatedDirectoryName))
+            }
+        }
+        captureConfigurationAttempt = attempt
+        captureConfigurationAttempts[attempt.id] = attempt
+        _uiState.update { it.copy(captureConfigurationReceipt = attempt.snapshot(),
+            captureConfigurationHistory = captureConfigurationHistory(it.captureConfigurationHistory, attempt.snapshot())) }
+        val retainedIds = _uiState.value.captureConfigurationHistory.mapTo(hashSetOf()) { it.id }
+        captureConfigurationAttempts.keys.retainAll(retainedIds)
+        val operation = if (request.operation == CaptureConfigurationOperation.CREATE_DIRECTORY) CameraOperation.DIRECTORY else CameraOperation.SETTING
+        val job = launchCameraOperation(operation, onRegistered = { captureConfigurationJob = it; activeCaptureConfigurationAttempt = attempt }) {
+            val updated = attempt.run()
+            if (owns() && !attempt.snapshot().cancelled) {
+                val snapshot = attempt.snapshot().evidence
+                _uiState.update { current -> current.copy(capabilities = current.capabilities?.let { capabilities ->
+                    capabilities.copy(fileNaming = updated ?: capabilities.fileNaming,
+                        advancedSettings = if (snapshot.readbackEvidence == CaptureConfigurationReadEvidence.REFRESHED)
+                            mergeCaptureConfigurationDirectorySettings(capabilities.advancedSettings,
+                                CaptureConfigurationReadback(directorySelection = snapshot.observedValue, directoryValues = snapshot.directoryValues), owns())
+                        else capabilities.advancedSettings)
+                }) }
+            }
+        }
+        job?.invokeOnCompletion {
+            attempt.finishBeforeStart()
+            if (captureConfigurationJob === job) {
+                captureConfigurationJob = null
+                if (activeCaptureConfigurationAttempt === attempt) activeCaptureConfigurationAttempt = null
+            }
+        }
+        if (job == null) attempt.finishBeforeStart()
     }
 
-    fun setFileNaming(field: CameraFileNamingField, value: String) = runCamera(CameraOperation.SETTING) {
+    fun cancelCaptureConfiguration(id: String) {
+        val attempt = activeCaptureConfigurationAttempt?.takeIf { it.id == id } ?: return
+        if (!attempt.draft.owner.matches(_uiState.value.info, _uiState.value.mediaSessionGeneration)) return
+        attempt.cancel()
+        captureConfigurationJob?.cancel()
+    }
+
+    fun recoverCaptureConfiguration(id: String) {
+        val attempt = captureConfigurationAttempts[id] ?: return
         val state = _uiState.value
-        if (
-            state.previewMode ||
-            !state.supports(CameraFeature.FILE_NAMING_CONTROL) ||
-            state.capabilities?.fileNaming?.accepts(field, value) != true
-        ) return@runCamera
-        val updated = repository.setFileNaming(field, value)
-        _uiState.update { current ->
-            current.copy(
-                capabilities = current.capabilities?.copy(fileNaming = updated),
-            )
+        if (state.captureConfigurationHistory.none { it.id == id }) return
+        if (!state.connected || state.busy || captureConfigurationJob != null ||
+            !attempt.draft.owner.matches(state.info, state.mediaSessionGeneration)) return
+        val generation = cameraSessionGeneration
+        val job = launchCameraOperation(CameraOperation.DIRECTORY, onRegistered = { captureConfigurationJob = it; activeCaptureConfigurationAttempt = attempt }) {
+            val readback = attempt.recover()
+            if (generation == cameraSessionGeneration && activeCaptureConfigurationAttempt === attempt &&
+                attempt.draft.owner.matches(_uiState.value.info, _uiState.value.mediaSessionGeneration)) {
+                readback?.let { observed -> _uiState.update { current -> current.copy(capabilities = current.capabilities?.let { capabilities ->
+                    capabilities.copy(fileNaming = observed.fileNaming ?: capabilities.fileNaming,
+                        advancedSettings = mergeCaptureConfigurationDirectorySettings(capabilities.advancedSettings, observed,
+                            attempt.draft.owner.matches(current.info, current.mediaSessionGeneration)))
+                }) } }
+            }
         }
+        job?.invokeOnCompletion { if (captureConfigurationJob === job) {
+            captureConfigurationJob = null
+            if (activeCaptureConfigurationAttempt === attempt) activeCaptureConfigurationAttempt = null
+        } }
     }
 
     fun sleepCamera() {
@@ -3506,6 +3587,7 @@ class CameraViewModel(
             val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
             val recordingWarning = retireRecordingAttempt(_uiState.value)
             _uiState.update { it.copy(recordingDisconnectWarning = recordingWarning) }
+            activeCaptureConfigurationAttempt?.cancel()
             mediaDeleteControl?.cancel()
             mediaUploadAttempt?.cancel()
             cameraSessionGeneration += 1
@@ -4030,6 +4112,7 @@ class CameraViewModel(
         val handoffCleanup = handoffOwner.cancelUnlaunched()
         foregroundImportPreferences?.unregisterOnSharedPreferenceChangeListener(foregroundImportWarningListener)
         val foregroundImport = stopForegroundImport(ForegroundImportStopReason.SESSION_CHANGED)
+        activeCaptureConfigurationAttempt?.cancel()
         mediaDeleteControl?.cancel()
         mediaUploadAttempt?.cancel()
         cameraSessionGeneration += 1
@@ -4139,6 +4222,7 @@ class CameraViewModel(
         focusFeedback = null,
         lastClockSyncAtMillis = null,
         lastCreatedDirectoryName = null,
+        captureConfigurationReceipt = null,
         operatorConfirmedFeatures = emptySet(),
         error = error,
         errorOperation = null,

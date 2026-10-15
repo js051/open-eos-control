@@ -83,6 +83,102 @@ class DesktopBridgeClientTest {
     }
 
     @Test
+    fun successfulDirectoryAckReadsOneFreshSelectionOnTheSameFrozenSession() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON.replace("libgphoto2", "ccapi")))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"name":"OTHER"}"""))
+        server.enqueue(jsonResponse("""{"operation":"create-directory","directorySelection":{"value":"100OTHER","ability":["100ABCDE","100OTHER"]}}"""))
+        val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+        assertEquals("OTHER", client.createDirectory("ABCDE", evidence))
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, evidence.snapshot().writeEvidence)
+        assertEquals(CaptureConfigurationReadEvidence.REFRESHED, evidence.snapshot().readbackEvidence)
+        assertEquals(listOf("100ABCDE", "100OTHER"), evidence.snapshot().directoryValues)
+        repeat(2) { server.takeRequest() }
+        val write = server.takeRequest(); val read = server.takeRequest()
+        assertEquals("POST", write.method); assertEquals("/v1/session/session-1/directories", write.path)
+        assertEquals("GET", read.method); assertEquals("/v1/session/session-1/capture-configuration/create-directory", read.path)
+        assertEquals("no-cache, no-store", read.getHeader("Cache-Control"))
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun successfulDirectoryAckSurvivesItsScopedReadFailureWithoutRetry() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON.replace("libgphoto2", "ccapi")))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"name":"OTHER"}"""))
+        server.enqueue(jsonResponse("{}", code = 404))
+        val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+        val failure = runCatching { client.createDirectory("ABCDE", evidence) }.exceptionOrNull()
+        assertTrue(failure is CaptureConfigurationException)
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, evidence.snapshot().writeEvidence)
+        assertEquals(CaptureConfigurationReadEvidence.UNAVAILABLE, evidence.snapshot().readbackEvidence)
+        repeat(2) { server.takeRequest() }
+        assertEquals("POST", server.takeRequest().method)
+        assertEquals("/v1/session/session-1/capture-configuration/create-directory", server.takeRequest().path)
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun cancellationAfterDirectoryAckDoesNotStartAutomaticReadback() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON.replace("libgphoto2", "ccapi")))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"name":"OTHER"}"""))
+        lateinit var evidence: CaptureConfigurationEvidence
+        evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"),
+            onChanged = { if (it.writeEvidence == CaptureConfigurationWriteEvidence.ACKNOWLEDGED) evidence.cancel() })
+        assertTrue(runCatching { client.createDirectory("ABCDE", evidence) }.isFailure)
+        assertEquals("OTHER", evidence.snapshot().acknowledgedValue)
+        assertEquals(CaptureConfigurationReadEvidence.UNAVAILABLE, evidence.snapshot().readbackEvidence)
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun captureConfigurationBridgeReceiptRetainsAckAndRecoveryUsesFreshBoundedRoute() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON.replace("libgphoto2", "ccapi")))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"error":{"code":"CAPTURE_CONFIG_READBACK_FAILED","message":"SYNTHETIC read failure",
+            "engine":"ccapi","feature":"DIRECTORY_CONTROL","captureConfigReceipt":{"version":1,
+            "operation":"create-directory","stage":"acknowledged","requestedValue":"ABCDE","acknowledgedValue":"OTHER"}}}""", code = 502))
+        val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+        assertTrue(runCatching { client.createDirectory("ABCDE", evidence) }.isFailure)
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, evidence.snapshot().writeEvidence)
+        assertEquals("OTHER", evidence.snapshot().acknowledgedValue)
+        assertEquals(CaptureConfigurationReadEvidence.UNAVAILABLE, evidence.snapshot().readbackEvidence)
+        server.enqueue(jsonResponse("""{"operation":"create-directory","directorySelection":{"value":"100OTHER","ability":["100OTHER"]}}"""))
+        assertEquals("100OTHER", client.readCaptureConfiguration(CaptureConfigurationOperation.CREATE_DIRECTORY).directorySelection)
+        repeat(3) { server.takeRequest() }
+        val recovery = server.takeRequest(); assertEquals("GET", recovery.method)
+        assertEquals("/v1/session/session-1/capture-configuration/create-directory", recovery.path)
+        assertEquals("no-cache, no-store", recovery.getHeader("Cache-Control"))
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun captureConfigurationWrongReceiptAndOversizedBodyRemainUnknown() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        for (body in listOf("""{"error":{"code":"CAPTURE_CONFIG_READBACK_FAILED","message":"SYNTHETIC",
+            "engine":"ccapi","feature":"DIRECTORY_CONTROL","captureConfigReceipt":{"version":true,
+            "operation":"create-directory","stage":"acknowledged","requestedValue":"ABCDE","acknowledgedValue":"ABCDE"}}}""",
+            "{\"padding\":\"" + "X".repeat(65_536) + "\"}")) {
+            server.enqueue(jsonResponse(body, code = 502))
+            val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+            assertTrue(runCatching { client.createDirectory("ABCDE", evidence) }.isFailure)
+            assertEquals(CaptureConfigurationWriteEvidence.UNKNOWN, evidence.snapshot().writeEvidence)
+        }
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun oldBridgeRecovery404HasNoCapabilitiesFallback() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
+        assertTrue(runCatching { client.readCaptureConfiguration(CaptureConfigurationOperation.SET_FILE_NAMING) }.isFailure)
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
     fun bridgeClientMapsCompleteSessionContractAndBearerAuthentication() = runTest {
         val dispatcher = BridgeDispatcher()
         server.dispatcher = dispatcher
@@ -951,6 +1047,8 @@ class DesktopBridgeClientTest {
                     createdDirectoryName = name
                     json("""{"name":"$name"}""")
                 }
+                path.endsWith("/capture-configuration/create-directory") && request.method == "GET" ->
+                    json("""{"operation":"create-directory","directorySelection":{"value":"100ABCDE","ability":["100CANON","100ABCDE"]}}""")
                 path.contains("/file-naming/") && request.method == "PUT" -> {
                     val field = path.substringAfterLast('/')
                     val value = JSONObject(request.body.clone().readUtf8()).getString("value")

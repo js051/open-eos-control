@@ -160,6 +160,21 @@ class CcapiClient(
             }
         }
     }.build()
+    // Capture configuration only: no redirect, authentication replay, HTTP cache or retry.
+    private val captureConfigurationHttpClient = this.httpClient.newBuilder()
+        .retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false)
+        .authenticator(okhttp3.Authenticator.NONE).proxyAuthenticator(okhttp3.Authenticator.NONE).cache(null)
+        .apply { if (this@CcapiClient.httpClient.callTimeoutMillis == 0 ||
+            this@CcapiClient.httpClient.callTimeoutMillis > 15_000) callTimeout(15, TimeUnit.SECONDS) }
+        .addNetworkInterceptor { chain ->
+            val response = chain.proceed(chain.request())
+            if (response.code in setOf(408, 421, 503)) {
+                val code = response.code
+                response.close()
+                throw IOException("Capture configuration request unconfirmed (HTTP $code).")
+            }
+            response
+        }.build()
     private val mutationHttpClient = this.httpClient.newBuilder()
         .retryOnConnectionFailure(false)
         .build()
@@ -1113,70 +1128,113 @@ class CcapiClient(
         return status
     }
 
-    suspend fun createDirectory(name: String): String {
+    suspend fun createDirectory(name: String, evidence: CaptureConfigurationEvidence = CaptureConfigurationEvidence(
+        CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, name),
+    )): String = captureConfigurationOperation(evidence) {
+        require(evidence.request == CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, name))
         require(DIRECTORY_CREATE_NAME_PATTERN.matches(name)) {
             "Directory name must be empty or exactly five uppercase letters, numbers, or underscores."
         }
-        val response = if (isRealCamera) {
-            val operations = directoryOperations()
-                ?: throw UnsupportedOperationException(
-                    "${CameraFeature.DIRECTORY_CONTROL.label} is not supported by this camera's advertised CCAPI ability.",
-                )
-            postJson(
-                operations.create.path,
-                JSONObject().put("directoryname", name),
-            )
-        } else {
-            postJson("/ccapi/directory", JSONObject().put("directoryname", name))
-        }
-        val created = response.opt("directoryname") as? String
-        require(created != null && DIRECTORY_CREATED_NAME_PATTERN.matches(created)) {
-            "Camera returned an invalid created directory name."
-        }
+        val path = if (isRealCamera) {
+            (directoryOperations() ?: throw UnsupportedOperationException(
+                "${CameraFeature.DIRECTORY_CONTROL.label} is not supported by this camera's advertised CCAPI ability.",
+            )).create.path
+        } else "/ccapi/directory"
+        val response = postJson(path, JSONObject().put("directoryname", name), captureEvidence = evidence,
+            captureResponse = { body ->
+                val created = body.opt("directoryname") as? String
+                require(created != null && DIRECTORY_CREATED_NAME_PATTERN.matches(created)) {
+                    "Camera returned an invalid created directory name."
+                }
+                evidence.acknowledge(created)
+            })
+        val created = response.getString("directoryname")
         observedFeatures.add(CameraFeature.DIRECTORY_CONTROL)
-        if (isRealCamera) loadShootingSettings()
-        return created
+        if (isRealCamera) {
+            // Preserve the existing read count, but never treat aggregate/cached settings
+            // as proof that the canonical directory-selection GET succeeded.
+            var observed = false
+            loadShootingSettings(directoryReadback = { readback ->
+                observed = true
+                if (readback == null) evidence.unavailable() else evidence.observe(readback)
+            })
+            if (!observed) evidence.unavailable()
+        }
+        created
     }
 
-    suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming {
+    suspend fun setFileNaming(field: CameraFileNamingField, value: String,
+        evidence: CaptureConfigurationEvidence = CaptureConfigurationEvidence(
+            CaptureConfigurationRequest(CaptureConfigurationOperation.SET_FILE_NAMING, value, field),
+        ),
+    ): CameraFileNaming = captureConfigurationOperation(evidence) {
+        require(evidence.request == CaptureConfigurationRequest(CaptureConfigurationOperation.SET_FILE_NAMING, value, field))
+        val frozenOperations = if (isRealCamera) fileNamingOperations() else null
         val current = loadFileNaming()
             ?: error("Camera did not advertise a valid complete Canon file-naming endpoint group.")
         require(current.accepts(field, value)) {
             "Value '$value' is not valid for Canon file-naming field ${field.wireName}."
         }
         val updated = if (isRealCamera) {
-            val operations = fileNamingOperations()
+            val operations = frozenOperations
                 ?: error("Camera did not advertise the complete Canon file-naming endpoint group.")
             val operation = operations.getValue(field).second
             val responseKey = FILE_NAMING_ENDPOINTS.getValue(field).responseKey
             val requestValue: Any = when (field) {
-                CameraFileNamingField.MOVIE_REEL_NUMBER,
-                CameraFileNamingField.MOVIE_CLIP_NUMBER,
-                -> value.toInt()
+                CameraFileNamingField.MOVIE_REEL_NUMBER, CameraFileNamingField.MOVIE_CLIP_NUMBER -> value.toInt()
                 else -> value
             }
-            val response = putJson(operation.path, JSONObject().put(responseKey, requestValue))
-            check(response.opt(responseKey) == requestValue) {
-                "Canon file-naming control returned an invalid update response."
-            }
+            putJson(operation.path, JSONObject().put(responseKey, requestValue), captureEvidence = evidence,
+                captureResponse = { response ->
+                    check(response.opt(responseKey) == requestValue) {
+                        "Canon file-naming control returned an invalid update response."
+                    }
+                    evidence.acknowledge(value)
+                })
             fileNamingLoaded = false
-            loadFileNaming(force = true)
+            kotlinx.coroutines.withTimeout(15_000L) { loadFileNaming(force = true, fresh = true) }
                 ?: error("Canon file-naming control returned an invalid state after update.")
         } else {
-            putJson(
-                "/ccapi/file-naming/${field.wireName}",
-                JSONObject().put("value", value),
-            ).toValidatedFileNaming()
-                ?: error("Simulator returned an invalid file-naming state.")
+            putJson("/ccapi/file-naming/${field.wireName}", JSONObject().put("value", value),
+                captureEvidence = evidence, captureResponse = { response ->
+                    val state = response.toValidatedFileNaming()
+                        ?: error("Simulator returned an invalid file-naming state.")
+                    check(state.value(field) == value) { "Simulator returned an invalid update response." }
+                    evidence.acknowledge(value)
+                    evidence.observe(CaptureConfigurationReadback(fileNaming = state))
+                }).toValidatedFileNaming() ?: error("Simulator returned an invalid file-naming state.")
         }
+        evidence.observe(CaptureConfigurationReadback(fileNaming = updated))
         check(updated.value(field) == value) {
             "Canon file-naming control did not return the requested value on refresh."
         }
         fileNamingState = updated
         fileNamingLoaded = true
         observedFeatures.add(CameraFeature.FILE_NAMING_CONTROL)
-        return updated
+        updated
     }
+
+    /** Explicit recovery is a fresh bounded read of only this configuration group. */
+    suspend fun readCaptureConfiguration(operation: CaptureConfigurationOperation): CaptureConfigurationReadback =
+        kotlinx.coroutines.withTimeout(15_000L) {
+            when (operation) {
+                CaptureConfigurationOperation.CREATE_DIRECTORY -> {
+                    val body = if (isRealCamera) {
+                        val read = directoryOperations()?.read ?: error("Directory selection is not advertised.")
+                        getJson(read.path, strictMediaJsonLimit = 65_536, fresh = true)
+                            .toValidatedDirectorySelectionSetting()
+                    } else getJson("/ccapi/capabilities", strictMediaJsonLimit = 65_536, fresh = true)
+                        .optJSONObject(DIRECTORY_SELECTION_SETTING_KEY)?.toValidatedDirectorySelectionSetting()
+                    val selected = body?.opt("value") as? String
+                    check(selected != null && DIRECTORY_SELECTION_PATTERN.matches(selected)) { "Directory readback unavailable." }
+                    CaptureConfigurationReadback(directorySelection = selected,
+                        directoryValues = requireNotNull(body).getJSONArray("ability").toStringList())
+                }
+                CaptureConfigurationOperation.SET_FILE_NAMING -> CaptureConfigurationReadback(
+                    fileNaming = loadFileNaming(force = true, fresh = true) ?: error("Complete file-naming readback unavailable."),
+                )
+            }
+        }
 
     suspend fun sleepCamera() {
         if (isRealCamera) {
@@ -3497,7 +3555,7 @@ class CcapiClient(
         )
     }
 
-    private suspend fun loadShootingSettings(): JSONObject? {
+    private suspend fun loadShootingSettings(directoryReadback: ((CaptureConfigurationReadback?) -> Unit)? = null): JSONObject? {
         settingPathsByKey.clear()
         settingValuesByKey.clear()
         structuredSettingPathsByKey.clear()
@@ -3798,12 +3856,15 @@ class CcapiClient(
 
         directoryOperations()?.let { operations ->
             val selection = try {
-                getJson(operations.read.path).toValidatedDirectorySelectionSetting()
+                getJson(operations.read.path, strictMediaJsonLimit = 65_536.takeIf { directoryReadback != null },
+                    fresh = directoryReadback != null).toValidatedDirectorySelectionSetting()
             } catch (exception: CancellationException) {
                 throw exception
             } catch (_: Exception) {
                 null
             }
+            directoryReadback?.invoke(selection?.let { CaptureConfigurationReadback(
+                directorySelection = it.getString("value"), directoryValues = it.getJSONArray("ability").toStringList()) })
             if (selection != null) {
                 val values = selection.getJSONArray("ability").toStringList().toSet()
                 settingPathsByKey[DIRECTORY_SELECTION_SETTING_KEY] = operations.write.path
@@ -3827,7 +3888,7 @@ class CcapiClient(
         shootingSettingResponseCache[path]?.let { cached -> JSONObject(cached.toString()) }
     }
 
-    private suspend fun loadFileNaming(force: Boolean = false): CameraFileNaming? {
+    private suspend fun loadFileNaming(force: Boolean = false, fresh: Boolean = false): CameraFileNaming? {
         if (fileNamingLoaded && !force) return fileNamingState
         observedFeatures.remove(CameraFeature.FILE_NAMING_CONTROL)
         val state = if (isRealCamera) {
@@ -3838,7 +3899,7 @@ class CcapiClient(
                 val responses = buildMap {
                     for ((field, operation) in operations) {
                         val response = try {
-                            getJson(operation.first.path)
+                            getJson(operation.first.path, strictMediaJsonLimit = 65_536.takeIf { fresh }, fresh = fresh)
                         } catch (exception: CancellationException) {
                             throw exception
                         } catch (_: Exception) {
@@ -3850,7 +3911,7 @@ class CcapiClient(
                 responses.toValidatedFileNaming()
             }
         } else {
-            getJson("/ccapi/capabilities").optJSONObject("fileNaming")?.toValidatedFileNaming()
+            getJson("/ccapi/capabilities", strictMediaJsonLimit = 65_536.takeIf { fresh }, fresh = fresh).optJSONObject("fileNaming")?.toValidatedFileNaming()
         }
         fileNamingState = state
         fileNamingLoaded = true
@@ -3972,8 +4033,8 @@ class CcapiClient(
         return settings.optJSONObject(key)
     }
 
-    private suspend fun getJson(path: String, strictMediaJsonLimit: Int? = null): JSONObject = requestJson(
-        Request.Builder().url("$baseUrl$path").get().build(), strictMediaJsonLimit = strictMediaJsonLimit,
+    private suspend fun getJson(path: String, strictMediaJsonLimit: Int? = null, fresh: Boolean = false): JSONObject = requestJson(
+        Request.Builder().url("$baseUrl$path").apply { if (fresh) header("Cache-Control", "no-cache, no-store") }.get().build(), strictMediaJsonLimit = strictMediaJsonLimit, captureRecovery = fresh,
     )
 
     private suspend fun getText(path: String): String = withContext(Dispatchers.IO) {
@@ -4003,11 +4064,12 @@ class CcapiClient(
         }
     }
 
-    private suspend fun postJson(path: String, payload: JSONObject, recordingEvidence: RecordingRequestEvidence? = null): JSONObject = requestJson(
+    private suspend fun postJson(path: String, payload: JSONObject, recordingEvidence: RecordingRequestEvidence? = null,
+        captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null): JSONObject = requestJson(
         Request.Builder()
             .url("$baseUrl$path")
             .post(payload.toString().toRequestBody(jsonMediaType))
-            .build(), recordingEvidence,
+            .build(), recordingEvidence, captureEvidence = captureEvidence, captureResponse = captureResponse,
     )
 
     private suspend fun patchJson(path: String, payload: JSONObject): JSONObject = requestJson(
@@ -4017,11 +4079,12 @@ class CcapiClient(
             .build(),
     )
 
-    private suspend fun putJson(path: String, payload: JSONObject): JSONObject = requestJson(
+    private suspend fun putJson(path: String, payload: JSONObject,
+        captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null): JSONObject = requestJson(
         Request.Builder()
             .url("$baseUrl$path")
             .put(payload.toString().toRequestBody(jsonMediaType))
-            .build(),
+            .build(), captureEvidence = captureEvidence, captureResponse = captureResponse,
     )
 
     private suspend fun deleteJson(path: String): JSONObject = requestJson(
@@ -4062,8 +4125,8 @@ class CcapiClient(
             .build(),
     )
 
-    private fun newCameraCall(request: Request): Call {
-        if (request.method == "GET" || request.method == "HEAD") return httpClient.newCall(request)
+    private fun newCameraCall(request: Request, captureConfiguration: Boolean = false): Call {
+        if (request.method == "GET" || request.method == "HEAD") return (if (captureConfiguration) captureConfigurationHttpClient else httpClient).newCall(request)
         val original = request.body
         val oneShot = original?.let { body ->
             object : RequestBody() {
@@ -4073,11 +4136,15 @@ class CcapiClient(
                 override fun writeTo(sink: BufferedSink) = body.writeTo(sink)
             }
         }
-        return mutationHttpClient.newCall(request.newBuilder().method(request.method, oneShot).build())
+        return (if (captureConfiguration) captureConfigurationHttpClient else mutationHttpClient)
+            .newCall(request.newBuilder().method(request.method, oneShot).build())
     }
 
-    private suspend fun requestJson(request: Request, recordingEvidence: RecordingRequestEvidence? = null, strictMediaJsonLimit: Int? = null): JSONObject = withContext(Dispatchers.IO) {
-        val call = newCameraCall(request)
+    private suspend fun requestJson(request: Request, recordingEvidence: RecordingRequestEvidence? = null, strictMediaJsonLimit: Int? = null,
+        captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null,
+        captureRecovery: Boolean = false): JSONObject = withContext(Dispatchers.IO) {
+        val call = newCameraCall(request, captureEvidence != null || captureRecovery)
+        val jsonLimit = strictMediaJsonLimit ?: 65_536.takeIf { captureEvidence != null }
         val readOnly = request.method == "GET" || request.method == "HEAD"
         val cancelCall = AtomicBoolean(true)
         val watcher = if (readOnly) launch(start = CoroutineStart.UNDISPATCHED) {
@@ -4088,12 +4155,18 @@ class CcapiClient(
                 currentCoroutineContext().ensureActive()
                 it.beginRequest()
             }
+            captureEvidence?.let {
+                currentCoroutineContext().ensureActive()
+                it.beforeDispatch("${request.method} ${request.url.encodedPath}")
+            }
             call.execute().use { response ->
                 recordingEvidence?.rejected = !response.isSuccessful
                 val body = response.body?.let {
-                    if (strictMediaJsonLimit == null) it.string()
-                    else it.byteStream().use { input -> readStrictMediaJsonText(input, it.contentLength(), strictMediaJsonLimit) }
+                    if (captureEvidence != null || captureRecovery) it.byteStream().use { input -> readCaptureConfigurationJsonText(input, it.contentLength()) }
+                    else if (jsonLimit == null) it.string()
+                    else it.byteStream().use { input -> readStrictMediaJsonText(input, it.contentLength(), jsonLimit) }
                 }.orEmpty()
+                if (captureEvidence != null) StrictMediaJson(body).validate()
                 if (!response.isSuccessful) {
                     throw CcapiHttpException(
                         statusCode = response.code,
@@ -4101,7 +4174,7 @@ class CcapiClient(
                     )
                 }
                 if (strictMediaJsonLimit != null) StrictMediaJson(body).validate()
-                JSONObject(body)
+                JSONObject(body).also { captureResponse?.invoke(it) }
             }
         } catch (exception: Exception) {
             if (readOnly) currentCoroutineContext().ensureActive()
@@ -5334,7 +5407,9 @@ private fun JSONObject.toValidatedCardSelectionSetting(): JSONObject? {
 private fun JSONObject.toValidatedDirectorySelectionSetting(): JSONObject? {
     val current = opt("value") as? String ?: return null
     val rawAbility = optJSONArray("ability") ?: return null
-    val values = runCatching { rawAbility.toStringList() }.getOrNull() ?: return null
+    val rawValues = (0 until rawAbility.length()).map { rawAbility.opt(it) }
+    if (rawValues.any { it !is String }) return null
+    val values = rawValues.filterIsInstance<String>()
     if (
         values.isEmpty() ||
         values.size > MAX_STRING_SETTING_OPTIONS ||
@@ -5407,14 +5482,7 @@ private fun JSONObject.toValidatedFileNaming(): CameraFileNaming? {
         movieClipRange = movieClipRange,
         movieUserDefined = movieUserDefined,
     )
-    return result.takeIf {
-        it.accepts(CameraFileNamingField.STILL_USER_SETTING_1, stillUserSetting1) &&
-            it.accepts(CameraFileNamingField.STILL_USER_SETTING_2, stillUserSetting2) &&
-            it.accepts(CameraFileNamingField.MOVIE_INDEX, movieIndex) &&
-            it.accepts(CameraFileNamingField.MOVIE_REEL_NUMBER, movieReelNumber.toString()) &&
-            it.accepts(CameraFileNamingField.MOVIE_CLIP_NUMBER, movieClipNumber.toString()) &&
-            it.accepts(CameraFileNamingField.MOVIE_USER_DEFINED, movieUserDefined)
-    }
+    return result.takeIf(::validCaptureConfigurationNaming)
 }
 
 private fun Map<CameraFileNamingField, JSONObject>.toValidatedFileNaming(): CameraFileNaming? {

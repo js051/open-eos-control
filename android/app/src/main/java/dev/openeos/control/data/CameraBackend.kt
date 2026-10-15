@@ -86,6 +86,12 @@ interface CameraControlBackend {
     suspend fun createDirectory(name: String): String = unsupported(CameraFeature.DIRECTORY_CONTROL)
     suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming =
         unsupported(CameraFeature.FILE_NAMING_CONTROL)
+    suspend fun createDirectory(name: String, evidence: CaptureConfigurationEvidence): String =
+        unsupported(CameraFeature.DIRECTORY_CONTROL)
+    suspend fun setFileNaming(field: CameraFileNamingField, value: String, evidence: CaptureConfigurationEvidence): CameraFileNaming =
+        unsupported(CameraFeature.FILE_NAMING_CONTROL)
+    suspend fun readCaptureConfiguration(operation: CaptureConfigurationOperation): CaptureConfigurationReadback =
+        unsupported(CameraFeature.DIRECTORY_CONTROL)
     suspend fun cleanSensor(autoPowerOff: Boolean) = unsupported<Unit>(CameraFeature.SENSOR_CLEANING)
     suspend fun sleepCamera() = unsupported<Unit>(CameraFeature.CAMERA_SLEEP)
     suspend fun startRecording(): CameraStatus
@@ -229,6 +235,13 @@ class CcapiCameraBackend(
 
     override suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming =
         client.setFileNaming(field, value)
+
+    override suspend fun createDirectory(name: String, evidence: CaptureConfigurationEvidence): String =
+        client.createDirectory(name, evidence)
+    override suspend fun setFileNaming(field: CameraFileNamingField, value: String, evidence: CaptureConfigurationEvidence): CameraFileNaming =
+        client.setFileNaming(field, value, evidence)
+    override suspend fun readCaptureConfiguration(operation: CaptureConfigurationOperation): CaptureConfigurationReadback =
+        client.readCaptureConfiguration(operation)
 
     override suspend fun cleanSensor(autoPowerOff: Boolean) = client.cleanSensor(autoPowerOff)
 
@@ -385,6 +398,13 @@ class DesktopBridgeCameraBackend(
 
     override suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming =
         client.setFileNaming(field, value)
+
+    override suspend fun createDirectory(name: String, evidence: CaptureConfigurationEvidence): String =
+        client.createDirectory(name, evidence)
+    override suspend fun setFileNaming(field: CameraFileNamingField, value: String, evidence: CaptureConfigurationEvidence): CameraFileNaming =
+        client.setFileNaming(field, value, evidence)
+    override suspend fun readCaptureConfiguration(operation: CaptureConfigurationOperation): CaptureConfigurationReadback =
+        client.readCaptureConfiguration(operation)
 
     override suspend fun cleanSensor(autoPowerOff: Boolean) = client.cleanSensor(autoPowerOff)
 
