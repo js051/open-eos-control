@@ -714,6 +714,7 @@
     <string name="refresh_recording_status">更新錄影狀態</string>
     <string name="recording_command_unconfirmed">錄影指令結果不明，相機可能仍在錄影。請使用「停止錄影」或在機身確認；更新狀態無法確認遺失的指令回應。</string>
     <string name="recording_disconnect_warning">上一台相機可能仍在錄影，尚未確認已停止，請在機身確認。</string>
+    <string name="live_view_stop_pending">預覽已在本機暫停。相機停止操作仍待完成，會等待進行中的相機控制結束。</string>
     <string name="live_view_stop_unconfirmed">尚未確認即時預覽已停止。請關閉遠端即時預覽，或在診斷頁按停止遠端即時預覽，只重試停止。舊版 Bridge 可能需要更新。</string>
     <string name="live_view_disconnect_warning">上一台相機的即時預覽在斷線前尚未確認停止，請在機身確認。</string>
     <string name="media_continuation_start">繼續未完成項目…</string>

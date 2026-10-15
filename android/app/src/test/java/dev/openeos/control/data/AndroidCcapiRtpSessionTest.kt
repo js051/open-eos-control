@@ -187,6 +187,31 @@ class AndroidCcapiRtpSessionTest {
         }
     }
 
+    @Test
+    fun aReadyStreamThatGoesSilentFailsOnceAndReplaysFailureToALateListener() = runBlocking {
+        val videoPort = availableUdpPort()
+        val session = session(videoPort, availableUdpPort(excluding = setOf(videoPort)),
+            videoFormatParameters = mapOf("sprop-parameter-sets" to "Z0I=,aAE="),
+            extractorFactory = { PassthroughLatmExtractor() },
+            audioPlayerFactory = { error("Audio stays muted") })
+        val events = Collections.synchronizedList(mutableListOf<NativeLiveViewEvent>())
+        DatagramSocket().use { sender ->
+            try {
+                session.start()
+                sender.send(videoPacket(videoPort, 1, 1_000, byteArrayOf(0x65, 0x01)))
+                session.awaitReady(2_000)
+                assertTrue(session.videoStatus.ready)
+                assertTrue(events.none { it is NativeLiveViewEvent.FrameRendered })
+                await(timeoutMillis = 6_000) { session.videoStatus.error?.contains("No complete H.264") == true }
+                assertFalse(session.videoStatus.ready)
+                assertEquals(null, session.renderedFrames.value)
+                session.setListener(events::add)
+                assertEquals(1, events.count { it is NativeLiveViewEvent.Failed })
+                assertTrue(events.none { it is NativeLiveViewEvent.FrameRendered })
+            } finally { session.close() }
+        }
+    }
+
     private fun session(
         videoPort: Int,
         audioPort: Int,

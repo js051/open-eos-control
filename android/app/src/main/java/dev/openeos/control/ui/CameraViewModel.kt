@@ -60,6 +60,9 @@ import dev.openeos.control.data.isVisualMedia
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraMediaTransferProgress
 import dev.openeos.control.data.CameraNetworkDiagnostics
+import dev.openeos.control.data.liveViewRecordingInterlocked
+import dev.openeos.control.data.LiveViewLifecycleEvidence
+import dev.openeos.control.data.CameraLiveViewOwner
 import dev.openeos.control.data.CameraRepository
 import dev.openeos.control.data.CameraStatus
 import dev.openeos.control.data.CameraSession
@@ -1011,6 +1014,7 @@ class CameraViewModel(
                 status = session.status,
                 shutterReleaseUnconfirmed = session.status.shutterReleaseUnconfirmed == true,
                 liveViewStopUnconfirmed = session.liveViewStartError != null && repository.isLiveViewStopRequired(),
+                liveViewStreamFailed = false,
                 capabilities = session.capabilities,
                 networkDiagnostics = session.networkDiagnostics,
                 liveViewFrameUrl = session.liveViewFrameUrl,
@@ -1206,13 +1210,24 @@ class CameraViewModel(
         queueLiveViewReconciliation()
     }
 
+    private var liveViewLifecycleStopOwner: CameraLiveViewOwner? = null
+
     private fun queueLiveViewReconciliation(restart: Boolean = false) {
         if (_uiState.value.maintenanceSuspended) return
         invalidateCameraFocusInfo()
         if (!appInForeground || !_uiState.value.liveViewAutoRefresh) {
             liveViewGeneration += 1
+            repository.cancelPendingLiveViewStart()
+            if (repository.isLiveViewRunning()) {
+                liveViewLifecycleStopOwner = repository.liveViewOwner()
+                repository.retireLiveView(checkNotNull(liveViewLifecycleStopOwner))
+            }
             stopLiveViewLoop()
+            detachNativeLiveViewListener()
             repository.setNativeLiveViewRenderingEnabled(false)
+            clearLiveViewPresentation()
+            _uiState.update { it.copy(liveViewStopPending = repository.isLiveViewStopRequired() &&
+                !repository.isLiveViewRunning() && !it.needsLiveViewStopRecovery) }
         } else if (restart && _uiState.value.nativeLiveViewSession == null && liveViewFrameReads.any { !it.stopped }) {
             // Release an in-flight frame before waiting for the transition mutex. Do not pause
             // native rendering or bypass a camera-command interlock before reconciliation.
@@ -1324,6 +1339,8 @@ class CameraViewModel(
         ) return@withLock
         // Do not change the camera's remote-view session in the middle of a bulb exposure.
         if (state.bulbExposureActive || state.shutterReleaseUnconfirmed) return@withLock
+        if (liveViewRecordingInterlocked(CameraOperation.RECORDING in state.pendingOperations,
+                state.pendingRecordingCommand != null, state.recordingStopAvailable)) return@withLock
         if (state.pendingOperations.any { it in LIVE_VIEW_INTERLOCK_OPERATIONS }) return@withLock
         val stopOnly = state.needsLiveViewStopRecovery ||
             (!state.supports(CameraFeature.LIVE_VIEW) && repository.isLiveViewStopRequired())
@@ -1342,19 +1359,25 @@ class CameraViewModel(
                     focusPoint = null, focusFeedback = null, liveViewDiagnostics = LiveViewDiagnostics(),
                     liveViewAudioStatus = NativeLiveViewAudioStatus.None)
             }
-            val effectiveRequest = repository.setLiveViewEnabled(enabled, restart)
+            val effectiveRequest = repository.setLiveViewEnabled(enabled, restart ||
+                liveViewLifecycleStopOwner?.let(repository::ownsLiveView) == true)
+            liveViewLifecycleStopOwner = null
             coroutineContext.ensureActive()
             if (generation != cameraSessionGeneration || _uiState.value.info !== state.info) return@withLock
             _uiState.update {
                 it.copy(
                     liveViewStopUnconfirmed = false,
+                    liveViewStopPending = false,
                     status = if (stopOnly) it.status?.copy(liveViewStopUnconfirmed = false) else it.status,
                     liveViewAutoRefresh = if (stopOnly) false else it.liveViewAutoRefresh,
-                    error = if (it.errorOperation == CameraOperation.LIVE_VIEW) null else it.error,
-                    errorOperation = it.errorOperation.takeUnless { operation -> operation == CameraOperation.LIVE_VIEW },
+                    liveViewStreamFailed = if (enabled) false else it.liveViewStreamFailed,
+                    error = if (it.errorOperation == CameraOperation.LIVE_VIEW && (enabled || !it.liveViewStreamFailed)) null else it.error,
+                    errorOperation = it.errorOperation.takeUnless { operation ->
+                        operation == CameraOperation.LIVE_VIEW && (enabled || !it.liveViewStreamFailed)
+                    },
                 )
             }
-            if (!enabled || !appInForeground || !_uiState.value.liveViewAutoRefresh || !_uiState.value.connected) return@withLock
+            if (!repository.isLiveViewRunning() || !enabled || !appInForeground || !_uiState.value.liveViewAutoRefresh || !_uiState.value.connected) return@withLock
             val capabilities = repository.refreshCapabilities()
             coroutineContext.ensureActive()
             if (generation != cameraSessionGeneration || _uiState.value.info !== state.info) return@withLock
@@ -1364,7 +1387,7 @@ class CameraViewModel(
                 it.copy(
                     capabilities = capabilities,
                     nativeLiveViewSession = nativeSession,
-                    liveViewSource = nativeSession?.source ?: it.liveViewSource,
+                    liveViewSource = repository.activeLiveViewSource() ?: nativeSession?.source ?: it.liveViewSource,
                     liveViewSize = effectiveRequest.size,
                     liveViewBitmap = null,
                     liveViewFrameUrl = null,
@@ -1384,7 +1407,7 @@ class CameraViewModel(
             throw exception
         } catch (exception: Exception) {
             if (generation == cameraSessionGeneration && _uiState.value.info === state.info) {
-                _uiState.update { it.copy(liveViewStopUnconfirmed = repository.isLiveViewStopRequired()) }
+                _uiState.update { it.copy(liveViewStopUnconfirmed = repository.isLiveViewStopRequired(), liveViewStopPending = false) }
                 throw exception
             }
         } finally {
@@ -1561,6 +1584,7 @@ class CameraViewModel(
         maintenanceAttempts.keys.retainAll(_uiState.value.maintenanceHistory.mapTo(hashSetOf()) { it.id })
         maintenanceEventRestore.keys.retainAll(maintenanceAttempts.keys)
         val retiredJobs = if (draft.request.needsStop) {
+            liveViewGeneration += 1
             val jobs = listOfNotNull(eventPollingJob, liveViewJob, focusInfoJob) + liveViewReconciliationJobs.toList() +
                 liveViewFrameReads.map { it.job }
             stopLiveViewLoop(); stopEventPollingLoop(); stopCameraFocusInfoLoop(); detachNativeLiveViewListener()
@@ -3981,11 +4005,12 @@ class CameraViewModel(
         ) return
 
         val generation = liveViewGeneration
+        val owner = repository.liveViewOwner()
 
         if (!repository.isRealCamera()) {
             val nextUrl = repository.nextLiveViewFrameUrl()
             _uiState.update {
-                if (it.connected && !it.shutterReleaseUnconfirmed && appInForeground && it.liveViewAutoRefresh && generation == liveViewGeneration) {
+                if (it.connected && !it.shutterReleaseUnconfirmed && appInForeground && it.liveViewAutoRefresh && generation == liveViewGeneration && repository.ownsLiveView(owner)) {
                     it.copy(
                         liveViewFrameUrl = nextUrl,
                         liveViewBitmap = null,
@@ -4014,7 +4039,11 @@ class CameraViewModel(
             )
 
             _uiState.update {
-                if (it.connected && !it.shutterReleaseUnconfirmed && appInForeground && it.liveViewAutoRefresh && generation == liveViewGeneration) {
+                if (it.connected && !it.shutterReleaseUnconfirmed && it.liveViewAutoRefresh &&
+                    LiveViewLifecycleEvidence(sameOwner = repository.ownsLiveView(owner),
+                        sameAttempt = generation == liveViewGeneration, foreground = appInForeground,
+                        startAdmitted = repository.isLiveViewRunning(), frameEvidence = "decoded-frame")
+                        .evaluate().canPublishDecoded) {
                     it.copy(
                         liveViewFrameUrl = frame.sourceUrl,
                         liveViewBitmap = bitmap,
@@ -4041,16 +4070,36 @@ class CameraViewModel(
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
-            exception.printStackTrace()
-            if (reportErrors && generation == liveViewGeneration) {
-                _uiState.update {
-                    it.copy(
-                        error = formatException(exception),
-                        errorOperation = CameraOperation.LIVE_VIEW,
-                    )
-                }
-            }
+            // A terminal reader is never polled again, including errors in the quiet loop.
+            retireFailedLiveView(generation, owner, formatException(exception))
         }
+    }
+
+    private fun clearLiveViewPresentation() {
+        resetFrameMetrics()
+        invalidateCameraFocusInfo()
+        _uiState.update { it.copy(
+            liveViewBitmap = null, liveViewFrameUrl = null, nativeLiveViewSession = null,
+            focusPoint = null, focusFeedback = null, liveViewDiagnostics = LiveViewDiagnostics(),
+            liveViewAudioStatus = NativeLiveViewAudioStatus.None,
+        ) }
+    }
+
+    private fun retireFailedLiveView(generation: Long, owner: CameraLiveViewOwner, message: String) {
+        if (generation != liveViewGeneration || !repository.ownsLiveView(owner)) return
+        if (!repository.retireLiveView(owner)) return
+        liveViewGeneration += 1
+        detachNativeLiveViewListener()
+        stopLiveViewLoop()
+        clearLiveViewPresentation()
+        _uiState.update { it.copy(
+            liveViewAutoRefresh = false, liveViewStreamFailed = true, liveViewStopPending = false,
+            liveViewStopUnconfirmed = repository.isLiveViewStopRequired(),
+            error = message, errorOperation = CameraOperation.LIVE_VIEW,
+        ) }
+        // Use the existing physical-control interlocks. If a bulb/shutter operation owns the
+        // camera, Stop responsibility stays visible until that operation releases or the user retries.
+        queueLiveViewReconciliation()
     }
 
     private fun formatException(exception: Exception): String = buildString {
@@ -4328,6 +4377,8 @@ class CameraViewModel(
         shutterAutofocus = true,
         shutterReleaseUnconfirmed = false,
         liveViewStopUnconfirmed = false,
+        liveViewStopPending = false,
+        liveViewStreamFailed = false,
         pendingOperations = pendingOperations - CameraOperation.FOCUS,
         baseUrl = baseUrl,
         previewMode = false,
@@ -4746,11 +4797,13 @@ class CameraViewModel(
     private fun configureNativeLiveViewSession(session: NativeLiveViewSession?, fps: Int) {
         session ?: return
         val generation = liveViewGeneration
+        val owner = repository.liveViewOwner()
         session.setTargetFps(fps)
         session.setRenderingEnabled(appInForeground && _uiState.value.liveViewAutoRefresh)
         session.setListener { event ->
             viewModelScope.launch {
-                if (generation != liveViewGeneration || !appInForeground || !_uiState.value.liveViewAutoRefresh) return@launch
+                if (generation != liveViewGeneration || !repository.ownsLiveView(owner) ||
+                    _uiState.value.maintenanceSuspended || !appInForeground || !_uiState.value.liveViewAutoRefresh) return@launch
                 if (_uiState.value.nativeLiveViewSession !== session && repository.nativeLiveViewSession() !== session) {
                     return@launch
                 }
@@ -4778,9 +4831,7 @@ class CameraViewModel(
                         _uiState.update { it.copy(liveViewAspectRatio = event.width.toFloat() / event.height) }
                     }
 
-                    is NativeLiveViewEvent.Failed -> _uiState.update {
-                        it.copy(error = event.message, errorOperation = CameraOperation.LIVE_VIEW)
-                    }
+                    is NativeLiveViewEvent.Failed -> retireFailedLiveView(generation, owner, event.message)
                 }
             }
         }

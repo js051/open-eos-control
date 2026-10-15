@@ -151,6 +151,19 @@ class CameraRepositoryTest {
         assertEquals(LiveViewSize.MEDIUM, effectiveRequest.size)
     }
 
+    @Test fun oldSourceAttemptCannotRetireReplacementEvenOnTheSameBackendAndSource() = runTest {
+        server.enqueue(jsonResponse(INFO_JSON)); server.enqueue(jsonResponse(STATUS_JSON)); server.enqueue(jsonResponse(CAPABILITIES_JSON))
+        repository.connect(server.url("/").toString())
+        val owner = repository.liveViewOwner()
+        server.enqueue(jsonResponse(CAPABILITIES_JSON))
+        repository.restartLiveView()
+        assertTrue(!repository.ownsLiveView(owner))
+        assertTrue(!repository.retireLiveView(owner))
+        assertTrue(repository.isLiveViewRunning())
+        assertTrue(repository.retireLiveView(repository.liveViewOwner()))
+        assertTrue(!repository.isLiveViewRunning())
+    }
+
     @Test
     fun captureStillRunsThroughRepositoryBackendBoundary() = runTest {
         server.enqueue(jsonResponse(INFO_JSON))

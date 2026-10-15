@@ -164,15 +164,19 @@ internal class CcapiMultipartLiveViewSession(
                 if (remaining <= 0) error("Timed out waiting for the next Canon multipart Live View frame.")
                 TimeUnit.NANOSECONDS.timedWait(monitor, remaining)
             }
+            checkUsable()
             if (producedGeneration > consumedGeneration) {
                 val frame = checkNotNull(latestFrame)
                 consumedGeneration = producedGeneration
                 return LiveViewFrame(frame.copyOf(), "image/jpeg", sourceUrl)
             }
-            terminalError?.let { throw IllegalStateException("Canon multipart Live View stream failed.", it) }
-            check(!closed) { "Canon multipart Live View stream is closed." }
             error("Canon multipart Live View did not produce a frame.")
         }
+    }
+
+    fun checkUsable() = synchronized(monitor) {
+        terminalError?.let { throw IllegalStateException("Canon multipart Live View stream failed.", it) }
+        check(!closed) { "Canon multipart Live View stream is closed." }
     }
 
     private fun drain(boundary: String) {

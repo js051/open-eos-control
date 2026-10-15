@@ -93,6 +93,7 @@ data class CameraUiState(
     val shutterReleaseUnconfirmed: Boolean = false,
     val shutterDisconnectWarning: Boolean = false,
     val liveViewStopUnconfirmed: Boolean = false,
+    val liveViewStopPending: Boolean = false,
     val liveViewDisconnectWarning: Boolean = false,
     val connectionTarget: ConnectionTarget = ConnectionTarget.CCAPI,
     val baseUrl: String = CameraRepository.DEFAULT_CAMERA_BASE_URL,
@@ -171,6 +172,7 @@ data class CameraUiState(
     val usbDiagnostics: UsbPtpDiagnostics = UsbPtpDiagnostics.Empty,
     val networkDiagnostics: CameraNetworkDiagnostics = CameraNetworkDiagnostics.Empty,
     val liveViewAutoRefresh: Boolean = true,
+    val liveViewStreamFailed: Boolean = false,
     val liveViewFrameRateFps: Int = DEFAULT_LIVE_VIEW_FPS,
     val liveViewSize: LiveViewSize = LiveViewSize.MEDIUM,
     val liveViewSource: LiveViewSource = LiveViewSource.AUTO,
@@ -219,7 +221,9 @@ data class CameraUiState(
         get() = liveViewStopUnconfirmed || status?.liveViewStopUnconfirmed == true
 
     fun liveViewRecoveryActionEnabled(): Boolean =
-        (supports(CameraFeature.LIVE_VIEW) || needsLiveViewStopRecovery) && !isBusy(CameraOperation.LIVE_VIEW) &&
+        (supports(CameraFeature.LIVE_VIEW) || needsLiveViewStopRecovery) && !isBusy(CameraOperation.LIVE_VIEW) && !liveViewStopPending &&
+            !dev.openeos.control.data.liveViewRecordingInterlocked(CameraOperation.RECORDING in pendingOperations,
+                pendingRecordingCommand != null, recordingStopAvailable) &&
             (liveViewAutoRefresh || needsLiveViewStopRecovery || errorOperation == CameraOperation.LIVE_VIEW)
 
     val recordingStopAvailable: Boolean

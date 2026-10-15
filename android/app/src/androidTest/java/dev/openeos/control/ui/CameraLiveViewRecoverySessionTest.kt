@@ -38,6 +38,7 @@ class CameraLiveViewRecoverySessionTest {
     private lateinit var viewModel: CameraViewModel
     private val failStart = AtomicBoolean(true)
     private val failStop = AtomicBoolean(true)
+    private val failFrames = AtomicBoolean(false)
     private val writes = CopyOnWriteArrayList<String>()
     private val blockNextStart = AtomicBoolean(false)
     private val startEntered = CountDownLatch(1)
@@ -69,7 +70,8 @@ class CameraLiveViewRecoverySessionTest {
                     path.endsWith("/devicestatus/battery") -> json("""{"level":"90"}""")
                     path.endsWith("/shooting/settings") -> json("{}")
                     path.endsWith("/shooting/liveview/flip") ->
-                        MockResponse().setHeader("Content-Type", "image/jpeg").setBody(Buffer().write(jpeg))
+                        MockResponse().setHeader("Content-Type", "image/jpeg")
+                            .setBody(Buffer().write(if (failFrames.get()) byteArrayOf(1, 2, 3) else jpeg))
                     else -> MockResponse().setResponseCode(404)
                 }
             }
@@ -176,6 +178,77 @@ class CameraLiveViewRecoverySessionTest {
         }
         // Only the initial startup, the successful recovery, and the already in-flight A restart ran.
         assertEquals(3, writes.count { it == "start" })
+    }
+
+    @Test fun terminalFrameFailureClearsPresentationStopsOnceAndRequiresDeliberateStart() {
+        recoverHealthyPreview()
+        val starts = writes.count { it == "start" }
+        val stops = writes.count { it == "stop" }
+        failFrames.set(true)
+        compose.waitUntil(TIMEOUT) { viewModel.uiState.value.liveViewStreamFailed && !viewModel.uiState.value.busy && !repository.isLiveViewStopRequired() }
+        compose.runOnIdle {
+            assertNull(viewModel.uiState.value.liveViewBitmap)
+            assertNull(viewModel.uiState.value.liveViewFrameUrl)
+            assertNull(viewModel.uiState.value.liveViewDiagnostics.lastFrameAtMillis)
+            assertFalse(repository.isLiveViewRunning())
+            assertFalse(viewModel.uiState.value.liveViewAutoRefresh)
+            assertEquals(CameraOperation.LIVE_VIEW, viewModel.uiState.value.errorOperation)
+        }
+        assertEquals(starts, writes.count { it == "start" })
+        assertEquals(stops + 1, writes.count { it == "stop" })
+        failFrames.set(false)
+        compose.runOnIdle { viewModel.setLiveViewAutoRefresh(true) }
+        compose.waitUntil(TIMEOUT) { viewModel.uiState.value.liveViewBitmap != null && !viewModel.uiState.value.busy }
+        assertEquals(starts + 1, writes.count { it == "start" })
+        assertFalse(viewModel.uiState.value.liveViewStreamFailed)
+    }
+
+    @Test fun failedStreamStopRemainsStopOnlyAcrossForegroundAndCannotResurrectOldFrame() {
+        recoverHealthyPreview()
+        val starts = writes.count { it == "start" }
+        failStop.set(true); failFrames.set(true)
+        compose.waitUntil(TIMEOUT) { viewModel.uiState.value.liveViewStreamFailed && !viewModel.uiState.value.busy }
+        assertFalse(repository.isLiveViewRunning()); assertTrue(repository.isLiveViewStopRequired())
+        compose.runOnIdle { viewModel.setAppForeground(false) }
+        compose.waitUntil(TIMEOUT) { !viewModel.uiState.value.busy }
+        compose.runOnIdle { viewModel.setAppForeground(true) }
+        compose.waitUntil(TIMEOUT) { !viewModel.uiState.value.busy }
+        assertEquals(starts, writes.count { it == "start" })
+        assertNull(viewModel.uiState.value.liveViewBitmap)
+        failStop.set(false)
+        compose.runOnIdle { viewModel.restartLiveView() }
+        compose.waitUntil(TIMEOUT) { !repository.isLiveViewStopRequired() && !viewModel.uiState.value.busy }
+        assertEquals(starts, writes.count { it == "start" })
+        assertFalse(viewModel.uiState.value.liveViewAutoRefresh)
+    }
+
+    @Test fun backgroundClearsPixelsImmediatelyAndForegroundCreatesAFreshSourceAttempt() {
+        recoverHealthyPreview()
+        val starts = writes.count { it == "start" }
+        val oldOwner = repository.liveViewOwner()
+        compose.runOnIdle {
+            viewModel.setAppForeground(false)
+            assertNull(viewModel.uiState.value.liveViewBitmap)
+            assertNull(viewModel.uiState.value.liveViewDiagnostics.lastFrameAtMillis)
+            assertTrue(viewModel.uiState.value.liveViewStopPending)
+            assertFalse(viewModel.uiState.value.liveViewStopUnconfirmed)
+        }
+        compose.waitUntil(TIMEOUT) { !repository.isLiveViewRunning() && !repository.isLiveViewStopRequired() && !viewModel.uiState.value.busy }
+        assertFalse(viewModel.uiState.value.liveViewStopPending)
+        compose.runOnIdle { viewModel.setAppForeground(true) }
+        compose.waitUntil(TIMEOUT) { viewModel.uiState.value.liveViewBitmap != null && !viewModel.uiState.value.busy }
+        assertEquals(starts + 1, writes.count { it == "start" })
+        assertFalse(repository.retireLiveView(oldOwner))
+        assertTrue(repository.isLiveViewRunning())
+    }
+
+    private fun recoverHealthyPreview() {
+        failStop.set(false)
+        compose.runOnIdle { viewModel.setLiveViewAutoRefresh(false) }
+        compose.waitUntil(TIMEOUT) { !repository.isLiveViewStopRequired() && !viewModel.uiState.value.busy }
+        failStart.set(false)
+        compose.runOnIdle { viewModel.setLiveViewAutoRefresh(true) }
+        compose.waitUntil(TIMEOUT) { viewModel.uiState.value.liveViewBitmap != null && !viewModel.uiState.value.busy }
     }
 
     private fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
