@@ -36,6 +36,8 @@ targets:
           - Fixtures
       - path: Tests/Fixtures
         buildPhase: resources
+      - path: ../../contracts/media-delivery/v1/outcome-vectors.json
+        buildPhase: resources
       - path: ../OpenEOSCore/Tests/OpenEOSCoreTests/URLSessionPendingBulbStopTests.swift
     dependencies:
       - target: OpenEOSControl

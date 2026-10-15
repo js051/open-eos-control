@@ -512,7 +512,7 @@ struct MediaView: View {
                 }
                 if camera.downloadedFile(for: item) != nil {
                     Button {
-                        filesExporter.begin(camera.makeMediaDownloadExportPayload(for: item))
+                        camera.beginMediaFilesExport(filesExporter, payload: camera.makeMediaDownloadExportPayload(for: item))
                     } label: {
                         Label(language.string("media_files_export_one"), systemImage: "folder")
                             .font(.caption)
@@ -1302,7 +1302,7 @@ private struct MediaPreviewView: View {
             if let item = camera.mediaPreviewItem, camera.downloadedFile(for: item) != nil {
                 VStack(alignment: .leading, spacing: 8) {
                     Button {
-                        filesExporter.begin(camera.makeMediaDownloadExportPayload(for: item))
+                        camera.beginMediaFilesExport(filesExporter, payload: camera.makeMediaDownloadExportPayload(for: item))
                     } label: {
                         Label(language.string("media_files_export_one"), systemImage: "folder")
                             .frame(minHeight: 44)

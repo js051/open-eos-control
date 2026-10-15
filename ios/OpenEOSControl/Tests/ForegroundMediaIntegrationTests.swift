@@ -362,7 +362,7 @@ final class ForegroundMediaIntegrationTests: XCTestCase {
             let requests = await fixture.peer.requests()
 
             let exporter = MediaFilesExportController()
-            XCTAssertTrue(exporter.begin(fixture.state.makeForegroundMediaExportPayload()))
+            XCTAssertTrue(exporter.beginUnrecordedForTesting(fixture.state.makeForegroundMediaExportPayload()))
             var coordinator: MediaFilesExportCoordinator? = MediaFilesExportCoordinator(
                 attempt: try XCTUnwrap(exporter.presentation), owner: exporter)
             let source = try XCTUnwrap(coordinator?.attempt.payload.fileURLs.first)

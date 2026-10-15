@@ -1,5 +1,8 @@
+import Combine
 import Darwin
 import Foundation
+import OpenEOSCore
+import UIKit
 import XCTest
 
 @testable import OpenEOSControl
@@ -1569,6 +1572,383 @@ final class MediaDeliveryStoreTests: XCTestCase {
         await expect(.invalidReceipt) { _ = try await store.acquireShare(receiptIDs: []) }
         try await store.clear()
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.file(ready, "READY.JPG").path))
+    }
+
+    func testManualFilesHistoryKeepsOnlyBatchObservationAcrossColdReopen() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let initial = await store.snapshot()
+        let epoch = try XCTUnwrap(initial.epoch)
+        let ticket = try await store.beginFilesExportHistory(attemptID: UUID(),
+            filenames: ["SAME.JPG", "SAME.JPG"], expectedEpoch: epoch)
+        let admitted = await store.snapshot()
+        XCTAssertEqual(admitted.filesExportAttempts.first?.status, .started)
+        XCTAssertEqual(try fixture.manifestObject()["version"] as? Int, 5)
+        try await store.finishFilesExportHistory(ticket, event: .reported(count: 2))
+        let cold = await fixture.store().snapshot()
+        XCTAssertNil(cold.warning)
+        XCTAssertEqual(cold.filesExportAttempts.first?.status, .providerReported)
+        XCTAssertEqual(cold.filesExportAttempts.first?.filenames, ["SAME.JPG", "SAME.JPG"])
+        XCTAssertEqual(cold.filesExportAttempts.first?.reportedCount, 2)
+        XCTAssertTrue(cold.records.isEmpty, "Picker observations are not prepared or saved-file receipts")
+        XCTAssertEqual(cold.retainedBytes, 0)
+        let data = try String(contentsOf: fixture.manifestURL, encoding: .utf8)
+        for forbidden in ["file://", "destination", "cameraID", "bookmark", "actualBytes"] {
+            XCTAssertFalse(data.contains(forbidden), forbidden)
+        }
+    }
+
+    func testManualFilesLabelsDropQueryAndFragmentLikeDataWithoutChangingSourceFiles() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let initial = await store.snapshot()
+        _ = try await store.beginFilesExportHistory(attemptID: UUID(),
+            filenames: ["ORIGINAL.JPG?synthetic-query", "OTHER.JPG#synthetic-fragment"],
+            expectedEpoch: XCTUnwrap(initial.epoch))
+        let snapshot = await store.snapshot()
+        XCTAssertEqual(snapshot.filesExportAttempts.first?.filenames, ["ORIGINAL.JPG", "OTHER.JPG"])
+        let persisted = try String(contentsOf: fixture.manifestURL, encoding: .utf8)
+        XCTAssertFalse(persisted.contains("synthetic-query"))
+        XCTAssertFalse(persisted.contains("synthetic-fragment"))
+    }
+
+    func testManualFilesColdPendingIsUnknownWithoutRewritingOrResuming() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let first = await store.snapshot()
+        let ticket = try await store.beginFilesExportHistory(attemptID: UUID(), filenames: ["ORIGINAL.JPG"],
+            expectedEpoch: XCTUnwrap(first.epoch))
+        let before = try Data(contentsOf: fixture.manifestURL)
+        let reopened = fixture.store()
+        let cold = await reopened.snapshot()
+        XCTAssertEqual(cold.filesExportAttempts.first?.status, .unconfirmed)
+        XCTAssertNil(cold.filesExportAttempts.first?.completedAt)
+        XCTAssertNil(cold.filesExportAttempts.first?.reportedCount)
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), before)
+        await expect(.invalidTicket) { try await reopened.finishFilesExportHistory(ticket, event: .reported(count: 1)) }
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), before)
+    }
+
+    func testManualFilesClearRetiresPendingAdmissionAndLateCompletion() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let before = await store.snapshot()
+        let epoch = try XCTUnwrap(before.epoch)
+        let ticket = try await store.beginFilesExportHistory(attemptID: UUID(), filenames: ["ORIGINAL.JPG"], expectedEpoch: epoch)
+        try await store.clear()
+        let cleared = try Data(contentsOf: fixture.manifestURL)
+        await expect(.invalidTicket) { try await store.finishFilesExportHistory(ticket, event: .reported(count: 1)) }
+        await expect(.invalidTicket) {
+            _ = try await store.beginFilesExportHistory(attemptID: UUID(), filenames: ["LATE.JPG"], expectedEpoch: epoch)
+        }
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), cleared)
+        let snapshot = await store.snapshot()
+        XCTAssertTrue(snapshot.filesExportAttempts.isEmpty)
+    }
+
+    func testManualFilesCapacityBoundsTotalSourceLabelsWithoutEviction() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store(records: 3)
+        let initial = await store.snapshot()
+        let epoch = try XCTUnwrap(initial.epoch)
+        let first = try await store.beginFilesExportHistory(attemptID: UUID(), filenames: ["A.JPG", "B.JPG"], expectedEpoch: epoch)
+        try await store.finishFilesExportHistory(first, event: .cancelled)
+        _ = try await store.beginFilesExportHistory(attemptID: UUID(), filenames: ["C.JPG"], expectedEpoch: epoch)
+        let before = try Data(contentsOf: fixture.manifestURL)
+        await expect(.recordLimit) {
+            _ = try await store.beginFilesExportHistory(attemptID: UUID(), filenames: ["D.JPG"], expectedEpoch: epoch)
+        }
+        XCTAssertEqual(try Data(contentsOf: fixture.manifestURL), before)
+        let snapshot = await store.snapshot()
+        XCTAssertEqual(snapshot.filesExportAttempts.flatMap(\.filenames), ["A.JPG", "B.JPG", "C.JPG"])
+    }
+
+    func testManualFilesTerminalEventsAndMalformedCountsRemainHonest() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let initial = await store.snapshot()
+        let epoch = try XCTUnwrap(initial.epoch)
+        let events: [(MediaFilesExportEvent, MediaFilesExportHistoryStatus, Int?)] = [
+            (.reported(count: 0), .unconfirmed, 0), (.reported(count: 2), .unconfirmed, 2),
+            (.reported(count: -1), .unconfirmed, nil), (.reported(count: Int.max), .unconfirmed, nil),
+            (.cancelled, .cancelled, nil), (.sourceUnavailable, .sourceUnavailable, nil),
+            (.unconfirmed, .unconfirmed, nil), (.reported(count: 1), .providerReported, 1)
+        ]
+        for (event, status, count) in events {
+            let ticket = try await store.beginFilesExportHistory(attemptID: UUID(), filenames: ["SYNTHETIC.JPG"], expectedEpoch: epoch)
+            try await store.finishFilesExportHistory(ticket, event: event)
+            let snapshot = await store.snapshot()
+            XCTAssertEqual(snapshot.filesExportAttempts.last?.status, status)
+            XCTAssertEqual(snapshot.filesExportAttempts.last?.reportedCount, count)
+            await expect(.invalidTicket) { try await store.finishFilesExportHistory(ticket, event: .reported(count: 1)) }
+        }
+        let cold = await fixture.store().snapshot()
+        XCTAssertNil(cold.warning)
+        XCTAssertEqual(cold.filesExportAttempts.map(\.status), events.map { $0.1 })
+    }
+
+    func testManualFilesTerminalWriteFailureDoesNotBecomeColdSuccess() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let faults = DeliveryFaults()
+        let store = fixture.store(faults: faults)
+        let initial = await store.snapshot()
+        let ticket = try await store.beginFilesExportHistory(attemptID: UUID(), filenames: ["SYNTHETIC.JPG"],
+            expectedEpoch: XCTUnwrap(initial.epoch))
+        faults.arm(.beforeManifestReplace)
+        await expect(.storageUnavailable) { try await store.finishFilesExportHistory(ticket, event: .reported(count: 1)) }
+        let cold = await fixture.store().snapshot()
+        XCTAssertEqual(cold.filesExportAttempts.first?.status, .unconfirmed)
+        XCTAssertNil(cold.filesExportAttempts.first?.reportedCount)
+    }
+
+    func testManualFilesSchemaRejectsDestinationFieldsAndUnsafeSourceNames() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let initial = await store.snapshot()
+        let epoch = try XCTUnwrap(initial.epoch)
+        for name in ["../OTHER.JPG", "", "a/b.JPG", "bad\u{0000}.JPG"] {
+            await expect(.invalidReceipt) {
+                _ = try await store.beginFilesExportHistory(attemptID: UUID(), filenames: [name], expectedEpoch: epoch)
+            }
+        }
+        _ = try await store.beginFilesExportHistory(attemptID: UUID(), filenames: ["SYNTHETIC.JPG"], expectedEpoch: epoch)
+        var object = try fixture.manifestObject()
+        var attempts = try XCTUnwrap(object["filesExportAttempts"] as? [[String: Any]])
+        attempts[0]["destination"] = "synthetic-provider"
+        object["filesExportAttempts"] = attempts
+        try JSONSerialization.data(withJSONObject: object).write(to: fixture.manifestURL)
+        let cold = await fixture.store().snapshot()
+        XCTAssertEqual(cold.warning, .invalidManifest)
+        XCTAssertTrue(cold.filesExportAttempts.isEmpty)
+    }
+
+    func testRecordedPickerWaitsForAdmissionAndKeepsObservedResultAfterTeardown() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let controller = MediaFilesExportController()
+        let payload = MediaBatchExportPayload(ownedFile: try original(Data([1, 2, 3])))
+        XCTAssertTrue(controller.beginRecorded(payload, store: store))
+        XCTAssertTrue(controller.isActive)
+        XCTAssertNil(controller.presentation, "Admission must finish before handing files to UIKit")
+        XCTAssertFalse(controller.beginRecorded(payload, store: store))
+        await controller.settleHistory()
+        let attempt = try XCTUnwrap(controller.presentation)
+        let admission = await store.snapshot()
+        XCTAssertEqual(admission.filesExportAttempts.first?.status, .started)
+        let coordinator = MediaFilesExportCoordinator(attempt: attempt, owner: controller)
+        XCTAssertNil(coordinator.presentationFailure())
+        var notifications = 0
+        let subscription = controller.objectWillChange.sink { notifications += 1 }
+        defer { subscription.cancel() }
+        coordinator.finish(.reported(count: 1))
+        coordinator.finish(.cancelled)
+        coordinator.dismantle()
+        let afterTeardown = notifications
+        XCTAssertTrue(controller.isActive, "Still owns the pending terminal history write")
+        await controller.settleHistory()
+        XCTAssertFalse(controller.isActive)
+        XCTAssertGreaterThan(notifications, afterTeardown, "Late history completion must directly refresh export controls")
+        XCTAssertFalse(controller.historyWarning)
+        XCTAssertEqual(controller.result?.status, .providerReported)
+        let reopened = await fixture.store().snapshot()
+        XCTAssertEqual(reopened.filesExportAttempts.first?.status, .providerReported)
+        XCTAssertNil(MediaFilesExportController().presentation, "History does not replay a picker")
+    }
+
+    func testRecordedPickerNeverPresentsWhenAdmissionCannotBeRecorded() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let faults = DeliveryFaults()
+        let store = fixture.store(faults: faults)
+        _ = await store.snapshot()
+        faults.arm(.beforeManifestReplace)
+        let controller = MediaFilesExportController()
+        let payload = MediaBatchExportPayload(ownedFile: try original(Data([1, 2, 3])))
+        XCTAssertTrue(controller.beginRecorded(payload, store: store))
+        await controller.settleHistory()
+        XCTAssertNil(controller.presentation)
+        XCTAssertFalse(controller.isActive)
+        XCTAssertEqual(controller.result?.status, .historyUnavailable)
+        XCTAssertTrue(controller.historyWarning)
+        let cold = await fixture.store().snapshot()
+        XCTAssertTrue(cold.filesExportAttempts.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(payload.fileURLs.first)), Data([1, 2, 3]))
+        let noStore = MediaFilesExportController()
+        XCTAssertFalse(noStore.beginRecorded(payload, store: nil))
+        XCTAssertNil(noStore.presentation)
+        XCTAssertEqual(noStore.result?.status, .historyUnavailable)
+    }
+
+    func testRecordedPickerRetirementBeforeAdmissionCannotPresentLater() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let controller = MediaFilesExportController()
+        let payload = MediaBatchExportPayload(ownedFile: try original(Data([1, 2, 3])))
+        XCTAssertTrue(controller.beginRecorded(payload, store: store))
+        controller.retirePendingAdmission()
+        await controller.settleHistory()
+        XCTAssertFalse(controller.isActive)
+        XCTAssertNil(controller.presentation)
+        let snapshot = await store.snapshot()
+        XCTAssertTrue(snapshot.filesExportAttempts.isEmpty)
+    }
+
+    func testRecordedPickerClearDoesNotResurrectHistoryOrChangeProviderObservation() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let controller = MediaFilesExportController()
+        let payload = MediaBatchExportPayload(ownedFile: try original(Data([1, 2, 3])))
+        XCTAssertTrue(controller.beginRecorded(payload, store: store))
+        await controller.settleHistory()
+        let coordinator = MediaFilesExportCoordinator(attempt: try XCTUnwrap(controller.presentation), owner: controller)
+        try await store.clear()
+        coordinator.finish(.reported(count: 1))
+        coordinator.dismantle()
+        await controller.settleHistory()
+        XCTAssertEqual(controller.result?.status, .providerReported)
+        XCTAssertTrue(controller.historyWarning)
+        XCTAssertFalse(controller.isActive)
+        let snapshot = await store.snapshot()
+        XCTAssertTrue(snapshot.filesExportAttempts.isEmpty)
+    }
+
+    func testRecordedPickerTerminalPersistenceFailurePreservesVisibleObservation() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let faults = DeliveryFaults()
+        let store = fixture.store(faults: faults)
+        let controller = MediaFilesExportController()
+        XCTAssertTrue(controller.beginRecorded(MediaBatchExportPayload(ownedFile: try original(Data([1, 2, 3]))), store: store))
+        await controller.settleHistory()
+        let coordinator = MediaFilesExportCoordinator(attempt: try XCTUnwrap(controller.presentation), owner: controller)
+        faults.arm(.beforeManifestReplace)
+        coordinator.finish(.reported(count: 1))
+        coordinator.dismantle()
+        await controller.settleHistory()
+        XCTAssertEqual(controller.result?.status, .providerReported)
+        XCTAssertTrue(controller.historyWarning)
+        let cold = await fixture.store().snapshot()
+        XCTAssertEqual(cold.filesExportAttempts.first?.status, .unconfirmed)
+    }
+
+    func testRecordedPickerRechecksPinnedSourceAfterDurableAdmission() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let faults = DeliveryFaults()
+        let store = fixture.store(faults: faults)
+        _ = await store.snapshot()
+        let source = try original(Data([1, 2, 3]))
+        let payload = MediaBatchExportPayload(ownedFile: source)
+        let sourceURL = source.fileURL
+        faults.arm(.beforeManifestReplace, action: { try Data([4, 5]).write(to: sourceURL, options: .atomic) })
+        let controller = MediaFilesExportController()
+        XCTAssertTrue(controller.beginRecorded(payload, store: store))
+        await controller.settleHistory()
+        XCTAssertNil(controller.presentation)
+        XCTAssertFalse(controller.isActive)
+        XCTAssertEqual(controller.result?.status, .sourceUnavailable)
+        let cold = await fixture.store().snapshot()
+        XCTAssertEqual(cold.filesExportAttempts.first?.status, .sourceUnavailable)
+    }
+
+    func testForegroundAdmissionPreservesSchemaFiveManualExportHistory() async throws {
+        let fixture = try DeliveryFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        let initial = await store.snapshot()
+        let manual = try await store.beginFilesExportHistory(attemptID: UUID(), filenames: ["SYNTHETIC.JPG"],
+            expectedEpoch: XCTUnwrap(initial.epoch))
+        try await store.finishFilesExportHistory(manual, event: .cancelled)
+        let batch = try await store.beginBatch()
+        let receipt = try await prepare(store, batch, name: "PREPARED.JPG", bytes: Data([1, 2]))
+        try await store.beginExternalAttempt(batch, receiptID: receipt, attemptID: UUID(), filename: "PREPARED.JPG")
+        XCTAssertEqual(try fixture.manifestObject()["version"] as? Int, 5)
+        let cold = await fixture.store().snapshot()
+        XCTAssertNil(cold.warning)
+        XCTAssertEqual(cold.filesExportAttempts.first?.status, .cancelled)
+        XCTAssertEqual(cold.externalAttempts.first?.status, .unconfirmed)
+    }
+
+    func testSharedPickerVectorsDriveRealControllerAndDurableObservations() async throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "outcome-vectors", withExtension: "json"))
+        let data = try Data(contentsOf: url)
+        XCTAssertLessThanOrEqual(data.count, 32 * 1024)
+        let contract = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let vectors = try XCTUnwrap(contract["vectors"] as? [[String: Any]])
+        XCTAssertLessThanOrEqual(vectors.count, 32)
+        var exercised = Set<String>()
+        for vector in vectors where (vector["targets"] as? [String])?.contains("ios_picker") == true {
+            let fixture = try DeliveryFixture()
+            defer { fixture.remove() }
+            let store = fixture.store()
+            let id = try XCTUnwrap(vector["id"] as? String)
+            let expected = try XCTUnwrap(vector["expected"] as? [String: Any])
+            let count = expected["expectedCount"] as? Int ?? 1
+            let results: [MediaBatchResult] = try (0..<count).map { index in
+                let file = try MediaBatchOwnedFile.create(filename: "SYNTHETIC-\(index).JPG")
+                try Data([1, 2, 3]).write(to: file.fileURL)
+                var result = MediaBatchResult(item: CameraMediaItem(id: "synthetic-\(index)", name: "SYNTHETIC-\(index).JPG", kind: "image"))
+                result.status = .ready
+                result.ownedFile = file
+                return result
+            }
+            let payload = try XCTUnwrap(MediaBatchExportPayload(results: results))
+            let controller = MediaFilesExportController()
+            if id == "ios_picker_source_unavailable" {
+                try Data([9]).write(to: XCTUnwrap(payload.fileURLs.first), options: .atomic)
+                XCTAssertFalse(controller.beginRecorded(payload, store: store))
+                XCTAssertNil(controller.presentation)
+            } else {
+                XCTAssertTrue(controller.beginRecorded(payload, store: store))
+                await controller.settleHistory()
+                let attempt = try XCTUnwrap(controller.presentation)
+                let coordinator = MediaFilesExportCoordinator(attempt: attempt, owner: controller)
+                let picker = UIDocumentPickerViewController(forExporting: payload.fileURLs, asCopy: true)
+                switch id {
+                case "ios_picker_full", "ios_picker_partial", "ios_picker_duplicate":
+                    let reported = try XCTUnwrap(expected["reportedCount"] as? Int)
+                    let urls = (0..<reported).map { index in
+                        URL(fileURLWithPath: "/synthetic-provider/\(id == "ios_picker_duplicate" ? 0 : index).JPG")
+                    }
+                    coordinator.documentPicker(picker, didPickDocumentsAt: urls)
+                case "ios_picker_cancel": coordinator.documentPickerWasCancelled(picker)
+                case "ios_picker_teardown": coordinator.dismantle()
+                default: XCTFail("Unhandled shared picker vector: \(id)")
+                }
+                coordinator.dismantle()
+                await controller.settleHistory()
+                let cold = await fixture.store().snapshot()
+                XCTAssertEqual(cold.filesExportAttempts.count, 1, id)
+                XCTAssertFalse(controller.historyWarning, id)
+                XCTAssertEqual(cold.filesExportAttempts.first?.reportedCount,
+                    id == "ios_picker_duplicate" ? nil : controller.result?.reportedCount, id)
+            }
+            let observation: String
+            switch controller.result?.status {
+            case .providerReported: observation = "provider_reported"
+            case .cancelled: observation = "cancelled"
+            case .unconfirmed: observation = "unconfirmed"
+            case .sourceUnavailable: observation = "source_unavailable"
+            default: observation = "unexpected"
+            }
+            XCTAssertEqual(observation, expected["observation"] as? String, id)
+            XCTAssertEqual(expected["saveConfirmed"] as? Bool, false, id)
+            XCTAssertFalse(controller.isActive, id)
+            exercised.insert(id)
+        }
+        XCTAssertEqual(exercised, ["ios_picker_full", "ios_picker_partial", "ios_picker_duplicate",
+            "ios_picker_cancel", "ios_picker_teardown", "ios_picker_source_unavailable"])
     }
 
     private func original(_ bytes: Data) throws -> MediaBatchOwnedFile {

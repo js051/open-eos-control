@@ -35,6 +35,10 @@ struct MediaDeliveryHistoryView: View {
     private var queuedCount: Int {
         worklists.reduce(0) { $0 + $1.rows.filter { $0.receipt == nil }.count }
     }
+    private var filesExportAttempts: [MediaFilesExportHistoryRecord] {
+        // Admission order is stable even when the wall clock changes.
+        Array(camera.mediaDeliverySnapshot.filesExportAttempts.reversed())
+    }
     private var legacyRecords: [MediaDeliveryRecord] {
         let plannedIDs = Set(worklists.flatMap { $0.rows.map(\.id) })
         return records.filter { !plannedIDs.contains($0.id) }
@@ -168,6 +172,26 @@ struct MediaDeliveryHistoryView: View {
                     .accessibilityIdentifier("media-delivery-history-refresh")
                 }
 
+                if !filesExportAttempts.isEmpty {
+                    Section(language.string("media_files_export_history_title")) {
+                        Text(language.string("media_files_export_history_help"))
+                            .font(.caption).foregroundStyle(Color.cameraSecondaryText)
+                        ForEach(filesExportAttempts) { attempt in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(attempt.startedAt, style: .date)
+                                Text(language.format("media_files_export_history_sources", attempt.filenames.count))
+                                    .font(.caption.monospacedDigit())
+                                ForEach(Array(attempt.filenames.enumerated()), id: \.offset) { _, name in
+                                    Text(verbatim: name).lineLimit(2)
+                                }
+                                Text(filesExportMessage(attempt)).font(.callout)
+                            }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("media-files-export-history-\(attempt.id.uuidString)")
+                        }
+                    }
+                }
+
                 ForEach(worklists) { worklist in
                     Section {
                         ForEach(Array(worklist.rows.enumerated()), id: \.element.id) { index, row in
@@ -240,7 +264,7 @@ struct MediaDeliveryHistoryView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(minHeight: 44, alignment: .leading)
                     }
-                    .disabled(actionsDisabled || (records.isEmpty && worklists.isEmpty && camera.mediaDeliverySnapshot.retainedBytes == 0 && !hasWarning))
+                    .disabled(actionsDisabled || (records.isEmpty && worklists.isEmpty && filesExportAttempts.isEmpty && camera.mediaDeliverySnapshot.retainedBytes == 0 && !hasWarning))
                     .accessibilityIdentifier("media-delivery-history-clear")
                 }
             }
@@ -310,6 +334,19 @@ struct MediaDeliveryHistoryView: View {
             MediaBatchActivityView(payload: payload)
         }
         .mediaFilesExport(filesExporter)
+    }
+
+    private func filesExportMessage(_ attempt: MediaFilesExportHistoryRecord) -> String {
+        switch attempt.status {
+        case .started: language.string("media_files_export_history_started")
+        case .providerReported: language.format("media_files_export_reported", attempt.filenames.count)
+        case .cancelled: language.string("media_files_export_cancelled")
+        case .sourceUnavailable: language.string("media_files_export_source_unavailable")
+        case .unconfirmed:
+            if let count = attempt.reportedCount {
+                language.format("media_files_export_mismatch", count, attempt.filenames.count)
+            } else { language.string("media_files_export_unconfirmed") }
+        }
     }
 
     @ViewBuilder private var retainedSize: some View {
@@ -408,7 +445,7 @@ struct MediaDeliveryHistoryView: View {
             guard isVisible, presentationID == owner else { return }
             preparingExport = false
             if toFiles {
-                filesExporter.begin(payload)
+                camera.beginMediaFilesExport(filesExporter, payload: payload)
             } else if let payload {
                 exportPayload = payload
             } else {

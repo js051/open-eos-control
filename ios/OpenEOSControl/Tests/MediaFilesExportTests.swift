@@ -11,7 +11,7 @@ import XCTest
 final class MediaFilesExportTests: XCTestCase {
     func testExactPositiveCountIsOnlyProviderReportedAndWaitsForTeardown() throws {
         let owner = MediaFilesExportController()
-        XCTAssertTrue(owner.begin(try payload(count: 2)))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload(count: 2)))
         let attempt = try XCTUnwrap(owner.presentation)
         let coordinator = MediaFilesExportCoordinator(attempt: attempt, owner: owner)
         XCTAssertNil(coordinator.presentationFailure())
@@ -20,23 +20,23 @@ final class MediaFilesExportTests: XCTestCase {
             expectedCount: 2, reportedCount: 2, status: .providerReported))
         XCTAssertNil(owner.presentation)
         XCTAssertTrue(owner.isActive)
-        XCTAssertFalse(owner.begin(try payload()))
+        XCTAssertFalse(owner.beginUnrecordedForTesting(try payload()))
         coordinator.dismantle()
         XCTAssertFalse(owner.isActive)
-        XCTAssertTrue(owner.begin(try payload()))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload()))
     }
 
     func testZeroPartialExcessAndNegativeCountsLeaveWholeAttemptUnconfirmed() throws {
-        for count in [0, 1, 3, -1] {
+        for count in [0, 1, 3, -1, 101, Int.max] {
             let owner = MediaFilesExportController()
-            XCTAssertTrue(owner.begin(try payload(count: 2)))
+            XCTAssertTrue(owner.beginUnrecordedForTesting(try payload(count: 2)))
             let attempt = try XCTUnwrap(owner.presentation)
             let coordinator = MediaFilesExportCoordinator(attempt: attempt, owner: owner)
             coordinator.finish(.reported(count: count))
             XCTAssertEqual(owner.result?.status, .unconfirmed)
             XCTAssertEqual(owner.result?.expectedCount, 2)
-            XCTAssertEqual(owner.result?.reportedCount, max(0, count))
-            XCTAssertFalse(owner.begin(try payload()))
+            XCTAssertEqual(owner.result?.reportedCount, (0...100).contains(count) ? count : nil)
+            XCTAssertFalse(owner.beginUnrecordedForTesting(try payload()))
             coordinator.dismantle()
             XCTAssertNil(owner.presentation, "An unknown result must never trigger a retry")
         }
@@ -44,7 +44,7 @@ final class MediaFilesExportTests: XCTestCase {
 
     func testDuplicateDestinationURLsDoNotProduceACompleteCount() throws {
         let owner = MediaFilesExportController()
-        XCTAssertTrue(owner.begin(try payload(count: 2)))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload(count: 2)))
         let attempt = try XCTUnwrap(owner.presentation)
         let coordinator = MediaFilesExportCoordinator(attempt: attempt, owner: owner)
         let picker = UIDocumentPickerViewController(forExporting: attempt.payload.fileURLs, asCopy: true)
@@ -57,7 +57,7 @@ final class MediaFilesExportTests: XCTestCase {
 
     func testDelegateReportsCountWithoutReadingOrMappingDestinationURLs() throws {
         let owner = MediaFilesExportController()
-        XCTAssertTrue(owner.begin(try payload(count: 2, sameFilename: true)))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload(count: 2, sameFilename: true)))
         let attempt = try XCTUnwrap(owner.presentation)
         let coordinator = MediaFilesExportCoordinator(attempt: attempt, owner: owner)
         let picker = UIDocumentPickerViewController(forExporting: attempt.payload.fileURLs, asCopy: true)
@@ -75,7 +75,7 @@ final class MediaFilesExportTests: XCTestCase {
 
     func testCancelThenDuplicateOrLateCallbacksCannotClaimExport() throws {
         let owner = MediaFilesExportController()
-        XCTAssertTrue(owner.begin(try payload()))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload()))
         let attempt = try XCTUnwrap(owner.presentation)
         let coordinator = MediaFilesExportCoordinator(attempt: attempt, owner: owner)
         let picker = UIDocumentPickerViewController(forExporting: attempt.payload.fileURLs, asCopy: true)
@@ -90,7 +90,7 @@ final class MediaFilesExportTests: XCTestCase {
 
     func testReportedResultCannotBeDowngradedByCancelDismissOrTeardown() throws {
         let owner = MediaFilesExportController()
-        XCTAssertTrue(owner.begin(try payload()))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload()))
         let attempt = try XCTUnwrap(owner.presentation)
         let coordinator = MediaFilesExportCoordinator(attempt: attempt, owner: owner)
         coordinator.finish(.reported(count: 1))
@@ -105,7 +105,7 @@ final class MediaFilesExportTests: XCTestCase {
 
     func testInteractiveDismissWithoutDocumentCallbackIsUnconfirmed() throws {
         let owner = MediaFilesExportController()
-        XCTAssertTrue(owner.begin(try payload()))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload()))
         let attempt = try XCTUnwrap(owner.presentation)
         let coordinator = MediaFilesExportCoordinator(attempt: attempt, owner: owner)
         let picker = UIDocumentPickerViewController(forExporting: attempt.payload.fileURLs, asCopy: true)
@@ -118,13 +118,13 @@ final class MediaFilesExportTests: XCTestCase {
 
     func testDismissBeforeCoordinatorCreationDoesNotLeaveAdmissionStuck() throws {
         let owner = MediaFilesExportController()
-        XCTAssertTrue(owner.begin(try payload()))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload()))
         let old = try XCTUnwrap(owner.presentation)
         owner.dismissPresentation(old.id)
         XCTAssertEqual(owner.result?.status, .unconfirmed)
         XCTAssertFalse(owner.isActive)
         XCTAssertNil(owner.presentation)
-        XCTAssertTrue(owner.begin(try payload()))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload()))
         let replacementID = owner.presentation?.id
         let lateCoordinator = MediaFilesExportCoordinator(attempt: old, owner: owner)
         XCTAssertEqual(lateCoordinator.presentationFailure(), .unconfirmed)
@@ -135,7 +135,7 @@ final class MediaFilesExportTests: XCTestCase {
 
     func testProgrammaticTeardownWithoutCallbackIsUnconfirmed() throws {
         let owner = MediaFilesExportController()
-        XCTAssertTrue(owner.begin(try payload()))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload()))
         let attempt = try XCTUnwrap(owner.presentation)
         let coordinator = MediaFilesExportCoordinator(attempt: attempt, owner: owner)
         coordinator.dismantle()
@@ -149,11 +149,11 @@ final class MediaFilesExportTests: XCTestCase {
 
     func testStaleBindingCallbackAndTeardownCannotDismissReplacement() throws {
         let owner = MediaFilesExportController()
-        XCTAssertTrue(owner.begin(try payload()))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload()))
         let old = try XCTUnwrap(owner.presentation)
         let oldCoordinator = MediaFilesExportCoordinator(attempt: old, owner: owner)
         oldCoordinator.dismantle()
-        XCTAssertTrue(owner.begin(try payload(count: 2)))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload(count: 2)))
         let replacement = try XCTUnwrap(owner.presentation)
         let current = MediaFilesExportCoordinator(attempt: replacement, owner: owner)
         owner.dismissPresentation(old.id)
@@ -170,7 +170,7 @@ final class MediaFilesExportTests: XCTestCase {
 
     func testDuplicateAndRetiredRepresentablesCannotHandFilesToUIKitOrSettleCurrentOwner() throws {
         let owner = MediaFilesExportController()
-        XCTAssertTrue(owner.begin(try payload()))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload()))
         let attempt = try XCTUnwrap(owner.presentation)
         let first = MediaFilesExportCoordinator(attempt: attempt, owner: owner)
         let duplicate = MediaFilesExportCoordinator(attempt: attempt, owner: owner)
@@ -180,7 +180,7 @@ final class MediaFilesExportTests: XCTestCase {
         XCTAssertNil(owner.result)
         XCTAssertNil(first.presentationFailure())
         first.dismantle()
-        XCTAssertTrue(owner.begin(try payload()))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload()))
         let nextID = owner.presentation?.id
         let retired = MediaFilesExportCoordinator(attempt: attempt, owner: owner)
         XCTAssertEqual(retired.presentationFailure(), .unconfirmed)
@@ -190,11 +190,11 @@ final class MediaFilesExportTests: XCTestCase {
 
     func testMissingEmptyAndUnavailablePayloadRejectBeforePresentation() throws {
         let owner = MediaFilesExportController()
-        XCTAssertFalse(owner.begin(nil))
+        XCTAssertFalse(owner.beginUnrecordedForTesting(nil))
         for empty in [false, true] {
             let file = try MediaBatchOwnedFile.create(filename: "UNAVAILABLE.JPG")
             if empty { try Data().write(to: file.fileURL) }
-            XCTAssertFalse(owner.begin(MediaBatchExportPayload(ownedFile: file)))
+            XCTAssertFalse(owner.beginUnrecordedForTesting(MediaBatchExportPayload(ownedFile: file)))
             XCTAssertEqual(owner.result?.status, .sourceUnavailable)
             XCTAssertFalse(owner.isActive)
             XCTAssertNil(owner.presentation)
@@ -216,7 +216,7 @@ final class MediaFilesExportTests: XCTestCase {
             default: try FileManager.default.removeItem(at: url)
             }
             let owner = MediaFilesExportController()
-            XCTAssertFalse(owner.begin(source), change)
+            XCTAssertFalse(owner.beginUnrecordedForTesting(source), change)
             XCTAssertEqual(owner.result?.status, .sourceUnavailable, change)
             XCTAssertNil(owner.presentation)
         }
@@ -235,7 +235,7 @@ final class MediaFilesExportTests: XCTestCase {
                 try FileManager.default.linkItem(at: unrelated, to: destination)
             }
             let owner = MediaFilesExportController()
-            XCTAssertFalse(owner.begin(source))
+            XCTAssertFalse(owner.beginUnrecordedForTesting(source))
             XCTAssertEqual(owner.result?.status, .sourceUnavailable)
             XCTAssertEqual(try Data(contentsOf: unrelated), Data([1, 2, 3]))
         }
@@ -243,7 +243,7 @@ final class MediaFilesExportTests: XCTestCase {
 
     func testChangeBetweenAdmissionAndUIKitHandoffFailsClosed() throws {
         let owner = MediaFilesExportController()
-        XCTAssertTrue(owner.begin(try payload()))
+        XCTAssertTrue(owner.beginUnrecordedForTesting(try payload()))
         let attempt = try XCTUnwrap(owner.presentation)
         let coordinator = MediaFilesExportCoordinator(attempt: attempt, owner: owner)
         XCTAssertNil(coordinator.presentationFailure())
@@ -261,7 +261,7 @@ final class MediaFilesExportTests: XCTestCase {
         var sourceURL: URL?
         weak var weakCoordinator: MediaFilesExportCoordinator?
         try autoreleasepool {
-            XCTAssertTrue(owner.begin(try payload()))
+            XCTAssertTrue(owner.beginUnrecordedForTesting(try payload()))
             let attempt = try XCTUnwrap(owner.presentation)
             sourceURL = try XCTUnwrap(attempt.payload.fileURLs.first)
             let coordinator = MediaFilesExportCoordinator(attempt: attempt, owner: owner)
@@ -281,7 +281,7 @@ final class MediaFilesExportTests: XCTestCase {
 
     func testReopenedControllerHasNoResultAndDoesNotAutomaticallyRetry() throws {
         let first = MediaFilesExportController()
-        XCTAssertTrue(first.begin(try payload()))
+        XCTAssertTrue(first.beginUnrecordedForTesting(try payload()))
         let attempt = try XCTUnwrap(first.presentation)
         let coordinator = MediaFilesExportCoordinator(attempt: attempt, owner: first)
         coordinator.finish(.reported(count: 1))

@@ -747,7 +747,7 @@
 "media_files_export_ready" = "Export prepared originals to Files…";
 "media_files_export_all" = "Export all available copies to Files…";
 "media_files_export_named" = "Export %@ to Files";
-"media_files_export_help" = "Choose a destination in Files for these prepared copies. Closing this screen or restarting the app loses the export result; earlier exports are then unknown. History records preparation only. Check Files before exporting again to avoid duplicates. Your chosen provider manages cloud sync.";
+"media_files_export_help" = "Choose a destination in Files for these prepared copies. History keeps bounded export observations, not proof of external bytes or cloud sync. Check Files before exporting again to avoid duplicates. Your chosen provider manages cloud sync.";
 "media_files_export_reported" = "iOS reported export destinations for %d originals. External bytes and cloud sync have not been verified.";
 "media_files_export_cancelled" = "Files export was cancelled. Check the destination before trying again; copies already made may remain.";
 "media_files_export_unconfirmed" = "Files export outcome is unknown. Check the destination before starting another export.";
@@ -807,3 +807,10 @@
 "native_lut_unavailable" = "LUT processor unavailable; native video retained";
 
 "native_lut_failed" = "LUT processing failed; native video fallback, LUT retained";
+"media_files_export_recording" = "Recording export attempt…";
+"media_files_export_history_warning" = "Export history is unavailable or incomplete. Check Files before trying again; an unrecorded final result does not undo copying.";
+"media_files_export_history_unavailable" = "The export attempt could not be recorded. Files was not opened. Check history and available local storage before starting another export.";
+"media_files_export_history_title" = "Manual Files export attempts";
+"media_files_export_history_help" = "These are batch-level observations, not individual destination receipts. Up to 100 source labels are retained across attempts. An interrupted attempt is unknown. Selecting originals and a destination again creates a new attempt; nothing resumes automatically.";
+"media_files_export_history_sources" = "%d source labels (no destination mapping)";
+"media_files_export_history_started" = "Export started; final result is pending.";

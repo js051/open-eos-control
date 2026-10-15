@@ -747,7 +747,7 @@
 "media_files_export_ready" = "將已準備原檔匯出至「檔案」…";
 "media_files_export_all" = "將所有可用副本匯出至「檔案」…";
 "media_files_export_named" = "將 %@ 匯出至「檔案」";
-"media_files_export_help" = "在「檔案」中為已準備副本選擇目的地。關閉此畫面或重新啟動 App 後，先前匯出結果將不再保留、無法確認；歷史紀錄僅記錄準備狀態。再次匯出前請先檢查「檔案」，以免產生重複副本。雲端同步由所選服務處理。";
+"media_files_export_help" = "在「檔案」中為已準備副本選擇目的地。歷史紀錄保留有上限的匯出觀察結果，不代表已驗證外部檔案內容或雲端同步。再次匯出前請先檢查「檔案」，以免產生重複副本。雲端同步由所選服務處理。";
 "media_files_export_reported" = "iOS 已回報 %d 份原檔的匯出目的地；尚未驗證外部檔案內容或雲端同步。";
 "media_files_export_cancelled" = "已取消「檔案」匯出。先前產生的副本可能仍存在，請先檢查目的地再重試。";
 "media_files_export_unconfirmed" = "「檔案」匯出結果不明。請先檢查目的地，再開始另一次匯出。";
@@ -807,3 +807,10 @@
 "native_lut_unavailable" = "LUT 處理器不可用，保留原生影片";
 
 "native_lut_failed" = "LUT 處理失敗；降回原生影片並保留 LUT";
+"media_files_export_recording" = "正在記錄匯出嘗試…";
+"media_files_export_history_warning" = "匯出歷史紀錄無法使用或不完整。重試前請先檢查「檔案」；無法記錄最終結果，不代表已撤回複製。";
+"media_files_export_history_unavailable" = "無法記錄這次匯出嘗試，尚未開啟「檔案」。請先檢查歷史紀錄與本機可用空間，再開始另一次匯出。";
+"media_files_export_history_title" = "手動「檔案」匯出嘗試";
+"media_files_export_history_help" = "這些是整批觀察結果，不是逐檔目的地收據。所有嘗試合計最多保留 100 個來源名稱；中斷的嘗試保留為結果不明。再次明確選擇原檔與目的地才會建立新嘗試，不會自動續傳。";
+"media_files_export_history_sources" = "%d 個來源名稱（沒有目的地對應）";
+"media_files_export_history_started" = "匯出已開始，尚待最終結果。";

@@ -80,7 +80,7 @@ struct MediaBatchPanel: View {
                 .disabled(camera.mediaBatchState == .running || !camera.mediaBatchResults.contains { $0.completedFileURL != nil })
                 .accessibilityIdentifier("media-batch-share-ready")
                 Button {
-                    filesExporter.begin(camera.makeMediaBatchExportPayload())
+                    camera.beginMediaFilesExport(filesExporter, payload: camera.makeMediaBatchExportPayload())
                 } label: {
                     Label(language.string("media_files_export_ready"), systemImage: "folder")
                         .fixedSize(horizontal: false, vertical: true)

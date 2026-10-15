@@ -30,7 +30,22 @@ struct MediaFilesExportSourceIdentity: Equatable, Sendable {
 /// These are observations about one explicit Files picker, never preparation
 /// receipts, verified external bytes, or evidence that a cloud provider synced.
 enum MediaFilesExportStatus: Equatable {
-    case providerReported, cancelled, unconfirmed, sourceUnavailable
+    case providerReported, cancelled, unconfirmed, sourceUnavailable, historyUnavailable
+}
+
+enum MediaFilesExportHistoryStatus: String, Codable, Sendable {
+    case started, providerReported, cancelled, unconfirmed, sourceUnavailable
+}
+
+/// Batch observations only. No camera IDs, source URLs, destination URLs,
+/// persistent grants, byte-success claims, or automatic retry capability.
+struct MediaFilesExportHistoryRecord: Codable, Sendable, Identifiable, Equatable {
+    let id: UUID
+    let filenames: [String]
+    let startedAt: Date
+    var completedAt: Date?
+    var status: MediaFilesExportHistoryStatus
+    var reportedCount: Int?
 }
 
 struct MediaFilesExportResult: Equatable {
@@ -45,42 +60,124 @@ struct MediaFilesExportAttempt: Identifiable {
     let payload: MediaBatchExportPayload
 }
 
-enum MediaFilesExportEvent: Equatable {
+enum MediaFilesExportEvent: Equatable, Sendable {
     case reported(count: Int)
     case cancelled
     case unconfirmed
     case sourceUnavailable
 }
 
-/// Screen-local state. A reopened screen has no export result; absence must
-/// never be interpreted as proof that a previous copy did not happen.
+/// Presentation ownership is screen-local; production admission and observations
+/// are separately persisted before/after the picker. Neither proves saved bytes.
 @MainActor
 final class MediaFilesExportController: ObservableObject {
     @Published private(set) var presentation: MediaFilesExportAttempt?
     @Published private(set) var result: MediaFilesExportResult?
-    private var activeID: UUID?
+    @Published private(set) var historyWarning = false
+    @Published private var activeID: UUID?
     private var expectedCount = 0
     private var pickerAttached = false
+    private var admissionTask: Task<Void, Never>?
+    private var historyTask: Task<Void, Never>?
+    private var history: (MediaDeliveryStore, MediaFilesExportHistoryTicket)?
+    private var historyDidChange: (() -> Void)?
+    private var waitingForHistory = false
+    private var pickerEnded = false
 
     var isActive: Bool { activeID != nil }
 
     @discardableResult
-    func begin(_ payload: MediaBatchExportPayload?) -> Bool {
+    func beginUnrecordedForTesting(_ payload: MediaBatchExportPayload?) -> Bool {
+        // The pure presentation transition is also exercised by coordinator tests.
+        // All production entry points use beginRecorded, never this direct path.
+        guard let attempt = reserve(payload) else { return false }
+        presentation = attempt
+        return true
+    }
+
+    private func reserve(_ payload: MediaBatchExportPayload?) -> MediaFilesExportAttempt? {
         // Even after a result, wait for actual teardown before admitting another
         // picker. Its coordinator, not this state, owns the presented sources.
-        guard activeID == nil else { return false }
+        guard activeID == nil else { return nil }
         guard let payload, Self.sourcesAvailable(payload) else {
             result = MediaFilesExportResult(attemptID: UUID(), expectedCount: payload?.fileURLs.count ?? 0,
                 reportedCount: nil, status: .sourceUnavailable)
-            return false
+            return nil
         }
         let attempt = MediaFilesExportAttempt(payload: payload)
         activeID = attempt.id
         expectedCount = payload.fileURLs.count
         pickerAttached = false
+        pickerEnded = false
+        historyWarning = false
         result = nil
-        presentation = attempt
+        return attempt
+    }
+
+    @discardableResult
+    func beginRecorded(_ payload: MediaBatchExportPayload?, store: MediaDeliveryStore?,
+                       isCurrent: @escaping () -> Bool = { true }, didChange: @escaping () -> Void = {}) -> Bool {
+        guard let attempt = reserve(payload) else { return false }
+        guard let store else {
+            failAdmission(attempt.id)
+            return false
+        }
+        historyDidChange = didChange
+        admissionTask = Task { [weak self] in
+            do {
+                let snapshot = await store.snapshot()
+                guard !Task.isCancelled, isCurrent(), let epoch = snapshot.epoch else {
+                    self?.failAdmission(attempt.id)
+                    return
+                }
+                let ticket = try await store.beginFilesExportHistory(attemptID: attempt.id,
+                    filenames: attempt.payload.fileURLs.map(\.lastPathComponent), expectedEpoch: epoch)
+                guard let self else {
+                    try? await store.finishFilesExportHistory(ticket, event: .unconfirmed)
+                    return
+                }
+                guard self.activeID == attempt.id, !Task.isCancelled, isCurrent() else {
+                    try? await store.finishFilesExportHistory(ticket, event: .unconfirmed)
+                    self.failAdmission(attempt.id)
+                    didChange()
+                    return
+                }
+                self.history = (store, ticket)
+                self.admissionTask = nil
+                // Deferred admission must revalidate the same pinned sources.
+                guard Self.sourcesAvailable(attempt.payload) else {
+                    self.receive(.sourceUnavailable, for: attempt.id)
+                    return
+                }
+                self.presentation = attempt
+                didChange()
+            } catch {
+                self?.failAdmission(attempt.id)
+                didChange()
+            }
+        }
         return true
+    }
+
+    private func failAdmission(_ id: UUID) {
+        guard activeID == id else { return }
+        result = MediaFilesExportResult(attemptID: id, expectedCount: expectedCount,
+            reportedCount: nil, status: .historyUnavailable)
+        historyWarning = true
+        admissionTask = nil
+        presentationEnded(id)
+    }
+
+    func retirePendingAdmission() {
+        guard presentation == nil, admissionTask != nil else { return }
+        admissionTask?.cancel()
+        // Retain ownership until the actor acknowledges admission or failure.
+    }
+
+    /// Deterministic completion barrier for tests; no polling or provider access.
+    func settleHistory() async {
+        await admissionTask?.value
+        await historyTask?.value
     }
 
     /// Lease constructors restrict sources to owned app files. Recheck the leaf
@@ -108,7 +205,7 @@ final class MediaFilesExportController: ObservableObject {
         var reportedCount: Int? = nil
         switch event {
         case .reported(let count):
-            reportedCount = max(0, count)
+            reportedCount = (0...100).contains(count) ? count : nil
             // Apple documents destination URLs, not ordered per-input receipts.
             // A partial/empty/mismatched callback leaves the entire mapping unknown.
             status = count > 0 && count == expectedCount ? .providerReported : .unconfirmed
@@ -118,6 +215,19 @@ final class MediaFilesExportController: ObservableObject {
         }
         result = MediaFilesExportResult(attemptID: id, expectedCount: expectedCount,
             reportedCount: reportedCount, status: status)
+        if let (store, ticket) = history {
+            history = nil
+            waitingForHistory = true
+            historyTask = Task { [weak self] in
+                do { try await store.finishFilesExportHistory(ticket, event: event) }
+                catch { self?.historyWarning = true }
+                guard let self, self.activeID == id else { return }
+                self.waitingForHistory = false
+                self.historyTask = nil
+                self.historyDidChange?()
+                self.releaseIfSettled(id)
+            }
+        }
         presentation = nil
         if !pickerAttached { presentationEnded(id) }
     }
@@ -133,9 +243,16 @@ final class MediaFilesExportController: ObservableObject {
         // The coordinator still pins its snapshot until UIKit/SwiftUI releases
         // it, even if this owner or the camera has already moved on.
         presentation = nil
+        pickerEnded = true
+        releaseIfSettled(id)
+    }
+
+    private func releaseIfSettled(_ id: UUID) {
+        guard activeID == id, pickerEnded, !waitingForHistory else { return }
         activeID = nil
         expectedCount = 0
         pickerAttached = false
+        historyDidChange = nil
     }
 }
 
@@ -236,6 +353,7 @@ private struct MediaFilesExportPresentation: ViewModifier {
         )) { attempt in
             MediaFilesExportPicker(attempt: attempt, owner: controller)
         }
+        .onDisappear { controller.retirePendingAdmission() }
     }
 }
 
@@ -251,10 +369,19 @@ struct MediaFilesExportStatusView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if controller.isActive && controller.presentation == nil && controller.result == nil {
+                ProgressView(language.string("media_files_export_recording"))
+                    .accessibilityIdentifier("media-files-export-recording")
+            }
             if let result = controller.result {
                 Text(message(result))
                     .font(.callout)
                     .accessibilityIdentifier("media-files-export-result")
+            }
+            if controller.historyWarning {
+                Text(language.string("media_files_export_history_warning"))
+                    .font(.caption).foregroundStyle(Color.cameraSecondaryText)
+                    .accessibilityIdentifier("media-files-export-history-warning")
             }
             Text(language.string("media_files_export_help"))
                 .font(.caption)
@@ -272,6 +399,8 @@ struct MediaFilesExportStatusView: View {
             language.string("media_files_export_cancelled")
         case .sourceUnavailable:
             language.string("media_files_export_source_unavailable")
+        case .historyUnavailable:
+            language.string("media_files_export_history_unavailable")
         case .unconfirmed:
             if let count = result.reportedCount {
                 language.format("media_files_export_mismatch", count, result.expectedCount)

@@ -26,7 +26,7 @@ final class MediaBatchDeliveryTests: XCTestCase {
             let requests = await peer.requests()
 
             let exporter = MediaFilesExportController()
-            XCTAssertTrue(exporter.begin(state.makeMediaDownloadExportPayload(for: original)))
+            XCTAssertTrue(exporter.beginUnrecordedForTesting(state.makeMediaDownloadExportPayload(for: original)))
             var coordinator: MediaFilesExportCoordinator? = MediaFilesExportCoordinator(
                 attempt: try XCTUnwrap(exporter.presentation), owner: exporter)
             let source = try XCTUnwrap(coordinator?.attempt.payload.fileURLs.first)
@@ -80,7 +80,7 @@ final class MediaBatchDeliveryTests: XCTestCase {
             let requests = await peer.requests()
 
             let exporter = MediaFilesExportController()
-            XCTAssertTrue(exporter.begin(state.makeMediaBatchExportPayload()))
+            XCTAssertTrue(exporter.beginUnrecordedForTesting(state.makeMediaBatchExportPayload()))
             var coordinator: MediaFilesExportCoordinator? = MediaFilesExportCoordinator(
                 attempt: try XCTUnwrap(exporter.presentation), owner: exporter)
             XCTAssertEqual(coordinator?.attempt.payload.fileURLs, [readySource])
@@ -133,7 +133,7 @@ final class MediaBatchDeliveryTests: XCTestCase {
         let preparedFacts = try Data(contentsOf: manifest)
         var payload = await offline.makeStoredMediaExportPayload(ids: offline.mediaDeliverySnapshot.records.map(\.id))
         let exporter = MediaFilesExportController()
-        XCTAssertTrue(exporter.begin(payload))
+        XCTAssertTrue(exporter.beginUnrecordedForTesting(payload))
         var coordinator: MediaFilesExportCoordinator? = MediaFilesExportCoordinator(
             attempt: try XCTUnwrap(exporter.presentation), owner: exporter)
         payload = nil
@@ -194,7 +194,7 @@ final class MediaBatchDeliveryTests: XCTestCase {
         XCTAssertEqual(payload.filesExportSourceIdentities, [Optional(acquiredIdentity)])
         XCTAssertFalse(MediaFilesExportController.sourcesAvailable(payload))
         let exporter = MediaFilesExportController()
-        XCTAssertFalse(exporter.begin(payload))
+        XCTAssertFalse(exporter.beginUnrecordedForTesting(payload))
         XCTAssertNil(exporter.presentation)
         XCTAssertFalse(exporter.isActive)
         XCTAssertEqual(exporter.result?.status, .sourceUnavailable)
