@@ -146,6 +146,7 @@
 
     return {
       render(source, lut) {
+        if (gl.isContextLost()) throw new Error("WebGL2 LUT context is lost.");
         const dimensions = sourceDimensions(source);
         if (!dimensions.width || !dimensions.height) throw new Error("Live View frame dimensions are unavailable.");
         if (activeLut !== lut) uploadLut(lut);
@@ -173,6 +174,9 @@
         gl.uniform3fv(domainMinUniform, lut.domainMin);
         gl.uniform3fv(domainMaxUniform, lut.domainMax);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
+        if (gl.isContextLost() || gl.getError() !== gl.NO_ERROR) {
+          throw new Error("WebGL2 LUT frame submission failed.");
+        }
       },
       dispose() {
         gl.deleteTexture(sourceTexture);

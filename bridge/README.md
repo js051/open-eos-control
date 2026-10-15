@@ -96,3 +96,36 @@ to the existing unavailable-storage warning. Review the failed result and any
 partial file, then explicitly enable again to select a destination and establish
 two fresh baselines. Existing files, including the failed ID, are skipped; the
 new run watches newly observed photos only.
+
+## RTP decoded-output and monitoring evidence
+
+The RTP receiver advances frame progress only after a nonempty decoder output
+returns. Packet arrival, NAL assembly, and an in-progress decoder call do not
+refresh readiness. An undelivered buffer expires after five seconds; a closed
+receiver cannot return cached readiness or publish a late decode. The existing
+read deadline and exact-source Stop recovery remain in place. This deadline does
+not claim to interrupt an opaque native decoder call or prove camera capture time.
+
+The browser decodes each JPEG privately before installing that same image object
+in the viewfinder. LUT submission and pixel analysis carry the same frame and LUT
+revision, with five-second evidence expiry; no new image, unbounded request, or
+pending decode can keep old monitoring overlays or FPS fresh. A LUT/context error
+hides its overlays and remains diagnostic until a later valid render recovers.
+The original frame can remain visible while awaiting the next bounded request.
+
+Diagnostics distinguish decoded output and successful WebGL surface submission.
+Neither an installed image nor a canvas draw is a compositor/physical-presentation
+confirmation. The shared [monitor gate](../contracts/rtp-presentation/v1/monitor-vectors.json)
+and controlled-decoder/JavaScript tests exercise lifecycle, same-frame identity,
+expiry, errors, and recovery. Browser/GPU and physical-camera acceptance are
+separate evidence and are not established by these tests.
+
+Logical Stop also does not prove that a receiver worker has physically drained.
+A worker alone closes its decoder after the active decode returns. Preparation
+reserves the existing local UDP endpoint and, for CCAPI, the existing normalized
+camera identity in memory. A replacement for that camera or endpoint is rejected
+until all of its started video/audio workers finish cleanup, including after a
+reconnect or SDP port change. Different cameras on distinct endpoints remain
+independent. Failed cleanup retains the reservation; a codec that never returns
+or a cleanup failure may require restarting the Bridge. The reservation neither
+sends/persists camera identifiers nor acknowledges a camera Stop.

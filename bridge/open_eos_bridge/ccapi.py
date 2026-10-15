@@ -2993,6 +2993,11 @@ class CcapiSession:
         try:
             description = parse_sdp(response.body.decode("utf-8"))
             session = factory(description, destination)
+            # The optional local reservation survives reconnect and SDP port changes.
+            # It does not send or persist the camera identifier.
+            set_decoder_owner = getattr(session, "set_decoder_owner", None)
+            if callable(set_decoder_owner):
+                set_decoder_owner(self.camera.id)
             session.set_target_fps(request.fps)
             session.start()
         except BaseException as error:

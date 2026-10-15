@@ -38,5 +38,20 @@
       if(signal?.aborted)throw aborted();return blob;
     }catch(error){cancel();throw error;}finally{signal?.removeEventListener('abort',cancel);try{reader?.releaseLock();}catch(_){}}
   }
-  return {evaluate,readFrame};
+  function evaluateRtpMonitorEvidence(v) {
+    const frame = value => Number.isSafeInteger(value) && value > 0;
+    const lut = value => Number.isSafeInteger(value) && value >= 0;
+    const max = v?.maxAgeMs;
+    const age = value => Number.isFinite(value) && value >= 0 && value <= max;
+    const alive = v?.active === true && v.sameOwner === true && v.sameRenderer === true &&
+      v.terminal === false && v.stopPending === true &&
+      (v.foregroundRequired === false || (v.foregroundRequired === true && v.foreground === true));
+    const current = alive && frame(v.sampleFrame) && v.sampleFrame === v.currentFrame &&
+      lut(v.sampleLut) && v.sampleLut === v.currentLut && Number.isFinite(max) && max > 0 && max <= 5000 &&
+      age(v.sampleAgeMs) && age(v.frameAgeMs);
+    const level = new Map([['decoded-output', 1], ['surface-submitted', 2], ['presentation-confirmed', 3]]).get(v?.evidence) || 0;
+    return {canPublishDecodedAnalysis: Boolean(current && level >= 1),
+      canPublishSubmittedAnalysis: Boolean(current && level >= 2), canClaimPresentation: Boolean(current && level === 3)};
+  }
+  return {evaluate,readFrame,evaluateRtpMonitorEvidence};
 });

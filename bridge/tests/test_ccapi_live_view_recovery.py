@@ -167,6 +167,15 @@ class LiveViewStopRecoveryTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "LIVE_VIEW_STOP_UNCONFIRMED")
         return raised.exception
 
+    def test_optional_local_decoder_owner_is_bound_before_start_without_camera_command(self) -> None:
+        session, transport, receiver = self.create_session()
+        order = []
+        receiver.set_decoder_owner = lambda owner: order.append(("owner", owner, len(transport.commands)))
+        receiver.start = lambda: order.append(("start", len(transport.commands)))
+        session.start_live_view(LiveViewStartRequest(source="CCAPI_RTP"))
+        self.assertEqual(order, [("owner", session.camera.id, 0), ("start", 0)])
+        self.assertEqual(transport.commands[0][1], PREFIX + "/rtp")
+
     def test_auto_never_falls_back_after_unconfirmed_rtp_cleanup(self) -> None:
         session, transport, receiver = self.create_session()
         receiver.ready_error = RtpError("Synthetic no decoded frame")
