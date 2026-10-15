@@ -20,7 +20,7 @@ class MediaReviewSelectionTest {
             reads++
             if (reads < 3) listOf(video, old) else listOf(video, photo, old)
         }
-        assertEquals(CaptureReviewResult.Found(photo), result)
+        assertEquals(CaptureReviewResult.Found(photo, CaptureReviewEvidence(3, 0, CaptureReviewRead.SUCCESS)), result)
         assertEquals(3, reads)
     }
 
@@ -33,12 +33,12 @@ class MediaReviewSelectionTest {
                 else -> listOf(photo, video, old)
             }
         }
-        assertEquals(CaptureReviewResult.Found(video), result)
+        assertEquals(CaptureReviewResult.Found(video, CaptureReviewEvidence(2, 1, CaptureReviewRead.SUCCESS)), result)
         assertEquals(3, reads)
     }
 
     @Test fun recentWithoutSnapshotCanSelectVideo() = runBlocking {
-        assertEquals(CaptureReviewResult.Found(video), awaitCaptureReviewItem(emptySet(), longArrayOf(), MediaReviewIntent.RECENT) {
+        assertEquals(CaptureReviewResult.Found(video, CaptureReviewEvidence(1, 0, CaptureReviewRead.SUCCESS)), awaitCaptureReviewItem(emptySet(), longArrayOf(), MediaReviewIntent.RECENT) {
             listOf(video, photo)
         })
     }
@@ -51,7 +51,7 @@ class MediaReviewSelectionTest {
             reads++
             listOf(old)
         }
-        assertEquals(CaptureReviewResult.NotReady, result)
+        assertEquals(CaptureReviewResult.NotReady(CaptureReviewEvidence(3, 0, CaptureReviewRead.SUCCESS)), result)
         assertEquals(3, reads)
     }
 
@@ -62,7 +62,12 @@ class MediaReviewSelectionTest {
                 if (reads++ != successfulRound) throw IOException("synthetic failure")
                 listOf(video, old)
             }
-            assertEquals(if (successfulRound < 0) CaptureReviewResult.ReadFailed else CaptureReviewResult.NotReady, result)
+            val evidence = CaptureReviewEvidence(
+                if (successfulRound < 0) 0 else 1, if (successfulRound < 0) 4 else 3,
+                if (successfulRound == 3) CaptureReviewRead.SUCCESS else CaptureReviewRead.FAILURE,
+            )
+            assertEquals(if (successfulRound < 0) CaptureReviewResult.ReadFailed(evidence)
+                else CaptureReviewResult.NotReady(evidence), result)
             assertEquals(4, reads)
         }
     }

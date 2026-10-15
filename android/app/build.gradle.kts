@@ -72,6 +72,7 @@ android {
     // Bounded synthetic contracts are consumed by all platform tests.
     sourceSets.getByName("test").resources.srcDir("../../contracts/media-delivery/v1")
     sourceSets.getByName("test").resources.srcDir("../../contracts/media-date-review/v1")
+    sourceSets.getByName("test").resources.srcDir("../../contracts/capture-review-evidence/v1")
     sourceSets.getByName("test").resources.srcDir("../../contracts/live-view-lut/v1")
     // Contract documentation is not a classpath resource; avoid duplicate README names.
     sourceSets.getByName("test").resources.exclude("README.md")

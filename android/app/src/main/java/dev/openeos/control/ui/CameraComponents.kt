@@ -214,7 +214,10 @@ fun CaptureReviewButton(
     val enabled = item != null || hasNotice
     val description = when {
         state.captureReviewStatus == CaptureReviewStatus.SEARCHING -> stringResource(R.string.capture_review_searching)
-        state.captureReviewStatus == CaptureReviewStatus.NOT_READY -> stringResource(R.string.capture_review_not_ready)
+        state.captureReviewStatus == CaptureReviewStatus.NOT_READY -> stringResource(
+            if (state.captureReviewEvidence.noCandidateWithFinalReadFailure) R.string.capture_review_no_candidate_read_failed
+            else R.string.capture_review_not_ready,
+        )
         state.captureReviewStatus == CaptureReviewStatus.READ_FAILED -> stringResource(R.string.capture_review_read_failed)
         state.captureStatusReadbackFailed -> stringResource(R.string.capture_status_readback_failed)
         item != null -> stringResource(R.string.open_latest_media_named, item.name)
@@ -255,7 +258,10 @@ fun CaptureReviewButton(
                     } else {
                         Icon(
                             painterResource(when {
-                                state.captureReviewStatus == CaptureReviewStatus.READ_FAILED -> LucideR.drawable.lucide_ic_triangle_alert
+                                state.captureReviewStatus == CaptureReviewStatus.READ_FAILED ||
+                                    (state.captureReviewStatus == CaptureReviewStatus.NOT_READY &&
+                                        state.captureReviewEvidence.noCandidateWithFinalReadFailure) ->
+                                    LucideR.drawable.lucide_ic_triangle_alert
                                 waitingForNewMedia -> LucideR.drawable.lucide_ic_clock
                                 state.captureStatusReadbackFailed -> LucideR.drawable.lucide_ic_triangle_alert
                                 else -> LucideR.drawable.lucide_ic_images
