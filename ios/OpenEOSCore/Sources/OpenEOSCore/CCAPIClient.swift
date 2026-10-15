@@ -375,6 +375,13 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     private var cachedModel = "Canon Camera"
     public private(set) var recordingCommandEvidence: CameraRecordingCommandEvidence?
     private var recording: Bool?
+    private let recordingOwner = UUID()
+    private var recordingAttemptID: UUID?
+    private var recordingRevision = UUID()
+    // Same-session Stop authorization is independent of current recording duty.
+    // A cancelled publication can retain app-side duty after ACK/fresh false.
+    // Never use this route to admit Start; retire it only with this client.
+    private var retainedRecordingStop: CCAPIOperation?
     private var bulbExposureActive = false
     private struct ShutterRelease: Sendable {
         let id: UUID
@@ -601,6 +608,7 @@ public actor CCAPIClient: CameraForegroundMediaReading {
     public func closeWithShutterReleaseState() async -> CameraShutterReleaseState {
         if let closeTask { return await closeTask.value }
         closing = true
+        retainedRecordingStop = nil
         let task = Task.detached(priority: .userInitiated) { await self.finishClose() }
         closeTask = task
         return await task.value
@@ -5057,6 +5065,107 @@ public actor CCAPIClient: CameraForegroundMediaReading {
         }
     }
 
+    /// One explicit command plus at most one bounded independent observation.
+    /// The original attempt is never rewritten by a later recovery read.
+    public func recordingOutcome(starting: Bool, attempt: CameraRecordingAttempt) async throws -> CameraRecordingOutcome {
+        try Task.checkCancellation()
+        guard recordingAttemptID == nil else { throw CCAPIError.invalidResponse("A recording command is already active.") }
+        try attempt.admit(owner: recordingOwner, starting: starting)
+        let id = attempt.snapshot.id
+        recordingAttemptID = id
+        defer { if recordingAttemptID == id { recordingAttemptID = nil }; attempt.complete() }
+        if starting {
+            guard recordingCommandEvidence == nil, recording != true else {
+                throw CCAPIError.invalidResponse("Stop the current recording before another Start.")
+            }
+            try beginCameraMutation()
+        }
+        defer { if starting { cameraMutationCount -= 1 } }
+        try await ensureInitialized()
+        if starting {
+            try await refreshTemperatureStatusForRestrictedCommand()
+            try requireTemperatureAllowsMovieRecording()
+        }
+        let operation: CCAPIOperation
+        if resolvedMode == .simulator {
+            operation = CCAPIOperation(method: .post, path: "/ccapi/record/\(starting ? "start" : "stop")")
+        } else if !starting, let retainedRecordingStop {
+            operation = retainedRecordingStop
+        } else {
+            guard let advertised = recordingOperation() else { throw CCAPIError.unsupported(.videoRecording) }
+            operation = advertised
+        }
+        let command = try request(path: operation.path, method: operation.method,
+            json: resolvedMode == .simulator ? [:] : ["action": starting ? "start" : "stop"])
+        guard !closing else { throw CCAPIError.notInitialized }
+        let previous = recordingCommandEvidence
+        try attempt.markDispatched()
+        recordingRevision = UUID()
+        recordingCommandEvidence = .unconfirmed(starting: starting)
+        retainedRecordingStop = resolvedMode == .simulator
+            ? CCAPIOperation(method: .post, path: "/ccapi/record/stop") : operation
+        let exchange: CameraHTTPRecordingResponse
+        do { exchange = try await transport.sendRecordingCommand(command) }
+        catch {
+            attempt.complete()
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
+            throw CCAPIError.recordingCommandUnconfirmed(starting: starting)
+        }
+        let response = exchange.response
+        if !(200..<300).contains(response.statusCode) {
+            attempt.recordResponse(.rejected)
+            recordingCommandEvidence = previous
+        } else if exchange.bodyComplete,
+                  CameraRecordingWire.validDirectAcknowledgement(response, simulator: resolvedMode == .simulator) {
+            attempt.recordResponse(.responseReceived)
+            if !closing, !exchange.cancelled, !Task.isCancelled {
+                recordingCommandEvidence = starting ? .acknowledged(starting: true) : nil
+                if !starting { recording = nil }
+                observedFeatures.insert(.videoRecording)
+            }
+        }
+        if exchange.cancelled { attempt.complete(); throw CancellationError() }
+        try Task.checkCancellation()
+        guard !closing else { throw CCAPIError.notInitialized }
+        let responseEvidence = attempt.snapshot.responseEvidence
+        guard responseEvidence == .responseReceived else {
+            attempt.complete()
+            if responseEvidence == .unconfirmed { throw CCAPIError.recordingCommandUnconfirmed(starting: starting) }
+            return attempt.snapshot
+        }
+        do {
+            let observation = try await recordingObservation()
+            guard !closing, recordingAttemptID == id else { throw CCAPIError.notInitialized }
+            attempt.complete(observation)
+        } catch {
+            attempt.complete(.readFailed)
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
+        }
+        return attempt.snapshot
+    }
+
+    /// Direct Canon currently has no proven REC GET. Its ACK cache is never
+    /// relabelled as observation, and recovery never rediscovers or sends REC.
+    public func recordingObservation() async throws -> CameraRecordingObservation {
+        try Task.checkCancellation()
+        guard !closing else { throw CCAPIError.notInitialized }
+        try await ensureInitialized()
+        guard resolvedMode == .simulator else { return .unavailable }
+        var read = try request(path: "/ccapi/status", method: .get)
+        read.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let revision = recordingRevision
+        let response = try await transport.sendRecordingStatus(read)
+        try Task.checkCancellation()
+        guard !closing, revision == recordingRevision, response.statusCode == 200, response.header("content-range") == nil,
+              response.body.count <= 32 * 1024 else { throw CCAPIError.invalidResponse("Recording observation was incomplete.") }
+        try CameraHTTPResponseIntegrity.validate(response, requestMethod: "GET")
+        let status = try parseSimulatorStatus(CameraRecordingWire.decode(response.body))
+        guard let observed = status.recording else { return .unavailable }
+        recording = observed
+        if !observed { recordingCommandEvidence = nil }
+        return .observed(observed, source: "ccapi-simulator")
+    }
+
     private func setRecording(_ enabled: Bool) async throws -> CameraStatus {
         try Task.checkCancellation()
         try await ensureInitialized()
@@ -5100,11 +5209,10 @@ public actor CCAPIClient: CameraForegroundMediaReading {
             catch { throw CCAPIError.recordingCommandUnconfirmed(starting: enabled) }
         }
         recordingCommandEvidence = .acknowledged(starting: enabled)
-        recording = enabled
         observedFeatures.insert(.videoRecording)
         do {
             let status = try await status()
-            if status.recording == false { recordingCommandEvidence = nil }
+            if resolvedMode == .simulator, status.recording == false { recordingCommandEvidence = nil }
             return status
         } catch {
             // Cancellation retains its existing propagation contract. In camera

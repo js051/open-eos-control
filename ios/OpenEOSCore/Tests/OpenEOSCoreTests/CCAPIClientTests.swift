@@ -3975,9 +3975,9 @@ final class CCAPIClientTests: XCTestCase {
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
 
         let started = try await client.startRecording()
-        XCTAssertEqual(started.recording, true)
+        XCTAssertNil(started.recording, "Canon ACK is not a fresh recording observation")
         let stopped = try await client.stopRecording()
-        XCTAssertEqual(stopped.recording, false)
+        XCTAssertNil(stopped.recording, "Canon ACK is not a fresh recording observation")
 
         let stop = (await transport.requests()).last { request in
             request.method == "POST" && request.path == "/ccapi/ver100/shooting/control/recbutton"

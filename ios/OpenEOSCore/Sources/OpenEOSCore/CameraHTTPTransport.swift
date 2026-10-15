@@ -118,6 +118,7 @@ public protocol CameraHTTPTransport: Sendable {
     func sendCaptureConfiguration(_ request: URLRequest) async throws -> CameraHTTPResponse
     func sendMaintenance(_ request: URLRequest) async throws -> CameraHTTPResponse
     func sendRecordingCommand(_ request: URLRequest) async throws -> CameraHTTPRecordingResponse
+    func sendRecordingStatus(_ request: URLRequest) async throws -> CameraHTTPResponse
     func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse
     func openMaintenanceStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse
     func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse
@@ -159,6 +160,11 @@ public extension CameraHTTPTransport {
         // Existing custom transports retain their send/cancellation contract.
         // There is exactly one invocation, never a fallback after failure.
         CameraHTTPRecordingResponse(response: try await send(request))
+    }
+
+    /// Read-only recovery uses one bounded exchange, never a command replay.
+    func sendRecordingStatus(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        try await send(request)
     }
 
     func openMaintenanceStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {
@@ -337,42 +343,17 @@ public final class URLSessionCameraHTTPTransport: CameraHTTPTransport, @unchecke
     func sendRecordingCommand(
         _ request: URLRequest, onResponseHeaders: (@Sendable (Int) -> Void)?
     ) async throws -> CameraHTTPRecordingResponse {
-        try Task.checkCancellation()
-        let handle = CameraHTTPStreamTaskHandle(
-            configuration: streamConfiguration, maximumBytes: CameraHTTPResponseBodyAccumulator.maximumBytes
-        )
-        let stream = try await withTaskCancellationHandler {
-            try await handle.start(request)
-        } onCancel: {
-            handle.cancel()
+        try await CameraHTTPRecordingTask(configuration: streamConfiguration, onResponseHeaders: onResponseHeaders).run(request)
+    }
+
+    public func sendRecordingStatus(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        guard request.httpMethod == "GET", request.httpBody == nil else {
+            throw CCAPIError.invalidResponse("Recording recovery must be read-only.")
         }
-        defer { stream.cancel() }
-        onResponseHeaders?(stream.statusCode)
-        return await withTaskCancellationHandler {
-            var body = CameraHTTPResponseBodyAccumulator()
-            do {
-                for try await chunk in stream.chunks {
-                    guard body.append(chunk) else {
-                        throw CCAPIError.invalidResponse("Recording response exceeded the 32 KiB limit.")
-                    }
-                }
-                let response = CameraHTTPResponse(statusCode: stream.statusCode, headers: stream.headers, body: body.data)
-                try CameraHTTPResponseIntegrity.validate(response, requestMethod: request.httpMethod ?? "GET")
-                return CameraHTTPRecordingResponse(
-                    response: response,
-                    bodyComplete: handle.recordingBodyCompleted(collectedBytes: body.data.count),
-                    cancelled: Task.isCancelled
-                )
-            } catch {
-                return CameraHTTPRecordingResponse(
-                    response: CameraHTTPResponse(statusCode: stream.statusCode, headers: stream.headers, body: body.data),
-                    bodyComplete: false,
-                    cancelled: Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
-                )
-            }
-        } onCancel: {
-            stream.cancel()
-        }
+        let exchange = try await CameraHTTPRecordingTask(configuration: streamConfiguration).run(request)
+        if exchange.cancelled { throw CancellationError() }
+        guard exchange.bodyComplete else { throw CCAPIError.invalidResponse("Recording observation did not complete.") }
+        return exchange.response
     }
 
     public func openMaintenanceStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse {

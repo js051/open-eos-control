@@ -919,7 +919,7 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
                 object = ["connected": true, "model": "Synthetic control \(owner)", "serial": "SYNTHETIC-\(owner)", "api": "fixture"]
             }
         case .status:
-            object = statusJSON()
+            object = path.hasSuffix("/recording/observation") ? recordingObservationJSON() : statusJSON()
         case .capabilities:
             object = path.hasSuffix("/settings/iso")
                 ? ["version": 1, "engine": "ccapi", "setting": shootingSettingJSON()]
@@ -967,7 +967,9 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             }
         case .recordingStart, .recordingStop:
             recording = wire == .recordingStart
-            object = statusJSON()
+            object = simulator ? statusJSON() : ["version": 1, "engine": "ccapi",
+                "operation": wire == .recordingStart ? "start" : "stop", "responseEvidence": "response-received",
+                "observation": recordingObservationJSON()]
         case .setting:
             iso = "800"
             object = simulator ? statusJSON() : ["version": 1, "engine": "ccapi", "key": "iso",
@@ -1023,7 +1025,7 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         switch (method, suffix) {
         case ("DELETE", ""): return .close
         case ("GET", "/info"): return .info
-        case ("GET", "/status"): return .status
+        case ("GET", "/status"), ("GET", "/recording/observation"): return .status
         case ("GET", "/capabilities"), ("GET", "/settings/iso"): return .capabilities
         case ("GET", "/capture-configuration/create-directory"): return .directoryReadback
         case ("GET", "/capture-configuration/set-file-naming"): return .namingReadback
@@ -1042,8 +1044,8 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case ("POST", "/focus/auto"): return .autofocus
         case ("POST", "/shutter/half-press"): return .halfPress
         case ("POST", "/shutter/release"): return .shutterRelease
-        case ("POST", "/record/start"), ("POST", "/recording/start"): return .recordingStart
-        case ("POST", "/record/stop"), ("POST", "/recording/stop"): return .recordingStop
+        case ("POST", "/record/start"), ("POST", "/recording/start/outcome"): return .recordingStart
+        case ("POST", "/record/stop"), ("POST", "/recording/stop/outcome"): return .recordingStop
         case ("POST", "/focus/tap"): return .tap
         case ("POST", "/whitebalance/click"): return .whiteBalance
         case ("POST", "/focus/drive"): return .drive
@@ -1055,6 +1057,11 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
 
     private func shootingSettingJSON() -> [String: Any] {
         ["key": "iso", "label": "ISO", "value": iso, "values": ["100", "800"], "inputKind": "choice"]
+    }
+
+    private func recordingObservationJSON() -> [String: Any] {
+        ["version": 1, "engine": "ccapi", "observationEvidence": "observed", "recording": recording,
+         "source": "ccapi-simulator"]
     }
 
     private func statusJSON() -> [String: Any] {

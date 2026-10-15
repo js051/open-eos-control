@@ -253,6 +253,20 @@ enum CameraSession: Sendable {
         }
     }
 
+    func recordingOutcome(starting: Bool, attempt: CameraRecordingAttempt) async throws -> CameraRecordingOutcome {
+        switch self {
+        case let .ccapi(client): return try await client.recordingOutcome(starting: starting, attempt: attempt)
+        case let .desktopBridge(client): return try await client.recordingOutcome(starting: starting, attempt: attempt)
+        }
+    }
+
+    func recordingObservation() async throws -> CameraRecordingObservation {
+        switch self {
+        case let .ccapi(client): return try await client.recordingObservation()
+        case let .desktopBridge(client): return try await client.recordingObservation()
+        }
+    }
+
     func recordingCommandEvidence() async -> CameraRecordingCommandEvidence? {
         switch self {
         case let .ccapi(client): return await client.recordingCommandEvidence

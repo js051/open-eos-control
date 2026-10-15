@@ -110,7 +110,7 @@ final class RecordingReadbackClientTests: XCTestCase {
             let physicalRecording = await peer.cameraRecording()
             XCTAssertTrue(physicalRecording, "The peer applied Start independently before dropping its reply")
             let refreshed = try await client.status()
-            if mode == .canonical { XCTAssertEqual(refreshed.recording, false, "Canonical status is the previous ACK cache") }
+            if mode == .canonical { XCTAssertNil(refreshed.recording, "Canonical status cannot expose an ACK direction as observation") }
             let evidence = await client.recordingCommandEvidence
             XCTAssertEqual(evidence, .unconfirmed(starting: true))
             let actions = await peer.actions()
@@ -419,9 +419,8 @@ final class RecordingReadbackClientTests: XCTestCase {
                 let peer = RecordingBoundaryTransport(mode: .canonical, readFault: fault)
                 let client = try CCAPIClient(baseURL: "http://127.0.0.1:18080", mode: .camera, transport: peer)
                 let status = starting ? try await client.startRecording() : try await client.stopRecording()
-                // This existing canonical value is the client's acknowledged
-                // direction, not an independent physical recording observation.
-                XCTAssertEqual(status.recording, starting)
+                // Command acknowledgement is not independent camera state.
+                XCTAssertNil(status.recording)
                 let actions = await peer.actions()
                 XCTAssertEqual(actions, [starting ? "start" : "stop"])
                 let reads = await peer.statusReadCount()

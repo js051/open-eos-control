@@ -110,12 +110,12 @@ final class CameraAppState: ObservableObject {
         didSet {
             shootingSettingObservationRevision &+= 1
             liveViewMagnification = snapshot?.capabilities.liveView.currentMagnification
-            if recordingRecovery != nil {
+            if recordingStopRequired || recordingRecovery != nil {
                 captureMode = .video
             } else if let setting = snapshot.flatMap({ captureModeSetting($0.capabilities.settings) }),
                let mode = appCaptureMode(for: setting) {
                 captureMode = mode
-            } else if snapshot?.status.recording == true {
+            } else if recording {
                 captureMode = .video
             }
             revokeUnsafeMaintenanceMutation()
@@ -148,6 +148,13 @@ final class CameraAppState: ObservableObject {
         didSet { revokeUnsafeMaintenanceMutation() }
     }
     var recordingRecovery: RecordingReadbackRecovery? { recordingCommandRecovery ?? recordingReadbackRecovery }
+    @Published private(set) var recordingOutcomes: [CameraRecordingOutcome] = []
+    @Published private(set) var recordingObservation = CameraRecordingObservation.unavailable
+    // Command duty and observed recording are different facts. A complete Stop
+    // response permits a deliberate new Start while observed state stays unknown.
+    private var recordingStopDuty: Bool?
+    private var recordingActiveAttemptID: UUID?
+    private var recordingStopReviewOwner: RecordingReadbackRecovery?
     @Published var activeSheet: CameraSheet? {
         didSet { if activeSheet != nil { releaseHeldAutofocus(); invalidateCameraFocusInfo() } }
     }
@@ -434,8 +441,10 @@ final class CameraAppState: ObservableObject {
         return MediaBatchExportPayload(ownedFile: downloadedOwnedFile)
     }
 
-    var recording: Bool { snapshot?.status.recording == true }
-    var recordingStopRequired: Bool { recording || recordingRecovery != nil }
+    var recording: Bool {
+        recordingOutcomes.isEmpty ? snapshot?.status.recording == true : recordingObservation.observedRecording == true
+    }
+    var recordingStopRequired: Bool { recordingStopDuty ?? (recording || recordingRecovery != nil) }
     var shutterAutofocusAllowed: Bool { shutterAutofocus || capabilities?.shutterAutofocusSupported == true }
     var showShutterAutofocus: Bool {
         connected && !isPreview && captureMode == .photo && !bulbMode && supports(.stillCapture)
@@ -586,8 +595,11 @@ final class CameraAppState: ObservableObject {
     }
 
     private func shutterControlIsBusy(_ operation: CameraOperation) -> Bool {
-        (operation == .capture || operation == .focus)
-            && (busyOperations.contains(.capture) || busyOperations.contains(.focus))
+        if operation == .recording {
+            return busyOperations.contains(.capture) || busyOperations.contains(.focus)
+        }
+        return (operation == .capture || operation == .focus)
+            && (busyOperations.contains(.capture) || busyOperations.contains(.focus) || busyOperations.contains(.recording))
     }
 
     func setBaseURL(_ value: String) {
@@ -957,6 +969,11 @@ final class CameraAppState: ObservableObject {
         maintenanceControlsPaused = false
         recordingReadbackRecovery = nil
         recordingCommandRecovery = nil
+        recordingStopDuty = nil
+        recordingActiveAttemptID = nil
+        recordingStopReviewOwner = nil
+        recordingObservation = .unavailable
+        recordingOutcomes = []
         pendingLiveViewStartTask?.cancel()
         pendingLiveViewStartTask = nil
         pendingLiveViewStartID = nil
@@ -1009,6 +1026,22 @@ final class CameraAppState: ObservableObject {
         return closingSession
     }
 
+    func refreshRecordingObservation() async {
+        guard !busyOperations.contains(.recording), let session, let recovery = recordingRecovery, begin(.refresh) else { return }
+        let generation = sessionGeneration, revision = operationRevision
+        defer { end(.refresh, generation: generation) }
+        do {
+            let observation = try await session.recordingObservation()
+            guard generation == sessionGeneration, revision == operationRevision,
+                  recordingRecovery?.commandID == recovery.commandID else { return }
+            lastError = nil
+            settleRecordingReadback(observation, expectedCommandID: recovery.commandID, session: session)
+        } catch {
+            guard generation == sessionGeneration, revision == operationRevision else { return }
+            record(error)
+        }
+    }
+
     func refresh() async {
         guard !busyOperations.contains(.recording), let session, begin(.refresh) else { return }
         let generation = sessionGeneration
@@ -1020,21 +1053,38 @@ final class CameraAppState: ObservableObject {
             if let recordingRecoveryID {
                 // Recovery is a status read only. Refreshing capabilities here
                 // could clamp FPS and restart Live View while REC is uncertain.
-                let status = try await session.status()
+                let observation = try await session.recordingObservation()
                 let release = await session.shutterReleaseState()
                 guard generation == sessionGeneration, revision == operationRevision,
                       recordingRecovery?.commandID == recordingRecoveryID else { return }
-                snapshot = snapshot?.replacing(status: status)
                 applyShutterReleaseState(release, pauseLiveView: false)
                 lastError = nil
-                settleRecordingReadback(status, expectedCommandID: recordingRecoveryID, session: session)
+                settleRecordingReadback(observation, expectedCommandID: recordingRecoveryID, session: session)
+                if !recordingStopRequired, observation.observedRecording == nil {
+                    // Ordinary global Refresh must not starve battery, thermal,
+                    // and settings after a Stop ACK with unavailable REC evidence.
+                    // This read cannot settle REC or trigger capability/LV changes.
+                    let ordinary = try await session.status()
+                    guard generation == sessionGeneration, revision == operationRevision,
+                          recordingRecovery?.commandID == recordingRecoveryID else { return }
+                    if let current = snapshot {
+                        snapshot = current.replacing(status: ordinary.withRecordingObservation(observation))
+                    }
+                }
                 return
             }
+            let freshRecording = recordingOutcomes.isEmpty ? nil : try await session.recordingObservation()
             let refreshed = try await session.connectSnapshot()
             let release = await session.shutterReleaseState()
             let liveViewStop = await session.liveViewStopState()
             guard generation == sessionGeneration, revision == operationRevision else { return }
-            snapshot = refreshed
+            if let freshRecording {
+                recordingObservation = freshRecording
+                if let observed = freshRecording.observedRecording { recordingStopDuty = observed }
+                completeOwnedRecordingReview(freshRecording, session: session)
+            }
+            snapshot = recordingOutcomes.isEmpty ? refreshed
+                : refreshed.replacing(status: refreshed.status.withRecordingObservation(recordingObservation))
             liveViewStopState = liveViewStop
             if liveViewStop.stopUnconfirmed { activeLiveViewSource = nil; stopLiveViewLoop() }
             applyShutterReleaseState(release)
@@ -1045,6 +1095,7 @@ final class CameraAppState: ObservableObject {
             clampLiveViewRequest()
         } catch {
             guard generation == sessionGeneration, revision == operationRevision else { return }
+            if !recordingOutcomes.isEmpty { recordingObservation = .readFailed }
             record(error)
         }
     }
@@ -2050,6 +2101,15 @@ final class CameraAppState: ObservableObject {
         }
     }
 
+    func performCaptureButtonAction() async {
+        if shutterReleaseRequired { await retryShutterRelease() }
+        else if recordingStopRequired { await toggleRecording() }
+        else if captureMode == .photo {
+            if bulbMode { await toggleBulbExposure() }
+            else { await captureStill() }
+        } else { await toggleRecording() }
+    }
+
     func toggleRecording() async {
         guard !Task.isCancelled else { return }
         let wasRecording = recordingStopRequired
@@ -2063,101 +2123,89 @@ final class CameraAppState: ObservableObject {
             return
         }
         guard let session else { return }
-        if wasRecording, recordingRecovery == nil || pendingCaptureReview?.kind != .video {
+        if wasRecording, pendingCaptureReview?.kind != .video {
             prepareCaptureMediaReview(kind: .video)
-        }
-        let commandID = UUID()
-        do {
-            let newStatus = wasRecording ? try await session.stopRecording() : try await session.startRecording()
-            guard generation == sessionGeneration else { return }
-            updateStatus(newStatus)
-            lastError = nil
-            recordingCommandRecovery = nil
-            if newStatus.recording == nil {
-                retainRecordingReadback(starting: !wasRecording, commandID: commandID)
-            } else {
-                recordingReadbackRecovery = nil
-                if !wasRecording, newStatus.recording == false {
-                    lastError = NSLocalizedString("recording_start_not_confirmed", comment: "")
-                }
-            }
-            if wasRecording {
-                // Review begins only after an explicit stopped status. Unknown
-                // status keeps the bounded attempt for a later read-only refresh.
-                if newStatus.recording == false, let review = pendingCaptureReview {
-                    startLatestMediaRefresh(session: session, review: review)
-                } else if newStatus.recording != nil {
-                    pendingCaptureReview = nil
-                    captureReviewState = .idle
-                } else {
-                    captureReviewState = .idle
-                }
-            }
-        } catch {
-            guard generation == sessionGeneration else { return }
-            let evidence: CameraRecordingCommandEvidence?
-            if let error = error as? CCAPIError, case let .recordingStatusReadbackFailed(starting) = error {
-                evidence = .acknowledged(starting: starting)
-            } else if let error = error as? DesktopBridgeError, case let .recordingStatusReadbackFailed(starting) = error {
-                evidence = .acknowledged(starting: starting)
-            } else if let error = error as? CCAPIError, case let .recordingCommandUnconfirmed(starting) = error {
-                evidence = .unconfirmed(starting: starting)
-            } else if let error = error as? DesktopBridgeError, case let .recordingCommandUnconfirmed(starting) = error {
-                evidence = .unconfirmed(starting: starting)
-            } else if error is CancellationError || (error as? URLError)?.code == .cancelled {
-                // Cancellation remains cancellation in Core. Consult the exact
-                // client's send-boundary evidence without replaying any request.
-                evidence = await session.recordingCommandEvidence()
-            } else {
-                evidence = nil
-            }
-            guard generation == sessionGeneration else { return }
-            switch evidence {
-            case let .some(.acknowledged(starting)) where starting == !wasRecording:
-                retainRecordingReadback(starting: starting, commandID: commandID)
-            case let .some(.unconfirmed(starting)) where starting == !wasRecording:
-                recordingReadbackRecovery = nil
-                recordingCommandRecovery = RecordingReadbackRecovery(
-                    sessionGeneration: generation, commandID: commandID, starting: starting
-                )
-                captureMode = .video
-                record(error)
-            default:
-                record(error)
-            }
-            if wasRecording {
-                if recordingRecovery == nil { pendingCaptureReview = nil }
-                captureReviewState = .idle
-            }
-        }
-    }
-
-    private func retainRecordingReadback(starting: Bool, commandID: UUID) {
-        recordingCommandRecovery = nil
-        recordingReadbackRecovery = RecordingReadbackRecovery(
-            sessionGeneration: sessionGeneration, commandID: commandID, starting: starting
-        )
-        captureMode = .video
-        lastError = nil
-    }
-
-    private func settleRecordingReadback(_ status: CameraStatus, expectedCommandID: UUID?, session: CameraSession) {
-        // Canonical CCAPI/Bridge status may merely echo the last ACK cache.
-        // No boolean read can settle a command whose response was not received.
-        guard recordingCommandRecovery == nil, let recovery = recordingReadbackRecovery,
-              recovery.sessionGeneration == sessionGeneration,
-              recovery.commandID == expectedCommandID,
-              !busyOperations.contains(.recording), let recording = status.recording else { return }
-        recordingReadbackRecovery = nil
-        if recovery.starting, !recording {
-            lastError = NSLocalizedString("recording_start_not_confirmed", comment: "")
-        }
-        if !recovery.starting, !recording, let review = pendingCaptureReview {
-            startLatestMediaRefresh(session: session, review: review)
-        } else if !recovery.starting {
+        } else if !wasRecording {
+            // A deliberate new Start retires the old Stop's media boundary.
             pendingCaptureReview = nil
+            recordingStopReviewOwner = nil
+            latestMediaTask?.cancel()
             captureReviewState = .idle
         }
+        let attempt = CameraRecordingAttempt(starting: !wasRecording)
+        let commandID = attempt.snapshot.id
+        recordingActiveAttemptID = commandID
+        if wasRecording {
+            recordingStopReviewOwner = RecordingReadbackRecovery(sessionGeneration: generation, commandID: commandID, starting: false)
+        }
+        do {
+            let outcome = try await session.recordingOutcome(starting: !wasRecording, attempt: attempt)
+            guard generation == sessionGeneration, recordingActiveAttemptID == commandID else { return }
+            applyRecordingOutcome(outcome, previousDuty: wasRecording, cancelled: Task.isCancelled, session: session)
+        } catch {
+            guard generation == sessionGeneration, recordingActiveAttemptID == commandID else { return }
+            let cancelled = Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
+            applyRecordingOutcome(attempt.snapshot, previousDuty: wasRecording, cancelled: cancelled, session: session)
+            record(error)
+        }
+        if generation == sessionGeneration, recordingActiveAttemptID == commandID { recordingActiveAttemptID = nil }
+    }
+
+    private func applyRecordingOutcome(_ outcome: CameraRecordingOutcome, previousDuty: Bool,
+                                       cancelled: Bool, session: CameraSession) {
+        recordingOutcomes.append(outcome)
+        if recordingOutcomes.count > 20 { recordingOutcomes.removeFirst(recordingOutcomes.count - 20) }
+        // Cancellation suppresses publication but cannot discard an admitted
+        // Start or clear an existing Stop duty from a late success/observation.
+        let response = cancelled && outcome.responseEvidence != .notSent && outcome.responseEvidence != .rejected
+            ? CameraRecordingResponseEvidence.unconfirmed : outcome.responseEvidence
+        let observation = cancelled ? CameraRecordingObservation.unavailable : outcome.observation
+        recordingStopDuty = CameraRecordingPolicy.stopRequired(previous: previousDuty, starting: outcome.starting,
+            response: response, observation: observation)
+        guard response != .notSent && response != .rejected || observation.observedRecording != nil else {
+            if !cancelled, response == .rejected { lastError = NSLocalizedString("recording_command_rejected", comment: "") }
+            return
+        }
+        recordingObservation = observation
+        if !cancelled, observation.observedRecording != nil || (!outcome.starting && response == .responseReceived),
+           let current = snapshot { snapshot = current.replacing(status: current.status.withRecordingObservation(observation)) }
+        lastError = nil
+        recordingCommandRecovery = nil
+        recordingReadbackRecovery = nil
+        if observation.observedRecording == nil {
+            let recovery = RecordingReadbackRecovery(sessionGeneration: sessionGeneration, commandID: outcome.id, starting: outcome.starting)
+            if response == .unconfirmed { recordingCommandRecovery = recovery }
+            else { recordingReadbackRecovery = recovery }
+            captureMode = .video
+            captureReviewState = .idle
+        } else if outcome.starting, observation.observedRecording == false {
+            lastError = NSLocalizedString("recording_start_not_confirmed", comment: "")
+        }
+        if !cancelled, !outcome.starting { completeOwnedRecordingReview(observation, session: session) }
+    }
+
+    private func completeOwnedRecordingReview(_ observation: CameraRecordingObservation, session: CameraSession) {
+        guard let owner = recordingStopReviewOwner, owner.sessionGeneration == sessionGeneration,
+              recordingActiveAttemptID == nil || recordingActiveAttemptID == owner.commandID,
+              observation.observedRecording == false, let review = pendingCaptureReview, review.kind == .video else { return }
+        recordingStopReviewOwner = nil
+        startLatestMediaRefresh(session: session, review: review)
+    }
+
+    private func settleRecordingReadback(_ observation: CameraRecordingObservation, expectedCommandID: UUID?, session: CameraSession) {
+        guard let recovery = recordingRecovery,
+              recovery.sessionGeneration == sessionGeneration, recovery.commandID == expectedCommandID,
+              !busyOperations.contains(.recording), !Task.isCancelled else { return }
+        recordingObservation = observation
+        guard let recording = observation.observedRecording else { return }
+        // This is a separate fresh observation, never an upgrade of the original
+        // response record. Cached /status values never enter this method.
+        if let current = snapshot { snapshot = current.replacing(status: current.status.withRecordingObservation(observation)) }
+        recordingStopDuty = recording
+        recordingReadbackRecovery = nil
+        recordingCommandRecovery = nil
+        if recovery.starting, !recording { lastError = NSLocalizedString("recording_start_not_confirmed", comment: "") }
+        if !recovery.starting { completeOwnedRecordingReview(observation, session: session) }
     }
 
     func tapFocus(x: Double, y: Double) async {
@@ -4558,7 +4606,7 @@ final class CameraAppState: ObservableObject {
 
     private func updateStatus(_ status: CameraStatus) {
         guard let snapshot else { return }
-        self.snapshot = snapshot.replacing(status: status)
+        self.snapshot = snapshot.replacing(status: recordingOutcomes.isEmpty ? status : status.withRecordingObservation(recordingObservation))
         adoptReportedShutterState(status)
         if bulbExposureActive {
             bulbStartedAt = bulbStartedAt ?? Date()
@@ -4668,12 +4716,18 @@ final class CameraAppState: ObservableObject {
                     guard generation == eventGeneration, !Task.isCancelled else { break }
                     guard refreshed.revision == operationRevision, busyOperations.isEmpty else { continue }
                     let wasReleaseRequired = shutterReleaseRequired
-                    snapshot = refreshed.snapshot
+                    if refreshed.recordingRecoveryID == nil, let observation = refreshed.recordingObservation {
+                        recordingObservation = observation
+                        if let observed = observation.observedRecording { recordingStopDuty = observed }
+                        completeOwnedRecordingReview(observation, session: session)
+                    }
+                    snapshot = recordingOutcomes.isEmpty ? refreshed.snapshot
+                        : refreshed.snapshot.replacing(status: refreshed.snapshot.status.withRecordingObservation(recordingObservation))
                     let recoveringRecording = refreshed.recordingRecoveryID != nil
                     applyShutterReleaseState(refreshed.release, pauseLiveView: !recoveringRecording)
                     if recoveringRecording {
                         lastError = nil
-                        settleRecordingReadback(refreshed.snapshot.status, expectedCommandID: refreshed.recordingRecoveryID, session: session)
+                        settleRecordingReadback(refreshed.recordingObservation ?? .unavailable, expectedCommandID: refreshed.recordingRecoveryID, session: session)
                     } else {
                         if wasReleaseRequired, !shutterReleaseRequired {
                             resumeLiveViewAfterBulb(session: session, generation: sessionGeneration)
@@ -4721,7 +4775,7 @@ final class CameraAppState: ObservableObject {
     private func stableEventSnapshot(
         session: CameraSession,
         generation: UUID
-    ) async throws -> (snapshot: CameraSnapshot, release: CameraShutterReleaseState, revision: UInt64, recordingRecoveryID: UUID?)? {
+    ) async throws -> (snapshot: CameraSnapshot, release: CameraShutterReleaseState, revision: UInt64, recordingRecoveryID: UUID?, recordingObservation: CameraRecordingObservation?)? {
         while generation == eventGeneration, !Task.isCancelled {
             while !busyOperations.isEmpty, generation == eventGeneration, !Task.isCancelled {
                 try await Task.sleep(nanoseconds: 50_000_000)
@@ -4731,15 +4785,20 @@ final class CameraAppState: ObservableObject {
             let revision = operationRevision
             let recordingRecoveryID = recordingRecovery?.commandID
             let refreshed: CameraSnapshot
+            let observation: CameraRecordingObservation?
             if recordingRecoveryID != nil, let current = snapshot {
-                refreshed = current.replacing(status: try await session.status())
+                observation = try await session.recordingObservation()
+                if !recordingStopRequired, observation?.observedRecording == nil {
+                    refreshed = current.replacing(status: try await session.status())
+                } else { refreshed = current }
             } else {
+                observation = recordingOutcomes.isEmpty ? nil : try await session.recordingObservation()
                 refreshed = try await session.connectSnapshot()
             }
             let release = await session.shutterReleaseState()
             guard generation == eventGeneration, !Task.isCancelled else { return nil }
             if revision == operationRevision, busyOperations.isEmpty {
-                return (refreshed, release, revision, recordingRecoveryID)
+                return (refreshed, release, revision, recordingRecoveryID, observation)
             }
         }
         return nil
