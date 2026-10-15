@@ -4536,8 +4536,16 @@ final class CameraAppState: ObservableObject {
             "rtpAudioPackets=\(rtpAudioStatus.packetsReceived)",
             "rtpAudioAccessUnits=\(rtpAudioStatus.accessUnitsReceived)",
             "rtpAudioDecoded=\(rtpAudioStatus.decodedAccessUnits)",
-            "rtpAudioPlayedFrames=\(rtpAudioStatus.playedSampleFrames)",
+            "rtpAudioDecoderInputs=\(rtpAudioStatus.decoderInputs)",
+            "rtpAudioDecodedFrames=\(rtpAudioStatus.decodedSampleFrames)",
+            "rtpAudioSubmittedFrames=\(rtpAudioStatus.submittedSampleFrames)",
+            "rtpAudioPlayerRenderedFrames=\(rtpAudioStatus.renderedSampleFrames)",
+            "rtpAudioOutputProgress=\(rtpAudioStatus.outputProgress.rawValue)",
+            "rtpAudioRenderProgressSupported=\(rtpAudioStatus.renderProgressSupported)",
+            "rtpAudioAudibility=unknown",
+            "rtpAudioResourcesRetiring=\(rtpAudioStatus.retiringResources)",
             "rtpAudioDropped=\(rtpAudioStatus.droppedAccessUnits)",
+            "rtpAudioExpiredOutputBuffers=\(rtpAudioStatus.expiredOutputBuffers)",
             "rtpAudioLastPacket=\(rtpAudioStatus.lastPacketAt.map { ISO8601DateFormatter().string(from: $0) } ?? "none")",
             "rtpAudioLastPCM=\(rtpAudioStatus.lastPCMAt.map { ISO8601DateFormatter().string(from: $0) } ?? "none")",
             "rtpAudioReason=\(rtpAudioStatus.reason ?? "none")",
@@ -5034,6 +5042,7 @@ final class CameraAppState: ObservableObject {
         switch event {
         case let .audioStatus(status):
             rtpAudioStatus = status
+            rtpAudioRequested = status.requested
         case let .frame(encodedBytes, at):
             guard activeLiveViewSource == .ccapiRTP else { return }
             frameBytes = encodedBytes

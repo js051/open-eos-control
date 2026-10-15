@@ -523,9 +523,11 @@ private struct LiveViewSettingsView: View {
     }
 
     private func audioStatusText(_ status: IOSCcapiRTPAudioStatus) -> String {
+        if status.retiringResources { return language.string("camera_audio_retiring") }
         if status.error != nil { return language.string("camera_audio_failed") }
         if !status.available { return language.string("camera_audio_unavailable") }
         if status.enabled {
+            guard status.outputProgress == .rendering else { return language.string("camera_audio_output_unknown") }
             return language.format(
                 "camera_audio_active_format",
                 status.rtpClockRate ?? 48_000,

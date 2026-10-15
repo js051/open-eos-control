@@ -322,7 +322,8 @@
 "camera_audio_muted" = "預設靜音；只有開啟此選項且 App 位於前景時才會播放。";
 "camera_audio_unavailable" = "此 RTP 工作階段沒有可支援的相機音訊。";
 "camera_audio_failed" = "相機音訊已停止；請到 Debug 查看接收或解碼的完整錯誤。";
-"camera_audio_active_format" = "播放中 · %d Hz · %d 聲道";
+"camera_audio_active_format" = "播放器渲染有進度 · %d Hz · %d 聲道";
+"camera_audio_output_unknown" = "監聽已開啟，正在等待可驗證的播放器渲染進度；無法確認裝置實際發聲。";
 "lut_preview" = "3D LUT 預覽";
 "load_cube_lut" = "載入 .cube LUT";
 "remove_cube_lut" = "移除 LUT";
@@ -1029,3 +1030,5 @@
 "native_presentation_progressing" = "已驗證顯示影格持續更新";
 "native_presentation_unknown" = "解碼輸出 · 顯示進度未驗證";
 "native_presentation_stalled" = "原生輸出已停止更新";
+
+"camera_audio_retiring" = "音訊正在停止，原生輸出仍待退場；無法確認裝置實際發聲。";

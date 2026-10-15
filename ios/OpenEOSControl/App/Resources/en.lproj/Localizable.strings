@@ -322,7 +322,8 @@
 "camera_audio_muted" = "Muted by default. Audio plays only while this switch is on and the app is active.";
 "camera_audio_unavailable" = "This RTP session does not provide supported camera audio.";
 "camera_audio_failed" = "Camera audio stopped. Open Debug for the exact receiver or decoder error.";
-"camera_audio_active_format" = "Active · %d Hz · %d ch";
+"camera_audio_active_format" = "Player render progress · %d Hz · %d ch";
+"camera_audio_output_unknown" = "Monitoring enabled; waiting for verified player render progress. Device audibility is unknown.";
 "lut_preview" = "3D LUT preview";
 "load_cube_lut" = "Load .cube LUT";
 "remove_cube_lut" = "Remove LUT";
@@ -1029,3 +1030,5 @@
 "native_presentation_progressing" = "Display frame progress verified";
 "native_presentation_unknown" = "Decoded output · display progress unverified";
 "native_presentation_stalled" = "Native output stopped progressing";
+
+"camera_audio_retiring" = "Audio is stopping. Native output retirement is pending; device audibility is unknown.";

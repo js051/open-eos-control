@@ -17,23 +17,33 @@ enum IOSCcapiRTPEvent: Sendable {
 struct IOSCcapiRTPDelivery: Sendable {
     let owner: UUID
     let event: IOSCcapiRTPEvent
+    var audioEpoch: UUID? = nil
 }
 
 struct IOSCcapiRTPAudioStatus: Equatable, Sendable {
     var advertised = false
     var available = false
     var enabled = false
+    var requested = false
+    var outputProgress = IOSRTPAudioOutputProgress.inactive
+    var renderProgressSupported = false
+    var retiringResources = false
     var codec: String?
     var rtpPort: UInt16?
     var rtpClockRate: Int?
     var channels: Int?
     var packetsReceived = 0
     var accessUnitsReceived = 0
+    var decoderInputs = 0
     var decodedAccessUnits = 0
-    var playedSampleFrames = 0
+    var decodedSampleFrames = 0
+    var submittedSampleFrames = 0
+    var renderedSampleFrames = 0
     var droppedAccessUnits = 0
+    var expiredOutputBuffers = 0
     var lastPacketAt: Date?
     var lastPCMAt: Date?
+    var lastRenderAt: Date?
     var reason: String?
     var error: String?
 
@@ -114,7 +124,14 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
     private var terminalVideoFailure: String?
     private let videoConsumer: (@MainActor @Sendable (CCAPIH264AccessUnit) -> Void)?
     private let flushRenderer: @MainActor @Sendable (AVSampleBufferDisplayLayer, Bool, @escaping @Sendable () -> Void) -> Void
-    private let audioPipeline = IOSCcapiRTPAudioPipeline()
+    private let audioPipeline: IOSCcapiRTPAudioPipeline
+    private let audioClock: () -> TimeInterval
+    private var audioEpoch = UUID()
+    private var activeAudioToken: IOSRTPAudioPlaybackToken?
+    private var audioEnabledAt: TimeInterval?
+    private var lastAudioPCMAt: TimeInterval?
+    private var audioWatch: DispatchSourceTimer?
+    private let audioWatchQueue = DispatchQueue(label: "dev.openeos.control.audio-watch")
 
     @MainActor private weak var displayLayer: AVSampleBufferDisplayLayer?
     @MainActor private var latestSPS: Data?
@@ -150,7 +167,9 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
     @MainActor private var videoProcessingUnavailable = false
     @MainActor var isPixelReadbackSuspended: Bool { pixelReadbackBarrier != nil }
 
-    init(videoConsumer: (@MainActor @Sendable (CCAPIH264AccessUnit) -> Void)? = nil,
+    init(audioPipeline: IOSCcapiRTPAudioPipeline = IOSCcapiRTPAudioPipeline(),
+         audioClock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         videoConsumer: (@MainActor @Sendable (CCAPIH264AccessUnit) -> Void)? = nil,
          videoProcessor: IOSRTPVideoProcessor = IOSRTPVideoProcessor(),
          readinessDecoder: IOSRTPVideoProcessor = IOSRTPVideoProcessor(),
          readDisplayedPixels: @escaping @MainActor @Sendable (AVSampleBufferDisplayLayer) -> CVPixelBuffer? = {
@@ -160,37 +179,42 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
          flushRenderer: @escaping @MainActor @Sendable (AVSampleBufferDisplayLayer, Bool, @escaping @Sendable () -> Void) -> Void = {
              $0.sampleBufferRenderer.flush(removingDisplayedImage: $1, completionHandler: $2)
          }) {
+        self.audioPipeline = audioPipeline
+        self.audioClock = audioClock
         self.videoConsumer = videoConsumer
         self.videoProcessor = videoProcessor
         self.readinessDecoder = readinessDecoder
         self.readDisplayedPixels = readDisplayedPixels
         self.flushRenderer = flushRenderer
+        audioPipeline.setRetirementObserver { [weak self] in self?.audioRetirementChanged() }
+    }
+
+    deinit {
+        audioWatch?.cancel()
+        audioPipeline.retire()
+        audioQueue.async { [audioPipeline] in audioPipeline.resetRetiredDecoder() }
     }
 
     func accepts(_ delivery: IOSCcapiRTPDelivery) -> Bool {
         audioStateLock.synchronized {
             guard deliveryOwner == delivery.owner else { return false }
             if case .failed = delivery.event { return true }
+            if case .audioStatus = delivery.event, delivery.audioEpoch != audioEpoch { return false }
             return terminalVideoFailure == nil
         }
     }
 
     @MainActor
     func retireDelivery() {
-        let owner = audioStateLock.synchronized { () -> UUID in
+        audioStateLock.synchronized {
+            retireAudioLocked()
             activeAudioSessionID = nil
             deliveryOwner = UUID()
-            audioRequested = false
-            queuedAudioAccessUnits = 0
             audioStatus = .inactive
-            return deliveryOwner
-        }
-        audioQueue.async { [weak self] in
-            guard let self, self.audioStateLock.synchronized({ self.deliveryOwner == owner }) else { return }
-            self.audioPipeline.stop()
+            audioStatus.retiringResources = audioPipeline.isRetiring
         }
         clearRendererSession()
-        emit(.audioStatus(.inactive), owner: owner)
+        publishAudioStatus(force: true)
     }
 
     func makeSession(
@@ -386,18 +410,24 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
 
     @MainActor
     func setApplicationActive(_ active: Bool) {
-        audioStateLock.synchronized { applicationActive = active }
+        audioStateLock.synchronized {
+            applicationActive = active
+            if !active { audioRequested = false }
+        }
         if active { progress = IOSRTPPresentationProgress(); resetRenderer(removingImage: true) }
         if !active { resetRenderer(removingImage: true) }
         updateAudioActivation()
     }
 
     private func setMonitoringActive(_ active: Bool) {
-        audioStateLock.synchronized { monitoringActive = active }
+        audioStateLock.synchronized {
+            monitoringActive = active
+            if !active { audioRequested = false }
+        }
         updateAudioActivation()
     }
 
-    fileprivate func audioListenerReady(sessionID: UUID) {
+    func audioListenerReady(sessionID: UUID) {
         let updated = updateAudioStatus(sessionID: sessionID, force: true) { status in
             status.available = true
             status.reason = nil
@@ -407,86 +437,109 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
         updateAudioActivation()
     }
 
-    fileprivate func audioListenerFailed(sessionID: UUID, _ message: String) {
-        let updated = updateAudioStatus(sessionID: sessionID, force: true) { status in
-            audioRequested = false
-            status.available = false
-            status.enabled = false
-            status.error = message
+    func audioListenerFailed(sessionID: UUID, _ message: String) {
+        let updated = audioStateLock.synchronized { () -> Bool in
+            guard activeAudioSessionID == sessionID else { return false }
+            retireAudioLocked(progress: .failed, error: message)
+            audioStatus.available = false
+            return true
         }
-        if updated { stopAudioPipeline(unlessSessionReplaced: sessionID) }
+        if updated { publishAudioStatus(force: true, sessionID: sessionID) }
     }
 
-    fileprivate func recordAudioPacket(sessionID: UUID, at date: Date) {
+    func recordAudioPacket(sessionID: UUID, at date: Date) {
         updateAudioStatus(sessionID: sessionID) { status in
             status.packetsReceived += 1
             status.lastPacketAt = date
         }
     }
 
-    fileprivate func submitAudio(_ accessUnit: CCAPIAACAccessUnit, sessionID: UUID) {
-        let shouldDecode = audioStateLock.synchronized { () -> Bool in
-            guard activeAudioSessionID == sessionID else { return false }
+    func submitAudio(_ accessUnit: CCAPIAACAccessUnit, sessionID: UUID) {
+        let admission = audioStateLock.synchronized { () -> (IOSRTPAudioPlaybackToken, TimeInterval)? in
+            guard activeAudioSessionID == sessionID else { return nil }
             audioStatus.accessUnitsReceived += 1
             audioStatus.channels = accessUnit.format.channels
-            guard audioStatus.enabled, queuedAudioAccessUnits < maximumQueuedAudioAccessUnits else {
+            guard audioStatus.enabled, let token = activeAudioToken,
+                  queuedAudioAccessUnits < maximumQueuedAudioAccessUnits else {
                 if audioStatus.enabled { audioStatus.droppedAccessUnits += 1 }
-                return false
+                return nil
             }
             queuedAudioAccessUnits += 1
-            return true
+            return (token, audioClock() + maximumAudioAccessUnitAge)
         }
         publishAudioStatusIfNeeded(sessionID: sessionID)
-        guard shouldDecode else { return }
+        guard let (token, expiresAt) = admission else { return }
         audioQueue.async { [weak self] in
-            guard let self, self.isActiveAudioSession(sessionID) else { return }
+            guard let self else { return }
             defer {
                 self.audioStateLock.synchronized {
-                    guard self.activeAudioSessionID == sessionID else { return }
                     self.queuedAudioAccessUnits = max(self.queuedAudioAccessUnits - 1, 0)
                 }
             }
+            guard self.isActiveAudioToken(token) else { return }
             do {
-                let result = try self.audioPipeline.consume(accessUnit)
-                self.updateAudioStatus(sessionID: sessionID) { status in
-                    status.decodedAccessUnits += result.decodedAccessUnits
-                    status.playedSampleFrames += result.playedSampleFrames
-                    status.channels = result.channels
-                    if result.playedSampleFrames > 0 { status.lastPCMAt = Date() }
-                    if result.droppedForBackpressure { status.droppedAccessUnits += 1 }
-                    status.error = nil
-                }
+                guard let result = try self.audioPipeline.consume(accessUnit, token: token, expiresAt: expiresAt) else { return }
+                self.recordAudioResult(result, token: token)
             } catch {
-                let updated = self.updateAudioStatus(sessionID: sessionID, force: true) { status in
-                    self.audioRequested = false
-                    status.enabled = false
-                    status.error = "Canon RTP AAC playback failed: \(error.localizedDescription)"
-                }
-                if updated { self.stopAudioPipeline(unlessSessionReplaced: sessionID) }
+                self.failAudio(token: token, progress: .failed,
+                               message: "Canon RTP AAC playback failed: \(error.localizedDescription)")
             }
         }
     }
 
-    fileprivate func recordAudioParseFailure(sessionID: UUID, _ message: String) {
-        updateAudioStatus(sessionID: sessionID, force: true) { status in
+    private func recordAudioResult(_ result: IOSCcapiRTPAudioPlaybackResult, token: IOSRTPAudioPlaybackToken) {
+        updateAudioStatus(sessionID: token.owner, token: token) { status in
+            status.submittedSampleFrames += result.submittedSampleFrames
+            status.channels = result.channels
+            if result.dropped { status.droppedAccessUnits += 1 }
+            if status.renderedSampleFrames == 0 { status.outputProgress = .unknown }
+        }
+        pollAudioProgress(token: token)
+    }
+
+    /// Real watchdog drain reaches AVAudioConverter even after the final AU. It
+    /// shares the bounded decode queue and can never run a second decoder in parallel.
+    private func queueAudioDrain() {
+        let token = audioStateLock.synchronized { () -> IOSRTPAudioPlaybackToken? in
+            guard audioStatus.enabled, let token = activeAudioToken, queuedAudioAccessUnits == 0 else { return nil }
+            queuedAudioAccessUnits += 1
+            return token
+        }
+        guard let token else { return }
+        audioQueue.async { [weak self] in
+            guard let self else { return }
+            defer { self.audioStateLock.synchronized { self.queuedAudioAccessUnits -= 1 } }
+            guard self.isActiveAudioToken(token) else { return }
+            do {
+                if let result = try self.audioPipeline.drain(token: token) {
+                    self.recordAudioResult(result, token: token)
+                }
+            } catch {
+                self.failAudio(token: token, progress: .failed,
+                               message: "Canon RTP AAC drain failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func recordAudioParseFailure(sessionID: UUID, _ message: String) {
+        updateAudioStatus(sessionID: sessionID) { status in
             status.droppedAccessUnits += 1
-            status.error = message
+            status.reason = message
         }
     }
 
     fileprivate func endAudioSession(sessionID: UUID) {
         let owner = audioStateLock.synchronized { () -> UUID? in
             guard activeAudioSessionID == sessionID else { return nil }
+            retireAudioLocked()
             activeAudioSessionID = nil
             deliveryOwner = UUID()
-            audioRequested = false
-            queuedAudioAccessUnits = 0
             audioStatus = .inactive
+            audioStatus.retiringResources = audioPipeline.isRetiring
             return deliveryOwner
         }
         guard let owner else { return }
-        stopAudioPipeline(unlessSessionReplaced: sessionID)
-        emit(.audioStatus(.inactive), owner: owner)
+        publishAudioStatus(force: true)
         Task { @MainActor [weak self] in
             guard let self, self.audioStateLock.synchronized({ self.deliveryOwner == owner }) else { return }
             self.clearRendererSession()
@@ -635,11 +688,15 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
 
     func currentVideoFailure() -> String? { audioStateLock.synchronized { terminalVideoFailure } }
 
-    func emit(_ event: IOSCcapiRTPEvent, owner: UUID) {
-        let delivery = IOSCcapiRTPDelivery(owner: owner, event: event)
+    func emit(_ event: IOSCcapiRTPEvent, owner: UUID, audioEpoch: UUID? = nil) {
+        let delivery = IOSCcapiRTPDelivery(owner: owner, event: event, audioEpoch: audioEpoch)
         let accepted = audioStateLock.synchronized { () -> Bool in
             guard deliveryOwner == owner, terminalVideoFailure == nil else { return false }
-            if case let .failed(message) = event { terminalVideoFailure = message }
+            if case .audioStatus = event, audioEpoch != self.audioEpoch { return false }
+            if case let .failed(message) = event {
+                terminalVideoFailure = message
+                retireAudioLocked()
+            }
             return true
         }
         guard accepted else { return }
@@ -653,11 +710,11 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
         sessionID: UUID
     ) {
         audioStateLock.synchronized {
+            retireAudioLocked()
             activeAudioSessionID = sessionID
             deliveryOwner = sessionID
             terminalVideoFailure = nil
             audioRequested = false
-            queuedAudioAccessUnits = 0
             lastAudioStatusPublishedAt = .distantPast
             audioStatus = IOSCcapiRTPAudioStatus(
                 advertised: media != nil,
@@ -670,34 +727,149 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
                 reason: support.reason,
                 error: support.supported || media == nil ? nil : support.reason
             )
+            audioStatus.retiringResources = audioPipeline.isRetiring
         }
-        audioQueue.async { [audioPipeline] in audioPipeline.stop() }
         publishAudioStatus(force: true, sessionID: sessionID)
     }
 
     private func updateAudioActivation() {
-        let enabled = audioStateLock.synchronized { () -> Bool in
+        audioStateLock.synchronized {
             let enabled = audioRequested && applicationActive && monitoringActive && audioStatus.available
-            audioStatus.enabled = enabled
-            return enabled
-        }
-        if !enabled {
-            audioQueue.async { [weak self] in
-                guard let self, !self.audioStateLock.synchronized({ self.audioStatus.enabled }) else { return }
-                self.audioPipeline.stop()
+                && activeAudioSessionID != nil && terminalVideoFailure == nil
+            guard enabled != audioStatus.enabled else {
+                if !enabled { audioRequested = false; audioStatus.requested = false }
+                return
             }
+            if enabled, let owner = activeAudioSessionID {
+                audioEpoch = UUID()
+                let token = IOSRTPAudioPlaybackToken(owner: owner, epoch: audioEpoch)
+                activeAudioToken = token
+                audioStatus.enabled = true
+                audioStatus.requested = true
+                audioStatus.outputProgress = .waiting
+                audioStatus.error = nil
+                audioStatus.reason = nil
+                audioStatus.decoderInputs = 0
+                audioStatus.decodedAccessUnits = 0
+                audioStatus.decodedSampleFrames = 0
+                audioStatus.submittedSampleFrames = 0
+                audioStatus.renderedSampleFrames = 0
+                audioStatus.expiredOutputBuffers = 0
+                audioStatus.lastPCMAt = nil
+                audioStatus.lastRenderAt = nil
+                audioEnabledAt = audioClock()
+                lastAudioPCMAt = nil
+                audioPipeline.activate(token)
+                audioStatus.retiringResources = audioPipeline.isRetiring
+                audioStatus.renderProgressSupported = audioPipeline.snapshot(for: token)?.supportsRenderProgress ?? false
+                beginAudioWatchLocked(token: token)
+            } else { retireAudioLocked() }
         }
         publishAudioStatus(force: true)
+    }
+
+    /// Call only while holding audioStateLock. Revokes output synchronously, then
+    /// drains decoder resources on their serial queue; no replacement decoder overlaps.
+    private func retireAudioLocked(progress: IOSRTPAudioOutputProgress = .inactive, error: String? = nil) {
+        audioEpoch = UUID()
+        activeAudioToken = nil
+        audioRequested = false
+        audioStatus.requested = false
+        audioStatus.enabled = false
+        audioStatus.outputProgress = progress
+        audioStatus.error = error
+        audioEnabledAt = nil
+        lastAudioPCMAt = nil
+        audioWatch?.cancel()
+        audioWatch = nil
+        audioPipeline.retire()
+        audioStatus.retiringResources = audioPipeline.isRetiring
+        audioQueue.async { [audioPipeline] in audioPipeline.resetRetiredDecoder() }
+    }
+
+    private func audioRetirementChanged() {
+        let changed = audioStateLock.synchronized { () -> Bool in
+            let retiring = audioPipeline.isRetiring
+            guard audioStatus.retiringResources != retiring else { return false }
+            audioStatus.retiringResources = retiring
+            return true
+        }
+        if changed { publishAudioStatus(force: true) }
+    }
+
+    private func beginAudioWatchLocked(token: IOSRTPAudioPlaybackToken) {
+        audioWatch?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: audioWatchQueue)
+        timer.schedule(deadline: .now() + .milliseconds(250), repeating: .milliseconds(250))
+        timer.setEventHandler { [weak self] in self?.pollAudioProgress(token: token) }
+        audioWatch = timer
+        timer.resume()
+    }
+
+    /// Shared by the real watchdog and deterministic tests; packet/input/PCM activity
+    /// cannot renew either deadline. Only current player-render callbacks can do so.
+    func pollAudioProgress(token expected: IOSRTPAudioPlaybackToken? = nil) {
+        let changed = audioStateLock.synchronized { () -> Bool in
+            guard let token = activeAudioToken, expected == nil || token == expected,
+                  let began = audioEnabledAt, let snapshot = audioPipeline.snapshot(for: token) else { return false }
+            let now = audioClock()
+            audioStatus.decoderInputs = snapshot.decoderInputs
+            audioStatus.decodedAccessUnits = snapshot.decodedAccessUnits
+            audioStatus.decodedSampleFrames = snapshot.decodedSampleFrames
+            lastAudioPCMAt = snapshot.lastDecodedAt
+            audioStatus.lastPCMAt = snapshot.lastDecodedAt.map { Date(timeIntervalSinceNow: $0 - now) }
+            if snapshot.renderedSampleFrames > audioStatus.renderedSampleFrames {
+                audioStatus.renderedSampleFrames = snapshot.renderedSampleFrames
+                audioStatus.lastRenderAt = snapshot.lastRenderedAt.map { Date(timeIntervalSinceNow: $0 - now) }
+                audioStatus.outputProgress = .rendering
+            }
+            audioStatus.renderProgressSupported = snapshot.supportsRenderProgress
+            audioStatus.expiredOutputBuffers = snapshot.expiredBuffers
+            audioStatus.retiringResources = snapshot.retiring
+            if let last = snapshot.lastRenderedAt {
+                audioStatus.outputProgress = now - last < maximumAudioAccessUnitAge ? .rendering : .unknown
+            }
+            if now - (lastAudioPCMAt ?? began) >= audioPCMStallTimeout {
+                retireAudioLocked(progress: .stalled,
+                                  error: "Camera audio decoder produced no fresh PCM for 5 seconds. Enable audio again to retry.")
+            } else if !snapshot.supportsRenderProgress {
+                audioStatus.outputProgress = .unknown
+            } else if let last = snapshot.lastRenderedAt {
+                if now - last >= audioRenderStallTimeout {
+                    retireAudioLocked(progress: .stalled,
+                                      error: "Camera audio render progress stopped. Enable audio again to retry.")
+                }
+            } else if now - began >= audioFirstRenderTimeout {
+                retireAudioLocked(progress: .stalled,
+                                  error: "Camera audio output is unverified: no player render progress. Enable audio again to retry.")
+            }
+            return true
+        }
+        if changed {
+            queueAudioDrain()
+            publishAudioStatus(force: true)
+        }
+    }
+
+    private func failAudio(token: IOSRTPAudioPlaybackToken, progress: IOSRTPAudioOutputProgress, message: String) {
+        let changed = audioStateLock.synchronized { () -> Bool in
+            guard activeAudioToken == token else { return false }
+            retireAudioLocked(progress: progress, error: message)
+            return true
+        }
+        if changed { publishAudioStatus(force: true, sessionID: token.owner) }
     }
 
     @discardableResult
     private func updateAudioStatus(
         sessionID: UUID? = nil,
+        token: IOSRTPAudioPlaybackToken? = nil,
         force: Bool = false,
         _ update: (inout IOSCcapiRTPAudioStatus) -> Void
     ) -> Bool {
         let updated = audioStateLock.synchronized { () -> Bool in
             if let sessionID, activeAudioSessionID != sessionID { return false }
+            if let token, activeAudioToken != token { return false }
             update(&audioStatus)
             return true
         }
@@ -713,26 +885,18 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
                 return nil
             }
             lastAudioStatusPublishedAt = now
-            return IOSCcapiRTPDelivery(owner: deliveryOwner, event: .audioStatus(audioStatus))
+            return IOSCcapiRTPDelivery(owner: deliveryOwner, event: .audioStatus(audioStatus), audioEpoch: audioEpoch)
         }
-        if let delivery { emit(delivery.event, owner: delivery.owner) }
+        if let delivery { emit(delivery.event, owner: delivery.owner, audioEpoch: delivery.audioEpoch) }
     }
 
     private func publishAudioStatusIfNeeded(sessionID: UUID) {
         publishAudioStatus(sessionID: sessionID)
     }
 
-    private func isActiveAudioSession(_ sessionID: UUID) -> Bool {
-        audioStateLock.synchronized { activeAudioSessionID == sessionID }
-    }
-
-    private func stopAudioPipeline(unlessSessionReplaced sessionID: UUID) {
-        audioQueue.async { [weak self] in
-            guard let self else { return }
-            let shouldStop = self.audioStateLock.synchronized {
-                self.activeAudioSessionID == nil || self.activeAudioSessionID == sessionID
-            }
-            if shouldStop { self.audioPipeline.stop() }
+    private func isActiveAudioToken(_ token: IOSRTPAudioPlaybackToken) -> Bool {
+        audioStateLock.synchronized {
+            activeAudioToken == token && audioStatus.enabled && applicationActive && monitoringActive
         }
     }
 
@@ -1328,3 +1492,9 @@ private let listenerBindTimeout: TimeInterval = 5
 private let audioStatusInterval: TimeInterval = 0.5
 private let maximumQueuedAudioAccessUnits = 8
 private let maximumRTPDatagramBytes = 65_535
+
+// Monotonic bounds are independent of packet rate and wall-clock changes.
+private let maximumAudioAccessUnitAge: TimeInterval = 1
+private let audioPCMStallTimeout: TimeInterval = 5
+private let audioFirstRenderTimeout: TimeInterval = 5
+private let audioRenderStallTimeout: TimeInterval = 5
