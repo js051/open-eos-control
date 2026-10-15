@@ -14,6 +14,8 @@
 
 原 H.264 非線性測試的 6 級誤差上限保留，失敗時增加合成 quadrant/channel/input/actual/expected 訊息。新增直接 Metal／Core Image 測試使用同一個 production context factory，驗負值及超範圍節點的插值後裁切，容差 3；這可獨立於 decoder 定位色域問題。
 
+後續核對發現 decoded JPEG／Bridge 的舊 `CIContext` 沒指定工作空間，會用預設線性光；原測試只驗輸出尺寸。現在兩條路徑共用 `CubeLut.swift` 的 context／domain／cube／output-clamp 實作。相同 12 個跨端固定向量（其中 6 個 byte 向量）已接至 iOS CPU、PNG/Metal 和 JPEG 原生測試來源，詳見 [LUT 數值契約](../lut-preview.md#shared-numeric-contract-2026-10-15)。仍須實際平台執行，不能用共用程式碼當作像素一致性證明。
+
 ## 錄影模式仍未解
 
 繁中 Video segment 點擊後，fixture 20 秒內沒有收到成功的 movie-mode POST。現有日誌不能判斷 SwiftUI binding、admission 或傳輸哪一段未完成。原生 result-bundle 下載經官方既有路徑回覆 `Forbidden`，已停止，沒有改路線；沒有可核實數字 HTTP status。
@@ -22,7 +24,7 @@
 
 ## 驗證界線及 Release Assessment
 
-本地 unittest 的 CI helper 46 項與驗收守門 24 項通過，變更 Python ruff 與 whitespace 檢查通過。另以 pytest 收集時 71 項通過，但既有 `test_tree` fixture helper 會被額外當作測試並產生 return-value warning，未把它當成新增驗證。這些是來源／隱私守門，並非 Swift 編譯、GPU 或 UIKit 執行。本地無 Swift/Xcode，新增測試及修正仍為 native **NOT_RUN**。原生 RTP、錄影及較新的交付／取消恢復群需要各自 exact-head 驗收；實機顏色、效能與 provider 落盤另外待驗。
+本地 unittest 的 CI helper 46 項與驗收守門 28 項通過，變更 Python ruff、版本一致性與 whitespace 檢查通過。先前以 pytest 收集 71 項的紀錄包含一個被額外當作測試的既有 `test_tree` fixture helper，以及 return-value warning，未把它當成新增驗證。這些是來源／隱私守門，並非 Swift 編譯、GPU 或 UIKit 執行。本地無 Swift/Xcode，新增測試及修正仍為 native **NOT_RUN**。原生 RTP、錄影及較新的交付／取消恢復群需要各自 exact-head 驗收；實機顏色、效能與 provider 落盤另外待驗。
 
 最新已核實發布基線為 [v0.12.0 Development Preview](https://github.com/js051/open-eos-control/releases/tag/v0.12.0)，查核於 2026-10-15 03:54 UTC。累積新 RTP 能力及交付觀察群的影響為 **minor**，本次修正是該群內的正確性補正。未改版本、未授予 PR ready；失敗驗收與未驗實機限制保留，不合併或發版。
 

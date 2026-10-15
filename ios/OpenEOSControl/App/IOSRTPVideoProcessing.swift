@@ -209,7 +209,7 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
                 guard let filtered = nativeRTPApplyLut(inputImage, lut: lut) else { return .failed }
                 image = filtered
             } else { image = inputImage }
-            context.render(image, to: target, bounds: image.extent, colorSpace: nativeRTPPreviewColorSpace)
+            context.render(image, to: target, bounds: image.extent, colorSpace: cubeLutPreviewOutputColorSpace)
             output = target
         }
         // Preserve the compressed stream's display geometry; convert color explicitly to SDR sRGB.
@@ -252,17 +252,8 @@ final class IOSRTPVideoProcessor: @unchecked Sendable {
     deinit { if let decoder { VTDecompressionSessionInvalidate(decoder) } }
 }
 
-private let nativeRTPPreviewColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
-// LUT node values may exceed the display range. Preserve them until after interpolation.
-// Extended sRGB keeps the same encoded coordinates as the CPU/browser preview contract.
-private let nativeRTPLutWorkingColorSpace = CGColorSpace(name: CGColorSpace.extendedSRGB)!
-
 func nativeRTPPreviewContext(device: MTLDevice) -> CIContext {
-    CIContext(mtlDevice: device, options: [
-        .workingColorSpace: nativeRTPLutWorkingColorSpace,
-        .outputColorSpace: nativeRTPPreviewColorSpace,
-        .cacheIntermediates: false,
-    ])
+    cubeLutPreviewContext(device: device)
 }
 
 func nativeRTPPreviewColorSupported(format: CMVideoFormatDescription, sps: Data) -> Bool {
@@ -281,38 +272,7 @@ func nativeRTPPreviewColorSupported(format: CMVideoFormatDescription, sps: Data)
     return true // Missing tags remain an explicitly approximate display-preview interpretation.
 }
 
-/// Numeric LUT coordinates use SDR sRGB preview values, matching the CPU/browser oracle.
+/// Native and decoded-frame previews share one numeric domain/interpolation pipeline.
 func nativeRTPApplyLut(_ input: CIImage, lut: CubeLut) -> CIImage? {
-    guard let normalize = CIFilter(name: "CIColorMatrix"), let clamp = CIFilter(name: "CIColorClamp"),
-          let cube = CIFilter(name: "CIColorCubeWithColorSpace"),
-          let outputClamp = CIFilter(name: "CIColorClamp") else { return nil }
-    guard (2...64).contains(lut.size), lut.domainMin.count == 3, lut.domainMax.count == 3,
-          lut.values.count == lut.size * lut.size * lut.size * 3,
-          lut.values.allSatisfy({ $0.isFinite }),
-          zip(lut.domainMin, lut.domainMax).allSatisfy({ $0.isFinite && $1.isFinite && $0 < $1 }) else { return nil }
-    let inverse = zip(lut.domainMin, lut.domainMax).map { 1 / ($1 - $0) }
-    let bias = zip(lut.domainMin, inverse).map { -$0 * $1 }
-    guard inverse.allSatisfy({ $0.isFinite && $0 > 0 }), bias.allSatisfy({ $0.isFinite }) else { return nil }
-    normalize.setValue(input, forKey: kCIInputImageKey)
-    normalize.setValue(CIVector(x: CGFloat(inverse[0]), y: 0, z: 0, w: 0), forKey: "inputRVector")
-    normalize.setValue(CIVector(x: 0, y: CGFloat(inverse[1]), z: 0, w: 0), forKey: "inputGVector")
-    normalize.setValue(CIVector(x: 0, y: 0, z: CGFloat(inverse[2]), w: 0), forKey: "inputBVector")
-    normalize.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
-    normalize.setValue(CIVector(x: CGFloat(bias[0]),
-        y: CGFloat(bias[1]), z: CGFloat(bias[2]), w: 0), forKey: "inputBiasVector")
-    guard let normalized = normalize.outputImage else { return nil }
-    clamp.setValue(normalized, forKey: kCIInputImageKey)
-    clamp.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputMinComponents")
-    clamp.setValue(CIVector(x: 1, y: 1, z: 1, w: 1), forKey: "inputMaxComponents")
-    guard let clamped = clamp.outputImage else { return nil }
-    cube.setValue(clamped, forKey: kCIInputImageKey)
-    cube.setValue(lut.size, forKey: "inputCubeDimension")
-    cube.setValue(lut.rgbaData, forKey: "inputCubeData")
-    cube.setValue(nativeRTPLutWorkingColorSpace, forKey: "inputColorSpace")
-    guard let interpolated = cube.outputImage else { return nil }
-    // Clamp the interpolated result, never each table entry. Early clipping changes nonlinear LUTs.
-    outputClamp.setValue(interpolated, forKey: kCIInputImageKey)
-    outputClamp.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputMinComponents")
-    outputClamp.setValue(CIVector(x: 1, y: 1, z: 1, w: 1), forKey: "inputMaxComponents")
-    return outputClamp.outputImage?.cropped(to: input.extent)
+    applyCubeLutPreview(input, lut: lut)
 }

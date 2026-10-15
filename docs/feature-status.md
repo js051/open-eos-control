@@ -146,6 +146,8 @@ Canon's current public SDK page lists EOS R6 Mark III for CCAPI and describes re
 
 The older monitoring rows above are not a current acceptance record for native RTP. The new branch-local native LUT work and earlier sampled-scope work are distinguished in the [native RTP validation contract](validation/native-rtp-lut-2026-10-14.md). The [2026-10-15 exact-head follow-up](validation/native-rtp-followup-2026-10-15.md) records successful native compilation but failed rendering/UI acceptance. The local extended-range LUT correction is not yet natively validated. Physical-camera color/performance, transport-specific delivery and combined-tree integration remain unverified.
 
+The decoded JPEG/Bridge and native LUT implementations now share an encoded-sRGB numeric pipeline. The [shared numeric contract](lut-preview.md#shared-numeric-contract-2026-10-15) adds fixed cross-platform vectors and actual iOS decoded/GPU test sources, replacing the old size-only rendering check as the intended color acceptance boundary. The new native tests remain NOT_RUN locally.
+
 ### Delivery-outcome parity candidate, 2026-10-15
 
 The manual Files export result is no longer intended to be screen-only in this candidate. A bounded, private schema-5 observation history records admission before the picker and retains honest batch-level provider outcomes. This does not convert picker callbacks into per-file byte receipts or cloud-sync evidence. See [the delivery-outcome validation contract](validation/media-delivery-outcomes-2026-10-15.zh-TW.md). New Swift/native execution and physical providers remain pending; the earlier RTP CI head is separate.
