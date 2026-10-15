@@ -27,22 +27,63 @@ def test_shared_policy_is_consumed_by_real_source_publication_and_fallback():
     assert 'guard policy["canPublishInputReady"] == true' in value
     assert 'policy["canPublishDecoded"] == true' in app('CameraAppState.swift')
 
-def test_rtp_camera_ack_waits_for_actual_decoder_gate_before_source_is_active():
-    value = section(core('CCAPIClient.swift'), 'private func startRTPLiveView(', 'private func isLiveViewSizeRejection(')
-    assert value.index('sendLiveViewStart(') < value.index('session.waitUntilReady()') < value.index('activeLiveViewSource = .ccapiRTP')
-    native = app('IOSCcapiRTP.swift')
-    assert 'private let readinessDecoder = IOSRTPVideoProcessor()' in native
+def _assert_rtp_decoder_readiness(client, native):
+    start = section(client, 'private func startRTPLiveView(', 'private func isLiveViewSizeRejection(')
+    assert start.index('sendLiveViewStart(') < start.index('session.waitUntilReady()') < start.index('requireLiveViewInputReady(owner: stop.id, decoded: true)') < start.index('activeLiveViewSource = .ccapiRTP')
+    # The probe is shared by the controller, with a real default and injectable tests.
+    assert native.count('private let readinessDecoder: IOSRTPVideoProcessor') == 1
+    assert 'readinessDecoder: IOSRTPVideoProcessor = IOSRTPVideoProcessor()' in native
+    assert 'self.readinessDecoder = readinessDecoder' in native
+    probe = section(native, 'func submitReadinessProbe(', 'fileprivate func cancelReadinessProbe(')
+    assert 'deliveryOwner == sessionID && terminalVideoFailure == nil' in probe
+    assert probe.count('guard readinessProbeOwner == sessionID,') == 2
+    assert 'guard self.readinessProbeOwner == sessionID,' in probe
+    submit = probe.index('return readinessDecoder.submit(')
+    assert probe.index('await videoProcessor.retireAndWait()') < probe.index('await readinessDecoder.retireAndWait()') < submit
+    assert 'lut: nil, sps: sps, decodeOnly: true)' in probe
+    assert submit < probe.index('await self.readinessDecoder.retireAndWait()') < probe.index('completion(result)')
+    first = section(native, 'private func decodeFirstFrame(', 'private func scheduleVideoWatchdog(')
+    assert 'guard !stateLock.synchronized({ closed || videoFailureReported })' in first
+    assert 'guard let self, !self.stateLock.synchronized({ self.closed || self.videoFailureReported })' in first
+    assert first.index('await sink.submitReadinessProbe(') < first.index('guard case .decoded = result else') < first.index('self.readiness.decodedFrame()')
+    assert native.count('self.readiness.decodedFrame()') == 1
     assert 'accessUnit.keyFrame' in native and 'self.latestSPS != nil, self.latestPPS != nil' in native
-    assert 'guard case .decoded = result' in native
-    assert 'readinessDecoder.invalidate()' in native and 'readiness.fail(CancellationError())' in native
+    cancel = section(native, 'fileprivate func cancelReadinessProbe(', 'func setEventHandler(')
+    assert 'self.readinessProbeOwner == sessionID' in cancel and 'self.readinessDecoder.invalidate()' in cancel
+    close = section(native, 'private func closeSynchronously(', 'private func acceptVideo(')
+    assert 'readiness.fail(CancellationError())' in close and 'sink.cancelReadinessProbe(sessionID: sessionID)' in close
+    wait = section(native, 'func waitUntilReady()', 'func setTargetFPS(')
+    assert wait.index('try await readiness.wait()') < wait.index('if terminal.1 {') < wait.index('if terminal.0 { throw CancellationError() }')
+    assert 'onCancel: { self.closeSynchronously() }' in wait
     assert 'self.lastValidVideoAt' in native and '5_000_000_000' in native
-    assert 'if terminal.1 {' in native and 'if terminal.0 { throw CancellationError() }' in native
+
+
+def _assert_decode_only_precedes_processing(value):
+    process = section(value, 'private func process(', 'private final class DecodedOutput')
+    actual_decode = process.index('VTDecompressionSessionDecodeFrame(')
+    completed = process.index('if image != nil { decodedOutput.completedAt = ProcessInfo.processInfo.systemUptime }')
+    status = process.index('guard status == noErr, decodedOutput.status == noErr else { return .failed }')
+    pixels = process.index('guard let decoded = decodedOutput.buffer, let decodedAt = decodedOutput.completedAt else { return .backpressure }')
+    decode_only = process.index('if request.decodeOnly { return .decoded(at: decodedAt) }')
+    present = process.index('guard request.present else { return .decoded(at: decodedAt) }')
+    color = process.index('if request.lut != nil && !nativeRTPPreviewColorSupported(')
+    metal = process.index('MTLCreateSystemDefaultDevice()')
+    assert actual_decode < completed < status < pixels < decode_only < present < color < metal
+    assert process.index('nativeRTPPreviewColorSupported(') > decode_only
+    assert process.index('CVPixelBufferPoolCreate(') > decode_only
+    assert process.index('context.render(') > decode_only
+    assert process.index('if request.lut == nil {') < process.index('output = decoded') < metal
+    assert 'case decoded(at: TimeInterval)' in value
+    # Readiness returns decoder evidence, never a frame or a renderer operation.
+    assert '.frame(' not in process[:decode_only]
+
+
+def test_rtp_camera_ack_waits_for_actual_decoder_gate_before_source_is_active():
+    _assert_rtp_decoder_readiness(core('CCAPIClient.swift'), app('IOSCcapiRTP.swift'))
+
 
 def test_decode_only_output_precedes_optional_color_lut_metal_processing():
-    value = app('IOSRTPVideoProcessing.swift')
-    assert 'request.decodeOnly || nativeRTPPreviewColorSupported' in value
-    assert value.index('let decoded = decodedOutput.buffer') < value.index('if request.decodeOnly { return .decoded }') < value.index('MTLCreateSystemDefaultDevice()')
-    assert 'Decode-only readiness, never renderer/presentation evidence' in value
+    _assert_decode_only_precedes_processing(app('IOSRTPVideoProcessing.swift'))
 
 def test_jpeg_start_has_retained_validated_frame_without_recursive_start_or_stop():
     value = section(core('CCAPIClient.swift'), 'private func startJPEGLiveView(', 'private func startCCAPILiveView(')
@@ -102,11 +143,51 @@ def test_candidate_rtp_failure_is_retained_until_selected_source_publish():
     assert 'terminalVideoFailure = message' in app('IOSCcapiRTP.swift')
     assert 'terminalVideoFailure = nil' in app('IOSCcapiRTP.swift')
 
+def _assert_renderer_progress_evidence(value, native, progress):
+    assert 'hasUsableRendererOutput' not in value + native
+    watch = section(value, 'private func beginLiveViewRenderWatch()', 'func captureStill(')
+    assert watch.index('self.rtpController.videoProgressFailure() != nil') < watch.index('self.retireLiveView(reason:')
+    assert 'lastFrameAt' not in watch
+    observe = section(native, 'private func observePresentation(', 'private func beginPresentationPolling(')
+    assert 'deliveryOwner == owner && applicationActive && terminalVideoFailure == nil' in observe
+    for start, end in [
+        ('guard IOSRTPPixelMonitor.supported else', 'guard let pixels = readDisplayedPixels(layer) else'),
+        ('guard let pixels = readDisplayedPixels(layer) else', 'guard let output = retainedOutputs.first'),
+    ]:
+        unknown = section(observe, start, end)
+        assert 'progress.recordUnverifiablePresentation(' in unknown
+        assert 'videoPresentation.presentedFrame = nil' in unknown
+        assert 'recordPresented(' not in unknown
+    identity = observe.index('$0.frame.pixelBuffer === pixels')
+    owned = observe.index('progress.owns(output.token) else')
+    confirmed = observe.index('progress.recordPresented(output.token, at: now)')
+    assert identity < owned < confirmed
+    mismatch = observe[owned:confirmed]
+    assert 'progress.recordUnverifiablePresentation(' in mismatch
+    assert 'videoPresentation.presentedFrame = nil' in mismatch
+    assert 'guard output.token == progress.submitted else' in observe
+    assert 'recordDecoded(token, at: frame.decodedAt)' in native
+    assert 'static let maximumGap: TimeInterval = 5' in progress
+    presented = section(progress, 'mutating func recordPresented(', 'mutating func recordUnverifiablePresentation(')
+    assert 'guard owns(frame), let submitted, frame.sequence <= submitted.sequence' in presented
+    assert 'now >= (lastPresentedAt ?? startedAt ?? now)' in presented
+    sequence = presented.index('presented.map({ frame.sequence > $0.sequence }) ?? true else { return false }')
+    assert sequence < presented.index('presented = frame; lastPresentedAt = now')
+    unknown = section(progress, 'mutating func recordUnverifiablePresentation(', 'mutating func failure(')
+    # Ignore prose comments: unknown evidence may not renew or erase either clock.
+    unknown_code = '\n'.join(line.split('//', 1)[0] for line in unknown.splitlines())
+    assert 'state = .unknown' in unknown_code
+    assert 'lastPresentedAt =' not in unknown_code and 'presentationExpectedAt =' not in unknown_code
+    failure = progress.split('mutating func failure(', 1)[1]
+    assert 'now - (lastDecodedAt ?? startedAt) >= Self.maximumGap' in failure
+    assert 'now - (lastSubmittedAt ?? startedAt) >= Self.maximumGap' in failure
+    assert 'submitted.sequence > (presented?.sequence ?? 0), now - deadline >= Self.maximumGap' in failure
+    for result in ['.decodedOutputStalled', '.outputUnavailable', '.presentationStalled', '.rendererFailed']:
+        assert result in failure
+
+
 def test_renderer_evidence_does_not_claim_fresh_pixels_from_non_nil_readback():
-    value = app('CameraAppState.swift')
-    assert 'Detect absent/unavailable output, not freshness of retained renderer pixels' in value
-    assert 'hasUsableRendererOutput()' in value
-    assert 'Earlier OS versions can only prove' in app('IOSCcapiRTP.swift')
+    _assert_renderer_progress_evidence(app('CameraAppState.swift'), app('IOSCcapiRTP.swift'), app('IOSRTPPresentationProgress.swift'))
 
 def test_native_regressions_cover_background_decode_cancel_and_unknown_stop():
     core_tests = (ROOT / 'ios/OpenEOSCore/Tests/OpenEOSCoreTests/LiveViewLifecycleTests.swift').read_text()
