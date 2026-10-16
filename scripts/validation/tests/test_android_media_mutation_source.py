@@ -56,7 +56,15 @@ class AndroidMediaMutationSourceTests(unittest.TestCase):
         self.assertIn('frozenItems.owner.matches(it.connection, it.generation)', screen)
         self.assertIn('onRate = { if (canDispatch()) actions.setMediaRatingBatch', screen)
         self.assertIn('selectedIds.mapNotNull(selectedSnapshots::get)', screen)
-        self.assertNotIn('selectedIds = selectedIds.intersect', screen)
+        deletion = screen.split('LaunchedEffect(state.mediaDeleteHistory) {', 1)[1].split('    var selectionDrag', 1)[0]
+        self.assertIn('consumeConfirmedDeleteSelection(remaining, receipt, state.info, state.mediaSessionGeneration)', deletion)
+        self.assertIn('selectedIds = selectedIds.intersect(remaining.keys)', deletion)
+        self.assertNotIn('selectedIds = selectedIds.intersect', screen.replace(deletion, ''))
+        self.assertIn('(currentItems[id] ?: selectedSnapshots[id])', screen)
+        consume = (UI / 'MediaDeleteBatch.kt').read_text().split('internal fun consumeConfirmedDeleteSelection', 1)[1].split('internal fun mediaDeleteRoster', 1)[0]
+        self.assertIn('if (!receipt.owner.matches(connection, generation)) return tokens', consume)
+        self.assertIn('it.outcome == MediaDeleteOutcome.CONFIRMED', consume)
+        self.assertIn('tokens[it.request.id] == it.request.selectionToken', consume)
         self.assertIn('previousMediaMetadataBatch = mediaMetadataBatch?.retiredMetadataReceipt()', vm)
         self.assertIn('state.previousMediaMetadataBatch?.let', screen)
 
@@ -65,7 +73,14 @@ class AndroidMediaMutationSourceTests(unittest.TestCase):
             source = (DATA / filename).read_text()
             self.assertIn('strictMediaJsonLimit: Int? = null', source)
             self.assertIn('strictMediaJsonLimit = MAX_MEDIA_METADATA_JSON_BYTES', source)
-            self.assertIn('readStrictMediaJsonText(input, it.contentLength(), strictMediaJsonLimit)', source)
+            section = source[source.index('val jsonLimit = strictMediaJsonLimit ?:'):]
+            self.assertIn('else if (jsonLimit != null)' if filename == 'DesktopBridgeClient.kt'
+                          else 'else if (jsonLimit == null) it.string()', section)
+            self.assertIn('readStrictMediaJsonText(input, it.contentLength(), jsonLimit)', section)
+            self.assertIn('if (strictMediaJsonLimit != null) StrictMediaJson(body).validate()', section)
+            self.assertLess(section.index('if (strictMediaJsonLimit != null) StrictMediaJson(body).validate()'),
+                            section.index('val parsed = runCatching { JSONObject(body)' if filename == 'DesktopBridgeClient.kt'
+                                          else 'JSONObject(body).also {'))
             self.assertIn('if (strictMediaJsonLimit != null) StrictMediaJson(body).validate()', source)
         self.assertIn('StrictMediaJson(text).validate()', (DATA / 'BridgeMediaListingDecoder.kt').read_text())
         self.assertIn('val key = string()', (DATA / 'StrictMediaJson.kt').read_text())
