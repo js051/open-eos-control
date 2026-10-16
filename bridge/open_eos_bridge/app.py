@@ -393,9 +393,10 @@ def create_app(
             staged = None
         else:
             item, chunks = (
-                session.download_media(media_id, single_attempt=True, jpeg_validation=True)
-                if jpeg_validation else session.download_media(media_id, single_attempt=True)
-                if single_attempt else session.download_media(media_id, cancellation=cancellation)
+                session.download_media(media_id, single_attempt=single_attempt,
+                                       jpeg_validation=jpeg_validation, cancellation=cancellation)
+                if isinstance(session, CcapiSession)
+                else session.download_media(media_id, cancellation=cancellation)
                 if isinstance(session, GPhoto2Session) else session.download_media(media_id)
             )
             item, staged = _stage_media(
