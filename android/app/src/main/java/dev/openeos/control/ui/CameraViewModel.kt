@@ -2117,6 +2117,12 @@ class CameraViewModel(
             clearFocusFeedbackAfter(FocusFeedback.ACCEPTED)
             return
         }
+        val generation = cameraSessionGeneration
+        val connection = _uiState.value.info
+        val presentationGeneration = liveViewGeneration
+        val liveViewOwner = repository.liveViewOwner()
+        fun ownsFocusResult() = generation == cameraSessionGeneration && _uiState.value.info === connection &&
+            presentationGeneration == liveViewGeneration && repository.ownsLiveView(liveViewOwner)
         runCamera(
             operation = CameraOperation.FOCUS,
             onError = {
@@ -2124,7 +2130,19 @@ class CameraViewModel(
                 clearFocusFeedbackAfter(FocusFeedback.FAILURE)
             },
         ) {
-            repository.driveFocus(direction, step)
+            try {
+                repository.driveFocus(direction, step)
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                // Retirement revokes presentation, not the pending physical call or
+                // its FOCUS interlock. Do not replace a newer Live View failure.
+                coroutineContext.ensureActive()
+                if (!ownsFocusResult()) return@runCamera
+                throw exception
+            }
+            coroutineContext.ensureActive()
+            if (!ownsFocusResult()) return@runCamera
             _uiState.update { it.copy(focusFeedback = FocusFeedback.ACCEPTED) }
             clearFocusFeedbackAfter(FocusFeedback.ACCEPTED)
             if (refreshLiveViewFrameInternal(reportErrors = false)) startLiveViewLoopIfNeeded()
