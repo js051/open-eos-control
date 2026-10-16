@@ -9,7 +9,8 @@ import re
 import secrets
 import threading
 from collections.abc import Callable, Iterator
-from contextlib import suppress
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
@@ -24,6 +25,19 @@ MAX_LIST_CHUNK_ITEMS = 128
 MAX_LIST_SNAPSHOT_ITEMS = 100_000
 MAX_LIST_SNAPSHOT_BYTES = 64 * 1024 * 1024
 MAX_LIST_QUEUED_FRAMES = 4
+
+# A provider may bound its own progress callback/backpressure without changing
+# the public provider signature or imposing that deadline on other engines.
+_PROGRESS_CHECK: ContextVar[Callable[[], None] | None] = ContextVar("media_listing_progress_check", default=None)
+
+
+@contextmanager
+def listing_progress_check(check: Callable[[], None]) -> Iterator[None]:
+    token = _PROGRESS_CHECK.set(check)
+    try:
+        yield
+    finally:
+        _PROGRESS_CHECK.reset(token)
 
 
 def accepts_media_stream(accept: str) -> bool:
@@ -134,6 +148,8 @@ class _Listing:
     def check(self) -> None:
         if self.cancelled():
             raise _ListingCancelled()
+        if check := _PROGRESS_CHECK.get():
+            check()
 
     def cancel(self) -> None:
         self.stopped.set()

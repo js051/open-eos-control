@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from io import BytesIO
 from pathlib import Path
 
@@ -301,6 +301,17 @@ class FakeRunner:
             raise BridgeError("UPLOAD_CANCELLED", "Upload cancelled.", status_code=409)
         self.cancellable_commands.append(tuple(arguments))
         return self.run(arguments, timeout=timeout)
+
+    def run_listing(
+        self, arguments: list[str], *, timeout: float,
+        on_line: Callable[[str], None], cancelled: Callable[[], bool],
+    ) -> None:
+        if cancelled():
+            raise BridgeError("MEDIA_LIST_CANCELLED", "Media listing cancelled.")
+        for line in self.run(arguments, timeout=timeout).text.splitlines():
+            if cancelled():
+                raise BridgeError("MEDIA_LIST_CANCELLED", "Media listing cancelled.")
+            on_line(line)
 
     @staticmethod
     def _content_type(name: str) -> str:
