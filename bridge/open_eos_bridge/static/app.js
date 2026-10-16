@@ -406,7 +406,8 @@
       liveViewStopped: "Live View stopped",
       liveViewWaitingFrame: "Live View connected; waiting for a decoded frame",
       liveViewFrameTimeout: "Live View frame timed out. Wait for source cleanup; retry Stop if needed.",
-      focusMoved: "Focus moved {direction}",
+      focusDriveAccepted: "Focus drive command accepted: {direction}",
+      focusDriveUnconfirmed: "Focus drive acknowledgement is unconfirmed. Check the camera before trying again.",
       focusAccepted: "Focus point accepted",
       tapToFocus: "Select a point to focus",
       clickWhiteBalanceAccepted: "White balance sampled",
@@ -1160,7 +1161,8 @@
       liveViewStopped: "即時預覽已停止",
       liveViewWaitingFrame: "即時預覽已連線，等待解碼影格",
       liveViewFrameTimeout: "即時預覽影格逾時。正在清理原來源；確認停止後再開始。",
-      focusMoved: "焦點已向{direction}移動",
+      focusDriveAccepted: "向{direction}微調對焦命令已接受",
+      focusDriveUnconfirmed: "尚未確認微調對焦命令回覆。再次操作前請先檢查相機。",
       focusAccepted: "已設定對焦點",
       tapToFocus: "點選畫面設定對焦點",
       clickWhiteBalanceAccepted: "已取樣白平衡",
@@ -7198,23 +7200,41 @@
       showToast(t("liveViewRequired"), true);
       return;
     }
+    const session = state.session;
+    const owner = state.liveViewStopOwner;
+    const liveGeneration = state.liveGeneration;
+    const source = state.activeLiveSource;
+    const step = state.focusStep;
     beginCameraInteraction();
+    const generation = state.refreshGeneration;
+    const ownsInteraction = () => state.session === session && state.refreshGeneration === generation;
+    const current = () => ownsInteraction() && state.liveActive && state.liveGeneration === liveGeneration &&
+      state.liveViewStopOwner === owner && state.activeLiveSource === source;
     setOperationState(t("busy"));
     renderAvailability();
     try {
-      await api(`/v1/session/${encodeURIComponent(state.session.id)}/focus/drive`, {
+      const result = await api(`/v1/session/${encodeURIComponent(session.id)}/focus/drive`, {
         method: "POST",
-        json: { direction, step: state.focusStep },
+        json: { direction, step },
       });
+      if (!current()) return;
+      if (result?.accepted !== true || result.direction !== direction || result.step !== step) {
+        throw new ApiError(t("focusDriveUnconfirmed"), { code: "FOCUS_DRIVE_UNCONFIRMED" });
+      }
       const localizedDirection = direction === "NEAR" ? t("near") : t("far");
-      setOperationState(t("focusMoved", { direction: localizedDirection }));
+      setOperationState(t("focusDriveAccepted", { direction: localizedDirection }));
     } catch (error) {
+      if (!current()) return;
       const normalized = captureError(error);
       setOperationState(normalized.message, true);
       showToast(normalized.message, true);
     } finally {
-      state.busy = false;
-      renderAvailability();
+      // A retired source cannot publish feedback, but still releases its own
+      // interaction. A newer Stop or replacement session owns its own busy state.
+      if (ownsInteraction()) {
+        state.busy = false;
+        renderAvailability();
+      }
     }
   }
 
