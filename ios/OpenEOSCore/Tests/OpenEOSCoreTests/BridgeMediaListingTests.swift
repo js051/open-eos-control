@@ -140,6 +140,78 @@ final class BridgeMediaListingTests: XCTestCase {
         }
     }
 
+    func testLegacyRejectsInvalidRowsDuplicateIdentitiesAndExcessLimitWithoutPublishing() async throws {
+        let valid = "{\"id\":\"image\",\"name\":\"IMG.JPG\",\"kind\":\"image\"}"
+        let cases: [(String, String, Int?)] = [
+            ("non-object row", "{\"items\":[\(valid),null]}", nil),
+            ("invalid row", "{\"items\":[\(valid),{\"id\":\"broken\",\"kind\":\"image\"}]}", nil),
+            ("duplicate identity", "{\"items\":[\(valid),\(valid)]}", nil),
+            ("escaped duplicate identity", "{\"items\":[\(valid),{\"id\":\"\\u0069mage\",\"name\":\"OTHER.JPG\",\"kind\":\"image\"}]}", nil),
+            ("requested limit", "{\"items\":[\(valid),{\"id\":\"other\",\"name\":\"OTHER.JPG\",\"kind\":\"image\"}]}", 1),
+        ]
+        for (name, body, limit) in cases {
+            let peer = ListingPeer(contentType: "application/json")
+            let client = try await makeClient(peer)
+            let progress = MediaListProgressRecorder()
+            let listing = Task { try await client.listMedia(maximumItems: limit) { await progress.record($0) } }
+            try await wait { await peer.count() == 1 }
+            await peer.feed(0, Data(body.utf8))
+            await peer.finish(0)
+            do { _ = try await listing.value; XCTFail("Accepted \(name)") }
+            catch { guard case DesktopBridgeError.invalidResponse = error else { throw error } }
+            let published = await progress.values()
+            let requests = await peer.listingRequests()
+            XCTAssertTrue(published.isEmpty, "A failed legacy response cannot replace a previous partial: \(name)")
+            XCTAssertEqual(requests.count, 1, "No fallback traversal: \(name)")
+        }
+    }
+
+    func testLegacyFullCardItemBoundaryRejectsOverflowWithoutTruncation() async throws {
+        for count in [100_000, 100_001] {
+            let peer = ListingPeer(contentType: "application/json")
+            let client = try await makeClient(peer)
+            let progress = MediaListProgressRecorder()
+            let listing = Task { try await client.listMedia { await progress.record($0) } }
+            try await wait { await peer.count() == 1 }
+            let rows = (0..<count).map { item("image-\($0)") }
+            await peer.feed(0, try JSONSerialization.data(withJSONObject: ["items": rows]))
+            await peer.finish(0)
+            if count == 100_000 {
+                let result = try await listing.value
+                XCTAssertEqual(result.count, count)
+                XCTAssertEqual(result.last?.id, "image-99999")
+            } else {
+                do { _ = try await listing.value; XCTFail("Accepted legacy item overflow") }
+                catch { guard case DesktopBridgeError.invalidResponse = error else { throw error } }
+            }
+            let published = await progress.values()
+            let requests = await peer.listingRequests()
+            XCTAssertEqual(published.map(\.count), count == 100_000 ? [count] : [])
+            XCTAssertEqual(requests.count, 1)
+            XCTAssertNil(requests[0].url?.query)
+        }
+    }
+
+    func testLegacyEmptyAndExactLimitPreserveOpaqueUnicodeIdentities() async throws {
+        let ids = [" 影像%2F+ ", "caf\u{e9}", "cafe\u{301}"]
+        for expected in [[], ids] {
+            let peer = ListingPeer(contentType: "application/json")
+            let client = try await makeClient(peer)
+            let progress = MediaListProgressRecorder()
+            let listing = Task { try await client.listMedia(maximumItems: 3) { await progress.record($0) } }
+            try await wait { await peer.count() == 1 }
+            await peer.feed(0, try JSONSerialization.data(withJSONObject: ["items": expected.map(item)]))
+            await peer.finish(0)
+            let result = try await listing.value
+            let published = await progress.values()
+            let requests = await peer.listingRequests()
+            XCTAssertEqual(result.map { Data($0.id.utf8) }, expected.map { Data($0.utf8) })
+            XCTAssertEqual(published.count, 1)
+            XCTAssertEqual(requests.count, 1)
+            XCTAssertEqual(requests[0].url?.query, "limit=3")
+        }
+    }
+
     private func makeClient(_ peer: ListingPeer) async throws -> DesktopBridgeClient {
         let client = try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", token: "synthetic-token", transport: peer)
         try await client.initialize()

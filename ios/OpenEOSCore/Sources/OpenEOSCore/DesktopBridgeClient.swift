@@ -1842,16 +1842,24 @@ public actor DesktopBridgeClient {
                   let raw = body["items"] as? [Any] else {
                 throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid media JSON.")
             }
+            guard raw.count <= BridgeMediaListingDecoder.maximumItems,
+                  maximumItems.map({ raw.count <= $0 }) ?? true else {
+                throw DesktopBridgeError.invalidResponse("Desktop Bridge listing exceeds the requested or supported item limit.")
+            }
+            var identities = Set<Data>()
             let items = try raw.map { value -> CameraMediaItem in
-                guard let object = value as? BridgeJSON, let item = Self.parseMediaItem(object) else {
+                guard let object = value as? BridgeJSON, let item = Self.parseMediaItem(object),
+                      identities.insert(Data(item.id.utf8)).inserted else {
                     throw DesktopBridgeError.invalidResponse("Desktop Bridge listing contains an invalid media item.")
                 }
                 return item
             }
-            let boundedItems = maximumItems.map { Array(items.prefix($0)) } ?? items
-            await onProgress(boundedItems)
+            // Validate the entire legacy response before publishing any replacement.
+            // Dropping invalid rows or truncating an over-limit reply is not completion.
             try requireMediaListingOwner(owner, generation: generation)
-            return boundedItems
+            await onProgress(items)
+            try requireMediaListingOwner(owner, generation: generation)
+            return items
         } onCancel: {
             response.cancel()
         }
