@@ -7,6 +7,7 @@ import dev.openeos.control.data.CameraMediaTransferProgress
 sealed interface MediaSaveFeedback {
     data object SelectingDestination : MediaSaveFeedback
     data object Queued : MediaSaveFeedback
+    data object NotStarted : MediaSaveFeedback
     data class Saving(val progress: CameraMediaTransferProgress) : MediaSaveFeedback
     data class Saved(val location: String) : MediaSaveFeedback
     data class Failed(val message: String) : MediaSaveFeedback

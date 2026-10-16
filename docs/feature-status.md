@@ -153,3 +153,7 @@ The decoded JPEG/Bridge and native LUT implementations now share an encoded-sRGB
 ### Delivery-outcome parity candidate, 2026-10-15
 
 The manual Files export result is no longer intended to be screen-only in this candidate. A bounded, private schema-5 observation history records admission before the picker and retains honest batch-level provider outcomes. This does not convert picker callbacks into per-file byte receipts or cloud-sync evidence. See [the delivery-outcome validation contract](validation/media-delivery-outcomes-2026-10-15.zh-TW.md). New Swift/native execution and physical providers remain pending; the earlier RTP CI head is separate.
+
+### Delivery outcome alignment candidate, 2026-10-15
+
+Android DOWNLOAD now stops at the first terminal row failure while preserving earlier confirmations and untouched queued rows. The new [delivery outcome contract](validation/media-delivery-outcomes-2026-10-15.zh-TW.md) records the permanent synthetic vectors, 11 portable JVM passes, and the SDK/provider/Compose/resource-loader checks that remain NOT_RUN. Earlier exact-head CI does not validate this branch-local increment.

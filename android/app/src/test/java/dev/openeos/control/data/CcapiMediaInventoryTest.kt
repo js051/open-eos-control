@@ -24,6 +24,7 @@ import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
 import java.net.Proxy
+import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -416,6 +417,65 @@ class CcapiMediaInventoryTest {
     }
 
     @Test
+    fun singleAttemptRejectsNon200AndEveryContentRangeEvenForAnExactCompleteJpeg() = runTest {
+        val jpeg = fixedOriginalJpeg()
+        val range = "bytes 0-${jpeg.lastIndex}/${jpeg.size}"
+        for ((status, contentRange) in listOf(206 to null, 201 to null, 206 to range, 200 to range, 200 to "")) {
+            val client = realClient()
+            val path = "$photos/IMG_0001.JPG"
+            val headers = mapOf("Content-Type" to "image/jpeg") +
+                (contentRange?.let { mapOf("Content-Range" to it) } ?: emptyMap())
+            fixtures[path] = Fixture(status = status, bytes = jpeg, headers = headers)
+            fixtures["$path?kind=main"] = binaryFixture(jpeg)
+            val output = ByteArrayOutputStream()
+            val progress = mutableListOf<CameraMediaTransferProgress>()
+            var completed = 0
+            val failure = runCatching {
+                client.downloadMediaSingleAttempt(mediaItem(path).copy(sizeBytes = jpeg.size.toLong()), output, progress::add)
+                completed++
+            }.exceptionOrNull()
+            assertTrue(failure is java.io.IOException)
+            assertEquals(listOf(path), requestedPaths())
+            assertEquals(listOf("GET"), requests.map { it.method })
+            assertEquals(0, output.size())
+            assertTrue(progress.isEmpty())
+            assertEquals(0, completed)
+            assertFalse(CameraFeature.MEDIA_DOWNLOAD in client.observedFeatureSnapshot())
+        }
+    }
+
+    @Test
+    fun returnedResponseRechecksTheEnvelopeAfterAnApplicationInterceptorChangesIt() = runTest {
+        val jpeg = fixedOriginalJpeg()
+        val path = "/ccapi/media/one"
+        for ((status, contentRange) in listOf(206 to null, 201 to null, 200 to "bytes 0-${jpeg.lastIndex}/${jpeg.size}", 200 to "")) {
+            fixtures[path] = binaryFixture(jpeg) // The actual network response is valid 200.
+            requests.clear()
+            val http = OkHttpClient.Builder().addInterceptor { chain ->
+                chain.proceed(chain.request()).newBuilder().code(status).apply {
+                    contentRange?.let { header("Content-Range", it) }
+                }.build()
+            }.build()
+            val client = CcapiClient(server.url("/").toString(), httpClient = http, treatAsSimulator = true)
+            val output = ByteArrayOutputStream()
+            val progress = mutableListOf<CameraMediaTransferProgress>()
+            var completed = 0
+            val failure = runCatching {
+                client.downloadMediaSingleAttempt(CameraMediaItem("one", "ONE.JPG", "image", jpeg.size.toLong()),
+                    output, progress::add)
+                completed++
+            }.exceptionOrNull()
+            assertTrue(failure is java.io.IOException)
+            assertEquals(listOf(path), requestedPaths())
+            assertEquals(listOf("GET"), requests.map { it.method })
+            assertEquals(0, output.size())
+            assertTrue(progress.isEmpty())
+            assertEquals(0, completed)
+            assertFalse(CameraFeature.MEDIA_DOWNLOAD in client.observedFeatureSnapshot())
+        }
+    }
+
+    @Test
     fun singleAttemptDownloadNeverFollowsHttpErrorsIncludingImmediateRetryAfter() = runTest {
         for (status in listOf(404, 408, 503)) {
             val client = realClient()
@@ -507,6 +567,46 @@ class CcapiMediaInventoryTest {
     }
 
     @Test
+    fun singleAttemptOriginalRejectsConflictingAndDuplicateMimeBeforeWritingAnyBytes() = runTest {
+        val client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
+        client.initialize()
+        val declarations = listOf(listOf(""), listOf(" "), listOf("image/png"), listOf("image/jpg"), listOf("image/jpeg;"),
+            listOf("image/jpeg", "image/png"), listOf("image/jpeg", "image/jpeg"))
+        declarations.forEach { values ->
+            server.dispatcher = QueueDispatcher().apply {
+                enqueueResponse(MockResponse().setBody(Buffer().write(byteArrayOf(1, 2, 3, 4))).apply {
+                    values.forEach { addHeader("Content-Type", it) }
+                })
+            }
+            val output = ByteArrayOutputStream()
+            val before = server.requestCount
+            val failure = runCatching {
+                client.downloadMediaSingleAttempt(CameraMediaItem("one", "ONE.JPG", "image", sizeBytes = 4), output)
+            }.exceptionOrNull()
+            assertTrue(failure is InvalidAutomaticJpegException)
+            assertEquals(before + 1, server.requestCount)
+            assertEquals(0, output.size())
+        }
+    }
+
+    @Test
+    fun normalManualDownloadKeepsItsExistingResponseEnvelopePolicy() = runTest {
+        val jpeg = fixedOriginalJpeg()
+        val range = "bytes 0-${jpeg.lastIndex}/${jpeg.size}"
+        for ((status, contentRange) in listOf(201 to null, 206 to range, 200 to range, 200 to "")) {
+            val client = realClient()
+            val path = "$photos/IMG_0001.JPG"
+            fixtures[path] = Fixture(status = status, bytes = jpeg, headers = mapOf("Content-Type" to "image/jpeg") +
+                (contentRange?.let { mapOf("Content-Range" to it) } ?: emptyMap()))
+            val output = ByteArrayOutputStream()
+            val result = client.downloadMedia(mediaItem(path).copy(sizeBytes = jpeg.size.toLong()), output)
+            assertEquals(jpeg.size.toLong(), result.bytesTransferred)
+            assertArrayEquals(jpeg, output.toByteArray())
+            assertEquals(listOf(path), requestedPaths())
+        }
+    }
+
+    @Test
     fun normalManualDownloadStillFallsBackAfterTextResponse() = runTest {
         val client = realClient()
         val path = "$photos/IMG_0001.JPG"
@@ -534,6 +634,13 @@ class CcapiMediaInventoryTest {
         assertTrue(runCatching { usb.downloadMediaSingleAttempt(item, ByteArrayOutputStream()) }.exceptionOrNull() is UnsupportedOperationException)
         assertTrue(runCatching { bridge.downloadMediaSingleAttempt(item, ByteArrayOutputStream()) }.exceptionOrNull() is UnsupportedOperationException)
         assertTrue(requests.isEmpty())
+    }
+
+    private fun fixedOriginalJpeg(): ByteArray {
+        val corpus = JSONObject(requireNotNull(javaClass.classLoader!!.getResourceAsStream("jpeg-original-vectors.json"))
+            .bufferedReader().use { it.readText() }).getJSONArray("byteVectors")
+        val vector = (0 until corpus.length()).map(corpus::getJSONObject).single { it.getString("id") == "rgb-baseline" }
+        return Base64.getDecoder().decode(vector.getString("base64"))
     }
 
     private fun binaryFixture(bytes: ByteArray) = Fixture(bytes = bytes, headers = mapOf("Content-Type" to "image/jpeg"))

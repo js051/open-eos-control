@@ -1,12 +1,16 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -16,6 +20,206 @@ import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 
 class UsbPtpCameraBackendTest {
+    @Test fun cancelledTransportAcquisitionClosesHandleBeforeAnyPtpCommand() = runTest {
+        val transport = ScriptedTransport()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb"), PtpTransportFactory {
+            entered.complete(Unit)
+            withContext(kotlinx.coroutines.NonCancellable) { release.await() }
+            transport
+        })
+        val attempt = launch(start = CoroutineStart.UNDISPATCHED) { backend.initialize() }
+        entered.await(); attempt.cancel(); release.complete(Unit); attempt.join()
+        assertTrue(transport.closed)
+        assertTrue(transport.sentContainers.isEmpty())
+    }
+
+    @Test fun cancelledUsbStopAfterAckKeepsSameSessionStopRouteWhenCapabilitiesDisappear() = runTest {
+        val transport = CanonEosScriptedTransport(advertiseRecordingRead = true)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb"), PtpTransportFactory { transport })
+        backend.initialize(); backend.capabilities(); backend.startRecording()
+        transport.gateNextRecordingRead()
+        val cancelled = RecordingRequestEvidence(RecordingCommand.STOP)
+        val operation = async(start = CoroutineStart.UNDISPATCHED) { withContext(cancelled) { backend.stopRecording() } }
+        assertEquals(RecordingResponseEvidence.RESPONSE_RECEIVED, cancelled.responseEvidence())
+        operation.cancelAndJoin()
+        transport.suppressRecordingReads = true
+        transport.queueEvent(eosAvailableValues(CanonEosPropertyCode.EVF_RECORD_STATUS) + eosBlock(0, byteArrayOf()))
+        backend.status()
+        assertFalse(backend.capabilities().matrix.supports(CameraFeature.VIDEO_RECORDING))
+        val retry = RecordingRequestEvidence(RecordingCommand.STOP)
+        assertTrue(runCatching { withContext(retry) { backend.stopRecording() } }.exceptionOrNull() is RecordingStatusReadbackException)
+        assertTrue(retry.attempted)
+        assertEquals(RecordingResponseEvidence.RESPONSE_RECEIVED, retry.responseEvidence())
+        val writes = transport.sentContainers.filter { it.type == PtpContainerType.DATA &&
+            it.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX && it.payloadU32(4)?.toInt() == CanonEosPropertyCode.EVF_RECORD_STATUS }
+        assertEquals(3, writes.size)
+        backend.close()
+    }
+
+    @Test fun authoritativeUsbTrueRetainsStopAfterCapabilityWithdrawalForReadAndNoOpStart() = runTest {
+        for (noOpStart in listOf(false, true)) {
+            val transport = CanonEosScriptedTransport(advertiseRecordingRead = true)
+            val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb"), PtpTransportFactory { transport })
+            backend.initialize(); backend.capabilities()
+            transport.setRecordingForTest(true)
+            backend.status()
+            if (noOpStart) {
+                val evidence = RecordingRequestEvidence(RecordingCommand.START)
+                withContext(evidence) { backend.startRecording() }
+                assertEquals(RecordingResponseEvidence.NOT_REQUIRED, evidence.responseEvidence())
+                assertEquals(true, evidence.observation?.recording)
+            } else assertEquals(true, backend.recordingObservation()?.recording)
+            transport.queueEvent(eosAvailableValues(CanonEosPropertyCode.EVF_RECORD_STATUS) + eosBlock(0, byteArrayOf()))
+            backend.status()
+            assertFalse(backend.capabilities().matrix.supports(CameraFeature.VIDEO_RECORDING))
+            val evidence = RecordingRequestEvidence(RecordingCommand.STOP)
+            withContext(evidence) { backend.stopRecording() }
+            assertEquals(RecordingResponseEvidence.RESPONSE_RECEIVED, evidence.responseEvidence())
+            assertEquals(false, evidence.observation?.recording)
+            val writes = transport.sentContainers.filter { it.type == PtpContainerType.DATA &&
+                it.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX && it.payloadU32(4)?.toInt() == CanonEosPropertyCode.EVF_RECORD_STATUS }
+            assertEquals(1, writes.size)
+            backend.close()
+        }
+    }
+
+    @Test fun usbRecordingReadAndAlreadyStoppedNoOpUseAdvertisedExactPropertyReadOnly() = runTest {
+        val transport = CanonEosScriptedTransport(advertiseRecordingRead = true)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb"), PtpTransportFactory { transport })
+        backend.initialize(); backend.capabilities()
+        val before = transport.sentContainers.size
+        val observed = backend.recordingObservation()
+        assertEquals(false, observed?.recording)
+        val commands = transport.sentContainers.drop(before).filter { it.type == PtpContainerType.COMMAND }
+        assertEquals(listOf(CanonEosOperationCode.GET_EVENT, CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE,
+            CanonEosOperationCode.GET_EVENT), commands.map { it.code })
+        assertEquals(CanonEosPropertyCode.EVF_RECORD_STATUS.toLong(), commands[1].parameters().single())
+        val evidence = RecordingRequestEvidence(RecordingCommand.STOP)
+        withContext(evidence) { backend.stopRecording() }
+        assertEquals(RecordingResponseEvidence.NOT_REQUIRED, evidence.responseEvidence())
+        assertFalse(evidence.attempted)
+        assertEquals(false, evidence.observation?.recording)
+        assertTrue(transport.sentContainers.none { it.type == PtpContainerType.DATA &&
+            it.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX && it.payloadU32(4)?.toInt() == CanonEosPropertyCode.EVF_RECORD_STATUS })
+        backend.close()
+    }
+
+    @Test fun usbMissingAdvertisedRecordingReaderNeverTreatsQueueDrainAsFresh() = runTest {
+        val transport = CanonEosScriptedTransport(advertiseRecordingRead = false)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb"), PtpTransportFactory { transport })
+        backend.initialize(); backend.capabilities()
+        val before = transport.sentContainers.size
+        assertNull(backend.recordingObservation())
+        assertEquals(before, transport.sentContainers.size)
+        val evidence = RecordingRequestEvidence(RecordingCommand.STOP)
+        assertTrue(runCatching { withContext(evidence) { backend.stopRecording() } }.exceptionOrNull() is RecordingStatusReadbackException)
+        assertTrue(evidence.attempted)
+        assertEquals(RecordingResponseEvidence.RESPONSE_RECEIVED, evidence.responseEvidence())
+        assertNull(evidence.observation)
+        backend.close()
+    }
+
+    @Test fun lostUsbStartAndMissingEvfStillSendsOneExplicitStopDespiteCachedFalse() = runTest {
+        val transport = CanonEosScriptedTransport(movieRecordingReadback = false, loseFirstMovieResponse = true)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb"), PtpTransportFactory { transport })
+        backend.initialize(); backend.capabilities()
+        val start = RecordingRequestEvidence(RecordingCommand.START)
+        assertTrue(runCatching { withContext(start) { backend.startRecording() } }.isFailure)
+        assertEquals(RecordingResponseEvidence.UNKNOWN, start.responseEvidence())
+        assertEquals(false, backend.status().recording)
+        val stop = RecordingRequestEvidence(RecordingCommand.STOP)
+        assertTrue(runCatching { withContext(stop) { backend.stopRecording() } }.exceptionOrNull() is RecordingStatusReadbackException)
+        val writes = transport.sentContainers.filter { it.type == PtpContainerType.DATA &&
+            it.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX && it.payloadU32(4)?.toInt() == CanonEosPropertyCode.EVF_RECORD_STATUS }
+        assertEquals(2, writes.size)
+        assertEquals(CanonEosPtp.MOVIE_RECORD_TARGET_CARD, writes[0].payloadU32(8)?.and(0xFFFF))
+        assertEquals(CanonEosPtp.MOVIE_RECORD_TARGET_NONE, writes[1].payloadU32(8)?.and(0xFFFF))
+        assertEquals(RecordingResponseEvidence.RESPONSE_RECEIVED, stop.responseEvidence())
+        assertNull(stop.observation)
+        backend.close()
+    }
+
+    @Test fun maintenanceUsbClockRetainsEpochOnlyProofAndRecoveryUsesGetEventOnly() = runTest {
+        val transport = CanonEosScriptedTransport()
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb"), PtpTransportFactory { transport })
+        backend.initialize(); backend.capabilities()
+        val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(TEST_CLOCK_EPOCH_SECONDS * 1_000, 28_800, false))
+        val access = backend.maintenanceAccess(request, null)
+        val attempt = dev.openeos.control.ui.MaintenanceAttempt(dev.openeos.control.ui.MaintenanceDraft(
+            dev.openeos.control.ui.MaintenanceOwner(Any(), 1), "synthetic", request), access, { true }, publish = {})
+        attempt.run()
+        assertEquals(MaintenanceCommandEvidence.RESPONSE_RECEIVED, attempt.snapshot().evidence.command)
+        assertEquals(MaintenanceClockEvidence.MATCHED, attempt.snapshot().evidence.clockRead)
+        assertNull(attempt.snapshot().evidence.clockReference?.utcOffsetMinutes)
+        assertNull(attempt.snapshot().evidence.clockReference?.daylightSaving)
+        val before = transport.sentContainers.size
+        attempt.recover()
+        assertTrue(transport.sentContainers.drop(before).all { it.code == CanonEosOperationCode.GET_EVENT })
+        assertEquals(MaintenanceClockEvidence.MATCHED, attempt.snapshot().evidence.clockRead)
+        backend.close()
+    }
+
+    @Test fun maintenanceUsbDoesNotPrepareRetiredSessionOrInventCleaningSupport() = runTest {
+        val transport = CanonEosScriptedTransport()
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb"), PtpTransportFactory { transport })
+        backend.initialize(); backend.capabilities()
+        val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(TEST_CLOCK_EPOCH_SECONDS * 1_000, 0, false))
+        val access = backend.maintenanceAccess(request, null)
+        assertTrue(runCatching { backend.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), null) }.isFailure)
+        backend.close(); val before = transport.sentContainers.size
+        assertTrue(runCatching { access.read(request) }.isFailure)
+        assertEquals(before, transport.sentContainers.size)
+    }
+
+    @Test
+    fun shootingSettingStandardWriteHasOneMutationAndFreshPropertyRead() = runTest {
+        val transport = ScriptedTransport(advertiseCapture = false)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("SYNTHETIC"), PtpTransportFactory { transport })
+        backend.initialize()
+        val request = ShootingSettingRequest("iso", "800")
+        val evidence = ShootingSettingEvidence(request)
+        val before = transport.sentContainers.size
+        backend.writeShootingSetting(request, evidence)
+        assertEquals(ShootingSettingWriteEvidence.RESPONSE_RECEIVED, evidence.snapshot().writeEvidence)
+        val commands = transport.sentContainers.drop(before).filter { it.type == PtpContainerType.COMMAND }
+        assertEquals(1, commands.count { it.code == PtpOperationCode.SET_DEVICE_PROP_VALUE })
+        assertTrue(commands.any { it.code == PtpOperationCode.GET_DEVICE_PROP_DESC })
+        val readStart = transport.sentContainers.size
+        assertEquals("800", backend.readShootingSetting(request).value)
+        val reads = transport.sentContainers.drop(readStart).filter { it.type == PtpContainerType.COMMAND }
+        assertEquals(listOf(PtpOperationCode.GET_DEVICE_PROP_VALUE), reads.map { it.code })
+    }
+
+    @Test
+    fun canonWithoutExplicitPropertyReadCannotVerifyOptimisticCache() = runTest {
+        val transport = CanonEosScriptedTransport(advertiseTextMetadata = false, advertiseLensName = false)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("SYNTHETIC"), PtpTransportFactory { transport })
+        backend.initialize()
+        backend.capabilities()
+        val request = ShootingSettingRequest("iso", "800")
+        val evidence = ShootingSettingEvidence(request)
+        backend.writeShootingSetting(request, evidence)
+        assertEquals(ShootingSettingWriteEvidence.RESPONSE_RECEIVED, evidence.snapshot().writeEvidence)
+        val before = transport.sentContainers.size
+        assertTrue(runCatching { backend.readShootingSetting(request) }.isFailure)
+        assertEquals(before, transport.sentContainers.size)
+    }
+
+    @Test
+    fun unknownUsbSettingFailsWithoutMutationOrReadFanout() = runTest {
+        val transport = ScriptedTransport(advertiseCapture = false)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("SYNTHETIC"), PtpTransportFactory { transport })
+        backend.initialize()
+        val request = ShootingSettingRequest("unknownsetting", "800")
+        val evidence = ShootingSettingEvidence(request)
+        val before = transport.sentContainers.size
+        assertTrue(runCatching { backend.writeShootingSetting(request, evidence) }.isFailure)
+        assertEquals(ShootingSettingWriteEvidence.NOT_SENT, evidence.snapshot().writeEvidence)
+        assertEquals(before, transport.sentContainers.size)
+    }
+
     @Test
     fun backendExposesOnlyAdvertisedStandardOperationsAndRunsMediaPath() = runTest {
         val transport = ScriptedTransport(advertiseCapture = true)
@@ -181,6 +385,24 @@ class UsbPtpCameraBackendTest {
     }
 
     @Test
+    fun localCancellationAtUsbDispatchBoundaryDoesNotSendOrAbortSession() = runTest {
+        val transport = ScriptedTransport(advertiseCapture = false, advertiseUpload = true)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb-upload"),
+            transportFactory = PtpTransportFactory { transport })
+        backend.initialize()
+        val attempt = MediaUploadAttempt().also { it.cancel() }
+        val failure = runCatching {
+            backend.uploadMedia("SYNTHETIC.JPG", 1, "image/jpeg", ByteArrayInputStream(byteArrayOf(7)),
+                evidence = MediaUploadEvidence(attempt::beforeDispatch, attempt::confirm))
+        }.exceptionOrNull()
+        assertTrue(failure is kotlinx.coroutines.CancellationException)
+        assertEquals(MediaUploadStatus.NOT_SENT, attempt.finish())
+        assertFalse(PtpOperationCode.SEND_OBJECT_INFO in transport.sentOperations)
+        assertFalse(transport.closed)
+        backend.close()
+    }
+
+    @Test
     fun mediaUploadRequiresAdvertisedOperationsAndVerifiesExactObjectInfo() = runTest {
         val transport = ScriptedTransport(advertiseCapture = false, advertiseUpload = true)
         val backend = UsbPtpCameraBackend(
@@ -189,6 +411,7 @@ class UsbPtpCameraBackendTest {
         )
         val bytes = "phone-to-camera".toByteArray()
         val progress = mutableListOf<CameraMediaTransferProgress>()
+        val attempt = MediaUploadAttempt()
         backend.initialize()
 
         val capabilities = backend.capabilities()
@@ -197,9 +420,13 @@ class UsbPtpCameraBackendTest {
             sizeBytes = bytes.size.toLong(),
             contentType = "image/jpeg",
             source = ByteArrayInputStream(bytes),
+            evidence = MediaUploadEvidence(attempt::beforeDispatch, attempt::confirm),
             onProgress = progress::add,
         )
 
+        attempt.cancel()
+        assertEquals(MediaUploadStatus.CONFIRMED, attempt.finish())
+        assertEquals(result, attempt.confirmedResult())
         assertTrue(capabilities.matrix.supports(CameraFeature.MEDIA_UPLOAD))
         assertEquals("PHONE_0001.JPG", result.item.name)
         assertEquals(bytes.size.toLong(), result.item.sizeBytes)
@@ -226,17 +453,20 @@ class UsbPtpCameraBackendTest {
         )
         backend.initialize()
 
+        val attempt = MediaUploadAttempt()
         val failure = runCatching {
             backend.uploadMedia(
                 name = "PHONE_0002.JPG",
                 sizeBytes = 2,
                 contentType = "image/jpeg",
                 source = ByteArrayInputStream(byteArrayOf(1)),
+                evidence = MediaUploadEvidence(attempt::beforeDispatch, attempt::confirm),
                 onProgress = {},
             )
         }.exceptionOrNull()
         backend.close()
 
+        assertEquals(MediaUploadStatus.UNCERTAIN, attempt.finish())
         assertTrue(failure is PtpProtocolException)
         assertTrue(failure?.message.orEmpty().contains("reconnect"))
         assertTrue(transport.closed)
@@ -997,7 +1227,7 @@ class UsbPtpCameraBackendTest {
 
     @Test
     fun canonEosVendorOperationsProvideCaptureFocusAndJpegLiveViewWhenAdvertised() = runTest {
-        val transport = CanonEosScriptedTransport()
+        val transport = CanonEosScriptedTransport(advertiseRecordingRead = true)
         val backend = UsbPtpCameraBackend(
             connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
             transportFactory = PtpTransportFactory { transport },
@@ -1455,7 +1685,7 @@ class UsbPtpCameraBackendTest {
 
     @Test
     fun canonMovieRecordingDoesNotReportSuccessWithoutMatchingPropertyReadback() = runTest {
-        val transport = CanonEosScriptedTransport(movieRecordingReadback = false)
+        val transport = CanonEosScriptedTransport(movieRecordingReadback = false, advertiseRecordingRead = true)
         val backend = UsbPtpCameraBackend(
             connection = CameraConnection.AndroidUsbPtp("usb-r6m3"),
             transportFactory = PtpTransportFactory { transport },
@@ -1464,7 +1694,8 @@ class UsbPtpCameraBackendTest {
 
         val failure = runCatching { backend.startRecording() }.exceptionOrNull()
 
-        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure is RecordingStatusReadbackException)
+        assertEquals(RecordingCommand.START, (failure as RecordingStatusReadbackException).command)
         assertEquals(false, backend.status().recording)
         assertFalse(CameraFeature.VIDEO_RECORDING in backend.observedFeatures())
         backend.close()
@@ -2133,6 +2364,74 @@ class UsbPtpCameraBackendTest {
         assertTrue(failure is PtpProtocolException)
         assertTrue(failure?.message.orEmpty().contains("explicitly selected phone"))
         assertFalse(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_ON))
+        backend.close()
+    }
+
+    @Test
+    fun shootingSettingPhoneIntentPreventsFallbackWhenCapacityPreparationFails() = runTest {
+        val transport = CanonEosScriptedTransport(captureDestination = 4, availableShots = 0,
+            hostCaptureObjects = listOf(HostCaptureObject(0x4A, PtpObjectFormat.EXIF_JPEG, "IMG_0050.JPG", byteArrayOf(5, 0))),
+            rejectOperationCode = CanonEosOperationCode.PC_HDD_CAPACITY)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("SYNTHETIC"),
+            PtpTransportFactory { transport }, MemoryHostCaptureStore())
+        backend.initialize()
+        backend.capabilities()
+        val request = ShootingSettingRequest("capturetarget", "Phone")
+        val evidence = ShootingSettingEvidence(request)
+        backend.shootingSettingAccess(request).write(request, evidence)
+        assertEquals(ShootingSettingWriteEvidence.RESPONSE_RECEIVED, evidence.snapshot().writeEvidence)
+        val before = transport.sentContainers.size
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure?.message.orEmpty().contains("explicitly selected phone"))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_ON))
+        assertFalse(transport.sentContainers.drop(before).any {
+            it.type == PtpContainerType.COMMAND && it.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX
+        })
+        backend.close()
+    }
+
+    @Test
+    fun uncertainPhoneTargetWriteRetainsIntentBeforeShutter() = runTest {
+        val transport = CanonEosScriptedTransport(captureDestination = 2, availableShots = 0,
+            hostCaptureObjects = listOf(HostCaptureObject(0x4A, PtpObjectFormat.EXIF_JPEG, "IMG_0050.JPG", byteArrayOf(5, 0))),
+            rejectPropertyCode = CanonEosPropertyCode.CAPTURE_DESTINATION)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("SYNTHETIC"),
+            PtpTransportFactory { transport }, MemoryHostCaptureStore())
+        backend.initialize()
+        backend.capabilities()
+        val request = ShootingSettingRequest("capturetarget", "Phone")
+        val evidence = ShootingSettingEvidence(request)
+        assertTrue(runCatching { backend.shootingSettingAccess(request).write(request, evidence) }.isFailure)
+        assertEquals(ShootingSettingWriteEvidence.UNKNOWN, evidence.snapshot().writeEvidence)
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure?.message.orEmpty().contains("explicitly selected phone"))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_ON))
+        backend.close()
+    }
+
+    @Test
+    fun uncertainCardTargetNeverCapturesToPhoneOrAutomaticallyRetriesCard() = runTest {
+        val transport = CanonEosScriptedTransport(captureDestination = 4, availableShots = 0,
+            hostCaptureObjects = listOf(HostCaptureObject(0x4A, PtpObjectFormat.EXIF_JPEG, "IMG_0050.JPG", byteArrayOf(5, 0))),
+            rejectPropertyCode = CanonEosPropertyCode.CAPTURE_DESTINATION)
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("SYNTHETIC"),
+            PtpTransportFactory { transport }, MemoryHostCaptureStore())
+        backend.initialize()
+        backend.capabilities()
+        val request = ShootingSettingRequest("capturetarget", "Memory card")
+        val evidence = ShootingSettingEvidence(request)
+        assertTrue(runCatching { backend.shootingSettingAccess(request).write(request, evidence) }.isFailure)
+        assertEquals(ShootingSettingWriteEvidence.UNKNOWN, evidence.snapshot().writeEvidence)
+        val before = transport.sentContainers.size
+        val failure = runCatching { backend.captureStill() }.exceptionOrNull()
+        assertTrue(failure is PtpProtocolException)
+        assertTrue(failure?.message.orEmpty().contains("explicitly selected memory-card"))
+        assertFalse(transport.hasOperation(CanonEosOperationCode.REMOTE_RELEASE_ON))
+        assertFalse(transport.sentContainers.drop(before).any {
+            it.type == PtpContainerType.COMMAND && it.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX
+        })
         backend.close()
     }
 
@@ -3036,6 +3335,8 @@ class UsbPtpCameraBackendTest {
         private val advertiseMovieRecording: Boolean = true,
         private val rejectMovieRecording: Boolean = false,
         private val movieRecordingReadback: Boolean = true,
+        private val advertiseRecordingRead: Boolean = false,
+        private var loseFirstMovieResponse: Boolean = false,
         private val advertiseMovieModeSwitch: Boolean = true,
         private val movieModeReadback: Boolean = true,
         private val advertisePropertyWrites: Boolean = true,
@@ -3078,6 +3379,10 @@ class UsbPtpCameraBackendTest {
         private var captureEventPending = false
         private var fullPressActive = false
         private var initialPropertyEventsPending = true
+        var suppressRecordingReads = false
+        private var recordingReadGate: CompletableDeferred<Unit>? = null
+        fun gateNextRecordingRead() { recordingReadGate = CompletableDeferred() }
+        private var moviePropertyValue: Int = 0
         private var moviePropertyEventPending: Int? = null
         private var movieModeEventPending: Int? = null
         private var clockPropertyEventPending: Pair<Int, Int>? = null
@@ -3113,6 +3418,7 @@ class UsbPtpCameraBackendTest {
                             advertiseMovieModeSwitch,
                             advertisePropertyWrites,
                             advertiseTextMetadata || advertiseLensName,
+                            advertiseRecordingRead,
                         ),
                     )
                     incoming += ok(transaction)
@@ -3186,6 +3492,12 @@ class UsbPtpCameraBackendTest {
 
                 CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE -> {
                     val propertyCode = container.parameters().single().toInt()
+                    if (propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS) {
+                        recordingReadGate?.let { gate -> recordingReadGate = null; gate.await() }
+                        if (advertiseRecordingRead && movieRecordingReadback && !suppressRecordingReads) moviePropertyEventPending = moviePropertyValue
+                        incoming += if (advertiseRecordingRead) ok(transaction) else response(PtpResponseCode.GENERAL_ERROR, transaction)
+                        return
+                    }
                     val value = textMetadata[propertyCode]
                     val propertyAdvertised = if (propertyCode == CanonEosPropertyCode.LENS_NAME) {
                         advertiseLensName
@@ -3280,6 +3592,7 @@ class UsbPtpCameraBackendTest {
                         ) {
                             incoming += response(PtpResponseCode.GENERAL_ERROR, transaction)
                         } else {
+                            if (propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS && value != null) moviePropertyValue = value and 0xFFFF
                             if (
                                 propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS &&
                                 value != null &&
@@ -3299,7 +3612,9 @@ class UsbPtpCameraBackendTest {
                                 textMetadata[propertyCode] = textMetadataReadbackOverride ?:
                                     String(bytes, StandardCharsets.US_ASCII)
                             }
-                            incoming += ok(transaction)
+                            if (propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS && loseFirstMovieResponse) {
+                                loseFirstMovieResponse = false
+                            } else incoming += ok(transaction)
                         }
                     }
                 }
@@ -3361,6 +3676,11 @@ class UsbPtpCameraBackendTest {
                 container.code == CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX &&
                 container.payloadU32(4)?.toInt() == propertyCode
         }?.payload
+
+        fun setRecordingForTest(recording: Boolean) {
+            moviePropertyValue = if (recording) CanonEosPtp.MOVIE_RECORD_TARGET_CARD.toInt() else 0
+            queueEvent(eosPropertyValue(CanonEosPropertyCode.EVF_RECORD_STATUS, moviePropertyValue) + eosBlock(0, byteArrayOf()))
+        }
 
         fun queueEvent(payload: ByteArray) {
             pendingScriptedEvents += payload
@@ -3464,6 +3784,12 @@ class UsbPtpCameraBackendTest {
 
         override suspend fun delete(item: CameraMediaItem) {
             check(items.remove(item.id) != null)
+        }
+
+        override suspend fun delete(item: CameraMediaItem, evidence: MediaDeleteEvidence) {
+            evidence.beforeDispatch()
+            delete(item)
+            evidence.onConfirmed()
         }
 
         fun bytes(item: CameraMediaItem): ByteArray = requireEntry(item).second
@@ -3754,6 +4080,7 @@ class UsbPtpCameraBackendTest {
             advertiseMovieModeSwitch: Boolean = true,
             advertisePropertyWrites: Boolean = true,
             advertiseTextMetadata: Boolean = false,
+            advertiseRecordingRead: Boolean = false,
         ): ByteArray = Writer().apply {
             u16(100)
             u32(CanonEosPtp.VENDOR_EXTENSION_ID)
@@ -3776,7 +4103,7 @@ class UsbPtpCameraBackendTest {
                         )
                     )
                     if (advertisePropertyWrites) add(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX)
-                    if (advertiseTextMetadata) add(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE)
+                    if (advertiseTextMetadata || advertiseRecordingRead) add(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE)
                     if (advertiseEventPolling) add(CanonEosOperationCode.GET_EVENT)
                     if (advertiseRemoteRelease) {
                         add(CanonEosOperationCode.REMOTE_RELEASE_ON)

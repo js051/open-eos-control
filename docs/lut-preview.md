@@ -19,7 +19,7 @@ The importer rejects 1D LUTs, combined shaper/3D files, duplicate or conflicting
 - iOS converts decoded JPEG and Desktop Bridge frames through one conflated Core Image worker. Its decoded/native paths share an explicit extended-sRGB context and `CIColorCubeWithColorSpace` pipeline, then output sRGB RGBA8/BGRA8. This corrects the former implicit linear-light decoded path; the new shared numeric/image tests are not yet natively executed.
 - PC uploads the LUT as a floating-point WebGL2 3D texture and performs explicit trilinear interpolation for decoded Bridge or local UVC/HDMI frames on the GPU.
 
-Android and iOS native RTP retain their direct native-surface renderers. LUT preview and pixel-derived scopes are unavailable for those paths because the app does not receive a decoded CPU image; geometric guides and anamorphic desqueeze remain available.
+Android native RTP connects MediaCodec to a bounded GLES LUT renderer; iOS connects native decode to Core Image and sample-buffer presentation. Both retain explicit unsupported/stale states and bounded post-LUT analysis rather than claiming full-rate scopes. Android uses visible-surface PixelCopy; iOS retains exact output identities for sampled scopes and spatial overlays. See the [native validation history](validation/native-rtp-lut-2026-10-14.md) for failed exact-head acceptance and subsequent unvalidated corrections. Source integration does not establish native or physical-camera acceptance.
 
 ## Privacy And Lifetime
 
@@ -29,7 +29,7 @@ Pixel-derived monitoring assists analyze the post-LUT image, so histogram, wavef
 
 ## Native RTP candidate update (2026-10-14)
 
-The historical native-RTP limitations above describe the earlier delivered baseline. The new native LUT candidate compiled but failed acceptance on 2026-10-15; see the [exact-head failures and local correction](validation/native-rtp-followup-2026-10-15.md). Android and iOS candidates live on separate development branches; neither this document nor the preceding green CI proves a combined tree or physical-camera parity.
+The new native LUT candidate compiled but failed acceptance on 2026-10-15; see the [exact-head failures and local correction](validation/native-rtp-followup-2026-10-15.md). The source candidates are now combined locally on dev; preceding CI does not validate this integrated tree or establish physical-camera parity.
 
 ## Shared numeric contract (2026-10-15)
 

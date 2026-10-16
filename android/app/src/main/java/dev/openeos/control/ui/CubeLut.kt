@@ -1,6 +1,5 @@
 package dev.openeos.control.ui
 
-import android.graphics.Bitmap
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
@@ -83,7 +82,8 @@ data class CubeLut(
     }
 }
 
-internal fun parseCubeLut(text: String, fallbackName: String): CubeLut {
+internal fun parseCubeLut(text: String, fallbackName: String, checkActive: () -> Unit = {}): CubeLut {
+    checkActive()
     require(text.toByteArray(Charsets.UTF_8).size <= MAX_CUBE_LUT_BYTES) {
         "3D LUT exceeds the ${MAX_CUBE_LUT_BYTES / (1024 * 1024)} MiB limit."
     }
@@ -96,6 +96,7 @@ internal fun parseCubeLut(text: String, fallbackName: String): CubeLut {
     val values = ArrayList<Float>()
 
     text.lineSequence().forEachIndexed { index, sourceLine ->
+        checkActive()
         val line = sourceLine.substringBefore('#').trim()
         if (line.isEmpty()) return@forEachIndexed
         val tokens = line.split(Regex("\\s+"))
@@ -144,6 +145,7 @@ internal fun parseCubeLut(text: String, fallbackName: String): CubeLut {
         }
     }
 
+    checkActive()
     val cubeSize = requireNotNull(size) { "LUT_3D_SIZE is required." }
     require(domainMin.indices.all { domainMin[it].isFinite() && domainMax[it].isFinite() && domainMin[it] < domainMax[it] }) {
         "Every LUT domain minimum must be lower than its maximum."
@@ -154,29 +156,6 @@ internal fun parseCubeLut(text: String, fallbackName: String): CubeLut {
     val safeName = title?.take(MAX_CUBE_LUT_NAME_LENGTH)
         ?: fallbackName.substringBeforeLast('.').trim().take(MAX_CUBE_LUT_NAME_LENGTH).ifBlank { "Imported LUT" }
     return CubeLut(safeName, cubeSize, domainMin, domainMax, values.toFloatArray())
-}
-
-internal fun applyCubeLut(
-    bitmap: Bitmap,
-    lut: CubeLut,
-    checkCancellation: () -> Unit = {},
-): Bitmap {
-    require(bitmap.width > 0 && bitmap.height > 0)
-    val pixels = IntArray(bitmap.width * bitmap.height)
-    bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-    pixels.indices.forEach { index ->
-        if (index % (bitmap.width * 8).coerceAtLeast(1) == 0) checkCancellation()
-        val pixel = pixels[index]
-        pixels[index] = lut.sampleArgb(pixel)
-    }
-    val result = Bitmap.createBitmap(pixels, bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
-    return try {
-        checkCancellation()
-        result
-    } catch (error: Throwable) {
-        result.recycle()
-        throw error
-    }
 }
 
 private fun parseVector(tokens: List<String>, lineIndex: Int): FloatArray {

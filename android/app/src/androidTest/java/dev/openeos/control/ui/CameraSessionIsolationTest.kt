@@ -9,6 +9,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.MockResponse
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -96,6 +97,132 @@ class CameraSessionIsolationTest {
             assertNull(viewModel.uiState.value.lastDeletedMediaName)
             assertReplacementState()
         }
+    }
+
+    @Test
+    fun metadataOwnerReplacementStopsAfterOneWriteAndCannotPublishIntoReplacement() {
+        loadMedia()
+        val items = viewModel.uiState.value.mediaItems
+        val gate = cameraA.gate()
+        val firstWrite = AtomicBoolean(true)
+        cameraA.intercept = { request ->
+            when {
+                request.method == "PUT" && request.requestUrl?.encodedPath?.startsWith("/ccapi/media/") == true -> {
+                    if (firstWrite.compareAndSet(true, false)) gate.blockResponse()
+                    cameraA.json("{}")
+                }
+                request.method == "GET" && request.requestUrl?.queryParameter("kind") == "info" -> cameraA.json("""{"rating":"3"}""")
+                else -> null
+            }
+        }
+        val oldOperation = launchAndCaptureJob { viewModel.setMediaRatingBatch(items, 3) }
+        assertTrue(gate.entered.await(SESSION_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        reconnectWhileOldResponseIsBlocked(oldOperation)
+        gate.release()
+        awaitReplacementSession(oldOperation)
+        assertEquals(listOf("PUT /ccapi/media/${items.first().id}"), cameraA.mutations.filter { it.startsWith("PUT /ccapi/media/") })
+        assertTrue(cameraB.mutations.isEmpty())
+        compose.runOnIdle {
+            assertNull(viewModel.uiState.value.mediaMetadataBatch)
+            val history = requireNotNull(viewModel.uiState.value.previousMediaMetadataBatch)
+            assertFalse(history.running)
+            assertEquals(items.map { it.id }, history.rows.map { it.request.id })
+            assertEquals(listOf(MediaMetadataOutcome.UNCERTAIN, MediaMetadataOutcome.NOT_STARTED), history.rows.map { it.outcome })
+            assertNull(viewModel.uiState.value.lastMediaBatchResult)
+            assertReplacementState()
+        }
+    }
+
+    @Test
+    fun metadataCancelDuringSecondWriteKeepsFirstConfirmationAndMarksSecondUncertain() {
+        loadMedia()
+        val items = viewModel.uiState.value.mediaItems
+        val gate = cameraA.gate()
+        cameraA.intercept = { request ->
+            when {
+                request.method == "PUT" && request.requestUrl?.encodedPath?.startsWith("/ccapi/media/") == true -> {
+                    if (request.requestUrl?.pathSegments?.last() == items[1].id) gate.blockResponse()
+                    cameraA.json("{}")
+                }
+                request.method == "GET" && request.requestUrl?.queryParameter("kind") == "info" -> cameraA.json("""{"rating":"3"}""")
+                else -> null
+            }
+        }
+        compose.runOnIdle { viewModel.setMediaRatingBatch(items, 3) }
+        assertTrue(gate.entered.await(SESSION_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        compose.runOnIdle { viewModel.cancelMediaMetadataBatch() }
+        gate.release()
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            !viewModel.uiState.value.isBusy(CameraOperation.MEDIA) && viewModel.uiState.value.mediaMetadataBatch?.running == false
+        }
+        compose.runOnIdle {
+            val receipt = requireNotNull(viewModel.uiState.value.mediaMetadataBatch)
+            assertEquals(listOf(MediaMetadataOutcome.CONFIRMED, MediaMetadataOutcome.UNCERTAIN), receipt.rows.map { it.outcome })
+            assertEquals(3, viewModel.uiState.value.mediaItems.first { it.id == items.first().id }.rating)
+            assertNull(viewModel.uiState.value.mediaItems.first { it.id == items[1].id }.rating)
+            assertEquals(1, viewModel.uiState.value.lastMediaBatchResult?.succeededItems)
+        }
+        assertEquals(2, cameraA.mutations.count { it.startsWith("PUT /ccapi/media/") })
+    }
+
+    @Test
+    fun partialProtectionReadbackCannotEraseRatingWritableVetoOrUnrelatedMetadata() {
+        cameraA.intercept = { request ->
+            when {
+                request.method == "GET" && request.requestUrl?.encodedPath == "/ccapi/media" -> {
+                    val body = JSONObject(cameraA.mediaJson())
+                    val rows = body.getJSONArray("items")
+                    repeat(rows.length()) { index -> rows.getJSONObject(index)
+                        .put("ratingWritable", false).put("rating", 2).put("archive", true).put("rotate", 270) }
+                    cameraA.json(body.toString())
+                }
+                request.method == "PUT" && request.requestUrl?.encodedPath?.startsWith("/ccapi/media/") == true -> cameraA.json("{}")
+                request.method == "GET" && request.requestUrl?.queryParameter("kind") == "info" -> cameraA.json("""{"protect":"enable"}""")
+                else -> null
+            }
+        }
+        loadMedia()
+        val item = viewModel.uiState.value.mediaItems.first()
+        assertEquals(false, item.ratingWritable)
+        compose.runOnIdle { viewModel.setMediaProtectionBatch(listOf(item), true) }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            viewModel.uiState.value.mediaMetadataBatch?.confirmed == 1 && !viewModel.uiState.value.isBusy(CameraOperation.MEDIA)
+        }
+        compose.runOnIdle {
+            val current = viewModel.uiState.value.mediaItems.first { it.id == item.id }
+            assertEquals(item.copy(protected = true), current)
+            viewModel.setMediaRatingBatch(listOf(current), 5)
+        }
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            viewModel.uiState.value.mediaMetadataBatch?.failedNotSent == 1 && !viewModel.uiState.value.isBusy(CameraOperation.MEDIA)
+        }
+        assertEquals(1, cameraA.mutations.count { it.startsWith("PUT /ccapi/media/") })
+    }
+
+    @Test
+    fun staleSingleCallerCannotOverrideCurrentExactIdWritableVeto() {
+        cameraA.intercept = { request ->
+            if (request.method == "GET" && request.requestUrl?.encodedPath == "/ccapi/media") {
+                val body = JSONObject(cameraA.mediaJson()); val rows = body.getJSONArray("items")
+                repeat(rows.length()) { index -> rows.getJSONObject(index)
+                    .put("ratingWritable", false).put("protectionWritable", false)
+                    .put("archiveWritable", false).put("rotationWritable", false).put("archive", true) }
+                cameraA.json(body.toString())
+            } else null
+        }
+        loadMedia()
+        val current = viewModel.uiState.value.mediaItems.first()
+        val staleCaller = current.copy(ratingWritable = true, protectionWritable = true,
+            archiveWritable = true, rotationWritable = true, archived = false)
+        compose.runOnIdle {
+            viewModel.setMediaRating(staleCaller, 3)
+            viewModel.setMediaProtection(staleCaller, true)
+            viewModel.setMediaArchived(staleCaller, false)
+            viewModel.setMediaRotation(staleCaller, 90)
+            assertFalse(viewModel.uiState.value.isBusy(CameraOperation.MEDIA))
+            assertEquals(current, viewModel.uiState.value.mediaItems.first())
+        }
+        assertTrue(cameraA.mutations.isEmpty())
     }
 
     @Test

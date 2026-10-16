@@ -1,7 +1,8 @@
 package dev.openeos.control.ui
 
 import dev.openeos.control.data.CameraMediaItem
-import java.util.Locale
+import dev.openeos.control.data.isAutomaticJpegEligible
+import dev.openeos.control.data.automaticJpegMetadataAdmitted
 
 enum class ForegroundImportPhase { OFF, BASELINING, WATCHING, WAITING, SAVING, STOPPING, STOPPED }
 
@@ -147,7 +148,8 @@ internal class ForegroundJpegImportPolicy(private val limits: ForegroundImportLi
         if (lifecycle != Lifecycle.ARMED) return
         require(observedAtMillis >= 0L)
         val candidate = pending[requested.id] ?: return
-        if (requested.id != returned.id || candidate.item.name != returned.name || !isJpegImportCandidate(returned)) {
+        if (!automaticJpegMetadataAdmitted(requested, returned, fresh = true) ||
+            !automaticJpegMetadataAdmitted(candidate.item, returned, fresh = true)) {
             return requestStop(ForegroundImportStopReason.INVALID_SOURCE)
         }
         updateMetadata(candidate, returned, observedAtMillis)
@@ -210,6 +212,4 @@ internal class ForegroundJpegImportPolicy(private val limits: ForegroundImportLi
     }
 }
 
-internal fun isJpegImportCandidate(item: CameraMediaItem): Boolean =
-    !item.isVideo && item.name.substringAfterLast('.', "").lowercase(Locale.ROOT) in setOf("jpg", "jpeg") &&
-        (item.contentType.isNullOrBlank() || item.contentType.substringBefore(';').trim().equals("image/jpeg", ignoreCase = true))
+internal fun isJpegImportCandidate(item: CameraMediaItem): Boolean = item.isAutomaticJpegEligible

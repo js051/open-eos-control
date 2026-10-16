@@ -322,7 +322,7 @@ class SavedJpegReceiverInstrumentedTest {
         assertReceiptReadByTarget(report)
         assertEquals(before, cameraReadSnapshot())
         assertEquals(listOf("/ccapi/media/$newId"), camera.originalReads.toList())
-        assertSingleGalleryHistoryReceipt()
+        assertSingleGalleryHistoryReceipt(planned = false)
     }
 
     @Test fun manualVmGallerySaveRegistersItsPublicationAndReusesOriginalAfterDisconnect() {
@@ -345,7 +345,7 @@ class SavedJpegReceiverInstrumentedTest {
         assertReceiptReadByTarget(report)
         assertEquals(before, cameraReadSnapshot())
         assertEquals(1, camera.originalReads.size)
-        assertSingleGalleryHistoryReceipt()
+        assertSingleGalleryHistoryReceipt(planned = true)
     }
 
     @Test fun realActivityRecreationRetainsTheLeaseAndDeliversExactlyOneExternalResult() {
@@ -684,9 +684,17 @@ class SavedJpegReceiverInstrumentedTest {
         assertArrayEquals(camera.imageBytes, resolver.openInputStream(saved.uri)?.use { it.readBytes() })
     }
 
-    private fun assertSingleGalleryHistoryReceipt() {
+    private fun assertSingleGalleryHistoryReceipt(planned: Boolean) {
         runBlocking { withTimeout(TIMEOUT) { history.awaitIdle() } }
-        val receipt = history.state.value.entries.single()
+        val state = history.state.value
+        if (planned) {
+            assertTrue(state.entries.isEmpty())
+            assertEquals(1, state.worklists.single().rows.size)
+        } else {
+            assertTrue(state.worklists.isEmpty())
+            assertEquals(1, state.entries.size)
+        }
+        val receipt = state.actualReceipts().single()
         assertEquals(DownloadHistoryDestination.GALLERY, receipt.destination)
         assertEquals(DownloadHistoryOutcome.COMPLETED, receipt.outcome)
         assertTrue(camera.deletes.isEmpty())
@@ -826,6 +834,7 @@ class SavedJpegReceiverInstrumentedTest {
         assertTrue(camera.originalReads.isEmpty())
         assertTrue(camera.deletes.isEmpty())
         assertTrue(history.state.value.entries.isEmpty())
+        assertTrue(history.state.value.worklists.isEmpty())
     }
 
     private fun control(operation: String, mode: String? = null): JSONObject {

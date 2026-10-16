@@ -20,6 +20,10 @@ internal class BridgeShutterReleaseSession(val id: String) {
     val hasReleaseResponsibility: Boolean get() = releaseRequired
     val hasConfirmedStart: Boolean get() = synchronized(this) { confirmedStart }
 
+    @Synchronized fun invalidateObservations() {
+        if (!closed) revision += 1
+    }
+
     @Synchronized fun observe(status: CameraStatus, expectedRevision: Long): Boolean {
         if (closed || revision != expectedRevision) return false
         if (status.shutterReleaseUnconfirmed == true) markUnconfirmed()
@@ -43,8 +47,13 @@ internal class BridgeShutterReleaseSession(val id: String) {
         status.copy(bulbExposureActive = null, shutterReleaseUnconfirmed = true)
     } else status
 
-    suspend fun start(read: suspend () -> CameraStatus, press: suspend () -> CameraStatus): CameraStatus = mutex.withLock {
+    suspend fun start(
+        read: suspend () -> CameraStatus,
+        press: suspend () -> CameraStatus,
+        admit: () -> Unit = {},
+    ): CameraStatus = mutex.withLock {
         check(!closed) { "Desktop Bridge session is closed." }
+        admit()
         if (unconfirmed) throw ShutterReleaseException(IllegalStateException("Retry stopping the camera control in this Bridge session."))
         if (confirmedStart) return@withLock read()
         // Record responsibility before bytes can reach Bridge. No failed start is replayable.

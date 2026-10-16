@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-15",
+  "delivery_state": "implemented",
+  "base_commit": "6c578399e3ac49dc3fecec2f29377b734c3750f1",
+  "release_assessment": {
+    "previously_verified_baseline": "v0.12.0 Development Preview",
+    "development_version": "0.13.0",
+    "cohort_impact": "patch",
+    "cumulative_impact_from_baseline": "minor",
+    "version_changed": false,
+    "live_release_rechecked": false,
+    "physical_device_status": "NOT_RUN",
+    "blockers": [
+      "formal JSON resource loader",
+      "Android SDK build",
+      "native ViewModel/Compose execution",
+      "exact-head CI"
+    ]
+  },
+  "evidence": {
+    "pure_jvm": {
+      "level": "EXECUTED",
+      "junit_tests": 44,
+      "compile_exit": 0,
+      "junit_exit": 0,
+      "test_log": "JUnit version 4.13.2\n............................................\nTime: 0.205\n\nOK (44 tests)\n\n",
+      "details": {
+        "scope": "Unchanged production parser/library/review + exact hashed DTO section + unchanged JUnit tests, fixed DATA provider",
+        "not_run": [
+          "org.json:20240303 resource loader",
+          "Gradle resource mapping",
+          "full Android SDK build",
+          "Compose timezone broadcast/lifecycle UI",
+          "ViewModel HTTP integration (including actual malformed-list adapter decoding)",
+          "Compose review-evidence UI",
+          "foreground import integration",
+          "physical camera"
+        ],
+        "review_evidence_fixture": {
+          "sha256": "aab83ace169997c2f9788ea45f2863513f0a0d99e3211143c0e60475eb7ec7b1",
+          "cases": 106,
+          "retries": 2,
+          "retirements": 4
+        },
+        "fixture_sha256": "8eb57e04446478fe523c1e8cd08c0cc57b524d9fcb7f63845fc28d6d02f57e9a",
+        "fixture_vectors": 48,
+        "fixture_zones": 3,
+        "sources": {
+          "android/app/src/main/java/dev/openeos/control/ui/MediaCaptureDate.kt": "200a0c1bb8da42ff4b95f616b77209c4b9911a2b613c31dff0163851ce1043de",
+          "android/app/src/main/java/dev/openeos/control/ui/MediaLibrary.kt": "e84b127ba44f7542cfa929d18b8d4d12cf177088daf7066549c4253f08a172ed",
+          "android/app/src/main/java/dev/openeos/control/ui/MediaReviewSelection.kt": "00186d02733be20e035dd3541746f42f18ee70d1769df5159c2eab725164dfc4",
+          "android/app/src/test/java/dev/openeos/control/ui/MediaDateReviewFixture.kt": "caeddb1eec96b7825be8ba819fe690481565171db177e02dc88e3bf0fe3cd7f0",
+          "android/app/src/test/java/dev/openeos/control/ui/CaptureReviewEvidenceFixture.kt": "fb2c5a7b6f25f81935b21e567d350a98b46bdea5396dd24576a585e2686aeb97",
+          "android/app/src/test/java/dev/openeos/control/ui/MediaDateReviewContractTest.kt": "b59d1c3de042965dfb4315387eef0a38498d84a2063c5b7d30c76b73e6b701ee",
+          "android/app/src/test/java/dev/openeos/control/ui/MediaReviewSelectionTest.kt": "6b2d3e7f7535aefeb88b697ce0ad44720e57c5bceec97be00f01200bf1d1ec0d",
+          "android/app/src/test/java/dev/openeos/control/ui/CaptureReviewEvidenceTest.kt": "0146199f39ebfe07f48f561a12fc79a3c715fbb9ba9d4a8d6bdda1cd544bcaea",
+          "android/app/src/test/java/dev/openeos/control/ui/CaptureReviewEvidenceContractTest.kt": "a71ecb1cea725c8fe5c00f9875cef81c83f3c33789738535d5a6b676fea1114c",
+          "android/app/src/test/java/dev/openeos/control/ui/MediaDateRangeTest.kt": "031348116d29fec42b48f627c9ec5c74aaf46e99ee539fcbf1847440412aabf1",
+          "android/app/src/test/java/dev/openeos/control/ui/MediaRatingFilterTest.kt": "33d64e6d5241e36ac2a88ece28f371ab90b7b8f272237b3db4f8143a47a2a0b6"
+        },
+        "model_source_sha256": "549b63c2aaf70880a1286070d8b96bafaa87daaf5aad456e2e47daa491f75a1f",
+        "model_section_sha256": "ae8fa1639196566f34766917e583e45e70157011adb059b62fb568cee5c354d3",
+        "model_section_start_line": 578,
+        "model_section_end_line": 627,
+        "compile_exit": 0,
+        "junit_exit": 0
+      }
+    },
+    "source_resource_guards": {
+      "level": "SOURCE_ONLY_EXECUTED",
+      "tests": 37,
+      "log": ".....................................                                    [100%]\n37 passed in 0.06s\n"
+    },
+    "kotlin_psi": {
+      "level": "SYNTAX_ONLY_EXECUTED",
+      "details": {
+        "scope": "Kotlin PSI syntax only. NOT Android SDK typecheck, Gradle, UI or runtime execution.",
+        "parser_sha256": "d718e53fcd98284858fa72636a3c5a0540ff933022cefc1afd5c536491a0a7f7",
+        "files": [
+          {
+            "path": "android/app/build.gradle.kts",
+            "sha256": "73c54b7739c38e3cd0fbc3349dae20344c4fe236ad7068052b6d981571f1199e",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/androidTest/java/dev/openeos/control/ui/CameraCaptureReviewUiTest.kt",
+            "sha256": "0a2c6cbfef950580db48d629a03f37f7a8932ec97e346f026e221434c4f7f058",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+            "sha256": "36fdf725c1a71f25501f0d43b5ce06b78e26415d5fe4f9c188465965157eb5ae",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt",
+            "sha256": "fd2ae92434ca9d5b2fea749a203dd009a6eca8c6d7470d7fa440d54d33abb4e8",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/main/java/dev/openeos/control/ui/CameraUiState.kt",
+            "sha256": "dd2e90dbe69d3baeea30be76dbbc382296be73dc718c11c61191b50ab0319408",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/main/java/dev/openeos/control/ui/CameraViewModel.kt",
+            "sha256": "bf4761249933913e27724f1c53de9748689f2df88d6ca3787a813f2682732efc",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/main/java/dev/openeos/control/ui/CaptureReviewStatusDialog.kt",
+            "sha256": "4504008c8222fb1bb5df6242a436955056fe57683caf37839c8685be3c355faf",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/main/java/dev/openeos/control/ui/MediaReviewSelection.kt",
+            "sha256": "00186d02733be20e035dd3541746f42f18ee70d1769df5159c2eab725164dfc4",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/test/java/dev/openeos/control/ui/CameraCaptureReviewRecoveryTest.kt",
+            "sha256": "551f1b4c510c9852adea234a4c01a82e357bc8519caf3188939f7ffcc9ab6d07",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/test/java/dev/openeos/control/ui/CaptureReviewEvidenceContractTest.kt",
+            "sha256": "a71ecb1cea725c8fe5c00f9875cef81c83f3c33789738535d5a6b676fea1114c",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/test/java/dev/openeos/control/ui/CaptureReviewEvidenceFixture.kt",
+            "sha256": "fb2c5a7b6f25f81935b21e567d350a98b46bdea5396dd24576a585e2686aeb97",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/test/java/dev/openeos/control/ui/CaptureReviewEvidenceFixtureLoader.kt",
+            "sha256": "b70cb9d30a3e6aa60df946687cc8eb9d64d33efca8bdb698ed4f4b4cef831a56",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/test/java/dev/openeos/control/ui/CaptureReviewEvidenceTest.kt",
+            "sha256": "0146199f39ebfe07f48f561a12fc79a3c715fbb9ba9d4a8d6bdda1cd544bcaea",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/test/java/dev/openeos/control/ui/MediaLibraryTest.kt",
+            "sha256": "be65322317f28cdcc9af3e2aedf5d3a3b19006e10c619a9748165422aa191212",
+            "exit": 0
+          },
+          {
+            "path": "android/app/src/test/java/dev/openeos/control/ui/MediaReviewSelectionTest.kt",
+            "sha256": "6b2d3e7f7535aefeb88b697ce0ad44720e57c5bceec97be00f01200bf1d1ec0d",
+            "exit": 0
+          }
+        ]
+      }
+    },
+    "ruff": {
+      "level": "EXECUTED",
+      "cwd": "bridge",
+      "command": "python -m ruff check . ../scripts/validation",
+      "log": "All checks passed!\n"
+    },
+    "diff_check": {
+      "level": "EXECUTED",
+      "command": "git diff --check",
+      "exit": 0
+    },
+    "combined_local_source_checks": {
+      "tests": 80,
+      "warning_count": 1,
+      "warning": "Existing test_export_ios_ui_evidence.test_tree returns dict",
+      "scope": [
+        "scripts/ci/tests",
+        "scripts/validation/tests",
+        "scripts/contracts/tests"
+      ],
+      "includes_source_resource_guards_not_additive": true,
+      "exit": 0
+    }
+  },
+  "malformed_vectors_scope": "Explicit adapter-rejection seam in pure JVM; actual HTTP/JSON adapter and native integration NOT_RUN.",
+  "native_test_sources": "Added/extended native ViewModel and Compose tests; source checked, NOT executed.",
+  "source_files": {
+    "android/app/build.gradle.kts": {
+      "bytes": 6318,
+      "sha256": "73c54b7739c38e3cd0fbc3349dae20344c4fe236ad7068052b6d981571f1199e"
+    },
+    "android/app/src/androidTest/java/dev/openeos/control/ui/CameraCaptureReviewUiTest.kt": {
+      "bytes": 15781,
+      "sha256": "0a2c6cbfef950580db48d629a03f37f7a8932ec97e346f026e221434c4f7f058"
+    },
+    "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt": {
+      "bytes": 255972,
+      "sha256": "36fdf725c1a71f25501f0d43b5ce06b78e26415d5fe4f9c188465965157eb5ae"
+    },
+    "android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt": {
+      "bytes": 87516,
+      "sha256": "fd2ae92434ca9d5b2fea749a203dd009a6eca8c6d7470d7fa440d54d33abb4e8"
+    },
+    "android/app/src/main/java/dev/openeos/control/ui/CameraUiState.kt": {
+      "bytes": 21394,
+      "sha256": "dd2e90dbe69d3baeea30be76dbbc382296be73dc718c11c61191b50ab0319408"
+    },
+    "android/app/src/main/java/dev/openeos/control/ui/CameraViewModel.kt": {
+      "bytes": 214193,
+      "sha256": "bf4761249933913e27724f1c53de9748689f2df88d6ca3787a813f2682732efc"
+    },
+    "android/app/src/main/java/dev/openeos/control/ui/CaptureReviewStatusDialog.kt": {
+      "bytes": 4681,
+      "sha256": "4504008c8222fb1bb5df6242a436955056fe57683caf37839c8685be3c355faf"
+    },
+    "android/app/src/main/java/dev/openeos/control/ui/MediaReviewSelection.kt": {
+      "bytes": 4175,
+      "sha256": "00186d02733be20e035dd3541746f42f18ee70d1769df5159c2eab725164dfc4"
+    },
+    "android/app/src/main/res/values-zh-rTW/strings.xml": {
+      "bytes": 82301,
+      "sha256": "b76fe16638c590ed3d46de5a1d07a4b4dbf136b7f3f9bfaada130fa20e929a65"
+    },
+    "android/app/src/main/res/values/strings.xml": {
+      "bytes": 84835,
+      "sha256": "c8cc8a5979bb1c1a2f9f3d9b6f0831082a843d798c7244705215f1178fe759c1"
+    },
+    "android/app/src/test/java/dev/openeos/control/ui/CameraCaptureReviewRecoveryTest.kt": {
+      "bytes": 56070,
+      "sha256": "551f1b4c510c9852adea234a4c01a82e357bc8519caf3188939f7ffcc9ab6d07"
+    },
+    "android/app/src/test/java/dev/openeos/control/ui/CaptureReviewEvidenceContractTest.kt": {
+      "bytes": 6114,
+      "sha256": "a71ecb1cea725c8fe5c00f9875cef81c83f3c33789738535d5a6b676fea1114c"
+    },
+    "android/app/src/test/java/dev/openeos/control/ui/CaptureReviewEvidenceFixture.kt": {
+      "bytes": 1076,
+      "sha256": "fb2c5a7b6f25f81935b21e567d350a98b46bdea5396dd24576a585e2686aeb97"
+    },
+    "android/app/src/test/java/dev/openeos/control/ui/CaptureReviewEvidenceFixtureLoader.kt": {
+      "bytes": 2423,
+      "sha256": "b70cb9d30a3e6aa60df946687cc8eb9d64d33efca8bdb698ed4f4b4cef831a56"
+    },
+    "android/app/src/test/java/dev/openeos/control/ui/CaptureReviewEvidenceTest.kt": {
+      "bytes": 5756,
+      "sha256": "0146199f39ebfe07f48f561a12fc79a3c715fbb9ba9d4a8d6bdda1cd544bcaea"
+    },
+    "android/app/src/test/java/dev/openeos/control/ui/MediaLibraryTest.kt": {
+      "bytes": 15936,
+      "sha256": "be65322317f28cdcc9af3e2aedf5d3a3b19006e10c619a9748165422aa191212"
+    },
+    "android/app/src/test/java/dev/openeos/control/ui/MediaReviewSelectionTest.kt": {
+      "bytes": 3989,
+      "sha256": "6b2d3e7f7535aefeb88b697ce0ad44720e57c5bceec97be00f01200bf1d1ec0d"
+    },
+    "contracts/capture-review-evidence/v1/README.md": {
+      "bytes": 2930,
+      "sha256": "8348befbf8c3cf338cd37d3452a2b2b855fa48d20dbf0db6232f1e08d99876d4"
+    },
+    "contracts/capture-review-evidence/v1/review-evidence-vectors.json": {
+      "bytes": 25745,
+      "sha256": "aab83ace169997c2f9788ea45f2863513f0a0d99e3211143c0e60475eb7ec7b1"
+    },
+    "scripts/validation/capture_review_evidence_fixture.py": {
+      "bytes": 2644,
+      "sha256": "ea64a58e7ff3d8bb1ec64534d595dd35b96b9a730e13fa6af0ab99a9fb4c03f4"
+    },
+    "scripts/validation/run_media_date_review_jvm.py": {
+      "bytes": 9176,
+      "sha256": "6b84241acaef10b6909f51e7f20e722560dbf1854bf46c2110dad4f2177a86c0"
+    },
+    "scripts/validation/tests/test_capture_review_evidence_source.py": {
+      "bytes": 7139,
+      "sha256": "3a2d3401a4ebd431cde7013749026dc6730ee2ac4851075ba86f4f1f79cf9e27"
+    }
+  },
+  "jvm_tool_receipt_sha256": "3425a7888c552197fe3ab7b0bf5dc6f53de9035b36850d608378bf0e4ad85a1c",
+  "non_actions": [
+    "commit",
+    "push",
+    "CI",
+    "download",
+    "installation",
+    "camera operation",
+    "credentials",
+    "security settings"
+  ]
+}

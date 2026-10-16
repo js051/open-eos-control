@@ -172,7 +172,7 @@ private fun falseColor(luminance: Int): Int = when {
     else -> 0xE0E83B35.toInt()
 }
 
-private fun analysisDimensions(width: Int, height: Int): Pair<Int, Int> {
+internal fun analysisDimensions(width: Int, height: Int): Pair<Int, Int> {
     require(width > 0 && height > 0)
     val scale = min(1f, min(MAX_ANALYSIS_WIDTH.toFloat() / width, MAX_ANALYSIS_HEIGHT.toFloat() / height))
     return (width * scale).roundToInt().coerceAtLeast(1) to

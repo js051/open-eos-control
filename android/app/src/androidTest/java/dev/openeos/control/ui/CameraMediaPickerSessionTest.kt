@@ -81,7 +81,7 @@ class CameraMediaPickerSessionTest {
                             .put("name", url.queryParameter("filename"))
                             .put("kind", "image").put("size_bytes", bytes.size)
                         uploadedItems += item
-                        camera.json(item.toString())
+                        camera.json(item.toString()).setResponseCode(201)
                     }
                     request.method == "GET" && url.encodedPath == "/ccapi/media" && uploadedItems.isNotEmpty() -> {
                         val items = JSONObject(camera.mediaJson()).getJSONArray("items")
@@ -291,19 +291,34 @@ class CameraMediaPickerSessionTest {
     }
 
     @Test
-    fun restoredFolderRequestKeepsItsBatchAndReportsProviderFailureForEveryOriginalItem() {
-        val items = viewModel.uiState.value.mediaItems
+    fun restoredFolderRequestKeepsItsRosterAndStopsAfterFirstProviderFailure() {
+        val items = viewModel.uiState.value.mediaItems.toList()
+        assertEquals(2, items.size)
         launchFolder()
         val request = registry.lastRequest(ActivityResultContracts.OpenDocumentTree::class.java)
         restoreComposition()
         // A deliberately missing provider exercises the real batch entry point without
         // granting a real SAF tree. This verifies restoration/error accounting, not SAF success.
         compose.runOnIdle { registry.deliver(request, unavailableTree()) }
-        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) { viewModel.uiState.value.lastMediaBatchResult != null }
-        val result = requireNotNull(viewModel.uiState.value.lastMediaBatchResult)
+        compose.waitUntil(SESSION_TEST_TIMEOUT_MILLIS) {
+            val state = viewModel.uiState.value
+            state.lastMediaBatchResult != null && !state.isBusy(CameraOperation.MEDIA) &&
+                state.mediaBatchProgress == null && state.mediaSaveFeedback.values.none { it.isPending }
+        }
+        val state = compose.runOnIdle { viewModel.uiState.value }
+        val result = requireNotNull(state.lastMediaBatchResult)
+        // Downloads stop on the first failure. Restoration must retain the entire
+        // roster and mark untouched rows NotStarted, never report them as attempted.
         assertEquals(items.size, result.totalItems)
         assertEquals(0, result.succeededItems)
-        assertEquals(items.map(CameraMediaItem::name), result.failedItemNames)
+        assertEquals(listOf(items.first().name), result.failedItemNames)
+        assertEquals(1, result.failedItems)
+        assertEquals(1, result.notStartedItems)
+        assertEquals(items.map(CameraMediaItem::id).toSet(), state.mediaSaveFeedback.keys)
+        assertTrue(state.mediaSaveFeedback[items.first().id] is MediaSaveFeedback.Failed)
+        assertEquals(MediaSaveFeedback.NotStarted, state.mediaSaveFeedback[items[1].id])
+        assertFalse(state.isBusy(CameraOperation.MEDIA))
+        assertTrue(state.mediaSaveFeedback.values.none { it.isPending })
         assertTrue(cameraA.originalReads.isEmpty())
         assertTrue(cameraB.originalReads.isEmpty())
     }

@@ -8,6 +8,29 @@ import org.junit.Test
 
 class LiveViewMonitoringTest {
     @Test
+    fun nativeDisplaySamplingPreservesBoundsAndDoesNotDesqueezeTwice() {
+        assertEquals(120 to 68, analysisDimensions(1920, 1080))
+        assertEquals(45 to 80, analysisDimensions(1080, 1920))
+        assertEquals(120 to 34, analysisDimensions(3840, 1080))
+        assertEquals(1 to 80, analysisDimensions(1, 8000))
+    }
+
+    @Test
+    fun srgbArgbChannelsAndAllAssistsUseTheSamePixelInput() {
+        val analysis = analyzeLiveViewPixels(
+            intArrayOf(0xffff0000.toInt(), 0xff00ff00.toInt(), 0xff0000ff.toInt()),
+            3, 1, 90, true, true, true,
+        )
+        assertEquals(1, analysis.histogram[13])
+        assertEquals(1, analysis.histogram[45])
+        assertEquals(1, analysis.histogram[4])
+        assertEquals(3, requireNotNull(analysis.waveform).density.sum())
+        assertEquals(0xE029B6D1.toInt(), requireNotNull(analysis.overlayPixels)[0])
+        assertEquals(0xE0F2D13D.toInt(), requireNotNull(analysis.overlayPixels)[1])
+        assertEquals(0xE0203DA0.toInt(), requireNotNull(analysis.overlayPixels)[2])
+    }
+
+    @Test
     fun histogramPlacesBlackAndWhiteInEndpointBuckets() {
         val analysis = analyzeLiveViewPixels(
             pixels = intArrayOf(0xff000000.toInt(), 0xffffffff.toInt()),

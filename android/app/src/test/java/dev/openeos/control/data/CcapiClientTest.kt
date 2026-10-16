@@ -22,6 +22,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -51,6 +52,163 @@ class CcapiClientTest {
     @After
     fun tearDown() {
         server.shutdown()
+    }
+
+    private fun liveViewJpegResponse() = binaryResponse(
+        byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 0xFF.toByte(), 0xD9.toByte()), "image/jpeg")
+
+    private fun maintenanceAttempt(request: MaintenanceRequest) = dev.openeos.control.ui.MaintenanceAttempt(
+        dev.openeos.control.ui.MaintenanceDraft(dev.openeos.control.ui.MaintenanceOwner(Any(), 1), "synthetic-confirmation", request),
+        client.maintenanceAccess(request, null), { true }, publish = {})
+
+    @Test fun maintenanceClockSeparatesAcceptedResponseFromFreshReadWithoutStatus() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
+        val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(1_700_000_000_000, 28_800, false))
+        val clock = """{"datetime":"Wed, 15 Nov 2023 06:13:20 +0800","dst":false}"""
+        server.enqueue(jsonResponse(clock)); server.enqueue(jsonResponse(clock))
+        val attempt = maintenanceAttempt(request); attempt.run()
+        assertEquals(MaintenanceCommandEvidence.RESPONSE_RECEIVED, attempt.snapshot().evidence.command)
+        assertEquals(MaintenanceClockEvidence.MATCHED, attempt.snapshot().evidence.clockRead)
+        assertEquals(2, server.requestCount)
+        val write = server.takeRequest(); val read = server.takeRequest()
+        assertEquals("PUT", write.method); assertEquals("/ccapi/ver100/functions/datetime", write.path)
+        assertEquals("Wed, 15 Nov 2023 06:13:20 +0800", JSONObject(write.body.readUtf8()).getString("datetime"))
+        assertEquals("GET", read.method); assertEquals(write.path, read.path)
+        assertEquals("no-cache, no-store", read.getHeader("Cache-Control"))
+    }
+
+    @Test fun maintenanceClockReadFailureRetainsResponseAndRecoveryNeverWrites() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
+        val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(1_700_000_000_000, 0, false))
+        val clock = """{"datetime":"Tue, 14 Nov 2023 22:13:20 +0000","dst":false}"""
+        server.enqueue(jsonResponse(clock)); server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+        val attempt = maintenanceAttempt(request); attempt.run()
+        assertEquals(MaintenanceCommandEvidence.RESPONSE_RECEIVED, attempt.snapshot().evidence.command)
+        assertEquals(MaintenanceClockEvidence.UNAVAILABLE, attempt.snapshot().evidence.clockRead)
+        server.enqueue(jsonResponse(clock)); attempt.recover()
+        assertEquals(3, server.requestCount)
+        assertEquals(listOf("PUT", "GET", "GET"), (0 until 3).map { server.takeRequest().method })
+        assertEquals(MaintenanceClockEvidence.UNAVAILABLE, attempt.snapshot().evidence.clockRead)
+        assertNotNull(attempt.snapshot().evidence.recoveryClock)
+    }
+
+    @Test fun maintenanceSimulatorCleaningUsesExact204AndDoesNotRestoreOrSleepAutomatically() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
+        server.enqueue(MockResponse().setResponseCode(204)); server.enqueue(jsonResponse(STATUS_JSON))
+        val attempt = maintenanceAttempt(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING)); attempt.run()
+        assertEquals(MaintenanceCommandEvidence.RESPONSE_RECEIVED, attempt.snapshot().evidence.command)
+        assertEquals(MaintenanceRestoreEvidence.NOT_REQUESTED, attempt.snapshot().evidence.restore)
+        assertEquals(2, server.requestCount)
+        assertEquals("/ccapi/sensor-cleaning", server.takeRequest().path)
+        assertEquals("/ccapi/status", server.takeRequest().path)
+    }
+
+    @Test fun maintenanceEventStopRejectsRedirectAndNon204WithoutDispatch() = runTest {
+        for (code in listOf(200, 201, 202, 302)) {
+            client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+            server.enqueue(jsonResponse("""{"ver100":[{"path":"/event/polling","get":true,"delete":true},{"path":"/functions/sensorcleaning","post":true}]}"""))
+            client.initialize()
+            server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", server.url("/forbidden-replay")).setBody("{}"))
+            val before = server.requestCount
+            val attempt = maintenanceAttempt(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING)); attempt.run()
+            assertEquals(before + 1, server.requestCount)
+            assertEquals(MaintenanceCommandEvidence.NOT_SENT, attempt.snapshot().evidence.command)
+            assertEquals(MaintenanceStopEvidence.UNKNOWN, attempt.snapshot().evidence.eventStop)
+        }
+    }
+
+    @Test fun maintenanceLiveViewDependenciesUseStrictTransportAndNeverRetryStartOrCleanup() = runTest {
+        var authReplays = 0
+        val http = okhttp3.OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).authenticator { _, response ->
+            authReplays++; response.request.newBuilder().header("Authorization", "synthetic-replay").build()
+        }.build()
+        client = CcapiClient(server.url("/").toString(), httpClient = http)
+        client.forceRealCamera()
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(liveViewJpegResponse())
+        client.startLiveView(LiveViewRequest(size = LiveViewSize.LARGE, source = LiveViewSource.CCAPI_JPEG_POLLING))
+        client.javaClass.getDeclaredField("cameraSleepWritePath").apply { isAccessible = true; set(client, "/ccapi/ver100/shooting/settings/autopoweroff") }
+        val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SLEEP), LiveViewRequest(size = LiveViewSize.LARGE))
+        server.enqueue(MockResponse().setResponseCode(204))
+        val guard = MaintenanceIoContext(kotlin.coroutines.coroutineContext) {}
+        kotlinx.coroutines.withContext(guard) { access.stopLiveView() }
+        assertFalse(client.liveViewStopRequired)
+        server.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
+        assertTrue(runCatching { kotlinx.coroutines.withContext(guard) { access.restore() } }.isFailure)
+        assertEquals(4, server.requestCount); assertTrue(client.liveViewStopRequired)
+        val requests = (0 until 4).map { server.takeRequest() }
+        assertEquals(listOf("POST", "GET", "DELETE", "POST"), requests.map { it.method })
+        assertEquals("large", JSONObject(requests.last().body.readUtf8()).getString("liveviewsize"))
+        assertTrue(client.maintenanceStopOwned)
+        val strictClient = client.javaClass.getDeclaredField("captureConfigurationHttpClient").apply { isAccessible = true }.get(client) as okhttp3.OkHttpClient
+        assertEquals(15_000, strictClient.callTimeoutMillis)
+        for (code in listOf(302, 401)) {
+            server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", server.url("/forbidden-stop-replay")).setBody("{}"))
+            val before = server.requestCount
+            assertTrue(runCatching { client.stopLiveView() }.isFailure)
+            assertEquals(before + 1, server.requestCount); assertTrue(client.maintenanceStopOwned)
+            assertEquals("DELETE", server.takeRequest().method)
+        }
+        server.enqueue(MockResponse().setResponseCode(403).setBody("{}"))
+        val beforeClose = server.requestCount
+        assertTrue(runCatching { client.close() }.isFailure)
+        assertEquals(beforeClose + 1, server.requestCount); server.takeRequest()
+        assertTrue(client.maintenanceStopOwned); assertEquals(0, authReplays)
+        server.enqueue(MockResponse().setResponseCode(204)); client.stopLiveView()
+        assertFalse(client.liveViewStopRequired); assertFalse(client.maintenanceStopOwned)
+    }
+
+    @Test fun maintenanceEventStopFailurePreventsCleaningDispatch() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver100":[{"path":"/event/polling","get":true,"delete":true},{"path":"/functions/sensorcleaning","post":true}]}"""))
+        client.initialize()
+        server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+        val attempt = maintenanceAttempt(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING)); attempt.run()
+        assertEquals(MaintenanceStopEvidence.UNKNOWN, attempt.snapshot().evidence.eventStop)
+        assertEquals(MaintenanceCommandEvidence.NOT_SENT, attempt.snapshot().evidence.command)
+        assertEquals(2, server.requestCount); server.takeRequest()
+        assertEquals("DELETE", server.takeRequest().method)
+    }
+
+    @Test
+    fun mediaClassificationPreservesLiteralIdentityAndExplicitMimeAliases() = runTest {
+        for (alias in CAMERA_MEDIA_MIME_ALIASES) {
+            server.enqueue(jsonResponse("""{"items":[{"id":"SYNTHETIC ","name":"FRAME.JPG ","kind":"image","$alias":" "}]}"""))
+            val item = client.listMedia().single()
+            assertEquals("SYNTHETIC ", item.id)
+            assertEquals("FRAME.JPG ", item.name)
+            assertEquals(" ", item.contentType)
+            assertFalse(item.isAutomaticJpegEligible)
+        }
+        val original = CameraMediaItem("SYNTHETIC", "FRAME.JPG", "image", contentType = "image/jpeg")
+        server.enqueue(jsonResponse("""{"filesize":100,"mimeType":"video/mp4"}"""))
+        val conflict = client.mediaInfo(original)
+        assertEquals(CameraMediaClassification.CONFLICT, conflict.mediaClassification)
+        assertFalse(automaticJpegMetadataAdmitted(original, conflict, fresh = true))
+        server.enqueue(jsonResponse("""{"filesize":100,"content_type":"image/jpeg","mimetype":null}"""))
+        assertEquals(CameraMediaClassification.UNKNOWN, client.mediaInfo(original).mediaClassification)
+        server.enqueue(jsonResponse("""{"filesize":100,"id":"OTHER","name":"OTHER.JPG","kind":"raw"}"""))
+        val changed = client.mediaInfo(original)
+        assertEquals("OTHER", changed.id)
+        assertEquals("OTHER.JPG", changed.name)
+        assertEquals("raw", changed.kind)
+        assertFalse(automaticJpegMetadataAdmitted(original, changed, fresh = true))
+        server.enqueue(jsonResponse("""{"filesize":0}"""))
+        val unready = client.mediaInfo(original.copy(kind = "raw", sizeBytes = null, contentType = "image/png"))
+        assertEquals("image", unready.kind)
+        assertNull(unready.sizeBytes)
+        assertNull(unready.contentType)
+    }
+
+    @Test
+    fun unknownAndConflictingMediaNeverIssueThumbnailPreviewOrStreamRequests() = runTest {
+        for (item in listOf(CameraMediaItem("unknown", "FILE.bin", "other"),
+            CameraMediaItem("conflict", "FRAME.JPG", "image", contentType = "video/mp4"))) {
+            assertTrue(runCatching { client.mediaThumbnail(item) }.exceptionOrNull() is IllegalArgumentException)
+            assertTrue(runCatching { client.mediaPreview(item) }.exceptionOrNull() is IllegalArgumentException)
+            assertTrue(runCatching { client.openMediaStream(item) }.exceptionOrNull() is IllegalArgumentException)
+        }
+        assertEquals(0, server.requestCount)
     }
 
     @Test
@@ -851,8 +1009,10 @@ class CcapiClientTest {
     fun jpegStopFailureIsReportedAndCanBeRetriedWithoutLosingOwnership() = runTest {
         client.forceRealCamera()
         server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(liveViewJpegResponse())
         client.startLiveView(LiveViewRequest(source = LiveViewSource.CCAPI_JPEG_POLLING))
         server.takeRequest()
+        assertEquals("GET", server.takeRequest().method)
         server.enqueue(MockResponse().setResponseCode(503).setBody("camera busy"))
 
         assertTrue(runCatching { client.stopLiveView() }.isFailure)
@@ -864,13 +1024,14 @@ class CcapiClientTest {
         assertEquals("DELETE", server.takeRequest().method)
         assertNull(client.currentLiveViewSource())
         client.stopLiveView()
-        assertEquals(3, server.requestCount)
+        assertEquals(4, server.requestCount)
     }
 
     @Test
     fun startLiveViewPostsCanonDisplayAndSize() = runTest {
         client.forceRealCamera()
         server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(liveViewJpegResponse())
 
         client.startLiveView(LiveViewRequest(size = LiveViewSize.LARGE))
         val request = server.takeRequest()
@@ -891,6 +1052,7 @@ class CcapiClientTest {
                 .setBody("""{"message":"Invalid parameter"}"""),
         )
         server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(liveViewJpegResponse())
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
 
         client.startLiveView(LiveViewRequest(size = LiveViewSize.MEDIUM))
@@ -912,6 +1074,7 @@ class CcapiClientTest {
         server.enqueue(MockResponse().setResponseCode(400).setBody("""{"message":"Invalid parameter"}"""))
         server.enqueue(MockResponse().setResponseCode(400).setBody("""{"message":"Invalid parameter"}"""))
         server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(liveViewJpegResponse())
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
 
         client.startLiveView(LiveViewRequest(size = LiveViewSize.LARGE))
@@ -1283,7 +1446,7 @@ class CcapiClientTest {
         val multipart = Buffer()
             .writeUtf8("--canon\nContent-Type: image/jpeg\nContent-Length: ${jpeg.size}\n\n")
             .write(jpeg)
-            .writeUtf8("\n--canon--\n")
+            .writeUtf8("\n")
         val discovery = JSONObject(DISCOVERY_MULTIPART_JSON).apply {
             getJSONArray("ver110").put(JSONObject("""{"path":"/shooting/liveview/flipdetail","get":true}"""))
         }
@@ -1293,7 +1456,7 @@ class CcapiClientTest {
             MockResponse()
                 .setResponseCode(200)
                 .setHeader("content-type", "multipart/x-mixed-replace;boundary=canon")
-                .setChunkedBody(multipart, 3),
+                .setBody(multipart).setHeader("Content-Length", 1_000_000),
         )
         server.enqueue(MockResponse().setBody(Buffer().write(focusInfoPacket(focusInfoJson()))))
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
@@ -1349,7 +1512,7 @@ class CcapiClientTest {
         val multipart = Buffer()
             .writeUtf8("--canon\nContent-Type: image/jpeg\nContent-Length: ${jpeg.size}\n\n")
             .write(jpeg)
-            .writeUtf8("\n--canon--\n")
+            .writeUtf8("\n")
         server.enqueue(jsonResponse(DISCOVERY_MULTIPART_JSON))
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
         repeat(2) {
@@ -1363,7 +1526,7 @@ class CcapiClientTest {
             MockResponse()
                 .setResponseCode(200)
                 .setHeader("content-type", "multipart/x-mixed-replace;boundary=canon")
-                .setChunkedBody(multipart, 3),
+                .setBody(multipart).setHeader("Content-Length", 1_000_000),
         )
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
@@ -1618,6 +1781,7 @@ class CcapiClientTest {
         server.enqueue(MockResponse().setResponseCode(400).setBody("RTP unavailable"))
         server.enqueue(jsonResponse("{}"))
         server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(liveViewJpegResponse())
 
         client.initialize()
         client.startLiveView(LiveViewRequest(source = LiveViewSource.AUTO))
@@ -1759,7 +1923,7 @@ class CcapiClientTest {
         val multipart = Buffer()
             .writeUtf8("--boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.size}\r\n\r\n")
             .write(jpeg)
-            .writeUtf8("\r\n--boundary--\r\n")
+            .writeUtf8("\r\n")
         server.enqueue(jsonResponse(DISCOVERY_LATEST_FIRMWARE_LIVE_VIEW_JSON))
         server.enqueue(MockResponse().setHeader("content-type", "text/plain").setBody(CANON_RTP_SDP))
         server.enqueue(MockResponse().setResponseCode(503).setBody("""{"message":"Mode not supported"}"""))
@@ -1769,7 +1933,7 @@ class CcapiClientTest {
             MockResponse()
                 .setResponseCode(200)
                 .setHeader("content-type", "multipart/x-mixed-replace;boundary=boundary")
-                .setChunkedBody(multipart, 3),
+                .setBody(multipart).setHeader("Content-Length", 1_000_000),
         )
         server.enqueue(MockResponse().setResponseCode(503).setBody("""{"message":"Mode not supported"}"""))
         server.enqueue(jsonResponse("{}"))
@@ -3113,6 +3277,99 @@ class CcapiClientTest {
     }
 
     @Test
+    fun captureDirectoryAckSurvivesFailedSelectionReadAndRecoveryIsFreshGetOnly() = runTest {
+        server.enqueue(jsonResponse("""{"ver100":[
+            {"path":"/functions/directory/createdirectory","post":true},
+            {"path":"/functions/directory/directoryselection","get":true,"put":true}]}"""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        client.initialize()
+        val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+        server.enqueue(jsonResponse("""{"directoryname":"OTHER"}"""))
+        server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+        assertEquals("OTHER", client.createDirectory("ABCDE", evidence))
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, evidence.snapshot().writeEvidence)
+        assertEquals(CaptureConfigurationReadEvidence.UNAVAILABLE, evidence.snapshot().readbackEvidence)
+        server.enqueue(jsonResponse("""{"value":"100OTHER","ability":["100OTHER"]}"""))
+        assertEquals("100OTHER", client.readCaptureConfiguration(CaptureConfigurationOperation.CREATE_DIRECTORY).directorySelection)
+        repeat(3) { server.takeRequest() }
+        val recovery = server.takeRequest()
+        assertEquals("GET", recovery.method)
+        assertEquals("/ccapi/ver100/functions/directory/directoryselection", recovery.path)
+        assertEquals("no-cache, no-store", recovery.getHeader("Cache-Control"))
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun cachedAggregateDirectorySelectionDoesNotProveCanonicalReadSucceeded() = runTest {
+        server.enqueue(jsonResponse("""{"ver100":[
+            {"path":"/shooting/settings","get":true},
+            {"path":"/shooting/settings/directoryselection","put":true},
+            {"path":"/functions/directory/createdirectory","post":true},
+            {"path":"/functions/directory/directoryselection","get":true,"put":true}]}"""))
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false); client.initialize()
+        server.enqueue(jsonResponse("""{"directoryname":"ABCDE"}"""))
+        server.enqueue(jsonResponse("""{"directoryselection":{"value":"100ABCDE","ability":["100ABCDE"]}}"""))
+        server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+        val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+        assertEquals("ABCDE", client.createDirectory("ABCDE", evidence))
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, evidence.snapshot().writeEvidence)
+        assertEquals(CaptureConfigurationReadEvidence.UNAVAILABLE, evidence.snapshot().readbackEvidence)
+        assertNull(evidence.snapshot().observedValue)
+        assertTrue(evidence.snapshot().directoryValues.isEmpty())
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun namingAckSurvivesFailedCompleteReadbackAndDirectExceptionCarriesReceipt() = runTest {
+        server.enqueue(jsonResponse(CANON_FILE_NAMING_DISCOVERY_JSON)); server.enqueue(jsonResponse("{}")); enqueueCanonFileNaming()
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        client.initialize(); client.capabilities()
+        server.enqueue(jsonResponse("""{"usersetting1":"EOS_"}""")); server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+        val failure = runCatching { client.setFileNaming(CameraFileNamingField.STILL_USER_SETTING_1, "EOS_") }.exceptionOrNull()
+        assertTrue(failure is CaptureConfigurationException)
+        val receipt = (failure as CaptureConfigurationException).receipt
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, receipt.writeEvidence)
+        assertEquals(CaptureConfigurationReadEvidence.UNAVAILABLE, receipt.readbackEvidence)
+        assertEquals(11, server.requestCount)
+        enqueueCanonFileNaming(stillUserSetting1 = "EOS_")
+        assertEquals("EOS_", client.readCaptureConfiguration(CaptureConfigurationOperation.SET_FILE_NAMING).fileNaming?.stillUserSetting1)
+        repeat(11) { server.takeRequest() }
+        repeat(7) { assertEquals("GET", server.takeRequest().method) }
+        assertEquals(18, server.requestCount)
+    }
+
+    @Test
+    fun namingCompleteMismatchRetainsAcknowledgedWriteAndDifferentObservedValue() = runTest {
+        server.enqueue(jsonResponse(CANON_FILE_NAMING_DISCOVERY_JSON)); server.enqueue(jsonResponse("{}")); enqueueCanonFileNaming()
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        client.initialize(); client.capabilities()
+        server.enqueue(jsonResponse("""{"usersetting1":"EOS_"}""")); enqueueCanonFileNaming()
+        val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.SET_FILE_NAMING,
+            "EOS_", CameraFileNamingField.STILL_USER_SETTING_1))
+        assertTrue(runCatching { client.setFileNaming(CameraFileNamingField.STILL_USER_SETTING_1, "EOS_", evidence) }.isFailure)
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, evidence.snapshot().writeEvidence)
+        assertEquals(CaptureConfigurationReadEvidence.MISMATCH, evidence.snapshot().readbackEvidence)
+        assertEquals("IMG_", evidence.snapshot().observedValue)
+    }
+
+    @Test
+    fun captureConfigurationRedirectAndMalformedAckNeverBecomeAcknowledged() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
+        server.enqueue(MockResponse().setResponseCode(307).setHeader("Location", server.url("/SYNTHETIC/redirect")))
+        val redirect = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+        assertTrue(runCatching { client.createDirectory("ABCDE", redirect) }.isFailure)
+        assertEquals(1, server.requestCount)
+        assertEquals(CaptureConfigurationWriteEvidence.UNKNOWN, redirect.snapshot().writeEvidence)
+        for (body in listOf("""{"directoryname":"ABCDE\n"}""", """{"directoryname":"ABCDE","directoryname":"OTHER"}""")) {
+            server.enqueue(jsonResponse(body))
+            val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+            assertTrue(runCatching { client.createDirectory("ABCDE", evidence) }.isFailure)
+            assertEquals(CaptureConfigurationWriteEvidence.UNKNOWN, evidence.snapshot().writeEvidence)
+        }
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
     fun canonFileNamingRequiresCompleteGroupAndVerifiesStringAndIntegerUpdates() = runTest {
         server.enqueue(jsonResponse(CANON_FILE_NAMING_DISCOVERY_JSON))
         server.enqueue(jsonResponse("{}"))
@@ -3350,7 +3607,8 @@ class CcapiClientTest {
 
         assertEquals("/ccapi/ver100/shooting/control/recbutton", recordRequest.path)
         assertEquals("POST", recordRequest.method)
-        assertTrue(status.recording == true)
+        assertNull("Command ACK is not a fresh REC observation", status.recording)
+        assertNull(status.recordingObservation)
     }
 
     @Test
@@ -3951,6 +4209,91 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realMagnificationRetiresDetailedGeometryBeforeBothCoordinateActions() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver140":[
+            {"path":"/shooting/liveview","post":true,"delete":true},
+            {"path":"/shooting/liveview/flipdetail","get":true},
+            {"path":"/shooting/liveview/afframeposition","put":true},
+            {"path":"/shooting/liveview/clickwb","post":true},
+            {"path":"/shooting/settings","get":true},
+            {"path":"/shooting/settings/lvzoom","get":true,"put":true}
+        ]}"""))
+        server.enqueue(jsonResponse("{}"))
+        server.enqueue(jsonResponse("""{"value":"1","ability":["1","5","10"]}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 0xFF.toByte(), 0xD9.toByte())
+        fun detail(x: Int, y: Int, w: Int, h: Int) = binaryResponse(detailedLiveView(jpeg,
+            """{"liveview":{"image":{"positionx":$x,"positiony":$y,"positionwidth":$w,"positionheight":$h}}}"""), "application/octet-stream")
+        server.enqueue(detail(100, 200, 6000, 4000))
+        client.initialize(); client.capabilities(); client.startLiveView()
+        repeat(5) { server.takeRequest() }
+        // Seed geometry after source admission, then retire it for each 1 -> 5 -> 10 -> 1 step.
+        server.enqueue(detail(100, 200, 6000, 4000)); client.liveViewFrame(cacheKey = 1)
+        // The first startup image is cached; the next read acquires detail for the admitted source.
+        client.liveViewFrame(cacheKey = 2); server.takeRequest()
+        for (zoom in listOf(LiveViewMagnification.X5, LiveViewMagnification.X10, LiveViewMagnification.X1)) {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+            server.enqueue(jsonResponse("""{"value":"${zoom.value}","ability":["1","5","10"]}"""))
+            client.setLiveViewMagnification(zoom)
+            assertEquals("PUT", server.takeRequest().method); server.takeRequest()
+            server.enqueue(detail(1000 + zoom.value, 1500 + zoom.value, 1200, 800))
+            server.enqueue(MockResponse().setResponseCode(204))
+            client.tapFocus(0.5, 0.5)
+            assertTrue(server.takeRequest().path.orEmpty().contains("flipdetail?kind=both"))
+            val point = JSONObject(server.takeRequest().body.readUtf8())
+            assertEquals(1600 + zoom.value, point.getInt("positionx")); assertEquals(1900 + zoom.value, point.getInt("positiony"))
+            server.enqueue(MockResponse().setResponseCode(204)); enqueueRealStatus()
+            server.enqueue(jsonResponse("""{"value":"${zoom.value}","ability":["1","5","10"]}"""))
+            client.clickWhiteBalance(0.5, 0.5)
+            val wb = JSONObject(server.takeRequest().body.readUtf8())
+            assertEquals(point.toString(), wb.toString()); repeat(4) { server.takeRequest() }
+        }
+    }
+
+    @Test
+    fun realDetailedGeometryPrefixWithTruncatedTailNeverAuthorizesTouchAf() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[
+            {"path":"/shooting/liveview","post":true,"delete":true},
+            {"path":"/shooting/liveview/afframeposition","put":true},
+            {"path":"/shooting/liveview/flipdetail","get":true}
+        ]}"""))
+        client.initialize(); server.takeRequest()
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 0xFF.toByte(), 0xD9.toByte())
+        val prefix = detailedLiveView(jpeg, """{"liveview":{"image":{"positionx":100,"positiony":200,"positionwidth":1000,"positionheight":800}}}""")
+        for (tail in listOf(byteArrayOf(1), detailedPacket(0, jpeg).dropLast(1).toByteArray())) {
+            server.enqueue(binaryResponse(prefix + tail, "application/octet-stream"))
+            assertTrue(runCatching { client.tapFocus(0.5, 0.5) }.isFailure)
+            assertEquals("GET", server.takeRequest().method)
+        }
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun realMalformedDetailedRectangleNeverDispatchesTouchAf() = runTest {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver110":[
+            {"path":"/shooting/liveview","post":true,"delete":true},
+            {"path":"/shooting/liveview/afframeposition","put":true},
+            {"path":"/shooting/liveview/flipdetail","get":true}
+        ]}"""))
+        client.initialize(); server.takeRequest()
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 0xFF.toByte(), 0xD9.toByte())
+        for (rectangle in listOf(
+            """{"positionx":-1,"positiony":0,"positionwidth":100,"positionheight":100}""",
+            """{"positionx":"0","positiony":0,"positionwidth":100,"positionheight":100}""",
+            """{"positionx":0,"positiony":0,"positionwidth":0,"positionheight":100}""",
+            """{"positionx":2147483647,"positiony":0,"positionwidth":100,"positionheight":100}""",
+        )) {
+            server.enqueue(binaryResponse(detailedLiveView(jpeg, """{"liveview":{"image":$rectangle}}"""), "application/octet-stream"))
+            assertTrue(runCatching { client.tapFocus(0.5, 0.5) }.isFailure)
+            assertEquals("GET", server.takeRequest().method)
+        }
+        assertEquals(5, server.requestCount)
+    }
+
+    @Test
     fun realLiveViewMagnificationUsesAdvertisedStringValueAndReadback() = runTest {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
@@ -3966,6 +4309,7 @@ class CcapiClientTest {
         server.enqueue(jsonResponse("{}"))
         server.enqueue(jsonResponse("""{"value":"5","ability":["1","5","10"]}"""))
         server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(liveViewJpegResponse())
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
         server.enqueue(jsonResponse("""{"value":"10","ability":["1","5","10"]}"""))
 
@@ -3985,6 +4329,7 @@ class CcapiClientTest {
         assertEquals("/ccapi/ver140/shooting/settings", server.takeRequest().path)
         assertEquals("/ccapi/ver140/shooting/settings/lvzoom", server.takeRequest().path)
         assertEquals("/ccapi/ver140/shooting/liveview", server.takeRequest().path)
+        assertTrue(server.takeRequest().path.orEmpty().contains("/shooting/liveview/flip?"))
         val write = server.takeRequest()
         assertEquals("PUT", write.method)
         assertEquals("/ccapi/ver140/shooting/settings/lvzoom", write.path)

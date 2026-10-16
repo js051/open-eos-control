@@ -90,9 +90,9 @@ class MediaRatingFilterTest {
         assertEquals(4, confirmed.single { it.id == "raw" }.rating)
     }
 
-    @Test fun captureReviewSelectionStillUsesRecencyIndependentlyOfRating() {
+    @Test fun captureReviewSelectionKeepsCameraOrderIndependentlyOfRatingOrDate() {
         val items = listOf(item("old-five", 5, date = "2026-08-13T12:00:00Z"), item("latest-unknown", null, date = "2026-08-14T12:00:00Z"))
-        assertEquals("latest-unknown", selectCaptureReviewItem(items)?.id)
+        assertEquals("old-five", selectCaptureReviewItem(items)?.id)
     }
 
     private fun filter(items: List<CameraMediaItem>, filter: MediaRatingFilter) =

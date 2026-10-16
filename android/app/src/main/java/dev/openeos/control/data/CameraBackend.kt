@@ -68,10 +68,21 @@ interface CameraControlBackend {
     val liveViewStopRequired: Boolean
         get() = false
 
+    val maintenanceStopOwned: Boolean
+        get() = false
+    val maintenanceSessionOwned: Boolean
+        get() = false
+    suspend fun closeMaintenanceSession(): Boolean { retireMaintenanceLocally(); return false }
+
     fun observedFeatures(): Set<CameraFeature> = emptySet()
 
     suspend fun initialize()
     suspend fun close() = Unit
+    suspend fun closeConnectionAttempt() = close()
+    val connectionRetirementUnconfirmed: Boolean
+        get() = false
+    /** Local teardown only while a maintenance hold forbids implicit camera/session cleanup. */
+    suspend fun retireMaintenanceLocally() { nativeLiveViewSession?.close() }
     suspend fun info(): CameraInfo
     suspend fun status(): CameraStatus
     suspend fun capabilities(): CameraCapabilities
@@ -79,15 +90,34 @@ interface CameraControlBackend {
     suspend fun stopEventPolling() = Unit
     suspend fun startLiveView(request: LiveViewRequest = LiveViewRequest())
     suspend fun stopLiveView()
+    /** Close local receivers without sending camera commands or discarding remote Stop ownership. */
+    fun retireLiveViewLocally() { nativeLiveViewSession?.close() }
     suspend fun setExposure(iso: String? = null, shutter: String? = null, aperture: String? = null): CameraStatus
     suspend fun setWhiteBalance(value: String): CameraStatus
     suspend fun setSetting(key: String, value: String): CameraStatus
+    suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence): Unit =
+        unsupported(CameraFeature.ADVANCED_SETTINGS)
+    suspend fun readShootingSetting(request: ShootingSettingRequest): ShootingSettingObservation =
+        unsupported(CameraFeature.ADVANCED_SETTINGS)
+    fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess = ShootingSettingAccess(transport.label,
+        write = { frozen, evidence -> require(frozen == request); writeShootingSetting(frozen, evidence) },
+        read = { frozen -> require(frozen == request); readShootingSetting(frozen) })
+    fun maintenanceAccess(request: MaintenanceRequest, liveView: LiveViewRequest?): MaintenanceAccess = unsupported(CameraFeature.CAMERA_CLOCK_SYNC)
     suspend fun syncCameraClock(): CameraStatus = unsupported(CameraFeature.CAMERA_CLOCK_SYNC)
     suspend fun createDirectory(name: String): String = unsupported(CameraFeature.DIRECTORY_CONTROL)
     suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming =
         unsupported(CameraFeature.FILE_NAMING_CONTROL)
+    suspend fun createDirectory(name: String, evidence: CaptureConfigurationEvidence): String =
+        unsupported(CameraFeature.DIRECTORY_CONTROL)
+    suspend fun setFileNaming(field: CameraFileNamingField, value: String, evidence: CaptureConfigurationEvidence): CameraFileNaming =
+        unsupported(CameraFeature.FILE_NAMING_CONTROL)
+    suspend fun readCaptureConfiguration(operation: CaptureConfigurationOperation): CaptureConfigurationReadback =
+        unsupported(CameraFeature.DIRECTORY_CONTROL)
     suspend fun cleanSensor(autoPowerOff: Boolean) = unsupported<Unit>(CameraFeature.SENSOR_CLEANING)
     suspend fun sleepCamera() = unsupported<Unit>(CameraFeature.CAMERA_SLEEP)
+    suspend fun recordingCommand(command: RecordingCommand): CameraStatus =
+        if (command == RecordingCommand.STOP) stopRecording() else startRecording()
+    suspend fun recordingObservation(): RecordingObservation? = null
     suspend fun startRecording(): CameraStatus
     suspend fun stopRecording(): CameraStatus
     suspend fun tapFocus(x: Double, y: Double): FocusResult
@@ -142,6 +172,7 @@ interface CameraControlBackend {
         sizeBytes: Long,
         contentType: String?,
         source: InputStream,
+        evidence: MediaUploadEvidence = MediaUploadEvidence(),
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaUploadResult = unsupported(CameraFeature.MEDIA_UPLOAD)
     suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = unsupported(CameraFeature.MEDIA_BROWSER)
@@ -154,6 +185,8 @@ interface CameraControlBackend {
     suspend fun setMediaRotation(item: CameraMediaItem, degrees: Int): CameraMediaItem =
         unsupported(CameraFeature.MEDIA_ROTATE)
     suspend fun deleteMedia(item: CameraMediaItem) = unsupported<Unit>(CameraFeature.MEDIA_DELETE)
+    suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence): Unit =
+        unsupported(CameraFeature.MEDIA_DELETE)
     fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): String
     suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): LiveViewFrame
     suspend fun liveViewFocusInfo(): CameraFocusInfo? = null
@@ -162,6 +195,7 @@ interface CameraControlBackend {
 class CcapiCameraBackend(
     override val connection: CameraConnection.CcapiNetwork,
     httpTransportFactory: CameraHttpTransportFactory = DefaultCameraHttpTransportFactory(),
+    jpegFrameValidator: ((ByteArray) -> Boolean)? = null,
 ) : CameraControlBackend {
     private val httpTransport = httpTransportFactory.create(connection.baseUrl)
     private val client = CcapiClient(
@@ -172,6 +206,7 @@ class CcapiCameraBackend(
         treatAsSimulator = connection.simulatorMode,
         rtpDestinationAddress = httpTransport.rtpDestinationAddress,
         rtpSessionFactory = httpTransport.rtpSessionFactory,
+        jpegFrameValidator = jpegFrameValidator,
     )
 
     override val transport: CameraTransport = CameraTransport.CCAPI_NETWORK
@@ -191,11 +226,23 @@ class CcapiCameraBackend(
     override val liveViewStopRequired: Boolean
         get() = client.liveViewStopRequired
 
+    override val maintenanceStopOwned: Boolean
+        get() = client.maintenanceStopOwned
+
+    override val maintenanceSessionOwned: Boolean
+        get() = client.maintenanceSessionOwned
+
+    override suspend fun closeMaintenanceSession(): Boolean = client.closeMaintenanceSession()
+
     override fun observedFeatures(): Set<CameraFeature> = client.observedFeatureSnapshot()
 
     override suspend fun initialize() = client.initialize()
 
     override suspend fun close() = client.close()
+
+    override suspend fun retireMaintenanceLocally() = client.retireMaintenanceLocally()
+
+    override fun retireLiveViewLocally() = client.retireLiveViewLocally()
 
     override suspend fun info(): CameraInfo = client.info()
 
@@ -219,6 +266,13 @@ class CcapiCameraBackend(
     override suspend fun setWhiteBalance(value: String): CameraStatus = client.setWhiteBalance(value)
 
     override suspend fun setSetting(key: String, value: String): CameraStatus = client.setSetting(key, value)
+    override suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence) =
+        client.writeShootingSetting(request, evidence)
+    override suspend fun readShootingSetting(request: ShootingSettingRequest): ShootingSettingObservation =
+        client.readShootingSetting(request)
+    override fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess = client.shootingSettingAccess(request)
+
+    override fun maintenanceAccess(request: MaintenanceRequest, liveView: LiveViewRequest?): MaintenanceAccess = client.maintenanceAccess(request, liveView)
 
     override suspend fun syncCameraClock(): CameraStatus = client.syncCameraClock()
 
@@ -227,9 +281,18 @@ class CcapiCameraBackend(
     override suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming =
         client.setFileNaming(field, value)
 
+    override suspend fun createDirectory(name: String, evidence: CaptureConfigurationEvidence): String =
+        client.createDirectory(name, evidence)
+    override suspend fun setFileNaming(field: CameraFileNamingField, value: String, evidence: CaptureConfigurationEvidence): CameraFileNaming =
+        client.setFileNaming(field, value, evidence)
+    override suspend fun readCaptureConfiguration(operation: CaptureConfigurationOperation): CaptureConfigurationReadback =
+        client.readCaptureConfiguration(operation)
+
     override suspend fun cleanSensor(autoPowerOff: Boolean) = client.cleanSensor(autoPowerOff)
 
     override suspend fun sleepCamera() = client.sleepCamera()
+
+    override suspend fun recordingObservation(): RecordingObservation? = client.recordingObservation()
 
     override suspend fun startRecording(): CameraStatus = client.startRecording()
 
@@ -297,8 +360,9 @@ class CcapiCameraBackend(
         sizeBytes: Long,
         contentType: String?,
         source: InputStream,
+        evidence: MediaUploadEvidence,
         onProgress: (CameraMediaTransferProgress) -> Unit,
-    ): CameraMediaUploadResult = client.uploadMedia(name, sizeBytes, contentType, source, onProgress)
+    ): CameraMediaUploadResult = client.uploadMedia(name, sizeBytes, contentType, source, evidence, onProgress)
 
     override suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = client.mediaInfo(item)
 
@@ -315,6 +379,7 @@ class CcapiCameraBackend(
         client.setMediaRotation(item, degrees)
 
     override suspend fun deleteMedia(item: CameraMediaItem) = client.deleteMedia(item)
+    override suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence) = client.deleteMedia(item, evidence)
 
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String = client.liveViewFrameUrl(cacheKey, request)
 
@@ -339,6 +404,17 @@ class DesktopBridgeCameraBackend(
 
     override val prefersBitmapLiveViewFrames: Boolean = true
 
+    override val liveViewStopRequired: Boolean
+        get() = client.liveViewStopRequired
+
+    override val maintenanceStopOwned: Boolean
+        get() = client.maintenanceStopOwned
+
+    override val maintenanceSessionOwned: Boolean
+        get() = client.maintenanceSessionOwned
+
+    override suspend fun closeMaintenanceSession(): Boolean = client.closeMaintenanceSession()
+
     override val networkDiagnostics: CameraNetworkDiagnostics
         get() = httpTransport.diagnosticsProvider()
 
@@ -347,6 +423,13 @@ class DesktopBridgeCameraBackend(
     override suspend fun initialize() = client.initialize()
 
     override suspend fun close() = client.close()
+
+    override suspend fun closeConnectionAttempt() = client.closeConnectionAttempt()
+
+    override val connectionRetirementUnconfirmed: Boolean
+        get() = client.connectionRetirementUnconfirmed
+
+    override suspend fun retireMaintenanceLocally() = client.retireMaintenanceLocally()
 
     override suspend fun info(): CameraInfo = client.info()
 
@@ -362,12 +445,21 @@ class DesktopBridgeCameraBackend(
 
     override suspend fun stopLiveView() = client.stopLiveView()
 
+    override suspend fun liveViewFocusInfo(): CameraFocusInfo? = client.liveViewFocusInfo()
+
     override suspend fun setExposure(iso: String?, shutter: String?, aperture: String?): CameraStatus =
         client.setExposure(iso = iso, shutter = shutter, aperture = aperture)
 
     override suspend fun setWhiteBalance(value: String): CameraStatus = client.setWhiteBalance(value)
 
     override suspend fun setSetting(key: String, value: String): CameraStatus = client.setSetting(key, value)
+    override suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence) =
+        client.writeShootingSetting(request, evidence)
+    override suspend fun readShootingSetting(request: ShootingSettingRequest): ShootingSettingObservation =
+        client.readShootingSetting(request)
+    override fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess = client.shootingSettingAccess(request)
+
+    override fun maintenanceAccess(request: MaintenanceRequest, liveView: LiveViewRequest?): MaintenanceAccess = client.maintenanceAccess(request, liveView)
 
     override suspend fun syncCameraClock(): CameraStatus = client.syncCameraClock()
 
@@ -376,9 +468,20 @@ class DesktopBridgeCameraBackend(
     override suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming =
         client.setFileNaming(field, value)
 
+    override suspend fun createDirectory(name: String, evidence: CaptureConfigurationEvidence): String =
+        client.createDirectory(name, evidence)
+    override suspend fun setFileNaming(field: CameraFileNamingField, value: String, evidence: CaptureConfigurationEvidence): CameraFileNaming =
+        client.setFileNaming(field, value, evidence)
+    override suspend fun readCaptureConfiguration(operation: CaptureConfigurationOperation): CaptureConfigurationReadback =
+        client.readCaptureConfiguration(operation)
+
     override suspend fun cleanSensor(autoPowerOff: Boolean) = client.cleanSensor(autoPowerOff)
 
     override suspend fun sleepCamera() = client.sleepCamera()
+
+    override suspend fun recordingCommand(command: RecordingCommand): CameraStatus = client.recordingLifecycleCommand(command)
+
+    override suspend fun recordingObservation(): RecordingObservation? = client.recordingObservation()
 
     override suspend fun startRecording(): CameraStatus = client.startRecording()
 
@@ -401,6 +504,10 @@ class DesktopBridgeCameraBackend(
 
     override suspend fun autofocus(): CameraStatus = client.autofocus()
 
+    override suspend fun holdAutofocus(whileHeld: suspend () -> Unit) = client.holdAutofocus(whileHeld)
+
+    override suspend fun retryAutofocusStop() = client.retryAutofocusStop()
+
     override suspend fun halfPressShutter(): CameraStatus = client.halfPressShutter()
 
     override suspend fun driveFocus(direction: FocusDriveDirection, step: FocusDriveStep): FocusDriveResult =
@@ -413,8 +520,7 @@ class DesktopBridgeCameraBackend(
     override suspend fun listMedia(
         maximumItems: Int?,
         onProgress: (List<CameraMediaItem>) -> Unit,
-    ): List<CameraMediaItem> = client.listMedia(maximumItems)
-        .also(onProgress)
+    ): List<CameraMediaItem> = client.listMedia(maximumItems, onProgress)
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail = client.mediaThumbnail(item)
 
@@ -434,8 +540,9 @@ class DesktopBridgeCameraBackend(
         sizeBytes: Long,
         contentType: String?,
         source: InputStream,
+        evidence: MediaUploadEvidence,
         onProgress: (CameraMediaTransferProgress) -> Unit,
-    ): CameraMediaUploadResult = client.uploadMedia(name, sizeBytes, contentType, source, onProgress)
+    ): CameraMediaUploadResult = client.uploadMedia(name, sizeBytes, contentType, source, evidence, onProgress)
 
     override suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = client.mediaInfo(item)
 
@@ -452,6 +559,7 @@ class DesktopBridgeCameraBackend(
         client.setMediaRotation(item, degrees)
 
     override suspend fun deleteMedia(item: CameraMediaItem) = client.deleteMedia(item)
+    override suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence) = client.deleteMedia(item, evidence)
 
     override fun liveViewFrameUrl(cacheKey: Long, request: LiveViewRequest): String = client.liveViewFrameUrl(cacheKey)
 
@@ -545,10 +653,11 @@ class CameraBackendFactory(
     private val httpTransportFactory: CameraHttpTransportFactory = DefaultCameraHttpTransportFactory(),
     private val ptpTransportFactory: PtpTransportFactory? = null,
     private val usbHostCaptureStore: UsbHostCaptureStore? = null,
+    private val jpegFrameValidator: ((ByteArray) -> Boolean)? = null,
 ) {
     fun create(connection: CameraConnection): CameraControlBackend =
         when (connection) {
-            is CameraConnection.CcapiNetwork -> CcapiCameraBackend(connection, httpTransportFactory)
+            is CameraConnection.CcapiNetwork -> CcapiCameraBackend(connection, httpTransportFactory, jpegFrameValidator)
             is CameraConnection.AndroidUsbPtp -> ptpTransportFactory
                 ?.let { UsbPtpCameraBackend(connection, it, usbHostCaptureStore) }
                 ?: PlannedCameraBackend(connection)

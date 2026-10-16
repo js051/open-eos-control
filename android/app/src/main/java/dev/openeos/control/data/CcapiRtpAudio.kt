@@ -75,20 +75,6 @@ internal class LatmRtpDepacketizer(
     }
 }
 
-internal data class AacStreamFormat(
-    val sampleRate: Int,
-    val channels: Int,
-    val initializationData: ByteArray,
-    val codec: String?,
-)
-
-internal data class AacAccessUnit(
-    val bytes: ByteArray,
-    val presentationTimeUs: Long,
-    val format: AacStreamFormat,
-    val discontinuity: Boolean,
-)
-
 internal interface LatmSampleExtractor {
     fun consume(accessUnit: LatmAccessUnit, presentationTimeUs: Long): List<AacAccessUnit>
     fun reset()

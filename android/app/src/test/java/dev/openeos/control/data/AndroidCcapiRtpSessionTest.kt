@@ -1,6 +1,6 @@
 package dev.openeos.control.data
 
-import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -108,7 +108,75 @@ class AndroidCcapiRtpSessionTest {
     }
 
     @Test
-    fun rtpReadinessRequiresSpsPpsAndAKeyFrame() = runBlocking {
+    fun backgroundMutesAndForegroundRequiresANewManualEnable() {
+        val videoPort = availableUdpPort()
+        val starts = AtomicInteger()
+        val session = session(videoPort, availableUdpPort(setOf(videoPort)),
+            extractorFactory = { PassthroughLatmExtractor() },
+            audioPlayerFactory = { RtpAudioPlayer { _, _ -> starts.incrementAndGet(); awaitCancellation() } })
+        try {
+            session.start()
+            session.setAudioEnabled(true)
+            await { starts.get() == 1 }
+            session.setRenderingEnabled(false)
+            await { !session.audioStatus.enabled && session.audioStatus.state == "muted" }
+            session.setAudioEnabled(true)
+            assertEquals(1, starts.get())
+            session.setRenderingEnabled(true)
+            assertFalse(session.audioStatus.enabled)
+            assertEquals(1, starts.get())
+            session.setAudioEnabled(true)
+            await { starts.get() == 2 }
+            assertEquals(2L, session.audioStatus.playbackEpoch)
+        } finally { session.close() }
+    }
+
+    @Test
+    fun audioPlayerFailureIsAudioOnlyAndExplicitRetryUsesANewEpoch() {
+        val videoPort = availableUdpPort()
+        val starts = AtomicInteger()
+        val events = Collections.synchronizedList(mutableListOf<NativeLiveViewEvent>())
+        val session = session(videoPort, availableUdpPort(setOf(videoPort)),
+            extractorFactory = { PassthroughLatmExtractor() },
+            audioPlayerFactory = { RtpAudioPlayer { _, _ ->
+                if (starts.incrementAndGet() == 1) error("synthetic audio decoder failure")
+                awaitCancellation()
+            } })
+        try {
+            session.setListener(events::add)
+            session.start()
+            session.setAudioEnabled(true)
+            await { session.audioStatus.state == "failed" }
+            assertFalse(session.audioStatus.enabled)
+            assertTrue(session.audioStatus.error!!.contains("synthetic audio decoder failure"))
+            assertTrue(events.none { it is NativeLiveViewEvent.Failed })
+            session.setAudioEnabled(true)
+            await { starts.get() == 2 }
+            assertEquals(2L, session.audioStatus.playbackEpoch)
+            assertTrue(session.audioStatus.enabled)
+            assertEquals(null, session.audioStatus.error)
+        } finally { session.close() }
+    }
+
+    @Test
+    fun audioExtractorInitializationFailureDoesNotEscapeIntoVideoStartup() {
+        val videoPort = availableUdpPort()
+        val events = Collections.synchronizedList(mutableListOf<NativeLiveViewEvent>())
+        val session = session(videoPort, availableUdpPort(setOf(videoPort)),
+            extractorFactory = { error("synthetic parser initialization failure") },
+            audioPlayerFactory = { error("Audio must stay muted") })
+        try {
+            session.setListener(events::add)
+            session.start()
+            await { session.audioStatus.error?.contains("parser initialization") == true }
+            assertFalse(session.audioStatus.available)
+            assertFalse(session.audioStatus.enabled)
+            assertTrue(events.none { it is NativeLiveViewEvent.Failed })
+        } finally { session.close() }
+    }
+
+    @Test
+    fun encodedSpsPpsAndKeyFrameDoNotProveDecoderReadiness() = runBlocking {
         val videoPort = availableUdpPort()
         val audioPort = availableUdpPort(excluding = setOf(videoPort))
         val session = session(
@@ -125,7 +193,9 @@ class AndroidCcapiRtpSessionTest {
             sender.send(videoPacket(videoPort, sequence = 2, timestamp = 2_000, payload = byteArrayOf(0x68, 0x01)))
             sender.send(videoPacket(videoPort, sequence = 3, timestamp = 3_000, payload = byteArrayOf(0x65, 0x01)))
 
-            session.awaitReady(timeoutMillis = 2_000)
+            val failure = runCatching { session.awaitReady(timeoutMillis = 2_000) }.exceptionOrNull()
+            assertTrue("Truncated synthetic input cannot prove decoded output", failure != null)
+            assertFalse(session.videoStatus.ready)
         } finally {
             sender.close()
             session.close()
@@ -133,7 +203,7 @@ class AndroidCcapiRtpSessionTest {
     }
 
     @Test
-    fun rtpReadinessUsesSdpParameterSetsWhenTheStreamOnlySendsAKeyFrame() = runBlocking {
+    fun sdpParameterSetsAndEncodedKeyFrameDoNotProveDecoderReadiness() = runBlocking {
         val videoPort = availableUdpPort()
         val audioPort = availableUdpPort(excluding = setOf(videoPort))
         val session = session(
@@ -149,8 +219,9 @@ class AndroidCcapiRtpSessionTest {
             session.start()
             sender.send(videoPacket(videoPort, sequence = 1, timestamp = 1_000, payload = byteArrayOf(0x65, 0x01)))
 
-            session.awaitReady(timeoutMillis = 2_000)
-            assertTrue(session.videoStatus.ready)
+            val failure = runCatching { session.awaitReady(timeoutMillis = 2_000) }.exceptionOrNull()
+            assertTrue("Truncated synthetic input cannot prove decoded output", failure != null)
+            assertFalse(session.videoStatus.ready)
             assertTrue(session.videoStatus.hasSequenceParameterSet)
             assertTrue(session.videoStatus.hasPictureParameterSet)
             assertEquals(1L, session.videoStatus.datagramsReceived)
@@ -184,6 +255,30 @@ class AndroidCcapiRtpSessionTest {
             assertTrue(failure.message.orEmpty().contains("key frames=0"))
         } finally {
             session.close()
+        }
+    }
+
+    @Test
+    fun decoderFailureRetiresEncodedOnlyInputAndReplaysFailureToALateListener() = runBlocking {
+        val videoPort = availableUdpPort()
+        val session = session(videoPort, availableUdpPort(excluding = setOf(videoPort)),
+            videoFormatParameters = mapOf("sprop-parameter-sets" to "Z0I=,aAE="),
+            extractorFactory = { PassthroughLatmExtractor() },
+            audioPlayerFactory = { error("Audio stays muted") })
+        val events = Collections.synchronizedList(mutableListOf<NativeLiveViewEvent>())
+        DatagramSocket().use { sender ->
+            try {
+                session.start()
+                sender.send(videoPacket(videoPort, 1, 1_000, byteArrayOf(0x65, 0x01)))
+                assertTrue(runCatching { session.awaitReady(2_000) }.isFailure)
+                assertTrue(events.none { it is NativeLiveViewEvent.FrameRendered })
+                await(timeoutMillis = 6_000) { session.videoStatus.error != null }
+                assertFalse(session.videoStatus.ready)
+                assertEquals(null, session.renderedFrames.value)
+                session.setListener(events::add)
+                assertEquals(1, events.count { it is NativeLiveViewEvent.Failed })
+                assertTrue(events.none { it is NativeLiveViewEvent.FrameRendered })
+            } finally { session.close() }
         }
     }
 

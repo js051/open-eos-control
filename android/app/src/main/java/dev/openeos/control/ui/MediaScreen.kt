@@ -36,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,16 +52,23 @@ import com.composables.icons.lucide.R as LucideR
 import dev.openeos.control.R
 import dev.openeos.control.data.CameraInfo
 import dev.openeos.control.data.CameraFeature
+import dev.openeos.control.data.MediaDeleteOutcome
+import dev.openeos.control.data.MediaUploadStatus
 import dev.openeos.control.data.CameraMediaItem
+import dev.openeos.control.data.MediaMetadataField
+import dev.openeos.control.data.metadataWritable
+import dev.openeos.control.data.isVisualMedia
 import dev.openeos.control.data.CameraMediaTransferProgress
 import java.util.Locale
 import java.time.ZoneId
 
 @Composable
 fun MediaScreen(state: CameraUiState, actions: CameraActions) {
-    // Reference identity matters: a camera can reconnect with identical descriptions and item IDs.
+    // The owner lives above the keyed content so even a delayed callback from a retired sheet
+    // observes the replacement owner rather than its disposed composition's last state.
+    val latestState by rememberUpdatedState(state)
     key(MediaScreenSessionKey(state.info, state.mediaSessionGeneration)) {
-        MediaScreenContent(state, actions)
+        MediaScreenContent(state, actions) { MediaMetadataOwner(latestState.info, latestState.mediaSessionGeneration) }
     }
 }
 
@@ -71,24 +79,45 @@ private class MediaScreenSessionKey(private val info: CameraInfo?, private val g
 }
 
 @Composable
-private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
-    var pendingDelete by remember { mutableStateOf<CameraMediaItem?>(null) }
-    var pendingBatchDelete by remember { mutableStateOf<List<CameraMediaItem>?>(null) }
+private fun MediaScreenContent(state: CameraUiState, actions: CameraActions, currentOwner: () -> MediaMetadataOwner) {
+    var pendingDelete by remember { mutableStateOf<MediaDeleteSelection?>(null) }
+    var pendingBatchDelete by remember { mutableStateOf<MediaDeleteSelection?>(null) }
     var activeMetadataItemId by remember { mutableStateOf<String?>(null) }
-    var batchMetadataVisible by remember { mutableStateOf(false) }
+    var batchMetadataSelection by remember { mutableStateOf<MediaMetadataSelection?>(null) }
     var mediaFilter by remember { mutableStateOf(MediaFilter.ALL) }
     var mediaSort by remember { mutableStateOf(MediaSort.NEWEST) }
     var dateDialogVisible by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
+    var selectedSnapshots by remember { mutableStateOf(emptyMap<String, CameraMediaItem>()) }
+    var selectionTokens by remember { mutableStateOf(emptyMap<String, String>()) }
+    fun updateSelection(ids: Set<String>) {
+        selectionTokens = ids.associateWith { selectionTokens[it] ?: newMediaDeleteSelectionToken() }
+        val currentItems = state.mediaItems.associateBy(CameraMediaItem::id)
+        selectedSnapshots = ids.mapNotNull { id ->
+            (currentItems[id] ?: selectedSnapshots[id])?.let { id to it }
+        }.toMap()
+        selectedIds = ids.filterTo(linkedSetOf()) { it in selectedSnapshots }
+    }
+    LaunchedEffect(state.mediaDeleteHistory) {
+        var remaining = selectionTokens
+        state.mediaDeleteHistory.forEach { receipt ->
+            remaining = consumeConfirmedDeleteSelection(remaining, receipt, state.info, state.mediaSessionGeneration)
+        }
+        if (remaining != selectionTokens) {
+            selectionTokens = remaining
+            selectedIds = selectedIds.intersect(remaining.keys)
+            selectedSnapshots = selectedSnapshots.filterKeys { it in selectedIds }
+        }
+    }
     var selectionDrag by remember { mutableStateOf<MediaSelectionDrag?>(null) }
-    val displayZone = ZoneId.systemDefault()
+    val displayZone = rememberMediaDisplayZone()
     val libraryFilteredItems = remember(state.mediaItems, state.mediaDateRange, state.mediaRatingFilter, state.mediaFolderFilter, displayZone) {
         mediaItemsForDisplay(
             state.mediaItems, MediaFilter.ALL, MediaSort.CAMERA, state.mediaDateRange, displayZone, state.mediaRatingFilter, state.mediaFolderFilter,
         )
     }
-    val displayedItems = remember(libraryFilteredItems, mediaFilter, mediaSort) {
-        mediaItemsForDisplay(libraryFilteredItems, mediaFilter, mediaSort)
+    val displayedItems = remember(libraryFilteredItems, mediaFilter, mediaSort, displayZone) {
+        mediaItemsForDisplay(libraryFilteredItems, mediaFilter, mediaSort, displayZone = displayZone)
     }
     val ratingViewActive = state.mediaRatingFilter != MediaRatingFilter.ALL || mediaSort.isRatingOrder
     val folders = remember(state.mediaItems) { loadedMediaFolders(state.mediaItems) }
@@ -99,7 +128,9 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
         state.mediaItems.count { it.captureTime.toMediaDisplayDate(displayZone) == null }
     }
     val displayedIds = remember(displayedItems) { displayedItems.mapTo(hashSetOf(), CameraMediaItem::id) }
-    val hiddenSelectedCount = selectedIds.count { it !in displayedIds }
+    val loadedIds = state.mediaItems.mapTo(hashSetOf(), CameraMediaItem::id)
+    val hiddenSelectedCount = selectedIds.count { it in loadedIds && it !in displayedIds }
+    val unloadedSelectedCount = selectedIds.count { it !in loadedIds }
     LaunchedEffect(displayedItems) { selectionDrag = null }
     if (dateDialogVisible) {
         MediaDateRangeDialog(
@@ -115,13 +146,9 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
     val allDisplayedSelected = displayedItems.isNotEmpty() && displayedItems.all { it.id in selectedIds }
 
     BackHandler(enabled = selectedIds.isNotEmpty()) {
-        selectedIds = emptySet()
+        updateSelection(emptySet())
         selectionDrag = null
-        batchMetadataVisible = false
-    }
-    LaunchedEffect(state.mediaItems) {
-        val availableIds = state.mediaItems.mapTo(hashSetOf(), CameraMediaItem::id)
-        selectedIds = selectedIds.intersect(availableIds)
+        batchMetadataSelection = null
     }
     fun download(items: List<CameraMediaItem>) {
         if (items.all(::canSaveMediaToGallery)) {
@@ -136,7 +163,8 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
     state.mediaPreviewItem?.let { item ->
         // Capture review or refreshed metadata can open an item outside the current filter.
         // Show that exact item as a standalone preview, never 0/N or an unrelated adjacent item.
-        val viewerItems = displayedItems.takeIf { item.id in displayedIds } ?: listOf(item)
+        val viewerItems = displayedItems.filter { it.isVisualMedia }
+            .takeIf { candidates -> candidates.any { it.id == item.id } } ?: listOf(item)
         val previewIndex = viewerItems.indexOfFirst { it.id == item.id }
         val viewerActionsEnabled = !state.isBusy(CameraOperation.MEDIA) && (
             state.supports(CameraFeature.MEDIA_BROWSER) ||
@@ -151,6 +179,7 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
         }
         MediaViewerDialog(
             item = item,
+            displayZone = displayZone,
             bytes = state.mediaPreviewBytes,
             streamSource = state.mediaStreamSource,
             loading = state.mediaPreviewLoading,
@@ -181,76 +210,50 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
         )
     }
 
-    pendingDelete?.let { item ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text(stringResource(R.string.delete_media_title)) },
-            text = { Text(stringResource(R.string.delete_media_confirmation, item.name)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        pendingDelete = null
-                        actions.deleteMedia(item)
-                    },
-                ) {
-                    Text(stringResource(R.string.delete), color = AppRecord)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
+    fun dispatchDeletion(selection: MediaDeleteSelection) {
+        val owner = currentOwner()
+        if (selection.owner.matches(owner.connection, owner.generation)) actions.deleteMediaBatch(selection)
+    }
+    pendingDelete?.let { selection ->
+        MediaDeleteConfirmation(selection, single = true, onDismiss = { pendingDelete = null },
+            onConfirm = { pendingDelete = null; dispatchDeletion(selection) })
+    }
+    pendingBatchDelete?.let { selection ->
+        MediaDeleteConfirmation(selection, single = false, onDismiss = { pendingBatchDelete = null },
+            onConfirm = { pendingBatchDelete = null; dispatchDeletion(selection) })
     }
 
-    pendingBatchDelete?.let { items ->
-        AlertDialog(
-            onDismissRequest = { pendingBatchDelete = null },
-            title = { Text(stringResource(R.string.delete_selected_media_title, items.size)) },
-            text = {
-                Column {
-                    Text(stringResource(R.string.delete_selected_media_confirmation, items.size))
-                    val hidden = items.count { it.id !in displayedIds }
-                    if (hidden > 0) Text(stringResource(R.string.media_hidden_selected, hidden))
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        pendingBatchDelete = null
-                        actions.deleteMediaBatch(items)
-                    },
-                ) {
-                    Text(stringResource(R.string.delete), color = AppRecord)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingBatchDelete = null }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
-    }
-
-    if (batchMetadataVisible && selectedItems.isNotEmpty()) {
+    batchMetadataSelection?.let { frozenItems ->
+        fun canDispatch(): Boolean = currentOwner().let { frozenItems.owner.matches(it.connection, it.generation) }
+        val loadedIds = state.mediaItems.mapTo(hashSetOf(), CameraMediaItem::id)
+        val roster = mediaMetadataRoster(frozenItems.map(CameraMediaItem::id), loadedIds, displayedIds)
+        fun hasEligible(field: MediaMetadataField, feature: CameraFeature): Boolean = frozenItems.any { selected ->
+            val loaded = state.mediaItems.firstOrNull { it.id == selected.id }
+            mediaMetadataPreflight(field, state.supports(feature), selected.id, loaded?.id, loaded?.archived,
+                loaded?.metadataWritable(field)) == null
+        }
         MediaBatchMetadataSheet(
-            itemCount = selectedItems.size,
+            itemCount = frozenItems.size,
+            hiddenCount = roster.hiddenCount,
+            unloadedCount = roster.unloadedCount,
+            receipt = state.mediaMetadataBatch,
+            onCancel = { if (canDispatch()) actions.cancelMediaMetadataBatch(frozenItems.owner) },
             busy = state.isBusy(CameraOperation.MEDIA),
-            protectSupported = state.supports(CameraFeature.MEDIA_PROTECT),
-            archiveSupported = state.supports(CameraFeature.MEDIA_ARCHIVE),
-            ratingSupported = state.supports(CameraFeature.MEDIA_RATING) &&
-                selectedItems.any { it.ratingWritable != false },
-            rotationSupported = state.supports(CameraFeature.MEDIA_ROTATE),
-            onDismiss = { batchMetadataVisible = false },
-            onProtect = { actions.setMediaProtectionBatch(selectedItems, it) },
-            onArchive = { actions.setMediaArchivedBatch(selectedItems, it) },
-            onRate = { actions.setMediaRatingBatch(selectedItems, it) },
-            onRotate = { actions.setMediaRotationBatch(selectedItems, it) },
-            downloadSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
+            protectSupported = hasEligible(MediaMetadataField.PROTECTION, CameraFeature.MEDIA_PROTECT),
+            archiveSupported = hasEligible(MediaMetadataField.ARCHIVE, CameraFeature.MEDIA_ARCHIVE),
+            ratingSupported = hasEligible(MediaMetadataField.RATING, CameraFeature.MEDIA_RATING),
+            rotationSupported = hasEligible(MediaMetadataField.ROTATION, CameraFeature.MEDIA_ROTATE),
+            onDismiss = { batchMetadataSelection = null },
+            onProtect = { if (canDispatch()) actions.setMediaProtectionBatch(frozenItems, it) },
+            onArchive = { if (canDispatch()) actions.setMediaArchivedBatch(frozenItems, it) },
+            onRate = { if (canDispatch()) actions.setMediaRatingBatch(frozenItems, it) },
+            onRotate = { if (canDispatch()) actions.setMediaRotationBatch(frozenItems, it) },
+            downloadSupported = roster.unloadedCount == 0 && !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
             onSaveToFolder = {
-                batchMetadataVisible = false
-                actions.downloadMediaBatch(selectedItems)
+                if (canDispatch() && roster.unloadedCount == 0) {
+                    batchMetadataSelection = null
+                    actions.downloadMediaBatch(frozenItems)
+                }
             },
         )
     }
@@ -258,22 +261,25 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
     activeMetadataItemId?.let { itemId ->
         val item = state.mediaItems.firstOrNull { it.id == itemId }
         if (item != null) {
-            LaunchedEffect(itemId) { actions.loadMediaInfo(item) }
+            val detailOwner = MediaMetadataOwner(state.info, state.mediaSessionGeneration)
+            fun canDispatchSingle(): Boolean = currentOwner().let { detailOwner.matches(it.connection, it.generation) }
+            LaunchedEffect(itemId) { if (canDispatchSingle()) actions.loadMediaInfo(item) }
             MediaMetadataSheet(
                 item = item,
+                displayZone = displayZone,
                 busy = state.isBusy(CameraOperation.MEDIA),
-                protectSupported = state.supports(CameraFeature.MEDIA_PROTECT) && item.protected != null,
-                archiveSupported = state.supports(CameraFeature.MEDIA_ARCHIVE) && item.archived != null,
+                protectSupported = state.supports(CameraFeature.MEDIA_PROTECT) && item.protected != null && item.protectionWritable != false,
+                archiveSupported = state.supports(CameraFeature.MEDIA_ARCHIVE) && item.archived != null && item.archiveWritable != false,
                 ratingSupported = state.supports(CameraFeature.MEDIA_RATING) && item.ratingWritable != false,
-                rotationSupported = state.supports(CameraFeature.MEDIA_ROTATE),
+                rotationSupported = state.supports(CameraFeature.MEDIA_ROTATE) && item.rotationWritable != false,
                 downloadSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
                 sereinSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
                 deleteSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DELETE),
                 onDismiss = { activeMetadataItemId = null },
-                onProtect = { actions.setMediaProtection(item, it) },
-                onArchive = { actions.setMediaArchived(item, it) },
-                onRate = { actions.setMediaRating(item, it) },
-                onRotate = { actions.setMediaRotation(item, it) },
+                onProtect = { if (canDispatchSingle()) actions.setMediaProtection(item, it) },
+                onArchive = { if (canDispatchSingle()) actions.setMediaArchived(item, it) },
+                onRate = { if (canDispatchSingle()) actions.setMediaRating(item, it) },
+                onRotate = { if (canDispatchSingle()) actions.setMediaRotation(item, it) },
                 onDownload = {
                     activeMetadataItemId = null
                     download(listOf(item))
@@ -288,7 +294,8 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
                 },
                 onDelete = {
                     activeMetadataItemId = null
-                    pendingDelete = item
+                    pendingDelete = MediaDeleteSelection(listOf(item),
+                        MediaDeleteOwner(state.info, state.mediaSessionGeneration), state.transport, selectionTokens, bridgeEngine = state.info?.bridgeEngine, bridgeEndpoint = state.info?.bridgeEndpoint)
                 },
             )
         } else {
@@ -308,32 +315,32 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
         ) {
             if (selectedIds.isNotEmpty()) {
                 MediaSelectionTopBar(
-                    selectedCount = selectedItems.size,
+                    selectedCount = selectedIds.size,
                     allDisplayedSelected = allDisplayedSelected,
                     busy = state.isBusy(CameraOperation.MEDIA),
-                    downloadSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
-                    sereinSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
+                    downloadSupported = unloadedSelectedCount == 0 && !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
+                    sereinSupported = unloadedSelectedCount == 0 && !state.previewMode && state.supports(CameraFeature.MEDIA_DOWNLOAD),
                     metadataSupported =
                     state.supports(CameraFeature.MEDIA_DOWNLOAD) ||
                         state.supports(CameraFeature.MEDIA_PROTECT) ||
                         state.supports(CameraFeature.MEDIA_ARCHIVE) ||
                         state.supports(CameraFeature.MEDIA_RATING) ||
                         state.supports(CameraFeature.MEDIA_ROTATE),
-                    deleteSupported = !state.previewMode && state.supports(CameraFeature.MEDIA_DELETE),
-                    onExit = { selectedIds = emptySet() },
+                    deleteSupported = selectedIds.size <= MAX_MEDIA_DELETE_ITEMS && !state.previewMode && state.supports(CameraFeature.MEDIA_DELETE),
+                    onExit = { updateSelection(emptySet()) },
                     onToggleSelectAll = {
-                        selectedIds = if (allDisplayedSelected) {
-                            selectedIds - displayedIds
-                        } else {
-                            selectedIds + displayedIds
-                        }
+                        updateSelection(if (allDisplayedSelected) selectedIds - displayedIds else selectedIds + displayedIds)
                     },
                     onOpenInSerein = { actions.openInSerein(selectedItems) },
                     onDownload = {
                         download(selectedItems)
                     },
-                    onEdit = { batchMetadataVisible = true },
-                    onDelete = { pendingBatchDelete = selectedItems },
+                    onEdit = {
+                        batchMetadataSelection = MediaMetadataSelection(selectedIds.mapNotNull(selectedSnapshots::get),
+                            MediaMetadataOwner(state.info, state.mediaSessionGeneration))
+                    },
+                    onDelete = { pendingBatchDelete = MediaDeleteSelection(selectedIds.mapNotNull(selectedSnapshots::get),
+                        MediaDeleteOwner(state.info, state.mediaSessionGeneration), state.transport, selectionTokens, hiddenSelectedCount, unloadedSelectedCount, bridgeEngine = state.info?.bridgeEngine, bridgeEndpoint = state.info?.bridgeEndpoint) },
                 )
             } else {
                 ToolIconButton(
@@ -554,7 +561,8 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        stringResource(R.string.uploading_media, name),
+                        stringResource(if (state.mediaUploadStatus == MediaUploadStatus.PREPARING)
+                            R.string.preparing_media_upload else R.string.uploading_media, name),
                         color = AppText,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -569,6 +577,14 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
                     actions.cancelMediaUpload,
                 )
             }
+        }
+
+        if (state.mediaWorklistUnavailable) {
+            Text(
+                stringResource(R.string.media_worklist_unavailable),
+                color = AppWarning,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            )
         }
 
         state.lastDownloadedMediaName?.let { name ->
@@ -595,6 +611,25 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
             )
         }
 
+        val uploadNotice = when {
+            state.mediaUploadStatus == MediaUploadStatus.NOT_SENT -> R.string.media_upload_not_sent
+            state.mediaUploadStatus == MediaUploadStatus.UNCERTAIN -> R.string.media_upload_uncertain
+            state.mediaUploadStatus == MediaUploadStatus.CONFIRMED && state.mediaUploadRefreshFailed ->
+                R.string.media_upload_refresh_failed
+            else -> null
+        }
+        uploadNotice?.let { notice ->
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text(stringResource(notice), color = AppWarning)
+                if (state.mediaUploadStatus == MediaUploadStatus.UNCERTAIN || state.mediaUploadRefreshFailed) {
+                    TextButton(onClick = actions.refreshMedia,
+                        enabled = !state.isBusy(CameraOperation.MEDIA) && !state.mediaLibraryLoading) {
+                        Text(stringResource(R.string.media_upload_inspect))
+                    }
+                }
+            }
+        }
+
         state.lastDeletedMediaName?.let { name ->
             Text(
                 stringResource(R.string.media_deleted, name),
@@ -618,15 +653,38 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
             )
         }
 
-        state.lastMediaBatchResult?.let { result ->
+        state.previousMediaMetadataBatch?.let { receipt ->
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text(stringResource(R.string.media_metadata_previous_session), color = AppWarning)
+                MediaMetadataBatchReceipt(receipt, {}, rowTagPrefix = "previous-media-metadata-row")
+            }
+        }
+        if (unloadedSelectedCount > 0) Text(stringResource(R.string.media_metadata_selection_unloaded, unloadedSelectedCount),
+            color = AppWarning, modifier = Modifier.padding(horizontal = 16.dp))
+
+        state.mediaMetadataBatch?.takeIf { batchMetadataSelection == null }?.let { receipt ->
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                MediaMetadataBatchReceipt(receipt, { actions.cancelMediaMetadataBatch(MediaMetadataOwner(state.info, state.mediaSessionGeneration)) })
+            }
+        }
+
+        if (selectedIds.size > MAX_MEDIA_DELETE_ITEMS) Text(stringResource(R.string.media_delete_limit), color = AppWarning)
+        MediaDeleteReceipts(state, actions)
+
+        state.lastMediaBatchResult?.takeIf { state.mediaMetadataBatch == null && it.operation != MediaBatchOperation.DELETE }?.let { result ->
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text(
-                    stringResource(
-                        if (result.failedItems == 0) R.string.media_batch_complete else R.string.media_batch_partial,
-                        result.succeededItems,
-                        result.totalItems,
-                        result.failedItems,
-                    ),
+                    if (result.operation == MediaBatchOperation.DOWNLOAD && result.failedItems > 0) {
+                        stringResource(R.string.media_batch_download_stopped,
+                            result.succeededItems, result.failedItems, result.notStartedItems)
+                    } else {
+                        stringResource(
+                            if (result.failedItems == 0) R.string.media_batch_complete else R.string.media_batch_partial,
+                            result.succeededItems,
+                            result.totalItems,
+                            result.failedItems,
+                        )
+                    },
                     color = if (result.failedItems == 0) AppSuccess else AppWarning,
                 )
                 if (result.failedItemNames.isNotEmpty()) {
@@ -673,16 +731,16 @@ private fun MediaScreenContent(state: CameraUiState, actions: CameraActions) {
                 selectedIds = selectedIds,
                 onPreview = actions.openMediaPreview,
                 onActions = { activeMetadataItemId = it.id },
-                onToggleSelection = { itemId -> selectedIds = toggleMediaSelection(selectedIds, itemId) },
+                onToggleSelection = { itemId -> updateSelection(toggleMediaSelection(selectedIds, itemId)) },
                 onSelectionDragStart = { itemId ->
                     val (updated, drag) = beginMediaSelectionDrag(displayedItems, selectedIds, itemId)
-                    selectedIds = updated
+                    updateSelection(updated)
                     selectionDrag = drag
                 },
                 onSelectionDrag = { itemId ->
                     selectionDrag?.let { drag ->
                         val index = displayedItems.indexOfFirst { it.id == itemId }
-                        if (index >= 0) selectedIds = applyMediaSelectionDrag(displayedItems, drag, index)
+                        if (index >= 0) updateSelection(applyMediaSelectionDrag(displayedItems, drag, index))
                     }
                 },
                 onSelectionDragEnd = { selectionDrag = null },
@@ -736,6 +794,7 @@ private fun MediaMessage(message: Int) {
 @OptIn(ExperimentalMaterial3Api::class)
 private fun MediaMetadataSheet(
     item: CameraMediaItem,
+    displayZone: ZoneId,
     busy: Boolean,
     protectSupported: Boolean,
     archiveSupported: Boolean,
@@ -791,7 +850,7 @@ private fun MediaMetadataSheet(
                     value = size,
                 )
             }
-            mediaCaptureTimeLabel(item.captureTime)?.let { capturedAt ->
+            mediaCaptureTimeLabel(item.captureTime, displayZone, stringResource(R.string.media_time_zone_unknown))?.let { capturedAt ->
                 MetadataSectionTitle(
                     title = stringResource(R.string.media_captured_at),
                     value = capturedAt,

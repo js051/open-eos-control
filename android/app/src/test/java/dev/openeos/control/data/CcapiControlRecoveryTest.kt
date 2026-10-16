@@ -223,6 +223,9 @@ class CcapiControlRecoveryTest {
                     else MockResponse().setResponseCode(204)
                 request.path?.endsWith("/multipart") == true && request.method == "GET" ->
                     MockResponse().setResponseCode(200).setHeader("Content-Type", "text/plain").setBody("invalid stream")
+                request.path?.contains("/shooting/liveview/flip?") == true ->
+                    MockResponse().setHeader("Content-Type", "image/jpeg")
+                        .setBody(okio.Buffer().write(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 1, 0xff.toByte(), 0xd9.toByte())))
                 else -> json()
             }
         }
@@ -296,40 +299,39 @@ class CcapiControlRecoveryTest {
         } finally { server.shutdown() }
     }
 
-    @Test fun cancellingMultipartFrameWaitDoesNotWaitForItsFifteenSecondDeadline() = runBlocking {
+    @Test fun cancellingMultipartFirstFrameWaitDoesNotWaitForItsFifteenSecondDeadline() = runBlocking {
         val server = MockWebServer()
         val http = noRetryHttp()
+        val entered = CountDownLatch(1)
+        val stops = AtomicInteger()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = when {
                 request.path == "/ccapi" -> json(multipartDiscovery)
-                request.path?.endsWith("/multipart") == true && request.method == "GET" ->
+                request.path?.endsWith("/multipart") == true && request.method == "GET" -> {
+                    entered.countDown()
                     MockResponse().setHeader("Content-Type", "multipart/x-mixed-replace; boundary=canon")
-                        .setBody("--canon\r\n").setBodyDelay(2, TimeUnit.SECONDS)
+                        .setBody("--canon\r\n").setHeader("Content-Length", 1_000_000)
+                }
+                request.path?.endsWith("/shooting/liveview") == true && request.method == "DELETE" -> {
+                    stops.incrementAndGet(); json()
+                }
                 else -> json()
             }
         }
         server.start()
+        val client = CcapiClient(server.url("/").toString(), treatAsSimulator = false, httpClient = http)
         try {
-            val client = CcapiClient(server.url("/").toString(), treatAsSimulator = false, httpClient = http)
             client.initialize()
-            client.startLiveView(LiveViewRequest(source = LiveViewSource.CCAPI_MULTIPART))
-            val entered = CountDownLatch(1)
-            val job = launch(Dispatchers.Default) {
-                entered.countDown()
-                runCatching { client.liveViewFrame(1) }
-            }
+            val job = launch(Dispatchers.Default) { runCatching { client.startLiveView(LiveViewRequest(source = LiveViewSource.CCAPI_MULTIPART)) } }
             try {
                 assertTrue(withContext(Dispatchers.IO) { entered.await(2, TimeUnit.SECONDS) })
-                // Let the production consumer enter its monitor wait before cancellation.
                 kotlinx.coroutines.delay(50)
+                assertNull(client.currentLiveViewSource())
                 job.cancel()
                 assertTrue(withTimeoutOrNull(1_000) { job.join(); true } ?: false)
-            } finally {
-                client.stopLiveView()
-                http.dispatcher.cancelAll()
-                job.cancel()
-                job.join()
-            }
+                assertEquals(1, stops.get())
+                assertFalse(client.liveViewStopRequired)
+            } finally { http.dispatcher.cancelAll(); job.cancel(); job.join(); client.close() }
         } finally { server.shutdown() }
     }
 
@@ -411,6 +413,9 @@ class CcapiControlRecoveryTest {
                     streamReceived.countDown()
                     MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
                 }
+                request.path?.contains("/shooting/liveview/flip?") == true ->
+                    MockResponse().setHeader("Content-Type", "image/jpeg")
+                        .setBody(okio.Buffer().write(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 1, 0xff.toByte(), 0xd9.toByte())))
                 else -> json()
             }
         }

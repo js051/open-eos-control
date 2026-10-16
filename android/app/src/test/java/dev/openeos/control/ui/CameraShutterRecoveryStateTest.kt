@@ -7,6 +7,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraShutterRecoveryStateTest {
+    @Test fun retiringFocusPreservesPreviousCameraWarningWithoutLiveView() {
+        val state = CameraUiState()
+        assertFalse(state.needsShutterDisconnectWarning())
+        for (phase in AutofocusHoldState.entries.filter { it != AutofocusHoldState.IDLE }) {
+            assertTrue("Retiring $phase must warn about the previous camera",
+                state.copy(autofocusHoldState = phase).needsShutterDisconnectWarning())
+        }
+        assertTrue(state.copy(pendingOperations = setOf(CameraOperation.FOCUS)).needsShutterDisconnectWarning())
+        assertTrue(state.copy(shutterDisconnectWarning = true).needsShutterDisconnectWarning())
+    }
+
     @Test fun dismissingPersistentReleaseWarningPreservesTheEntireState() {
         val state = CameraUiState().withOfflinePreview().copy(
             shutterReleaseUnconfirmed = true,

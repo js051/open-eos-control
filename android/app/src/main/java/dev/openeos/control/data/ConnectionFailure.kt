@@ -66,12 +66,23 @@ private val DISCOVERY_REASON_PRIORITY = listOf(
     ConnectionFailureReason.ENDPOINT_NOT_FOUND,
 )
 
+/** Bounded connection-only evidence; the origin and reason always come from the same cause. */
+internal data class ConnectionFailure(
+    val reason: ConnectionFailureReason,
+    val cameraViaBridge: Boolean = false,
+)
+
+internal fun connectionFailureReason(error: Throwable): ConnectionFailureReason = connectionFailure(error).reason
+
 /** Use only at connection boundaries; command and release safety errors keep their existing handling. */
-internal fun connectionFailureReason(error: Throwable): ConnectionFailureReason {
+internal fun connectionFailure(error: Throwable): ConnectionFailure {
     // Bound traversal, including unusual cyclic cause chains. Never inspect diagnostic text.
     val causes = generateSequence(error) { it.cause }.take(16).toList()
     causes.filterIsInstance<CancellationException>().firstOrNull()?.let { throw it }
     for (cause in causes) {
+        if (cause is DesktopBridgeException && cause.connectionReason != null) {
+            return ConnectionFailure(cause.connectionReason, cameraViaBridge = true)
+        }
         val reason = when (cause) {
             is CcapiDiscoveryException -> cause.reason
             is CameraWifiRouteUnavailableException -> ConnectionFailureReason.UNREACHABLE
@@ -85,7 +96,7 @@ internal fun connectionFailureReason(error: Throwable): ConnectionFailureReason 
                 ConnectionFailureReason.UNREACHABLE
             else -> ConnectionFailureReason.UNKNOWN
         }
-        if (reason != ConnectionFailureReason.UNKNOWN) return reason
+        if (reason != ConnectionFailureReason.UNKNOWN) return ConnectionFailure(reason)
     }
-    return ConnectionFailureReason.UNKNOWN
+    return ConnectionFailure(ConnectionFailureReason.UNKNOWN)
 }
