@@ -173,7 +173,11 @@ class IOSCaptureReviewEvidenceSourceTests(unittest.TestCase):
             'throw DesktopBridgeError.invalidResponse("Desktop Bridge returned invalid media JSON.")', listing
         )
         self.assertIn("let items = try raw.map", listing)
-        self.assertIn("let item = Self.parseMediaItem(object) else", listing)
+        self.assertIn("let item = Self.parseMediaItem(object),", listing)
+        self.assertIn("identities.insert(Data(item.id.utf8)).inserted else", listing)
+        self.assertIn("raw.count <= BridgeMediaListingDecoder.maximumItems", listing)
+        self.assertIn("maximumItems.map({ raw.count <= $0 }) ?? true", listing)
+        self.assertNotIn("Array(items.prefix", listing)
         self.assertNotIn("raw.compactMap", listing)
         paths = ccapi.split("private func contentPaths(", 1)[1].split("private func contentPage(", 1)[0]
         self.assertEqual(paths.count("try Self.validatedContentPaths("), 6)
