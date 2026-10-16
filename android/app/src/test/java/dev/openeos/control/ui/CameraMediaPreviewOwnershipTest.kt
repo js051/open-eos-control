@@ -61,6 +61,29 @@ class CameraMediaPreviewOwnershipTest(private val transport: CameraTransport) {
     @Before fun setUp() { Dispatchers.setMain(main) }
     @After fun tearDown() { Dispatchers.resetMain() }
 
+    @Test fun invalidLegacyBridgeRefreshPreservesRowsAndFailsWithoutFallback() = runTest(main) {
+        if (transport != CameraTransport.DESKTOP_BRIDGE) return@runTest
+        withCamera {
+            val valid = """{"id":"synthetic-image","name":"SYNTHETIC.JPG","kind":"image"}"""
+            peer.mediaBody.set("""{"items":[$valid]}""")
+            model.refreshMedia()
+            model.uiState.first { !it.mediaLibraryLoading && it.mediaLibraryLoadStatus == MediaLibraryLoadStatus.COMPLETE }
+            val previous = model.uiState.value.mediaItems
+            assertEquals(1, previous.size)
+            for (body in listOf("""{"items":[$valid,null]}""", """{"items":[$valid,$valid]}""")) {
+                val reads = peer.mediaRequests.size
+                peer.mediaBody.set(body)
+                model.refreshMedia()
+                val failed = model.uiState.first { !it.mediaLibraryLoading && it.mediaLibraryLoadStatus == MediaLibraryLoadStatus.FAILED }
+                assertEquals(previous, failed.mediaItems)
+                assertEquals(MediaLibraryLoadStatus.FAILED, failed.mediaLibraryLoadStatus)
+                assertTrue(failed.mediaListingDefersThumbnails)
+                assertNotNull(failed.error)
+                assertEquals("Malformed legacy data must not start a fallback traversal", reads + 1, peer.mediaRequests.size)
+            }
+        }
+    }
+
     @Test fun closingHttpPreviewCancelsItsCallAndTheSameItemCanBeOpenedAgain() = runTest(main) {
         withCamera {
             val entered = peer.stallNextPreview()
@@ -553,6 +576,8 @@ private class PreviewOwnershipPeer {
     lateinit var baseUrl: String
     val displayBytes = byteArrayOf(1, 2, 3, 4)
     val previewCalls = CopyOnWriteArrayList<Call>()
+    val mediaRequests = CopyOnWriteArrayList<RecordedRequest>()
+    val mediaBody = AtomicReference("""{"items":[]}""")
     private val stalledPreview = AtomicReference<CompletableDeferred<Unit>?>()
     val http = OkHttpClient.Builder().retryOnConnectionFailure(false).eventListener(object : EventListener() {
         override fun callStart(call: Call) {
@@ -587,7 +612,7 @@ private class PreviewOwnershipPeer {
                     path.endsWith("/info") -> json("""{"connected":true,"model":"Synthetic preview owner","serial":"TEST-PREVIEW-OWNER","api":"desktop-bridge/v1"}""")
                     path.endsWith("/status") -> json("""{"connected":true,"recording":false,"mode":"photo","battery":{},"media":{},"exposure":{}}""")
                     path.endsWith("/capabilities") -> json("""{"supported":["CAMERA_IDENTITY","DESKTOP_BRIDGE","MEDIA_BROWSER","MEDIA_PREVIEW"],"settings":[]}""")
-                    path.endsWith("/media") -> json("""{"items":[]}""")
+                    path.endsWith("/media") -> { mediaRequests += request; json(mediaBody.get()) }
                     path == "/v1/session/synthetic-session" && request.method == "DELETE" -> MockResponse().setResponseCode(204)
                     path.endsWith("/liveview/stop") -> json("{}")
                     else -> MockResponse().setResponseCode(404)
