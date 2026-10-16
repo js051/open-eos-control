@@ -28,7 +28,8 @@ function element() {
   return {
     value: "", hidden: false, disabled: false, open: false, textContent: "", dataset: {},
     classList: { toggle() {}, remove() {} }, style: { removeProperty() {} },
-    append(child) { child.parentElement = this; }, setAttribute() {}, removeAttribute() {},
+    append(child) { child.parentElement = this; },
+    replaceChildren(...children) { this.children = children; }, setAttribute() {}, removeAttribute() {},
     querySelectorAll() { return []; }, pause() {}, load() {}, close() { this.open = false; },
   };
 }

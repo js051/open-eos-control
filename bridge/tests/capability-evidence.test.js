@@ -25,6 +25,7 @@ function deferred() {
 function element() {
   return { value: "", hidden: false, disabled: false, textContent: "", dataset: {},
     classList: { toggle() {} }, append(child) { child.parentElement = this; },
+    replaceChildren(...children) { this.children = children; },
     setAttribute() {}, removeAttribute() {} };
 }
 function context({ reuseSessionId = false } = {}) {

@@ -1183,6 +1183,7 @@ for (const reason of ["unknown", "in-flight", "confirmed-active", "idle", "retir
       "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh", "closeMediaPreview",
       "closeMediaDetails", "releaseObjectUrl", "clearBulbTimer", "renderAvailability", "renderHealth"]) s[name] = () => {};
     for (const name of ["connectionView", "controlView", "tokenInput", "ccapiPasswordInput"]) s.ui[name] = {};
+    s.ui.mediaList = { replaceChildren(...children) { this.children = children; } };
     vm.runInContext(productionFunction("cancelSetting") + "\n" + productionFunction("resetSession"), s);
     s.resetSession();
     assert.equal(Boolean(s.state.shutterDisconnectWarning), ["unknown", "in-flight", "confirmed-active"].includes(reason));

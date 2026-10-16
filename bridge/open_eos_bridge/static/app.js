@@ -2763,8 +2763,28 @@
       ui.connectionView.hidden = true;
       ui.controlView.hidden = false;
       renderSession();
+      // A retained Media tab belongs to this newly admitted camera, not the
+      // detached cards from the retired connection. Ordinary status renders
+      // must not turn a cancelled or failed listing into an automatic retry.
+      if (state.activeView === "media") {
+        if (featureSupported(FEATURES.MEDIA_BROWSER)) {
+          renderMedia();
+          const interactionGeneration = state.refreshGeneration;
+          void refreshMedia().then((complete) => {
+            // Visible inventory has priority. Enrichment must not cancel its
+            // owner, retry a cancelled/failed list, or supersede newer work.
+            if (complete && state.session === session &&
+                state.refreshGeneration === interactionGeneration && !cameraInteractionBusy() &&
+                !state.mediaListingOwner && !state.latestMediaRefreshPromise) void refreshLatestMedia();
+          });
+        } else {
+          selectView("live");
+          void refreshLatestMedia();
+        }
+      } else {
+        void refreshLatestMedia();
+      }
       startEventLoop();
-      void refreshLatestMedia();
       showToast(t("connected"));
     } catch (error) {
       if (!current()) return;
@@ -2997,6 +3017,8 @@
     state.lastClockSyncAt = null;
     state.lastCreatedDirectoryName = null;
     state.media = [];
+    state.mediaRenderOwner = null;
+    ui.mediaList.replaceChildren();
     state.mediaSelection?.clear();
     state.mediaSelection?.replaceLoaded([]);
     if (state.mediaDeleteOwner) {
@@ -7611,6 +7633,10 @@
 
   function renderMedia() {
     if (!ui.mediaList) return;
+    const owner = { session: state.session };
+    state.mediaRenderOwner = owner;
+    const current = () => Boolean(owner.session) && state.session === owner.session &&
+      state.mediaRenderOwner === owner;
     const nextDisplayZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     if (state.mediaDisplayZone !== nextDisplayZone) {
       state.mediaDisplayZone = nextDisplayZone;
@@ -7673,7 +7699,7 @@
       const selectionLabel = t("mediaSelect").replaceAll("{name}", () => String(item.name));
       checkbox.setAttribute("aria-label", selectionLabel);
       checkbox.addEventListener("change", () => {
-        if (cameraInteractionBusy()) return;
+        if (!current() || cameraInteractionBusy()) return;
         state.mediaSelection.setSelected(item.id, checkbox.checked);
         renderMediaSelection();
       });
@@ -7690,7 +7716,7 @@
         thumbnail.type = "button";
         thumbnail.disabled = Boolean(state.mediaBatchOwner || state.mediaMutationOwner);
         thumbnail.setAttribute("aria-label", t("previewMedia", { name: item.name }));
-        thumbnail.addEventListener("click", () => openMediaPreview(item));
+        thumbnail.addEventListener("click", () => { if (current()) void openMediaPreview(item); });
       }
       renderMediaThumbnail(thumbnail, item, state.mediaThumbnailUrls.get(item.id));
       const copy = document.createElement("div");
@@ -7719,7 +7745,7 @@
         manageIcon.dataset.icon = "ellipsis-vertical";
         manage.append(manageIcon);
         manage.disabled = cameraInteractionBusy();
-        manage.addEventListener("click", () => openMediaDetails(item));
+        manage.addEventListener("click", () => { if (current()) void openMediaDetails(item); });
         actions.append(manage);
       }
       card.append(selection, thumbnail, copy, size, actions);
@@ -9069,6 +9095,11 @@
   }
 
   function observeMediaThumbnail(container) {
+    // disconnect() cannot retract observer entries already queued by the browser.
+    // Bind demand to the rendered page and session object, even when IDs repeat.
+    container.mediaThumbnailOwner = { session: state.session, generation: state.mediaGeneration,
+      render: state.mediaRenderOwner };
+    if (!state.session) return;
     if (state.mediaListingOwner || state.mediaLoadStatus === "CANCELLED" || state.mediaLoadStatus === "FAILED") return;
     if (!("IntersectionObserver" in window)) {
       const item = state.media.find((candidate) => candidate.id === container.dataset.mediaId);
@@ -9081,6 +9112,9 @@
           entries.forEach((entry) => {
             if (!entry.isIntersecting) return;
             observer.unobserve(entry.target);
+            const owner = entry.target.mediaThumbnailOwner;
+            if (!owner?.session || owner.session !== state.session ||
+                owner.generation !== state.mediaGeneration || owner.render !== state.mediaRenderOwner) return;
             const item = state.media.find((candidate) => candidate.id === entry.target.dataset.mediaId);
             if (item) loadMediaThumbnail(item);
           });
