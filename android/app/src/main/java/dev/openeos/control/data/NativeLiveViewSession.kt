@@ -1,6 +1,23 @@
 package dev.openeos.control.data
 
 import android.view.Surface
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+
+/** Progress from a native API, with optional pixels captured from that exact GPU frame. */
+data class NativeLiveViewRenderedFrame(
+    val surface: Surface,
+    val decoderGeneration: Long,
+    val formatGeneration: Long,
+    val sequence: Long,
+    val renderedAtNanos: Long,
+    val identity: NativeRtpFrameIdentity = NativeRtpFrameIdentity(decoderGeneration, formatGeneration, 0, 0, sequence),
+    val evidence: NativeFrameEvidence = NativeFrameEvidence.CODEC_RENDER_CALLBACK,
+    val pixels: NativeRtpFramePixels? = null,
+)
+
+private val noRenderedFrames = MutableStateFlow<NativeLiveViewRenderedFrame?>(null)
+private val noVideoLut = MutableStateFlow(NativeVideoLutStatus.OFF)
 
 sealed interface NativeLiveViewEvent {
     data class FrameRendered(
@@ -8,6 +25,8 @@ sealed interface NativeLiveViewEvent {
         val atMillis: Long,
         val width: Int,
         val height: Int,
+        val evidence: NativeFrameEvidence = NativeFrameEvidence.CODEC_RENDER_CALLBACK,
+        val frameId: Long? = null,
     ) : NativeLiveViewEvent
 
     data class VideoSizeChanged(
@@ -36,12 +55,22 @@ data class NativeLiveViewAudioStatus(
     val packetsReceived: Long = 0,
     val accessUnitsReceived: Long = 0,
     val decodedAccessUnits: Long = 0,
+    // AudioTrack playback-head progress, not physical audibility.
     val playedSampleFrames: Long = 0,
     val droppedAccessUnits: Long = 0,
     val underruns: Int = 0,
     val lastPacketAtMillis: Long? = null,
     val lastPcmAtMillis: Long? = null,
     val error: String? = null,
+    val playbackEpoch: Long = 0,
+    val retirementPending: Boolean = false,
+    val state: String = "muted",
+    val evidenceLevel: String = "none",
+    val queuedAccessUnits: Long = 0,
+    val decodedSampleFrames: Long = 0,
+    val submittedSampleFrames: Long = 0,
+    val lastOutputAtMillis: Long? = null,
+    val pcmFresh: Boolean = false,
 ) {
     companion object {
         val None = NativeLiveViewAudioStatus()
@@ -58,6 +87,10 @@ data class NativeLiveViewVideoStatus(
     val hasSequenceParameterSet: Boolean = false,
     val hasPictureParameterSet: Boolean = false,
     val ready: Boolean = false,
+    val decodedFrames: Long = 0,
+    val presentationFrames: Long = 0,
+    val lastDecodedAtMillis: Long? = null,
+    val lastPresentationAtMillis: Long? = null,
     val error: String? = null,
 ) {
     companion object {
@@ -73,8 +106,16 @@ interface NativeLiveViewSession : AutoCloseable {
         get() = NativeLiveViewAudioStatus.None
     val videoStatus: NativeLiveViewVideoStatus
         get() = NativeLiveViewVideoStatus.None
+    val renderedFrames: StateFlow<NativeLiveViewRenderedFrame?>
+        get() = noRenderedFrames
+
+    val supportsVideoLut: Boolean get() = false
+    val videoLutStatus: StateFlow<NativeVideoLutStatus> get() = noVideoLut
+    fun setVideoLut(lut: NativeVideoLut?) = Unit
+    fun setMonitorSamplingEnabled(enabled: Boolean) = Unit
 
     fun start()
+    /** Completes only after real decoded output. ACKs, SPS/PPS/IDR and queue intent are insufficient. */
     suspend fun awaitReady(timeoutMillis: Long)
     fun attachSurface(surface: Surface)
     fun detachSurface(surface: Surface)

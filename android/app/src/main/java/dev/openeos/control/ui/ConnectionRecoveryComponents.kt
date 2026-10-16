@@ -90,8 +90,21 @@ internal fun ConnectionRecoveryCard(recovery: ConnectionRecovery, onDismiss: () 
 }
 
 @StringRes
-private fun connectionRecoveryMessage(recovery: ConnectionRecovery): Int {
+internal fun connectionRecoveryMessage(recovery: ConnectionRecovery): Int {
     if (recovery.target == ConnectionAttemptTarget.USB) return R.string.connection_recovery_usb
+    if (recovery.target == ConnectionAttemptTarget.DESKTOP_BRIDGE && recovery.cameraViaBridge) {
+        return when (recovery.reason) {
+            ConnectionFailureReason.AUTHENTICATION_REJECTED -> R.string.connection_recovery_camera_via_bridge_auth
+            ConnectionFailureReason.TLS_ERROR -> R.string.connection_recovery_camera_via_bridge_tls
+            ConnectionFailureReason.HOST_NOT_FOUND -> R.string.connection_recovery_camera_via_bridge_host_not_found
+            ConnectionFailureReason.TIMEOUT -> R.string.connection_recovery_camera_via_bridge_timeout
+            ConnectionFailureReason.UNREACHABLE -> R.string.connection_recovery_camera_via_bridge_unreachable
+            ConnectionFailureReason.HTTP_ERROR -> R.string.connection_recovery_camera_via_bridge_http
+            ConnectionFailureReason.ENDPOINT_NOT_FOUND -> R.string.connection_recovery_camera_via_bridge_endpoint
+            ConnectionFailureReason.DISCOVERY_FAILED -> R.string.connection_recovery_camera_via_bridge_discovery
+            ConnectionFailureReason.INVALID_ADDRESS, ConnectionFailureReason.UNKNOWN -> R.string.connection_recovery_unknown
+        }
+    }
     return when (recovery.reason) {
         ConnectionFailureReason.INVALID_ADDRESS -> R.string.connection_recovery_invalid_address
         ConnectionFailureReason.AUTHENTICATION_REJECTED ->

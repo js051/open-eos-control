@@ -11,6 +11,7 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +56,7 @@ fun OpenEosControlApp(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val downloadHistory by viewModel.downloadHistoryState.collectAsStateWithLifecycle()
+    val downloadContinuation by viewModel.downloadContinuation.collectAsStateWithLifecycle()
     var showDownloadHistory by rememberSaveable { mutableStateOf(false) }
     var showSavedJpegs by rememberSaveable { mutableStateOf(false) }
     val savedJpegs by viewModel.savedJpegState.collectAsStateWithLifecycle()
@@ -63,6 +65,7 @@ fun OpenEosControlApp(
     var launchedHandoffToken by rememberSaveable { mutableStateOf<Long?>(null) }
     val context = LocalContext.current
     val mediaPickers = rememberCameraMediaPickerLaunchers(viewModel)
+    val loadCubeLut = rememberCubeLutPickerLauncher(viewModel)
     val sereinLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -126,6 +129,7 @@ fun OpenEosControlApp(
         cancelConnectionAttempt = viewModel::cancelConnectionAttempt,
         disconnect = viewModel::disconnect,
         refresh = viewModel::refresh,
+        refreshRecordingStatus = viewModel::refreshRecordingStatus,
         refreshUsb = { viewModel.refreshUsbDiagnostics(context) },
         requestUsbPermission = { viewModel.requestUsbPermission(context, it) },
         connectUsb = viewModel::connectUsb,
@@ -141,9 +145,9 @@ fun OpenEosControlApp(
         setFrameGuide = viewModel::setFrameGuide,
         setSafeAreaVisible = viewModel::setSafeAreaVisible,
         setDesqueeze = viewModel::setDesqueeze,
-        importCubeLut = viewModel::importCubeLut,
+        loadCubeLut = loadCubeLut,
         clearCubeLut = viewModel::clearCubeLut,
-        reportCubeLutError = viewModel::reportCubeLutError,
+        cancelCubeLutImport = viewModel::cancelCubeLutImport,
         setLiveViewTapAction = viewModel::setLiveViewTapAction,
         openPicker = viewModel::openSettingPicker,
         closePicker = viewModel::closeSettingPicker,
@@ -152,8 +156,18 @@ fun OpenEosControlApp(
         setAperture = viewModel::setAperture,
         setWhiteBalance = viewModel::setWhiteBalance,
         setCameraSetting = viewModel::setCameraSetting,
+        submitShootingSetting = viewModel::submitShootingSetting,
+        cancelShootingSetting = viewModel::cancelShootingSetting,
+        recoverShootingSetting = viewModel::recoverShootingSetting,
         createDirectory = viewModel::createDirectory,
         setFileNaming = viewModel::setFileNaming,
+        submitCaptureConfiguration = viewModel::submitCaptureConfiguration,
+        cancelCaptureConfiguration = viewModel::cancelCaptureConfiguration,
+        recoverCaptureConfiguration = viewModel::recoverCaptureConfiguration,
+        submitMaintenance = viewModel::submitMaintenance,
+        cancelMaintenance = viewModel::cancelMaintenance,
+        recoverMaintenance = viewModel::recoverMaintenance,
+        restoreMaintenance = viewModel::restoreMaintenance,
         syncCameraClock = viewModel::syncCameraClock,
         cleanSensor = viewModel::cleanSensor,
         sleepCamera = viewModel::sleepCamera,
@@ -209,7 +223,10 @@ fun OpenEosControlApp(
         uploadMedia = mediaPickers.upload,
         deleteMedia = viewModel::deleteMedia,
         deleteMediaBatch = viewModel::deleteMediaBatch,
+        cancelMediaDeletion = viewModel::cancelMediaDeletion,
+        inspectMediaDeletion = viewModel::inspectMediaDeletion,
         cancelMediaDownload = viewModel::cancelMediaDownload,
+        cancelMediaMetadataBatch = viewModel::cancelMediaMetadataBatch,
         cancelMediaUpload = viewModel::cancelMediaUpload,
         refreshLiveView = viewModel::refreshLiveViewFrame,
         restartLiveView = viewModel::restartLiveView,
@@ -260,7 +277,7 @@ fun OpenEosControlApp(
                                 ) FOREGROUND_IMPORT_BAR_HEIGHT else 0.dp,
                             ),
                     ) {
-                        CameraErrorPresentation(state, actions.clearError)
+                        CameraErrorPresentation(state, actions.clearError, actions.refreshRecordingStatus, actions.toggleRecording)
                     }
                 }
             }
@@ -284,6 +301,22 @@ fun OpenEosControlApp(
                     state = downloadHistory,
                     onClear = viewModel::clearDownloadHistory,
                     onDismiss = { showDownloadHistory = false },
+                    continuationAvailable = state.connected && !state.previewMode && state.mediaItems.isNotEmpty() &&
+                        state.supports(CameraFeature.MEDIA_DOWNLOAD) && !state.isBusy(CameraOperation.MEDIA) &&
+                        !state.foregroundImportOwnerActive,
+                    onContinue = { worklistId ->
+                        if (viewModel.beginDownloadContinuation(worklistId)) showDownloadHistory = false
+                    },
+                )
+            }
+            downloadContinuation?.let { draft ->
+                DownloadContinuationDialog(
+                    draft = draft,
+                    onMap = { rowId, sourceId -> viewModel.mapDownloadContinuation(draft.id, rowId, sourceId) },
+                    onConfirmUnknown = { viewModel.confirmDownloadContinuationUnknown(draft.id, it) },
+                    onGallery = { viewModel.continueDownloadToGallery(context, draft.id) },
+                    onFolder = { mediaPickers.continueFolder(draft.id) },
+                    onDismiss = viewModel::cancelDownloadContinuation,
                 )
             }
         }
@@ -291,20 +324,67 @@ fun OpenEosControlApp(
 }
 
 @Composable
-internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit) {
+internal fun CameraErrorPresentation(state: CameraUiState, onDismiss: () -> Unit, onRefresh: () -> Unit = {},
+    onStopRecording: () -> Unit = {}) {
+    val recordingReceipt = state.recordingReceipt?.takeIf { !it.retired && it.sameOwner }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    if (recordingReceipt != null) {
+        val response = stringResource(when (recordingReceipt.response) {
+            dev.openeos.control.data.RecordingResponseEvidence.RESPONSE_RECEIVED -> R.string.recording_response_received
+            dev.openeos.control.data.RecordingResponseEvidence.UNKNOWN -> R.string.recording_response_unknown
+            dev.openeos.control.data.RecordingResponseEvidence.REJECTED -> R.string.recording_response_rejected
+            else -> R.string.recording_response_not_sent
+        })
+        val observation = stringResource(when (recordingReceipt.observation?.takeIf { recordingReceipt.canPublish }?.recording) {
+            true -> R.string.recording_observed_active
+            false -> R.string.recording_observed_stopped
+            null -> R.string.recording_observed_unavailable
+        })
+        PersistentCameraWarning(stringResource(R.string.recording_receipt_details,
+            stringResource(if (recordingReceipt.command == dev.openeos.control.data.RecordingCommand.START)
+                R.string.start_recording else R.string.stop_recording), response, observation),
+            onRefresh = onRefresh,
+            refreshEnabled = state.info != null && !state.isBusy(CameraOperation.STATUS) && !state.isBusy(CameraOperation.RECORDING),
+            onStopRecording = onStopRecording.takeIf { state.recordingStopAvailable },
+            stopEnabled = state.info != null && !state.isBusy(CameraOperation.RECORDING))
+    }
+    if (recordingReceipt == null && state.pendingRecordingCommand != null && !state.shutterReleaseUnconfirmed) {
+        PersistentCameraWarning(
+            stringResource(when {
+                state.recordingCommandUnconfirmed -> R.string.recording_command_unconfirmed
+                state.pendingRecordingCommand == dev.openeos.control.data.RecordingCommand.START -> R.string.recording_start_pending
+                else -> R.string.recording_stop_pending
+            }),
+            onRefresh = onRefresh,
+            refreshEnabled = state.connected && !state.isBusy(CameraOperation.STATUS) && !state.isBusy(CameraOperation.RECORDING),
+        )
+    }
     ErrorBanner(
         when {
             state.shutterReleaseUnconfirmed -> stringResource(
                 if (state.transport == CameraTransport.DESKTOP_BRIDGE) R.string.bridge_shutter_release_unconfirmed
                 else R.string.shutter_release_unconfirmed,
             )
+            state.needsLiveViewStopRecovery -> stringResource(R.string.live_view_stop_unconfirmed)
+            state.liveViewStopPending -> stringResource(R.string.live_view_stop_pending)
+            state.connectionRetirementUnconfirmed -> listOfNotNull(
+                stringResource(R.string.shutter_disconnect_warning).takeIf { state.shutterDisconnectWarning },
+                stringResource(R.string.live_view_disconnect_warning).takeIf { state.liveViewDisconnectWarning },
+                stringResource(R.string.recording_disconnect_warning).takeIf { state.recordingDisconnectWarning },
+                stringResource(R.string.connection_retirement_unconfirmed),
+            ).joinToString("\n")
             state.error != null && (state.connected || state.connectionRecovery == null) -> state.error
+            state.recordingStartNotConfirmed -> stringResource(R.string.recording_start_not_confirmed)
+            state.recordingDisconnectWarning -> stringResource(R.string.recording_disconnect_warning)
             state.shutterDisconnectWarning -> stringResource(R.string.shutter_disconnect_warning)
+            state.liveViewDisconnectWarning -> stringResource(R.string.live_view_disconnect_warning)
             else -> null
         },
         onDismiss,
-        dismissible = !state.shutterReleaseUnconfirmed,
+        dismissible = !state.shutterReleaseUnconfirmed && !state.needsLiveViewStopRecovery && !state.liveViewStopPending &&
+            !state.connectionRetirementUnconfirmed,
     )
+    }
 }
 
 @Composable
@@ -357,6 +437,7 @@ data class CameraActions(
     val cancelConnectionAttempt: () -> Unit = {},
     val disconnect: () -> Unit,
     val refresh: () -> Unit,
+    val refreshRecordingStatus: () -> Unit = refresh,
     val refreshUsb: () -> Unit,
     val requestUsbPermission: (String) -> Unit,
     val connectUsb: (String, Int, Int) -> Unit,
@@ -372,9 +453,9 @@ data class CameraActions(
     val setFrameGuide: (LiveViewFrameGuide) -> Unit = {},
     val setSafeAreaVisible: (Boolean) -> Unit = {},
     val setDesqueeze: (LiveViewDesqueeze) -> Unit = {},
-    val importCubeLut: (String, String) -> Unit = { _, _ -> },
+    val loadCubeLut: () -> Unit = {},
     val clearCubeLut: () -> Unit = {},
-    val reportCubeLutError: (String) -> Unit = {},
+    val cancelCubeLutImport: () -> Unit = {},
     val setLiveViewTapAction: (LiveViewTapAction) -> Unit,
     val openPicker: (SettingPicker) -> Unit,
     val closePicker: () -> Unit,
@@ -383,8 +464,18 @@ data class CameraActions(
     val setAperture: (String) -> Unit,
     val setWhiteBalance: (String) -> Unit,
     val setCameraSetting: (String, String) -> Unit,
+    val submitShootingSetting: ((ShootingSettingDraft) -> Unit)? = null,
+    val cancelShootingSetting: (String) -> Unit = {},
+    val recoverShootingSetting: (String) -> Unit = {},
     val createDirectory: (String) -> Unit = {},
     val setFileNaming: (CameraFileNamingField, String) -> Unit = { _, _ -> },
+    val submitCaptureConfiguration: ((CaptureConfigurationDraft) -> Unit)? = null,
+    val cancelCaptureConfiguration: (String) -> Unit = {},
+    val recoverCaptureConfiguration: (String) -> Unit = {},
+    val submitMaintenance: ((MaintenanceDraft) -> Unit)? = null,
+    val cancelMaintenance: (String) -> Unit = {},
+    val recoverMaintenance: (String) -> Unit = {},
+    val restoreMaintenance: (String) -> Unit = {},
     val syncCameraClock: () -> Unit = {},
     val cleanSensor: (Boolean) -> Unit = {},
     val sleepCamera: () -> Unit = {},
@@ -419,10 +510,10 @@ data class CameraActions(
     val setMediaArchived: (CameraMediaItem, Boolean) -> Unit = { _, _ -> },
     val setMediaRating: (CameraMediaItem, Int) -> Unit = { _, _ -> },
     val setMediaRotation: (CameraMediaItem, Int) -> Unit = { _, _ -> },
-    val setMediaProtectionBatch: (List<CameraMediaItem>, Boolean) -> Unit = { _, _ -> },
-    val setMediaArchivedBatch: (List<CameraMediaItem>, Boolean) -> Unit = { _, _ -> },
-    val setMediaRatingBatch: (List<CameraMediaItem>, Int) -> Unit = { _, _ -> },
-    val setMediaRotationBatch: (List<CameraMediaItem>, Int) -> Unit = { _, _ -> },
+    val setMediaProtectionBatch: (MediaMetadataSelection, Boolean) -> Unit = { _, _ -> },
+    val setMediaArchivedBatch: (MediaMetadataSelection, Boolean) -> Unit = { _, _ -> },
+    val setMediaRatingBatch: (MediaMetadataSelection, Int) -> Unit = { _, _ -> },
+    val setMediaRotationBatch: (MediaMetadataSelection, Int) -> Unit = { _, _ -> },
     val downloadMedia: (CameraMediaItem) -> Unit,
     val downloadMediaBatch: (List<CameraMediaItem>) -> Unit = {},
     val saveMediaToPhone: (List<CameraMediaItem>) -> Unit = {},
@@ -434,7 +525,10 @@ data class CameraActions(
     val uploadMedia: () -> Unit = {},
     val deleteMedia: (CameraMediaItem) -> Unit,
     val deleteMediaBatch: (List<CameraMediaItem>) -> Unit = {},
+    val cancelMediaDeletion: (MediaDeleteOwner) -> Unit = {},
+    val inspectMediaDeletion: (MediaDeleteOwner) -> Unit = {},
     val cancelMediaDownload: () -> Unit,
+    val cancelMediaMetadataBatch: (MediaMetadataOwner) -> Unit = {},
     val cancelMediaUpload: () -> Unit = {},
     val refreshLiveView: () -> Unit,
     val restartLiveView: () -> Unit,

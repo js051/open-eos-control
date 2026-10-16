@@ -1,6 +1,9 @@
 package dev.openeos.control.ui
 
 import android.graphics.Bitmap
+import dev.openeos.control.data.NativeVideoLut
+import dev.openeos.control.data.NativeVideoLutStatus
+import kotlinx.coroutines.flow.MutableStateFlow
 import android.graphics.drawable.BitmapDrawable
 import android.os.SystemClock
 import android.text.format.Formatter
@@ -44,6 +47,9 @@ import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -86,6 +92,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
+import androidx.lifecycle.compose.LifecycleEventEffect
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -204,7 +214,10 @@ fun CaptureReviewButton(
     val enabled = item != null || hasNotice
     val description = when {
         state.captureReviewStatus == CaptureReviewStatus.SEARCHING -> stringResource(R.string.capture_review_searching)
-        state.captureReviewStatus == CaptureReviewStatus.NOT_READY -> stringResource(R.string.capture_review_not_ready)
+        state.captureReviewStatus == CaptureReviewStatus.NOT_READY -> stringResource(
+            if (state.captureReviewEvidence.noCandidateWithFinalReadFailure) R.string.capture_review_no_candidate_read_failed
+            else R.string.capture_review_not_ready,
+        )
         state.captureReviewStatus == CaptureReviewStatus.READ_FAILED -> stringResource(R.string.capture_review_read_failed)
         state.captureStatusReadbackFailed -> stringResource(R.string.capture_status_readback_failed)
         item != null -> stringResource(R.string.open_latest_media_named, item.name)
@@ -245,7 +258,10 @@ fun CaptureReviewButton(
                     } else {
                         Icon(
                             painterResource(when {
-                                state.captureReviewStatus == CaptureReviewStatus.READ_FAILED -> LucideR.drawable.lucide_ic_triangle_alert
+                                state.captureReviewStatus == CaptureReviewStatus.READ_FAILED ||
+                                    (state.captureReviewStatus == CaptureReviewStatus.NOT_READY &&
+                                        state.captureReviewEvidence.noCandidateWithFinalReadFailure) ->
+                                    LucideR.drawable.lucide_ic_triangle_alert
                                 waitingForNewMedia -> LucideR.drawable.lucide_ic_clock
                                 state.captureStatusReadbackFailed -> LucideR.drawable.lucide_ic_triangle_alert
                                 else -> LucideR.drawable.lucide_ic_images
@@ -950,7 +966,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
     val bitmap = state.liveViewBitmap
     var loadedFrameBitmap by remember { mutableStateOf<Bitmap?>(null) }
     val decodedFrame = bitmap ?: loadedFrameBitmap
-    val sourceAspectRatio = decodedFrame?.takeIf { it.width > 0 && it.height > 0 }
+    val sourceAspectRatio = decodedFrame?.takeIf { state.nativeLiveViewSession == null && it.width > 0 && it.height > 0 }
         ?.let { it.width.toFloat() / it.height.toFloat() } ?: state.liveViewAspectRatio
     val displayAspectRatio = sourceAspectRatio * state.monitorSettings.desqueeze.horizontalScale
     val tapAction = when {
@@ -960,7 +976,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
         state.supports(CameraFeature.CLICK_WHITE_BALANCE) -> LiveViewTapAction.WHITE_BALANCE
         else -> null
     }
-    val canTap = state.liveViewAutoRefresh && !state.isBusy(CameraOperation.LIVE_VIEW) && when (tapAction) {
+    val canTap = state.liveViewAutoRefresh && !state.liveViewCoordinateRefreshPending && !state.isBusy(CameraOperation.LIVE_VIEW) && when (tapAction) {
         LiveViewTapAction.FOCUS -> !state.isBusy(CameraOperation.FOCUS)
         LiveViewTapAction.WHITE_BALANCE -> !state.isBusy(CameraOperation.SETTING)
         null -> false
@@ -973,6 +989,31 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
     val pixelAnalysisAvailable = !state.previewMode &&
         state.liveViewSource != dev.openeos.control.data.LiveViewSource.CCAPI_RTP &&
         state.nativeLiveViewSession == null
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val nativeSampler = remember { NativeRtpMonitorSampler() }
+    val inactiveLut = remember { MutableStateFlow(NativeVideoLutStatus.OFF) }
+    val nativeLutStatus by (state.nativeLiveViewSession?.videoLutStatus ?: inactiveLut).collectAsState()
+    val nativeLut = remember(state.monitorSettings.cubeLut) {
+        state.monitorSettings.cubeLut?.let { lut ->
+            runCatching { NativeVideoLut(lut.size, lut.domainMin, lut.domainMax, lut.values) }.getOrNull()
+        }
+    }
+    SideEffect { state.nativeLiveViewSession?.setVideoLut(nativeLut) }
+    val nativeMonitor by nativeSampler.result.collectAsState()
+    val noNativeFrame = remember { MutableStateFlow<dev.openeos.control.data.NativeLiveViewRenderedFrame?>(null) }
+    val latestNativeFrame by (state.nativeLiveViewSession?.renderedFrames ?: noNativeFrame).collectAsState()
+    val nativeSamplingEnabled = !state.previewMode && state.liveViewAutoRefresh &&
+        state.liveViewTemperatureAllowed && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    val monitorRotation = LocalCameraControlTargetRotation.current
+    SideEffect {
+        nativeSampler.configure(state.nativeLiveViewSession, nativeSamplingEnabled, state.monitorSettings, monitorRotation)
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { nativeSampler.pause() }
+    LaunchedEffect(state.nativeLiveViewSession, nativeSampler) {
+        val session = state.nativeLiveViewSession ?: return@LaunchedEffect
+        session.renderedFrames.collect { nativeSampler.onFrame(session, it) }
+    }
+    DisposableEffect(nativeSampler) { onDispose { nativeSampler.close() } }
     var lutPreviewBitmap by remember { mutableStateOf<Bitmap?>(null) }
     val lutRequestGeneration = remember { AtomicLong(0) }
     val lutRequests = remember { Channel<LiveViewLutRequest>(Channel.CONFLATED) }
@@ -1024,7 +1065,7 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
     } else {
         null
     }
-    val monitorAnalysis by produceState<LiveViewMonitorAnalysis?>(
+    val decodedMonitorAnalysis by produceState<LiveViewMonitorAnalysis?>(
         initialValue = null,
         key1 = analysisSource,
         key2 = Pair(
@@ -1053,8 +1094,17 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             null
         }
     }
-    val monitorOverlay = remember(monitorAnalysis) {
-        monitorAnalysis?.overlayPixels?.let { pixels ->
+    val nativeMonitorCurrent = nativeSamplingEnabled &&
+        nativeSampler.matches(state.nativeLiveViewSession, state.monitorSettings, monitorRotation)
+    val monitorAnalysis = if (state.nativeLiveViewSession != null) {
+        nativeMonitor.analysis.takeIf { nativeMonitorCurrent }
+    } else decodedMonitorAnalysis.takeIf { pixelAnalysisAvailable }
+    // Spatial overlays must match the newest submitted frame. Sampled scopes may retain an
+    // explicitly identified older frame for their bounded freshness window.
+    val overlayFrameMatches = state.nativeLiveViewSession == null ||
+        (nativeMonitor.identity != null && nativeMonitor.identity == latestNativeFrame?.identity)
+    val monitorOverlay = remember(monitorAnalysis, overlayFrameMatches) {
+        monitorAnalysis?.overlayPixels?.takeIf { overlayFrameMatches }?.let { pixels ->
             Bitmap.createBitmap(
                 pixels,
                 monitorAnalysis!!.width,
@@ -1103,10 +1153,13 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(24.dp).testTag("live-view-paused"),
             )
-            state.nativeLiveViewSession != null -> NativeRtpLiveView(
-                session = state.nativeLiveViewSession,
-                modifier = Modifier.fitLiveViewContent(displayAspectRatio),
-            )
+            state.nativeLiveViewSession != null -> key(state.nativeLiveViewSession) {
+                NativeRtpLiveView(
+                    session = state.nativeLiveViewSession,
+                    sampler = nativeSampler,
+                    modifier = Modifier.fitLiveViewContent(displayAspectRatio),
+                )
+            }
             lutPreviewActive && lutPreviewBitmap != null -> Image(
                 lutPreviewBitmap!!.asImageBitmap(),
                 stringResource(R.string.live_view_lut_preview),
@@ -1189,7 +1242,8 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
                     }
             )
 
-            if (state.status?.recording == true) {
+            if ((state.recordingReceipt?.let { it.canPublish && it.observation?.recording == true }
+                    ?: (state.status?.recording == true)) && state.pendingRecordingCommand == null) {
                 RecordingIndicator(Modifier.align(Alignment.CenterStart).padding(12.dp))
             }
             if (state.bulbExposureActive) {
@@ -1204,14 +1258,39 @@ fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifi
             if (state.monitorSettings.waveformVisible) {
                 monitorAnalysis?.waveform?.let { WaveformOverlay(it, hudVisible = false) }
             }
+            if (state.nativeLiveViewSession != null && nativeSamplingEnabled &&
+                (state.monitorSettings.needsPixelAnalysis || state.monitorSettings.cubeLut != null)) {
+                Column(Modifier.align(Alignment.TopCenter).padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.7f)).padding(4.dp).testTag("native-monitor-status")) {
+                    if (state.monitorSettings.needsPixelAnalysis) {
+                        Text(stringResource(when (if (nativeMonitorCurrent) nativeMonitor.status else NativeMonitorStatus.WAITING) {
+                            NativeMonitorStatus.SAMPLED -> R.string.native_monitor_sampled
+                            NativeMonitorStatus.NO_DATA -> R.string.native_monitor_no_data
+                            NativeMonitorStatus.FAILED -> R.string.native_monitor_failed
+                            NativeMonitorStatus.STALE -> R.string.native_monitor_stale
+                            else -> R.string.native_monitor_waiting
+                        }), color = AppMutedText, fontSize = 11.sp)
+                    }
+                    if (state.monitorSettings.cubeLut != null) {
+                        val status = if (nativeLut == null) NativeVideoLutStatus.FAILED else nativeLutStatus
+                        Text(stringResource(when (status) {
+                            NativeVideoLutStatus.APPLIED -> R.string.native_lut_applied
+                            NativeVideoLutStatus.UNSUPPORTED_COLOR -> R.string.native_lut_unsupported_color
+                            NativeVideoLutStatus.UNSUPPORTED_GPU -> R.string.native_lut_unsupported_gpu
+                            NativeVideoLutStatus.FAILED -> R.string.native_lut_failed
+                            else -> R.string.native_lut_waiting
+                        }), color = AppMutedText, fontSize = 11.sp)
+                    }
+                }
+            }
             val hasFocusImage = !state.previewMode && state.liveViewAutoRefresh &&
                 (bitmap != null || (state.liveViewFrameUrl != null && loadedFrameBitmap != null) ||
                     (state.nativeLiveViewSession != null && state.liveViewDiagnostics.lastFrameAtMillis != null))
             if (hasFocusImage) {
-                CameraReportedFocusOverlay(state.cameraFocusInfo, state.cameraFocusInfoAtMillis, displayAspectRatio)
+                CameraReportedFocusOverlay(state.cameraFocusInfo, state.cameraFocusInfoAtMillis, sourceAspectRatio, displayAspectRatio)
             }
             if (!hasFocusImage || state.cameraFocusInfo?.frames.isNullOrEmpty() ||
-                state.cameraFocusInfo?.let { !focusInfoMatchesImage(it, displayAspectRatio) } == true ||
+                state.cameraFocusInfo?.let { !focusInfoMatchesImage(it, sourceAspectRatio) } == true ||
                 state.focusFeedback != FocusFeedback.ACCEPTED
             ) {
                 FocusIndicator(state.focusPoint, state.focusFeedback, displayAspectRatio)
@@ -1509,20 +1588,24 @@ private fun liveViewOverlayBottomPadding(state: CameraUiState): Dp =
 @Composable
 private fun NativeRtpLiveView(
     session: NativeLiveViewSession,
+    sampler: NativeRtpMonitorSampler,
     modifier: Modifier = Modifier,
 ) {
     val contentDescription = stringResource(R.string.live_view)
-    val callback = remember(session) {
+    val callback = remember(session, sampler) {
         object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
                 session.attachSurface(holder.surface)
+                sampler.attach(session, holder.surface, holder.surfaceFrame.width(), holder.surfaceFrame.height())
             }
 
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
                 session.attachSurface(holder.surface)
+                sampler.attach(session, holder.surface, width, height)
             }
 
             override fun surfaceDestroyed(holder: SurfaceHolder) {
+                sampler.detach(session, holder.surface)
                 session.detachSurface(holder.surface)
             }
         }
@@ -1531,6 +1614,7 @@ private fun NativeRtpLiveView(
     DisposableEffect(session) {
         onDispose {
             surfaceView?.holder?.let { holder ->
+                sampler.detach(session, holder.surface)
                 if (holder.surface.isValid) session.detachSurface(holder.surface)
                 holder.removeCallback(callback)
             }
@@ -1812,11 +1896,11 @@ private fun androidx.compose.foundation.layout.RowScope.ExposureCell(
 
 @Composable
 fun CaptureButton(state: CameraUiState, actions: CameraActions) {
-    val photo = state.captureMode == CaptureMode.PHOTO
+    val photo = state.captureMode == CaptureMode.PHOTO && !state.recordingStopAvailable
     val bulb = photo && state.bulbMode
     val bulbActive = state.bulbExposureActive
     val releaseOnly = state.shutterReleaseUnconfirmed
-    val recordingActive = !photo && state.status?.recording == true
+    val recordingActive = !photo && state.recordingStopAvailable
     val supported = releaseOnly || bulbActive || recordingActive || state.supports(
         when {
             bulb -> CameraFeature.BULB_EXPOSURE
@@ -1933,7 +2017,13 @@ fun ErrorBanner(error: String?, onDismiss: () -> Unit, dismissible: Boolean = tr
 }
 
 @Composable
-private fun PersistentCameraWarning(message: String) {
+internal fun PersistentCameraWarning(
+    message: String,
+    onRefresh: (() -> Unit)? = null,
+    refreshEnabled: Boolean = true,
+    onStopRecording: (() -> Unit)? = null,
+    stopEnabled: Boolean = true,
+) {
     val density = LocalDensity.current
     val textStyle = LocalTextStyle.current.copy(color = AppText)
     val textMeasurer = rememberTextMeasurer()
@@ -1953,16 +2043,26 @@ private fun PersistentCameraWarning(message: String) {
         )
         CameraReadableSlot(
             width = readingWidth,
-            height = with(density) { (textLayout.size.height + 2 * 8.dp.roundToPx()).toDp() },
+            height = with(density) { (textLayout.size.height + 2 * 8.dp.roundToPx()).toDp() } + (if (onRefresh != null) 48.dp else 0.dp) + (if (onStopRecording != null) 48.dp else 0.dp),
             animateRotation = false,
         ) {
-            Text(
-                message,
-                style = textStyle,
-                modifier = Modifier.fillMaxSize()
-                    .background(Color(0xFF512326), RoundedCornerShape(6.dp))
-                    .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
-            )
+            Column(Modifier.fillMaxSize().background(Color(0xFF512326), RoundedCornerShape(6.dp))) {
+                Text(message, style = textStyle,
+                    modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp))
+                if (onStopRecording != null) {
+                    androidx.compose.material3.TextButton(onClick = onStopRecording, enabled = stopEnabled,
+                        modifier = Modifier.height(48.dp).testTag("recording-owned-stop")) {
+                        Text(stringResource(R.string.stop_recording))
+                    }
+                }
+                if (onRefresh != null) {
+                    androidx.compose.material3.TextButton(
+                        onClick = onRefresh,
+                        enabled = refreshEnabled,
+                        modifier = Modifier.height(48.dp).testTag("recording-status-refresh"),
+                    ) { Text(stringResource(R.string.refresh_recording_status)) }
+                }
+            }
         }
     }
 }

@@ -211,6 +211,7 @@ internal data class H264AccessUnit(
     val keyFrame: Boolean,
     val sequenceParameterSet: ByteArray?,
     val pictureParameterSet: ByteArray?,
+    val hasPicture: Boolean = keyFrame,
 )
 
 internal class H264RtpDepacketizer(
@@ -221,6 +222,7 @@ internal class H264RtpDepacketizer(
     private var validAccessUnit = true
     private var fragmentedNal = false
     private var keyFrame = false
+    private var hasPicture = false
     private var sequenceParameterSet: ByteArray? = null
     private var pictureParameterSet: ByteArray? = null
     private var output = ByteArrayOutputStream()
@@ -256,6 +258,7 @@ internal class H264RtpDepacketizer(
                 keyFrame = keyFrame,
                 sequenceParameterSet = sequenceParameterSet,
                 pictureParameterSet = pictureParameterSet,
+                hasPicture = hasPicture,
             )
         } else {
             null
@@ -329,6 +332,7 @@ internal class H264RtpDepacketizer(
     }
 
     private fun observeNalType(type: Int, nal: ByteArray?) {
+        if (type == 1 || type == H264_IDR) hasPicture = true
         when (type) {
             H264_IDR -> keyFrame = true
             H264_SPS -> sequenceParameterSet = nal?.withStartCode()
@@ -347,6 +351,7 @@ internal class H264RtpDepacketizer(
         validAccessUnit = true
         fragmentedNal = false
         keyFrame = false
+        hasPicture = false
         sequenceParameterSet = null
         pictureParameterSet = null
         output = ByteArrayOutputStream()

@@ -3,6 +3,7 @@ package dev.openeos.control.ui
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -98,6 +100,32 @@ import org.junit.Assert.assertTrue
 
 class CameraScreensTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun maintenanceHoldKeepsReviewVisibleWithoutASecondCameraAction() {
+        var opened: SettingPicker? = null
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) {
+            CameraControlScreen(connectedState().copy(maintenanceSuspended = true), noOpActions().copy(openPicker = { opened = it }))
+        } }
+        compose.onNodeWithTag("maintenance-hold-banner").assertIsDisplayed()
+        compose.onNodeWithTag("maintenance-review").performClick()
+        compose.runOnIdle { assertEquals(SettingPicker.MORE, opened) }
+    }
+
+    @Test fun maintenanceSleepConfirmationCannotSurviveOwnerReplacement() {
+        val base = connectedState()
+        val capabilities = requireNotNull(base.capabilities)
+        val supported = base.copy(activeSettingPicker = SettingPicker.MORE, capabilities = capabilities.copy(
+            matrix = capabilities.matrix.copy(supported = capabilities.matrix.supported + CameraFeature.CAMERA_SLEEP)))
+        val state = mutableStateOf(supported); var commands = 0
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) {
+            CameraControlScreen(state.value, noOpActions().copy(submitMaintenance = { commands++ }))
+        } }
+        compose.onNodeWithTag("camera-sleep").performScrollTo().performClick()
+        compose.onNodeWithTag("camera-sleep-confirm").assertIsDisplayed()
+        compose.runOnIdle { state.value = supported.copy(mediaSessionGeneration = supported.mediaSessionGeneration + 1) }
+        compose.onNodeWithTag("camera-sleep-confirm").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, commands) }
+    }
 
     @Test fun cameraHudTextFitsAfterRotationLocaleAndFontChanges() {
         val bitmap = Bitmap.createBitmap(16, 12, Bitmap.Config.ARGB_8888).apply {
@@ -1831,6 +1859,7 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.camera_value_aperture_priority_ae))
             .assertIsDisplayed()
             .performClick()
+        compose.onNodeWithTag("shooting-setting-apply-shootingmode").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("shootingmode" to "AV", request)
         }
@@ -1839,6 +1868,7 @@ class CameraScreensTest {
             .assertIsDisplayed()
         compose.onNodeWithTag("advanced-setting-values-aspectratio").performScrollToIndex(3)
         compose.onNodeWithText("16:9").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("shooting-setting-apply-aspectratio").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("aspectratio" to "16:9", request)
         }
@@ -1852,6 +1882,7 @@ class CameraScreensTest {
             .assertIsDisplayed()
         compose.onNodeWithTag("advanced-setting-values-zoomspeed").performScrollToIndex(11)
         compose.onNodeWithText("12").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("shooting-setting-apply-zoomspeed").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("zoomspeed" to "12", request)
         }
@@ -1861,6 +1892,7 @@ class CameraScreensTest {
         compose.onNodeWithTag("advanced-setting-value-alomode-High")
             .assertIsDisplayed()
             .performClick()
+        compose.onNodeWithTag("shooting-setting-apply-alomode").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("alomode" to "High", request)
         }
@@ -1874,6 +1906,7 @@ class CameraScreensTest {
             .assertIsDisplayed()
             .performClick()
 
+        compose.onNodeWithTag("shooting-setting-apply-drivemode").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("drivemode" to "Super high speed continuous shooting", request)
         }
@@ -1883,6 +1916,7 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.camera_value_phone))
             .assertIsDisplayed()
             .performClick()
+        compose.onNodeWithTag("shooting-setting-apply-capturetarget").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("capturetarget" to "Phone", request)
         }
@@ -1890,6 +1924,7 @@ class CameraScreensTest {
             .performScrollTo()
             .assertIsDisplayed()
         compose.onNodeWithText("SD").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("shooting-setting-apply-capturestorage").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals("capturestorage" to "SD", request)
         }
@@ -1931,7 +1966,7 @@ class CameraScreensTest {
                 ),
             )
         }
-        compose.onNodeWithTag("advanced-setting-text-apply-ownername")
+        compose.onNodeWithTag("shooting-setting-apply-ownername")
             .assertIsEnabled()
             .performClick()
 
@@ -2001,6 +2036,7 @@ class CameraScreensTest {
         compose.onNodeWithTag("advanced-setting-value-beep-disabletouch")
             .assertIsDisplayed()
             .performClick()
+        compose.onNodeWithTag("shooting-setting-apply-beep").performScrollTo().performClick()
         compose.runOnIdle { assertEquals("beep" to "disabletouch", request) }
 
         compose.onNodeWithTag("advanced-setting-displayoff").performScrollTo().assertIsDisplayed()
@@ -2009,6 +2045,7 @@ class CameraScreensTest {
         compose.onNodeWithTag("advanced-setting-value-displayoff-120")
             .assertIsDisplayed()
             .performClick()
+        compose.onNodeWithTag("shooting-setting-apply-displayoff").performScrollTo().performClick()
         compose.runOnIdle { assertEquals("displayoff" to "120", request) }
 
         compose.runOnIdle {
@@ -2408,6 +2445,48 @@ class CameraScreensTest {
     }
 
     @Test
+    fun namingEditorKeepsNewerTypedDraftWhenReadbackChangesCapabilities() {
+        val state = mutableStateOf(connectedStateWithFileNaming().copy(activeSettingPicker = SettingPicker.MORE))
+        var writes = 0
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CameraControlScreen(state.value, noOpActions().copy(setFileNaming = { _, _ -> writes++ }))
+            }
+        }
+        compose.onNodeWithTag("file-naming").performScrollTo().performClick()
+        compose.onNodeWithTag("still-user-setting-1").performTextReplacement("ABCD")
+        compose.runOnIdle {
+            val capabilities = requireNotNull(state.value.capabilities)
+            state.value = state.value.copy(capabilities = capabilities.copy(fileNaming = requireNotNull(capabilities.fileNaming).copy(stillUserSetting1 = "EOS_")))
+        }
+        compose.onNodeWithTag("still-user-setting-1").assertTextContains("ABCD")
+        compose.runOnIdle { assertEquals(0, writes) }
+    }
+
+    @Test
+    fun captureConfigurationReceiptOffersOnlyExplicitReadAndShowsIndependentEvidence() {
+        val request = dev.openeos.control.data.CaptureConfigurationRequest(
+            dev.openeos.control.data.CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE")
+        val receipt = CaptureConfigurationReceipt("SYNTHETIC-attempt",
+            CaptureConfigurationDraft(CaptureConfigurationOwner(Any(), 1), "SYNTHETIC-draft", 0, request),
+            "https://synthetic.invalid", dev.openeos.control.data.CaptureConfigurationSnapshot(request,
+                dev.openeos.control.data.CaptureConfigurationWriteEvidence.ACKNOWLEDGED,
+                dev.openeos.control.data.CaptureConfigurationReadEvidence.UNAVAILABLE, acknowledgedValue = "OTHER"), running = false)
+        var reads = 0
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                CaptureConfigurationReceiptView(receipt, true, {}, { reads++ })
+            }
+        }
+        compose.onNodeWithTag("capture-configuration-write").assertIsDisplayed()
+        compose.onNodeWithTag("capture-configuration-readback").assertIsDisplayed()
+        compose.onNodeWithTag("capture-configuration-cancel").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, reads) }
+        compose.onNodeWithTag("capture-configuration-recover").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(1, reads) }
+    }
+
+    @Test
     fun moreSettingsHidesShutterHalfPressWhenTheCameraDoesNotAdvertiseIt() {
         val picker = mutableStateOf<SettingPicker?>(null)
         val preview = CameraUiState().withOfflinePreview()
@@ -2738,6 +2817,7 @@ class CameraScreensTest {
         compose.setContent {
             MaterialTheme(colorScheme = OpenEosColorScheme) {
                 MediaViewerDialog(
+                    displayZone = java.time.ZoneId.of("UTC"),
                     item = item,
                     bytes = null,
                     streamSource = null,
@@ -2758,7 +2838,7 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.media_viewer_position, 2, 8)).assertIsDisplayed()
-        compose.onNodeWithText("2026-08-14 10:05").assertIsDisplayed()
+        compose.onNodeWithText("2026-08-14 10:05 (${compose.activity.getString(R.string.media_time_zone_unknown)})").assertIsDisplayed()
         compose.onNodeWithText("2.0 MB").assertIsDisplayed()
         compose.onNodeWithContentDescription(resourceText(R.string.previous_media)).assertDoesNotExist()
         compose.onNodeWithContentDescription(resourceText(R.string.next_media)).performClick()
@@ -2824,7 +2904,7 @@ class CameraScreensTest {
     fun mediaDeleteRequiresConfirmationBeforeDispatchingCameraAction() {
         var deletedName: String? = null
         val state = CameraUiState().withOfflinePreview().copy(previewMode = false, uiMode = UiMode.MEDIA)
-        val actions = noOpActions().copy(deleteMedia = { deletedName = it.name })
+        val actions = noOpActions().copy(deleteMediaBatch = { deletedName = it.single().name })
         compose.setContent {
             MaterialTheme(colorScheme = OpenEosColorScheme) {
                 MediaScreen(state, actions)
@@ -2915,6 +2995,103 @@ class CameraScreensTest {
         compose.onNodeWithText(resourceText(R.string.delete_selected_media_confirmation, 2)).assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.delete)).performClick()
         compose.runOnIdle { assertEquals(items, deleted) }
+    }
+
+    @Test
+    fun confirmedDeleteConsumesOnlyOriginalSelectionAndRetainsRejectedDeleteEntry() {
+        val items = listOf(CameraMediaItem("card-a/A", "SAME.JPG", "image", protected = false),
+            CameraMediaItem("card-b/A", "SAME.JPG", "image", protected = false))
+        val initial = CameraUiState().withOfflinePreview().copy(previewMode = false, uiMode = UiMode.MEDIA,
+            transport = dev.openeos.control.data.CameraTransport.CCAPI_NETWORK, mediaItems = items)
+        val state = mutableStateOf(initial)
+        var selection: MediaDeleteSelection? = null
+        val actions = noOpActions().copy(deleteMediaBatch = { selection = it as MediaDeleteSelection })
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state.value, actions) } }
+        compose.onAllNodesWithContentDescription(resourceText(R.string.select_media_item, "SAME.JPG"))[0]
+            .performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.onAllNodesWithContentDescription(resourceText(R.string.select_media_item, "SAME.JPG"))[1].performClick()
+        compose.onNodeWithContentDescription(resourceText(R.string.delete_selected_media, 2)).performClick()
+        compose.onNodeWithText(resourceText(R.string.delete)).performClick()
+        compose.runOnIdle {
+            val frozen = requireNotNull(selection)
+            val receipt = MediaDeleteReceipt(frozen.attemptId, frozen.owner, listOf(
+                MediaDeleteRow(frozen.requests[0], dev.openeos.control.data.MediaDeleteOutcome.CONFIRMED),
+                MediaDeleteRow(frozen.requests[1], dev.openeos.control.data.MediaDeleteOutcome.REJECTED)))
+            state.value = state.value.copy(mediaItems = listOf(items[1]), mediaDeleteReceipt = receipt,
+                mediaDeleteHistory = listOf(receipt))
+        }
+        compose.onNodeWithText(resourceText(R.string.media_selected_count, 1)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.delete_selected_media, 1)).assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithContentDescription(resourceText(R.string.delete_selected_media, 1)).performClick()
+        compose.onNodeWithText("card-b/A").assertIsDisplayed()
+        compose.onNodeWithText("card-a/A").assertDoesNotExist()
+    }
+
+    @Test
+    fun leavingAndReturningToMediaCannotReuseSelectionEpochForLateDeleteReceipt() {
+        val item = CameraMediaItem("same-owner/A", "SYNTHETIC.JPG", "image", protected = false)
+        val initial = CameraUiState().withOfflinePreview().copy(previewMode = false, uiMode = UiMode.MEDIA,
+            transport = dev.openeos.control.data.CameraTransport.CCAPI_NETWORK, mediaItems = listOf(item))
+        val state = mutableStateOf(initial)
+        val inMedia = mutableStateOf(true)
+        var opening: MediaDeleteSelection? = null
+        val actions = noOpActions().copy(deleteMediaBatch = { opening = it as MediaDeleteSelection })
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) {
+            if (inMedia.value) MediaScreen(state.value, actions) else Text("SYNTHETIC CONTROL")
+        } }
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, item.name))
+            .performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.onNodeWithContentDescription(resourceText(R.string.delete_selected_media, 1)).performClick()
+        compose.onNodeWithText(resourceText(R.string.delete)).performClick()
+        val oldSelection = requireNotNull(opening)
+        // Actually dispose and recreate the media composition under the same owner/generation.
+        compose.runOnIdle { inMedia.value = false }
+        compose.onNodeWithText("SYNTHETIC CONTROL").assertIsDisplayed()
+        compose.runOnIdle { inMedia.value = true }
+        compose.onNodeWithContentDescription(resourceText(R.string.select_media_item, item.name))
+            .performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.runOnIdle {
+            val receipt = MediaDeleteReceipt(oldSelection.attemptId, oldSelection.owner, listOf(
+                MediaDeleteRow(oldSelection.requests.single(), dev.openeos.control.data.MediaDeleteOutcome.CONFIRMED)))
+            state.value = state.value.copy(mediaDeleteReceipt = receipt, mediaDeleteHistory = listOf(receipt))
+        }
+        compose.onNodeWithText(resourceText(R.string.media_selected_count, 1)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(resourceText(R.string.delete_selected_media, 1)).performClick()
+        compose.onNodeWithText(resourceText(R.string.delete)).performClick()
+        compose.runOnIdle {
+            org.junit.Assert.assertNotEquals(oldSelection.requests.single().selectionToken,
+                requireNotNull(opening).requests.single().selectionToken)
+        }
+    }
+
+    @Test
+    fun bridgeHostConfirmationShowsTheFrozenConnectedEndpointAndRemoteLocation() {
+        val item = CameraMediaItem("gphoto2-host:U1lOVEhFVElDLkpQRw", "SYNTHETIC.JPG", "image")
+        val info = requireNotNull(CameraUiState().withOfflinePreview().info).copy(
+            bridgeEngine = "libgphoto2", bridgeEndpoint = "https://bridge.example:8443")
+        val selection = MediaDeleteSelection(listOf(item), MediaDeleteOwner(info, 9),
+            dev.openeos.control.data.CameraTransport.DESKTOP_BRIDGE,
+            bridgeEngine = info.bridgeEngine, bridgeEndpoint = info.bridgeEndpoint)
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) {
+            MediaDeleteConfirmation(selection, true, {}, {})
+        } }
+        compose.onNodeWithText(resourceText(R.string.media_delete_bridge_endpoint,
+            "https://bridge.example:8443", "libgphoto2")).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.media_delete_source_desktop)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.media_delete_source_android)).assertDoesNotExist()
+        compose.onNodeWithText(resourceText(R.string.media_delete_source_camera)).assertDoesNotExist()
+    }
+
+    @Test
+    fun hostCaptureConfirmationNamesAndroidPrivateStorage() {
+        val item = CameraMediaItem("usb-host:SYNTHETIC.JPG", "SYNTHETIC.JPG", "image")
+        val state = CameraUiState().withOfflinePreview().copy(previewMode = false, uiMode = UiMode.MEDIA,
+            transport = dev.openeos.control.data.CameraTransport.USB_PTP, mediaItems = listOf(item))
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, noOpActions()) } }
+        compose.onNodeWithContentDescription(resourceText(R.string.media_actions, item.name)).performClick()
+        compose.onNodeWithText(resourceText(R.string.delete_media, item.name)).performScrollTo().performClick()
+        compose.onNodeWithText(resourceText(R.string.media_delete_source_android)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.media_delete_source_camera)).assertDoesNotExist()
     }
 
     @Test
@@ -3249,6 +3426,31 @@ class CameraScreensTest {
     }
 
     @Test
+    fun unknownUploadShowsInspectionActionWithoutSuccessOrAutomaticRetry() {
+        var refreshes = 0
+        var uploads = 0
+        val state = CameraUiState().withOfflinePreview().copy(previewMode = false, uiMode = UiMode.MEDIA,
+            mediaUploadStatus = dev.openeos.control.data.MediaUploadStatus.UNCERTAIN)
+        compose.setContent {
+            MaterialTheme(colorScheme = OpenEosColorScheme) {
+                MediaScreen(state, noOpActions().copy(refreshMedia = { refreshes++ }, uploadMedia = { uploads++ }))
+            }
+        }
+        compose.onNodeWithText(resourceText(R.string.media_upload_uncertain)).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.media_upload_inspect)).performClick()
+        compose.runOnIdle { assertEquals(1, refreshes); assertEquals(0, uploads) }
+    }
+
+    @Test
+    fun locallyPreparingUploadIsNotPresentedAsSending() {
+        val state = CameraUiState().withOfflinePreview().copy(previewMode = false, uiMode = UiMode.MEDIA,
+            activeMediaUploadName = "SAME.JPG", mediaUploadStatus = dev.openeos.control.data.MediaUploadStatus.PREPARING)
+        compose.setContent { MaterialTheme(colorScheme = OpenEosColorScheme) { MediaScreen(state, noOpActions()) } }
+        compose.onNodeWithText(resourceText(R.string.preparing_media_upload, "SAME.JPG")).assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.uploading_media, "SAME.JPG")).assertDoesNotExist()
+    }
+
+    @Test
     fun photoStateShowsModeSelectorAndExplainsMissingStillCaptureCapability() {
         var selectedMode: CaptureMode? = null
         compose.setContent {
@@ -3261,8 +3463,45 @@ class CameraScreensTest {
         }
         compose.onNodeWithTag("capture-mode-PHOTO").assertIsDisplayed().assertIsSelected()
         compose.onNodeWithTag("capture-mode-VIDEO").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(null, selectedMode) }
+        compose.onNodeWithTag("shooting-setting-apply-capture-mode").performClick()
         compose.runOnIdle { assertEquals(CaptureMode.VIDEO, selectedMode) }
         compose.onNodeWithText(resourceText(R.string.capture_not_supported)).assertIsDisplayed()
+    }
+
+    @Test
+    fun captureModeSelectionRequiresApplyAndSameValueTapCreatesNewRevision() {
+        val base = connectedState()
+        val state = mutableStateOf(base.copy(capabilities = base.capabilities?.copy(
+            advancedSettings = listOf(CameraSettingControl("moviemode", "Movie mode", "off", listOf("off", "on"))))))
+        val submitted = mutableListOf<ShootingSettingDraft>()
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(state.value, noOpActions().copy(submitShootingSetting = { submitted += it }))
+            }
+        }
+        compose.onNodeWithTag("capture-mode-VIDEO").performClick()
+        compose.runOnIdle {
+            assertTrue(submitted.isEmpty())
+            assertEquals(CaptureMode.PHOTO, state.value.captureMode)
+        }
+        compose.onNodeWithTag("shooting-setting-apply-capture-mode").performClick().assertIsNotEnabled()
+        compose.runOnIdle {
+            assertEquals(1, submitted.size)
+            assertEquals("moviemode", submitted.single().request.key)
+            assertEquals("on", submitted.single().request.requestedValue)
+            assertEquals(CaptureMode.PHOTO, state.value.captureMode)
+        }
+        compose.onNodeWithTag("capture-mode-VIDEO").performClick()
+        compose.onNodeWithTag("shooting-setting-apply-capture-mode").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertEquals(2, submitted.size)
+            assertTrue(submitted.last().revision > submitted.first().revision)
+            assertEquals(submitted.first().token, submitted.last().token)
+            state.value = state.value.copy(status = state.value.status?.copy(recording = true))
+        }
+        compose.onNodeWithTag("capture-mode-PHOTO").assertIsNotEnabled()
+        compose.onNodeWithTag("shooting-setting-apply-capture-mode").assertIsNotEnabled()
     }
 
     @Test
@@ -3660,9 +3899,13 @@ class CameraScreensTest {
 
         compose.onNodeWithText("ISO").performClick()
         compose.onNodeWithText("1600").performClick()
+        compose.runOnIdle { assertEquals(null, selectedIso) }
+        compose.onNodeWithTag("shooting-setting-apply-iso").performClick()
         compose.runOnIdle { assertEquals("1600", selectedIso) }
         compose.onNodeWithTag("exposure-picker-SHUTTER").performClick()
         compose.onNodeWithText("1/60").performClick()
+        compose.runOnIdle { assertEquals(null, selectedShutter) }
+        compose.onNodeWithTag("shooting-setting-apply-shutter").performClick()
         compose.runOnIdle { assertEquals("1/60", selectedShutter) }
         compose.onNodeWithTag("exposure-picker-ISO").assertIsDisplayed()
     }
@@ -3718,7 +3961,7 @@ class CameraScreensTest {
     }
 
     @Test
-    fun exposureDialLocksDuringWriteAndReturnsToConfirmedValueAfterFailure() {
+    fun exposureDialLocksDuringWriteAndRetainsDraftAfterFailure() {
         val state = mutableStateOf(connectedState().copy(activeSettingPicker = SettingPicker.ISO))
         var selectedIso: String? = null
         compose.setContent {
@@ -3732,6 +3975,8 @@ class CameraScreensTest {
 
         compose.onNodeWithTag("exposure-option-3").assertIsSelected()
         compose.onNodeWithTag("exposure-option-4").performClick().assertIsSelected()
+        compose.runOnIdle { assertEquals(null, selectedIso) }
+        compose.onNodeWithTag("shooting-setting-apply-iso").performClick()
         compose.runOnIdle {
             assertEquals("1600", selectedIso)
             state.value = state.value.copy(pendingOperations = setOf(CameraOperation.SETTING))
@@ -3741,7 +3986,8 @@ class CameraScreensTest {
 
         compose.runOnIdle { state.value = state.value.copy(pendingOperations = emptySet()) }
         compose.waitForIdle()
-        compose.onNodeWithTag("exposure-option-3").assertIsSelected()
+        compose.onNodeWithTag("exposure-option-4").assertIsSelected()
+        compose.onNodeWithTag("shooting-setting-apply-iso").assertIsNotEnabled()
     }
 
     @Test
@@ -3869,15 +4115,37 @@ class CameraScreensTest {
     }
 
     @Test
-    fun nativeRtpDisablesPixelAnalysisButKeepsGeometricAssists() {
+    fun nativeRtpEnablesLutSelectionWithExplicitRuntimeFallbackContract() {
         val picker = mutableStateOf<SettingPicker?>(SettingPicker.LIVE_VIEW)
-        val actions = noOpActions().copy(openPicker = { picker.value = it })
+        val settings = mutableStateOf(LiveViewMonitorSettings())
+        val actions = noOpActions().copy(
+            openPicker = { picker.value = it },
+            setHistogramVisible = {
+                settings.value = settings.value.copy(
+                    histogramVisible = it,
+                    waveformVisible = if (it) false else settings.value.waveformVisible,
+                )
+            },
+            setWaveformVisible = {
+                settings.value = settings.value.copy(
+                    waveformVisible = it,
+                    histogramVisible = if (it) false else settings.value.histogramVisible,
+                )
+            },
+            setZebraThreshold = { settings.value = settings.value.copy(zebraThresholdPercent = it) },
+            setFalseColorEnabled = { settings.value = settings.value.copy(falseColorEnabled = it) },
+            setFocusPeakingEnabled = { settings.value = settings.value.copy(focusPeakingEnabled = it) },
+            setFrameGuide = { settings.value = settings.value.copy(frameGuide = it) },
+            setSafeAreaVisible = { settings.value = settings.value.copy(safeAreaVisible = it) },
+            setDesqueeze = { settings.value = settings.value.copy(desqueeze = it) },
+        )
         compose.setContent {
             MaterialTheme {
                 CameraControlScreen(
                     connectedState().copy(
                         activeSettingPicker = picker.value,
                         liveViewSource = LiveViewSource.CCAPI_RTP,
+                        monitorSettings = settings.value,
                     ),
                     actions,
                 )
@@ -3885,13 +4153,74 @@ class CameraScreensTest {
         }
 
         compose.onNodeWithText(resourceText(R.string.monitoring_assists)).performClick()
+        compose.onNodeWithText(resourceText(R.string.native_lut_preview_contract)).assertExists()
+        compose.onNodeWithText(resourceText(R.string.monitoring_assists_rtp_unavailable)).assertDoesNotExist()
+        compose.onNodeWithText(resourceText(R.string.histogram))
+            .performScrollTo().assertIsEnabled().performClick().assertIsOn()
+        compose.onNodeWithText(resourceText(R.string.luma_waveform))
+            .performScrollTo().assertIsEnabled().performClick().assertIsOn()
+        compose.onNodeWithText(resourceText(R.string.histogram)).assertIsOff()
+        compose.onNodeWithTag("monitor-lut-options").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(resourceText(R.string.load_cube_lut)).assertIsEnabled()
+        compose.onNodeWithTag("monitor-zebra-options").performScrollTo().performScrollToIndex(6)
+        compose.onNodeWithText(resourceText(R.string.zebra_threshold, 95))
+            .assertIsEnabled().performClick().assertIsSelected()
+        compose.onNodeWithText(resourceText(R.string.false_color))
+            .performScrollTo().assertIsEnabled().performClick().assertIsOn()
+        compose.onNodeWithText(resourceText(R.string.focus_peaking))
+            .performScrollTo().assertIsEnabled().performClick().assertIsOn()
+        compose.onNodeWithTag("monitor-frame-guide-options").performScrollTo().performScrollToIndex(2)
+        compose.onNodeWithText(resourceText(R.string.ratio_2_39))
+            .performScrollTo().assertIsEnabled().performClick().assertIsSelected()
+        compose.onNodeWithText(resourceText(R.string.safe_area))
+            .performScrollTo().assertIsEnabled().performClick().assertIsOn()
+        compose.onNodeWithTag("monitor-desqueeze-options").performScrollTo().performScrollToIndex(4)
+        compose.onNodeWithText(resourceText(R.string.desqueeze_value, 2f))
+            .performScrollTo().assertIsEnabled().performClick().assertIsSelected()
+        compose.runOnIdle {
+            assertFalse(settings.value.histogramVisible)
+            assertTrue(settings.value.waveformVisible)
+            assertEquals(95, settings.value.zebraThresholdPercent)
+            assertTrue(settings.value.falseColorEnabled)
+            assertTrue(settings.value.focusPeakingEnabled)
+            assertEquals(LiveViewFrameGuide.RATIO_2_39, settings.value.frameGuide)
+            assertTrue(settings.value.safeAreaVisible)
+            assertEquals(LiveViewDesqueeze.X2, settings.value.desqueeze)
+        }
+    }
+
+    @Test
+    fun offlinePreviewDisablesPixelAnalysisButKeepsGeometricAssists() {
+        val picker = mutableStateOf<SettingPicker?>(SettingPicker.LIVE_VIEW)
+        compose.setContent {
+            MaterialTheme {
+                CameraControlScreen(
+                    connectedState().copy(
+                        activeSettingPicker = picker.value,
+                        previewMode = true,
+                        liveViewSource = LiveViewSource.CCAPI_RTP,
+                    ),
+                    noOpActions().copy(openPicker = { picker.value = it }),
+                )
+            }
+        }
+
+        compose.onNodeWithText(resourceText(R.string.monitoring_assists)).performClick()
         compose.onNodeWithText(resourceText(R.string.monitoring_assists_rtp_unavailable)).assertExists()
-        compose.onNodeWithText(resourceText(R.string.histogram)).assertIsNotEnabled()
-        compose.onNodeWithText(resourceText(R.string.luma_waveform)).assertIsNotEnabled()
+        compose.onNodeWithText(resourceText(R.string.native_lut_preview_contract)).assertDoesNotExist()
+        compose.onNodeWithText(resourceText(R.string.histogram)).performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText(resourceText(R.string.luma_waveform)).performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("monitor-lut-options").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText(resourceText(R.string.load_cube_lut)).assertIsNotEnabled()
-        compose.onNodeWithText(resourceText(R.string.frame_guide)).assertExists()
-        compose.onNodeWithText(resourceText(R.string.anamorphic_desqueeze)).assertExists()
+        compose.onNodeWithTag("monitor-zebra-options").performScrollTo().performScrollToIndex(6)
+        compose.onNodeWithText(resourceText(R.string.zebra_threshold, 95)).assertIsNotEnabled()
+        compose.onNodeWithText(resourceText(R.string.false_color)).performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText(resourceText(R.string.focus_peaking)).performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("monitor-frame-guide-options").performScrollTo().performScrollToIndex(2)
+        compose.onNodeWithText(resourceText(R.string.ratio_2_39)).performScrollTo().assertIsEnabled()
+        compose.onNodeWithText(resourceText(R.string.safe_area)).performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("monitor-desqueeze-options").performScrollTo().performScrollToIndex(4)
+        compose.onNodeWithText(resourceText(R.string.desqueeze_value, 2f)).performScrollTo().assertIsEnabled()
     }
 
     @Test

@@ -1,5 +1,9 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -33,6 +37,341 @@ class DesktopBridgeClientTest {
         server.shutdown()
     }
 
+    @Test fun maintenanceUsesOnlyNewOutcomeAndNeverFallsBackToLegacyMutation() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
+        val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(1_700_000_000_000, 0, false))
+        val attempt = dev.openeos.control.ui.MaintenanceAttempt(dev.openeos.control.ui.MaintenanceDraft(
+            dev.openeos.control.ui.MaintenanceOwner(Any(), 1), "synthetic", request), client.maintenanceAccess(request, null), { true }, publish = {})
+        attempt.run(); assertEquals(MaintenanceCommandEvidence.UNKNOWN, attempt.snapshot().evidence.command)
+        assertEquals(3, server.requestCount); repeat(2) { server.takeRequest() }
+        val write = server.takeRequest(); assertEquals("POST", write.method)
+        assertEquals("/v1/session/session-1/maintenance/clock-sync/outcome", write.path)
+        assertEquals(false, JSONObject(write.body.readUtf8()).getBoolean("autoPowerOff"))
+    }
+
+    @Test fun maintenanceClockOutcomePreservesResponseWhenClockReadIsMalformed() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"version":1,"engine":"libgphoto2","operation":"clock-sync","autoPowerOff":false,"responseEvidence":"response-received","clockReadEvidence":"matched","clockReference":null,"clockObservation":{}}"""))
+        val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(1_700_000_000_000, 0, false))
+        val attempt = dev.openeos.control.ui.MaintenanceAttempt(dev.openeos.control.ui.MaintenanceDraft(
+            dev.openeos.control.ui.MaintenanceOwner(Any(), 1), "synthetic", request), client.maintenanceAccess(request, null), { true }, publish = {})
+        attempt.run(); assertEquals(MaintenanceCommandEvidence.RESPONSE_RECEIVED, attempt.snapshot().evidence.command)
+        assertEquals(MaintenanceClockEvidence.UNAVAILABLE, attempt.snapshot().evidence.clockRead)
+        assertEquals(3, server.requestCount)
+        server.enqueue(jsonResponse("""{"version":1,"engine":"libgphoto2","operation":"clock-sync","observationEvidence":"observed","clockObservation":{"epochSeconds":1700000000,"utcOffsetMinutes":null,"daylightSaving":null}}"""))
+        attempt.recover(); assertEquals(MaintenanceClockEvidence.UNAVAILABLE, attempt.snapshot().evidence.clockRead)
+        repeat(3) { server.takeRequest() }; val read = server.takeRequest()
+        assertEquals("GET", read.method); assertEquals("/v1/session/session-1/maintenance/clock-sync", read.path)
+        assertEquals("no-cache, no-store", read.getHeader("Cache-Control"))
+    }
+
+    @Test fun maintenanceRawDecimalExponentAndOverflowTokensNeverBecomeIntegerProof() = runTest {
+        for (token in listOf("1.0", "1e0", "18446744073709551616")) {
+            server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+            val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+            val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(1_700_000_000_000, 0, false))
+            val access = client.maintenanceAccess(request, null)
+            server.enqueue(jsonResponse("""{"version":$token,"engine":"libgphoto2","operation":"clock-sync","autoPowerOff":false,"responseEvidence":"response-received"}"""))
+            val base = MaintenanceEvidence(request)
+            assertTrue(runCatching { access.dispatch(request, base) }.isFailure)
+            assertEquals(MaintenanceCommandEvidence.UNKNOWN, base.snapshot().command)
+            server.enqueue(jsonResponse("""{"version":1,"engine":"libgphoto2","operation":"clock-sync","autoPowerOff":false,"responseEvidence":"response-received","clockReadEvidence":"matched","clockReference":{"earliestEpochSeconds":0,"latestEpochSeconds":10,"utcOffsetMinutes":null,"daylightSaving":null},"clockObservation":{"epochSeconds":$token,"utcOffsetMinutes":null,"daylightSaving":null}}"""))
+            val clock = MaintenanceEvidence(request); access.dispatch(request, clock)
+            assertEquals(MaintenanceCommandEvidence.RESPONSE_RECEIVED, clock.snapshot().command)
+            assertEquals(MaintenanceClockEvidence.UNAVAILABLE, clock.snapshot().clockRead)
+        }
+    }
+
+    @Test fun maintenanceControlUsesDedicatedStopStartRoutesAndStrictTypedProof() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}"""))
+        val preview = LiveViewRequest(source = LiveViewSource.AUTO)
+        client.startLiveView(preview)
+        val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), preview)
+        val guard = MaintenanceIoContext(kotlin.coroutines.coroutineContext) {}
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}"""))
+        kotlinx.coroutines.withContext(guard) { access.stopLiveView() }
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false,"source":"LIBGPHOTO2_JPEG"}"""))
+        kotlinx.coroutines.withContext(guard) { access.restore() }
+        repeat(3) { server.takeRequest() }
+        assertEquals("/v1/session/session-1/maintenance/control/liveview/stop", server.takeRequest().path)
+        assertEquals("/v1/session/session-1/maintenance/control/liveview/start", server.takeRequest().path)
+        assertTrue(client.liveViewStopRequired) // Normal active responsibility is retained.
+    }
+
+    @Test fun unknownMaintenanceRestoreRetainsStrictRetryStopAndCloseWithoutGenericCleanup() = runTest {
+        var authReplays = 0
+        val http = okhttp3.OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).authenticator { _, response ->
+            authReplays++; response.request.newBuilder().header("Authorization", "synthetic-replay").build()
+        }.build()
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString(), httpClient = http); client.initialize()
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}"""))
+        val preview = LiveViewRequest(); client.startLiveView(preview)
+        val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), preview)
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")); access.stopLiveView()
+        server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+        assertTrue(runCatching { access.restore() }.isFailure); assertTrue(client.maintenanceStopOwned)
+        repeat(5) { server.takeRequest() }
+        val strictClient = client.javaClass.getDeclaredField("captureConfigurationHttpClient").apply { isAccessible = true }.get(client) as okhttp3.OkHttpClient
+        assertEquals(15_000, strictClient.callTimeoutMillis)
+        for (code in listOf(302, 401)) {
+            server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", server.url("/forbidden-stop-replay")).setBody("{}"))
+            val before = server.requestCount
+            assertTrue(runCatching { client.stopLiveView() }.isFailure)
+            assertEquals(before + 1, server.requestCount); assertTrue(client.maintenanceStopOwned)
+            assertEquals("/v1/session/session-1/maintenance/control/liveview/stop", server.takeRequest().path)
+        }
+        server.enqueue(MockResponse().setResponseCode(403).setBody("{}"))
+        server.enqueue(MockResponse().setResponseCode(204))
+        val beforeClose = server.requestCount; assertTrue(client.closeMaintenanceSession())
+        assertEquals(beforeClose + 2, server.requestCount)
+        assertEquals("/v1/session/session-1/maintenance/control/liveview/stop", server.takeRequest().path)
+        val retirement = server.takeRequest()
+        assertEquals("DELETE", retirement.method)
+        assertEquals("/v1/session/session-1/maintenance/control/session", retirement.path)
+        assertEquals(0, authReplays)
+        assertTrue(runCatching { client.closeMaintenanceSession() }.isFailure)
+        assertEquals(beforeClose + 2, server.requestCount)
+    }
+
+    @Test fun restoredMaintenanceSessionCloseReleasesNewBulbBeforeStrictStopAndLocalRetire() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}"""))
+        val preview = LiveViewRequest(); client.startLiveView(preview)
+        val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), preview)
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")); access.stopLiveView()
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}""")); access.restore()
+        server.enqueue(jsonResponse("""{"bulbExposureActive":true,"shutterReleaseUnconfirmed":false}""")); client.startBulbExposure()
+        repeat(6) { server.takeRequest() }
+        server.enqueue(jsonResponse("""{"bulbExposureActive":false,"shutterReleaseUnconfirmed":false}"""))
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        assertFalse(client.closeMaintenanceSession())
+        assertEquals(listOf("/v1/session/session-1/bulb/stop", "/v1/session/session-1/maintenance/control/liveview/stop",
+            "/v1/session/session-1/maintenance/control/session"), (0 until 3).map { server.takeRequest().path })
+        assertEquals(9, server.requestCount)
+    }
+
+    @Test fun maintenanceLocalRetireRouteFailureDoesNotUseGenericDeleteOrRetry() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SLEEP), null)
+        server.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
+        val failure = runCatching { client.closeMaintenanceSession() }.exceptionOrNull()
+        assertTrue(failure is MaintenanceRetirementUnconfirmedException)
+        assertFalse((failure as MaintenanceRetirementUnconfirmedException).stopUnconfirmed)
+        assertEquals(3, server.requestCount); repeat(2) { server.takeRequest() }
+        assertEquals("/v1/session/session-1/maintenance/control/session", server.takeRequest().path)
+    }
+
+    @Test fun sameSessionWarningRevisionSupersedesStrictStopAndStartResponses() = runTest {
+        lateinit var client: DesktopBridgeClient
+        var bumpWarning = false
+        val http = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
+            val response = chain.proceed(chain.request())
+            if (bumpWarning && chain.request().url.encodedPath.contains("/maintenance/control/liveview/")) {
+                // Synthetic same-session warning arriving while the control response is in flight.
+                client.javaClass.getDeclaredField("liveViewRevision").apply {
+                    isAccessible = true; setLong(client, getLong(client) + 1)
+                }
+            }
+            response
+        }.build()
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        client = DesktopBridgeClient(server.url("/").toString(), httpClient = http); client.initialize()
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}""")); client.startLiveView(LiveViewRequest())
+        val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), LiveViewRequest())
+        bumpWarning = true
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}"""))
+        assertTrue(runCatching { access.stopLiveView() }.isFailure); assertTrue(client.maintenanceStopOwned)
+        bumpWarning = false
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")); client.stopLiveView()
+        bumpWarning = true
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}"""))
+        assertTrue(runCatching { access.restore() }.isFailure); assertTrue(client.maintenanceStopOwned)
+        bumpWarning = false
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")); client.stopLiveView()
+        assertFalse(client.liveViewStopRequired)
+    }
+
+    @Test fun maintenanceEventStopRejectsRedirectOrWrongStatusWithoutMainAction() = runTest {
+        for (code in listOf(200, 201, 202, 302)) {
+            server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+            val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+            client.javaClass.getDeclaredField("eventPollingSupported").apply { isAccessible = true; setBoolean(client, true) }
+            server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", server.url("/forbidden-replay")).setBody("{}"))
+            val request = MaintenanceRequest(MaintenanceAction.SLEEP)
+            val attempt = dev.openeos.control.ui.MaintenanceAttempt(dev.openeos.control.ui.MaintenanceDraft(
+                dev.openeos.control.ui.MaintenanceOwner(Any(), 1), "stop-$code", request), client.maintenanceAccess(request, null), { true }, publish = {})
+            val before = server.requestCount; attempt.run(); assertEquals(before + 1, server.requestCount)
+            assertEquals(MaintenanceCommandEvidence.NOT_SENT, attempt.snapshot().evidence.command)
+            assertEquals(MaintenanceStopEvidence.UNKNOWN, attempt.snapshot().evidence.eventStop)
+        }
+    }
+
+    @Test fun maintenanceKeepPowerRestoreWithNoPriorPreviewNeverStartsLiveView() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"version":1,"engine":"libgphoto2","operation":"sensor-cleaning","autoPowerOff":false,"responseEvidence":"response-received","clockReadEvidence":"not-applicable","clockReference":null,"clockObservation":null}"""))
+        val reachable = """{"version":1,"engine":"libgphoto2","operation":"sensor-cleaning","observationEvidence":"reachable","clockObservation":null}"""
+        server.enqueue(jsonResponse(reachable)); server.enqueue(jsonResponse(reachable))
+        val request = MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING)
+        val attempt = dev.openeos.control.ui.MaintenanceAttempt(dev.openeos.control.ui.MaintenanceDraft(
+            dev.openeos.control.ui.MaintenanceOwner(Any(), 1), "synthetic", request), client.maintenanceAccess(request, null), { true }, publish = {})
+        attempt.run(); assertTrue(attempt.restore()); assertEquals(5, server.requestCount)
+        val requests = (0 until 5).map { server.takeRequest() }
+        assertEquals(0, requests.count { it.path?.contains("liveview") == true })
+        assertEquals(1, requests.count { it.path?.endsWith("/outcome") == true })
+        assertEquals(2, requests.count { it.path?.endsWith("/maintenance/sensor-cleaning") == true && it.method == "GET" })
+    }
+
+    @Test
+    fun freshMediaMetadataPreservesMimeAliasesAndRejectsTheirDisagreement() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        server.enqueue(jsonResponse(SESSION_JSON))
+        val client = DesktopBridgeClient(server.url("/").toString())
+        client.initialize()
+        val original = CameraMediaItem("SYNTHETIC", "FRAME.JPG", "image", contentType = "image/jpeg")
+        for (alias in CAMERA_MEDIA_MIME_ALIASES) {
+            server.enqueue(jsonResponse("""{"id":"SYNTHETIC","name":"FRAME.JPG","kind":"image","$alias":" "}"""))
+            val returned = client.mediaInfo(original)
+            assertEquals(" ", returned.contentType)
+            assertFalse(automaticJpegMetadataAdmitted(original, returned, fresh = true))
+        }
+        server.enqueue(jsonResponse("""{"id":"SYNTHETIC","name":"FRAME.JPG","kind":"image","contentType":"image/jpeg","mimeType":"IMAGE/JPEG"}"""))
+        assertEquals(CameraMediaClassification.UNKNOWN, client.mediaInfo(original).mediaClassification)
+        server.enqueue(jsonResponse("""{"id":"SYNTHETIC","name":"FRAME.JPG ","kind":"image","mimetype":"image/jpeg"}"""))
+        val renamed = client.mediaInfo(original)
+        assertEquals("FRAME.JPG ", renamed.name)
+        assertFalse(automaticJpegMetadataAdmitted(original, renamed, fresh = true))
+    }
+
+    @Test
+    fun missingCreatedSessionEngineIsNotInferredFromApiDisplayName() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON))
+        val session = JSONObject(SESSION_JSON)
+        session.getJSONObject("camera").remove("engine")
+        server.enqueue(jsonResponse(session.toString()))
+        server.enqueue(jsonResponse(INFO_JSON))
+        val client = DesktopBridgeClient(server.url("/").toString(), cameraEngine = "libgphoto2")
+        client.initialize()
+        assertNull(client.info().bridgeEngine)
+    }
+
+    @Test
+    fun unknownAndConflictingMediaNeverIssueThumbnailPreviewOrStreamRequests() = runTest {
+        val client = DesktopBridgeClient(server.url("/").toString())
+        for (item in listOf(CameraMediaItem("unknown", "FILE.bin", "other"),
+            CameraMediaItem("conflict", "FRAME.JPG", "image", contentType = "video/mp4"))) {
+            assertTrue(runCatching { client.mediaThumbnail(item) }.exceptionOrNull() is IllegalArgumentException)
+            assertTrue(runCatching { client.mediaPreview(item) }.exceptionOrNull() is IllegalArgumentException)
+            assertTrue(runCatching { client.openMediaStream(item) }.exceptionOrNull() is IllegalArgumentException)
+        }
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun successfulDirectoryAckReadsOneFreshSelectionOnTheSameFrozenSession() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON.replace("libgphoto2", "ccapi")))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"name":"OTHER"}"""))
+        server.enqueue(jsonResponse("""{"operation":"create-directory","directorySelection":{"value":"100OTHER","ability":["100ABCDE","100OTHER"]}}"""))
+        val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+        assertEquals("OTHER", client.createDirectory("ABCDE", evidence))
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, evidence.snapshot().writeEvidence)
+        assertEquals(CaptureConfigurationReadEvidence.REFRESHED, evidence.snapshot().readbackEvidence)
+        assertEquals(listOf("100ABCDE", "100OTHER"), evidence.snapshot().directoryValues)
+        repeat(2) { server.takeRequest() }
+        val write = server.takeRequest(); val read = server.takeRequest()
+        assertEquals("POST", write.method); assertEquals("/v1/session/session-1/directories", write.path)
+        assertEquals("GET", read.method); assertEquals("/v1/session/session-1/capture-configuration/create-directory", read.path)
+        assertEquals("no-cache, no-store", read.getHeader("Cache-Control"))
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun successfulDirectoryAckSurvivesItsScopedReadFailureWithoutRetry() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON.replace("libgphoto2", "ccapi")))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"name":"OTHER"}"""))
+        server.enqueue(jsonResponse("{}", code = 404))
+        val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+        val failure = runCatching { client.createDirectory("ABCDE", evidence) }.exceptionOrNull()
+        assertTrue(failure is CaptureConfigurationException)
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, evidence.snapshot().writeEvidence)
+        assertEquals(CaptureConfigurationReadEvidence.UNAVAILABLE, evidence.snapshot().readbackEvidence)
+        repeat(2) { server.takeRequest() }
+        assertEquals("POST", server.takeRequest().method)
+        assertEquals("/v1/session/session-1/capture-configuration/create-directory", server.takeRequest().path)
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun cancellationAfterDirectoryAckDoesNotStartAutomaticReadback() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON.replace("libgphoto2", "ccapi")))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"name":"OTHER"}"""))
+        lateinit var evidence: CaptureConfigurationEvidence
+        evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"),
+            onChanged = { if (it.writeEvidence == CaptureConfigurationWriteEvidence.ACKNOWLEDGED) evidence.cancel() })
+        assertTrue(runCatching { client.createDirectory("ABCDE", evidence) }.isFailure)
+        assertEquals("OTHER", evidence.snapshot().acknowledgedValue)
+        assertEquals(CaptureConfigurationReadEvidence.UNAVAILABLE, evidence.snapshot().readbackEvidence)
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun captureConfigurationBridgeReceiptRetainsAckAndRecoveryUsesFreshBoundedRoute() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON.replace("libgphoto2", "ccapi")))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(jsonResponse("""{"error":{"code":"CAPTURE_CONFIG_READBACK_FAILED","message":"SYNTHETIC read failure",
+            "engine":"ccapi","feature":"DIRECTORY_CONTROL","captureConfigReceipt":{"version":1,
+            "operation":"create-directory","stage":"acknowledged","requestedValue":"ABCDE","acknowledgedValue":"OTHER"}}}""", code = 502))
+        val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+        assertTrue(runCatching { client.createDirectory("ABCDE", evidence) }.isFailure)
+        assertEquals(CaptureConfigurationWriteEvidence.ACKNOWLEDGED, evidence.snapshot().writeEvidence)
+        assertEquals("OTHER", evidence.snapshot().acknowledgedValue)
+        assertEquals(CaptureConfigurationReadEvidence.UNAVAILABLE, evidence.snapshot().readbackEvidence)
+        server.enqueue(jsonResponse("""{"operation":"create-directory","directorySelection":{"value":"100OTHER","ability":["100OTHER"]}}"""))
+        assertEquals("100OTHER", client.readCaptureConfiguration(CaptureConfigurationOperation.CREATE_DIRECTORY).directorySelection)
+        repeat(3) { server.takeRequest() }
+        val recovery = server.takeRequest(); assertEquals("GET", recovery.method)
+        assertEquals("/v1/session/session-1/capture-configuration/create-directory", recovery.path)
+        assertEquals("no-cache, no-store", recovery.getHeader("Cache-Control"))
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun captureConfigurationWrongReceiptAndOversizedBodyRemainUnknown() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        for (body in listOf("""{"error":{"code":"CAPTURE_CONFIG_READBACK_FAILED","message":"SYNTHETIC",
+            "engine":"ccapi","feature":"DIRECTORY_CONTROL","captureConfigReceipt":{"version":true,
+            "operation":"create-directory","stage":"acknowledged","requestedValue":"ABCDE","acknowledgedValue":"ABCDE"}}}""",
+            "{\"padding\":\"" + "X".repeat(65_536) + "\"}")) {
+            server.enqueue(jsonResponse(body, code = 502))
+            val evidence = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
+            assertTrue(runCatching { client.createDirectory("ABCDE", evidence) }.isFailure)
+            assertEquals(CaptureConfigurationWriteEvidence.UNKNOWN, evidence.snapshot().writeEvidence)
+        }
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun oldBridgeRecovery404HasNoCapabilitiesFallback() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        server.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
+        assertTrue(runCatching { client.readCaptureConfiguration(CaptureConfigurationOperation.SET_FILE_NAMING) }.isFailure)
+        assertEquals(3, server.requestCount)
+    }
+
     @Test
     fun bridgeClientMapsCompleteSessionContractAndBearerAuthentication() = runTest {
         val dispatcher = BridgeDispatcher()
@@ -47,6 +386,9 @@ class DesktopBridgeClientTest {
         val cameras = client.discoverCameras()
         client.initialize()
         val info = client.info()
+        // Use the actual returned engine, not the requested edsdk hint or api display string.
+        assertEquals("libgphoto2", info.bridgeEngine)
+        assertEquals(server.url("/").toString().trimEnd('/'), info.bridgeEndpoint)
         val initialStatus = client.status()
         val capabilities = client.capabilities()
         val exposureStatus = client.setExposure(iso = "800")
@@ -392,6 +734,73 @@ class DesktopBridgeClientTest {
     }
 
     @Test
+    fun mediaUploadCancellationBeforeDispatchSendsNoPost() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
+        val client = DesktopBridgeClient(server.url("/").toString())
+        client.initialize()
+        val attempt = MediaUploadAttempt().also { it.cancel() }
+        val failure = runCatching {
+            client.uploadMedia("SAME.JPG", 1, "image/jpeg", ByteArrayInputStream(byteArrayOf(7)),
+                evidence = MediaUploadEvidence(attempt::beforeDispatch, attempt::confirm))
+        }.exceptionOrNull()
+        assertTrue(failure is CancellationException)
+        assertEquals(MediaUploadStatus.NOT_SENT, attempt.finish())
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun mediaUploadReceiptIsRecordedBeforeCancelledIoReturn() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
+        server.enqueue(jsonResponse("""{"id":"exact/receipt","name":"SAME.JPG","kind":"image","sizeBytes":1}""", 201))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        val attempt = MediaUploadAttempt()
+        val upload = launch {
+            val owner = currentCoroutineContext().job
+            client.uploadMedia("SAME.JPG", 1, "image/jpeg", ByteArrayInputStream(byteArrayOf(7)),
+                evidence = MediaUploadEvidence(attempt::beforeDispatch, { attempt.confirm(it); owner.cancel() }))
+        }
+        upload.join()
+        attempt.cancel()
+        assertEquals(MediaUploadStatus.CONFIRMED, attempt.finish())
+        assertEquals("exact/receipt", attempt.confirmedResult()?.item?.id)
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun mediaUploadLostAcknowledgementIsUnknownAndDoesNotReplay() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
+        server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        val attempt = MediaUploadAttempt()
+        runCatching {
+            client.uploadMedia("SAME.JPG", 1, "image/jpeg", ByteArrayInputStream(byteArrayOf(7)),
+                evidence = MediaUploadEvidence(attempt::beforeDispatch, attempt::confirm))
+        }
+        assertEquals(MediaUploadStatus.UNCERTAIN, attempt.finish())
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun mediaUploadActualHttpDecoderRejectsInvalidSharedReceiptsWithoutRetry() = runTest {
+        server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
+        val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
+        val cases = dev.openeos.control.ui.loadMediaUploadFixture().receipts
+            .filter { it.size == 1234L && it.bound && it.status != 204 }
+        for (row in cases) {
+            server.enqueue(jsonResponse(row.raw, row.status))
+            val attempt = MediaUploadAttempt()
+            runCatching {
+                client.uploadMedia(row.name, row.size, "image/jpeg", ByteArrayInputStream(ByteArray(1234)),
+                    evidence = MediaUploadEvidence(attempt::beforeDispatch, attempt::confirm))
+            }
+            assertEquals(row.id, row.expected, attempt.confirmedResult() != null)
+            assertEquals(row.id, if (row.expected) MediaUploadStatus.CONFIRMED else MediaUploadStatus.UNCERTAIN,
+                attempt.finish())
+        }
+        assertEquals(2 + cases.size, server.requestCount)
+    }
+
+    @Test
     fun mediaUploadStreamsExactBytesAndReportsProgress() = runTest {
         val bytes = ByteArray(192 * 1024 + 17) { (it % 251).toByte() }
         server.enqueue(jsonResponse(HEALTH_JSON))
@@ -572,7 +981,7 @@ class DesktopBridgeClientTest {
         }.exceptionOrNull()
 
         assertTrue(failure is IllegalStateException)
-        assertTrue(failure?.message.orEmpty().contains("response exceeded 32768 bytes"))
+        assertTrue(failure?.message.orEmpty().contains("byte limit"))
         assertFalse(CameraFeature.MEDIA_UPLOAD in client.observedFeatureSnapshot())
     }
 
@@ -832,6 +1241,8 @@ class DesktopBridgeClientTest {
                     createdDirectoryName = name
                     json("""{"name":"$name"}""")
                 }
+                path.endsWith("/capture-configuration/create-directory") && request.method == "GET" ->
+                    json("""{"operation":"create-directory","directorySelection":{"value":"100ABCDE","ability":["100CANON","100ABCDE"]}}""")
                 path.contains("/file-naming/") && request.method == "PUT" -> {
                     val field = path.substringAfterLast('/')
                     val value = JSONObject(request.body.clone().readUtf8()).getString("value")

@@ -1,11 +1,22 @@
 package dev.openeos.control.ui
 
-import android.content.Context
-import android.net.Uri
-import android.provider.OpenableColumns
+import dev.openeos.control.data.MaintenanceAction
+import dev.openeos.control.data.MaintenanceRequest
+import dev.openeos.control.data.MaintenanceCommandEvidence
+import dev.openeos.control.data.MaintenanceClockEvidence
+import dev.openeos.control.data.MaintenanceAvailability
+import dev.openeos.control.data.MaintenanceStopEvidence
+import dev.openeos.control.data.MaintenanceRestoreEvidence
+import dev.openeos.control.data.ShootingSettingRequest
+import dev.openeos.control.data.ShootingSettingWriteEvidence
+import dev.openeos.control.data.ShootingSettingReadEvidence
+import dev.openeos.control.data.acceptsShootingSettingValue
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import dev.openeos.control.data.CaptureConfigurationOperation
+import dev.openeos.control.data.CaptureConfigurationRequest
+import dev.openeos.control.data.CaptureConfigurationWriteEvidence
+import dev.openeos.control.data.CaptureConfigurationReadEvidence
 import android.text.format.DateFormat
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -99,10 +110,7 @@ import dev.openeos.control.data.LiveViewSource
 import java.util.Date
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -153,6 +161,17 @@ fun CameraControlScreen(
 private fun StableCameraControls(state: CameraUiState, actions: CameraActions) {
     Box(Modifier.fillMaxSize()) {
         LiveViewFrame(state, actions, Modifier.fillMaxSize())
+        if (state.maintenanceSuspended) {
+            Surface(modifier = Modifier.align(Alignment.Center).padding(16.dp).widthIn(max = 360.dp)
+                .testTag("maintenance-hold-banner"), color = AppSurface, shape = RoundedCornerShape(8.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.maintenance_hold), color = AppWarning)
+                    TextButton(onClick = { actions.openPicker(SettingPicker.MORE) }, modifier = Modifier.testTag("maintenance-review")) {
+                        Text(stringResource(R.string.maintenance_review))
+                    }
+                }
+            }
+        }
         if (state.hudVisible) {
             CameraOverlayHeader(state, actions)
             state.status?.temperature?.takeUnless(CameraTemperatureStatus::isNormal)?.let { temperature ->
@@ -386,37 +405,52 @@ private fun CaptureCapabilityWarning(
 
 @Composable
 private fun CaptureModeSelector(state: CameraUiState, actions: CameraActions) {
-    val enabled = captureModeSwitchEnabled(state)
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(CAPTURE_MODE_SELECTOR_HEIGHT)
-            .testTag("capture-mode-selector"),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(
-            Modifier
-                .width(208.dp)
-                .height(48.dp)
-                .selectableGroup(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            CaptureModeOption(
-                label = stringResource(R.string.photo),
-                mode = CaptureMode.PHOTO,
-                selected = state.captureMode == CaptureMode.PHOTO,
-                enabled = enabled,
-                onSelect = actions.setCaptureMode,
-                modifier = Modifier.weight(1f),
-            )
-            CaptureModeOption(
-                label = stringResource(R.string.video),
-                mode = CaptureMode.VIDEO,
-                selected = state.captureMode == CaptureMode.VIDEO,
-                enabled = enabled,
-                onSelect = actions.setCaptureMode,
-                modifier = Modifier.weight(1f),
-            )
+    val enabled = captureModeSwitchEnabled(state) && !state.busy
+    val owner = remember(state.info, state.mediaSessionGeneration) { ShootingSettingOwner(state.info, state.mediaSessionGeneration) }
+    val token = remember(owner) { java.util.UUID.randomUUID().toString() }
+    var draftMode by remember(owner) { mutableStateOf(state.captureMode) }
+    var revision by remember(owner) { mutableStateOf(0L) }
+    var edited by remember(owner) { mutableStateOf(false) }
+    var submittedRevision by remember(owner) { mutableStateOf<Long?>(null) }
+    var preferredPhotoValue by remember(owner) { mutableStateOf<String?>(null) }
+    val setting = state.capabilities?.captureModeSetting()
+    LaunchedEffect(setting?.value, state.captureMode) {
+        if (setting?.currentCaptureMode() == CaptureMode.PHOTO) preferredPhotoValue = setting.value
+        if (!edited) draftMode = state.captureMode
+    }
+    val receipt = state.shootingSettingReceipt
+    LaunchedEffect(receipt) {
+        if (receipt != null && canConsumeShootingSettingDraft(receipt, token, revision, state.info, state.mediaSessionGeneration)) {
+            edited = false
+            draftMode = setting?.copy(value = receipt.evidence.observedValue ?: setting.value)?.currentCaptureMode() ?: state.captureMode
+        }
+    }
+    val target = setting?.valueForCaptureMode(draftMode, preferredPhotoValue)
+    val select: (CaptureMode) -> Unit = { mode ->
+        draftMode = mode; revision += 1; edited = true
+    }
+    Box(Modifier.fillMaxWidth().height(CAPTURE_MODE_SELECTOR_HEIGHT).testTag("capture-mode-selector"),
+        contentAlignment = Alignment.Center) {
+        Row(Modifier.width(if (edited) 312.dp else 208.dp).height(48.dp).selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            CaptureModeOption(stringResource(R.string.photo), CaptureMode.PHOTO, draftMode == CaptureMode.PHOTO,
+                enabled, select, Modifier.weight(1f))
+            CaptureModeOption(stringResource(R.string.video), CaptureMode.VIDEO, draftMode == CaptureMode.VIDEO,
+                enabled, select, Modifier.weight(1f))
+            if (edited) {
+                Button(onClick = {
+                    submittedRevision = revision
+                    val submit = actions.submitShootingSetting
+                    if (state.previewMode || setting == null || submit == null) {
+                        actions.setCaptureMode(draftMode)
+                        edited = false
+                    } else if (target != null) {
+                        submit(ShootingSettingDraft(owner, token, revision, ShootingSettingRequest(setting.key, target)))
+                    }
+                }, enabled = enabled && submittedRevision != revision &&
+                    (setting == null || target != null && acceptsShootingSettingValue(setting, target)),
+                    modifier = Modifier.testTag("shooting-setting-apply-capture-mode")) { Text(stringResource(R.string.apply)) }
+            }
         }
     }
 }
@@ -541,6 +575,20 @@ private fun ExposureSettingsSheet(state: CameraUiState, actions: CameraActions) 
         }
         else -> return
     }
+    val owner = remember(state.info, state.mediaSessionGeneration) { ShootingSettingOwner(state.info, state.mediaSessionGeneration) }
+    val token = remember(owner, picker) { java.util.UUID.randomUUID().toString() }
+    var draft by remember(owner, picker) { mutableStateOf(current) }
+    var revision by remember(owner, picker) { mutableStateOf(0L) }
+    var edited by remember(owner, picker) { mutableStateOf(false) }
+    var submittedRevision by remember(owner, picker) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(current) { if (!edited) draft = current }
+    val receipt = state.shootingSettingReceipt
+    LaunchedEffect(receipt) {
+        if (receipt != null && canConsumeShootingSettingDraft(receipt, token, revision, state.info, state.mediaSessionGeneration)) {
+            edited = false
+            draft = receipt.evidence.observedValue
+        }
+    }
     CameraSettingsSurface(
         onDismissRequest = actions.closePicker,
     ) {
@@ -555,8 +603,21 @@ private fun ExposureSettingsSheet(state: CameraUiState, actions: CameraActions) 
                 isApplying = state.isBusy(CameraOperation.SETTING),
                 actions = actions,
             )
-            key(picker) {
-                ExposureDial(title, valueKey, values, current, state.isBusy(CameraOperation.SETTING), onSelect)
+            key(owner, picker) {
+                ExposureDial(title, valueKey, values, draft, state.isBusy(CameraOperation.SETTING)) { value ->
+                    draft = value; revision += 1; edited = true
+                }
+            }
+            Button(onClick = {
+                val value = draft ?: return@Button
+                submittedRevision = revision
+                val submit = actions.submitShootingSetting
+                if (submit == null || state.previewMode) onSelect(value) else submit(ShootingSettingDraft(owner, token, revision,
+                    ShootingSettingRequest(valueKey, value)))
+            }, enabled = !state.busy && edited && draft in values && submittedRevision != revision,
+                modifier = Modifier.testTag("shooting-setting-apply-$valueKey")) { Text(stringResource(R.string.apply)) }
+            receipt?.takeIf { it.draft.request.key == valueKey }?.let {
+                ShootingSettingReceiptView(it, state, actions)
             }
         }
     }
@@ -638,7 +699,10 @@ private fun ExposureDial(
     val initialIndex = values.indexOf(current).coerceAtLeast(0)
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val scope = rememberCoroutineScope()
-    var selectedIndex by remember(values, current) { mutableIntStateOf(initialIndex) }
+    var selectedIndex by remember { mutableIntStateOf(initialIndex) }
+    val dragged by listState.interactionSource.collectIsDraggedAsState()
+    var userScrolled by remember { mutableStateOf(false) }
+    LaunchedEffect(dragged) { if (dragged) userScrolled = true }
 
     LaunchedEffect(isApplying, current, values) {
         if (!isApplying) {
@@ -655,6 +719,8 @@ private fun ExposureDial(
             .distinctUntilChanged()
             .filter { scrolling -> !scrolling }
             .collect {
+                if (!userScrolled) return@collect
+                userScrolled = false
                 val viewportCenter = (listState.layoutInfo.viewportStartOffset + listState.layoutInfo.viewportEndOffset) / 2
                 val centered = listState.layoutInfo.visibleItemsInfo.minByOrNull { item ->
                     abs((item.offset + item.size / 2) - viewportCenter)
@@ -916,25 +982,12 @@ private fun MonitoringAssistSheet(state: CameraUiState, actions: CameraActions) 
 @Composable
 private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraActions) {
     val settings = state.monitorSettings
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val pixelAnalysisAvailable = !state.previewMode &&
-        state.liveViewSource != LiveViewSource.CCAPI_RTP &&
-        state.nativeLiveViewSession == null
-    val lutLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            scope.launch {
-                runCatching {
-                    withContext(Dispatchers.IO) { readCubeLutDocument(context, uri) }
-                }.fold(
-                    onSuccess = { (name, text) -> actions.importCubeLut(name, text) },
-                    onFailure = { actions.reportCubeLutError(it.message ?: it::class.java.simpleName) },
-                )
-            }
-        }
-    }
+    val pixelAnalysisAvailable = !state.previewMode
+    val lutAvailable = pixelAnalysisAvailable
     if (!pixelAnalysisAvailable) {
         Text(stringResource(R.string.monitoring_assists_rtp_unavailable), color = AppWarning)
+    } else if (state.liveViewSource == LiveViewSource.CCAPI_RTP) {
+        Text(stringResource(R.string.native_lut_preview_contract), color = AppMutedText)
     }
     MonitorSwitchRow(
         label = stringResource(R.string.histogram),
@@ -952,7 +1005,7 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
         Modifier.fillMaxWidth().testTag("monitor-lut-options"),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(stringResource(R.string.lut_preview), color = if (pixelAnalysisAvailable) AppText else AppMutedText)
+        Text(stringResource(R.string.lut_preview), color = if (lutAvailable) AppText else AppMutedText)
         Text(
             settings.cubeLut?.let { stringResource(R.string.cube_lut_summary, it.name, it.size) }
                 ?: stringResource(R.string.no_cube_lut),
@@ -963,11 +1016,9 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Button(
-                onClick = {
-                    lutLauncher.launch(arrayOf("text/plain", "application/octet-stream", "application/x-cube"))
-                },
-                enabled = pixelAnalysisAvailable,
-                modifier = Modifier.height(48.dp),
+                onClick = actions.loadCubeLut,
+                enabled = lutAvailable && !state.cubeLutImport.pickerOpen,
+                modifier = Modifier.height(48.dp).testTag("monitor-lut-load"),
             ) {
                 Icon(
                     painterResource(LucideR.drawable.lucide_ic_download),
@@ -982,10 +1033,28 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
                     icon = LucideR.drawable.lucide_ic_trash_2,
                     description = stringResource(R.string.remove_cube_lut),
                     onClick = actions.clearCubeLut,
-                    enabled = pixelAnalysisAvailable,
-                    modifier = Modifier.size(48.dp),
+                    enabled = lutAvailable,
+                    modifier = Modifier.size(48.dp).testTag("monitor-lut-remove"),
                 )
             }
+        }
+        if (state.cubeLutImport.pickerRecoveryRequired) {
+            Text(stringResource(R.string.cube_lut_picker_recovery), color = AppWarning,
+                modifier = Modifier.testTag("monitor-lut-picker-recovery"))
+        }
+        if (state.cubeLutImport.loading) {
+            Text(stringResource(if (state.cubeLutImport.waitingForPrevious) R.string.cube_lut_import_waiting
+                else R.string.cube_lut_import_loading), color = AppMutedText,
+                modifier = Modifier.testTag("monitor-lut-loading"))
+            TextButton(onClick = actions.cancelCubeLutImport, modifier = Modifier.testTag("monitor-lut-cancel")) {
+                Text(stringResource(R.string.cancel_cube_lut_import))
+            }
+        } else if (state.cubeLutImport.stopping) {
+            Text(stringResource(R.string.cube_lut_import_stopping), color = AppMutedText,
+                modifier = Modifier.testTag("monitor-lut-stopping"))
+        }
+        state.cubeLutImport.error?.let { error ->
+            Text(error, color = AppWarning, modifier = Modifier.testTag("monitor-lut-error"))
         }
     }
     MonitorChoiceRow(
@@ -1030,32 +1099,6 @@ private fun MonitoringAssistSettings(state: CameraUiState, actions: CameraAction
         labelFor = { desqueeze -> desqueezeLabel(desqueeze) },
         onSelect = actions.setDesqueeze,
     )
-}
-
-private fun readCubeLutDocument(context: Context, uri: Uri): Pair<String, String> {
-    val name = context.contentResolver.query(
-        uri,
-        arrayOf(OpenableColumns.DISPLAY_NAME),
-        null,
-        null,
-        null,
-    )?.use { cursor ->
-        if (cursor.moveToFirst()) cursor.getString(0) else null
-    }?.takeIf(String::isNotBlank) ?: uri.lastPathSegment ?: "Imported LUT.cube"
-    val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
-        val output = ByteArrayOutputStream()
-        val buffer = ByteArray(16 * 1024)
-        while (true) {
-            val count = input.read(buffer)
-            if (count < 0) break
-            output.write(buffer, 0, count)
-            require(output.size() <= MAX_CUBE_LUT_BYTES) {
-                "3D LUT exceeds the ${MAX_CUBE_LUT_BYTES / (1024 * 1024)} MiB limit."
-            }
-        }
-        output.toByteArray()
-    } ?: error("The selected LUT could not be opened.")
-    return name to bytes.toString(Charsets.UTF_8)
 }
 
 @Composable
@@ -1178,12 +1221,20 @@ private fun liveViewSourceLabel(source: LiveViewSource): String = stringResource
 @Composable
 private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
     val settings = settingsForMode(state.capabilities?.advancedSettings.orEmpty(), state.captureMode)
-    var showSleepConfirmation by remember { mutableStateOf(false) }
-    var showSensorCleaningConfirmation by remember { mutableStateOf(false) }
-    var showDirectoryCreation by remember { mutableStateOf(false) }
-    var showFileNaming by remember { mutableStateOf(false) }
-    var directoryName by remember { mutableStateOf("") }
-    var sensorCleaningAutoPowerOff by remember { mutableStateOf(false) }
+    val maintenanceOwner = remember(state.info, state.mediaSessionGeneration) { MaintenanceOwner(state.info, state.mediaSessionGeneration) }
+    var showSleepConfirmation by remember(maintenanceOwner) { mutableStateOf(false) }
+    var showSensorCleaningConfirmation by remember(maintenanceOwner) { mutableStateOf(false) }
+    var maintenanceToken by remember(maintenanceOwner) { mutableStateOf(java.util.UUID.randomUUID().toString()) }
+    val configurationOwner = remember(state.info, state.mediaSessionGeneration) {
+        CaptureConfigurationOwner(state.info, state.mediaSessionGeneration)
+    }
+    var showDirectoryCreation by remember(configurationOwner) { mutableStateOf(false) }
+    var showFileNaming by remember(configurationOwner) { mutableStateOf(false) }
+    var directoryName by remember(configurationOwner) { mutableStateOf("") }
+    var directoryDraftToken by remember(configurationOwner) { mutableStateOf(java.util.UUID.randomUUID().toString()) }
+    var directoryDraftRevision by remember(configurationOwner) { mutableStateOf(0L) }
+    var namingDraftToken by remember(configurationOwner) { mutableStateOf(java.util.UUID.randomUUID().toString()) }
+    var sensorCleaningAutoPowerOff by remember(maintenanceOwner) { mutableStateOf(false) }
     if (showSensorCleaningConfirmation) {
         AlertDialog(
             onDismissRequest = { showSensorCleaningConfirmation = false },
@@ -1218,8 +1269,12 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 TextButton(
                     onClick = {
                         showSensorCleaningConfirmation = false
-                        actions.cleanSensor(sensorCleaningAutoPowerOff)
+                        val submit = actions.submitMaintenance
+                        if (submit != null) submit(MaintenanceDraft(maintenanceOwner, maintenanceToken,
+                            MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING, autoPowerOff = sensorCleaningAutoPowerOff)))
+                        else actions.cleanSensor(sensorCleaningAutoPowerOff)
                     },
+                    enabled = !state.busy && !state.recordingStopAvailable && !state.bulbExposureActive && !state.shutterReleaseUnconfirmed,
                     modifier = Modifier.testTag("sensor-cleaning-confirm"),
                 ) {
                     Text(stringResource(R.string.clean_now), color = AppAccent)
@@ -1244,8 +1299,11 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 TextButton(
                     onClick = {
                         showSleepConfirmation = false
-                        actions.sleepCamera()
+                        val submit = actions.submitMaintenance
+                        if (submit != null) submit(MaintenanceDraft(maintenanceOwner, maintenanceToken, MaintenanceRequest(MaintenanceAction.SLEEP)))
+                        else actions.sleepCamera()
                     },
+                    enabled = !state.busy && !state.recordingStopAvailable && !state.bulbExposureActive && !state.shutterReleaseUnconfirmed,
                     modifier = Modifier.testTag("camera-sleep-confirm"),
                 ) {
                     Text(stringResource(R.string.sleep_now), color = AppRecord)
@@ -1272,6 +1330,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                     OutlinedTextField(
                         value = directoryName,
                         onValueChange = { raw ->
+                            directoryDraftRevision += 1
                             directoryName = raw.uppercase()
                                 .filter { it in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" }
                                 .take(5)
@@ -1288,7 +1347,10 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 TextButton(
                     onClick = {
                         showDirectoryCreation = false
-                        actions.createDirectory(directoryName)
+                        val submit = actions.submitCaptureConfiguration
+                        if (submit == null) actions.createDirectory(directoryName) else submit(CaptureConfigurationDraft(
+                            configurationOwner, directoryDraftToken, directoryDraftRevision,
+                            CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, directoryName)))
                     },
                     enabled = validName && !state.isBusy(CameraOperation.DIRECTORY),
                     modifier = Modifier.testTag("create-directory-confirm"),
@@ -1309,6 +1371,14 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                 captureMode = state.captureMode,
                 busy = state.previewMode || state.busy,
                 onSet = actions.setFileNaming,
+                draftToken = namingDraftToken,
+                onDraftSet = actions.submitCaptureConfiguration?.let { submit -> { field, value, revision ->
+                    submit(CaptureConfigurationDraft(configurationOwner, namingDraftToken, revision,
+                        CaptureConfigurationRequest(CaptureConfigurationOperation.SET_FILE_NAMING, value, field)))
+                } },
+                receipt = state.captureConfigurationReceipt,
+                onCancel = actions.cancelCaptureConfiguration,
+                onRecover = actions.recoverCaptureConfiguration,
                 onDismiss = { showFileNaming = false },
             )
         }
@@ -1413,7 +1483,7 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         }
                         Button(
                             onClick = actions.syncCameraClock,
-                            enabled = !state.isBusy(CameraOperation.CLOCK),
+                            enabled = !state.previewMode && !state.busy && !state.recordingStopAvailable && !state.isBusy(CameraOperation.CLOCK),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = AppSurfaceHigh,
                                 contentColor = AppText,
@@ -1433,6 +1503,21 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         }
                     }
                 }
+                state.maintenanceHistory.forEach { receipt -> MaintenanceReceiptView(receipt, state, actions) }
+                state.shootingSettingHistory.filter { it.id != state.shootingSettingReceipt?.id ||
+                    settings.none { setting -> setting.key == it.draft.request.key } }.forEach { receipt ->
+                    ShootingSettingReceiptView(receipt, state, actions)
+                }
+                state.captureConfigurationReceipt?.let { receipt ->
+                    CaptureConfigurationReceiptView(receipt, !state.busy,
+                        actions.cancelCaptureConfiguration, actions.recoverCaptureConfiguration)
+                }
+                state.captureConfigurationHistory.filter { it.id != state.captureConfigurationReceipt?.id }.forEach { receipt ->
+                    CaptureConfigurationReceiptView(receipt,
+                        !state.busy && state.connected && receipt.draft.owner.matches(state.info, state.mediaSessionGeneration),
+                        actions.cancelCaptureConfiguration, actions.recoverCaptureConfiguration, history = true,
+                        ownerCurrent = receipt.draft.owner.matches(state.info, state.mediaSessionGeneration))
+                }
                 if (state.supports(CameraFeature.DIRECTORY_CONTROL)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -1451,6 +1536,8 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         Button(
                             onClick = {
                                 directoryName = ""
+                                directoryDraftToken = java.util.UUID.randomUUID().toString()
+                                directoryDraftRevision = 0
                                 showDirectoryCreation = true
                             },
                             enabled = !state.previewMode && !state.busy,
@@ -1489,7 +1576,10 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                             )
                         }
                         Button(
-                            onClick = { showFileNaming = true },
+                            onClick = {
+                                namingDraftToken = java.util.UUID.randomUUID().toString()
+                                showFileNaming = true
+                            },
                             enabled = !state.previewMode && !state.busy,
                             colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
                             shape = RoundedCornerShape(6.dp),
@@ -1512,10 +1602,11 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                         Button(
                             onClick = {
                                 sensorCleaningAutoPowerOff = false
+                                maintenanceToken = java.util.UUID.randomUUID().toString()
                                 showSensorCleaningConfirmation = true
                             },
                             enabled = !state.previewMode &&
-                                state.status?.recording != true &&
+                                !state.recordingStopAvailable &&
                                 !state.bulbExposureActive &&
                                 !state.busy,
                             colors = ButtonDefaults.buttonColors(
@@ -1548,9 +1639,9 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                             Text(stringResource(R.string.camera_sleep_hint), color = AppSubtleText)
                         }
                         Button(
-                            onClick = { showSleepConfirmation = true },
+                            onClick = { maintenanceToken = java.util.UUID.randomUUID().toString(); showSleepConfirmation = true },
                             enabled = !state.previewMode &&
-                                state.status?.recording != true &&
+                                !state.recordingStopAvailable &&
                                 !state.bulbExposureActive &&
                                 !state.busy,
                             colors = ButtonDefaults.buttonColors(
@@ -1590,7 +1681,9 @@ private fun MoreSettingsSheet(state: CameraUiState, actions: CameraActions) {
                     AdvancedSettingRow(
                         setting = setting,
                         actions = actions,
-                        enabled = !state.previewMode && !state.isBusy(CameraOperation.SETTING),
+                        state = state,
+                        enabled = !state.busy && !state.isBusy(CameraOperation.SETTING) &&
+                            (!setting.key.isCaptureModeKey() || captureModeSwitchEnabled(state)),
                     )
                 }
             }
@@ -1604,14 +1697,23 @@ private fun FileNamingEditorDialog(
     captureMode: CaptureMode,
     busy: Boolean,
     onSet: (CameraFileNamingField, String) -> Unit,
+    draftToken: String,
+    onDraftSet: ((CameraFileNamingField, String, Long) -> Unit)?,
+    receipt: CaptureConfigurationReceipt?,
+    onCancel: (String) -> Unit,
+    onRecover: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var stillUserSetting1 by remember(value.stillUserSetting1) { mutableStateOf(value.stillUserSetting1) }
-    var stillUserSetting2 by remember(value.stillUserSetting2) { mutableStateOf(value.stillUserSetting2) }
-    var movieIndex by remember(value.movieIndex) { mutableStateOf(value.movieIndex) }
-    var movieReelNumber by remember(value.movieReelNumber) { mutableStateOf(value.movieReelNumber.toString()) }
-    var movieClipNumber by remember(value.movieClipNumber) { mutableStateOf(value.movieClipNumber.toString()) }
-    var movieUserDefined by remember(value.movieUserDefined) { mutableStateOf(value.movieUserDefined) }
+    var stillUserSetting1 by remember(draftToken) { mutableStateOf(value.stillUserSetting1) }
+    var stillUserSetting2 by remember(draftToken) { mutableStateOf(value.stillUserSetting2) }
+    var movieIndex by remember(draftToken) { mutableStateOf(value.movieIndex) }
+    var movieReelNumber by remember(draftToken) { mutableStateOf(value.movieReelNumber.toString()) }
+    var movieClipNumber by remember(draftToken) { mutableStateOf(value.movieClipNumber.toString()) }
+    var movieUserDefined by remember(draftToken) { mutableStateOf(value.movieUserDefined) }
+    var draftRevision by remember(draftToken) { mutableStateOf(0L) }
+    fun submit(field: CameraFileNamingField, text: String) {
+        if (onDraftSet == null) onSet(field, text) else onDraftSet(field, text, draftRevision)
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.file_naming)) },
@@ -1631,7 +1733,10 @@ private fun FileNamingEditorDialog(
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(value.stillFilenameModeOptions) { option ->
                             Button(
-                                onClick = { onSet(CameraFileNamingField.STILL_FILENAME_MODE, option) },
+                                onClick = {
+                                    draftRevision += 1
+                                    submit(CameraFileNamingField.STILL_FILENAME_MODE, option)
+                                },
                                 enabled = !busy && option != value.stillFilenameMode,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (option == value.stillFilenameMode) AppAccent else AppSurfaceHigh,
@@ -1647,62 +1752,64 @@ private fun FileNamingEditorDialog(
                     FileNamingInputRow(
                         label = stringResource(R.string.still_user_setting_1),
                         value = stillUserSetting1,
-                        onValueChange = { stillUserSetting1 = it.fileNamingText(4, allowUnderscore = true) },
+                        onValueChange = { draftRevision += 1; stillUserSetting1 = it.fileNamingText(4, allowUnderscore = true) },
                         valid = value.accepts(CameraFileNamingField.STILL_USER_SETTING_1, stillUserSetting1),
                         busy = busy,
                         testTag = "still-user-setting-1",
-                        onApply = { onSet(CameraFileNamingField.STILL_USER_SETTING_1, stillUserSetting1) },
+                        onApply = { submit(CameraFileNamingField.STILL_USER_SETTING_1, stillUserSetting1) },
                     )
                     FileNamingInputRow(
                         label = stringResource(R.string.still_user_setting_2),
                         value = stillUserSetting2,
-                        onValueChange = { stillUserSetting2 = it.fileNamingText(3, allowUnderscore = true) },
+                        onValueChange = { draftRevision += 1; stillUserSetting2 = it.fileNamingText(3, allowUnderscore = true) },
                         valid = value.accepts(CameraFileNamingField.STILL_USER_SETTING_2, stillUserSetting2),
                         busy = busy,
                         testTag = "still-user-setting-2",
-                        onApply = { onSet(CameraFileNamingField.STILL_USER_SETTING_2, stillUserSetting2) },
+                        onApply = { submit(CameraFileNamingField.STILL_USER_SETTING_2, stillUserSetting2) },
                     )
                 } else {
                     FileNamingInputRow(
                         label = stringResource(R.string.movie_index),
                         value = movieIndex,
-                        onValueChange = { movieIndex = it.fileNamingText(2, allowUnderscore = true) },
+                        onValueChange = { draftRevision += 1; movieIndex = it.fileNamingText(2, allowUnderscore = true) },
                         valid = value.accepts(CameraFileNamingField.MOVIE_INDEX, movieIndex),
                         busy = busy,
                         testTag = "movie-index",
-                        onApply = { onSet(CameraFileNamingField.MOVIE_INDEX, movieIndex) },
+                        onApply = { submit(CameraFileNamingField.MOVIE_INDEX, movieIndex) },
                     )
                     FileNamingInputRow(
                         label = stringResource(R.string.movie_reel_number),
                         value = movieReelNumber,
-                        onValueChange = { movieReelNumber = it.filter(Char::isDigit).take(4) },
+                        onValueChange = { draftRevision += 1; movieReelNumber = it.filter(Char::isDigit).take(4) },
                         valid = value.accepts(CameraFileNamingField.MOVIE_REEL_NUMBER, movieReelNumber),
                         busy = busy,
                         numeric = true,
                         testTag = "movie-reel-number",
-                        onApply = { onSet(CameraFileNamingField.MOVIE_REEL_NUMBER, movieReelNumber) },
+                        onApply = { submit(CameraFileNamingField.MOVIE_REEL_NUMBER, movieReelNumber) },
                     )
                     FileNamingInputRow(
                         label = stringResource(R.string.movie_clip_number),
                         value = movieClipNumber,
-                        onValueChange = { movieClipNumber = it.filter(Char::isDigit).take(3) },
+                        onValueChange = { draftRevision += 1; movieClipNumber = it.filter(Char::isDigit).take(3) },
                         valid = value.accepts(CameraFileNamingField.MOVIE_CLIP_NUMBER, movieClipNumber),
                         busy = busy,
                         numeric = true,
                         testTag = "movie-clip-number",
-                        onApply = { onSet(CameraFileNamingField.MOVIE_CLIP_NUMBER, movieClipNumber) },
+                        onApply = { submit(CameraFileNamingField.MOVIE_CLIP_NUMBER, movieClipNumber) },
                     )
                     FileNamingInputRow(
                         label = stringResource(R.string.movie_user_defined),
                         value = movieUserDefined,
-                        onValueChange = { movieUserDefined = it.fileNamingText(5, allowUnderscore = false) },
+                        onValueChange = { draftRevision += 1; movieUserDefined = it.fileNamingText(5, allowUnderscore = false) },
                         valid = value.accepts(CameraFileNamingField.MOVIE_USER_DEFINED, movieUserDefined),
                         busy = busy,
                         testTag = "movie-user-defined",
-                        onApply = { onSet(CameraFileNamingField.MOVIE_USER_DEFINED, movieUserDefined) },
+                        onApply = { submit(CameraFileNamingField.MOVIE_USER_DEFINED, movieUserDefined) },
                     )
                 }
                 Text(stringResource(R.string.file_naming_rule), color = AppSubtleText)
+                receipt?.let { CaptureConfigurationReceiptView(it, !busy, onCancel, onRecover) }
+                Text(stringResource(R.string.capture_configuration_draft_retained), color = AppSubtleText)
             }
         },
         confirmButton = {
@@ -1886,156 +1993,91 @@ private fun FocusDriveDirectionRow(
 }
 
 @Composable
-private fun AdvancedSettingRow(
-    setting: CameraSettingControl,
-    actions: CameraActions,
-    enabled: Boolean,
-) {
-    if (setting.inputKind == CameraSettingInputKind.TEXT) {
-        TextSettingRow(setting, actions, enabled)
-        return
+private fun AdvancedSettingRow(setting: CameraSettingControl, actions: CameraActions, state: CameraUiState, enabled: Boolean) {
+    val owner = remember(state.info, state.mediaSessionGeneration) { ShootingSettingOwner(state.info, state.mediaSessionGeneration) }
+    val token = remember(owner, setting.key) { java.util.UUID.randomUUID().toString() }
+    var draft by remember(owner, setting.key) { mutableStateOf(setting.value) }
+    var revision by remember(owner, setting.key) { mutableStateOf(0L) }
+    var edited by remember(owner, setting.key) { mutableStateOf(false) }
+    var submittedRevision by remember(owner, setting.key) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(setting.value) { if (!edited) draft = setting.value }
+    val receipt = state.shootingSettingReceipt
+    LaunchedEffect(receipt) {
+        if (receipt != null && canConsumeShootingSettingDraft(receipt, token, revision, state.info, state.mediaSessionGeneration)) {
+            draft = requireNotNull(receipt.evidence.observedValue)
+            edited = false
+        }
     }
-    if (setting.key.lowercase() in RANGE_SETTING_KEYS) {
-        RangeSettingRow(setting, actions)
-        return
-    }
-    val selectedIndex = setting.values.indexOf(setting.value).coerceAtLeast(0)
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex)
-    LaunchedEffect(setting.key, setting.value, setting.values) {
-        listState.scrollToItem(selectedIndex)
-    }
-    Column(
-        modifier = Modifier.testTag("advanced-setting-${setting.key}"),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
+    val edit: (String) -> Unit = { value -> draft = value; revision += 1; edited = true }
+    Column(Modifier.testTag("advanced-setting-${setting.key}"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(cameraSettingLabel(setting), color = AppText, fontWeight = FontWeight.SemiBold)
-        LazyRow(
-            state = listState,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.testTag("advanced-setting-values-${setting.key}"),
-        ) {
-            items(setting.values) { value ->
-                Box(
-                    Modifier
-                        .testTag("advanced-setting-value-${setting.key}-$value")
-                        .height(48.dp)
-                        .background(if (value == setting.value) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp))
-                        .clickable { actions.setCameraSetting(setting.key, value) }
-                        .padding(horizontal = 14.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        localizedCameraValue(setting.key, value),
-                        color = if (value == setting.value) AppBackground else AppText,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+        Text(stringResource(R.string.shooting_setting_current, setting.value), color = AppSubtleText)
+        when {
+            setting.inputKind == CameraSettingInputKind.TEXT -> {
+                val maximum = setting.maxLength ?: 0
+                OutlinedTextField(value = draft, onValueChange = { edit(it) }, enabled = enabled,
+                    singleLine = true, isError = !acceptsShootingSettingValue(setting, draft),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    supportingText = { Text(stringResource(R.string.setting_ascii_text_hint, maximum)) },
+                    modifier = Modifier.fillMaxWidth().testTag("advanced-setting-text-${setting.key}"))
+            }
+            setting.key.lowercase() in RANGE_SETTING_KEYS && setting.values.size > 1 -> {
+                val selected = setting.values.indexOf(draft)
+                Text(if (setting.key.equals("zoom", ignoreCase = true)) stringResource(R.string.zoom_value, draft) else draft, color = AppAccent)
+                Slider(value = selected.coerceAtLeast(0).toFloat(),
+                    onValueChange = { index -> edit(setting.values[index.roundToInt().coerceIn(setting.values.indices)]) },
+                    enabled = enabled, valueRange = 0f..setting.values.lastIndex.toFloat(),
+                    steps = if (setting.values.size <= 101) (setting.values.size - 2).coerceAtLeast(0) else 0,
+                    modifier = Modifier.fillMaxWidth().testTag("advanced-setting-values-${setting.key}"))
+            }
+            else -> LazyRow(modifier = Modifier.testTag("advanced-setting-values-${setting.key}"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(setting.values, key = { it }) { value ->
+                    Box(Modifier.testTag("advanced-setting-value-${setting.key}-$value").height(48.dp)
+                        .background(if (value == draft) AppAccent else AppSurfaceHigh, RoundedCornerShape(6.dp))
+                        .clickable(enabled = enabled) { edit(value) }.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+                        Text(localizedCameraValue(setting.key, value), color = if (value == draft) AppBackground else AppText)
+                    }
                 }
             }
         }
+        Button(onClick = {
+            submittedRevision = revision
+            val submit = actions.submitShootingSetting
+            if (submit == null || state.previewMode) actions.setCameraSetting(setting.key, draft) else submit(ShootingSettingDraft(owner, token, revision,
+                ShootingSettingRequest(setting.key, draft)))
+        }, enabled = enabled && edited && acceptsShootingSettingValue(setting, draft) && submittedRevision != revision,
+            modifier = Modifier.testTag("shooting-setting-apply-${setting.key}")) { Text(stringResource(R.string.apply)) }
+        receipt?.takeIf { it.draft.request.key == setting.key }?.let { ShootingSettingReceiptView(it, state, actions) }
     }
 }
 
 @Composable
-private fun TextSettingRow(
-    setting: CameraSettingControl,
-    actions: CameraActions,
-    enabled: Boolean,
-) {
-    val maxLength = setting.maxLength ?: return
-    var confirmedValue by remember(setting.key) { mutableStateOf(setting.value) }
-    var draft by remember(setting.key) { mutableStateOf(setting.value) }
-    LaunchedEffect(setting.value) {
-        if (draft == confirmedValue) draft = setting.value
-        confirmedValue = setting.value
-    }
-    val valid = draft.length <= maxLength && draft.all { it.code in 0x20..0x7E }
-    Column(
-        modifier = Modifier.testTag("advanced-setting-${setting.key}"),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(cameraSettingLabel(setting), color = AppText, fontWeight = FontWeight.SemiBold)
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { raw ->
-                    draft = raw.filter { it.code in 0x20..0x7E }.take(maxLength)
-                },
-                enabled = enabled,
-                singleLine = true,
-                isError = !valid,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                supportingText = {
-                    Text(stringResource(R.string.setting_ascii_text_hint, maxLength))
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("advanced-setting-text-${setting.key}"),
-            )
-            Button(
-                onClick = { actions.setCameraSetting(setting.key, draft) },
-                enabled = enabled && valid && draft != setting.value,
-                colors = ButtonDefaults.buttonColors(containerColor = AppSurfaceHigh, contentColor = AppText),
-                shape = RoundedCornerShape(6.dp),
-                modifier = Modifier
-                    .height(48.dp)
-                    .testTag("advanced-setting-text-apply-${setting.key}"),
-            ) {
-                Text(stringResource(R.string.apply))
-            }
+private fun ShootingSettingReceiptView(receipt: ShootingSettingReceipt, state: CameraUiState, actions: CameraActions) {
+    val evidence = receipt.evidence
+    val ownerCurrent = receipt.draft.owner.matches(state.info, state.mediaSessionGeneration)
+    Column(Modifier.testTag("shooting-setting-receipt-${receipt.id}"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(stringResource(R.string.shooting_setting_requested, evidence.request.key, evidence.request.requestedValue), color = AppSubtleText)
+        Text(stringResource(when (evidence.writeEvidence) {
+            ShootingSettingWriteEvidence.NOT_SENT -> R.string.shooting_setting_not_sent
+            ShootingSettingWriteEvidence.UNKNOWN -> R.string.shooting_setting_unknown
+            ShootingSettingWriteEvidence.RESPONSE_RECEIVED -> R.string.shooting_setting_response_received
+        }), color = AppSubtleText)
+        Text(stringResource(when (evidence.readbackEvidence) {
+            ShootingSettingReadEvidence.NOT_READ -> R.string.shooting_setting_not_read
+            ShootingSettingReadEvidence.UNAVAILABLE -> R.string.shooting_setting_unavailable
+            ShootingSettingReadEvidence.MISMATCH -> R.string.shooting_setting_mismatch
+            ShootingSettingReadEvidence.MATCHED -> R.string.shooting_setting_matched
+        }), color = AppSubtleText)
+        evidence.observedValue?.let { Text(stringResource(R.string.shooting_setting_current, it), color = AppSubtleText) }
+        if (receipt.cancelled) Text(stringResource(R.string.shooting_setting_cancelled), color = AppSubtleText)
+        if (!ownerCurrent) Text(stringResource(R.string.shooting_setting_previous_session), color = AppSubtleText)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (receipt.running || receipt.recovering) TextButton(onClick = { actions.cancelShootingSetting(receipt.id) },
+                enabled = ownerCurrent) { Text(stringResource(R.string.cancel)) }
+            else TextButton(onClick = { actions.recoverShootingSetting(receipt.id) },
+                enabled = ownerCurrent && state.connected && !state.busy && !state.isBusy(CameraOperation.SETTING),
+                modifier = Modifier.testTag("shooting-setting-recover-${receipt.id}")) { Text(stringResource(R.string.shooting_setting_read_current)) }
         }
-    }
-}
-
-@Composable
-private fun RangeSettingRow(setting: CameraSettingControl, actions: CameraActions) {
-    val currentIndex = setting.values.indexOf(setting.value).coerceAtLeast(0)
-    val settingLabel = cameraSettingLabel(setting)
-    var pendingIndex by remember(setting.key) { mutableFloatStateOf(currentIndex.toFloat()) }
-    LaunchedEffect(setting.value, setting.values) {
-        pendingIndex = currentIndex.toFloat()
-    }
-    val selectedIndex = pendingIndex.roundToInt().coerceIn(setting.values.indices)
-    val selectedValue = setting.values[selectedIndex]
-    val selectedValueLabel = if (setting.key.equals("zoom", ignoreCase = true)) {
-        stringResource(R.string.zoom_value, selectedValue)
-    } else {
-        selectedValue
-    }
-    Column(
-        modifier = Modifier.testTag("advanced-setting-${setting.key}"),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                settingLabel,
-                color = AppText,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
-            Text(selectedValueLabel, color = AppAccent, fontWeight = FontWeight.Bold)
-        }
-        Slider(
-            value = pendingIndex,
-            onValueChange = { pendingIndex = it },
-            onValueChangeFinished = {
-                if (selectedValue != setting.value) actions.setCameraSetting(setting.key, selectedValue)
-            },
-            valueRange = 0f..setting.values.lastIndex.toFloat(),
-            steps = if (setting.values.size <= 101) {
-                (setting.values.size - 2).coerceAtLeast(0)
-            } else {
-                0
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .testTag("advanced-setting-values-${setting.key}")
-                .semantics { contentDescription = "$settingLabel $selectedValueLabel" },
-        )
     }
 }
 
@@ -2119,3 +2161,137 @@ private val RANGE_SETTING_KEYS = setOf(
     "focusbracketingnumberofshots",
     "focusbracketingfocusincrement",
 )
+
+@Composable
+internal fun CaptureConfigurationReceiptView(
+    receipt: CaptureConfigurationReceipt,
+    recoveryEnabled: Boolean,
+    onCancel: (String) -> Unit,
+    onRecover: (String) -> Unit,
+    history: Boolean = false,
+    ownerCurrent: Boolean = true,
+) {
+    val evidence = receipt.evidence
+    val directory = evidence.request.operation == CaptureConfigurationOperation.CREATE_DIRECTORY
+    Column(Modifier.fillMaxWidth().testTag(if (history) "capture-configuration-history-${receipt.id}" else "capture-configuration-receipt"),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(stringResource(if (history) R.string.capture_configuration_previous else R.string.capture_configuration_result),
+            color = AppText, fontWeight = FontWeight.SemiBold)
+        Text(receipt.origin, color = AppSubtleText, modifier = Modifier.testTag("capture-configuration-origin"))
+        (receipt.draft.owner.connection as? dev.openeos.control.data.CameraInfo)?.model?.let { Text(it, color = AppSubtleText) }
+        evidence.target?.let { Text(it, color = AppSubtleText, modifier = Modifier.testTag("capture-configuration-target")) }
+        Text(stringResource(R.string.capture_configuration_request,
+            if (directory) stringResource(R.string.create_capture_directory) else evidence.request.field?.wireName.orEmpty(),
+            evidence.request.requestedValue.ifEmpty { stringResource(R.string.capture_configuration_automatic) }), color = AppText)
+        Text(stringResource(when (evidence.writeEvidence) {
+            CaptureConfigurationWriteEvidence.NOT_SENT -> R.string.capture_configuration_not_sent
+            CaptureConfigurationWriteEvidence.UNKNOWN -> R.string.capture_configuration_unknown
+            CaptureConfigurationWriteEvidence.ACKNOWLEDGED -> R.string.capture_configuration_acknowledged
+        }), color = AppText, modifier = Modifier.testTag("capture-configuration-write"))
+        evidence.acknowledgedValue?.let { Text(stringResource(R.string.capture_configuration_ack_value, it), color = AppText) }
+        Text(stringResource(when (evidence.readbackEvidence) {
+            CaptureConfigurationReadEvidence.NOT_READ -> R.string.capture_configuration_not_read
+            CaptureConfigurationReadEvidence.UNAVAILABLE -> R.string.capture_configuration_unavailable
+            CaptureConfigurationReadEvidence.MISMATCH -> R.string.capture_configuration_mismatch
+            CaptureConfigurationReadEvidence.MATCHED -> R.string.capture_configuration_matched
+            CaptureConfigurationReadEvidence.REFRESHED -> R.string.capture_configuration_refreshed
+        }), color = AppSubtleText, modifier = Modifier.testTag("capture-configuration-readback"))
+        evidence.observedValue?.takeIf { evidence.readbackEvidence in setOf(CaptureConfigurationReadEvidence.MATCHED,
+            CaptureConfigurationReadEvidence.MISMATCH, CaptureConfigurationReadEvidence.REFRESHED) }?.let { Text(stringResource(R.string.capture_configuration_observed_value, it), color = AppSubtleText) }
+        if (directory) Text(stringResource(R.string.capture_configuration_directory_limit), color = AppSubtleText)
+        if (evidence.writeEvidence == CaptureConfigurationWriteEvidence.UNKNOWN) {
+            Text(stringResource(R.string.capture_configuration_no_repeat), color = AppSubtleText)
+        }
+        if (receipt.cancelled) Text(stringResource(R.string.capture_configuration_cancelled), color = AppSubtleText)
+        if (ownerCurrent) {
+            if (receipt.running || receipt.recovering) TextButton(onClick = { onCancel(receipt.id) },
+                modifier = Modifier.testTag(if (history) "capture-configuration-cancel-${receipt.id}" else "capture-configuration-cancel")) { Text(stringResource(R.string.cancel)) }
+            else TextButton(onClick = { onRecover(receipt.id) }, enabled = recoveryEnabled,
+                modifier = Modifier.testTag(if (history) "capture-configuration-recover-${receipt.id}" else "capture-configuration-recover")) { Text(stringResource(R.string.capture_configuration_recover)) }
+        }
+    }
+}
+
+
+@Composable
+internal fun MaintenanceReceiptView(receipt: MaintenanceReceipt, state: CameraUiState, actions: CameraActions) {
+    val evidence = receipt.evidence
+    val ownerCurrent = receipt.draft.owner.matches(state.info, state.mediaSessionGeneration)
+    val available = state.connected && ownerCurrent && state.pendingOperations.isEmpty()
+    var showRestore by remember(receipt.id, ownerCurrent) { mutableStateOf(false) }
+    if (showRestore && ownerCurrent) {
+        AlertDialog(onDismissRequest = { showRestore = false },
+            title = { Text(stringResource(R.string.maintenance_restore_title)) },
+            text = { Text(stringResource(R.string.maintenance_restore_confirm)) },
+            confirmButton = { TextButton(onClick = { showRestore = false; actions.restoreMaintenance(receipt.id) },
+                enabled = available && !state.recordingStopAvailable && !state.bulbExposureActive && !state.shutterReleaseUnconfirmed,
+                modifier = Modifier.testTag("maintenance-restore-confirm-${receipt.id}")) { Text(stringResource(R.string.maintenance_restore)) } },
+            dismissButton = { TextButton(onClick = { showRestore = false }) { Text(stringResource(R.string.cancel)) } })
+    }
+    Column(Modifier.fillMaxWidth().testTag("maintenance-receipt-${receipt.id}"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(stringResource(R.string.maintenance_result), color = AppText, fontWeight = FontWeight.SemiBold)
+        Text(receipt.origin, color = AppSubtleText)
+        (receipt.draft.owner.connection as? dev.openeos.control.data.CameraInfo)?.model?.let { Text(it, color = AppSubtleText) }
+        Text(stringResource(when (receipt.draft.request.action) {
+            MaintenanceAction.CLOCK_SYNC -> R.string.sync_camera_clock
+            MaintenanceAction.SENSOR_CLEANING -> R.string.sensor_cleaning
+            MaintenanceAction.SLEEP -> R.string.camera_sleep
+        }), color = AppText)
+        if (receipt.draft.request.action == MaintenanceAction.SENSOR_CLEANING) Text(stringResource(R.string.maintenance_power_choice,
+            stringResource(if (receipt.draft.request.autoPowerOff) R.string.yes else R.string.no)), color = AppSubtleText)
+        Text(stringResource(when (evidence.command) {
+            MaintenanceCommandEvidence.NOT_SENT -> R.string.maintenance_not_sent
+            MaintenanceCommandEvidence.UNKNOWN -> R.string.maintenance_unknown
+            MaintenanceCommandEvidence.RESPONSE_RECEIVED -> R.string.maintenance_response
+        }), color = AppText, modifier = Modifier.testTag("maintenance-command-${receipt.id}"))
+        if (receipt.draft.request.needsStop) {
+            Text(stringResource(R.string.maintenance_stops, maintenanceStopLabel(evidence.eventStop), maintenanceStopLabel(evidence.liveViewStop)), color = AppSubtleText)
+            Text(stringResource(R.string.maintenance_completion_limit), color = AppSubtleText)
+        }
+        if (receipt.draft.request.action == MaintenanceAction.CLOCK_SYNC) {
+            Text(stringResource(when (evidence.clockRead) {
+                MaintenanceClockEvidence.MATCHED -> R.string.maintenance_clock_matched
+                MaintenanceClockEvidence.MISMATCH -> R.string.maintenance_clock_mismatch
+                MaintenanceClockEvidence.UNAVAILABLE -> R.string.maintenance_clock_unavailable
+                else -> R.string.maintenance_clock_not_read
+            }), color = AppSubtleText, modifier = Modifier.testTag("maintenance-clock-${receipt.id}"))
+            evidence.clockReference?.let { reference ->
+                Text(stringResource(R.string.maintenance_clock_reference,
+                    java.time.Instant.ofEpochSecond(reference.earliestEpochSeconds).toString(),
+                    java.time.Instant.ofEpochSecond(reference.latestEpochSeconds).toString()), color = AppSubtleText)
+                Text(if (reference.utcOffsetMinutes == null) stringResource(R.string.maintenance_clock_epoch_only)
+                    else stringResource(R.string.maintenance_clock_zone, reference.utcOffsetMinutes,
+                        stringResource(if (reference.daylightSaving == true) R.string.yes else R.string.no)), color = AppSubtleText)
+            }
+            evidence.observedClock?.let { Text(stringResource(R.string.maintenance_initial_clock, java.time.Instant.ofEpochSecond(it.epochSeconds).toString()), color = AppSubtleText) }
+            evidence.recoveryClock?.let { Text(stringResource(R.string.maintenance_latest_clock, java.time.Instant.ofEpochSecond(it.epochSeconds).toString()), color = AppSubtleText) }
+        }
+        Text(stringResource(when (evidence.availability) {
+            MaintenanceAvailability.NOT_READ -> R.string.maintenance_not_read
+            MaintenanceAvailability.REACHABLE -> R.string.maintenance_reachable
+            MaintenanceAvailability.UNAVAILABLE -> R.string.maintenance_unavailable
+        }), color = AppSubtleText)
+        if (receipt.cancelled) Text(stringResource(R.string.maintenance_cancelled), color = AppSubtleText)
+        if (!ownerCurrent || receipt.retired) Text(stringResource(R.string.maintenance_retired), color = AppSubtleText)
+        if (evidence.restore != MaintenanceRestoreEvidence.NOT_REQUESTED) Text(stringResource(
+            if (evidence.restore == MaintenanceRestoreEvidence.RESTORED) R.string.maintenance_restored else R.string.maintenance_restore_unknown), color = AppSubtleText)
+        if (ownerCurrent && (receipt.running || receipt.recovering || receipt.restoring)) {
+            TextButton(onClick = { actions.cancelMaintenance(receipt.id) }, modifier = Modifier.testTag("maintenance-cancel-${receipt.id}")) { Text(stringResource(R.string.cancel)) }
+        } else if (ownerCurrent) {
+            TextButton(onClick = { actions.recoverMaintenance(receipt.id) }, enabled = available,
+                modifier = Modifier.testTag("maintenance-recover-${receipt.id}")) { Text(stringResource(R.string.maintenance_recover)) }
+            if (state.maintenanceReceipt?.id == receipt.id && canRestoreMaintenance(receipt, true)) {
+                TextButton(onClick = { showRestore = true }, enabled = available && !state.recordingStopAvailable && !state.bulbExposureActive && !state.shutterReleaseUnconfirmed,
+                    modifier = Modifier.testTag("maintenance-restore-${receipt.id}")) { Text(stringResource(R.string.maintenance_restore)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun maintenanceStopLabel(value: MaintenanceStopEvidence): String = stringResource(when (value) {
+    MaintenanceStopEvidence.NOT_REQUIRED -> R.string.maintenance_phase_not_required
+    MaintenanceStopEvidence.NOT_ATTEMPTED -> R.string.maintenance_phase_pending
+    MaintenanceStopEvidence.UNKNOWN -> R.string.maintenance_phase_unknown
+    MaintenanceStopEvidence.STOPPED -> R.string.maintenance_phase_confirmed
+})

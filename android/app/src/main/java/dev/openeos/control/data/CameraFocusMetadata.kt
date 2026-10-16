@@ -21,6 +21,34 @@ data class CameraFocusInfo(val frames: List<CameraFocusFrame>, val magnification
 internal const val MAX_FOCUS_INFO_BYTES = 256 * 1024
 private const val MAX_AF_FRAMES = 512
 
+/** Bridge already normalizes the selected Canon frames. Never coerce malformed wire values. */
+internal fun parseBridgeFocusInfo(root: JSONObject): CameraFocusInfo? {
+    val magnification = root.exactInt("magnification")?.takeIf { it > 0 } ?: return null
+    val aspect = (root.opt("imageAspectRatio") as? Number)?.toDouble()
+        ?.takeIf { it.isFinite() && it > 0 && it.toFloat().isFinite() && it.toFloat() > 0 } ?: return null
+    val frames = root.optJSONArray("frames") ?: return null
+    require(frames.length() <= MAX_AF_FRAMES) { "Bridge AF frame count exceeds the safety limit." }
+    // No geometry is valid at magnification other than 1x.
+    if (magnification != 1) return CameraFocusInfo(emptyList(), magnification, aspect.toFloat())
+    val parsed = buildList {
+        for (index in 0 until frames.length()) {
+            val frame = frames.optJSONObject(index) ?: return null
+            fun coordinate(key: String) = (frame.opt(key) as? Number)?.toDouble()
+                ?.takeIf { it.isFinite() && it in 0.0..1.0 }?.toFloat()
+            val left = coordinate("left") ?: return null
+            val top = coordinate("top") ?: return null
+            val right = coordinate("right") ?: return null
+            val bottom = coordinate("bottom") ?: return null
+            if (right <= left || bottom <= top) return null
+            val status = CameraFocusStatus.entries.firstOrNull { it.name == frame.opt("status") } ?: return null
+            val kind = CameraFocusFrameKind.entries.firstOrNull { it.name == frame.opt("kind") } ?: return null
+            add(CameraFocusFrame(left, top, right, bottom,
+                if (kind == CameraFocusFrameKind.UNKNOWN) CameraFocusStatus.UNKNOWN else status, kind))
+        }
+    }
+    return CameraFocusInfo(parsed, magnification, aspect.toFloat())
+}
+
 internal fun parseCcapiFocusInfoPacket(payload: ByteArray): CameraFocusInfo? {
     require(payload.size in 9..MAX_FOCUS_INFO_BYTES) { "Invalid Canon focus information packet size." }
     val buffer = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)

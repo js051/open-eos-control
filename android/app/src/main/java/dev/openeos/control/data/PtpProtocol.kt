@@ -1,5 +1,7 @@
 package dev.openeos.control.data
 
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.ByteArrayOutputStream
@@ -240,8 +242,15 @@ object PtpCodec {
 
 interface PtpTransport {
     suspend fun send(container: PtpContainer)
+    suspend fun send(container: PtpContainer, beforeDispatch: () -> Unit) {
+        currentCoroutineContext().ensureActive()
+        beforeDispatch()
+        send(container)
+    }
 
     suspend fun receive(maxPayloadBytes: Int = DEFAULT_PTP_METADATA_BYTES): PtpContainer
+    suspend fun receiveObserved(onReceived: (PtpContainer) -> Unit): PtpContainer =
+        receive().also(onReceived)
 
     suspend fun receiveTo(
         destination: OutputStream,
@@ -459,6 +468,7 @@ class PtpSession(
     private val mutex = Mutex()
     private var nextTransactionId = 1L
     private var sessionOpen = false
+    private var sessionOpenAttempted = false
     private var cachedDeviceInfo: PtpDeviceInfo? = null
 
     suspend fun initialize(): PtpDeviceInfo = mutex.withLock {
@@ -469,12 +479,19 @@ class PtpSession(
             expectData = true,
         ) ?: throw PtpProtocolException("GetDeviceInfo completed without a data container.")
         val info = PtpDatasets.deviceInfo(infoPayload)
-        executeLocked(
-            operationCode = PtpOperationCode.OPEN_SESSION,
-            parameters = listOf(sessionId),
-            transactionId = 0L,
-            expectData = false,
-        )
+        try {
+            executeLocked(
+                operationCode = PtpOperationCode.OPEN_SESSION,
+                parameters = listOf(sessionId),
+                transactionId = 0L,
+                expectData = false,
+                beforeDispatch = { sessionOpenAttempted = true },
+            )
+        } catch (failure: PtpResponseException) {
+            // A complete rejection did not open our session; do not close an existing owner.
+            sessionOpenAttempted = false
+            throw failure
+        }
         sessionOpen = true
         cachedDeviceInfo = info
         info
@@ -622,8 +639,28 @@ class PtpSession(
         executeOperation(PtpOperationCode.INITIATE_CAPTURE, listOf(storageId, objectFormat))
     }
 
-    suspend fun deleteObject(handle: Long, objectFormat: Long = 0L) {
-        executeOperation(PtpOperationCode.DELETE_OBJECT, listOf(handle, objectFormat))
+    suspend fun deleteObject(handle: Long, objectFormat: Long = 0L, evidence: MediaDeleteEvidence = MediaDeleteEvidence()) {
+        requireObjectHandle(handle, "DeleteObject")
+        require(objectFormat == 0L) { "DeleteObject only accepts a concrete item, without format-wide deletion." }
+        mutex.withLock {
+            requireOpen()
+            val transactionId = takeTransactionId()
+            transport.send(PtpCodec.command(PtpOperationCode.DELETE_OBJECT, transactionId, listOf(handle, 0L)), evidence.beforeDispatch)
+            while (true) {
+                val container = transport.receiveObserved { received ->
+                    if (received.type == PtpContainerType.EVENT) return@receiveObserved
+                    validateTransaction(received.header, transactionId)
+                    check(received.type == PtpContainerType.RESPONSE) { "DeleteObject returned an unexpected container." }
+                    // Validate framing too; a malformed response cannot become a rejection or ACK.
+                    PtpCodec.responseParameters(received)
+                    if (received.code == PtpResponseCode.OK) evidence.onConfirmed()
+                    // No deletion-specific non-OK refusal allowlist is established here. General,
+                    // partial-completion, reserved and vendor responses stay uncertain, never continue a batch.
+                    checkResponse(received.code, PtpOperationCode.DELETE_OBJECT)
+                }
+                if (container.type == PtpContainerType.RESPONSE) break
+            }
+        }
     }
 
     suspend fun setObjectProtection(handle: Long, protected: Boolean) {
@@ -642,6 +679,7 @@ class PtpSession(
         parentObject: Long,
         objectInfo: PtpObjectInfo,
         source: InputStream,
+        beforeDispatch: () -> Unit = {},
         onProgress: (bytesTransferred: Long, totalBytes: Long) -> Unit = { _, _ -> },
     ): PtpSendObjectInfoResult = mutex.withLock {
         requireOpen()
@@ -656,6 +694,8 @@ class PtpSession(
             throw PtpProtocolException("SendObjectInfo command and dataset destinations must match.")
         }
 
+        currentCoroutineContext().ensureActive()
+        beforeDispatch()
         val infoTransactionId = takeTransactionId()
         transport.send(
             PtpCodec.command(
@@ -810,6 +850,28 @@ class PtpSession(
         }
     }
 
+    /** Strict retirement for an abandoned setup; ordinary shutdown keeps its best-effort policy. */
+    suspend fun shutdownConnectionAttempt() {
+        mutex.withLock {
+            try {
+                if (sessionOpen || sessionOpenAttempted) {
+                    try {
+                        executeLocked(PtpOperationCode.CLOSE_SESSION,
+                            transactionId = takeTransactionId(), expectData = false)
+                    } catch (failure: PtpResponseException) {
+                        // A definite no-session response also confirms the original owner is retired.
+                        if (failure.responseCode != PtpResponseCode.SESSION_NOT_OPEN) throw failure
+                    }
+                }
+            } finally {
+                sessionOpen = false
+                sessionOpenAttempted = false
+                cachedDeviceInfo = null
+                transport.close()
+            }
+        }
+    }
+
     suspend fun shutdown() {
         mutex.withLock {
             try {
@@ -824,6 +886,7 @@ class PtpSession(
                 }
             } finally {
                 sessionOpen = false
+                sessionOpenAttempted = false
                 cachedDeviceInfo = null
                 transport.close()
             }
@@ -832,6 +895,7 @@ class PtpSession(
 
     fun abort() {
         sessionOpen = false
+        sessionOpenAttempted = false
         cachedDeviceInfo = null
         transport.close()
     }
@@ -861,8 +925,10 @@ class PtpSession(
         transactionId: Long,
         expectData: Boolean,
         maxPayloadBytes: Int = DEFAULT_PTP_METADATA_BYTES,
+        beforeDispatch: (() -> Unit)? = null,
     ): ByteArray? {
-        transport.send(PtpCodec.command(operationCode, transactionId, parameters))
+        val command = PtpCodec.command(operationCode, transactionId, parameters)
+        if (beforeDispatch == null) transport.send(command) else transport.send(command, beforeDispatch)
         var data: ByteArray? = null
         while (true) {
             val container = transport.receive(maxPayloadBytes)

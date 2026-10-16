@@ -22,14 +22,45 @@ class CameraRepository(
     private var liveViewRequest = LiveViewRequest()
     private var active = false
     private var liveViewRunning = false
+    private var liveViewAttemptGeneration = 0L
     private var activeInfo: CameraInfo? = null
     private val connectionMutex = Mutex()
+    @Volatile var connectionRetirementRevision: Long = 0L
+        private set
+    @Volatile internal var connectionRetirementSafetyWarnings: Set<PreviousConnectionSafetyWarning> = emptySet()
+        private set
+    private val liveViewStarter = LiveViewStartOperation()
+
+    internal fun cancelPendingLiveViewStart() = liveViewStarter.retire()
+
+    private suspend fun startOwnedLiveView(): Boolean {
+        liveViewAttemptGeneration += 1
+        val owner = backend
+        val request = liveViewRequest
+        return liveViewStarter.run(start = { owner.startLiveView(request) },
+            stopRequired = { owner.liveViewStopRequired }, stop = { owner.stopLiveView() })
+    }
 
     fun isRealCamera(): Boolean = backend.prefersBitmapLiveViewFrames
 
     fun nativeLiveViewSession(): NativeLiveViewSession? = backend.nativeLiveViewSession
 
     fun isLiveViewRunning(): Boolean = liveViewRunning
+
+    internal fun liveViewOwner() = CameraLiveViewOwner(backend, liveViewAttemptGeneration)
+
+    internal fun ownsLiveView(owner: CameraLiveViewOwner): Boolean =
+        active && owner.backend === backend && owner.attempt == liveViewAttemptGeneration
+
+    /** Retire local health immediately; the backend retains its exact remote Stop responsibility. */
+    internal fun retireLiveView(owner: CameraLiveViewOwner): Boolean {
+        if (!ownsLiveView(owner)) return false
+        liveViewRunning = false
+        backend.retireLiveViewLocally()
+        return true
+    }
+
+    fun activeLiveViewSource(): LiveViewSource? = backend.activeLiveViewSource
 
     // Stop ownership is distinct from confirmed running: a lost start response can leave only cleanup.
     fun isLiveViewStopRequired(): Boolean = backend.liveViewStopRequired
@@ -40,6 +71,7 @@ class CameraRepository(
             httpTransportFactory = AndroidCameraHttpTransportFactory(context.applicationContext),
             ptpTransportFactory = AndroidUsbPtpTransportFactory(context.applicationContext),
             usbHostCaptureStore = AndroidUsbHostCaptureStore(context.applicationContext),
+            jpegFrameValidator = ::androidDecodesLiveViewJpeg,
         )
     }
 
@@ -80,9 +112,15 @@ class CameraRepository(
     suspend fun discoverBridgeCameras(
         baseUrl: String,
         token: String = "",
-    ): List<DesktopBridgeCamera> = backendFactory.discoverDesktopBridge(
-        CameraConnection.DesktopBridge(baseUrl = baseUrl, token = token)
-    )
+    ): List<DesktopBridgeCamera> {
+        // Local Bridge engine discovery can touch a USB owner. Never queue a stale scan.
+        if (!connectionMutex.tryLock()) throw ConnectionRetirementPendingException()
+        try {
+            if (connectionRetirementRevision != 0L) throw ConnectionRetirementBlockedException()
+            if (active) throw ConnectionRetirementPendingException()
+            return backendFactory.discoverDesktopBridge(CameraConnection.DesktopBridge(baseUrl = baseUrl, token = token))
+        } finally { connectionMutex.unlock() }
+    }
 
     suspend fun connectBridge(
         baseUrl: String,
@@ -107,7 +145,9 @@ class CameraRepository(
         request: LiveViewRequest,
         startLiveView: Boolean,
     ): CameraSession = connectionMutex.withLock {
+        if (connectionRetirementRevision != 0L) throw ConnectionRetirementBlockedException()
         if (active) disconnectLocked()
+        if (connectionRetirementRevision != 0L) throw ConnectionRetirementBlockedException()
         try {
             backend = backendFactory.create(connection)
             backend.initialize()
@@ -132,9 +172,8 @@ class CameraRepository(
             if (startLiveView && status.shutterReleaseUnconfirmed != true &&
                 status.bulbExposureActive != true && capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
                 try {
-                    backend.startLiveView(liveViewRequest)
-                    liveViewRunning = true
-                    if (!backend.prefersBitmapLiveViewFrames) {
+                    liveViewRunning = startOwnedLiveView()
+                    if (liveViewRunning && !backend.prefersBitmapLiveViewFrames) {
                         liveViewFrameUrl = nextLiveViewFrameUrl()
                     }
                 } catch (exception: CancellationException) {
@@ -160,7 +199,15 @@ class CameraRepository(
             )
         } catch (exception: Exception) {
             // Cancellation still owns any partly initialized backend until cleanup completes.
-            withContext(NonCancellable) { runCatching { backend.close() } }
+            connectionRetirementSafetyWarnings += previousConnectionSafetyWarnings(exception)
+            if (exception is ConnectionRetirementUnconfirmedException || backend.connectionRetirementUnconfirmed)
+                connectionRetirementRevision += 1
+            withContext(NonCancellable) {
+                runCatching { backend.closeConnectionAttempt() }.onFailure { failure ->
+                    connectionRetirementRevision += 1
+                    connectionRetirementSafetyWarnings += previousConnectionSafetyWarnings(failure)
+                }
+            }
             active = false
             liveViewRunning = false
             activeInfo = null
@@ -168,27 +215,64 @@ class CameraRepository(
         }
     }
 
+    fun maintenanceStopRecoveryAccess(): suspend () -> Unit {
+        val owner = backend
+        return {
+            connectionMutex.withLock {
+                check(active && backend === owner && owner.maintenanceStopOwned) { "Maintenance Stop owner changed." }
+                if (backend === owner) liveViewRunning = false
+                owner.stopLiveView()
+            }
+        }
+    }
+
+    fun maintenanceRetirementAccess(force: Boolean): (suspend () -> Unit)? {
+        val owner = backend
+        if (!force && !owner.maintenanceSessionOwned) return null
+        return {
+            connectionMutex.withLock {
+                owner.retireMaintenanceLocally()
+                if (backend === owner) {
+                    active = false
+                    liveViewRunning = false
+                    activeInfo = null
+                }
+            }
+        }
+    }
+
     suspend fun disconnect() = connectionMutex.withLock {
         disconnectLocked()
     }
 
-    private suspend fun disconnectLocked() {
-        if (!active) return
+    private suspend fun disconnectLocked(): Boolean {
+        if (!active) return false
+        if (backend.maintenanceSessionOwned) {
+            try { return backend.closeMaintenanceSession() }
+            finally { active = false; liveViewRunning = false; activeInfo = null }
+        }
+        val hadLiveView = liveViewRunning || backend.liveViewStopRequired
+        var liveViewStopUnconfirmed = false
         try {
             runCatching { backend.retryAutofocusStop() }
             try {
                 backend.stopLiveView()
             } catch (_: Exception) {
+                liveViewStopUnconfirmed = hadLiveView
                 // A backend without Live View still needs its session closed.
             }
             backend.close()
-        } catch (_: Exception) {
-            // ignore failure to stop live view
+        } catch (failure: Exception) {
+            connectionRetirementSafetyWarnings += previousConnectionSafetyWarnings(failure)
+            liveViewStopUnconfirmed = liveViewStopUnconfirmed || hadLiveView
+            connectionRetirementRevision += 1
+            // Session retirement cannot prove that an unreachable camera stopped.
         } finally {
             active = false
             liveViewRunning = false
             activeInfo = null
         }
+        return liveViewStopUnconfirmed
     }
 
     suspend fun refreshStatus(): CameraStatus = backend.status()
@@ -203,10 +287,58 @@ class CameraRepository(
 
     suspend fun setCameraSetting(key: String, value: String): CameraStatus = backend.setSetting(key, value)
 
+    fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess {
+        val owner = backend
+        return owner.shootingSettingAccess(request)
+    }
+
+    /** The handle captures the actual backend, connection and routes before any await. */
+    fun captureConfigurationAccess(): CaptureConfigurationAccess {
+        val owner = backend
+        val origin = when (val connection = owner.connection) {
+            is CameraConnection.CcapiNetwork -> mediaDeleteEndpoint(connection.baseUrl)
+            is CameraConnection.DesktopBridge -> mediaDeleteEndpoint(connection.baseUrl)
+            else -> null
+        }
+        return CaptureConfigurationAccess(origin ?: owner.transport.label,
+            write = { request, evidence ->
+                when (request.operation) {
+                    CaptureConfigurationOperation.CREATE_DIRECTORY -> {
+                        owner.createDirectory(request.requestedValue, evidence)
+                        null
+                    }
+                    CaptureConfigurationOperation.SET_FILE_NAMING -> owner.setFileNaming(
+                        requireNotNull(request.field), request.requestedValue, evidence)
+                }
+            }, read = { operation -> owner.readCaptureConfiguration(operation) })
+    }
+
     suspend fun createDirectory(name: String): String = backend.createDirectory(name)
 
     suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming =
         backend.setFileNaming(field, value)
+
+    fun maintenanceAccess(request: MaintenanceRequest, eventPollingActive: Boolean): MaintenanceAccess {
+        val owner = backend
+        val hadLiveView = liveViewRunning
+        val preview = liveViewRequest.takeIf { hadLiveView }
+        val access = owner.maintenanceAccess(request, preview)
+        return MaintenanceAccess(access.origin, restoreAvailable = request.allowsRestore,
+            eventStopRequired = eventPollingActive && access.eventStopRequired,
+            liveViewStopRequired = (hadLiveView || owner.liveViewStopRequired) && access.liveViewStopRequired, stopEvents = access.stopEvents,
+            stopLiveView = {
+                if (backend === owner) liveViewRunning = false
+                access.stopLiveView()
+            }, dispatch = access.dispatch, read = access.read,
+            restore = {
+                if (backend === owner) {
+                    liveViewAttemptGeneration += 1
+                    liveViewRunning = false
+                }
+                access.restore()
+                if (backend === owner) liveViewRunning = hadLiveView
+            })
+    }
 
     suspend fun syncCameraClock(): CameraStatus = backend.syncCameraClock()
 
@@ -225,6 +357,17 @@ class CameraRepository(
     fun observedFeatures(): Set<CameraFeature> = backend.observedFeatures()
 
     fun refreshNetworkDiagnostics(): CameraNetworkDiagnostics = backend.networkDiagnostics
+
+    fun recordingAccess(): RecordingAccess {
+        val owner = backend
+        return RecordingAccess(dispatch = { command ->
+            check(backend === owner && active) { "Recording owner changed." }
+            recordingIoScope { owner.recordingCommand(command) }
+        }, read = {
+            check(backend === owner && active) { "Recording owner changed." }
+            recordingIoScope { owner.recordingObservation() }
+        })
+    }
 
     suspend fun toggleRecording(recording: Boolean?): CameraStatus =
         if (recording == true) backend.stopRecording() else backend.startRecording()
@@ -304,8 +447,9 @@ class CameraRepository(
         sizeBytes: Long,
         contentType: String?,
         source: InputStream,
+        evidence: MediaUploadEvidence = MediaUploadEvidence(),
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
-    ): CameraMediaUploadResult = backend.uploadMedia(name, sizeBytes, contentType, source, onProgress)
+    ): CameraMediaUploadResult = backend.uploadMedia(name, sizeBytes, contentType, source, evidence, onProgress)
 
     suspend fun mediaInfo(item: CameraMediaItem): CameraMediaItem = backend.mediaInfo(item)
 
@@ -322,6 +466,7 @@ class CameraRepository(
         backend.setMediaRotation(item, degrees)
 
     suspend fun deleteMedia(item: CameraMediaItem) = backend.deleteMedia(item)
+    suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence) = backend.deleteMedia(item, evidence)
 
     suspend fun restartLiveView(): LiveViewRequest = setLiveViewEnabled(true, restart = true)
 
@@ -330,12 +475,12 @@ class CameraRepository(
             check(active) { "Camera is not connected." }
             if ((liveViewRunning || backend.liveViewStopRequired) && (!enabled || restart)) {
                 // Retain ownership on failure so a later stop/disconnect can retry cleanup.
-                backend.stopLiveView()
                 liveViewRunning = false
+                backend.stopLiveView()
             }
             if (enabled && !liveViewRunning) {
-                backend.startLiveView(liveViewRequest)
-                liveViewRunning = true
+                check(!backend.liveViewStopRequired) { "Live View must be stopped before starting again." }
+                liveViewRunning = startOwnedLiveView()
                 liveViewRequest = liveViewRequest.clampTo(backend.capabilities().liveView)
             }
             liveViewRequest

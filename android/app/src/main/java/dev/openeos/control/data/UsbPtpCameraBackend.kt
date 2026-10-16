@@ -53,9 +53,16 @@ class UsbPtpCameraBackend(
     private val canonUnknownPropertyEvents = linkedMapOf<Pair<Int, Int>, CanonEosUnknownPropertyEvent>()
     private var canonUnknownPropertyEventsTruncated = false
     private var selectedCaptureDestination: Long? = null
+    // Explicit new-flow intent survives uncertain writes and contrary/stale events. It is not readback.
+    private var shootingCaptureDestinationIntent: Long? = null
     private var advertisedStorageTargets: Map<String, Long> = emptyMap()
     private var bulbExposureActive = false
     private var bulbHostTransferPrepared = false
+    private val recordingSequence = java.util.concurrent.atomic.AtomicLong()
+    @Volatile private var recordingEventObservation: RecordingObservation? = null
+    private var recordingStopOwned = false
+    // Same-session route authority survives cancelled/suppressed Stop ACK or observation.
+    private var recordingStopAuthorized = false
     private val canonEventMutex = Mutex()
     private val observedFeatures = ConcurrentHashMap.newKeySet<CameraFeature>()
 
@@ -63,9 +70,11 @@ class UsbPtpCameraBackend(
 
     override suspend fun initialize() {
         if (session != null) return
-        val transport = transportFactory.open(connection)
-        val newSession = PtpSession(transport)
+        var acquiredSession: PtpSession? = null
         try {
+            acquireConnectionResource(acquire = { transportFactory.open(connection) },
+                retain = { acquiredSession = PtpSession(it) })
+            val newSession = requireNotNull(acquiredSession)
             val info = newSession.initialize()
             deviceInfo = info
             session = newSession
@@ -73,12 +82,24 @@ class UsbPtpCameraBackend(
             loadPropertyDescriptors(newSession, info)
             observedFeatures.addAll(setOf(CameraFeature.USB_DIAGNOSTICS, CameraFeature.CAMERA_IDENTITY))
         } catch (exception: Exception) {
-            runCatching { newSession.shutdown() }
+            // Cancellation can occur after the OS opens a handle or during PTP setup.
+            // Retire exactly that acquired owner, even before it became the active session.
+            val cleanupFailure = withContext(NonCancellable) {
+                runCatching { acquiredSession?.shutdownConnectionAttempt() }.exceptionOrNull()
+            }
+            if (session === acquiredSession) session = null
+            if (cleanupFailure != null) throw ConnectionRetirementUnconfirmedException(exception).also {
+                it.addSuppressed(cleanupFailure)
+            }
             throw exception
         }
     }
 
-    override suspend fun close() {
+    override suspend fun close() = closeInternal(strictConnectionAttempt = false)
+
+    override suspend fun closeConnectionAttempt() = closeInternal(strictConnectionAttempt = true)
+
+    private suspend fun closeInternal(strictConnectionAttempt: Boolean) {
         synchronized(mediaFolderLock) {
             resetObservedMediaFolders(null)
             observedFeatures.clear()
@@ -96,6 +117,9 @@ class UsbPtpCameraBackend(
             }
         }
         session = null
+        recordingStopOwned = false
+        recordingStopAuthorized = false
+        recordingEventObservation = null
         deviceInfo = null
         storageSnapshot = emptyList()
         storageError = null
@@ -115,6 +139,7 @@ class UsbPtpCameraBackend(
             canonUnknownPropertyEventsTruncated = false
         }
         selectedCaptureDestination = null
+        shootingCaptureDestinationIntent = null
         advertisedStorageTargets = emptyMap()
         bulbExposureActive = false
         bulbHostTransferPrepared = false
@@ -122,7 +147,7 @@ class UsbPtpCameraBackend(
             // Cleanup may observe its own features; never clear a replacement session's set.
             if (mediaFolderContext == null) observedFeatures.clear()
         }
-        current?.shutdown()
+        if (strictConnectionAttempt) current?.shutdownConnectionAttempt() else current?.shutdown()
     }
 
     override suspend fun info(): CameraInfo {
@@ -145,7 +170,7 @@ class UsbPtpCameraBackend(
         val info = requireDeviceInfo()
         refreshCanonPropertyState(info)
         refreshPropertyValuesIfNeeded(info)
-        val storageResult = refreshStorageSnapshot(info)
+        refreshStorageSnapshot(info, observeStatus = true)
         val batteryLevel = propertyValues[PtpDevicePropertyCode.BATTERY_LEVEL]
             ?.unsignedLong()
             ?.takeIf { it <= 100UL }
@@ -153,7 +178,6 @@ class UsbPtpCameraBackend(
         if (PtpDevicePropertyCode.BATTERY_LEVEL in propertyValues) {
             observedFeatures.add(CameraFeature.BATTERY_STATUS)
         }
-        if (storageResult?.isSuccess == true) observedFeatures.add(CameraFeature.STORAGE_STATUS)
         val standardFreeImages = storageSnapshot.mapNotNull {
             it.freeSpaceImages.takeIf { value -> value >= 0 && value != 0xFFFF_FFFFL }
         }
@@ -170,6 +194,7 @@ class UsbPtpCameraBackend(
             recording = CanonEosPtp.movieRecording(
                 canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS).currentValue,
             ),
+            recordingObservation = recordingEventObservation,
             mode = corePropertyDisplay(
                 CanonEosPropertyCode.AUTO_EXPOSURE_MODE,
                 PtpDevicePropertyCode.EXPOSURE_PROGRAM_MODE,
@@ -458,6 +483,58 @@ class UsbPtpCameraBackend(
         return CameraEvent()
     }
 
+    override fun maintenanceAccess(request: MaintenanceRequest, liveView: LiveViewRequest?): MaintenanceAccess {
+        require(request.action == MaintenanceAction.CLOCK_SYNC) { "USB does not advertise sleep or sensor cleaning." }
+        val owner = requireSession()
+        val property = canonClockPropertyCode(requireDeviceInfo()) ?: unsupported<Int>(CameraFeature.CAMERA_CLOCK_SYNC)
+        fun current() { check(session === owner && canonRemotePrepared) { "USB maintenance session is not prepared or has changed." } }
+        return MaintenanceAccess("USB PTP", restoreAvailable = false, stopEvents = {}, stopLiveView = {}, dispatch = { frozen, evidence ->
+            require(frozen == request); current()
+            val requested = requireNotNull(request.clock).epochMillis / 1_000L
+            require(requested in 0L..UINT32_MAX)
+            evidence.reference(MaintenanceClockReference(requested - 10, requested + 10, null, null))
+            canonEventMutex.withLock {
+                current(); currentCoroutineContext().ensureActive()
+                // Discard queued pre-write clock events; only the next same-property event is verification.
+                owner.executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+                current(); currentCoroutineContext().ensureActive(); evidence.beforeDispatch()
+                owner.executeDataOutOperation(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                    CanonEosPtp.uint32PropertyPayload(property, requested))
+                evidence.responseReceived()
+                currentCoroutineContext().ensureActive(); current()
+                var last: MaintenanceClockObservation? = null
+                withTimeoutOrNull(CANON_CLOCK_SYNC_VERIFY_TIMEOUT_MILLIS) {
+                    while (true) {
+                        currentCoroutineContext().ensureActive(); current()
+                        val payload = owner.executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+                        currentCoroutineContext().ensureActive(); current()
+                        CanonEosPtp.propertyUpdates(payload).lastOrNull { it.propertyCode == property && it.currentValue != null }
+                            ?.currentValue?.let { value ->
+                                last = MaintenanceClockObservation(value)
+                                if (abs(value - requested) <= CANON_CLOCK_SYNC_TOLERANCE_SECONDS) return@withTimeoutOrNull
+                            }
+                        delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
+                    }
+                }
+                val observation = last
+                if (observation == null) evidence.initialUnavailable()
+                else evidence.initialRead(MaintenanceReadback(observation))
+            }
+        }, read = { frozen ->
+            require(frozen == request); current()
+            // No prepare, property request, status, cached value, write, or live-view start.
+            canonEventMutex.withLock {
+                currentCoroutineContext().ensureActive(); current()
+                val payload = owner.executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+                currentCoroutineContext().ensureActive(); current()
+                val value = CanonEosPtp.propertyUpdates(payload)
+                    .lastOrNull { it.propertyCode == property && it.currentValue != null }?.currentValue
+                    ?: error("No fresh same-property USB clock observation.")
+                MaintenanceReadback(MaintenanceClockObservation(value))
+            }
+        }, restore = { error("Clock sync does not restore monitoring.") })
+    }
+
     override suspend fun syncCameraClock(): CameraStatus {
         val info = requireDeviceInfo()
         refreshCanonPropertyState(info)
@@ -722,6 +799,143 @@ class UsbPtpCameraBackend(
         return status()
     }
 
+    override fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess {
+        val ptp = requireSession()
+        val route = shootingSettingRoute(request.key)
+        return ShootingSettingAccess(transport.label, write = { frozen, evidence ->
+            require(frozen == request); check(requireSession() === ptp); writeShootingSetting(frozen, evidence, route)
+        }, read = { frozen -> require(frozen == request); check(requireSession() === ptp); readShootingSetting(frozen, route) })
+    }
+
+    override suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence) =
+        writeShootingSetting(request, evidence, shootingSettingRoute(request.key))
+
+    private suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence,
+        route: UsbShootingSettingRoute) {
+        require(evidence.request == request)
+        val key = request.key
+        val value = request.requestedValue
+        val info = requireDeviceInfo()
+        // Strictly consume pending Canon ability events. No event is not proof of a newly
+        // fetched ability; standard PTP below explicitly re-reads its descriptor before write.
+        // Unlike the legacy status refresh, event-read failures cannot silently reuse cache.
+        if (CanonEosPtp.supportsRemotePreparation(info)) {
+            ensureCanonRemoteMode()
+            drainCanonEvents()
+        }
+        check(shootingSettingRoute(key) == route) { "The selected USB property route changed before dispatch." }
+        val core = shootingCoreProperty(key)
+        if (core != null) {
+            if (route.canonCode != null) {
+                check(setAdvertisedCanonProperty(route.canonCode, value, evidence)) { "The frozen Canon setting route is no longer available." }
+            } else {
+                setProperty(requireNotNull(route.standardCode), value,
+                    if (key == "whitebalance") CameraFeature.WHITE_BALANCE_CONTROL else CameraFeature.EXPOSURE_CONTROL, evidence)
+            }
+            return
+        }
+        when (key) {
+            USB_CAPTURE_TARGET_KEY -> setCanonCaptureTarget(info, value, evidence)
+            USB_CAPTURE_STORAGE_KEY -> setCanonCaptureStorage(info, value, evidence)
+            USB_MOVIE_MODE_KEY -> check(setCanonMovieMode(info, value, evidence)) { "The frozen Canon movie-mode route is no longer available." }
+            else -> {
+                val text = CanonEosPtp.textSettingSpecs.firstOrNull { it.key == key }
+                if (text != null) { setCanonTextMetadata(info, text, value, evidence); return }
+                if (route.canonCode != null) {
+                    check(setAdvertisedCanonProperty(route.canonCode, value, evidence)) { "The frozen Canon setting route is no longer available." }
+                } else {
+                    setProperty(requireNotNull(route.standardCode), value, CameraFeature.ADVANCED_SETTINGS, evidence)
+                }
+            }
+        }
+    }
+
+    private fun shootingCoreProperty(key: String): Pair<Int, Int>? = when (key) {
+        "iso" -> CanonEosPropertyCode.ISO_SPEED to PtpDevicePropertyCode.EXPOSURE_INDEX
+        "shutter" -> CanonEosPropertyCode.SHUTTER_SPEED to PtpDevicePropertyCode.EXPOSURE_TIME
+        "aperture" -> CanonEosPropertyCode.APERTURE to PtpDevicePropertyCode.F_NUMBER
+        "whitebalance" -> CanonEosPropertyCode.WHITE_BALANCE to PtpDevicePropertyCode.WHITE_BALANCE
+        else -> null
+    }
+
+    private data class UsbShootingSettingRoute(val canonCode: Int?, val standardCode: Int?, val text: CanonEosTextSettingSpec?)
+    private fun shootingSettingRoute(key: String): UsbShootingSettingRoute {
+        val core = shootingCoreProperty(key)
+        val text = CanonEosPtp.textSettingSpecs.firstOrNull { it.key == key }
+        val canonCode = when (key) {
+            USB_CAPTURE_TARGET_KEY -> CanonEosPropertyCode.CAPTURE_DESTINATION
+            USB_CAPTURE_STORAGE_KEY -> CanonEosPropertyCode.CURRENT_STORAGE
+            USB_MOVIE_MODE_KEY -> CanonEosPropertyCode.FIXED_MOVIE
+            else -> text?.propertyCode ?: CanonEosPtp.settingSpecs.firstOrNull { it.key == key }?.propertyCode
+                ?: core?.first
+        }?.takeIf { text != null || key in setOf(USB_MOVIE_MODE_KEY, USB_CAPTURE_TARGET_KEY, USB_CAPTURE_STORAGE_KEY) ||
+            canonPropertyState(it).availableValues.isNotEmpty() }
+        val standardCode = core?.second ?: PtpStandardProperties.advancedProperties.firstOrNull { it.key == key }?.propertyCode
+        require(canonCode != null || standardCode != null) { "The USB setting has no readable property route." }
+        return UsbShootingSettingRoute(canonCode, standardCode, text)
+    }
+
+    /** Fresh selected property only. Never prepares remote mode, lists cards or trusts write-side caches. */
+    override suspend fun readShootingSetting(request: ShootingSettingRequest): ShootingSettingObservation =
+        readShootingSetting(request, shootingSettingRoute(request.key))
+
+    private suspend fun readShootingSetting(request: ShootingSettingRequest, route: UsbShootingSettingRoute): ShootingSettingObservation {
+        val ptp = requireSession()
+        val info = requireDeviceInfo()
+        val key = request.key
+        val text = route.text
+        val canonCode = route.canonCode
+        val value = if (canonCode != null) {
+            check(canonRemotePrepared && info.supports(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE)) {
+                "This USB session does not advertise a fresh property read."
+            }
+            canonEventMutex.withLock {
+                check(requireSession() === ptp)
+                val prior = ptp.executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+                check(requireSession() === ptp)
+                applyCanonPropertyUpdates(prior) // Discard older pending events before this explicit request.
+                ptp.executeOperation(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE, listOf(canonCode.toLong()))
+                var observed: String? = null
+                repeat(10) {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    check(requireSession() === ptp)
+                    val payload = ptp.executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+                    check(requireSession() === ptp)
+                    applyCanonPropertyUpdates(payload)
+                    val update = CanonEosPtp.propertyUpdates(payload).lastOrNull { it.propertyCode == canonCode &&
+                        (if (text != null) it.currentText != null else it.currentValue != null) }
+                    if (update != null) {
+                        observed = if (text != null) update.currentText else update.currentValue?.let { raw ->
+                            when (key) {
+                                USB_MOVIE_MODE_KEY -> when (raw) { 0L -> USB_MOVIE_MODE_OFF; 1L -> USB_MOVIE_MODE_ON; else -> null }
+                                USB_CAPTURE_TARGET_KEY -> when {
+                                    raw == CanonEosPtp.CAPTURE_DESTINATION_HOST -> USB_CAPTURE_TARGET_PHONE
+                                    raw in canonPropertyState(canonCode).availableValues -> USB_CAPTURE_TARGET_CARD
+                                    else -> null
+                                }
+                                USB_CAPTURE_STORAGE_KEY -> advertisedStorageTargets.entries.singleOrNull { it.value == raw }?.key
+                                else -> CanonEosPtp.propertyLabel(canonCode, raw)
+                            }
+                        }
+                        return@withLock requireNotNull(observed) { "The USB property read returned an unknown value." }
+                    }
+                    delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
+                }
+                error("The USB session did not return a fresh setting event.")
+            }
+        } else {
+            val code = requireNotNull(route.standardCode)
+            check(info.supports(PtpOperationCode.GET_DEVICE_PROP_VALUE))
+            val descriptor = requireNotNull(propertyDescriptors[code])
+            val raw = ptp.devicePropertyValue(code, descriptor.dataType)
+            check(requireSession() === ptp)
+            propertyValues[code] = raw
+            PtpStandardProperties.options(descriptor).firstOrNull { it.value == raw }?.label
+                ?: error("The USB property read returned an unknown value.")
+        }
+        return ShootingSettingObservation(key, value)
+    }
+
     override suspend fun setSetting(key: String, value: String): CameraStatus {
         val info = requireDeviceInfo()
         refreshCanonPropertyState(info)
@@ -842,6 +1056,7 @@ class UsbPtpCameraBackend(
                 ratingWritable = objectInfo.objectFormat in ratedFormats,
                 streamAvailable = streamAvailable,
                 folder = snapshot.folderFor(objectInfo),
+                deleteWritable = false.takeIf { storageSnapshot.any { storage -> storage.storageId == objectInfo.storageId && storage.accessCapability == 1 } },
             )
         }
         if (handles.isNotEmpty() && items.isEmpty() && firstFailure != null && hostItems.isEmpty()) throw firstFailure!!
@@ -928,6 +1143,7 @@ class UsbPtpCameraBackend(
     }
 
     override suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
+        require(item.isVisualMedia) { "Thumbnails require an unambiguous photo or video item." }
         hostCaptureStore?.takeIf { it.owns(item) }?.let { store ->
             return store.thumbnail(item).also { observedFeatures.add(CameraFeature.MEDIA_THUMBNAIL) }
         }
@@ -937,6 +1153,10 @@ class UsbPtpCameraBackend(
         val context = captureMediaFolderContext(ptp)
         val objectInfo = cachedMediaInfo(context, handle) ?: ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
         ensureMediaListingSession(context)
+        val sourceItem = objectInfo.toMediaItem(folder = observedMediaFolder(context, objectInfo))
+        require(sourceItem.id == item.id && sourceItem.name == item.name && sourceItem.isVisualMedia) {
+            "Camera changed the media identity or type before reading its thumbnail."
+        }
         if (objectInfo.thumbnailSizeBytes <= 0L || objectInfo.thumbnailFormat == 0) {
             throw PtpProtocolException("${item.name} does not advertise an embedded PTP thumbnail.")
         }
@@ -962,6 +1182,7 @@ class UsbPtpCameraBackend(
     }
 
     override suspend fun mediaPreview(item: CameraMediaItem): CameraMediaPreview {
+        require(item.isPhotoMedia) { "Display preview requires an unambiguous photo item." }
         hostCaptureStore?.takeIf { it.owns(item) }?.let { store ->
             return store.preview(item).also { observedFeatures.add(CameraFeature.MEDIA_PREVIEW) }
         }
@@ -972,7 +1193,10 @@ class UsbPtpCameraBackend(
         val objectInfo = cachedMediaInfo(context, handle) ?: ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
         ensureMediaListingSession(context)
         val mediaItem = objectInfo.toMediaItem(folder = observedMediaFolder(context, objectInfo))
-        if (!mediaItem.previewAvailable) {
+        require(mediaItem.id == item.id && mediaItem.name == item.name) {
+            "Camera changed the media identity before reading its preview."
+        }
+        if (!mediaItem.isPhotoMedia || !mediaItem.previewAvailable) {
             throw PtpProtocolException("${item.name} does not advertise a bounded JPEG or PNG preview object.")
         }
         val output = BoundedByteArrayOutputStream(MAX_PTP_MEDIA_PREVIEW_BYTES)
@@ -999,6 +1223,9 @@ class UsbPtpCameraBackend(
         val objectInfo = cachedMediaInfo(context, handle) ?: ptp.objectInfo(handle).also { rememberMediaInfo(context, it) }
         ensureMediaListingSession(context)
         val mediaItem = objectInfo.toMediaItem(folder = observedMediaFolder(context, objectInfo))
+        require(mediaItem.id == item.id && mediaItem.name == item.name && mediaItem.isVideoMedia) {
+            "Camera changed the media identity or type before playback."
+        }
         require(mediaItem.sizeBytes != null && mediaItem.sizeBytes > 0L) {
             "${item.name} does not report a valid video size."
         }
@@ -1045,6 +1272,7 @@ class UsbPtpCameraBackend(
         sizeBytes: Long,
         contentType: String?,
         source: InputStream,
+        evidence: MediaUploadEvidence,
         onProgress: (CameraMediaTransferProgress) -> Unit,
     ): CameraMediaUploadResult {
         val info = requireDeviceInfo()
@@ -1094,19 +1322,22 @@ class UsbPtpCameraBackend(
             modificationDate = "",
             keywords = "",
         )
+        var dispatchStarted = false
         val sent = try {
             ptp.uploadObject(
                 storageId = target.storageId,
                 parentObject = PTP_ROOT_OBJECT_HANDLE,
                 objectInfo = outgoing,
                 source = source,
+                beforeDispatch = { evidence.beforeDispatch(); dispatchStarted = true },
             ) { transferred, total ->
                 onProgress(CameraMediaTransferProgress(transferred, total))
             }
         } catch (exception: CancellationException) {
-            abortUploadSession(ptp)
+            if (dispatchStarted) abortUploadSession(ptp)
             throw exception
         } catch (exception: Exception) {
+            if (!dispatchStarted) throw exception
             abortUploadSession(ptp)
             throw PtpProtocolException(
                 "USB PTP upload failed after SendObjectInfo; reconnect the camera before another command.",
@@ -1126,13 +1357,17 @@ class UsbPtpCameraBackend(
             )
         }
         rememberMediaInfo(context, readback)
-        refreshStorageSnapshot(info)
         val item = readback.toMediaItem(
             streamAvailable = requireDeviceInfo().supports(PtpOperationCode.GET_PARTIAL_OBJECT),
             folder = observedMediaFolder(context, readback),
         )
         observedFeatures.addAll(setOf(CameraFeature.MEDIA_UPLOAD, CameraFeature.MEDIA_BROWSER))
-        return CameraMediaUploadResult(item = item, bytesTransferred = sizeBytes)
+        val result = CameraMediaUploadResult(item = item, bytesTransferred = sizeBytes).also(evidence.onConfirmed)
+        // A later storage refresh cannot erase this operation's verified handle/readback.
+        withContext(NonCancellable) {
+            try { refreshStorageSnapshot(info) } catch (_: Exception) { /* Optional freshness only. */ }
+        }
+        return result
     }
 
     private suspend fun abortUploadSession(ptp: PtpSession) {
@@ -1156,6 +1391,7 @@ class UsbPtpCameraBackend(
                 ratingWritable = rating != null,
                 streamAvailable = item.streamAvailable,
                 folder = observedMediaFolder(context, objectInfo),
+                deleteWritable = false.takeIf { storageSnapshot.any { storage -> storage.storageId == objectInfo.storageId && storage.accessCapability == 1 } },
             )
         }
     }
@@ -1236,6 +1472,7 @@ class UsbPtpCameraBackend(
                         ratingWritable = true,
                         streamAvailable = item.streamAvailable,
                         folder = observedMediaFolder(context, objectInfo),
+                        deleteWritable = false.takeIf { storageSnapshot.any { storage -> storage.storageId == objectInfo.storageId && storage.accessCapability == 1 } },
                     )
                 }
             }
@@ -1247,14 +1484,31 @@ class UsbPtpCameraBackend(
         )
     }
 
-    override suspend fun deleteMedia(item: CameraMediaItem) {
+    override suspend fun deleteMedia(item: CameraMediaItem) = deleteMedia(item, MediaDeleteEvidence())
+
+    override suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence) {
+        check(item.protected != true && item.deleteWritable != false) { "This media item cannot be deleted." }
         hostCaptureStore?.takeIf { it.owns(item) }?.let { store ->
-            store.delete(item)
+            store.delete(item, evidence)
             observedFeatures.add(CameraFeature.MEDIA_DELETE)
             return
         }
+        val handle = mediaDeletePtpHandle(item.id)
         requireOperation(PtpOperationCode.DELETE_OBJECT, CameraFeature.MEDIA_DELETE)
-        requireSession().deleteObject(item.ptpHandle())
+        val ptp = requireSession()
+        val context = captureMediaFolderContext(ptp)
+        val guarded = evidence.copy(beforeDispatch = {
+            synchronized(mediaFolderLock) {
+                if (mediaFolderContext?.session !== context.session) throw CancellationException("USB media session changed.")
+            }
+            val known = cachedMediaInfo(context, handle)
+            check(known?.protectionStatus != PtpProtectionStatus.READ_ONLY) { "Known protected media cannot be deleted." }
+            check(storageSnapshot.none { it.storageId == known?.storageId && it.accessCapability == 1 }) {
+                "Known read-only storage does not permit deletion."
+            }
+            evidence.beforeDispatch()
+        })
+        ptp.deleteObject(handle, evidence = guarded)
         observedFeatures.add(CameraFeature.MEDIA_DELETE)
     }
 
@@ -1620,12 +1874,18 @@ class UsbPtpCameraBackend(
 
     private suspend fun prepareCanonCaptureDestination(): Boolean {
         val state = canonPropertyState(CanonEosPropertyCode.CAPTURE_DESTINATION)
+        val intent = shootingCaptureDestinationIntent
+        if (intent != null && state.currentValue != intent) {
+            val target = if (intent == CanonEosPtp.CAPTURE_DESTINATION_HOST) "phone" else "memory-card"
+            throw PtpProtocolException("Canon EOS has not confirmed the explicitly selected $target capture destination.")
+        }
         if (state.currentValue != CanonEosPtp.CAPTURE_DESTINATION_HOST) return false
         val info = requireDeviceInfo()
         val hostTransferReady = supportsCanonHostCaptureTarget(info) &&
             prepareCanonHostCapacity(info)
         if (hostTransferReady) return true
-        if (selectedCaptureDestination == CanonEosPtp.CAPTURE_DESTINATION_HOST) {
+        if (selectedCaptureDestination == CanonEosPtp.CAPTURE_DESTINATION_HOST ||
+            shootingCaptureDestinationIntent == CanonEosPtp.CAPTURE_DESTINATION_HOST) {
             throw PtpProtocolException(
                 "Canon EOS cannot prepare the explicitly selected phone capture destination."
             )
@@ -1672,7 +1932,7 @@ class UsbPtpCameraBackend(
         selectedCaptureDestination = null
     }
 
-    private suspend fun setCanonCaptureTarget(info: PtpDeviceInfo, label: String) {
+    private suspend fun setCanonCaptureTarget(info: PtpDeviceInfo, label: String, evidence: ShootingSettingEvidence? = null) {
         val control = captureTargetControl(info)
             ?: unsupported<CameraSettingControl>(CameraFeature.ADVANCED_SETTINGS)
         if (label !in control.values) {
@@ -1686,70 +1946,119 @@ class UsbPtpCameraBackend(
             else -> throw PtpProtocolException("Value '$label' is not an available Android USB capture target.")
         }
         ensureCanonRemoteMode()
+        evidence?.beforeDispatch()
+        // Record operator intent before dispatch; cancellation or a lost response must not permit card fallback.
+        if (evidence != null) shootingCaptureDestinationIntent = target
         requireSession().executeDataOutOperation(
             operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
             payload = CanonEosPtp.uint32PropertyPayload(CanonEosPropertyCode.CAPTURE_DESTINATION, target),
         )
+        evidence?.responseReceived()
+        if (evidence != null) return
         synchronized(canonProperties) {
             canonProperties[CanonEosPropertyCode.CAPTURE_DESTINATION] = state.copy(currentValue = target)
         }
         selectedCaptureDestination = target
+        shootingCaptureDestinationIntent = null
     }
 
-    private suspend fun setCanonMovieRecording(recording: Boolean): CameraStatus {
+    override suspend fun recordingObservation(): RecordingObservation? = recordingIoScope {
+        val owner = requireSession()
+        val info = requireDeviceInfo()
+        if (!canonRemotePrepared || !info.supports(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE)) return@recordingIoScope null
+        canonEventMutex.withLock { readCanonRecordingObservationLocked(owner) }
+    }
+
+    /** Existing advertised selected-property reader: drain, request exact EVF status, then match its event. */
+    private suspend fun readCanonRecordingObservationLocked(owner: PtpSession): RecordingObservation? {
+        if (!canonRemotePrepared || !requireDeviceInfo().supports(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE)) return null
+        check(session === owner)
+        currentCoroutineContext().ensureActive()
+        val prior = owner.executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+        check(session === owner)
+        applyCanonPropertyUpdates(prior) // Queued events update display only, never lifecycle evidence.
+        owner.executeOperation(CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE,
+            listOf(CanonEosPropertyCode.EVF_RECORD_STATUS.toLong()))
+        repeat(10) {
+            currentCoroutineContext().ensureActive()
+            check(session === owner)
+            val payload = owner.executeDataInOperation(CanonEosOperationCode.GET_EVENT)
+            check(session === owner)
+            applyCanonPropertyUpdates(payload)
+            val values = CanonEosPtp.propertyUpdates(payload).filter {
+                it.propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS && it.currentValue != null
+            }.mapNotNull { it.currentValue }.distinct()
+            if (values.isNotEmpty()) {
+                check(values.size == 1) { "Conflicting USB recording values." }
+                val value = requireNotNull(CanonEosPtp.movieRecording(values.single())) { "Unknown USB recording value." }
+                return RecordingObservation(value, recordingSequence.incrementAndGet(), RecordingObservationSource.USB_EVENT)
+                    .also { recordingEventObservation = it; recordingStopOwned = value; if (value) recordingStopAuthorized = true }
+            }
+            delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
+        }
+        return null
+    }
+
+    private suspend fun setCanonMovieRecording(recording: Boolean): CameraStatus = recordingIoScope {
+        val command = if (recording) RecordingCommand.START else RecordingCommand.STOP
+        val evidence = currentCoroutineContext()[RecordingRequestEvidence] ?: RecordingRequestEvidence(command)
+        val owner = requireSession()
+        evidence.observationFloor = recordingSequence.get()
         val info = requireDeviceInfo()
         refreshCanonPropertyState(info)
         val state = canonPropertyState(CanonEosPropertyCode.EVF_RECORD_STATUS)
-        if (!CanonEosPtp.supportsMovieRecording(info, state.availableValues)) {
+        if (!CanonEosPtp.supportsMovieRecording(info, state.availableValues) && (recording || !recordingStopAuthorized)) {
             unsupported<Unit>(CameraFeature.VIDEO_RECORDING)
         }
-
-        val target = if (recording) {
-            CanonEosPtp.MOVIE_RECORD_TARGET_CARD
-        } else {
-            CanonEosPtp.MOVIE_RECORD_TARGET_NONE
-        }
-        if (state.currentValue != target) {
-            ensureCanonRemoteMode()
-            var lastReadback: Long? = null
-            val verified = canonEventMutex.withLock {
+        val target = if (recording) CanonEosPtp.MOVIE_RECORD_TARGET_CARD else CanonEosPtp.MOVIE_RECORD_TARGET_NONE
+        ensureCanonRemoteMode()
+        canonEventMutex.withLock {
+            check(session === owner)
+            // A cached target is insufficient: only a supported explicit read can authorize the no-op.
+            val before = if (state.currentValue == target) {
+                try { readCanonRecordingObservationLocked(owner) }
+                catch (failure: CancellationException) { throw failure }
+                catch (_: Exception) { null }
+            } else null
+            if (before?.recording == recording) {
+                recordingStopAuthorized = true // This validated no-op also retains the same-session Stop route.
+                evidence.noOp()
+                evidence.observe(before)
+                if (!recording) recordingStopOwned = false
+            } else {
                 drainCanonEventsLocked()
-                requireSession().executeDataOutOperation(
-                    operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
-                    payload = CanonEosPtp.uint16PropertyPayload(
-                        CanonEosPropertyCode.EVF_RECORD_STATUS,
-                        target.toInt(),
-                    ),
-                )
-                withTimeoutOrNull(CANON_MOVIE_RECORD_VERIFY_TIMEOUT_MILLIS) {
-                    while (true) {
-                        val payload = drainCanonEventsLocked()
-                        CanonEosPtp.propertyUpdates(payload)
-                            .lastOrNull {
-                                it.propertyCode == CanonEosPropertyCode.EVF_RECORD_STATUS && it.currentValue != null
-                            }
-                            ?.currentValue
-                            ?.let { readback ->
-                                lastReadback = readback
-                                if (readback == target) return@withTimeoutOrNull readback
-                            }
-                        delay(CANON_EVENT_POLL_INTERVAL_MILLIS)
-                    }
+                evidence.observationFloor = recordingSequence.get()
+                check(session === owner)
+                currentCoroutineContext().ensureActive()
+                val priorStopOwned = recordingStopOwned
+                evidence.beginRequest()
+                recordingStopAuthorized = true
+                recordingStopOwned = true
+                try {
+                    owner.executeDataOutOperation(CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
+                        CanonEosPtp.uint16PropertyPayload(CanonEosPropertyCode.EVF_RECORD_STATUS, target.toInt()))
+                } catch (failure: PtpResponseException) {
+                    evidence.rejected = true
+                    recordingStopOwned = priorStopOwned
+                    throw failure
                 }
-            }
-            if (verified == null) {
-                throw PtpProtocolException(
-                    "Canon EOS accepted the movie-record command but did not report EVFRecordStatus=$target " +
-                        "within ${CANON_MOVIE_RECORD_VERIFY_TIMEOUT_MILLIS / 1_000} seconds " +
-                        "(last=${lastReadback ?: "none"})."
-                )
+                evidence.acknowledge()
+                if (!recording) recordingStopOwned = false
+                val observed = try { readCanonRecordingObservationLocked(owner) }
+                catch (failure: CancellationException) { throw failure }
+                catch (failure: Exception) { throw RecordingStatusReadbackException(command, failure) }
+                evidence.observe(observed)
+                if (observed == null) throw RecordingStatusReadbackException(command,
+                    PtpProtocolException("Canon EOS accepted the movie-record command; fresh EVF recording status is unavailable."))
             }
         }
         observedFeatures.add(CameraFeature.VIDEO_RECORDING)
-        return status()
+        try { status().also { evidence.observe(it.recordingObservation) } }
+        catch (failure: CancellationException) { throw failure }
+        catch (failure: Exception) { throw RecordingStatusReadbackException(command, failure) }
     }
 
-    private suspend fun setCanonMovieMode(info: PtpDeviceInfo, label: String): Boolean {
+    private suspend fun setCanonMovieMode(info: PtpDeviceInfo, label: String, evidence: ShootingSettingEvidence? = null): Boolean {
         val control = movieModeControl(info)
             ?: unsupported<CameraSettingControl>(CameraFeature.ADVANCED_SETTINGS)
         if (label !in control.values) {
@@ -1763,6 +2072,7 @@ class UsbPtpCameraBackend(
         var lastReadback: Long? = null
         val verified = canonEventMutex.withLock {
             drainCanonEventsLocked()
+            evidence?.beforeDispatch()
             requireSession().executeOperation(
                 operationCode = if (target == 1L) {
                     CanonEosOperationCode.MOVIE_SELECT_SWITCH_ON
@@ -1771,6 +2081,8 @@ class UsbPtpCameraBackend(
                 },
                 parameters = emptyList(),
             )
+            evidence?.responseReceived()
+            if (evidence != null) return true
             withTimeoutOrNull(CANON_MOVIE_MODE_VERIFY_TIMEOUT_MILLIS) {
                 while (true) {
                     val payload = drainCanonEventsLocked()
@@ -1801,6 +2113,7 @@ class UsbPtpCameraBackend(
         info: PtpDeviceInfo,
         spec: CanonEosTextSettingSpec,
         value: String,
+        evidence: ShootingSettingEvidence? = null,
     ) {
         if (!CanonEosPtp.supportsTextMetadata(info)) unsupported<Unit>(CameraFeature.ADVANCED_SETTINGS)
         if (!CanonEosPtp.validTextMetadata(value)) {
@@ -1819,10 +2132,13 @@ class UsbPtpCameraBackend(
         var lastReadback: String? = null
         val verified = canonEventMutex.withLock {
             drainCanonEventsLocked()
+            evidence?.beforeDispatch()
             requireSession().executeDataOutOperation(
                 operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
                 payload = CanonEosPtp.textPropertyPayload(spec.propertyCode, value),
             )
+            evidence?.responseReceived()
+            if (evidence != null) return
             requireSession().executeOperation(
                 CanonEosOperationCode.REQUEST_DEVICE_PROP_VALUE,
                 listOf(spec.propertyCode.toLong()),
@@ -1873,8 +2189,9 @@ class UsbPtpCameraBackend(
 
     private suspend fun readStorageSnapshot(context: MediaFolderContext): List<PtpStorageInfo> {
         val ptp = context.session
+        ensureMediaListingSession(context)
         val storageIds = ptp.storageIds()
-        synchronized(mediaFolderLock) {
+        completeMediaOperation(context) {
             if (isCurrentMediaFolderContext(context)) {
                 val refreshedIds = storageIds.toSet()
                 if (confirmedStorageIds?.let { it != refreshedIds } == true) {
@@ -1883,15 +2200,27 @@ class UsbPtpCameraBackend(
                 confirmedStorageIds = refreshedIds
             }
         }
-        return storageIds.map { storageId -> ptp.storageInfo(storageId) }
+        return storageIds.map { storageId ->
+            ensureMediaListingSession(context)
+            ptp.storageInfo(storageId)
+        }
     }
 
-    private suspend fun refreshStorageSnapshot(info: PtpDeviceInfo): Result<List<PtpStorageInfo>>? {
+    private suspend fun refreshStorageSnapshot(
+        info: PtpDeviceInfo,
+        observeStatus: Boolean = false,
+    ): Result<List<PtpStorageInfo>>? {
         if (!supportsStorage(info)) return null
         val context = captureMediaFolderContext(requireSession())
-        return runCatching { readStorageSnapshot(context) }.also { result ->
+        val result = runCatching { readStorageSnapshot(context) }.onFailure {
+            if (it is CancellationException) throw it
+        }
+        // Success and rejection belong to the captured session, including after a newer listing.
+        return completeMediaOperation(context) {
             storageSnapshot = result.getOrDefault(emptyList())
             storageError = result.exceptionOrNull()?.message
+            if (observeStatus && result.isSuccess) observedFeatures.add(CameraFeature.STORAGE_STATUS)
+            result
         }
     }
 
@@ -1937,12 +2266,13 @@ class UsbPtpCameraBackend(
         standardPropertyCode: Int,
         label: String,
         feature: CameraFeature,
+        evidence: ShootingSettingEvidence? = null,
     ) {
-        if (setAdvertisedCanonProperty(canonPropertyCode, label)) return
-        setProperty(standardPropertyCode, label, feature)
+        if (setAdvertisedCanonProperty(canonPropertyCode, label, evidence)) return
+        setProperty(standardPropertyCode, label, feature, evidence)
     }
 
-    private suspend fun setAdvertisedCanonProperty(propertyCode: Int, label: String): Boolean {
+    private suspend fun setAdvertisedCanonProperty(propertyCode: Int, label: String, evidence: ShootingSettingEvidence? = null): Boolean {
         if (!CanonEosPtp.supportsPropertyControl(requireDeviceInfo())) return false
         val state = canonPropertyState(propertyCode)
         if (state.availableValues.isEmpty()) return false
@@ -1952,27 +2282,38 @@ class UsbPtpCameraBackend(
                     "0x${propertyCode.toString(16).uppercase().padStart(4, '0')}."
             )
         ensureCanonRemoteMode()
+        evidence?.beforeDispatch()
         requireSession().executeDataOutOperation(
             operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
             payload = CanonEosPtp.propertyPayload(propertyCode, value),
         )
+        evidence?.responseReceived()
+        if (evidence != null) return true
         synchronized(canonProperties) {
             canonProperties[propertyCode] = state.copy(currentValue = value)
         }
         return true
     }
 
-    private suspend fun setProperty(propertyCode: Int, label: String, feature: CameraFeature) {
+    private suspend fun setProperty(propertyCode: Int, label: String, feature: CameraFeature, evidence: ShootingSettingEvidence? = null) {
         val info = requireDeviceInfo()
         if (!info.supports(PtpOperationCode.SET_DEVICE_PROP_VALUE)) unsupported<Unit>(feature)
-        val descriptor = propertyDescriptors[propertyCode] ?: unsupported<PtpDevicePropertyDescriptor>(feature)
+        val descriptor = if (evidence != null) {
+            check(info.supports(PtpOperationCode.GET_DEVICE_PROP_DESC))
+            requireSession().devicePropertyDescriptor(propertyCode).also { fresh ->
+                propertyDescriptors = propertyDescriptors + (propertyCode to fresh)
+            }
+        } else propertyDescriptors[propertyCode] ?: unsupported<PtpDevicePropertyDescriptor>(feature)
         if (!descriptor.writable) unsupported<Unit>(feature)
         val option = PtpStandardProperties.options(descriptor).firstOrNull { it.label == label }
             ?: throw PtpProtocolException(
                 "Value '$label' is not advertised for USB PTP property " +
                     "0x${propertyCode.toString(16).uppercase().padStart(4, '0')}."
             )
+        evidence?.beforeDispatch()
         requireSession().setDevicePropertyValue(propertyCode, descriptor.dataType, option.value)
+        evidence?.responseReceived()
+        if (evidence != null) return
         propertyValues[propertyCode] = option.value
         propertyErrors.remove(propertyCode)
         lastPropertyRefreshAtMillis = System.currentTimeMillis()
@@ -2093,7 +2434,7 @@ class UsbPtpCameraBackend(
         )
     }
 
-    private suspend fun setCanonCaptureStorage(info: PtpDeviceInfo, label: String) {
+    private suspend fun setCanonCaptureStorage(info: PtpDeviceInfo, label: String, evidence: ShootingSettingEvidence? = null) {
         if (!CanonEosPtp.supportsPropertyControl(info) || !supportsStorage(info)) {
             unsupported<Unit>(CameraFeature.ADVANCED_SETTINGS)
         }
@@ -2111,10 +2452,13 @@ class UsbPtpCameraBackend(
             throw PtpProtocolException("Recording card '$label' is no longer available.")
         }
         ensureCanonRemoteMode()
+        evidence?.beforeDispatch()
         requireSession().executeDataOutOperation(
             operationCode = CanonEosOperationCode.SET_DEVICE_PROP_VALUE_EX,
             payload = CanonEosPtp.propertyPayload(CanonEosPropertyCode.CURRENT_STORAGE, targetId),
         )
+        evidence?.responseReceived()
+        if (evidence != null) return
         synchronized(canonProperties) {
             val state = canonProperties[CanonEosPropertyCode.CURRENT_STORAGE] ?: CanonEosPropertyState()
             canonProperties[CanonEosPropertyCode.CURRENT_STORAGE] = state.copy(currentValue = targetId)
@@ -2364,6 +2708,7 @@ private fun PtpObjectInfo.toMediaItem(
     ratingWritable: Boolean? = null,
     streamAvailable: Boolean = false,
     folder: CameraMediaFolder? = null,
+    deleteWritable: Boolean? = null,
 ): CameraMediaItem = CameraMediaItem(
     id = "ptp:${handle.toString(16).uppercase(Locale.ROOT).padStart(8, '0')}",
     name = filename,
@@ -2384,6 +2729,7 @@ private fun PtpObjectInfo.toMediaItem(
     widthPixels = imageWidth.takeIf { it in 1..Int.MAX_VALUE.toLong() }?.toInt(),
     heightPixels = imageHeight.takeIf { it in 1..Int.MAX_VALUE.toLong() }?.toInt(),
     folder = folder,
+    deleteWritable = deleteWritable,
 )
 
 private fun CameraMediaItem.ptpHandle(): Long {
@@ -2522,7 +2868,7 @@ private fun contentTypeFor(filename: String, kind: String): String =
         "cr2", "cr3" -> "image/x-canon-raw"
         "mp4" -> "video/mp4"
         "mov" -> "video/quicktime"
-        else -> if (kind == "video") "video/*" else "application/octet-stream"
+        else -> "application/octet-stream"
     }
 
 private fun validatePtpUploadName(name: String): String {

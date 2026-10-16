@@ -22,6 +22,7 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -145,6 +146,7 @@ class CcapiClient(
     password: String = "",
     private val rtpDestinationAddress: String? = null,
     private val rtpSessionFactory: CcapiRtpSessionFactory? = null,
+    private val jpegFrameValidator: ((ByteArray) -> Boolean)? = null,
 ) {
     private val baseUrl = baseUrl.trimEnd('/')
     private val httpClient = (httpClient ?: OkHttpClient()).newBuilder().apply {
@@ -159,6 +161,22 @@ class CcapiClient(
             }
         }
     }.build()
+    // Capture configuration only: no redirect, authentication replay, HTTP cache or retry.
+    private val captureConfigurationHttpClient = this.httpClient.newBuilder()
+        .retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false)
+        .authenticator(okhttp3.Authenticator.NONE).proxyAuthenticator(okhttp3.Authenticator.NONE).cache(null)
+        .apply { if (this@CcapiClient.httpClient.callTimeoutMillis == 0 ||
+            this@CcapiClient.httpClient.callTimeoutMillis > 15_000) callTimeout(15, TimeUnit.SECONDS) }
+        .addNetworkInterceptor { chain ->
+            val response = chain.proceed(chain.request())
+            if (response.code in setOf(408, 421, 503)) {
+                val code = response.code
+                chain.request().tag(RecordingRequestEvidence::class.java)?.rejected = true
+                response.close()
+                throw IOException("Single-attempt request rejected (HTTP $code).")
+            }
+            response
+        }.build()
     private val mutationHttpClient = this.httpClient.newBuilder()
         .retryOnConnectionFailure(false)
         .build()
@@ -171,16 +189,17 @@ class CcapiClient(
         .cache(null)
         .addNetworkInterceptor { chain ->
             val response = chain.proceed(chain.request())
-            if (!response.isSuccessful) {
+            if (!automaticJpegOriginalResponseAdmitted(response.code, response.headers("Content-Range").isNotEmpty())) {
                 // Fail before OkHttp's follow-up interceptor can repeat a 503/Retry-After: 0.
+                // Even a complete-looking JPEG in a 206/201/range response is not an original.
                 response.close()
-                throw IOException("Original media request failed: HTTP ${response.code}.")
+                throw IOException("Original media request did not return a complete HTTP 200 response.")
             }
             response
         }
         .build()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-    private val eventHttpClient = this.httpClient.newBuilder()
+    private val eventHttpClient = captureConfigurationHttpClient.newBuilder()
         .readTimeout(CCAPI_EVENT_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .callTimeout(CCAPI_EVENT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
@@ -200,11 +219,15 @@ class CcapiClient(
 
     private var apiVersionPrefixes = listOf("/ccapi/ver100")
     private var isRecording: Boolean? = null
+    private val recordingSequence = java.util.concurrent.atomic.AtomicLong()
+    private val recordingEventFence = RecordingEventFence()
+    private var retainedRecordingOperation: CcapiApiOperation? = null
     private var bulbExposureActive = false
     private val heldAutofocus = HeldAutofocusSession()
     private val heldShutter = ShutterReleaseSession()
     private var latestTemperatureStatus: CameraTemperatureStatus? = null
     private val settingPathsByKey = mutableMapOf<String, String>()
+    private val settingReadPathsByKey = mutableMapOf<String, String>()
     private val settingValuesByKey = mutableMapOf<String, Set<String>>()
     private val structuredSettingPathsByKey = mutableMapOf<String, String>()
     private val structuredSettingValuesByKey = mutableMapOf<String, Set<String>>()
@@ -224,13 +247,21 @@ class CcapiClient(
     private var liveViewSizeControlSupported = true
     private val rejectedLiveViewSizes = mutableSetOf<LiveViewSize>()
     private var activeLiveViewSize = LiveViewSize.MEDIUM
-    private var latestLiveViewGeometry: CcapiLiveViewGeometry? = null
+    private val liveViewGeometry = LiveViewGeometryState<CcapiLiveViewGeometry>()
     private var activeLiveViewSource: LiveViewSource? = null
+        set(value) {
+            if (field != value) liveViewGeometry.reset()
+            field = value
+        }
     private var activeJpegLiveViewOperations: CcapiJpegLiveViewOperations? = null
     private var activeMultipartLiveViewOperations: CcapiMultipartOperations? = null
     private var multipartLiveViewSession: CcapiMultipartLiveViewSession? = null
+    private var firstLiveViewFrame: LiveViewFrame? = null
+    private var liveViewStartAttempt = 0L
     // Owned before sending a start: a missing response cannot prove that the camera stayed stopped.
     @Volatile private var pendingLiveViewStop: (suspend () -> Unit)? = null
+    @Volatile private var pendingLiveViewLocalClose: (suspend () -> Unit)? = null
+    @Volatile private var pendingLiveViewMaintenanceOwned = false
     private var simulatorEventSequence = 0L
     private var mediaDescendingOrderSupported: Boolean? = null
     private val mediaOrderingInfoCache = object : LinkedHashMap<String, MediaOrderingInfo>(32, 0.75f, true) {
@@ -246,8 +277,47 @@ class CcapiClient(
     fun currentLiveViewSource(): LiveViewSource? = activeLiveViewSource
 
     val liveViewStopRequired: Boolean get() = pendingLiveViewStop != null
+    val maintenanceStopOwned: Boolean get() = pendingLiveViewStop != null && pendingLiveViewMaintenanceOwned
+    var maintenanceSessionOwned: Boolean = false
+        private set
+
+    fun retireLiveViewLocally() {
+        firstLiveViewFrame = null
+        liveViewGeometry.retire()
+        multipartLiveViewSession?.close()
+        multipartLiveViewSession = null
+        nativeLiveViewSession?.close()
+        nativeLiveViewSession = null
+        activeLiveViewSource = null
+        liveViewGeometry.retire()
+        // pendingLiveViewStop retains its original remote routes/session until acknowledgement.
+    }
+
+    suspend fun retireMaintenanceLocally() {
+        liveViewGeometry.retire()
+        firstLiveViewFrame = null
+        activeEventCall.getAndSet(null)?.cancel()
+        pendingLiveViewLocalClose?.invoke()
+        pendingLiveViewLocalClose = null
+        closeCcapiMultipartSession(multipartLiveViewSession)
+        multipartLiveViewSession = null
+        nativeLiveViewSession?.close()
+        nativeLiveViewSession = null
+        // No remote Stop, event DELETE, retry, or mode write during lifecycle retirement.
+    }
+
+    suspend fun closeMaintenanceSession(): Boolean = maintenanceCloseOnce(liveViewStopRequired,
+        releasePhysical = { maintenancePhysicalReleaseOnce(
+            autofocus = { heldAutofocus.retryStop() },
+            shutter = { if (heldShutter.hasPendingRelease) retryShutterRelease() }) },
+        stop = { maintenanceStopRecoveryScope { stopLiveView() } }, retireLocal = { retireMaintenanceLocally() })
 
     suspend fun close() {
+        liveViewGeometry.retire()
+        if (maintenanceSessionOwned) {
+            check(!closeMaintenanceSession()) { "Live View Stop remains unconfirmed after local retirement." }
+            return
+        }
         runCatching { heldAutofocus.retryStop() }
         runCatching { stopEventPolling() }
         runCatching { retryShutterRelease() }
@@ -255,6 +325,7 @@ class CcapiClient(
     }
 
     suspend fun initialize() {
+        liveViewGeometry.reset()
         discoveryTrace.clear()
         discoveryTraceTruncated = false
         val isLocalOrSim = try {
@@ -667,6 +738,7 @@ class CcapiClient(
                 batteryLevel = batteryLevel,
                 batteryStatus = batteryLevelStr,
                 recording = isRecording,
+                recordingObservation = null, // Canon event queues provide change hints, not a fresh REC snapshot.
                 mode = modeVal,
                 mediaAvailable = storageInfo?.available,
                 remainingMinutes = null,
@@ -690,7 +762,10 @@ class CcapiClient(
                 temperature = latestTemperatureStatus,
             )
         } else {
-            getJson("/ccapi/status").toCameraStatus().also {
+            getJson("/ccapi/status").toCameraStatus().let { value ->
+                value.copy(recordingObservation = value.recording?.let { RecordingObservation(it,
+                    recordingSequence.incrementAndGet(), RecordingObservationSource.SIMULATOR_STATUS) })
+            }.also {
                 latestTemperatureStatus = it.temperature
                 observedFeatures.addAll(setOf(CameraFeature.BATTERY_STATUS, CameraFeature.STORAGE_STATUS))
                 if (it.recordableShots != null || it.remainingRecordingSeconds != null) {
@@ -884,6 +959,7 @@ class CcapiClient(
             val url = "$baseUrl${pollOperation.path}".toHttpUrl().newBuilder()
                 .addQueryParameter(timeoutParameter.first, timeoutParameter.second)
                 .build()
+            val recordingReadEpoch = recordingEventFence.capture()
             val json = requestEventJson(
                 Request.Builder()
                     .url(url)
@@ -892,7 +968,7 @@ class CcapiClient(
                     .header("Cache-Control", "no-cache")
                     .build(),
             )
-            applyRecordingEvent(json)
+            recordingEventFence.accept(recordingReadEpoch) { applyRecordingEvent(json) }
             CameraEvent(changedKeys = json.safeTopLevelKeys())
         } else {
             val url = "$baseUrl/ccapi/events".toHttpUrl().newBuilder()
@@ -917,16 +993,10 @@ class CcapiClient(
 
     private fun applyRecordingEvent(event: JSONObject) {
         val recbutton = event.optJSONObject("recbutton") ?: return
-        val state = when {
-            recbutton.has("action") && !recbutton.isNull("action") -> recbutton.opt("action") as? String
-            recbutton.has("status") && !recbutton.isNull("status") -> recbutton.opt("status") as? String
-            else -> null
-        }
-        isRecording = when (state) {
-            "start" -> true
-            "stop" -> false
-            else -> return
-        }
+        val fields = recbutton.keys().asSequence().associateWith { recbutton.opt(it) }
+        val recording = recordingEventValue(fields) ?: return
+        isRecording = recording
+        // Preserve display-compatible event hints only. Queued delivery cannot prove current REC.
     }
 
     suspend fun stopEventPolling() {
@@ -975,45 +1045,140 @@ class CcapiClient(
     }
 
     suspend fun setSetting(key: String, value: String): CameraStatus {
-        val status = if (isRealCamera) {
+        writeSetting(key, value)
+        return status()
+    }
+
+    fun shootingSettingAccess(request: ShootingSettingRequest): ShootingSettingAccess {
+        val route = resolveShootingSettingRoute(request)
+        return ShootingSettingAccess("Canon CCAPI", write = { frozen, evidence ->
+            require(frozen == request); writeShootingSetting(frozen, evidence, route)
+        }, read = { frozen -> require(frozen == request); readShootingSetting(frozen, route) })
+    }
+
+    private fun resolveShootingSettingRoute(request: ShootingSettingRequest): ShootingSettingRoute? {
+        if (!isRealCamera) return null
+        val base = request.key.splitStructuredSettingKey()?.first
+        val actual = base ?: shootingSettingAliases(request.key).firstOrNull { it in settingReadPathsByKey }
+            ?: error("The setting has no advertised read route.")
+        val read = requireNotNull(settingReadPathsByKey[actual])
+        val write = structuredSettingPathsByKey[request.key] ?: requireNotNull(settingPathsByKey[actual])
+        return ShootingSettingRoute(actual, read, write, actual.takeIf { read.endsWith("/shooting/settings") })
+    }
+
+    suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence) =
+        writeShootingSetting(request, evidence, resolveShootingSettingRoute(request))
+
+    private suspend fun writeShootingSetting(request: ShootingSettingRequest, evidence: ShootingSettingEvidence, route: ShootingSettingRoute?) {
+        require(evidence.request == request)
+        withContext(ShootingSettingWriteContext(evidence, route)) {
+            val key = request.key
+            val value = request.requestedValue
+            if (isRealCamera) {
+                val fresh = freshShootingSetting(request, route)
+                require(acceptsShootingSettingValue(fresh, value)) { "The requested value is no longer advertised." }
+                route?.key?.let { settingValuesByKey[it] = fresh.values.toSet() }
+            }
+            when (key) {
+                "iso", "shutter", "aperture", "whitebalance" -> if (isRealCamera) {
+                    putSettingValue(shootingSettingAliases(key), value)
+                } else if (key == "whitebalance") {
+                    patchJson("/ccapi/white-balance", JSONObject().put("white_balance", value))
+                } else patchJson("/ccapi/exposure", JSONObject().put(key, value))
+                else -> writeSetting(key, value)
+            }
+            observedFeatures.add(featureForSetting(key))
+        }
+    }
+
+    /** One cache-bypassing GET for the selected advertised resource. Never enumerates contents. */
+    suspend fun readShootingSetting(request: ShootingSettingRequest): ShootingSettingObservation =
+        readShootingSetting(request, resolveShootingSettingRoute(request))
+
+    private suspend fun readShootingSetting(request: ShootingSettingRequest, route: ShootingSettingRoute?): ShootingSettingObservation {
+        val setting = freshShootingSetting(request, route)
+        return ShootingSettingObservation(request.key, setting.value)
+    }
+
+    private suspend fun freshShootingSetting(request: ShootingSettingRequest, route: ShootingSettingRoute?): CameraSettingControl {
+        val key = request.key
+        val body = if (isRealCamera) {
+            val frozen = requireNotNull(route)
+            val response = getJson(frozen.readPath, strictMediaJsonLimit = 65_536, fresh = true, shootingRead = true)
+            if (frozen.aggregateKey == null) response else requireNotNull(response.optJSONObject(frozen.aggregateKey))
+        } else {
+            val capabilities = getJson("/ccapi/capabilities", strictMediaJsonLimit = 65_536, fresh = true, shootingRead = true)
+            if (key in setOf("iso", "shutter", "aperture", "whitebalance")) {
+                val exposure = getJson("/ccapi/status", strictMediaJsonLimit = 65_536, fresh = true, shootingRead = true).getJSONObject("exposure")
+                val field = if (key == "whitebalance") "white_balance" else key
+                JSONObject().put("value", exposure.opt(field)).put("ability", capabilities.optJSONArray(field))
+            } else requireNotNull(capabilities.optJSONObject(key))
+        }
+        val structured = key.splitStructuredSettingKey()
+        val integer = key == ZOOM_SETTING_KEY || key in SOUND_RECORDING_LEVEL_SETTING_KEYS ||
+            key in FOCUS_BRACKETING_INTEGER_SETTING_KEYS || structured?.first == WB_SHIFT_SETTING_KEY
+        val rawValue = if (structured != null) body.optJSONObject("value")?.opt(structured.second)
+            else if (key == MOVIE_MODE_SETTING_KEY) body.opt("status") ?: body.opt("value") else body.opt("value")
+        val current = if (integer) rawValue.toExactJsonInt()?.toString() else rawValue as? String
+        val rawAbility = if (structured != null) body.optJSONObject("ability")?.opt(structured.second) else body.opt("ability")
+        val choices = if (key == MOVIE_MODE_SETTING_KEY && rawAbility == null) MOVIE_MODE_VALUES.toList()
+        else if (integer && rawAbility is JSONObject) rawAbility.toBoundedIntegerRangeValues(1024)
+        else if (rawAbility is org.json.JSONArray && rawAbility.length() <= 1024) (0 until rawAbility.length()).map { index ->
+            val raw = rawAbility.opt(index)
+            if (integer) raw.toExactJsonInt()?.toString() ?: raw as? String ?: error("Invalid numeric setting ability.")
+            else raw as? String ?: error("Invalid setting ability.")
+        } else error("The camera did not return a fresh setting ability.")
+        return CameraSettingControl(key, key, requireNotNull(current), choices).also {
+            require(acceptsShootingSettingObservation(it)) { "The camera did not return a valid current setting." }
+        }
+    }
+
+    private fun shootingSettingAliases(key: String): List<String> = when (key) {
+        "shutter" -> listOf("tv", "shutterspeed", "shutter")
+        "aperture" -> listOf("av", "aperture")
+        "whitebalance" -> listOf("wb", "whitebalance", "white_balance")
+        else -> listOf(key)
+    }
+
+    private suspend fun writeSetting(key: String, value: String) {
+        if (isRealCamera) {
             when {
                 key.equals(ZOOM_SETTING_KEY, ignoreCase = true) -> postZoomValue(value)
                 key.equals(MOVIE_MODE_SETTING_KEY, ignoreCase = true) -> postMovieModeValue(value)
                 key.lowercase() in CARD_SELECTION_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
                 key.lowercase() in DEVICE_FUNCTION_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
                 key.lowercase() in SOUND_RECORDING_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
                 key.lowercase() in SOUND_RECORDING_LEVEL_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putIntegerSettingValue(key.lowercase(), value)
                 }
                 key.lowercase() in FOCUS_BRACKETING_STRING_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
                 key.lowercase() in FOCUS_BRACKETING_INTEGER_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putIntegerSettingValue(key.lowercase(), value)
                 }
                 key.lowercase() in MOVIE_SETTING_KEYS -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putSettingValue(listOf(key.lowercase()), value)
                 }
                 key.equals(DIRECTORY_SELECTION_SETTING_KEY, ignoreCase = true) -> {
-                    loadShootingSettings()
+                    if (currentCoroutineContext()[ShootingSettingWriteContext] == null) loadShootingSettings()
                     putSettingValue(listOf(DIRECTORY_SELECTION_SETTING_KEY), value)
                 }
                 else -> putSettingValue(listOf(key), value)
             }
-            status()
         } else {
             when {
                 key.equals(ZOOM_SETTING_KEY, ignoreCase = true) -> {
@@ -1105,75 +1270,225 @@ class CcapiClient(
                     "${featureForSetting(key).label} is not supported by the simulator.",
                 )
             }
-            status()
         }
         observedFeatures.add(featureForSetting(key))
-        return status
     }
 
-    suspend fun createDirectory(name: String): String {
+    suspend fun createDirectory(name: String, evidence: CaptureConfigurationEvidence = CaptureConfigurationEvidence(
+        CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, name),
+    )): String = captureConfigurationOperation(evidence) {
+        require(evidence.request == CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, name))
         require(DIRECTORY_CREATE_NAME_PATTERN.matches(name)) {
             "Directory name must be empty or exactly five uppercase letters, numbers, or underscores."
         }
-        val response = if (isRealCamera) {
-            val operations = directoryOperations()
-                ?: throw UnsupportedOperationException(
-                    "${CameraFeature.DIRECTORY_CONTROL.label} is not supported by this camera's advertised CCAPI ability.",
-                )
-            postJson(
-                operations.create.path,
-                JSONObject().put("directoryname", name),
-            )
-        } else {
-            postJson("/ccapi/directory", JSONObject().put("directoryname", name))
-        }
-        val created = response.opt("directoryname") as? String
-        require(created != null && DIRECTORY_CREATED_NAME_PATTERN.matches(created)) {
-            "Camera returned an invalid created directory name."
-        }
+        val path = if (isRealCamera) {
+            (directoryOperations() ?: throw UnsupportedOperationException(
+                "${CameraFeature.DIRECTORY_CONTROL.label} is not supported by this camera's advertised CCAPI ability.",
+            )).create.path
+        } else "/ccapi/directory"
+        val response = postJson(path, JSONObject().put("directoryname", name), captureEvidence = evidence,
+            captureResponse = { body ->
+                val created = body.opt("directoryname") as? String
+                require(created != null && DIRECTORY_CREATED_NAME_PATTERN.matches(created)) {
+                    "Camera returned an invalid created directory name."
+                }
+                evidence.acknowledge(created)
+            })
+        val created = response.getString("directoryname")
         observedFeatures.add(CameraFeature.DIRECTORY_CONTROL)
-        if (isRealCamera) loadShootingSettings()
-        return created
+        if (isRealCamera) {
+            // Preserve the existing read count, but never treat aggregate/cached settings
+            // as proof that the canonical directory-selection GET succeeded.
+            var observed = false
+            loadShootingSettings(directoryReadback = { readback ->
+                observed = true
+                if (readback == null) evidence.unavailable() else evidence.observe(readback)
+            })
+            if (!observed) evidence.unavailable()
+        }
+        created
     }
 
-    suspend fun setFileNaming(field: CameraFileNamingField, value: String): CameraFileNaming {
+    suspend fun setFileNaming(field: CameraFileNamingField, value: String,
+        evidence: CaptureConfigurationEvidence = CaptureConfigurationEvidence(
+            CaptureConfigurationRequest(CaptureConfigurationOperation.SET_FILE_NAMING, value, field),
+        ),
+    ): CameraFileNaming = captureConfigurationOperation(evidence) {
+        require(evidence.request == CaptureConfigurationRequest(CaptureConfigurationOperation.SET_FILE_NAMING, value, field))
+        val frozenOperations = if (isRealCamera) fileNamingOperations() else null
         val current = loadFileNaming()
             ?: error("Camera did not advertise a valid complete Canon file-naming endpoint group.")
         require(current.accepts(field, value)) {
             "Value '$value' is not valid for Canon file-naming field ${field.wireName}."
         }
         val updated = if (isRealCamera) {
-            val operations = fileNamingOperations()
+            val operations = frozenOperations
                 ?: error("Camera did not advertise the complete Canon file-naming endpoint group.")
             val operation = operations.getValue(field).second
             val responseKey = FILE_NAMING_ENDPOINTS.getValue(field).responseKey
             val requestValue: Any = when (field) {
-                CameraFileNamingField.MOVIE_REEL_NUMBER,
-                CameraFileNamingField.MOVIE_CLIP_NUMBER,
-                -> value.toInt()
+                CameraFileNamingField.MOVIE_REEL_NUMBER, CameraFileNamingField.MOVIE_CLIP_NUMBER -> value.toInt()
                 else -> value
             }
-            val response = putJson(operation.path, JSONObject().put(responseKey, requestValue))
-            check(response.opt(responseKey) == requestValue) {
-                "Canon file-naming control returned an invalid update response."
-            }
+            putJson(operation.path, JSONObject().put(responseKey, requestValue), captureEvidence = evidence,
+                captureResponse = { response ->
+                    check(response.opt(responseKey) == requestValue) {
+                        "Canon file-naming control returned an invalid update response."
+                    }
+                    evidence.acknowledge(value)
+                })
             fileNamingLoaded = false
-            loadFileNaming(force = true)
+            kotlinx.coroutines.withTimeout(15_000L) { loadFileNaming(force = true, fresh = true) }
                 ?: error("Canon file-naming control returned an invalid state after update.")
         } else {
-            putJson(
-                "/ccapi/file-naming/${field.wireName}",
-                JSONObject().put("value", value),
-            ).toValidatedFileNaming()
-                ?: error("Simulator returned an invalid file-naming state.")
+            putJson("/ccapi/file-naming/${field.wireName}", JSONObject().put("value", value),
+                captureEvidence = evidence, captureResponse = { response ->
+                    val state = response.toValidatedFileNaming()
+                        ?: error("Simulator returned an invalid file-naming state.")
+                    check(state.value(field) == value) { "Simulator returned an invalid update response." }
+                    evidence.acknowledge(value)
+                    evidence.observe(CaptureConfigurationReadback(fileNaming = state))
+                }).toValidatedFileNaming() ?: error("Simulator returned an invalid file-naming state.")
         }
+        evidence.observe(CaptureConfigurationReadback(fileNaming = updated))
         check(updated.value(field) == value) {
             "Canon file-naming control did not return the requested value on refresh."
         }
         fileNamingState = updated
         fileNamingLoaded = true
         observedFeatures.add(CameraFeature.FILE_NAMING_CONTROL)
-        return updated
+        updated
+    }
+
+    /** Explicit recovery is a fresh bounded read of only this configuration group. */
+    suspend fun readCaptureConfiguration(operation: CaptureConfigurationOperation): CaptureConfigurationReadback =
+        kotlinx.coroutines.withTimeout(15_000L) {
+            when (operation) {
+                CaptureConfigurationOperation.CREATE_DIRECTORY -> {
+                    val body = if (isRealCamera) {
+                        val read = directoryOperations()?.read ?: error("Directory selection is not advertised.")
+                        getJson(read.path, strictMediaJsonLimit = 65_536, fresh = true)
+                            .toValidatedDirectorySelectionSetting()
+                    } else getJson("/ccapi/capabilities", strictMediaJsonLimit = 65_536, fresh = true)
+                        .optJSONObject(DIRECTORY_SELECTION_SETTING_KEY)?.toValidatedDirectorySelectionSetting()
+                    val selected = body?.opt("value") as? String
+                    check(selected != null && DIRECTORY_SELECTION_PATTERN.matches(selected)) { "Directory readback unavailable." }
+                    CaptureConfigurationReadback(directorySelection = selected,
+                        directoryValues = requireNotNull(body).getJSONArray("ability").toStringList())
+                }
+                CaptureConfigurationOperation.SET_FILE_NAMING -> CaptureConfigurationReadback(
+                    fileNaming = loadFileNaming(force = true, fresh = true) ?: error("Complete file-naming readback unavailable."),
+                )
+            }
+        }
+
+    /** One selected route per intent. Recovery bypasses cached status/capability aggregators. */
+    fun maintenanceAccess(request: MaintenanceRequest, liveView: LiveViewRequest?): MaintenanceAccess {
+        val clockOperations = if (isRealCamera) cameraClockOperations() else null
+        val clockRead = clockOperations?.first?.path ?: "/ccapi/ver100/functions/datetime".takeUnless { isRealCamera }
+        val clockWrite = clockOperations?.second?.path ?: "/ccapi/ver100/functions/datetime".takeUnless { isRealCamera }
+        val cleaning = if (isRealCamera) sensorCleaningOperation()?.path else "/ccapi/sensor-cleaning"
+        val sleep = if (isRealCamera) cameraSleepWritePath else "/ccapi/camera-sleep"
+        val originalStop = pendingLiveViewStop
+        val originalSource = activeLiveViewSource
+        val restoreRequest = liveView?.copy(source = originalSource ?: liveView.source, size = activeLiveViewSize)
+        val stopEventsPath = if (isRealCamera) eventPollingOperations()?.second?.path else null
+        val probe = if (isRealCamera) (apiOperation("GET", "/devicestatus/batterylist")
+            ?: apiOperation("GET", "/devicestatus/battery"))?.path else "/ccapi/status"
+        when (request.action) {
+            MaintenanceAction.CLOCK_SYNC -> check(clockRead != null && clockWrite != null)
+            MaintenanceAction.SENSOR_CLEANING -> check(cleaning != null)
+            MaintenanceAction.SLEEP -> check(sleep != null)
+        }
+        if (request.needsStop) maintenanceSessionOwned = true
+        return MaintenanceAccess("Canon CCAPI", eventStopRequired = stopEventsPath != null,
+            liveViewStopRequired = pendingLiveViewStop != null, stopEvents = {
+            activeEventCall.getAndSet(null)?.cancel()
+            stopEventsPath?.let { path -> maintenanceJson(Request.Builder().url("$baseUrl$path").delete().build(), 204, empty = true) }
+        }, stopLiveView = {
+            check(pendingLiveViewStop === originalStop) { "Live View stop owner changed." }
+            if (originalStop != null) pendingLiveViewMaintenanceOwned = true
+            maintenanceIoScope { stopLiveView() }
+        }, dispatch = { frozen, evidence ->
+            require(frozen == request)
+            requireShutterReleased()
+            check(isRecording != true && !bulbExposureActive) { "Stop recording and Bulb before maintenance." }
+            val builder = Request.Builder()
+            val expected: Int
+            when (request.action) {
+                MaintenanceAction.CLOCK_SYNC -> {
+                    val target = requireNotNull(request.clock)
+                    val instant = java.time.Instant.ofEpochMilli(target.epochMillis)
+                    val time = instant.atZone(java.time.ZoneOffset.ofTotalSeconds(target.offsetSeconds))
+                    evidence.reference(MaintenanceClockReference(instant.epochSecond - 10, instant.epochSecond + 10,
+                        target.offsetSeconds / 60, target.daylightSaving))
+                    builder.url("$baseUrl${requireNotNull(clockWrite)}").put(JSONObject()
+                        .put("datetime", CANON_DATETIME_FORMATTER.format(time)).put("dst", target.daylightSaving)
+                        .toString().toRequestBody(jsonMediaType))
+                    expected = 200
+                }
+                MaintenanceAction.SENSOR_CLEANING -> {
+                    builder.url("$baseUrl${requireNotNull(cleaning)}").post(JSONObject().put("autopoweroff", request.autoPowerOff)
+                        .toString().toRequestBody(jsonMediaType)); expected = if (isRealCamera) 200 else 204
+                }
+                MaintenanceAction.SLEEP -> {
+                    val payload = if (isRealCamera) JSONObject().put("value", AUTO_POWER_OFF_IMMEDIATELY) else JSONObject()
+                    builder.url("$baseUrl${requireNotNull(sleep)}")
+                    if (isRealCamera) builder.put(payload.toString().toRequestBody(jsonMediaType))
+                    else builder.post(payload.toString().toRequestBody(jsonMediaType))
+                    expected = if (isRealCamera) 202 else 204
+                }
+            }
+            maintenanceJson(builder.build(), expected, evidence)
+        }, read = { frozen ->
+            require(frozen == request)
+            if (request.action == MaintenanceAction.CLOCK_SYNC) {
+                val body = maintenanceJson(Request.Builder().url("$baseUrl${requireNotNull(clockRead)}")
+                    .header("Cache-Control", "no-cache, no-store").get().build(), 200)
+                val (clock, daylight) = parseCameraClock(requireNotNull(body))
+                MaintenanceReadback(MaintenanceClockObservation(clock.toEpochSecond(), clock.offset.totalSeconds / 60, daylight))
+            } else {
+                val body = maintenanceJson(Request.Builder().url("$baseUrl${requireNotNull(probe) { "No required maintenance probe advertised." }}")
+                    .header("Cache-Control", "no-cache, no-store").get().build(), 200)
+                if (isRealCamera) {
+                    val required = requireNotNull(body)
+                    val list = when {
+                        probe?.endsWith("/batterylist") == true || required.has("batterylist") -> requireNotNull(required.optJSONArray("batterylist"))
+                        required.has("battery") -> requireNotNull(required.optJSONArray("battery"))
+                        else -> null
+                    }
+                    val levels = if (list != null) (0 until list.length()).map { list.optJSONObject(it)?.opt("level") }
+                        else listOf(required.opt("level"))
+                    check(validMaintenanceBatteryLevels(levels)) { "Required battery observation is malformed." }
+                }
+                else check(body?.opt("connected") == true)
+                MaintenanceReadback()
+            }
+        }, restore = {
+            requireShutterReleased(); check(isRecording != true && !bulbExposureActive)
+            if (restoreRequest != null) maintenanceIoScope { startLiveView(restoreRequest) }
+        })
+    }
+
+    private suspend fun maintenanceJson(request: Request, expected: Int? = null,
+        evidence: MaintenanceEvidence? = null, empty: Boolean = false): JSONObject? = withContext(Dispatchers.IO) {
+        currentCoroutineContext()[MaintenanceIoContext]?.requireActive?.invoke()
+        val call = newCameraCall(request, true)
+        val watchers = maintenanceCancellationWatchers { call.cancel() }
+        try {
+            currentCoroutineContext().ensureActive(); evidence?.beforeDispatch()
+            call.execute().use { response ->
+                requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                    response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                check(expected == null || response.code == expected) { "Maintenance response status was not accepted." }
+                val text = response.body?.let { body -> body.byteStream().use { readShootingSettingResponseText(it, body.contentLength()) } }.orEmpty()
+                if (empty) requireMaintenanceEmptyResponse(response.code, response.headers("Content-Length"), response.headers("Transfer-Encoding"), text)
+                val body = if (text.isEmpty()) null else JSONObject(text)
+                if (evidence?.request?.action == MaintenanceAction.CLOCK_SYNC) parseCameraClock(requireNotNull(body))
+                evidence?.responseReceived()
+                body
+            }
+        } finally { watchers.forEach { it.cancel() } }
     }
 
     suspend fun sleepCamera() {
@@ -1245,44 +1560,64 @@ class CcapiClient(
         return status()
     }
 
-    suspend fun startRecording(): CameraStatus {
-        refreshTemperatureStatusForRestrictedCommand()
-        requireMovieRecordingAllowed()
-        if (isRealCamera) {
-            val operation = recordingOperation()
-            if (enforceAdvertisedOperations && operation == null) {
-                error("Camera did not advertise movie recording control.")
-            }
-            commandOk(
-                pathSuffix = "/shooting/control/recbutton",
-                payload = JSONObject().put("action", "start"),
-                operation = operation,
-            )
-            isRecording = true
-        } else {
-            postJson("/ccapi/record/start", JSONObject())
+    suspend fun recordingObservation(): RecordingObservation? = recordingIoScope {
+        if (isRealCamera) null else {
+            val value = getJson("/ccapi/status").strictRecordingStatus()
+            value?.let { RecordingObservation(it, recordingSequence.incrementAndGet(), RecordingObservationSource.SIMULATOR_STATUS) }
         }
-        observedFeatures.add(CameraFeature.VIDEO_RECORDING)
-        return status()
     }
 
-    suspend fun stopRecording(): CameraStatus {
-        if (isRealCamera) {
-            val operation = recordingOperation()
-            if (enforceAdvertisedOperations && operation == null) {
-                error("Camera did not advertise movie recording control.")
+    suspend fun startRecording(): CameraStatus = recordingIoScope {
+        refreshTemperatureStatusForRestrictedCommand()
+        requireMovieRecordingAllowed()
+        recordingCommand(RecordingCommand.START)
+    }
+
+    suspend fun stopRecording(): CameraStatus = recordingCommand(RecordingCommand.STOP)
+
+    private suspend fun recordingCommand(command: RecordingCommand): CameraStatus = recordingIoScope {
+        val operation = if (isRealCamera) {
+            if (command == RecordingCommand.STOP) retainedRecordingOperation ?: recordingOperation() else recordingOperation()
+        } else null
+        if (isRealCamera && enforceAdvertisedOperations && operation == null) {
+            error("Camera did not advertise movie recording control.")
+        }
+        val evidence = currentCoroutineContext()[RecordingRequestEvidence] ?: RecordingRequestEvidence(command)
+        if (operation != null) retainedRecordingOperation = operation
+        evidence.onAdmission = { recordingEventFence.commandAdmission(); recordingSequence.get() }
+        try {
+            if (isRealCamera) {
+                commandOk(
+                    pathSuffix = "/shooting/control/recbutton",
+                    payload = JSONObject().put("action", if (command == RecordingCommand.START) "start" else "stop"),
+                    operation = operation,
+                    recordingEvidence = evidence,
+                )
+            } else {
+                postJson("/ccapi/record/${if (command == RecordingCommand.START) "start" else "stop"}", JSONObject(), evidence)
             }
-            commandOk(
-                pathSuffix = "/shooting/control/recbutton",
-                payload = JSONObject().put("action", "stop"),
-                operation = operation,
-            )
-            isRecording = false
-        } else {
-            postJson("/ccapi/record/stop", JSONObject())
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Exception) {
+            if (evidence.unresolved && (exception is IOException || exception is JSONException)) {
+                throw RecordingCommandUnconfirmedException(command, exception)
+            }
+            throw exception
+        } finally {
+            if (evidence.attempted) recordingEventFence.commandCompleted()
         }
         observedFeatures.add(CameraFeature.VIDEO_RECORDING)
-        return status()
+        evidence.acknowledge()
+        recordingStatusAfterAcknowledgement(command).also { evidence.observe(it.recordingObservation) }
+    }
+
+    private suspend fun recordingStatusAfterAcknowledgement(command: RecordingCommand): CameraStatus = try {
+        status()
+    } catch (exception: CancellationException) {
+        throw exception
+    } catch (exception: Exception) {
+        currentCoroutineContext().ensureActive()
+        throw RecordingStatusReadbackException(command, exception)
     }
 
     suspend fun captureStill(autofocus: Boolean = true): CameraStatus {
@@ -1562,7 +1897,9 @@ class CcapiClient(
         check(activeLiveViewSource != null) {
             "Canon Live View magnification requires an active Live View session."
         }
+        val owner = liveViewGeometry.owner()
         if (!settingsLoaded) loadShootingSettings()
+        liveViewGeometry.requireOwner(owner)
         val operations = liveViewMagnificationOperations()
             ?: error("Camera did not advertise same-version GET and PUT Canon Live View magnification control.")
         val setting = liveViewMagnificationSetting
@@ -1571,18 +1908,32 @@ class CcapiClient(
             "${magnification.value}x Live View magnification is not advertised by this camera."
         }
 
-        putOk(
-            operations.second.path,
-            JSONObject().put("value", magnification.value.toString()),
-        )
-        val readback = getJson(operations.first.path).toValidatedLiveViewMagnificationSetting()
-            ?: error("Camera returned an invalid Live View magnification readback.")
-        check(readback.current == magnification) {
-            "Camera accepted Live View magnification but reported ${readback.current.value}x instead of ${magnification.value}x."
+        // Retire before dispatch, including lost/failed acknowledgements. Reads begun during
+        // the mutation are not eligible for the post-command geometry revision.
+        val change = liveViewGeometry.beginMutation(owner)
+        val multipart = multipartLiveViewSession
+        multipart?.discardPendingFrames()
+        firstLiveViewFrame = null
+        try {
+            putOk(
+                operations.second.path,
+                JSONObject().put("value", magnification.value.toString()),
+                checkOwner = { liveViewGeometry.requireRevision(change) },
+            )
+            liveViewGeometry.requireRevision(change)
+            val readback = getJson(operations.first.path, fresh = true).toValidatedLiveViewMagnificationSetting()
+                ?: error("Camera returned an invalid Live View magnification readback.")
+            liveViewGeometry.requireRevision(change)
+            check(readback.current == magnification) {
+                "Camera accepted Live View magnification but reported ${readback.current.value}x instead of ${magnification.value}x."
+            }
+            liveViewMagnificationSetting = readback
+            observedFeatures.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+            return LiveViewMagnificationResult(ok = true, magnification = readback.current)
+        } finally {
+            multipart?.discardPendingFrames()
+            liveViewGeometry.finishMutation(change)
         }
-        liveViewMagnificationSetting = readback
-        observedFeatures.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
-        return LiveViewMagnificationResult(ok = true, magnification = readback.current)
     }
 
     suspend fun listMedia(
@@ -1628,6 +1979,7 @@ class CcapiClient(
     }
 
     suspend fun mediaThumbnail(item: CameraMediaItem): CameraMediaThumbnail {
+        require(item.isVisualMedia) { "Thumbnails require an unambiguous photo or video item." }
         val (bytes, contentType) = mediaImageRepresentation(
             item = item,
             kind = "thumbnail",
@@ -1644,7 +1996,7 @@ class CcapiClient(
         } else {
             item.kind.isCcapiPreviewKind()
         }
-        require(previewEligible) {
+        require(item.isPhotoMedia && previewEligible) {
             "CCAPI display preview is available only for JPEG or CR3 items."
         }
         val (bytes, contentType) = mediaImageRepresentation(
@@ -1673,6 +2025,9 @@ class CcapiClient(
         } else {
             item
         }
+        require(playbackItem.id == item.id && playbackItem.name == item.name && playbackItem.isVideoMedia) {
+            "Camera changed the media identity or type before playback."
+        }
         val path = mediaItemPath(playbackItem)
         val paths = if (isRealCamera) listOf(path, "$path?kind=main", "$path?type=main") else listOf(path)
         return OkHttpCameraMediaStreamSource(
@@ -1697,7 +2052,7 @@ class CcapiClient(
         if (isRealCamera && enforceAdvertisedOperations && !supportsApi("GET", "/contents")) {
             error("Camera did not advertise CCAPI media browsing.")
         }
-        return parseMediaInfo(item, getJson("${mediaItemPath(item)}?kind=info"))
+        return parseMediaInfo(item, getJson("${mediaItemPath(item)}?kind=info", strictMediaJsonLimit = MAX_MEDIA_METADATA_JSON_BYTES))
     }
 
     suspend fun setMediaProtection(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
@@ -1706,7 +2061,7 @@ class CcapiClient(
             action = "protect",
             value = if (enabled) "enable" else "disable",
             feature = CameraFeature.MEDIA_PROTECT,
-            matches = { it.protected == enabled },
+            target = MediaMetadataTarget(MediaMetadataField.PROTECTION, if (enabled) 1 else 0),
         )
 
     suspend fun setMediaArchived(item: CameraMediaItem, enabled: Boolean): CameraMediaItem =
@@ -1715,7 +2070,7 @@ class CcapiClient(
             action = "archive",
             value = if (enabled) "enable" else "disable",
             feature = CameraFeature.MEDIA_ARCHIVE,
-            matches = { it.archived == enabled },
+            target = MediaMetadataTarget(MediaMetadataField.ARCHIVE, if (enabled) 1 else 0),
         )
 
     suspend fun setMediaRating(item: CameraMediaItem, rating: Int): CameraMediaItem {
@@ -1725,7 +2080,7 @@ class CcapiClient(
             action = "rating",
             value = if (rating == 0) "off" else rating.toString(),
             feature = CameraFeature.MEDIA_RATING,
-            matches = { it.rating == rating },
+            target = MediaMetadataTarget(MediaMetadataField.RATING, rating),
         )
     }
 
@@ -1736,7 +2091,7 @@ class CcapiClient(
             action = "rotate",
             value = degrees.toString(),
             feature = CameraFeature.MEDIA_ROTATE,
-            matches = { it.rotationDegrees == degrees },
+            target = MediaMetadataTarget(MediaMetadataField.ROTATION, degrees),
         )
     }
 
@@ -1745,7 +2100,7 @@ class CcapiClient(
         action: String,
         value: String,
         feature: CameraFeature,
-        matches: (CameraMediaItem) -> Boolean,
+        target: MediaMetadataTarget,
     ): CameraMediaItem {
         if (isRealCamera && enforceAdvertisedOperations && !supportsMediaModify()) {
             error("Camera did not advertise ${feature.label.lowercase()}.")
@@ -1755,7 +2110,7 @@ class CcapiClient(
         var latest = item
         repeat(3) { attempt ->
             latest = mediaInfo(item)
-            if (matches(latest)) {
+            if (target.matches(item.id, latest.metadataReadback())) {
                 observedFeatures.add(feature)
                 return latest
             }
@@ -1772,27 +2127,20 @@ class CcapiClient(
     }
 
     private fun parseMediaInfo(item: CameraMediaItem, body: JSONObject): CameraMediaItem {
-        val ratingValue = body.optString("rating").let { value ->
-            when (value) {
-                "off" -> 0
-                else -> value.toIntOrNull()?.takeIf { it in 1..5 }
-            }
-        }
+        val canonicalName = if (isRealCamera) mediaItemPath(item).substringAfterLast('/') else item.name
         return item.copy(
+            // Canon may omit identity/type fields. Explicit returned evidence must not be hidden.
+            id = if (body.has("id")) body.opt("id") as? String ?: "" else item.id,
+            name = if (body.has("name")) body.opt("name") as? String ?: "" else canonicalName,
+            kind = if (body.has("kind")) body.opt("kind") as? String ?: "" else canonicalName.mediaKind(),
+            contentType = body.cameraMediaContentType(),
             sizeBytes = body.optLong("filesize").takeIf { it > 0L } ?: item.sizeBytes,
             captureTime = body.optString("lastmodifieddate").takeIf { it.isNotBlank() } ?: item.captureTime,
-            protected = when (body.optString("protect")) {
-                "enable" -> true
-                "disable" -> false
-                else -> null
-            },
-            archived = when (body.optString("archive")) {
-                "enable" -> true
-                "disable" -> false
-                else -> null
-            },
-            rating = ratingValue,
-            rotationDegrees = body.optString("rotate").toIntOrNull()?.takeIf { it in MEDIA_ROTATIONS },
+            protected = canonicalMediaMetadataFlag(body.opt("protect")),
+            deleteWritable = if (body.has("deleteWritable")) normalizedMediaMetadataBoolean(body.opt("deleteWritable")) else item.deleteWritable,
+            archived = canonicalMediaMetadataFlag(body.opt("archive")),
+            rating = canonicalMediaMetadataRating(body.opt("rating")),
+            rotationDegrees = canonicalMediaMetadataRotation(body.opt("rotate")),
         )
     }
 
@@ -1901,6 +2249,7 @@ class CcapiClient(
         sizeBytes: Long,
         contentType: String?,
         source: InputStream,
+        evidence: MediaUploadEvidence = MediaUploadEvidence(),
         onProgress: (CameraMediaTransferProgress) -> Unit = {},
     ): CameraMediaUploadResult = withContext(Dispatchers.IO) {
         if (isRealCamera) {
@@ -1913,6 +2262,7 @@ class CcapiClient(
             .addQueryParameter("filename", name)
             .build()
         val mediaType = (contentType ?: "application/octet-stream").substringBefore(';').trim().toMediaType()
+        val uploadContext = currentCoroutineContext()
         var bytesTransferred = 0L
         val body = object : RequestBody() {
             override fun contentType() = mediaType
@@ -1922,10 +2272,12 @@ class CcapiClient(
                 val buffer = ByteArray(MEDIA_TRANSFER_BUFFER_BYTES)
                 onProgress(CameraMediaTransferProgress(0L, sizeBytes))
                 while (bytesTransferred < sizeBytes) {
+                    uploadContext.ensureActive()
                     val requested = minOf(buffer.size.toLong(), sizeBytes - bytesTransferred).toInt()
                     val count = source.read(buffer, 0, requested)
                     check(count >= 0) { "Upload source ended after $bytesTransferred of $sizeBytes bytes." }
                     if (count == 0) continue
+                    uploadContext.ensureActive()
                     sink.write(buffer, 0, count)
                     bytesTransferred += count
                     onProgress(CameraMediaTransferProgress(bytesTransferred, sizeBytes))
@@ -1944,6 +2296,8 @@ class CcapiClient(
         }
         try {
             val response = try {
+                currentCoroutineContext().ensureActive()
+                evidence.beforeDispatch()
                 call.execute()
             } catch (exception: CancellationException) {
                 throw exception
@@ -1952,7 +2306,7 @@ class CcapiClient(
                 throw exception
             }
             response.use {
-                val responseBody = response.body?.string().orEmpty()
+                val responseBody = response.body?.let { readStrictMediaJsonText(it.byteStream(), it.contentLength(), 65_536) }.orEmpty()
                 if (!response.isSuccessful) {
                     throw CcapiHttpException(
                         response.code,
@@ -1960,12 +2314,21 @@ class CcapiClient(
                     )
                 }
                 check(bytesTransferred == sizeBytes) { "Simulator upload byte count did not match the source." }
-                val item = parseSimulatorMediaItem(JSONObject(responseBody))
-                    ?: error("Simulator returned invalid uploaded media information.")
+                val strictReceipt = StrictMediaJson(responseBody).also { it.validate() }
+                val receipt = JSONObject(responseBody)
+                check(validUploadReceipt(response.code, name, sizeBytes, bytesTransferred,
+                    receipt.opt("id"), receipt.opt("name"), receipt.opt("size_bytes"), receipt.opt("kind"), strictReceipt.topLevelToken("size_bytes"))) {
+                    "Upload has no valid operation-specific completion receipt."
+                }
+                val item = CameraMediaItem(
+                    id = receipt.getString("id"), name = receipt.getString("name"), kind = receipt.getString("kind"),
+                    sizeBytes = sizeBytes, contentType = receipt.cameraMediaContentType(),
+                )
                 check(item.name == name && item.sizeBytes == sizeBytes) {
                     "Simulator did not verify the uploaded filename and size."
                 }
                 CameraMediaUploadResult(item, bytesTransferred).also {
+                    evidence.onConfirmed(it)
                     observedFeatures.add(CameraFeature.MEDIA_UPLOAD)
                 }
             }
@@ -1975,7 +2338,8 @@ class CcapiClient(
         }
     }
 
-    suspend fun deleteMedia(item: CameraMediaItem) {
+    suspend fun deleteMedia(item: CameraMediaItem, evidence: MediaDeleteEvidence = MediaDeleteEvidence()) {
+        check(item.protected != true && item.deleteWritable != false) { "This media item cannot be deleted." }
         val path = if (isRealCamera) {
             if (enforceAdvertisedOperations && !supportsMediaDelete()) {
                 error("Camera did not advertise media deletion.")
@@ -1985,7 +2349,8 @@ class CcapiClient(
             val encodedId = URLEncoder.encode(item.id, StandardCharsets.UTF_8.name()).replace("+", "%20")
             "/ccapi/media/$encodedId"
         }
-        deleteOk(path)
+        executeMediaDeleteHttp(mutationHttpClient, Request.Builder().url("$baseUrl$path").delete().build(), evidence,
+            checkOwner = { requireShutterReleased() })
         observedFeatures.add(CameraFeature.MEDIA_DELETE)
     }
 
@@ -1994,8 +2359,11 @@ class CcapiClient(
         check(pendingLiveViewStop == null) { "Live View must be stopped before starting again." }
         refreshTemperatureStatusForRestrictedCommand()
         requireLiveViewAllowed()
+        liveViewGeometry.reset()
         if (isRealCamera) {
-            latestLiveViewGeometry = null
+            check(currentCoroutineContext()[MaintenanceIoContext] == null || request.source != LiveViewSource.AUTO) {
+                "Maintenance restoration requires the frozen active Live View source."
+            }
             val sources = when (request.source) {
                 LiveViewSource.AUTO -> buildList {
                     if (supportsRtpLiveView()) add(LiveViewSource.CCAPI_RTP)
@@ -2013,6 +2381,7 @@ class CcapiClient(
             check(sources.isNotEmpty()) { "Camera did not advertise a complete Live View CCAPI lifecycle." }
             val failures = mutableListOf<Throwable>()
             for (source in sources) {
+                val previousAttempt = liveViewStartAttempt
                 try {
                     when (source) {
                         LiveViewSource.CCAPI_RTP -> startRtpLiveView(request)
@@ -2020,11 +2389,19 @@ class CcapiClient(
                         LiveViewSource.CCAPI_JPEG_POLLING -> startJpegLiveView(request)
                         else -> error("${source.label} is not available through the CCAPI network backend.")
                     }
+                    currentCoroutineContext().ensureActive()
                     return
                 } catch (exception: Exception) {
                     if (exception is CancellationException || exception is CcapiLiveViewReleaseException) throw exception
+                    currentCoroutineContext().ensureActive()
                     failures += exception
-                    if (request.source != LiveViewSource.AUTO) throw exception
+                    val admitted = previousAttempt != liveViewStartAttempt
+                    if (!LiveViewLifecycleEvidence(
+                            startAdmitted = admitted, startAcknowledged = false, terminal = true,
+                            sourceMode = if (request.source == LiveViewSource.AUTO) "AUTO" else "explicit",
+                            stopEvidence = if (pendingLiveViewStop != null) "unconfirmed"
+                                else if (admitted) "confirmed" else "not-needed",
+                        ).evaluate().canFallback) throw exception
                 }
             }
             throw IllegalStateException(
@@ -2034,9 +2411,16 @@ class CcapiClient(
         }
     }
 
-    suspend fun stopLiveView() = withContext(NonCancellable) {
-        latestLiveViewGeometry = null
-        val stop = pendingLiveViewStop ?: return@withContext
+    suspend fun stopLiveView() {
+        if (currentCoroutineContext()[MaintenanceIoContext] != null && pendingLiveViewStop != null) pendingLiveViewMaintenanceOwned = true
+        if (maintenanceStopOwned) maintenanceStopRecoveryScope { stopLiveViewOwned() }
+        else withContext(NonCancellable) { stopLiveViewOwned() }
+    }
+
+    private suspend fun stopLiveViewOwned() {
+        firstLiveViewFrame = null
+        liveViewGeometry.retire()
+        val stop = pendingLiveViewStop ?: return
         try {
             stop()
         } catch (exception: Exception) {
@@ -2044,20 +2428,31 @@ class CcapiClient(
             throw CcapiLiveViewReleaseException(exception)
         }
         pendingLiveViewStop = null
+        pendingLiveViewLocalClose = null
+        pendingLiveViewMaintenanceOwned = false
         activeLiveViewSource = null
+        liveViewGeometry.retire()
         activeJpegLiveViewOperations = null
         activeMultipartLiveViewOperations = null
     }
 
     private suspend fun withLiveViewStartCleanup(
         stop: suspend () -> Unit,
+        localClose: suspend () -> Unit = {},
         start: suspend () -> Unit,
     ) {
         check(pendingLiveViewStop == null) { "Live View must be stopped before starting again." }
+        liveViewStartAttempt += 1
+        firstLiveViewFrame = null
         pendingLiveViewStop = stop
+        pendingLiveViewLocalClose = localClose
+        pendingLiveViewMaintenanceOwned = currentCoroutineContext()[MaintenanceIoContext] != null
         try {
             start()
+            currentCoroutineContext().ensureActive()
         } catch (failure: Throwable) {
+            // Maintenance restoration never dispatches an automatic cleanup/retry after an uncertain Start.
+            if (currentCoroutineContext()[MaintenanceIoContext] != null || failure is CcapiLiveViewReleaseException) throw failure
             try {
                 stopLiveView()
             } catch (releaseFailure: CcapiLiveViewReleaseException) {
@@ -2074,7 +2469,7 @@ class CcapiClient(
             if (enforceAdvertisedOperations && !supportsCoordinateTapFocus()) {
                 error("Camera did not advertise Canon Live View AF frame position control with detailed Live View metadata.")
             }
-            val (positionX, positionY) = cameraLiveViewPosition(x, y, CameraFeature.TAP_FOCUS)
+            val (positionX, positionY, geometryOwner) = cameraLiveViewPosition(x, y, CameraFeature.TAP_FOCUS)
             val payload = JSONObject()
                 .put("positionx", positionX)
                 .put("positiony", positionY)
@@ -2082,7 +2477,8 @@ class CcapiClient(
                 method = "PUT",
                 path = apiPath("PUT", "/shooting/liveview/afframeposition"),
             )
-            commandOk("/shooting/liveview/afframeposition", payload, selectedOperation)
+            commandOk("/shooting/liveview/afframeposition", payload, selectedOperation,
+                checkOwner = { liveViewGeometry.requireSnapshot(geometryOwner) })
             observedFeatures.add(CameraFeature.TAP_FOCUS)
             FocusResult(ok = true, x = x, y = y)
         } else {
@@ -2109,7 +2505,7 @@ class CcapiClient(
         if (enforceAdvertisedOperations && !supportsCoordinateClickWhiteBalance()) {
             error("Camera did not advertise Canon Click WB control with detailed Live View metadata.")
         }
-        val (positionX, positionY) = cameraLiveViewPosition(x, y, CameraFeature.CLICK_WHITE_BALANCE)
+        val (positionX, positionY, geometryOwner) = cameraLiveViewPosition(x, y, CameraFeature.CLICK_WHITE_BALANCE)
         val selectedOperation = operation ?: CcapiApiOperation(
             method = "POST",
             path = apiPath("POST", "/shooting/liveview/clickwb"),
@@ -2118,6 +2514,7 @@ class CcapiClient(
             "/shooting/liveview/clickwb",
             JSONObject().put("positionx", positionX).put("positiony", positionY),
             selectedOperation,
+            checkOwner = { liveViewGeometry.requireSnapshot(geometryOwner) },
         )
         observedFeatures.add(CameraFeature.CLICK_WHITE_BALANCE)
         return status()
@@ -2127,11 +2524,27 @@ class CcapiClient(
         liveViewFrameUrls(cacheKey, request).first()
 
     suspend fun liveViewFrame(cacheKey: Long, request: LiveViewRequest = LiveViewRequest()): LiveViewFrame {
+        currentCoroutineContext().ensureActive()
+        val frameOwner = liveViewGeometry.owner()
+        if (activeLiveViewSource != null) firstLiveViewFrame?.let { frame ->
+            if (activeLiveViewSource == LiveViewSource.CCAPI_MULTIPART) {
+                checkNotNull(multipartLiveViewSession).checkUsable()
+            }
+            firstLiveViewFrame = null
+            observedFeatures.add(CameraFeature.LIVE_VIEW)
+            when (activeLiveViewSource) {
+                LiveViewSource.CCAPI_MULTIPART -> observedFeatures.add(CameraFeature.LIVE_VIEW_MULTIPART)
+                LiveViewSource.CCAPI_JPEG_POLLING -> observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
+                else -> Unit
+            }
+            return frame
+        }
         if (isRealCamera && activeLiveViewSource == LiveViewSource.CCAPI_MULTIPART) {
             return runInterruptible(Dispatchers.IO) {
                 checkNotNull(multipartLiveViewSession) { "Canon multipart Live View session is not active." }
                     .nextFrame()
             }.also {
+                liveViewGeometry.requireOwner(frameOwner)
                 observedFeatures.add(CameraFeature.LIVE_VIEW)
                 observedFeatures.add(CameraFeature.LIVE_VIEW_MULTIPART)
             }
@@ -2141,6 +2554,7 @@ class CcapiClient(
         for (attempt in 0..JPEG_FRAME_BUSY_RETRY_DELAYS_MILLIS.size) {
             var transientBusy = false
             for (sourceUrl in sourceUrls) {
+                liveViewGeometry.requireOwner(frameOwner)
                 val frameRequest = Request.Builder()
                     .url(sourceUrl)
                     .get()
@@ -2152,6 +2566,7 @@ class CcapiClient(
 
                 try {
                     return requestLiveViewFrame(frameRequest, sourceUrl).also {
+                        liveViewGeometry.requireOwner(frameOwner)
                         observedFeatures.add(CameraFeature.LIVE_VIEW)
                         observedFeatures.add(CameraFeature.LIVE_VIEW_JPEG_POLLING)
                     }
@@ -2637,15 +3052,29 @@ class CcapiClient(
         }) {
             activeJpegLiveViewOperations = operations
             startCcapiLiveView(request, operations.startLiveView.path)
-            if (operations.stopMethod == CcapiLiveViewStopMethod.POST_OFF) {
+            if (currentCoroutineContext()[MaintenanceIoContext] != null) {
+                // Maintenance restores only the frozen endpoint, once, with strict transport.
+                val sourceUrl = liveViewFrameUrls(System.nanoTime(), request).firstOrNull()
+                    ?: error("The frozen JPEG source has no advertised frame endpoint.")
+                firstLiveViewFrame = requestLiveViewFrame(Request.Builder().url(sourceUrl).get()
+                    .header("Accept", "image/jpeg,image/*,*/*")
+                    .header("Cache-Control", "no-cache, no-store").build(), sourceUrl)
+            } else {
                 try {
                     validateJpegLiveViewFrame(request)
                 } catch (exception: Exception) {
-                    if (exception is CancellationException || request.size == LiveViewSize.SMALL || !exception.isRejectedLiveViewSize()) {
+                    if (exception is CancellationException || operations.stopMethod != CcapiLiveViewStopMethod.POST_OFF ||
+                        request.size == LiveViewSize.SMALL || !exception.isRejectedLiveViewSize()) {
                         throw exception
                     }
-                    withContext(NonCancellable) {
-                        stopCcapiLiveView(operations.stopLiveView, operations.stopMethod)
+                    try {
+                        withContext(NonCancellable) {
+                            stopCcapiLiveView(operations.stopLiveView, operations.stopMethod)
+                        }
+                    } catch (stopFailure: Exception) {
+                        // A failed size-downgrade Stop is unknown cleanup. The outer Start
+                        // transaction must not silently retry it or admit another Start.
+                        throw CcapiLiveViewReleaseException(stopFailure).also { it.addSuppressed(exception) }
                     }
                     val fallback = request.copy(
                         size = LiveViewSize.SMALL,
@@ -2657,15 +3086,34 @@ class CcapiClient(
                     activeLiveViewSize = LiveViewSize.SMALL
                 }
             }
+            validateFirstLiveViewJpeg(checkNotNull(firstLiveViewFrame))
             activeLiveViewSource = LiveViewSource.CCAPI_JPEG_POLLING
         }
     }
 
+    private suspend fun validateFirstLiveViewJpeg(frame: LiveViewFrame) {
+        val validator = jpegFrameValidator
+        if (validator != null) {
+            check(withContext(Dispatchers.Default) { validator(frame.bytes) }) {
+                "The first Live View JPEG could not be decoded by Android."
+            }
+        }
+        currentCoroutineContext().ensureActive()
+        check(LiveViewLifecycleEvidence(frameEvidence = if (validator == null) "encoded-frame" else "decoded-frame")
+            .evaluate().canPublishInputReady)
+    }
+
     private suspend fun validateJpegLiveViewFrame(request: LiveViewRequest) {
-        liveViewFrame(
-            cacheKey = System.nanoTime(),
-            request = request.copy(source = LiveViewSource.CCAPI_JPEG_POLLING),
-        )
+        // Preserve encoded evidence for the first Android decode; Start ACK alone is not readiness.
+        firstLiveViewFrame = try {
+            withContext(Dispatchers.IO) { withTimeout(15_000L) { liveViewFrame(
+                cacheKey = System.nanoTime(),
+                request = request.copy(source = LiveViewSource.CCAPI_JPEG_POLLING),
+            ) } }
+        } catch (failure: TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
+            throw IOException("Timed out waiting for the first Canon JPEG Live View frame.", failure)
+        }
     }
 
     private fun Throwable.isRejectedLiveViewSize(): Boolean {
@@ -2687,7 +3135,7 @@ class CcapiClient(
             postOk(path, requestedPayload)
             liveViewSizeControlSupported = true
         } catch (exception: CcapiHttpException) {
-            if (exception.statusCode != 400) throw exception
+            if (currentCoroutineContext()[MaintenanceIoContext] != null || exception.statusCode != 400) throw exception
             try {
                 postOk(path, JSONObject().put("cameradisplay", "on"))
                 liveViewSizeControlSupported = false
@@ -2727,12 +3175,17 @@ class CcapiClient(
         val operation = multipartLiveViewOperations()
             ?: error("Camera did not advertise a complete Canon multipart Live View lifecycle.")
         var openedSession: CcapiMultipartLiveViewSession? = null
-        withLiveViewStartCleanup(stop = {
+        withLiveViewStartCleanup(localClose = {
+            closeCcapiMultipartSession(openedSession)
+            closeCcapiMultipartSession(multipartLiveViewSession)
+            multipartLiveViewSession = null
+        }, stop = {
             closeCcapiMultipartSession(openedSession)
             closeCcapiMultipartSession(multipartLiveViewSession)
             multipartLiveViewSession = null
             // Canon's multipart DELETE closes the stream; the general stop owns Live View itself.
-            runCatching { deleteOk(operation.closeStream.path) }
+            if (currentCoroutineContext()[MaintenanceIoContext] != null) deleteOk(operation.closeStream.path)
+            else runCatching { deleteOk(operation.closeStream.path) }
             stopCcapiLiveView(operation.stopLiveView, operation.stopMethod)
         }) {
             activeMultipartLiveViewOperations = operation
@@ -2747,17 +3200,23 @@ class CcapiClient(
             val session = withContext(Dispatchers.IO) {
                 var lastFailure: CcapiHttpException? = null
                 repeat(MULTIPART_START_RETRY_DELAYS_MILLIS.size + 1) { attempt ->
-                    val call = multipartHttpClient.newCall(streamRequest)
+                    val maintenance = currentCoroutineContext()[MaintenanceIoContext]
+                    maintenance?.requireActive?.invoke()
+                    val streamClient = if (maintenance == null) multipartHttpClient else captureConfigurationHttpClient.newBuilder()
+                        .callTimeout(0, TimeUnit.MILLISECONDS).readTimeout(0, TimeUnit.MILLISECONDS).build()
+                    val call = streamClient.newCall(streamRequest)
                     try {
                         val result = withTimeout(MULTIPART_OPEN_TIMEOUT_MILLIS) {
                             val cancelCall = AtomicBoolean(true)
                             val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
                                 try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
                             }
+                            val ownerWatchers = if (maintenance != null) maintenanceCancellationWatchers { if (cancelCall.get()) call.cancel() } else emptyList()
                             try {
                                 val response = call.execute()
                                 if (response.code == 200) {
                                     try {
+                                        check(response.headers("Content-Range").isEmpty()) { "Multipart Live View cannot be a partial response." }
                                         val boundary = parseCcapiMultipartBoundary(response.header("content-type"))
                                         CcapiMultipartLiveViewSession(call, response, sourceUrl, boundary).also {
                                             // Keep ownership outside withContext: cancellation may discard its return value.
@@ -2779,7 +3238,7 @@ class CcapiClient(
                                 }
                             } finally {
                                 cancelCall.set(false)
-                                watcher.cancel()
+                                watcher.cancel(); ownerWatchers.forEach { it.cancel() }
                             }
                         }
                         return@withContext result
@@ -2789,7 +3248,7 @@ class CcapiClient(
                         if (exception is TimeoutCancellationException) {
                             throw IOException("Timed out opening the Canon multipart Live View stream.", exception)
                         }
-                        if (exception !is CcapiHttpException || exception.statusCode != 503 ||
+                        if (maintenance != null || exception !is CcapiHttpException || exception.statusCode != 503 ||
                             !exception.message.orEmpty().contains("live view not started", ignoreCase = true) ||
                             attempt >= MULTIPART_START_RETRY_DELAYS_MILLIS.size
                         ) throw exception
@@ -2799,6 +3258,12 @@ class CcapiClient(
                 }
                 throw checkNotNull(lastFailure)
             }
+            // HTTP 200 and a boundary are only transport admission. Fail inside the frozen
+            // Stop transaction so AUTO can continue only after confirmed cleanup.
+            firstLiveViewFrame = runInterruptible(Dispatchers.IO) { session.nextFrame() }
+            currentCoroutineContext().ensureActive()
+            validateFirstLiveViewJpeg(checkNotNull(firstLiveViewFrame))
+            session.checkUsable() // Decoding may yield while the receiver reaches EOF/failure.
             multipartLiveViewSession = session
             activeLiveViewSource = LiveViewSource.CCAPI_MULTIPART
         }
@@ -2828,7 +3293,10 @@ class CcapiClient(
         val description = CcapiRtpSessionDescriptionParser.parse(getText(descriptionPath))
         val session = checkNotNull(rtpSessionFactory).create(description, checkNotNull(rtpDestinationAddress))
         session.setTargetFps(request.fps)
-        withLiveViewStartCleanup(stop = {
+        withLiveViewStartCleanup(localClose = {
+            session.close()
+            if (nativeLiveViewSession === session) nativeLiveViewSession = null
+        }, stop = {
             try {
                 postOk(controlPath, JSONObject().put("action", "stop").put("ipaddress", ""))
             } finally {
@@ -2844,6 +3312,8 @@ class CcapiClient(
                     .put("ipaddress", checkNotNull(rtpDestinationAddress)),
             )
             session.awaitReady(RTP_FIRST_VIDEO_TIMEOUT_MILLIS)
+            currentCoroutineContext().ensureActive()
+            check(LiveViewLifecycleEvidence(frameEvidence = "decoded-frame").evaluate().canPublishDecoded)
             nativeLiveViewSession = session
             activeLiveViewSource = LiveViewSource.CCAPI_RTP
             observedFeatures.add(CameraFeature.LIVE_VIEW)
@@ -2865,6 +3335,8 @@ class CcapiClient(
         pathSuffix: String,
         payload: JSONObject,
         operation: CcapiApiOperation? = null,
+        recordingEvidence: RecordingRequestEvidence? = null,
+        checkOwner: (() -> Unit)? = null,
     ) {
         val selected = operation ?: if (!enforceAdvertisedOperations) {
             CcapiApiOperation(method = "POST", path = "$apiVersionPrefix$pathSuffix")
@@ -2878,7 +3350,7 @@ class CcapiClient(
             "POST" -> builder.post(requestBody).build()
             else -> error("Unsupported CCAPI command method ${selected.method} for ${selected.path}")
         }
-        requestOk(request)
+        requestOk(request, recordingEvidence = recordingEvidence, checkOwner = checkOwner)
     }
 
     private suspend fun withRecoverableFocusRelease(
@@ -2895,15 +3367,24 @@ class CcapiClient(
     }
 
     private suspend fun listSimulatorMedia(): List<CameraMediaItem> {
-        val items = getJson("/ccapi/media").optJSONArray("items") ?: return emptyList()
-        return List(items.length()) { index -> parseSimulatorMediaItem(items.getJSONObject(index)) }.filterNotNull()
+        // A successful HTTP response is not a successfully parsed listing. Missing,
+        // mistyped or invalid identities must not become empty/no-candidate evidence.
+        val items = getJson("/ccapi/media", strictMediaJsonLimit = BridgeMediaListingDecoder.MAX_SNAPSHOT_BYTES).getJSONArray("items")
+        return List(items.length()) { index ->
+            val item = items.getJSONObject(index)
+            check(item.opt("id") is String && item.opt("name") is String) {
+                "Simulator returned an invalid media identity."
+            }
+            checkNotNull(parseSimulatorMediaItem(item)) { "Simulator returned an invalid media identity." }
+        }
     }
 
     private fun parseSimulatorMediaItem(item: JSONObject): CameraMediaItem? {
-        val id = item.optString("id").trim()
-        val name = item.optString("name").trim()
+        val id = item.optString("id")
+        val name = item.optString("name")
         if (id.isBlank() || name.isBlank()) return null
         val kind = item.optString("kind", "other")
+        val contentType = item.cameraMediaContentType()
         return CameraMediaItem(
             id = id,
             name = name,
@@ -2914,10 +3395,14 @@ class CcapiClient(
             protected = item.opt("protect") as? Boolean,
             archived = item.opt("archive") as? Boolean,
             rating = item.normalizedMediaRating(),
-            rotationDegrees = item.optInt("rotate").takeIf { item.has("rotate") && it in MEDIA_ROTATIONS },
-            ratingWritable = true,
-            streamAvailable = cameraMediaIsVideo(kind, name),
-            contentType = item.optString("content_type").takeIf { it.isNotBlank() },
+            rotationDegrees = normalizedMediaMetadataInteger(item.opt("rotate"), MEDIA_ROTATIONS),
+            ratingWritable = normalizedMediaMetadataBoolean(item.opt("ratingWritable")) ?: true,
+            protectionWritable = normalizedMediaMetadataBoolean(item.opt("protectionWritable")),
+            archiveWritable = normalizedMediaMetadataBoolean(item.opt("archiveWritable")),
+            rotationWritable = normalizedMediaMetadataBoolean(item.opt("rotationWritable")),
+            deleteWritable = normalizedMediaMetadataBoolean(item.opt("deleteWritable")),
+            streamAvailable = cameraMediaHasVideoTransportHint(kind, name) && cameraMediaIsVideo(kind, name, contentType),
+            contentType = contentType,
             widthPixels = item.optInt("width_pixels").takeIf { item.has("width_pixels") && it > 0 },
             heightPixels = item.optInt("height_pixels").takeIf { item.has("height_pixels") && it > 0 },
         )
@@ -3145,11 +3630,9 @@ class CcapiClient(
         } else {
             getFirstJson(numberPaths)
         }
-        val pageCount = if (strict && pageInfo != null) {
-            pageInfo.inventoryPageCount()
-        } else {
-            pageInfo?.optInt("pagenumber", 0) ?: 0
-        }
+        // All listing consumers need valid page metadata; strict also controls
+        // inventory transport fallback, independently of response validation.
+        val pageCount = pageInfo?.inventoryPageCount() ?: 0
         check(pageCount >= 0) { "Camera returned a negative media page count at $containerPath." }
         val paths = linkedSetOf<String>()
         if (pageCount <= 0) {
@@ -3159,12 +3642,12 @@ class CcapiClient(
             } else {
                 getFirstJsonRequired(listOf(containerPath), "Reading camera media page")
             }
-            paths.addAll(response.contentPaths(strict = strict))
+            paths.addAll(response.contentPaths(strict = true))
             onPage(paths.toList())
         } else if (mediaDescendingOrderSupported == false) {
             for (page in pageCount downTo 1) {
                 val response = getContentPage(containerPath, page, strict, beforeRequest)
-                paths.addAll(response.contentPaths(reverse = true, strict = strict))
+                paths.addAll(response.contentPaths(reverse = true, strict = true))
                 if (!onPage(paths.toList())) break
             }
         } else {
@@ -3172,15 +3655,15 @@ class CcapiClient(
             if (mediaDescendingOrderSupported == false) {
                 for (page in pageCount downTo 1) {
                     val response = if (page == 1) firstResponse else getContentPage(containerPath, page, strict, beforeRequest)
-                    paths.addAll(response.contentPaths(reverse = true, strict = strict))
+                    paths.addAll(response.contentPaths(reverse = true, strict = true))
                     if (!onPage(paths.toList())) break
                 }
             } else {
-                paths.addAll(firstResponse.contentPaths(strict = strict))
+                paths.addAll(firstResponse.contentPaths(strict = true))
                 if (onPage(paths.toList())) {
                     for (page in 2..pageCount) {
                         val response = getContentPage(containerPath, page, strict, beforeRequest)
-                        paths.addAll(response.contentPaths(strict = strict))
+                        paths.addAll(response.contentPaths(strict = true))
                         if (!onPage(paths.toList())) break
                     }
                 }
@@ -3209,13 +3692,7 @@ class CcapiClient(
             contentPaths(strict = true)
             return 0
         }
-        val count = when (val value = opt("pagenumber")) {
-            is Int -> value.toLong()
-            is Long -> value
-            else -> error("Camera returned an invalid media page count.")
-        }
-        check(count in 0..Int.MAX_VALUE.toLong()) { "Camera returned an invalid media page count." }
-        return count.toInt()
+        return validatedMediaPageCount(opt("pagenumber"))
     }
 
     private suspend fun getContentPage(
@@ -3355,6 +3832,13 @@ class CcapiClient(
                         continue
                     }
 
+                    if (singleAttempt && !automaticJpegOriginalResponseAdmitted(
+                            response.code, response.headers("Content-Range").isNotEmpty())) {
+                        // Application interceptors can transform a response after the network
+                        // interceptor. Recheck before peeking, writing, or reporting progress.
+                        response.close()
+                        throw IOException("Original media request did not return a complete HTTP 200 response.")
+                    }
                     if (!response.isSuccessful) {
                         response.use {
                             val preview = response.body?.string().orEmpty().take(MAX_ERROR_BODY_CHARS)
@@ -3364,6 +3848,10 @@ class CcapiClient(
                     }
 
                     val contentType = response.header("content-type")
+                    if (singleAttempt && !automaticJpegResponseHeadersAdmitted(response.headers("content-type"))) {
+                        response.close()
+                        throw InvalidAutomaticJpegException("conflicting original response content type")
+                    }
                     val previewBytes = try {
                         response.peekBody(MEDIA_SNIFF_BYTES).bytes()
                     } catch (exception: Exception) {
@@ -3457,8 +3945,9 @@ class CcapiClient(
         )
     }
 
-    private suspend fun loadShootingSettings(): JSONObject? {
+    private suspend fun loadShootingSettings(directoryReadback: ((CaptureConfigurationReadback?) -> Unit)? = null): JSONObject? {
         settingPathsByKey.clear()
+        settingReadPathsByKey.clear()
         settingValuesByKey.clear()
         structuredSettingPathsByKey.clear()
         structuredSettingValuesByKey.clear()
@@ -3498,6 +3987,8 @@ class CcapiClient(
                     (!enforceAdvertisedOperations || apiOperations.contains(CcapiApiOperation("PUT", settingPath)))
                 ) {
                     settingPathsByKey.putIfAbsent(key, settingPath)
+                    settingReadPathsByKey.putIfAbsent(key, if (!enforceAdvertisedOperations ||
+                        apiOperations.contains(CcapiApiOperation("GET", settingPath))) settingPath else path)
                     val setting = settings.optJSONObject(key)
                     val values = setting?.optJSONArray("ability")
                         ?.toStringList()
@@ -3561,6 +4052,7 @@ class CcapiClient(
                     ?: return@let
                 val values = setting.getJSONArray("ability").toStringList().toSet()
                 settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                 settingValuesByKey[key] = values
                 merged.put(key, setting)
             }
@@ -3591,6 +4083,7 @@ class CcapiClient(
             if (zoom != null) {
                 val values = zoom.getJSONArray("ability").toStringList().toSet()
                 settingPathsByKey[ZOOM_SETTING_KEY] = write.path
+                settingReadPathsByKey[ZOOM_SETTING_KEY] = read.path
                 settingValuesByKey[ZOOM_SETTING_KEY] = values
                 merged.put(ZOOM_SETTING_KEY, zoom)
             }
@@ -3606,6 +4099,7 @@ class CcapiClient(
             }
             if (movieMode != null) {
                 settingPathsByKey[MOVIE_MODE_SETTING_KEY] = write.path
+                settingReadPathsByKey[MOVIE_MODE_SETTING_KEY] = read.path
                 settingValuesByKey[MOVIE_MODE_SETTING_KEY] = MOVIE_MODE_VALUES
                 merged.put(MOVIE_MODE_SETTING_KEY, movieMode)
             }
@@ -3623,6 +4117,7 @@ class CcapiClient(
                 if (cardSelection != null) {
                     val values = cardSelection.getJSONArray("ability").toStringList().toSet()
                     settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                     settingValuesByKey[key] = values
                     merged.put(key, cardSelection)
                     observedFeatures.add(CameraFeature.CARD_SELECTION_CONTROL)
@@ -3648,6 +4143,7 @@ class CcapiClient(
                     val current = setting.getString("value")
                     if (settingValues.size >= 2 && current in settingValues) {
                         settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                         settingValuesByKey[key] = settingValues.toSet()
                         merged.put(
                             key,
@@ -3671,6 +4167,7 @@ class CcapiClient(
                 }
                 if (setting != null) {
                     settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                     settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
                     merged.put(key, setting)
                     observedFeatures.add(CameraFeature.SOUND_RECORDING_CONTROL)
@@ -3690,6 +4187,7 @@ class CcapiClient(
                 if (soundRecordingLevel != null) {
                     val values = soundRecordingLevel.getJSONArray("ability").toStringList().toSet()
                     settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                     settingValuesByKey[key] = values
                     merged.put(key, soundRecordingLevel)
                     observedFeatures.add(CameraFeature.SOUND_RECORDING_LEVEL_CONTROL)
@@ -3710,6 +4208,7 @@ class CcapiClient(
                 }
                 if (setting != null) {
                     settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                     settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
                     merged.put(key, setting)
                     if (key == FOCUS_BRACKETING_SETTING_KEY) {
@@ -3731,6 +4230,7 @@ class CcapiClient(
                     }
                     if (setting != null) {
                         settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                         settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
                         merged.put(key, setting)
                     }
@@ -3749,6 +4249,7 @@ class CcapiClient(
                 }
                 if (setting != null) {
                     settingPathsByKey[key] = write.path
+                settingReadPathsByKey[key] = read.path
                     settingValuesByKey[key] = setting.getJSONArray("ability").toStringList().toSet()
                     merged.put(key, setting)
                     observedFeatures.add(CameraFeature.MOVIE_SETTINGS_CONTROL)
@@ -3758,15 +4259,19 @@ class CcapiClient(
 
         directoryOperations()?.let { operations ->
             val selection = try {
-                getJson(operations.read.path).toValidatedDirectorySelectionSetting()
+                getJson(operations.read.path, strictMediaJsonLimit = 65_536.takeIf { directoryReadback != null },
+                    fresh = directoryReadback != null).toValidatedDirectorySelectionSetting()
             } catch (exception: CancellationException) {
                 throw exception
             } catch (_: Exception) {
                 null
             }
+            directoryReadback?.invoke(selection?.let { CaptureConfigurationReadback(
+                directorySelection = it.getString("value"), directoryValues = it.getJSONArray("ability").toStringList()) })
             if (selection != null) {
                 val values = selection.getJSONArray("ability").toStringList().toSet()
                 settingPathsByKey[DIRECTORY_SELECTION_SETTING_KEY] = operations.write.path
+                settingReadPathsByKey[DIRECTORY_SELECTION_SETTING_KEY] = operations.read.path
                 settingValuesByKey[DIRECTORY_SELECTION_SETTING_KEY] = values
                 merged.put(DIRECTORY_SELECTION_SETTING_KEY, selection)
                 observedFeatures.add(CameraFeature.DIRECTORY_CONTROL)
@@ -3787,7 +4292,7 @@ class CcapiClient(
         shootingSettingResponseCache[path]?.let { cached -> JSONObject(cached.toString()) }
     }
 
-    private suspend fun loadFileNaming(force: Boolean = false): CameraFileNaming? {
+    private suspend fun loadFileNaming(force: Boolean = false, fresh: Boolean = false): CameraFileNaming? {
         if (fileNamingLoaded && !force) return fileNamingState
         observedFeatures.remove(CameraFeature.FILE_NAMING_CONTROL)
         val state = if (isRealCamera) {
@@ -3798,7 +4303,7 @@ class CcapiClient(
                 val responses = buildMap {
                     for ((field, operation) in operations) {
                         val response = try {
-                            getJson(operation.first.path)
+                            getJson(operation.first.path, strictMediaJsonLimit = 65_536.takeIf { fresh }, fresh = fresh)
                         } catch (exception: CancellationException) {
                             throw exception
                         } catch (_: Exception) {
@@ -3810,7 +4315,7 @@ class CcapiClient(
                 responses.toValidatedFileNaming()
             }
         } else {
-            getJson("/ccapi/capabilities").optJSONObject("fileNaming")?.toValidatedFileNaming()
+            getJson("/ccapi/capabilities", strictMediaJsonLimit = 65_536.takeIf { fresh }, fresh = fresh).optJSONObject("fileNaming")?.toValidatedFileNaming()
         }
         fileNamingState = state
         fileNamingLoaded = true
@@ -3820,7 +4325,7 @@ class CcapiClient(
 
     private suspend fun postZoomValue(value: String) {
         if (!settingsLoaded) loadShootingSettings()
-        val path = settingPathsByKey[ZOOM_SETTING_KEY]
+        val path = currentCoroutineContext()[ShootingSettingWriteContext]?.route?.writePath ?: settingPathsByKey[ZOOM_SETTING_KEY]
             ?: error("Camera did not advertise writable Canon zoom control.")
         if (value !in settingValuesByKey[ZOOM_SETTING_KEY].orEmpty()) {
             error("Value '$value' is not advertised for zoom.")
@@ -3833,7 +4338,7 @@ class CcapiClient(
 
     private suspend fun postMovieModeValue(value: String) {
         if (!settingsLoaded) loadShootingSettings()
-        val path = settingPathsByKey[MOVIE_MODE_SETTING_KEY]
+        val path = currentCoroutineContext()[ShootingSettingWriteContext]?.route?.writePath ?: settingPathsByKey[MOVIE_MODE_SETTING_KEY]
             ?: error("Camera did not advertise writable Canon movie mode control.")
         if (value !in settingValuesByKey[MOVIE_MODE_SETTING_KEY].orEmpty()) {
             error("Value '$value' is not advertised for movie mode.")
@@ -3843,7 +4348,7 @@ class CcapiClient(
 
     private suspend fun putIntegerSettingValue(key: String, value: String) {
         if (!settingsLoaded) loadShootingSettings()
-        val path = settingPathsByKey[key]
+        val path = currentCoroutineContext()[ShootingSettingWriteContext]?.route?.writePath ?: settingPathsByKey[key]
             ?: error("Camera did not advertise writable ${key.toSettingLabel()} control.")
         if (value !in settingValuesByKey[key].orEmpty()) {
             error("Value '$value' is not advertised for ${key.toSettingLabel()}.")
@@ -3878,12 +4383,18 @@ class CcapiClient(
             .mapNotNull(settingPathsByKey::get)
             .distinct()
 
+        if (currentCoroutineContext()[ShootingSettingWriteContext] != null) {
+            val frozen = requireNotNull(currentCoroutineContext()[ShootingSettingWriteContext]?.route)
+            putOk(frozen.writePath, JSONObject().put("value", value))
+            return
+        }
         val errors = mutableListOf<String>()
         paths.forEach { path ->
             try {
                 putOk(path, JSONObject().put("value", value))
                 return
             } catch (exception: Exception) {
+                if (exception is CancellationException) throw exception
                 errors.add("$path: ${exception.message ?: exception.javaClass.simpleName}")
             }
         }
@@ -3897,11 +4408,40 @@ class CcapiClient(
     private suspend fun putStructuredSettingValue(key: String, value: String) {
         val (baseKey, field) = key.splitStructuredSettingKey()
             ?: error("Unsupported structured camera setting '$key'.")
-        val advertisedValues = structuredSettingValuesByKey[key].orEmpty()
+        var scopedCurrent: JSONObject? = null
+        var scopedValues: Set<String>? = null
+        if (currentCoroutineContext()[ShootingSettingWriteContext] != null) {
+            val frozen = requireNotNull(currentCoroutineContext()[ShootingSettingWriteContext]?.route)
+            val response = getJson(frozen.readPath, strictMediaJsonLimit = 65_536, fresh = true, shootingRead = true)
+            val fresh = if (frozen.aggregateKey == null) response else requireNotNull(response.optJSONObject(frozen.aggregateKey))
+            val current = requireNotNull(fresh.optJSONObject("value"))
+            val ability = requireNotNull(fresh.optJSONObject("ability"))
+            val fields = if (baseKey == WB_SHIFT_SETTING_KEY) WB_SHIFT_FIELDS.toSet() else current.keys().asSequence().toSet()
+            require(fields.isNotEmpty() && field in fields &&
+                (baseKey == WB_SHIFT_SETTING_KEY || fields.all { it in IMAGE_QUALITY_FIELDS }) &&
+                current.keys().asSequence().toSet() == fields && ability.keys().asSequence().toSet() == fields)
+            fields.forEach { sibling ->
+                val observed = if (baseKey == WB_SHIFT_SETTING_KEY) current.opt(sibling).toExactJsonInt()?.toString()
+                    else current.opt(sibling) as? String
+                val allowed = if (baseKey == WB_SHIFT_SETTING_KEY) ability.optJSONObject(sibling)?.toBoundedIntegerRangeValues(1024)
+                    else ability.optJSONArray(sibling)?.let { array ->
+                        require(array.length() <= 1024)
+                        (0 until array.length()).map { array.opt(it) as? String ?: error("Invalid sibling ability.") }
+                    }
+                require(observed != null && allowed != null && allowed.isNotEmpty() && allowed.distinct().size == allowed.size &&
+                    observed in allowed && allowed.all { it.isNotEmpty() && validShootingSettingText(it) }) { "Invalid fresh structured sibling." }
+            }
+            val values = if (baseKey == WB_SHIFT_SETTING_KEY) ability.optJSONObject(field)?.toBoundedIntegerRangeValues()
+                else ability.optJSONArray(field)?.toStringList()
+            require(values != null && value in values) { "The requested structured value is no longer advertised." }
+            scopedCurrent = current
+            scopedValues = values.toSet()
+        }
+        val advertisedValues = scopedValues ?: structuredSettingValuesByKey[key].orEmpty()
         if (value !in advertisedValues) {
             error("Value '$value' is not advertised for $key.")
         }
-        val current = structuredSettingCurrentValues[baseKey]
+        val current = scopedCurrent ?: structuredSettingCurrentValues[baseKey]
             ?: error("Camera did not return the current value for $baseKey.")
         val encodedValue: Any = if (baseKey == WB_SHIFT_SETTING_KEY) {
             WB_SHIFT_FIELDS.forEach { requiredField ->
@@ -3921,9 +4461,9 @@ class CcapiClient(
                 error("At least one still image format must remain enabled.")
             }
         }
-        val path = structuredSettingPathsByKey.getValue(key)
+        val path = currentCoroutineContext()[ShootingSettingWriteContext]?.route?.writePath ?: structuredSettingPathsByKey.getValue(key)
         putOk(path, JSONObject().put("value", updated))
-        structuredSettingCurrentValues[baseKey] = updated
+        if (currentCoroutineContext()[ShootingSettingWriteContext] == null) structuredSettingCurrentValues[baseKey] = updated
     }
 
     private fun writableSetting(settings: JSONObject?, candidateKeys: List<String>): JSONObject? {
@@ -3932,20 +4472,32 @@ class CcapiClient(
         return settings.optJSONObject(key)
     }
 
-    private suspend fun getJson(path: String): JSONObject = requestJson(
-        Request.Builder().url("$baseUrl$path").get().build(),
+    private suspend fun getJson(path: String, strictMediaJsonLimit: Int? = null, fresh: Boolean = false, shootingRead: Boolean = false): JSONObject = requestJson(
+        Request.Builder().url("$baseUrl$path").apply { if (fresh) header("Cache-Control", "no-cache, no-store") }.get().build(), strictMediaJsonLimit = strictMediaJsonLimit, captureRecovery = fresh, shootingRead = shootingRead,
     )
 
     private suspend fun getText(path: String): String = withContext(Dispatchers.IO) {
         val request = Request.Builder().url("$baseUrl$path").get().header("Accept", "text/plain").build()
-        val call = newCameraCall(request)
+        val maintenance = currentCoroutineContext()[MaintenanceIoContext]
+        maintenance?.requireActive?.invoke()
+        val recordingIo = currentCoroutineContext()[RecordingIoContext] != null
+        val call = newCameraCall(request, maintenance != null || recordingIo)
         val cancelCall = AtomicBoolean(true)
         val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
         }
+        val ownerWatchers = if (maintenance != null) maintenanceCancellationWatchers { if (cancelCall.get()) call.cancel() } else emptyList()
         try {
             call.execute().use { response ->
-                val body = response.body?.string().orEmpty()
+                val body = response.body?.let { body ->
+                    if (maintenance == null && !recordingIo) body.string() else {
+                        requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                            response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                        body.byteStream().use { readStrictMediaJsonText(it, body.contentLength(), 65_536) }.also {
+                            check(body.contentLength() < 0 || it.toByteArray(Charsets.UTF_8).size.toLong() == body.contentLength())
+                        }
+                    }
+                }.orEmpty()
                 if (!response.isSuccessful) {
                     throw CcapiHttpException(
                         statusCode = response.code,
@@ -3959,15 +4511,16 @@ class CcapiClient(
             throw exception
         } finally {
             cancelCall.set(false)
-            watcher.cancel()
+            watcher.cancel(); ownerWatchers.forEach { it.cancel() }
         }
     }
 
-    private suspend fun postJson(path: String, payload: JSONObject): JSONObject = requestJson(
+    private suspend fun postJson(path: String, payload: JSONObject, recordingEvidence: RecordingRequestEvidence? = null,
+        captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null): JSONObject = requestJson(
         Request.Builder()
             .url("$baseUrl$path")
             .post(payload.toString().toRequestBody(jsonMediaType))
-            .build(),
+            .build(), recordingEvidence, captureEvidence = captureEvidence, captureResponse = captureResponse,
     )
 
     private suspend fun patchJson(path: String, payload: JSONObject): JSONObject = requestJson(
@@ -3977,11 +4530,12 @@ class CcapiClient(
             .build(),
     )
 
-    private suspend fun putJson(path: String, payload: JSONObject): JSONObject = requestJson(
+    private suspend fun putJson(path: String, payload: JSONObject,
+        captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null): JSONObject = requestJson(
         Request.Builder()
             .url("$baseUrl$path")
             .put(payload.toString().toRequestBody(jsonMediaType))
-            .build(),
+            .build(), captureEvidence = captureEvidence, captureResponse = captureResponse,
     )
 
     private suspend fun deleteJson(path: String): JSONObject = requestJson(
@@ -4007,12 +4561,14 @@ class CcapiClient(
         path: String,
         payload: JSONObject,
         expectedStatusCode: Int? = null,
+        checkOwner: (() -> Unit)? = null,
     ): Unit = requestOk(
         Request.Builder()
             .url("$baseUrl$path")
             .put(payload.toString().toRequestBody(jsonMediaType))
             .build(),
         expectedStatusCode = expectedStatusCode,
+        checkOwner = checkOwner,
     )
 
     private suspend fun deleteOk(path: String): Unit = requestOk(
@@ -4022,8 +4578,8 @@ class CcapiClient(
             .build(),
     )
 
-    private fun newCameraCall(request: Request): Call {
-        if (request.method == "GET" || request.method == "HEAD") return httpClient.newCall(request)
+    private fun newCameraCall(request: Request, captureConfiguration: Boolean = false): Call {
+        if (request.method == "GET" || request.method == "HEAD") return (if (captureConfiguration) captureConfigurationHttpClient else httpClient).newCall(request)
         val original = request.body
         val oneShot = original?.let { body ->
             object : RequestBody() {
@@ -4033,26 +4589,67 @@ class CcapiClient(
                 override fun writeTo(sink: BufferedSink) = body.writeTo(sink)
             }
         }
-        return mutationHttpClient.newCall(request.newBuilder().method(request.method, oneShot).build())
+        return (if (captureConfiguration) captureConfigurationHttpClient else mutationHttpClient)
+            .newCall(request.newBuilder().method(request.method, oneShot).build())
     }
 
-    private suspend fun requestJson(request: Request): JSONObject = withContext(Dispatchers.IO) {
-        val call = newCameraCall(request)
+    private suspend fun requestJson(request: Request, recordingEvidence: RecordingRequestEvidence? = null, strictMediaJsonLimit: Int? = null,
+        captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null,
+        captureRecovery: Boolean = false, shootingRead: Boolean = false): JSONObject = withContext(Dispatchers.IO) {
+        if (currentCoroutineContext()[MaintenanceIoContext] != null) {
+            return@withContext requireNotNull(maintenanceJson(request)) { "Maintenance dependency returned no JSON." }
+        }
+        val shootingEvidence = currentCoroutineContext()[ShootingSettingWriteContext]?.evidence
+            ?.takeIf { request.method != "GET" && request.method != "HEAD" }
+        val recordingIo = currentCoroutineContext()[RecordingIoContext] != null || recordingEvidence != null
+        val call = newCameraCall(request.newBuilder().tag(RecordingRequestEvidence::class.java, recordingEvidence).build(), captureEvidence != null || captureRecovery || shootingEvidence != null || recordingIo)
+        val jsonLimit = strictMediaJsonLimit ?: 65_536.takeIf { captureEvidence != null || recordingIo }
         val readOnly = request.method == "GET" || request.method == "HEAD"
         val cancelCall = AtomicBoolean(true)
-        val watcher = if (readOnly) launch(start = CoroutineStart.UNDISPATCHED) {
+        val watcher = if (readOnly || recordingIo) launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
         } else null
         try {
+            recordingEvidence?.let {
+                currentCoroutineContext().ensureActive()
+                it.beginRequest()
+            }
+            captureEvidence?.let {
+                currentCoroutineContext().ensureActive()
+                it.beforeDispatch("${request.method} ${request.url.encodedPath}")
+            }
+            shootingEvidence?.let { currentCoroutineContext().ensureActive(); it.beforeDispatch() }
             call.execute().use { response ->
-                val body = response.body?.string().orEmpty()
+                recordingEvidence?.rejected = !response.isSuccessful
+                val body = response.body?.let {
+                    if (recordingIo) it.byteStream().use { input -> readShootingSettingResponseText(input, it.contentLength()) }
+                    else if (captureEvidence != null || captureRecovery || shootingEvidence != null) it.byteStream().use { input -> readCaptureConfigurationJsonText(input, it.contentLength()) }
+                    else if (jsonLimit == null) it.string()
+                    else it.byteStream().use { input -> readStrictMediaJsonText(input, it.contentLength(), jsonLimit) }
+                }.orEmpty()
+                if (captureEvidence != null || recordingIo) StrictMediaJson(body).validate()
                 if (!response.isSuccessful) {
                     throw CcapiHttpException(
                         statusCode = response.code,
                         message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body",
                     )
                 }
-                JSONObject(body)
+                if (strictMediaJsonLimit != null) StrictMediaJson(body).validate()
+                JSONObject(body).also {
+                    if (recordingIo) {
+                        check(response.code == 200)
+                        requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                            response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                        recordingEvidence?.acknowledge()
+                    }
+                    if (shootingEvidence != null || shootingRead) {
+                        if (shootingRead) check(response.code == 200)
+                        requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                            response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                        shootingEvidence?.responseReceived()
+                    }
+                    captureResponse?.invoke(it)
+                }
             }
         } catch (exception: Exception) {
             if (readOnly) currentCoroutineContext().ensureActive()
@@ -4076,15 +4673,14 @@ class CcapiClient(
         }
         try {
             call.execute().use { response ->
-                val payload = response.body?.byteStream()?.readBoundedEventPayload() ?: ByteArray(0)
-                val body = payload.toString(StandardCharsets.UTF_8)
-                if (!response.isSuccessful) {
-                    throw CcapiHttpException(
-                        statusCode = response.code,
-                        message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\n" +
-                            "Body: ${body.take(MAX_ERROR_BODY_CHARS)}",
-                    )
+                check(response.code == 200) { "Camera event response requires HTTP 200." }
+                requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                    response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                val body = requireNotNull(response.body).let { body ->
+                    body.byteStream().use { readStrictMediaJsonText(it, body.contentLength(), MAX_CCAPI_EVENT_BODY_BYTES) }
+                        .also { check(body.contentLength() < 0 || it.toByteArray(Charsets.UTF_8).size.toLong() == body.contentLength()) }
                 }
+                StrictMediaJson(body).validate()
                 runCatching { JSONObject(body) }.getOrElse {
                     error("Camera event polling returned invalid JSON.")
                 }
@@ -4099,9 +4695,34 @@ class CcapiClient(
     private suspend fun requestOk(
         request: Request,
         expectedStatusCode: Int? = null,
+        recordingEvidence: RecordingRequestEvidence? = null,
+        checkOwner: (() -> Unit)? = null,
     ): Unit = withContext(Dispatchers.IO) {
-        newCameraCall(request).execute().use { response ->
-            val body = response.body?.string().orEmpty()
+        currentCoroutineContext().ensureActive()
+        checkOwner?.invoke()
+        if (currentCoroutineContext()[MaintenanceIoContext] != null) {
+            maintenanceJson(request, expectedStatusCode ?: 204, empty = true)
+            return@withContext
+        }
+        recordingEvidence?.let {
+            currentCoroutineContext().ensureActive()
+            it.beginRequest()
+        }
+        val shootingEvidence = currentCoroutineContext()[ShootingSettingWriteContext]?.evidence
+        shootingEvidence?.let { currentCoroutineContext().ensureActive(); it.beforeDispatch() }
+        val recordingIo = currentCoroutineContext()[RecordingIoContext] != null || recordingEvidence != null
+        val call = newCameraCall(request.newBuilder().tag(RecordingRequestEvidence::class.java, recordingEvidence).build(), shootingEvidence != null || recordingIo)
+        val watcher = if (shootingEvidence != null || recordingIo || checkOwner != null) launch(start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { call.cancel() }
+        } else null
+        try {
+            currentCoroutineContext().ensureActive()
+            checkOwner?.invoke()
+            call.execute().use { response ->
+            recordingEvidence?.rejected = !response.isSuccessful
+            val body = response.body?.let { body -> if (shootingEvidence == null && !recordingIo) body.string() else
+                body.byteStream().use { readShootingSettingResponseText(it, body.contentLength()) }
+            }.orEmpty()
             if (!response.isSuccessful) {
                 throw CcapiHttpException(
                     statusCode = response.code,
@@ -4115,27 +4736,54 @@ class CcapiClient(
                         "expected HTTP $expectedStatusCode.\nBody: $body",
                 )
             }
-        }
+            if (recordingEvidence != null) {
+                check(response.code == 200 || response.code == 204)
+                if (body.isNotBlank()) { StrictMediaJson(body).validate(); check(JSONObject(body).length() == 0) }
+                requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                    response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                if (response.code == 204) check(body.isEmpty() && response.headers("Content-Length").all { it == "0" } &&
+                    response.headers("Transfer-Encoding").isEmpty())
+                recordingEvidence.acknowledge()
+            }
+            if (shootingEvidence != null) {
+                requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                    response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                shootingEvidence.responseReceived()
+            }
+        } } finally { watcher?.cancel() }
     }
 
-    private suspend fun requestLiveViewFrame(request: Request, sourceUrl: String): LiveViewFrame =
-        withContext(Dispatchers.IO) {
-            val isDetailedFrame = sourceUrl.contains("/shooting/liveview/flipdetail") && sourceUrl.contains("kind=both")
-            if (isDetailedFrame) {
-                latestLiveViewGeometry = null
+    private suspend fun requestLiveViewFrame(request: Request, sourceUrl: String): LiveViewFrame {
+        val owner = liveViewGeometry.owner()
+        val isDetailedFrame = sourceUrl.contains("/shooting/liveview/flipdetail") && sourceUrl.contains("kind=both")
+        val geometryRead = if (isDetailedFrame) liveViewGeometry.beginRead(owner) else null
+        return withContext(Dispatchers.IO) {
+            liveViewGeometry.requireOwner(owner)
+            val maintenance = currentCoroutineContext()[MaintenanceIoContext]
+            maintenance?.requireActive?.invoke()
+            val call = newCameraCall(request, captureConfiguration = maintenance != null)
+            if (call.timeout().timeoutNanos() == 0L || call.timeout().timeoutNanos() > TimeUnit.SECONDS.toNanos(15)) {
+                call.timeout().timeout(15, TimeUnit.SECONDS)
             }
-            val call = newCameraCall(request)
             val cancelCall = AtomicBoolean(true)
             val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
                 try { awaitCancellation() } finally { if (cancelCall.get()) call.cancel() }
             }
+            val ownerWatchers = if (maintenance != null) maintenanceCancellationWatchers {
+                if (cancelCall.get()) call.cancel()
+            } else emptyList()
             try {
                 call.execute().use { response ->
+                    if (maintenance != null) {
+                        check(response.code == 200) { "Maintenance JPEG readiness requires HTTP 200." }
+                        requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                            response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                    }
                     val contentType = response.header("content-type")
                     val body = response.body ?: error("Live view frame failed: empty response body")
 
                     if (!response.isSuccessful) {
-                        val preview = body.string().trim().take(MAX_ERROR_BODY_CHARS)
+                        val preview = body.byteStream().readBoundedBytes(MAX_ERROR_BODY_CHARS).toString(StandardCharsets.UTF_8).trim()
                         throw CcapiHttpException(
                             statusCode = response.code,
                             message = "Live view frame failed: ${request.method} ${request.url} returned HTTP ${response.code}\n" +
@@ -4144,32 +4792,41 @@ class CcapiClient(
                         )
                     }
 
+                    check(response.code == 200 && response.headers("Content-Range").isEmpty()) {
+                        "Live View frame requires a complete HTTP 200 representation without Content-Range."
+                    }
                     if (contentType.isTextLikeContentType()) {
-                        val preview = body.string().trim().take(MAX_ERROR_BODY_CHARS)
+                        val preview = body.byteStream().readBoundedBytes(MAX_ERROR_BODY_CHARS).toString(StandardCharsets.UTF_8).trim()
                         error(
                             "Live view frame returned ${contentType ?: "text"} instead of image bytes.\n" +
                                 "Body: $preview"
                         )
                     }
 
+                    val completeBody = if (maintenance != null) body.byteStream().readBoundedBytes(MAX_LIVE_VIEW_SCAN_BYTES).also {
+                        check(body.contentLength() < 0 || body.contentLength() == it.size.toLong()) {
+                            "Maintenance JPEG response ended before its declared body length."
+                        }
+                        maintenance.requireActive()
+                    } else null
                     val detailed = if (isDetailedFrame) {
-                        parseDetailedLiveView(body.byteStream().readBoundedBytes(MAX_LIVE_VIEW_SCAN_BYTES))
+                        parseDetailedLiveView(completeBody ?: body.byteStream().readBoundedBytes(MAX_LIVE_VIEW_SCAN_BYTES))
                     } else {
                         null
                     }
-                    if (detailed?.geometry != null) {
-                        latestLiveViewGeometry = detailed.geometry
-                    }
-
-                    LiveViewFrame(
+                    val frame = LiveViewFrame(
                         bytes = when {
                             detailed?.image != null -> detailed.image
                             detailed != null -> error("Detailed Live View response did not contain an image packet.")
-                            else -> readFirstJpegFrame(body.byteStream())
+                            else -> readFirstJpegFrame(completeBody?.inputStream() ?: body.byteStream())
                         },
                         contentType = contentType,
                         sourceUrl = sourceUrl,
                     )
+                    currentCoroutineContext().ensureActive()
+                    liveViewGeometry.requireOwner(owner)
+                    if (geometryRead != null) liveViewGeometry.publish(geometryRead, detailed?.geometry)
+                    frame
                 }
             } catch (exception: Exception) {
                 currentCoroutineContext().ensureActive()
@@ -4177,8 +4834,10 @@ class CcapiClient(
             } finally {
                 cancelCall.set(false)
                 watcher.cancel()
+                ownerWatchers.forEach { it.cancel() }
             }
         }
+    }
 
     private fun parseDetailedLiveView(payload: ByteArray): CcapiDetailedLiveView {
         var offset = 0
@@ -4205,6 +4864,7 @@ class CcapiClient(
             offset = dataEnd + CCAPI_DETAIL_FOOTER_BYTES
         }
 
+        check(offset == payload.size) { "Detailed Live View response contained a truncated or malformed packet." }
         if (image == null && geometry == null) {
             error("Detailed Live View response did not contain a valid Canon image or info packet.")
         }
@@ -4220,12 +4880,15 @@ class CcapiClient(
             if (image != null) {
                 val keys = listOf("positionx", "positiony", "positionwidth", "positionheight")
                 if (keys.all(image::has)) {
-                    val width = image.optInt("positionwidth", 0)
-                    val height = image.optInt("positionheight", 0)
-                    if (width > 0 && height > 0) {
+                    val x = image.opt("positionx").toExactJsonInt() ?: return null
+                    val y = image.opt("positiony").toExactJsonInt() ?: return null
+                    val width = image.opt("positionwidth").toExactJsonInt() ?: return null
+                    val height = image.opt("positionheight").toExactJsonInt() ?: return null
+                    if (x >= 0 && y >= 0 && width > 0 && height > 0 &&
+                        x.toLong() + width <= Int.MAX_VALUE && y.toLong() + height <= Int.MAX_VALUE) {
                         return CcapiLiveViewGeometry(
-                            positionX = image.optInt("positionx"),
-                            positionY = image.optInt("positiony"),
+                            positionX = x,
+                            positionY = y,
                             positionWidth = width,
                             positionHeight = height,
                         )
@@ -4247,25 +4910,28 @@ class CcapiClient(
         x: Double,
         y: Double,
         feature: CameraFeature,
-    ): Pair<Int, Int> {
+    ): Triple<Int, Int, LiveViewGeometryState.Snapshot<CcapiLiveViewGeometry>> {
         require(x in 0.0..1.0 && y in 0.0..1.0) {
             "${feature.label} coordinates must be normalized from 0 through 1."
         }
-        if (latestLiveViewGeometry == null) {
+        val owner = liveViewGeometry.owner()
+        if (liveViewGeometry.snapshot() == null) {
             detailedLiveViewOperation()?.let { operation ->
                 val sourceUrl = "$baseUrl${operation.path}?kind=both"
                 val request = Request.Builder()
                     .url(sourceUrl)
                     .get()
                     .header("Accept", "image/jpeg,image/*,*/*")
-                    .header("Cache-Control", "no-cache")
+                    .header("Cache-Control", "no-cache, no-store")
                     .build()
                 requestLiveViewFrame(request, sourceUrl)
             }
         }
-        val geometry = latestLiveViewGeometry
+        liveViewGeometry.requireOwner(owner)
+        val geometry = liveViewGeometry.snapshot()
             ?: error("${feature.label} needs Canon detailed Live View position metadata, but the camera returned none.")
-        return geometry.cameraPosition(x, y)
+        val (positionX, positionY) = geometry.value.cameraPosition(x, y)
+        return Triple(positionX, positionY, geometry)
     }
 
     private fun InputStream.readBoundedBytes(maxBytes: Int): ByteArray {
@@ -4473,7 +5139,7 @@ private fun JSONObject.toCameraStatus(): CameraStatus {
         connected = optBoolean("connected"),
         batteryLevel = battery.optNullableInt("level"),
         batteryStatus = battery.optString("status"),
-        recording = optNullableBoolean("recording"),
+        recording = strictRecordingStatus(),
         mode = optString("mode"),
         mediaAvailable = media.optNullableBoolean("available"),
         remainingMinutes = media.optNullableInt("remaining_minutes"),
@@ -5279,7 +5945,9 @@ private fun JSONObject.toValidatedCardSelectionSetting(): JSONObject? {
 private fun JSONObject.toValidatedDirectorySelectionSetting(): JSONObject? {
     val current = opt("value") as? String ?: return null
     val rawAbility = optJSONArray("ability") ?: return null
-    val values = runCatching { rawAbility.toStringList() }.getOrNull() ?: return null
+    val rawValues = (0 until rawAbility.length()).map { rawAbility.opt(it) }
+    if (rawValues.any { it !is String }) return null
+    val values = rawValues.filterIsInstance<String>()
     if (
         values.isEmpty() ||
         values.size > MAX_STRING_SETTING_OPTIONS ||
@@ -5352,14 +6020,7 @@ private fun JSONObject.toValidatedFileNaming(): CameraFileNaming? {
         movieClipRange = movieClipRange,
         movieUserDefined = movieUserDefined,
     )
-    return result.takeIf {
-        it.accepts(CameraFileNamingField.STILL_USER_SETTING_1, stillUserSetting1) &&
-            it.accepts(CameraFileNamingField.STILL_USER_SETTING_2, stillUserSetting2) &&
-            it.accepts(CameraFileNamingField.MOVIE_INDEX, movieIndex) &&
-            it.accepts(CameraFileNamingField.MOVIE_REEL_NUMBER, movieReelNumber.toString()) &&
-            it.accepts(CameraFileNamingField.MOVIE_CLIP_NUMBER, movieClipNumber.toString()) &&
-            it.accepts(CameraFileNamingField.MOVIE_USER_DEFINED, movieUserDefined)
-    }
+    return result.takeIf(::validCaptureConfigurationNaming)
 }
 
 private fun Map<CameraFileNamingField, JSONObject>.toValidatedFileNaming(): CameraFileNaming? {

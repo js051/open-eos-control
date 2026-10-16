@@ -18,7 +18,7 @@ import java.util.Base64
 @RunWith(AndroidJUnit4::class)
 class AndroidRtpAudioPlayerInstrumentedTest {
     @Test
-    fun realLatmFixtureIsExtractedDecodedAndWrittenToAudioTrack() = runBlocking {
+    fun realLatmFixtureSeparatesDecodeSubmissionAndOutputClockProgress() = runBlocking {
         val extractor = Media3LatmSampleExtractor()
         val firstMux = Base64.getDecoder().decode(FIRST_LATM_MUX_BASE64)
         val repeatedMux = Base64.getDecoder().decode(REPEATED_LATM_MUX_BASE64)
@@ -55,8 +55,13 @@ class AndroidRtpAudioPlayerInstrumentedTest {
         assertNotNull(stats)
         assertEquals(48_000, stats?.sampleRate)
         assertEquals(2, stats?.channels)
-        assertTrue("Expected raw AAC to reach MediaCodec", stats!!.decodedAccessUnits >= 20)
-        assertTrue("Expected decoded PCM to reach AudioTrack", stats.playedSampleFrames > 0)
+        assertTrue("Expected raw AAC input accepted by MediaCodec", stats!!.queuedAccessUnits >= 20)
+        assertTrue("Expected actual non-config decoded PCM", stats.decodedAccessUnits > 0)
+        assertTrue("Expected decoded PCM frames", stats.decodedSampleFrames > 0)
+        assertTrue("Expected PCM accepted by AudioTrack", stats.submittedSampleFrames > 0)
+        assertTrue("Expected AudioTrack playback-head progress; not physical audibility", stats.playedSampleFrames > 0)
+        assertTrue(stats.playedSampleFrames <= stats.submittedSampleFrames)
+        assertNotNull(stats.lastOutputAtMillis)
         assertNotNull(stats.lastPcmAtMillis)
     }
 
