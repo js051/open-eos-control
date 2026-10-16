@@ -30,11 +30,11 @@ from open_eos_bridge.models import CameraFeature, CameraTemperatureStatus, FileN
 from open_eos_bridge.rtp import RtpAudioChunk, RtpError, RtpSessionDescription
 
 from .fakes import FakeRunner
+from .liveview_jpeg_fixture import JPEG, OpenLiveViewStream, with_comment
 
-JPEG = b"\xff\xd8open-eos-ccapi\xff\xd9"
 MEDIA = b"camera-media"
 RTP_JPEG = b"\xff\xd8ccapi-rtp\xff\xd9"
-LARGE_MULTIPART_JPEG = b"\xff\xd8" + (b"multipart-frame" * 5_000) + b"\xff\xd9"
+LARGE_MULTIPART_JPEG = with_comment(JPEG, 75000)
 RTP_SDP = """v=0
 m=video 12000 RTP/AVP 96
 a=rtpmap:96 H264/90000
@@ -310,8 +310,9 @@ class FakeCcapiTransport:
         headers: dict[str, str] | None = None,
         timeout: float = 15.0,
         max_bytes: int = 2 * 1024 * 1024,
+        strict_control: bool = False,
     ) -> CcapiResponse:
-        del headers, timeout, max_bytes
+        del headers, timeout, max_bytes, strict_control
         path = _request_path(url)
         payload = json.loads(body) if body else None
         self.requests.append(RecordedRequest(method, path, payload))
@@ -733,8 +734,10 @@ class FakeCcapiTransport:
         *,
         headers: dict[str, str] | None = None,
         timeout: float = 60.0,
+        follow_redirects: bool = True,
+        strict_control: bool = False,
     ) -> CcapiStreamResponse:
-        del headers, timeout
+        del headers, timeout, follow_redirects, strict_control
         path = _request_path(url)
         self.requests.append(RecordedRequest(method, path, None))
         if method == "GET" and path == "/ccapi/ver100/shooting/liveview/multipart":
@@ -751,12 +754,12 @@ class FakeCcapiTransport:
                 + str(len(self.multipart_frame)).encode()
                 + b"\n\n"
                 + self.multipart_frame
-                + b"\n--canon--\n"
+                + b"\n"
             )
             return CcapiStreamResponse(
                 200,
                 {"content-type": "multipart/x-mixed-replace;boundary=canon"},
-                BytesIO(multipart),
+                OpenLiveViewStream(multipart),
             )
         if path.endswith("IMG_0001.JPG"):
             return CcapiStreamResponse(
@@ -807,6 +810,9 @@ class FakeRtpSession:
 
     def set_target_fps(self, fps: int) -> None:
         self.target_fps = fps
+
+    def discard_pending_frames(self) -> None:
+        pass
 
     def read_frame(self, timeout: float = 5.0) -> bytes:
         assert timeout == 5.0

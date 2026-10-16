@@ -4,11 +4,13 @@ import base64
 import json
 import mimetypes
 import re
+import socket
+import ssl
 import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
@@ -17,16 +19,25 @@ from pathlib import Path
 from typing import BinaryIO, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, unquote, urlencode, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
-from .errors import BridgeError, unsupported
+from .errors import BridgeError, ConnectionFailureReason, unsupported
+from .focus_info import MAX_FOCUS_INFO_BYTES, parse_ccapi_focus_info_packet
+from .jpeg_original import MAX_ENCODED_BYTES, InvalidJpegOriginal, validate_http_types
+from .liveview_decode import validate_first_jpeg
+from .liveview_lifecycle import evaluate as liveview_policy
+from .maintenance import observation as maintenance_observation
+from .maintenance import require_intent, response_received
 from .media_folders import camera_folder_fields
+from .media_listing import MAX_LIST_SNAPSHOT_ITEMS
+from .media_metadata import MIME_ALIASES, declared_media_mime
 from .models import (
     BatteryStatus,
     CameraCapabilities,
     CameraDescriptor,
     CameraEvent,
     CameraFeature,
+    CameraFocusInfo,
     CameraInfo,
     CameraSetting,
     CameraStatus,
@@ -37,6 +48,7 @@ from .models import (
     FileNamingField,
     FileNamingState,
     FocusResult,
+    HeldAutofocusState,
     IntegerRange,
     LensStatus,
     LiveViewCapabilities,
@@ -46,6 +58,9 @@ from .models import (
     StorageStatus,
     camera_profile,
 )
+from .recording import observation as recording_observation
+from .recording import outcome as recording_outcome
+from .recording import require_operation
 from .rtp import (
     RtpAudioChunk,
     RtpError,
@@ -56,6 +71,7 @@ from .rtp import (
     pyav_decoder_available,
     resolve_local_ipv4,
 )
+from .shooting_settings import exact_setting, observation, require_requested_value, responded, valid_key, valid_string
 
 ENGINE_NAME = "ccapi"
 ENGINE_VERSION = "CCAPI HTTP"
@@ -71,6 +87,14 @@ MAX_RTP_SESSION_DESCRIPTION_BYTES = 64 * 1024
 RTP_AUDIO_FEATURE = "LIVE_VIEW_RTP_AUDIO"
 MAX_MEDIA_THUMBNAIL_BYTES = 8 * 1024 * 1024
 MAX_MEDIA_PREVIEW_BYTES = 32 * 1024 * 1024
+MAX_MEDIA_INVENTORY_ITEMS = 1000
+MAX_MEDIA_INVENTORY_REQUESTS = 512
+MAX_MEDIA_INVENTORY_CONTAINERS = 512
+MAX_MEDIA_INVENTORY_SECONDS = 30.0
+MEDIA_INVENTORY_READ_TIMEOUT = 2.0
+MAX_MEDIA_INVENTORY_PATH_CHARS = 2048
+MAX_MEDIA_LIST_REQUESTS = 10_000
+MAX_MEDIA_LIST_CONTAINERS = 4_096
 MULTIPART_START_RETRY_DELAYS = (0.1, 0.2, 0.4, 0.8)
 JPEG_FRAME_BUSY_RETRY_DELAYS = (0.05, 0.1)
 MAX_CAPABILITY_EVIDENCE_ITEMS = 256
@@ -84,6 +108,7 @@ MAX_EVENT_KEYS = 64
 MAX_EVENT_KEY_CHARS = 128
 TRANSFER_CHUNK_BYTES = 64 * 1024
 HALF_PRESS_SECONDS = 0.35
+MAX_HELD_AUTOFOCUS_SECONDS = 30.0
 HTTP_METHODS = ("GET", "PUT", "POST", "DELETE")
 COMMAND_METHODS = {"PUT", "POST"}
 PRIMARY_SETTING_KEYS = {"iso", "shutter", "aperture", "whitebalance"}
@@ -400,6 +425,14 @@ class CcapiJpegOperations:
     stop_payload: Mapping[str, object] | None = None
 
 
+@dataclass(frozen=True)
+class _CcapiLiveViewStop:
+    source: str
+    operation: CcapiOperation
+    payload: tuple[tuple[str, object], ...] | None
+    close_stream: CcapiOperation | None = None
+
+
 class _CcapiLiveViewSizeUnsupported(BridgeError):
     def __init__(self, path: str) -> None:
         super().__init__(
@@ -517,10 +550,18 @@ class CcapiMultipartSession:
         self._latest_frame: bytes | None = None
         self._produced_generation = 0
         self._consumed_generation = 0
+        self._frame_epoch = 0
         self._terminal_error: Exception | None = None
         self._closed = False
         self._worker = threading.Thread(target=self._drain, name="ccapi-multipart-live-view", daemon=True)
         self._worker.start()
+
+    def discard_pending_frames(self) -> None:
+        with self._condition:
+            self._frame_epoch += 1
+            self._consumed_generation = self._produced_generation
+            self._latest_frame = None
+            self._condition.notify_all()
 
     def next_frame(self, timeout: float = 15.0) -> bytes:
         deadline = time.monotonic() + timeout
@@ -534,6 +575,7 @@ class CcapiMultipartSession:
                 if remaining <= 0:
                     raise _multipart_error("Timed out waiting for the next Canon multipart Live View frame.")
                 self._condition.wait(remaining)
+            self._check_usable_locked()
             if self._produced_generation > self._consumed_generation:
                 assert self._latest_frame is not None
                 self._consumed_generation = self._produced_generation
@@ -544,25 +586,38 @@ class CcapiMultipartSession:
                 raise _multipart_error(f"Canon multipart Live View stream failed: {self._terminal_error}")
             raise _multipart_error("Canon multipart Live View stream is closed.")
 
-    def wait_until_ready(self, timeout: float = 15.0) -> None:
+    def wait_until_ready(self, timeout: float = 15.0) -> bytes:
         deadline = time.monotonic() + max(timeout, 0.0)
         with self._condition:
             while (
                 not self._closed
-                and self._produced_generation == 0
+                and self._latest_frame is None
                 and self._terminal_error is None
             ):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise _multipart_error("Timed out waiting for the first Canon multipart Live View frame.")
                 self._condition.wait(remaining)
-            if self._produced_generation > 0:
-                return
+            self._check_usable_locked()
+            if self._latest_frame is not None:
+                return self._latest_frame
             if self._terminal_error is not None:
                 if isinstance(self._terminal_error, BridgeError):
                     raise self._terminal_error
                 raise _multipart_error(f"Canon multipart Live View stream failed: {self._terminal_error}")
             raise _multipart_error("Canon multipart Live View stream closed before its first frame.")
+
+    def check_usable(self) -> None:
+        with self._condition:
+            self._check_usable_locked()
+
+    def _check_usable_locked(self) -> None:
+        if self._closed:
+            raise _multipart_error("Canon multipart Live View stream is closed.")
+        if self._terminal_error is not None:
+            if isinstance(self._terminal_error, BridgeError):
+                raise self._terminal_error
+            raise _multipart_error(f"Canon multipart Live View stream failed: {self._terminal_error}")
 
     def close(self) -> None:
         with self._condition:
@@ -580,10 +635,23 @@ class CcapiMultipartSession:
                 with self._condition:
                     if self._closed:
                         return
-                frame = reader.next_frame()
-                if frame is None:
-                    raise _multipart_error("Canon multipart Live View stream ended unexpectedly.")
+                    epoch = self._frame_epoch
+                try:
+                    frame = reader.next_frame()
+                except Exception:
+                    with self._condition:
+                        if self._closed:
+                            return
+                        if epoch != self._frame_epoch:
+                            continue
+                    raise
                 with self._condition:
+                    if self._closed:
+                        return
+                    if epoch != self._frame_epoch:
+                        continue
+                    if frame is None:
+                        raise _multipart_error("Canon multipart Live View stream ended unexpectedly.")
                     self._latest_frame = frame
                     self._produced_generation += 1
                     self._condition.notify_all()
@@ -617,6 +685,7 @@ class CcapiTransport(Protocol):
         headers: Mapping[str, str] | None = None,
         timeout: float = 15.0,
         max_bytes: int = MAX_JSON_BYTES,
+        strict_control: bool = False,
     ) -> CcapiResponse: ...
 
     def open_stream(
@@ -626,9 +695,16 @@ class CcapiTransport(Protocol):
         *,
         headers: Mapping[str, str] | None = None,
         timeout: float = 60.0,
+        follow_redirects: bool = True,
+        strict_control: bool = False,
     ) -> CcapiStreamResponse: ...
 
     def close(self) -> None: ...
+
+
+class _NoCcapiRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 class UrllibCcapiTransport:
@@ -647,11 +723,52 @@ class UrllibCcapiTransport:
         headers: Mapping[str, str] | None = None,
         timeout: float = 15.0,
         max_bytes: int = MAX_JSON_BYTES,
+        strict_control: bool = False,
     ) -> CcapiResponse:
-        response = self._open(method, url, body=body, headers=headers, timeout=timeout)
+        resource_path = urlsplit(url).path
+        configuration_resource = strict_control or (
+            resource_path.endswith((DIRECTORY_CREATE_PATH_SUFFIX, DIRECTORY_SELECTION_PATH_SUFFIX,
+                                    ZOOM_PATH_SUFFIX, MOVIE_MODE_PATH_SUFFIX, "/functions/datetime",
+                                    "/functions/sensorcleaning", "/functions/autopoweroff", "/deviceinformation"))
+            or "/shooting/settings" in resource_path
+            or any(resource_path.endswith(suffix) for suffix, _ in FILE_NAMING_ENDPOINTS.values())
+        )
+        deadline = time.monotonic() + timeout if configuration_resource else None
+        response = self._open(
+            method, url, body=body, headers=headers, timeout=timeout,
+            follow_redirects=method != "DELETE" and not configuration_resource, strict_control=strict_control,
+        )
         try:
+            if method != "DELETE" and not 200 <= response.status < 300:
+                # The received status already proves rejection. An optional
+                # diagnostic body must not turn that evidence into an unknown
+                # command result when it is oversized, truncated, or unreadable.
+                payload = b""
+                if not configuration_resource:
+                    with suppress(OSError, HTTPException):
+                        payload = response.body.read(min(max_bytes, MAX_ERROR_BYTES))
+                return CcapiResponse(response.status, response.headers, payload)
             try:
-                payload = response.body.read(max_bytes + 1)
+                if deadline is None:
+                    payload = response.body.read(max_bytes + 1)
+                else:
+                    # Cooperative wall budget between single buffered reads. urllib
+                    # DNS/header setup and a blocking socket read cannot be forcibly
+                    # cancelled here; reject late bytes instead of publishing them.
+                    chunks = []
+                    total = 0
+                    reader = getattr(response.body, "read1", response.body.read)
+                    while total <= max_bytes:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("Configuration response deadline elapsed")
+                        chunk = reader(min(4096, max_bytes + 1 - total))
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("Configuration response deadline elapsed")
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        total += len(chunk)
+                    payload = b"".join(chunks)
             except (OSError, HTTPException) as error:
                 raise BridgeError(
                     "CCAPI_UNREACHABLE",
@@ -685,8 +802,11 @@ class UrllibCcapiTransport:
         *,
         headers: Mapping[str, str] | None = None,
         timeout: float = 60.0,
+        follow_redirects: bool = True,
+        strict_control: bool = False,
     ) -> CcapiStreamResponse:
-        return self._open(method, url, headers=headers, timeout=timeout)
+        return self._open(method, url, headers=headers, timeout=timeout, follow_redirects=follow_redirects,
+                          strict_control=strict_control)
 
     def close(self) -> None:
         self._authorization = None
@@ -699,6 +819,8 @@ class UrllibCcapiTransport:
         body: bytes | None = None,
         headers: Mapping[str, str] | None = None,
         timeout: float,
+        follow_redirects: bool = True,
+        strict_control: bool = False,
     ) -> CcapiStreamResponse:
         request_headers = {
             "Accept": "application/json,*/*",
@@ -712,7 +834,10 @@ class UrllibCcapiTransport:
             request_headers.setdefault("Content-Type", "application/json; charset=utf-8")
         request = Request(url, data=body, headers=request_headers, method=method)
         try:
-            response = urlopen(request, timeout=timeout)  # noqa: S310 - user-selected camera origin is intentional.
+            if follow_redirects:
+                response = urlopen(request, timeout=timeout)  # noqa: S310 - user-selected camera origin is intentional.
+            else:
+                response = build_opener(_NoCcapiRedirect()).open(request, timeout=timeout)
         except HTTPError as error:
             response = error
         except (OSError, HTTPException, URLError) as error:
@@ -722,6 +847,23 @@ class UrllibCcapiTransport:
                 status_code=502,
                 engine=ENGINE_NAME,
             ) from error
+        resource_path = urlsplit(url).path
+        strict_setting = strict_control or ("/shooting/settings" in resource_path
+                          or resource_path.endswith((ZOOM_PATH_SUFFIX, MOVIE_MODE_PATH_SUFFIX,
+                                                     "/functions/datetime", "/functions/sensorcleaning",
+                                                     "/functions/autopoweroff", "/deviceinformation")))
+        if strict_setting and 200 <= int(response.status) < 300:
+            get_all = getattr(response.headers, "get_all", None)
+            ambiguous = callable(get_all) and any(
+                len(get_all(name, [])) > 1 for name in
+                ("Content-Length", "Transfer-Encoding", "Content-Range", "Content-Encoding")
+            )
+            transfer = response.headers.get("Transfer-Encoding")
+            encoding = response.headers.get("Content-Encoding")
+            if ambiguous or transfer not in {None, "chunked"} or encoding not in {None, "identity"}:
+                response.close()
+                raise BridgeError("INVALID_CCAPI_RESPONSE", "Ambiguous setting HTTP framing.",
+                                  status_code=502, engine=ENGINE_NAME)
         response_headers = {key.casefold(): value for key, value in response.headers.items()}
         return CcapiStreamResponse(int(response.status), response_headers, response)
 
@@ -744,6 +886,35 @@ class _CcapiHTTPError(BridgeError):
             value = None
         if isinstance(value, dict) and isinstance(value.get("message"), str):
             self.camera_message = value["message"].strip()
+
+
+def _connection_failure_reason(error: BridgeError) -> ConnectionFailureReason:
+    # The upstream HTTP status is retained separately from the legacy Bridge 502.
+    # Neither the camera body nor a diagnostic message can grant auth/TLS evidence.
+    if isinstance(error, _CcapiHTTPError):
+        if error.camera_status in {401, 403}:
+            return ConnectionFailureReason.AUTHENTICATION_REJECTED
+        if error.camera_status == 404:
+            return ConnectionFailureReason.ENDPOINT_NOT_FOUND
+        return ConnectionFailureReason.HTTP_ERROR
+    cause: BaseException | None = error
+    for _ in range(16):
+        if isinstance(cause, ssl.SSLError):
+            return ConnectionFailureReason.TLS_ERROR
+        if isinstance(cause, socket.gaierror):
+            return ConnectionFailureReason.HOST_NOT_FOUND
+        if isinstance(cause, TimeoutError):
+            return ConnectionFailureReason.TIMEOUT
+        if isinstance(cause, URLError):
+            # URLError may carry plain diagnostic text, which is not evidence.
+            cause = cause.reason if isinstance(cause.reason, BaseException) else cause.__cause__
+            continue
+        if isinstance(cause, (OSError, HTTPException)):
+            return ConnectionFailureReason.UNREACHABLE
+        if cause is None:
+            break
+        cause = cause.__cause__
+    return ConnectionFailureReason.DISCOVERY_FAILED
 
 
 class CcapiEngine:
@@ -834,19 +1005,30 @@ class CcapiSession:
         self._camera_sleep_path: str | None = None
         self._discovery_source = "unknown"
         self._recording: bool | None = None
+        self._recording_stop_operation: CcapiOperation | None = None
+        self._recording_last_stop_operation: CcapiOperation | None = None
         self._bulb_exposure_active: bool | None = False
         self._bulb_release_operation: CcapiOperation | None = None
         self._bulb_start_confirmed = False
         self._short_control_release: tuple[CcapiOperation, dict[str, object], CameraFeature] | None = None
+        self._held_autofocus_owner: str | None = None
+        self._held_autofocus_active: bool | None = False
+        self._held_autofocus_timer: threading.Timer | None = None
+        self._completed_autofocus_owners: deque[str] = deque(maxlen=64)
         self._shutter_release_unconfirmed = False
         self._temperature_status: CameraTemperatureStatus | None = None
         self._live_view_active = False
+        self._pending_live_view_stop: _CcapiLiveViewStop | None = None
+        self._live_view_stop_unconfirmed = False
         self._active_live_view_source: str | None = None
         self._rtp_session: RtpLiveViewSession | None = None
         self._multipart_session: CcapiMultipartSession | None = None
         self._active_multipart_operations: CcapiMultipartOperations | None = None
         self._active_jpeg_operations: CcapiJpegOperations | None = None
         self._live_view_size_control = True
+        self._maintenance_control_active = False
+        self._maintenance_stop_owned = False
+        self._maintenance_restore_request: LiveViewStartRequest | None = None
         self._rejected_live_view_sizes: set[str] = set()
         self._active_live_view_size: str | None = None
         self._live_view_magnification: tuple[int, list[int]] | None = None
@@ -865,6 +1047,7 @@ class CcapiSession:
             self._discovery_trace.clear()
             self._discovery_trace_truncated = False
             failures: list[str] = []
+            reasons: set[ConnectionFailureReason] = set()
             for path in ("/ccapi", "/ccapi/"):
                 try:
                     try:
@@ -897,6 +1080,7 @@ class CcapiSession:
                             endpoint=f"GET {path}", outcome="NO_API_LIST", response=value
                         )
 
+                    reasons.add(ConnectionFailureReason.DISCOVERY_FAILED)
                     developer_endpoint = f"GET {CCAPI_DEVELOPER_API_PATH}"
                     try:
                         value = self._request_json("GET", CCAPI_DEVELOPER_API_PATH)
@@ -933,6 +1117,7 @@ class CcapiSession:
                     return
                 except BridgeError as error:
                     failures.append(f"GET {path}: {error.message}")
+                    reasons.add(_connection_failure_reason(error))
 
             for prefix in ("/ccapi/ver110", "/ccapi/ver100"):
                 path = f"{prefix}/deviceinformation"
@@ -967,6 +1152,7 @@ class CcapiSession:
                     return
                 except BridgeError as error:
                     failures.append(f"GET {path}: {error.message}")
+                    reasons.add(_connection_failure_reason(error))
 
             detail = "\n".join(f"- {failure}" for failure in failures[-6:])
             raise BridgeError(
@@ -974,6 +1160,9 @@ class CcapiSession:
                 f"Failed to discover a Canon CCAPI camera at {self.base_url}.\n{detail}",
                 status_code=502,
                 engine=self.engine_name,
+                # Enum declaration order is the bounded recovery priority. A fallback
+                # 404 must not hide earlier auth, TLS, or transport evidence.
+                connection_reason=next(reason for reason in ConnectionFailureReason if reason in reasons),
             )
 
     def close(self) -> None:
@@ -997,25 +1186,25 @@ class CcapiSession:
                 except BridgeError:
                     release_error = self._shutter_release_error(disconnected=True)
                     self._last_error = release_error.message
-            if self._live_view_active:
+            if self._pending_live_view_stop is not None:
                 try:
                     self._stop_live_view_locked()
-                except BridgeError as error:
-                    self._last_error = error.message
+                except BaseException as error:
+                    if isinstance(error, BridgeError):
+                        error = self._live_view_stop_error(disconnected=True)
+                        self._last_error = error.message
+                    if release_error is None:
+                        release_error = error
             self._live_view_active = False
             self._active_live_view_source = None
-            if self._rtp_session is not None:
-                with suppress(Exception):
-                    self._rtp_session.close()
-                self._rtp_session = None
-            if self._multipart_session is not None:
-                self._multipart_session.close()
-                self._multipart_session = None
+            self._close_live_view_receivers()
             self._settings_cache = None
             self._file_naming_cache = None
             self._media_cache.clear()
-            self.transport.close()
-            self._closed = True
+            try:
+                self.transport.close()
+            finally:
+                self._closed = True
             if release_error is not None:
                 raise release_error
 
@@ -1084,6 +1273,11 @@ class CcapiSession:
                 recording=self._recording,
                 bulb_exposure_active=self._bulb_exposure_active,
                 shutter_release_unconfirmed=self._shutter_release_unconfirmed,
+                held_autofocus_active=(
+                    self._held_autofocus_active
+                    if self.held_autofocus_supported or self._held_autofocus_owner is not None else None
+                ),
+                live_view_stop_unconfirmed=self._live_view_stop_unconfirmed,
                 mode=_setting_value(settings, "shootingmode") or "unknown",
                 media=storage_status,
                 exposure=ExposureState(
@@ -1235,6 +1429,11 @@ class CcapiSession:
             live_view_available = CameraFeature.LIVE_VIEW in supported or live_view_magnification is not None
             return CameraCapabilities(
                 shutter_autofocus_supported=self.shutter_autofocus_supported,
+                held_autofocus_supported=self.held_autofocus_supported,
+                focus_info_supported=(
+                    self._operation("GET", "/shooting/liveview/flipdetail") is not None
+                    and CameraFeature.LIVE_VIEW in supported
+                ),
                 profile=camera_profile(model),
                 supported=sorted(supported, key=str),
                 planned=sorted(candidates - supported, key=str),
@@ -1415,6 +1614,150 @@ class CcapiSession:
                 return
             raise
 
+    def _scoped_setting_data(
+        self, key: str, *, deadline: float | None = None,
+    ) -> tuple[CameraSetting, object, str, str]:
+        """One fresh exact resource (or its advertised settings aggregate), no fallback."""
+        self._require_open()
+        if not self._initialized or not valid_key(key) or SETTING_ALIASES.get(key, key) != key:
+            raise unsupported(CameraFeature.ADVANCED_SETTINGS.value, self.engine_name)
+        structured = _structured_setting_parts(key)
+        base = structured[0] if structured else key
+        path = self._setting_paths.get(base)
+        method = "POST" if key in {ZOOM_SETTING_KEY, MOVIE_MODE_SETTING_KEY} else "PUT"
+        if path is None or CcapiOperation(method, path) not in self._operations:
+            raise unsupported(_feature_for_setting(key).value, self.engine_name)
+        read_path = path
+        aggregate = False
+        if CcapiOperation("GET", read_path) not in self._operations:
+            read_path = path.rsplit("/", 1)[0]
+            aggregate = read_path.endswith("/shooting/settings")
+            if not aggregate or CcapiOperation("GET", read_path) not in self._operations:
+                raise unsupported(_feature_for_setting(key).value, self.engine_name)
+        deadline = min(deadline or float("inf"), time.monotonic() + 15.0)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BridgeError("SETTING_READBACK_TIMEOUT", "Setting readback timed out.", status_code=504)
+        raw = self._request_capture_configuration_json("GET", read_path, timeout=remaining, strict_setting=True)
+        if time.monotonic() >= deadline:
+            raise BridgeError("SETTING_READBACK_TIMEOUT", "Setting readback timed out.", status_code=504)
+        if aggregate:
+            raw = raw.get(path.rsplit("/", 1)[1]) if isinstance(raw, dict) else None
+        # Reuse the existing operation-specific safety validators, not cache data.
+        if key == ZOOM_SETTING_KEY:
+            raw = _validated_zoom_setting(raw)
+        elif key == MOVIE_MODE_SETTING_KEY:
+            raw = _validated_movie_mode_setting(raw)
+        elif key in CARD_SELECTION_ENDPOINTS:
+            raw = _validated_card_selection_setting(raw)
+        elif key in DEVICE_FUNCTION_SETTING_ENDPOINTS:
+            raw = _validated_string_ability_setting(raw, DEVICE_FUNCTION_SETTING_ENDPOINTS[key][1])
+            if key == AUTO_POWER_OFF_SETTING_KEY and isinstance(raw, dict):
+                raw["ability"] = [value for value in raw["ability"] if value != AUTO_POWER_OFF_IMMEDIATELY]
+        elif key in SOUND_RECORDING_ENDPOINTS:
+            raw = _validated_string_ability_setting(raw, SOUND_RECORDING_ENDPOINTS[key][1])
+        elif key in SOUND_RECORDING_LEVEL_SETTING_KEYS:
+            raw = _validated_integer_range_setting(raw)
+        elif key in FOCUS_BRACKETING_STRING_ENDPOINTS:
+            raw = _validated_string_ability_setting(raw, FOCUS_BRACKETING_STRING_ENDPOINTS[key][1])
+        elif key in FOCUS_BRACKETING_INTEGER_ENDPOINTS:
+            raw = _validated_integer_range_setting(raw, maximum_options=MAX_FOCUS_BRACKETING_OPTIONS)
+        elif key in MOVIE_SETTING_ENDPOINTS:
+            raw = _validated_string_ability_setting(raw, MOVIE_SETTING_ENDPOINTS[key][1])
+        elif key == DIRECTORY_SELECTION_SETTING_KEY:
+            raw = _validated_directory_selection_setting(raw)
+        if not isinstance(raw, dict):
+            raise BridgeError("SETTING_READBACK_INVALID", "Missing fresh setting body.", status_code=502)
+        if structured and base == IMAGE_QUALITY_SETTING_KEY:
+            current, abilities = raw.get("value"), raw.get("ability")
+            if (not isinstance(current, dict) or not isinstance(abilities, dict) or not current
+                    or set(current) != set(abilities) or not set(current) <= set(IMAGE_QUALITY_FIELDS)
+                    or any(not isinstance(values, list) or not 1 <= len(values) <= 1024
+                           or not all(valid_string(item) and bool(item) for item in values)
+                           or len(values) != len(set(values)) or current[name] not in values
+                           for name, values in abilities.items())):
+                raise BridgeError("SETTING_READBACK_INVALID", "Invalid fresh image-quality siblings.", status_code=502)
+        elif structured and base == WB_SHIFT_SETTING_KEY:
+            current, abilities = raw.get("value"), raw.get("ability")
+            if (not isinstance(current, dict) or not isinstance(abilities, dict)
+                    or set(current) != set(WB_SHIFT_FIELDS) or set(abilities) != set(WB_SHIFT_FIELDS)
+                    or any(type(current[name]) is not int
+                           or str(current[name]) not in _bounded_integer_range_values(abilities[name])
+                           for name in WB_SHIFT_FIELDS)):
+                raise BridgeError("SETTING_READBACK_INVALID", "Invalid fresh white balance siblings.", status_code=502)
+        elif not structured:
+            values = raw.get("ability")
+            if (not isinstance(raw.get("value"), str) or not isinstance(values, list)
+                    or not all(isinstance(item, str) for item in values) or len(values) != len(set(values))):
+                raise BridgeError("SETTING_READBACK_INVALID", "Invalid exact setting values.", status_code=502)
+        control = next((item for item in self._camera_settings({base: raw}) if item.key == key), None)
+        try:
+            if control is None:
+                raise ValueError("Missing fresh setting")
+            exact_setting(control, key)
+        except ValueError as error:
+            raise BridgeError("SETTING_READBACK_INVALID", "Fresh setting response is incomplete or invalid.",
+                              status_code=502, engine=self.engine_name) from error
+        return control, raw, path, method
+
+    def read_setting(self, key: str) -> dict[str, object]:
+        deadline = time.monotonic() + 15.0
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("SETTING_READBACK_TIMEOUT", "Setting readback lock timed out.", status_code=504)
+        try:
+            return observation(self.engine_name, self._scoped_setting_data(key, deadline=deadline)[0])
+        finally:
+            self._lock.release()
+
+    def apply_setting_outcome(self, key: str, value: str) -> dict[str, object]:
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("SETTING_WRITE_TIMEOUT", "Setting write lock timed out.", status_code=504)
+        try:
+            self._require_shutter_release_confirmed()
+            control, raw, path, method = self._scoped_setting_data(key)
+            require_requested_value(control, value)
+            payload: dict[str, object] = {"value": value}
+            structured = _structured_setting_parts(key)
+            if key == MOVIE_MODE_SETTING_KEY:
+                payload = {"action": value}
+            elif (key == ZOOM_SETTING_KEY or key in SOUND_RECORDING_LEVEL_SETTING_KEYS
+                  or key in FOCUS_BRACKETING_INTEGER_ENDPOINTS):
+                payload = {"value": int(value)}
+            elif structured:
+                base, field = structured
+                current = raw.get("value") if isinstance(raw, dict) else None
+                fields = WB_SHIFT_FIELDS if base == WB_SHIFT_SETTING_KEY else IMAGE_QUALITY_FIELDS
+                ability = raw.get("ability") if isinstance(raw, dict) else None
+                if (not isinstance(current, dict) or not isinstance(ability, dict) or not current
+                        or set(current) != set(ability) or not set(current) <= set(fields) or field not in current
+                        or (base == WB_SHIFT_SETTING_KEY and set(current) != set(fields))):
+                    raise BridgeError("INVALID_SETTING_VALUE", "Complete fresh structured siblings required.",
+                                      status_code=422, engine=self.engine_name)
+                updated = dict(current)
+                updated[field] = int(value) if base == WB_SHIFT_SETTING_KEY else value
+                if base == WB_SHIFT_SETTING_KEY and any(type(updated[item]) is not int for item in fields):
+                    raise BridgeError("INVALID_SETTING_VALUE", "Invalid white balance siblings.", status_code=422)
+                if (base == IMAGE_QUALITY_SETTING_KEY
+                        and all(str(item).casefold() == "none" for item in updated.values())):
+                    raise BridgeError("INVALID_SETTING_VALUE", "At least one still format must remain enabled.",
+                                      status_code=422)
+                payload = {"value": updated}
+            # One frozen route. No status(), aliases, or retry after any exception.
+            response = self._request(method, path, payload, max_bytes=65536)
+            if (response.status not in {200, 204} or "content-range" in response.headers
+                    or len(response.body) > 65536):
+                raise BridgeError("INVALID_CCAPI_RESPONSE", "Incomplete setting transport response.", status_code=502)
+            length = response.headers.get("content-length")
+            if (length is not None and (not re.fullmatch(r"0|[1-9][0-9]*", length)
+                                       or int(length) != len(response.body)
+                                       or "transfer-encoding" in response.headers)):
+                raise BridgeError("INVALID_CCAPI_RESPONSE", "Ambiguous setting response framing.", status_code=502)
+            self._settings_cache = None
+            self._observed.add(_feature_for_setting(key))
+            return responded(self.engine_name, key, value, lambda: self._scoped_setting_data(key)[0])
+        finally:
+            self._lock.release()
+
     def set_setting(self, key: str, value: str) -> CameraStatus:
         with self._lock:
             self._require_shutter_release_confirmed()
@@ -1554,7 +1897,7 @@ class CcapiSession:
                     self.engine_name,
                     "The camera did not advertise the complete Canon directory-control endpoint group.",
                 )
-            response = self._request_json(
+            response = self._request_capture_configuration_json(
                 operations.create.method,
                 operations.create.path,
                 {"directoryname": name},
@@ -1569,9 +1912,130 @@ class CcapiSession:
                     engine=self.engine_name,
                 )
             self._settings_cache = None
-            self._load_settings(force=True)
+            try:
+                self.read_capture_configuration("create-directory")
+            except Exception as error:
+                raise self._capture_configuration_readback_error(
+                    "create-directory", name, created,
+                ) from error
             self._observed.add(CameraFeature.DIRECTORY_CONTROL)
             return created
+
+    def _capture_configuration_readback_error(
+        self, operation: str, requested: str, acknowledged: str, field: FileNamingField | None = None,
+    ) -> BridgeError:
+        receipt: dict[str, object] = {
+            "version": 1, "operation": operation, "stage": "acknowledged",
+            "requestedValue": requested, "acknowledgedValue": acknowledged,
+        }
+        if field is not None:
+            receipt["field"] = field.value
+        feature = (CameraFeature.DIRECTORY_CONTROL if operation == "create-directory"
+                   else CameraFeature.FILE_NAMING_CONTROL)
+        return BridgeError(
+            "CAPTURE_CONFIG_READBACK_FAILED",
+            "Camera acknowledged the configuration write; complete readback is unavailable. Do not repeat the write.",
+            status_code=502, feature=feature.value, engine=self.engine_name,
+            capture_config_receipt=receipt,
+        )
+
+    def _request_capture_configuration_json(
+        self, method: str, path: str, payload: dict[str, object] | None = None, *, timeout: float = 15.0,
+        strict_setting: bool = False,
+    ) -> object:
+        response = self._request(method, path, payload, timeout=timeout, max_bytes=65536,
+                                 headers={"Cache-Control": "no-cache, no-store", "Accept": "application/json"})
+        if strict_setting and (response.status != 200 or "content-range" in response.headers
+                               or len(response.body) > 65536):
+            raise BridgeError("INVALID_CCAPI_RESPONSE", "Incomplete setting read response.", status_code=502)
+        length = response.headers.get("content-length")
+        encoding = response.headers.get("transfer-encoding")
+        if (length is not None and (not re.fullmatch(r"0|[1-9][0-9]*", length)
+                                   or int(length) != len(response.body) or encoding is not None)):
+            raise BridgeError("INVALID_CCAPI_RESPONSE", "Ambiguous configuration response framing.",
+                              status_code=502, engine=self.engine_name)
+
+        def unique_object(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError("Duplicate configuration field")
+                value[key] = item
+            return value
+
+        try:
+            def reject_constant(_):
+                raise ValueError("Non-JSON numeric constant")
+
+            value = json.loads(response.body, object_pairs_hook=unique_object, parse_constant=reject_constant)
+            pending = [value]
+            while pending:
+                item = pending.pop()
+                if isinstance(item, str) and re.search(r"[\ud800-\udfff]", item):
+                    raise ValueError("Unpaired configuration surrogate")
+                if isinstance(item, dict):
+                    pending.extend(item.keys())
+                    pending.extend(item.values())
+                elif isinstance(item, list):
+                    pending.extend(item)
+            return value
+        except (UnicodeDecodeError, ValueError, RecursionError) as error:
+            raise BridgeError("INVALID_CCAPI_RESPONSE", "Invalid complete configuration JSON response.",
+                              status_code=502, engine=self.engine_name) from error
+
+    def read_capture_configuration(self, operation: str) -> dict[str, object]:
+        """Fresh, bounded reads only; never replay an earlier configuration write."""
+        deadline = time.monotonic() + 15.0
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("CAPTURE_CONFIG_READBACK_TIMEOUT", "Configuration readback lock timed out.",
+                              status_code=504, engine=self.engine_name)
+        try:
+            self._require_open()
+            if not self._initialized:
+                raise BridgeError("SESSION_NOT_INITIALIZED", "Connect before reading configuration.", status_code=409)
+
+            def read(path: str) -> object:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise BridgeError("CAPTURE_CONFIG_READBACK_TIMEOUT", "Configuration readback timed out.",
+                                      status_code=504, engine=self.engine_name)
+                result = self._request_capture_configuration_json("GET", path, timeout=remaining)
+                if time.monotonic() >= deadline:
+                    raise BridgeError("CAPTURE_CONFIG_READBACK_TIMEOUT", "Configuration readback timed out.",
+                                      status_code=504, engine=self.engine_name)
+                return result
+
+            if operation == "create-directory":
+                operations = self._directory_operations()
+                if operations is None:
+                    raise unsupported(CameraFeature.DIRECTORY_CONTROL.value, self.engine_name)
+                selection = _validated_directory_selection_setting(read(operations.read.path))
+                if selection is None:
+                    raise BridgeError("INVALID_CCAPI_RESPONSE", "Invalid fresh directory-selection state.",
+                                      status_code=502, engine=self.engine_name)
+                if self._settings_cache is not None:
+                    self._settings_cache[DIRECTORY_SELECTION_SETTING_KEY] = selection
+                self._setting_paths[DIRECTORY_SELECTION_SETTING_KEY] = operations.write.path
+                self._observed.add(CameraFeature.DIRECTORY_CONTROL)
+                return {"operation": operation, "directorySelection": selection}
+            if operation == "set-file-naming":
+                naming_operations = self._file_naming_operations()
+                if naming_operations is None:
+                    raise unsupported(CameraFeature.FILE_NAMING_CONTROL.value, self.engine_name)
+                self._file_naming_cache = None
+                responses = {field: read(operations[0].path)
+                             for field, operations in naming_operations.values.items()}
+                state = _validated_file_naming_state(responses)
+                if state is None:
+                    raise BridgeError("INVALID_CCAPI_RESPONSE", "Invalid fresh complete file-naming state.",
+                                      status_code=502, engine=self.engine_name)
+                self._file_naming_cache = state
+                self._observed.add(CameraFeature.FILE_NAMING_CONTROL)
+                return {"operation": operation, "fileNaming": state.model_dump(mode="json", by_alias=True)}
+            raise BridgeError("UNSUPPORTED_CAPTURE_CONFIGURATION_READBACK", "Unknown configuration operation.",
+                              status_code=409, engine=self.engine_name)
+        finally:
+            self._lock.release()
 
     def set_file_naming(self, field: FileNamingField, value: str) -> FileNamingState:
         with self._lock:
@@ -1599,8 +2063,11 @@ class CcapiSession:
                 FileNamingField.MOVIE_REEL_NUMBER,
                 FileNamingField.MOVIE_CLIP_NUMBER,
             } else value
-            response = self._request_json(operation.method, operation.path, {response_key: request_value})
-            if not isinstance(response, dict) or response.get(response_key) != request_value:
+            response = self._request_capture_configuration_json(
+                operation.method, operation.path, {response_key: request_value},
+            )
+            if (not isinstance(response, dict) or type(response.get(response_key)) is not type(request_value)
+                    or response.get(response_key) != request_value):
                 raise BridgeError(
                     "INVALID_CCAPI_RESPONSE",
                     "Canon file-naming control returned an invalid update response.",
@@ -1609,21 +2076,205 @@ class CcapiSession:
                     engine=self.engine_name,
                 )
             self._file_naming_cache = None
-            updated = self._load_file_naming(force=True)
-            if updated is None or _file_naming_value(updated, field) != value:
-                raise BridgeError(
-                    "INVALID_CCAPI_RESPONSE",
-                    "Canon file-naming control did not return the requested value on refresh.",
-                    status_code=502,
-                    feature=CameraFeature.FILE_NAMING_CONTROL.value,
-                    engine=self.engine_name,
-                )
+            try:
+                result = self.read_capture_configuration("set-file-naming")
+                updated = FileNamingState.model_validate(result["fileNaming"])
+                if _file_naming_value(updated, field) != value:
+                    raise self._capture_configuration_readback_error("set-file-naming", value, value, field)
+            except Exception as error:
+                if isinstance(error, BridgeError) and error.code == "CAPTURE_CONFIG_READBACK_FAILED":
+                    raise
+                raise self._capture_configuration_readback_error("set-file-naming", value, value, field) from error
             self._observed.add(CameraFeature.FILE_NAMING_CONTROL)
             return updated
+
+    def _maintenance_clock_sample(self, path: str, deadline: float) -> dict[str, object]:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance read timed out.", status_code=504)
+        raw = self._request_capture_configuration_json("GET", path, timeout=remaining, strict_setting=True)
+        if time.monotonic() >= deadline:
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance read timed out.", status_code=504)
+        stamp, daylight = self._validate_camera_clock_response(raw)
+        offset = stamp.utcoffset().total_seconds()
+        if offset % 60:
+            raise BridgeError("INVALID_CCAPI_RESPONSE", "Clock offset is not a whole minute.", status_code=502)
+        return {"epochSeconds": int(stamp.timestamp()), "utcOffsetMinutes": int(offset // 60),
+                "daylightSaving": daylight}
+
+    def read_maintenance(self, operation: str) -> dict[str, object]:
+        require_intent(operation, False)
+        deadline = time.monotonic() + 15.0
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance lock timed out.", status_code=504)
+        try:
+            self._require_open()
+            if not self._initialized:
+                raise BridgeError("SESSION_NOT_INITIALIZED", "Connect before maintenance reads.", status_code=409)
+            if operation == "clock-sync":
+                operations = self._camera_clock_operations()
+                if operations is None:
+                    raise unsupported(CameraFeature.CAMERA_CLOCK_SYNC.value, self.engine_name)
+                return maintenance_observation(self.engine_name, operation,
+                                               self._maintenance_clock_sample(operations[0].path, deadline))
+            probe = self._operation("GET", "/deviceinformation")
+            if probe is None:
+                raise unsupported("MAINTENANCE_READBACK", self.engine_name)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance read timed out.", status_code=504)
+            raw = self._request_capture_configuration_json("GET", probe.path, timeout=remaining, strict_setting=True)
+            if (time.monotonic() >= deadline or not isinstance(raw, dict)
+                    or not isinstance(raw.get("productname"), str) or not raw["productname"].strip()):
+                raise BridgeError("INVALID_CCAPI_RESPONSE", "Required camera identity read unavailable.",
+                                  status_code=502)
+            # Do not return identity/serial data, cached status or physical completion claims.
+            return maintenance_observation(self.engine_name, operation, reachable=True)
+        finally:
+            self._lock.release()
+
+    @contextmanager
+    def _maintenance_controls(self) -> Iterator[None]:
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance control lock timed out.", status_code=504)
+        previous = self._maintenance_control_active
+        try:
+            self._require_open()
+            if not self._initialized:
+                raise BridgeError("SESSION_NOT_INITIALIZED", "Connect before maintenance.", status_code=409)
+            self._maintenance_control_active = True
+            yield
+        finally:
+            self._maintenance_control_active = previous
+            self._lock.release()
+
+    def maintenance_stop_events(self) -> None:
+        with self._maintenance_controls():
+            operations = self._event_polling_operations()
+            if operations is None:
+                raise unsupported("MAINTENANCE_CONTROLS", self.engine_name)
+            self._request_ok("DELETE", operations[1].path, timeout=5.0, expected_status=204)
+
+    def maintenance_retire(self) -> None:
+        """Retire local resources only; this never acknowledges or retries camera Stop."""
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance retire lock timed out.", status_code=504)
+        try:
+            if self._closed:
+                return
+            # A local-only retire must never discard a physical shutter release obligation.
+            if self._short_control_release is not None or self._bulb_release_operation is not None:
+                raise self._shutter_release_error(blocked=True)
+            self._closed = True
+            self._live_view_stop_unconfirmed |= self._pending_live_view_stop is not None
+            self._live_view_active = False
+            self._active_live_view_source = None
+            self._maintenance_restore_request = None
+            self._settings_cache = None
+            self._file_naming_cache = None
+            self._media_cache.clear()
+            try:
+                self._close_live_view_receivers()
+            finally:
+                self.transport.close()
+        finally:
+            self._lock.release()
+
+    def maintenance_stop_live_view(self) -> None:
+        with self._maintenance_controls():
+            if self._active_live_view_source and self._live_view_active:
+                self._maintenance_restore_request = LiveViewStartRequest(
+                    fps=self._requested_fps, source=self._active_live_view_source,
+                    size=self._active_live_view_size or "MEDIUM")
+            self._maintenance_stop_owned = True
+            self._stop_live_view_locked()
+
+    def maintenance_start_live_view(self, request: LiveViewStartRequest) -> None:
+        with self._maintenance_controls():
+            frozen = self._maintenance_restore_request
+            if self._live_view_stop_unconfirmed:
+                raise self._live_view_stop_error()
+            if frozen is None or frozen.source == "AUTO":
+                raise BridgeError("MAINTENANCE_RESTORE_UNAVAILABLE", "No frozen prior Live View source.",
+                                  status_code=409)
+            if self._recording is True or self._bulb_exposure_active:
+                raise BridgeError("CAMERA_BUSY", "Stop recording or Bulb before restoration.", status_code=409)
+            # Request fields are transport-compatible, but cannot replace the original source/size/FPS.
+            del request
+            self._maintenance_stop_owned = True
+            self.start_live_view(frozen)
+            self._maintenance_restore_request = None
+
+    def perform_maintenance_outcome(self, operation: str, auto_power_off: bool) -> dict[str, object]:
+        require_intent(operation, auto_power_off)
+        if not self._lock.acquire(timeout=15.0):
+            raise BridgeError("MAINTENANCE_TIMEOUT", "Maintenance lock timed out.", status_code=504)
+        try:
+            self._require_shutter_release_confirmed()
+            if not self._initialized:
+                raise BridgeError("SESSION_NOT_INITIALIZED", "Connect before maintenance.", status_code=409)
+            if self._recording is True or self._bulb_exposure_active:
+                raise BridgeError("CAMERA_BUSY", "Stop recording or Bulb before maintenance.", status_code=409)
+            if operation != "clock-sync" and (self._live_view_active or self._live_view_stop_unconfirmed):
+                raise BridgeError("LIVE_VIEW_STOP_REQUIRED", "Confirm Live View stopped before maintenance.",
+                                  status_code=409)
+            if operation == "clock-sync":
+                operations = self._camera_clock_operations()
+                if operations is None:
+                    raise unsupported(CameraFeature.CAMERA_CLOCK_SYNC.value, self.engine_name)
+                read, write = operations
+                requested = datetime.now().astimezone().replace(microsecond=0)
+                # astimezone() carries a fixed offset, whose dst() is normally None.
+                # Query host DST for this exact instant, including transition boundaries.
+                daylight = time.localtime(requested.timestamp()).tm_isdst > 0
+                reference = {"earliestEpochSeconds": int(requested.timestamp()) - 10,
+                             "latestEpochSeconds": int(requested.timestamp()) + 10,
+                             "utcOffsetMinutes": int(requested.utcoffset().total_seconds() // 60),
+                             "daylightSaving": daylight}
+                # Freeze exact read/write route. One write; validate the existing clock response contract.
+                raw = self._request_capture_configuration_json(write.method, write.path,
+                        {"datetime": format_datetime(requested), "dst": daylight}, strict_setting=True)
+                self._validate_camera_clock_response(raw)
+                result = response_received(self.engine_name, operation, False, reference,
+                         lambda: self._maintenance_clock_sample(read.path, time.monotonic() + 15.0))
+                if result["clockReadEvidence"] == "matched":
+                    self._observed.add(CameraFeature.CAMERA_CLOCK_SYNC)
+                return result
+            if operation == "sleep":
+                pair = self._read_write_setting_operations("/functions/autopoweroff")
+                if pair is None:
+                    raise unsupported(CameraFeature.CAMERA_SLEEP.value, self.engine_name)
+                read, write = pair
+                raw = self._request_capture_configuration_json("GET", read.path, strict_setting=True)
+                setting = _validated_string_ability_setting(
+                    raw, AUTO_POWER_OFF_SETTING_VALUES | {AUTO_POWER_OFF_IMMEDIATELY})
+                if setting is None or AUTO_POWER_OFF_IMMEDIATELY not in setting["ability"]:
+                    raise unsupported(CameraFeature.CAMERA_SLEEP.value, self.engine_name)
+                method, path, payload, expected = write.method, write.path, {"value": AUTO_POWER_OFF_IMMEDIATELY}, 202
+            else:
+                selected = self._operation("POST", "/functions/sensorcleaning")
+                if selected is None:
+                    raise unsupported(CameraFeature.SENSOR_CLEANING.value, self.engine_name)
+                method, path, payload, expected = selected.method, selected.path, {"autopoweroff": auto_power_off}, 200
+            response = self._request(method, path, payload, max_bytes=65536)
+            length = response.headers.get("content-length")
+            if (response.status != expected or "content-range" in response.headers or len(response.body) > 65536
+                    or response.headers.get("content-encoding") not in {None, "identity"}
+                    or (length is not None and (not re.fullmatch(r"0|[1-9][0-9]*", length)
+                        or int(length) != len(response.body) or "transfer-encoding" in response.headers))):
+                raise BridgeError("INVALID_CCAPI_RESPONSE", "Incomplete maintenance response.", status_code=502)
+            # No post-action status, hidden restart, DELETE, route fallback or retries.
+            self._settings_cache = None
+            self._observed.add(CameraFeature.CAMERA_SLEEP if operation == "sleep" else CameraFeature.SENSOR_CLEANING)
+            return response_received(self.engine_name, operation, auto_power_off)
+        finally:
+            self._lock.release()
 
     def sleep_camera(self) -> None:
         with self._lock:
             self._require_shutter_release_confirmed()
+            if self._live_view_stop_unconfirmed:
+                raise self._live_view_stop_error()
             self._ensure_initialized()
             self.stop_event_polling()
             if self._live_view_active:
@@ -1648,6 +2299,8 @@ class CcapiSession:
     def clean_sensor(self, auto_power_off: bool) -> None:
         with self._lock:
             self._require_shutter_release_confirmed()
+            if self._live_view_stop_unconfirmed:
+                raise self._live_view_stop_error()
             self._ensure_initialized()
             operation = self._operation("POST", "/functions/sensorcleaning")
             if operation is None:
@@ -1861,6 +2514,91 @@ class CcapiSession:
         self._require_open()
         if self._shutter_release_unconfirmed:
             raise self._shutter_release_error(blocked=True)
+        if self._held_autofocus_owner is not None:
+            raise BridgeError(
+                "AUTOFOCUS_ACTIVE", "Stop the held autofocus control before starting another camera control.",
+                status_code=409, feature=CameraFeature.AUTOFOCUS.value, engine=self.engine_name,
+            )
+
+    @property
+    def held_autofocus_supported(self) -> bool:
+        # A manual shutter half-press is a different operation and never a held AF substitute.
+        return self._operation("POST", "/shooting/control/af") is not None
+
+    def start_autofocus(self, owner_id: str) -> HeldAutofocusState:
+        with self._lock:
+            self._require_open()
+            if self._held_autofocus_owner == owner_id:
+                if self._shutter_release_unconfirmed:
+                    raise self._shutter_release_error(blocked=True)
+                return HeldAutofocusState(owner_id=owner_id, active=True, stop_unconfirmed=False)
+            self._require_shutter_release_confirmed()
+            if owner_id in self._completed_autofocus_owners:
+                raise self._focus_owner_error()
+            operation = self._operation("POST", "/shooting/control/af")
+            if operation is None:
+                raise unsupported(CameraFeature.AUTOFOCUS.value, self.engine_name,
+                                  "The camera does not advertise a dedicated held AF start/stop operation.")
+            if self._bulb_release_operation is not None:
+                raise BridgeError(
+                    "BULB_EXPOSURE_ACTIVE", "Stop the exposure before starting held autofocus.",
+                    status_code=409, feature=CameraFeature.AUTOFOCUS.value, engine=self.engine_name,
+                )
+            self._held_autofocus_owner = owner_id
+            self._held_autofocus_active = None
+            self._short_control_release = (operation, {"action": "stop"}, CameraFeature.AUTOFOCUS)
+            self._shutter_release_unconfirmed = True
+            try:
+                self._schedule_autofocus_stop_locked(owner_id)
+                self._command_ok(operation, {"action": "start"})
+            except Exception as error:
+                try:
+                    self._release_short_control_locked()
+                except BridgeError as release_error:
+                    raise release_error from error
+                raise
+            self._held_autofocus_active = True
+            self._shutter_release_unconfirmed = False
+            self._observed.add(CameraFeature.AUTOFOCUS)
+            # An unrelated status read must never turn an acknowledged start into a replay.
+            return HeldAutofocusState(owner_id=owner_id, active=True, stop_unconfirmed=False)
+
+    def stop_autofocus(self, owner_id: str) -> HeldAutofocusState:
+        with self._lock:
+            self._require_open()
+            if self._held_autofocus_owner != owner_id:
+                if owner_id in self._completed_autofocus_owners:
+                    return HeldAutofocusState(owner_id=owner_id, active=False, stop_unconfirmed=False)
+                # A stop that overtakes its start must prevent that late request
+                # from pressing the camera after the user has already released.
+                self._completed_autofocus_owners.append(owner_id)
+                raise self._focus_owner_error()
+            self._release_short_control_locked()
+            return HeldAutofocusState(owner_id=owner_id, active=False, stop_unconfirmed=False)
+
+    def _focus_owner_error(self) -> BridgeError:
+        return BridgeError(
+            "FOCUS_OWNER_MISMATCH", "This autofocus request does not own the held control in this session.",
+            status_code=409, feature=CameraFeature.AUTOFOCUS.value, engine=self.engine_name,
+        )
+
+    def _schedule_autofocus_stop_locked(self, owner_id: str) -> None:
+        def expire() -> None:
+            with self._lock:
+                if (
+                    self._closed or self._held_autofocus_owner != owner_id
+                    or self._held_autofocus_timer is not timer
+                ):
+                    return
+                self._held_autofocus_timer = None
+                # One bounded stop, never an automatic start or repeated stop loop.
+                with suppress(BridgeError):
+                    self._release_short_control_locked()
+
+        timer = threading.Timer(MAX_HELD_AUTOFOCUS_SECONDS, expire)
+        timer.daemon = True
+        self._held_autofocus_timer = timer
+        timer.start()
 
     def autofocus(self) -> CameraStatus:
         with self._lock:
@@ -1889,6 +2627,77 @@ class CcapiSession:
                 raise unsupported(CameraFeature.AUTOFOCUS.value, self.engine_name)
             self._observed.add(CameraFeature.AUTOFOCUS)
             return self.status()
+
+    def read_recording_observation(self) -> dict[str, object]:
+        # Canon status() contains our last acknowledged assignment, not a dedicated REC read.
+        # Do not invent an endpoint or consume another event owner's queue to claim freshness.
+        self._require_open()
+        return recording_observation(self.engine_name)
+
+    def perform_recording_outcome(self, operation: str) -> dict[str, object]:
+        require_operation(operation)
+        try:
+            return self._perform_recording_outcome(operation)
+        except (BridgeError, OSError):
+            # The implementation catches every dispatched REC failure separately.
+            # Exceptions reaching here are pre-admission only, never a lost write.
+            return recording_outcome(self.engine_name, operation, "not-sent")
+
+    def _perform_recording_outcome(self, operation: str) -> dict[str, object]:
+        require_operation(operation)
+        with self._maintenance_controls():
+            starting = operation == "start"
+            if starting:
+                if self._recording_stop_operation is not None:
+                    raise BridgeError("RECORDING_STOP_REQUIRED", "Resolve the previous recording with Stop.",
+                                      status_code=409)
+                try:
+                    self._require_shutter_release_confirmed()
+                    self._refresh_temperature_status()
+                    self._require_temperature_allows_movie_recording()
+                except Exception:
+                    # No REC command was admitted; do not create an unknown write.
+                    return recording_outcome(self.engine_name, operation, "not-sent")
+            command = ((self._recording_stop_operation or self._recording_last_stop_operation)
+                       if not starting else None) or (
+                self._operation("POST", "/shooting/control/recbutton") or
+                self._operation("PUT", "/shooting/control/recbutton"))
+            if command is None:
+                raise unsupported(CameraFeature.VIDEO_RECORDING.value, self.engine_name)
+            prior = self._recording_stop_operation
+            # Freeze the exact advertised route before a write whose response may be lost.
+            self._recording_stop_operation = command
+            # Stop authorization outlives server-side duty: its response may be lost
+            # or retired by the client. It never authorizes Start or another session.
+            self._recording_last_stop_operation = command
+            try:
+                response = self._request(command.method, command.path, {"action": operation},
+                                         timeout=10.0, max_bytes=32768)
+                if response.status == 204:
+                    if response.body:
+                        raise ValueError("Nonempty recording response")
+                elif response.status == 200:
+                    def unique(pairs):
+                        value = {}
+                        for key, item in pairs:
+                            if key in value:
+                                raise ValueError("Duplicate recording response field")
+                            value[key] = item
+                        return value
+                    if response.body.strip() and json.loads(response.body, object_pairs_hook=unique) != {}:
+                        raise ValueError("Invalid recording response")
+                else:
+                    raise ValueError("Unexpected recording success status")
+            except _CcapiHTTPError:
+                self._recording_stop_operation = prior
+                return recording_outcome(self.engine_name, operation, "rejected")
+            except Exception:
+                return recording_outcome(self.engine_name, operation, "unconfirmed")
+            self._recording = starting  # Legacy display cache; never fresh evidence.
+            self._observed.add(CameraFeature.VIDEO_RECORDING)
+            if not starting:
+                self._recording_stop_operation = None
+            return recording_outcome(self.engine_name, operation, "response-received")
 
     def start_recording(self) -> CameraStatus:
         return self._set_recording(True)
@@ -1946,19 +2755,32 @@ class CcapiSession:
                     engine=self.engine_name,
                 )
             read, write = operations
-            self._request_ok("PUT", write.path, {"value": str(value)})
-            readback = self._parse_live_view_magnification(self._request_json("GET", read.path))
-            if readback is None or readback[0] != value:
-                raise BridgeError(
-                    "INVALID_CCAPI_RESPONSE",
-                    "Canon Live View magnification did not match the requested value after readback.",
-                    status_code=502,
-                    feature=CameraFeature.LIVE_VIEW_MAGNIFICATION.value,
-                    engine=self.engine_name,
-                )
-            self._live_view_magnification = readback
-            self._observed.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
-            return LiveViewMagnificationResult(accepted=True, value=readback[0])
+            # The camera may apply the mutation even when its acknowledgement or
+            # readback is lost. Retire coordinates before dispatch, never rollback.
+            # This session lock also serializes geometry reads and coordinate sends.
+            self._latest_live_view_geometry = None
+            readers = tuple(reader for reader in (self._rtp_session, self._multipart_session) if reader is not None)
+            for reader in readers:
+                reader.discard_pending_frames()
+            try:
+                self._request_ok("PUT", write.path, {"value": str(value)})
+                readback = self._parse_live_view_magnification(self._request_json("GET", read.path))
+                if readback is None or readback[0] != value:
+                    raise BridgeError(
+                        "INVALID_CCAPI_RESPONSE",
+                        "Canon Live View magnification did not match the requested value after readback.",
+                        status_code=502,
+                        feature=CameraFeature.LIVE_VIEW_MAGNIFICATION.value,
+                        engine=self.engine_name,
+                    )
+                self._live_view_magnification = readback
+                self._observed.add(CameraFeature.LIVE_VIEW_MAGNIFICATION)
+                return LiveViewMagnificationResult(accepted=True, value=readback[0])
+            finally:
+                # Also retire output produced while the camera mutation was in
+                # flight. A new browser generation cannot relabel that mailbox.
+                for reader in readers:
+                    reader.discard_pending_frames()
 
     def tap_focus(self, x: float, y: float) -> FocusResult:
         with self._lock:
@@ -1990,6 +2812,17 @@ class CcapiSession:
 
     def start_live_view(self, request: LiveViewStartRequest) -> None:
         with self._lock:
+            self._require_open()
+            if self._pending_live_view_stop is not None:
+                if self._live_view_stop_unconfirmed:
+                    raise self._live_view_stop_error()
+                raise BridgeError(
+                    "LIVE_VIEW_STOP_REQUIRED",
+                    "Stop the current Live View before starting another source or changing its settings.",
+                    status_code=409,
+                    feature=CameraFeature.LIVE_VIEW.value,
+                    engine=self.engine_name,
+                )
             self._require_shutter_release_confirmed()
             self._ensure_initialized()
             self._refresh_temperature_status()
@@ -2022,6 +2855,7 @@ class CcapiSession:
             )
             failures: list[BridgeError] = []
             for selected in candidates:
+                self._liveview_start_attempt_admitted = False
                 try:
                     if selected == "CCAPI_RTP":
                         if not rtp_supported:
@@ -2042,7 +2876,12 @@ class CcapiSession:
                     return
                 except BridgeError as error:
                     failures.append(error)
-                    if source != "AUTO":
+                    admitted = self._liveview_start_attempt_admitted
+                    cleanup = ("unconfirmed" if self._pending_live_view_stop is not None else
+                               "confirmed" if admitted else "not-needed")
+                    if not liveview_policy({'sameOwner': True, 'sameAttempt': True,
+                                            'sourceMode': source, 'terminal': True,
+                                            'startAdmitted': admitted, 'stopEvidence': cleanup})['canFallback']:
                         raise
             if failures:
                 raise failures[-1]
@@ -2057,39 +2896,34 @@ class CcapiSession:
                 self.engine_name,
                 "The camera must advertise a JPEG start, frame, and explicit stop lifecycle.",
             )
-        started = False
-        try:
-            self._active_jpeg_operations = operations
-            size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
-            started = True
+        while True:
             try:
-                self._jpeg_live_view_frame()
+                with self._live_view_start_cleanup(
+                    "CCAPI_JPEG_POLLING", operations.stop_live_view, operations.stop_payload
+                ):
+                    self._active_jpeg_operations = operations
+                    size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
+                    validate_first_jpeg(self._jpeg_live_view_frame())
+                    self._live_view_active = True
+                    self._active_live_view_size = size if self._live_view_size_control else None
+                    self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
+                return
             except _CcapiLiveViewSizeUnsupported:
-                if size == "SMALL":
+                if self._maintenance_control_active or size == "SMALL":
                     raise
-                try:
-                    self._stop_jpeg_live_view(operations)
-                finally:
-                    started = False
-                    self._active_jpeg_operations = None
-                self._active_jpeg_operations = operations
+                # The cleanup context confirmed the original stop before resizing.
                 self._rejected_live_view_sizes.add(size)
-                size = self._start_ccapi_live_view(request, "SMALL", operations.start_live_view.path)
-                started = True
-                self._jpeg_live_view_frame()
-            self._live_view_active = True
-            self._active_live_view_source = "CCAPI_JPEG_POLLING"
-            self._active_live_view_size = size if self._live_view_size_control else None
-            self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_JPEG_POLLING})
-        except Exception:
-            if started:
-                with suppress(BridgeError):
-                    self._stop_jpeg_live_view(operations)
-            self._active_jpeg_operations = None
-            self._active_live_view_size = None
-            raise
+                size = "SMALL"
 
     def _start_ccapi_live_view(self, request: LiveViewStartRequest, size: str, path: str) -> str:
+        if self._maintenance_control_active:
+            payload = {"cameradisplay": "on"}
+            if self._live_view_size_control:
+                payload["liveviewsize"] = size.casefold()
+            self._request_ok("POST", path, payload, expected_status=204)
+            self._active_live_view_size = size if self._live_view_size_control else None
+            self._requested_fps = max(1, min(30, request.fps))
+            return size
         try:
             self._request_ok("POST", path, {"cameradisplay": "on", "liveviewsize": size.casefold()})
             self._live_view_size_control = True
@@ -2130,25 +2964,33 @@ class CcapiSession:
         operations = self._multipart_live_view_operations()
         if operations is None:
             raise unsupported(CameraFeature.LIVE_VIEW_MULTIPART.value, self.engine_name)
-        size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
-        response: CcapiStreamResponse | None = None
-        session: CcapiMultipartSession | None = None
-        try:
-            for attempt in range(len(MULTIPART_START_RETRY_DELAYS) + 1):
+        with self._live_view_start_cleanup(
+            "CCAPI_MULTIPART", operations.stop_live_view, operations.stop_payload, operations.close_stream
+        ):
+            self._active_multipart_operations = operations
+            size = self._start_ccapi_live_view(request, size, operations.start_live_view.path)
+            response: CcapiStreamResponse | None = None
+            for attempt in range(1 if self._maintenance_control_active else len(MULTIPART_START_RETRY_DELAYS) + 1):
                 response = self.transport.open_stream(
                     "GET",
                     self._url(operations.open_stream.path),
                     headers={"Accept": "multipart/x-mixed-replace", "Cache-Control": "no-cache"},
-                    timeout=60.0,
+                    timeout=15.0 if self._maintenance_control_active else 60.0,
+                    **({"strict_control": True, "follow_redirects": False}
+                       if self._maintenance_control_active else {}),
                 )
                 if response.status == 200:
                     break
-                payload = response.body.read(MAX_ERROR_BYTES)
                 status = response.status
-                response.close()
+                try:
+                    payload = response.body.read(MAX_ERROR_BYTES)
+                finally:
+                    with suppress(Exception):
+                        response.close()
                 response = None
                 retryable = (
-                    status == 503
+                    not self._maintenance_control_active
+                    and status == 503
                     and b"live view not started" in payload.lower()
                     and attempt < len(MULTIPART_START_RETRY_DELAYS)
                 )
@@ -2161,30 +3003,16 @@ class CcapiSession:
                     CcapiResponse(status, {}, payload),
                 )
             assert response is not None
-            boundary = parse_multipart_boundary(response.headers.get("content-type"))
-            session = CcapiMultipartSession(response, boundary)
-            session.wait_until_ready(timeout=15.0)
-            response = None
-            if self._multipart_session is not None:
-                self._multipart_session.close()
-            self._multipart_session = session
-            self._active_multipart_operations = operations
+            try:
+                boundary = parse_multipart_boundary(response.headers.get("content-type"))
+                self._multipart_session = CcapiMultipartSession(response, boundary)
+            except BaseException:
+                with suppress(Exception):
+                    response.close()
+                raise
+            validate_first_jpeg(self._multipart_session.wait_until_ready(timeout=15.0))
+            self._multipart_session.check_usable()
             self._live_view_active = True
-            self._active_live_view_source = "CCAPI_MULTIPART"
-        except Exception:
-            if response is not None:
-                response.close()
-            if session is not None:
-                session.close()
-            with suppress(Exception):
-                self._request_ok("DELETE", operations.close_stream.path)
-            with suppress(Exception):
-                self._request_ok(
-                    operations.stop_live_view.method,
-                    operations.stop_live_view.path,
-                    dict(operations.stop_payload) if operations.stop_payload is not None else None,
-                )
-            raise
 
     def _start_rtp_live_view(self, request: LiveViewStartRequest) -> None:
         factory = self._rtp_session_factory
@@ -2198,12 +3026,19 @@ class CcapiSession:
         try:
             description = parse_sdp(response.body.decode("utf-8"))
             session = factory(description, destination)
+            # The optional local reservation survives reconnect and SDP port changes.
+            # It does not send or persist the camera identifier.
+            set_decoder_owner = getattr(session, "set_decoder_owner", None)
+            if callable(set_decoder_owner):
+                set_decoder_owner(self.camera.id)
             session.set_target_fps(request.fps)
             session.start()
-        except Exception as error:
+        except BaseException as error:
             if session is not None:
                 with suppress(Exception):
                     session.close()
+            if not isinstance(error, Exception):
+                raise
             raise BridgeError(
                 "CCAPI_RTP_START_FAILED",
                 f"Could not prepare the Canon RTP receiver: {error}",
@@ -2212,93 +3047,155 @@ class CcapiSession:
                 engine=self.engine_name,
             ) from error
         assert session is not None
+        with self._live_view_start_cleanup(
+            "CCAPI_RTP", CcapiOperation("POST", control_path), {"action": "stop", "ipaddress": ""}
+        ):
+            self._rtp_session = session
+            try:
+                self._request_ok("POST", control_path, {"action": "start", "ipaddress": destination})
+                session.wait_until_ready(timeout=5.0)
+            except Exception as error:
+                if isinstance(error, BridgeError):
+                    raise
+                raise BridgeError(
+                    "CCAPI_RTP_START_FAILED",
+                    f"Canon RTP started but no decoded video became ready: {error}",
+                    status_code=502,
+                    feature=CameraFeature.LIVE_VIEW_RTP.value,
+                    engine=self.engine_name,
+                ) from error
+            self._requested_fps = max(1, min(30, request.fps))
+            self._live_view_active = True
+            self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_RTP})
+
+    @contextmanager
+    def _live_view_start_cleanup(
+        self,
+        source: str,
+        operation: CcapiOperation,
+        payload: Mapping[str, object] | None = None,
+        close_stream: CcapiOperation | None = None,
+    ) -> Iterator[None]:
+        # Own the original stop before dispatch: a failed POST response is not
+        # proof that the camera did not start. Discovery cannot replace this owner.
+        self._liveview_start_attempt_admitted = True
+        self._pending_live_view_stop = _CcapiLiveViewStop(
+            source, operation, tuple(payload.items()) if payload is not None else None, close_stream
+        )
+        self._active_live_view_source = source
         try:
-            self._request_ok("POST", control_path, {"action": "start", "ipaddress": destination})
-            session.wait_until_ready(timeout=5.0)
-        except Exception as error:
-            with suppress(Exception):
-                session.close()
-            with suppress(BridgeError):
-                self._request_ok("POST", control_path, {"action": "stop", "ipaddress": ""})
-            if isinstance(error, BridgeError):
+            yield
+        except BaseException as error:
+            if self._maintenance_control_active:
+                self._live_view_active = False
+                self._live_view_stop_unconfirmed = True
+                self._close_live_view_receivers()
                 raise
-            raise BridgeError(
-                "CCAPI_RTP_START_FAILED",
-                f"Canon RTP started but no decoded video became ready: {error}",
-                status_code=502,
-                feature=CameraFeature.LIVE_VIEW_RTP.value,
-                engine=self.engine_name,
-            ) from error
-        if self._rtp_session is not None:
-            with suppress(Exception):
-                self._rtp_session.close()
-        self._rtp_session = session
-        self._requested_fps = max(1, min(30, request.fps))
-        self._live_view_active = True
-        self._active_live_view_source = "CCAPI_RTP"
-        self._observed.update({CameraFeature.LIVE_VIEW, CameraFeature.LIVE_VIEW_RTP})
+            try:
+                self._stop_live_view_locked()
+            except BaseException as stop_error:
+                if not isinstance(error, Exception):
+                    raise error from stop_error
+                raise stop_error from error
+            raise
 
     def stop_live_view(self) -> None:
         with self._lock:
             self._require_open()
+            release_error = None
+            if self._held_autofocus_owner is not None:
+                try:
+                    self._release_short_control_locked()
+                except BridgeError as error:
+                    release_error = error
             self._latest_live_view_geometry = None
-            if not self._live_view_active:
-                return
             self._stop_live_view_locked()
+            if release_error is not None:
+                raise release_error
+
+    def live_view_focus_info(self) -> CameraFocusInfo | None:
+        with self._lock:
+            self._require_open()
+            if not self._live_view_active:
+                raise BridgeError(
+                    "LIVE_VIEW_NOT_ACTIVE", "Start camera Live View before reading focus information.",
+                    status_code=409, feature=CameraFeature.LIVE_VIEW.value, engine=self.engine_name,
+                )
+            operation = self._operation("GET", "/shooting/liveview/flipdetail")
+            if operation is None:
+                raise unsupported("FOCUS_INFO", self.engine_name)
+            try:
+                response = self._request(
+                    "GET", f"{operation.path}?kind=info",
+                    headers={"Accept": "application/octet-stream", "Cache-Control": "no-cache"},
+                    timeout=2.0, max_bytes=MAX_FOCUS_INFO_BYTES,
+                )
+                return parse_ccapi_focus_info_packet(response.body)
+            except (BridgeError, ValueError, UnicodeDecodeError, RecursionError) as error:
+                # Never return camera payloads, credentials, URLs, or arbitrary diagnostic strings.
+                raise BridgeError(
+                    "FOCUS_INFO_UNAVAILABLE", "Camera focus information could not be read or decoded.",
+                    status_code=502, feature="FOCUS_INFO", engine=self.engine_name,
+                ) from error
 
     def _stop_live_view_locked(self) -> None:
-        source = self._active_live_view_source
+        if self._maintenance_stop_owned and not self._maintenance_control_active:
+            # Explicit Retry Stop / disconnect cannot downgrade a maintenance obligation.
+            with self._maintenance_controls():
+                self._stop_live_view_locked()
+            return
+        stop = self._pending_live_view_stop
+        if stop is None:
+            return
+        self._live_view_active = False
+        self._latest_live_view_geometry = None
         try:
-            if source == "CCAPI_RTP":
-                self._request_ok(
-                    "POST",
-                    self._api_path("POST", "/shooting/liveview/rtp"),
-                    {"action": "stop", "ipaddress": ""},
-                )
-            elif source == "CCAPI_MULTIPART":
-                operations = self._active_multipart_operations or self._multipart_live_view_operations()
-                if operations is None:
-                    raise BridgeError(
-                        "LIVE_VIEW_LIFECYCLE_MISSING",
-                        "Cannot stop multipart Live View because its advertised lifecycle is unavailable.",
-                        status_code=502,
-                        feature=CameraFeature.LIVE_VIEW_MULTIPART.value,
-                        engine=self.engine_name,
-                    )
-                if self._multipart_session is not None:
-                    self._multipart_session.close()
-                    self._multipart_session = None
+            self._close_live_view_receivers()
+            if stop.close_stream is not None:
+                # Stream teardown is best effort; Canon's general stop owns Live View.
                 with suppress(Exception):
-                    self._request_ok("DELETE", operations.close_stream.path)
-                self._request_ok(
-                    operations.stop_live_view.method,
-                    operations.stop_live_view.path,
-                    dict(operations.stop_payload) if operations.stop_payload is not None else None,
-                )
-            else:
-                operations = self._active_jpeg_operations or self._jpeg_live_view_operations()
-                if operations is None:
-                    raise BridgeError(
-                        "LIVE_VIEW_LIFECYCLE_MISSING",
-                        "Cannot stop JPEG Live View because its advertised lifecycle is unavailable.",
-                        status_code=502,
-                        feature=CameraFeature.LIVE_VIEW.value,
-                        engine=self.engine_name,
-                    )
-                self._stop_jpeg_live_view(operations)
-        finally:
-            if self._rtp_session is not None:
+                    self._request_ok(stop.close_stream.method, stop.close_stream.path)
+            self._request_ok(
+                stop.operation.method, stop.operation.path,
+                dict(stop.payload) if stop.payload is not None else None,
+            )
+        except BaseException as error:
+            self._live_view_stop_unconfirmed = True
+            failure = self._live_view_stop_error()
+            self._last_error = failure.message
+            if not isinstance(error, Exception):
+                raise
+            raise failure from error
+        self._pending_live_view_stop = None
+        self._maintenance_stop_owned = False
+        self._live_view_stop_unconfirmed = False
+        self._active_multipart_operations = None
+        self._active_live_view_source = None
+        self._active_jpeg_operations = None
+        self._active_live_view_size = None
+
+    def _close_live_view_receivers(self) -> None:
+        rtp, self._rtp_session = self._rtp_session, None
+        multipart, self._multipart_session = self._multipart_session, None
+        for receiver in (rtp, multipart):
+            if receiver is not None:
                 with suppress(Exception):
-                    self._rtp_session.close()
-                self._rtp_session = None
-            if self._multipart_session is not None:
-                self._multipart_session.close()
-                self._multipart_session = None
-            self._active_multipart_operations = None
-            self._live_view_active = False
-            self._active_live_view_source = None
-            self._active_jpeg_operations = None
-            self._active_live_view_size = None
+                    receiver.close()
+
+    def _live_view_stop_error(self, *, disconnected: bool = False) -> BridgeError:
+        return BridgeError(
+            "LIVE_VIEW_STOP_UNCONFIRMED",
+            (
+                "Disconnected, but the camera did not confirm Live View stopped. "
+                "Check and stop Live View on the camera before reconnecting."
+                if disconnected else
+                "The camera did not confirm Live View stopped. Retry Stop in this session "
+                "before starting another Live View source or changing its settings."
+            ),
+            status_code=409,
+            feature=CameraFeature.LIVE_VIEW.value,
+            engine=self.engine_name,
+        )
 
     def live_view_frame(self) -> bytes:
         with self._lock:
@@ -2362,17 +3259,21 @@ class CcapiSession:
                     "Canon RTP Live View with an advertised audio stream must be active before requesting audio.",
                 )
             audio_status = getattr(session, "audio_status", {})
-            if not isinstance(audio_status, dict) or not audio_status.get("available"):
+            if not isinstance(audio_status, dict) or not audio_status.get(
+                "decodingAvailable", audio_status.get("available")
+            ):
                 reason = audio_status.get("reason") if isinstance(audio_status, dict) else None
                 raise unsupported(RTP_AUDIO_FEATURE, self.engine_name, str(reason) if reason else None)
             reader = getattr(session, "read_audio", None)
             if not callable(reader):
                 raise unsupported(RTP_AUDIO_FEATURE, self.engine_name, "The active RTP receiver has no audio path.")
         try:
-            return reader(after_generation=after_generation, timeout=timeout)
-        except (RtpError, OSError, RuntimeError) as error:
+            chunk = reader(after_generation=after_generation, timeout=timeout)
             with self._lock:
-                self._last_error = str(error)
+                if self._rtp_session is not session or not self._live_view_active or self._closed:
+                    return None
+            return chunk
+        except (RtpError, OSError, RuntimeError) as error:
             raise BridgeError(
                 "CCAPI_RTP_AUDIO_FAILED",
                 str(error),
@@ -2407,6 +3308,9 @@ class CcapiSession:
                         },
                         max_bytes=MAX_LIVE_VIEW_SCAN_BYTES,
                     )
+                    if response.status != 200 or any(key.casefold() == "content-range" for key in response.headers):
+                        raise BridgeError("INVALID_LIVE_VIEW_FRAME", "Live View requires a complete HTTP 200 response.",
+                                          status_code=502, engine=self.engine_name)
                     content_type = response.headers.get("content-type", "")
                     if _is_text_content_type(content_type):
                         raise BridgeError(
@@ -2498,7 +3402,187 @@ class CcapiSession:
             self._observed.add(CameraFeature.MEDIA_BROWSER)
             return items
 
-    def media_info(self, media_id: str) -> MediaItem:
+    def list_media_progressive(
+        self,
+        maximum_items: int | None = None,
+        *,
+        on_progress: Callable[[list[MediaItem]], None],
+        cancelled: Callable[[], bool],
+    ) -> list[MediaItem]:
+        """Browse with the existing page ordering; cancellation stops subsequent requests.
+
+        The active HTTP read retains its existing transport timeout. This does not
+        close shared camera I/O, interrupt a camera command, or certify an inventory.
+        """
+        if maximum_items is not None and maximum_items <= 0:
+            raise ValueError("maximum_items must be positive when provided")
+
+        def check() -> None:
+            if cancelled():
+                raise BridgeError("MEDIA_LIST_CANCELLED", "Media listing was cancelled.", status_code=409)
+            self._require_open()
+
+        requests = 0
+
+        def request(path: str) -> object:
+            nonlocal requests
+            check()
+            if requests >= MAX_MEDIA_LIST_REQUESTS:
+                raise self._listing_incomplete("camera request resource bound exceeded")
+            requests += 1
+            value = self._request_json("GET", path)
+            check()
+            return value
+
+        check()
+        while not self._lock.acquire(timeout=0.05):
+            check()
+        try:
+            check()
+            self._ensure_initialized()
+            check()
+            if not self._supports("GET", "/contents"):
+                raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
+            pending = deque([self._api_path("GET", "/contents")])
+            discovered: set[str] = set(pending)
+            visited: set[str] = set()
+            identities: set[str] = set()
+            groups: list[list[str]] = []
+
+            def items() -> list[MediaItem]:
+                paths = _merge_media_path_groups(groups)
+                if maximum_items is not None:
+                    paths = paths[:maximum_items]
+                return [
+                    MediaItem(
+                        id=_media_id(path), name=path.rsplit("/", 1)[-1], kind=_media_kind(path),
+                        content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
+                        preview_available=_supports_ccapi_display_preview(path), **_media_folder_fields(path),
+                    )
+                    for path in paths
+                ]
+
+            while pending:
+                check()
+                container = pending.popleft()
+                if container in visited:
+                    continue
+                visited.add(container)
+                group: list[str] = []
+                groups.append(group)
+
+                def progress(paths: list[str], target_group: list[str] = group) -> None:
+                    check()
+                    target_group[:] = [path for path in paths if _is_media_path(path)]
+                    identities.update(target_group)
+                    if len(identities) > MAX_LIST_SNAPSHOT_ITEMS:
+                        raise self._listing_incomplete("media identity resource bound exceeded")
+                    on_progress(items())
+                    check()
+
+                paths = self._content_paths(container, maximum_items, on_progress=progress, request=request)
+                for path in paths:
+                    if not _is_media_path(path) and path not in discovered:
+                        if len(discovered) >= MAX_MEDIA_LIST_CONTAINERS:
+                            raise self._listing_incomplete("container resource bound exceeded")
+                        discovered.add(path)
+                        pending.append(path)
+            check()
+            result = items()
+            if maximum_items is None:
+                self._media_cache = {item.id: item for item in result}
+            else:
+                self._media_cache.update({item.id: item for item in result})
+            self._observed.add(CameraFeature.MEDIA_BROWSER)
+            return result
+        finally:
+            self._lock.release()
+
+    def list_media_strict(self, maximum_items: int = MAX_MEDIA_INVENTORY_ITEMS) -> list[MediaItem]:
+        """Exhaust the camera's reachable topology, or fail without publishing partial evidence.
+
+        This is an observation of source-reported identities, not an atomic card snapshot.
+        The deadline is checked cooperatively, including between bounded read1 body reads.
+        A blocking network read can overshoot by its short inactivity timeout; urllib's
+        response-header parsing does not expose a cancellable whole-header deadline.
+        """
+        if not 1 <= maximum_items <= MAX_MEDIA_INVENTORY_ITEMS:
+            raise ValueError("maximum_items must be between 1 and 1000")
+        deadline = time.monotonic() + MAX_MEDIA_INVENTORY_SECONDS
+        if not self._lock.acquire(timeout=MAX_MEDIA_INVENTORY_SECONDS):
+            raise self._inventory_incomplete("observation deadline exceeded waiting for the camera")
+        try:
+            self._require_open()
+            # Open sessions have already completed discovery. Never start unbudgeted
+            # discovery or legacy listing as a side effect of a strict observation.
+            if not self._initialized:
+                raise self._inventory_incomplete("camera discovery has not completed")
+            if not self._supports("GET", "/contents"):
+                raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
+            requests = 0
+
+            def request(path: str) -> object:
+                nonlocal requests
+                if requests >= MAX_MEDIA_INVENTORY_REQUESTS:
+                    raise self._inventory_incomplete("request budget exceeded")
+                requests += 1
+                return self._inventory_json(path, deadline)
+
+            root = self._inventory_path(self._api_path("GET", "/contents"))
+            pending = deque([root])
+            containers = {root}
+            media_paths: dict[str, None] = {}
+            while pending:
+                self._inventory_remaining(deadline)
+                container = pending.popleft()
+                for paths in self._inventory_pages(container, request):
+                    for path in paths:
+                        self._inventory_remaining(deadline)
+                        if _is_media_path(path):
+                            media_paths.setdefault(path, None)
+                            # Reserve a sentinel beyond the caller's output budget.
+                            # Reaching the budget alone is not proof of exhaustion.
+                            if len(media_paths) > maximum_items:
+                                raise self._inventory_incomplete("item budget exceeded")
+                        elif path not in containers:
+                            if len(containers) >= MAX_MEDIA_INVENTORY_CONTAINERS:
+                                raise self._inventory_incomplete("container budget exceeded")
+                            containers.add(path)
+                            pending.append(path)
+            self._inventory_remaining(deadline)
+            items = [MediaItem(
+                id=_media_id(path),
+                name=path.rsplit("/", 1)[-1],
+                kind=_media_kind(path),
+                content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
+                preview_available=_supports_ccapi_display_preview(path),
+                **_media_folder_fields(path),
+            ) for path in media_paths]
+            self._inventory_remaining(deadline)
+            # Preserve metadata used by manual browsing. The returned strict items
+            # deliberately carry no cached size evidence; fresh info is separate.
+            for item in items:
+                self._media_cache.setdefault(item.id, item)
+            self._observed.add(CameraFeature.MEDIA_BROWSER)
+            return items
+        finally:
+            self._lock.release()
+
+    def media_info(self, media_id: str, *, fresh: bool = False) -> MediaItem:
+        if fresh:
+            deadline = time.monotonic() + MAX_MEDIA_INVENTORY_SECONDS
+            if not self._lock.acquire(timeout=MAX_MEDIA_INVENTORY_SECONDS):
+                raise self._inventory_incomplete("metadata observation deadline exceeded waiting for the camera")
+            try:
+                self._inventory_remaining(deadline)
+                self._require_open()
+                if not self._initialized:
+                    raise self._inventory_incomplete("camera discovery has not completed")
+                if not self._supports("GET", "/contents"):
+                    raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
+                return self._media_info(media_id, fresh=True, deadline=deadline)
+            finally:
+                self._lock.release()
         with self._lock:
             self._ensure_initialized()
             if not self._supports("GET", "/contents"):
@@ -2506,6 +3590,11 @@ class CcapiSession:
             return self._media_info(media_id)
 
     def set_media_protection(self, media_id: str, enabled: bool) -> MediaItem:
+        if type(enabled) is not bool:
+            raise BridgeError(
+                "INVALID_MEDIA_PROTECTION", "Media protection must be a boolean.", status_code=422,
+                feature=CameraFeature.MEDIA_PROTECT.value, engine=self.engine_name,
+            )
         return self._modify_media(
             media_id,
             action="protect",
@@ -2515,7 +3604,7 @@ class CcapiSession:
         )
 
     def set_media_rating(self, media_id: str, value: int) -> MediaItem:
-        if value not in range(6):
+        if type(value) is not int or value not in range(6):
             raise BridgeError(
                 "INVALID_MEDIA_RATING",
                 "Media rating must be from 0 through 5.",
@@ -2528,11 +3617,11 @@ class CcapiSession:
             action="rating",
             value="off" if value == 0 else str(value),
             feature=CameraFeature.MEDIA_RATING,
-            matches=lambda item: item.rating == value,
+            matches=lambda item: type(item.rating) is int and item.rating == value,
         )
 
     def set_media_rotation(self, media_id: str, degrees: int) -> MediaItem:
-        if degrees not in {0, 90, 180, 270}:
+        if type(degrees) is not int or degrees not in {0, 90, 180, 270}:
             raise BridgeError(
                 "INVALID_MEDIA_ROTATION",
                 "Media rotation must be 0, 90, 180, or 270 degrees.",
@@ -2545,10 +3634,15 @@ class CcapiSession:
             action="rotate",
             value=str(degrees),
             feature=CameraFeature.MEDIA_ROTATE,
-            matches=lambda item: item.rotation_degrees == degrees,
+            matches=lambda item: type(item.rotation_degrees) is int and item.rotation_degrees == degrees,
         )
 
     def set_media_archive(self, media_id: str, enabled: bool) -> MediaItem:
+        if type(enabled) is not bool:
+            raise BridgeError(
+                "INVALID_MEDIA_ARCHIVE", "Media archive state must be a boolean.", status_code=422,
+                feature=CameraFeature.MEDIA_ARCHIVE.value, engine=self.engine_name,
+            )
         return self._modify_media(
             media_id,
             action="archive",
@@ -2557,9 +3651,36 @@ class CcapiSession:
             matches=lambda item: item.archived is enabled,
         )
 
-    def _media_info(self, media_id: str) -> MediaItem:
+    def _media_info(self, media_id: str, *, fresh: bool = False, deadline: float | None = None) -> MediaItem:
         path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
-        value = self._request_json("GET", f"{path}?kind=info")
+        if fresh:
+            path = self._inventory_path(_decode_media_id(media_id))
+            if _media_id(path) != media_id:
+                raise self._inventory_incomplete("metadata identity is not canonical")
+            if not _is_media_path(path):
+                raise self._inventory_incomplete("metadata identity is not a media file")
+            # Invalidate before I/O too: a failed read must not leave stale positive
+            # size/type evidence for a later consumer of this same session cache.
+            cached = self._media_cache.get(media_id)
+            if cached is not None:
+                self._media_cache[media_id] = cached.model_copy(
+                    update={"size_bytes": 0, "content_type": "application/octet-stream"},
+                )
+            value = self._inventory_json(
+                f"{path}?kind=info",
+                deadline if deadline is not None else time.monotonic() + MAX_MEDIA_INVENTORY_SECONDS,
+            )
+        else:
+            response = self._request("GET", f"{path}?kind=info")
+            try:
+                value = json.loads(
+                    response.body, object_pairs_hook=_strict_json_object, parse_constant=_reject_media_json_constant,
+                )
+            except (UnicodeDecodeError, ValueError, RecursionError) as error:
+                raise BridgeError(
+                    "INVALID_CCAPI_MEDIA_INFO", "Camera media information contained invalid or ambiguous JSON.",
+                    status_code=502, feature=CameraFeature.MEDIA_BROWSER.value, engine=self.engine_name,
+                ) from error
         if not isinstance(value, dict):
             raise BridgeError(
                 "INVALID_CCAPI_MEDIA_INFO",
@@ -2568,6 +3689,13 @@ class CcapiSession:
                 feature=CameraFeature.MEDIA_BROWSER.value,
                 engine=self.engine_name,
             )
+        # Canon kind=info may omit identity because the request names one exact
+        # file. An explicit identity may never contradict that request.
+        if "id" in value and (not isinstance(value["id"], str) or value["id"] != media_id):
+            raise BridgeError(
+                "INVALID_CCAPI_MEDIA_INFO", "Camera media information returned a conflicting media identity.",
+                status_code=502, feature=CameraFeature.MEDIA_BROWSER.value, engine=self.engine_name,
+            )
         base = self._media_cache.get(media_id) or MediaItem(
             id=media_id,
             name=path.rsplit("/", 1)[-1],
@@ -2575,14 +3703,44 @@ class CcapiSession:
             content_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
             preview_available=_supports_ccapi_display_preview(path),
         )
+        size = (_strict_positive_int(value.get("filesize")) or 0
+                if fresh else _positive_int(value.get("filesize")) or base.size_bytes)
+        # Fresh identity is bound to the canonical request, never cached type.
+        identity = {"id": media_id, "name": path.rsplit("/", 1)[-1], "kind": _media_kind(path)}
+        try:
+            mime = declared_media_mime(value)
+            if fresh:
+                for key in identity:
+                    if key in value:
+                        if not isinstance(value[key], str) or not value[key].strip():
+                            raise ValueError("Fresh media identity/type must be a nonblank string")
+                        if key in ("id", "name") and value[key] != identity[key]:
+                            raise ValueError("Fresh media identity changed")
+                        identity[key] = value[key]
+        except ValueError as error:
+            raise self._inventory_incomplete(str(error)) from error
         item = base.model_copy(
             update={
-                "size_bytes": _positive_int(value.get("filesize")) or base.size_bytes,
+                "size_bytes": size,
+                **(identity if fresh else {}),
+                # Null means the successful response genuinely omitted MIME (or
+                # explicitly declared null). Generic is never converted to null.
+                # Invalid size preserves the former fail-closed invalidation.
+                **({"content_type": mime if size else "application/octet-stream"} if fresh else
+                   {"content_type": mime} if any(key in value for key in MIME_ALIASES) else {}),
                 "capture_time": _optional_string(value.get("lastmodifieddate")) or base.capture_time,
                 "protected": _canon_protection(value.get("protect")),
                 "rating": _canon_rating(value.get("rating")),
                 "rotation_degrees": _canon_rotation(value.get("rotate")),
                 "archived": _canon_archive(value.get("archive")),
+                **{
+                    field: value[alias]
+                    for field, alias in (
+                        ("protection_writable", "protectionWritable"), ("rating_writable", "ratingWritable"),
+                        ("rotation_writable", "rotationWritable"), ("archive_writable", "archiveWritable"),
+                    )
+                    if type(value.get(alias)) is bool
+                },
                 **_media_folder_fields(path),
             }
         )
@@ -2603,12 +3761,17 @@ class CcapiSession:
             self._ensure_initialized()
             if not self._supports_media_modify():
                 raise unsupported(feature.value, self.engine_name)
-            path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
+            path = self._inventory_path(_decode_media_id(media_id))
+            if _media_id(path) != media_id or not _is_media_path(path):
+                raise BridgeError(
+                    "INVALID_MEDIA_ID", "Media modification requires an exact canonical media identity.",
+                    status_code=422, feature=feature.value, engine=self.engine_name,
+                )
             self._request_ok("PUT", path, {"action": action, "value": value}, expected_status=200)
             latest: MediaItem | None = None
             for attempt in range(3):
                 latest = self._media_info(media_id)
-                if matches(latest):
+                if latest.id == media_id and matches(latest):
                     self._observed.add(feature)
                     return latest
                 if attempt < 2:
@@ -2621,24 +3784,73 @@ class CcapiSession:
                 engine=self.engine_name,
             )
 
-    def download_media(self, media_id: str) -> tuple[MediaItem, Iterator[bytes]]:
+    def download_media(
+        self, media_id: str, *, single_attempt: bool = False, jpeg_validation: bool = False,
+    ) -> tuple[MediaItem, Iterator[bytes]]:
+        if jpeg_validation and not single_attempt:
+            raise BridgeError("INVALID_ORIGINAL_VALIDATION", "JPEG validation requires a single original GET.",
+                              status_code=422)
         with self._lock:
-            self._ensure_initialized()
+            if single_attempt:
+                self._require_open()
+                if not self._initialized:
+                    raise self._inventory_incomplete("camera discovery has not completed")
+            else:
+                self._ensure_initialized()
             if not self._supports("GET", "/contents"):
                 raise unsupported(CameraFeature.MEDIA_DOWNLOAD.value, self.engine_name)
             path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
+            if single_attempt:
+                path = self._inventory_path(_decode_media_id(media_id))
+                if _media_id(path) != media_id:
+                    raise self._inventory_incomplete("original identity is not canonical")
+                if not _is_media_path(path):
+                    raise self._inventory_incomplete("original identity is not a media file")
             cached = self._media_cache.get(media_id)
             name = path.rsplit("/", 1)[-1]
             failures: list[str] = []
-            for candidate in (path, f"{path}?kind=main", f"{path}?type=main"):
+            candidates = (path,) if single_attempt else (path, f"{path}?kind=main", f"{path}?type=main")
+            for candidate in candidates:
                 response = self.transport.open_stream(
                     "GET",
                     self._url(candidate),
                     headers={"Accept": "application/octet-stream,*/*", "Cache-Control": "no-cache"},
                     timeout=600.0,
+                    **({"follow_redirects": False} if single_attempt else {}),
                 )
+                strict_length = None
+                if single_attempt:
+                    try:
+                        strict_length = self._strict_media_length(response)
+                        if jpeg_validation:
+                            get_all = getattr(getattr(response.body, "headers", None), "get_all", None)
+                            values = get_all("Content-Type", []) if callable(get_all) else [
+                                value for key, value in response.headers.items() if key.casefold() == "content-type"
+                            ]
+                            try:
+                                validate_http_types(values)
+                                if strict_length is not None and strict_length > MAX_ENCODED_BYTES:
+                                    raise InvalidJpegOriginal("encoded size limit")
+                            except InvalidJpegOriginal as error:
+                                raise BridgeError(
+                                    "MEDIA_ORIGINAL_JPEG_INVALID", "Original response MIME or size is not allowed.",
+                                    status_code=502, feature=CameraFeature.MEDIA_DOWNLOAD.value,
+                                ) from error
+                    except BridgeError:
+                        response.close()
+                        raise
+                if single_attempt and (response.status != 200 or "content-range" in response.headers):
+                    response.close()
+                    raise BridgeError(
+                        "CCAPI_MEDIA_DOWNLOAD_FAILED",
+                        f"The single original request returned HTTP {response.status} or partial content.",
+                        status_code=502,
+                        feature=CameraFeature.MEDIA_DOWNLOAD.value,
+                        engine=self.engine_name,
+                    )
                 if 200 <= response.status < 300:
-                    content_type = response.headers.get("content-type", "").split(";", 1)[0]
+                    raw_type = response.headers.get("content-type", "")
+                    content_type = ((raw_type or "") if jpeg_validation else raw_type).split(";", 1)[0]
                     if _is_text_content_type(content_type):
                         try:
                             preview = response.body.read(MAX_ERROR_BYTES).decode("utf-8", errors="replace").strip()
@@ -2647,7 +3859,17 @@ class CcapiSession:
                             response.close()
                         continue
                     content_type = content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
-                    size = _positive_int(response.headers.get("content-length")) or (cached.size_bytes if cached else 0)
+                    size = (
+                        strict_length if single_attempt and strict_length is not None
+                        else (_positive_int(response.headers.get("content-length"))
+                              or (cached.size_bytes if cached else 0))
+                    )
+                    if jpeg_validation and size > MAX_ENCODED_BYTES:
+                        response.close()
+                        raise BridgeError(
+                            "MEDIA_ORIGINAL_JPEG_INVALID", "Original JPEG exceeds the encoded-size limit.",
+                            status_code=502, feature=CameraFeature.MEDIA_DOWNLOAD.value,
+                        )
                     item = cached or MediaItem(
                         id=media_id,
                         name=name,
@@ -2774,7 +3996,37 @@ class CcapiSession:
             if not self._supports_media_delete():
                 raise unsupported(CameraFeature.MEDIA_DELETE.value, self.engine_name)
             path = self._normalize_resource(_decode_media_id(media_id)).split("?", 1)[0]
-            self._request_ok("DELETE", path)
+            self._require_open()
+            response = self.transport.request("DELETE", self._url(path), max_bytes=64 * 1024)
+            length = response.headers.get("content-length")
+            encoding = response.headers.get("transfer-encoding")
+            framing_valid = (
+                length is None or (length.isdigit() and int(length) == len(response.body))
+            ) and not (length is not None and encoding is not None)
+            if framing_valid and response.status in {400, 401, 403, 404, 405, 409, 412, 413, 415, 422, 429}:
+                # Only this DELETE invocation's complete refusal is preserved.
+                # Other commands retain their existing error mapping.
+                raise BridgeError(
+                    "MEDIA_DELETE_REJECTED",
+                    f"Camera explicitly refused deletion (HTTP {response.status}).",
+                    status_code=response.status,
+                    feature=CameraFeature.MEDIA_DELETE.value,
+                    engine=self.engine_name,
+                )
+            if (
+                response.status != 204
+                or not framing_valid
+                or response.body
+                or (length is not None and length != "0")
+                or encoding is not None
+            ):
+                raise BridgeError(
+                    "INVALID_CCAPI_RESPONSE",
+                    "Camera deletion returned no unambiguous empty HTTP 204 receipt; inspect before another attempt.",
+                    status_code=502,
+                    feature=CameraFeature.MEDIA_DELETE.value,
+                    engine=self.engine_name,
+                )
             self._media_cache.pop(media_id, None)
             self._observed.add(CameraFeature.MEDIA_DELETE)
 
@@ -2796,6 +4048,10 @@ class CcapiSession:
     @property
     def live_view_active(self) -> bool:
         return self._live_view_active
+
+    @property
+    def live_view_stop_unconfirmed(self) -> bool:
+        return self._live_view_stop_unconfirmed
 
     @property
     def live_view_source(self) -> str | None:
@@ -2855,10 +4111,36 @@ class CcapiSession:
             )
             if operation is None:
                 raise unsupported(CameraFeature.VIDEO_RECORDING.value, self.engine_name)
-            self._command_ok(operation, {"action": "start" if recording else "stop"})
+            try:
+                self._command_ok(operation, {"action": "start" if recording else "stop"})
+            except BridgeError as error:
+                if error.code not in {"CCAPI_UNREACHABLE", "CCAPI_RESPONSE_TOO_LARGE"}:
+                    raise
+                # The request may have taken effect. A prior ACK cache is not
+                # evidence that this command was rejected or recording stopped.
+                raise BridgeError(
+                    "RECORDING_COMMAND_UNCONFIRMED",
+                    "The recording command result is unknown. Use Stop explicitly; "
+                    "cached status cannot confirm that the camera stopped.",
+                    status_code=502,
+                    feature=CameraFeature.VIDEO_RECORDING.value,
+                    engine=self.engine_name,
+                ) from error
             self._recording = recording
             self._observed.add(CameraFeature.VIDEO_RECORDING)
-            return self.status()
+            try:
+                return self.status()
+            except BridgeError as error:
+                # REC was acknowledged. The caller must not mistake a later
+                # status failure for a rejected command and replay that action.
+                raise BridgeError(
+                    "RECORDING_STATUS_READBACK_FAILED",
+                    "The recording command was acknowledged, but camera status could not be read. "
+                    "Read status again before starting another recording; stopping remains available.",
+                    status_code=502,
+                    feature=CameraFeature.VIDEO_RECORDING.value,
+                    engine=self.engine_name,
+                ) from error
 
     def _guaranteed_release(
         self,
@@ -2893,17 +4175,26 @@ class CcapiSession:
         pending = self._short_control_release
         if pending is None:
             return
+        timer, self._held_autofocus_timer = self._held_autofocus_timer, None
+        if timer is not None:
+            timer.cancel()
         operation, release, _ = pending
         try:
             self._command_ok(operation, release)
         except Exception as error:
             self._shutter_release_unconfirmed = True
+            if self._held_autofocus_owner is not None:
+                self._held_autofocus_active = None
             failure = self._shutter_release_error()
             self._last_error = failure.message
             raise failure from error
         # Status readback is independent of a received stop ACK.
         self._short_control_release = None
         self._shutter_release_unconfirmed = False
+        if self._held_autofocus_owner is not None:
+            self._completed_autofocus_owners.append(self._held_autofocus_owner)
+            self._held_autofocus_owner = None
+            self._held_autofocus_active = False
         self._last_error = None
 
     def _command_ok(self, operation: CcapiOperation, payload: dict[str, object]) -> None:
@@ -2916,8 +4207,212 @@ class CcapiSession:
             )
         self._request_ok(operation.method, operation.path, payload)
 
-    def _content_paths(self, container: str, maximum_media_paths: int | None = None) -> list[str]:
-        page_info = self._first_json([f"{container}?kind=number", f"{container}?type=all,kind=number"])
+    def _inventory_incomplete(self, reason: str) -> BridgeError:
+        return BridgeError(
+            "CCAPI_INVENTORY_INCOMPLETE",
+            f"Camera media inventory is incomplete: {reason}.",
+            status_code=502,
+            feature=CameraFeature.MEDIA_BROWSER.value,
+            engine=self.engine_name,
+        )
+
+    def _inventory_remaining(self, deadline: float) -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise self._inventory_incomplete("observation deadline exceeded")
+        return remaining
+
+    def _strict_media_length(self, response: CcapiStreamResponse) -> int | None:
+        # HTTPMessage preserves duplicate wire headers; the compatibility
+        # dictionary alone may have discarded a conflicting middle value.
+        get_all = getattr(getattr(response.body, "headers", None), "get_all", None)
+        values = get_all("Content-Length", []) if callable(get_all) else []
+        if not values and "content-length" in response.headers:
+            values = [response.headers["content-length"]]
+        if not values:
+            return None
+        if "transfer-encoding" in response.headers:
+            raise self._inventory_incomplete("ambiguous response framing")
+        tokens = [part.strip(" \t") for value in values for part in value.split(",")]
+        if any(not part.isascii() or not part.isdigit() or len(part) > 20 for part in tokens):
+            raise self._inventory_incomplete("invalid response length")
+        lengths = {int(part) for part in tokens}
+        if len(lengths) != 1:
+            raise self._inventory_incomplete("conflicting response lengths")
+        return lengths.pop()
+
+    def _inventory_json(self, path: str, deadline: float) -> object:
+        """Strict-only bounded body reader; no retries, redirects, or legacy fallback."""
+        remaining = self._inventory_remaining(deadline)
+        response = self.transport.open_stream(
+            "GET", self._url(path), timeout=min(MEDIA_INVENTORY_READ_TIMEOUT, remaining), follow_redirects=False,
+        )
+        try:
+            self._inventory_remaining(deadline)
+            if response.status != 200:
+                raise _CcapiHTTPError("GET", path, CcapiResponse(response.status, response.headers, b""))
+            if "content-range" in response.headers:
+                raise self._inventory_incomplete("partial JSON response")
+            declared_length = self._strict_media_length(response)
+            reader = getattr(response.body, "read1", None)
+            if not callable(reader):
+                raise self._inventory_incomplete("transport does not support bounded body reads")
+            payload = bytearray()
+            while True:
+                self._inventory_remaining(deadline)
+                chunk = reader(min(TRANSFER_CHUNK_BYTES, MAX_JSON_BYTES + 1 - len(payload)))
+                self._inventory_remaining(deadline)
+                if not chunk:
+                    break
+                payload.extend(chunk)
+                if len(payload) > MAX_JSON_BYTES:
+                    raise self._inventory_incomplete("JSON response byte budget exceeded")
+            if declared_length is not None and declared_length != len(payload):
+                raise self._inventory_incomplete("invalid or truncated JSON response length")
+            try:
+                value = json.loads(
+                    payload, object_pairs_hook=_strict_json_object, parse_constant=_reject_media_json_constant,
+                )
+            except (UnicodeDecodeError, ValueError, RecursionError) as error:
+                raise self._inventory_incomplete("invalid JSON response") from error
+            self._inventory_remaining(deadline)
+            return value
+        except (OSError, HTTPException) as error:
+            raise self._inventory_incomplete("camera response interrupted or timed out") from error
+        finally:
+            response.close()
+
+    def _inventory_path(self, value: object) -> str:
+        if (
+            not isinstance(value, str)
+            or not value
+            or len(value) > MAX_MEDIA_INVENTORY_PATH_CHARS
+            or any(character in value for character in "?#\\")
+            or any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value)
+        ):
+            raise self._inventory_incomplete("invalid media identity")
+        try:
+            parsed = urlsplit(value)
+            if parsed.username is not None or parsed.password is not None:
+                raise self._inventory_incomplete("invalid media identity credentials")
+            # Require canonical escapes; do not turn encoded separators, nested
+            # traversal, or unreserved aliases into different apparent identities.
+            if re.search(r"%(?![0-9A-F]{2})", parsed.path):
+                raise self._inventory_incomplete("invalid or noncanonical media path escape")
+            for escape in re.findall(r"%([0-9A-F]{2})", parsed.path):
+                character = chr(int(escape, 16))
+                if (
+                    character in "/\\%?#-._~"
+                    or character.isascii() and character.isalnum()
+                    or ord(character) < 32
+                    or ord(character) == 127
+                ):
+                    raise self._inventory_incomplete("ambiguous encoded media identity")
+            path = self._normalize_resource(value)
+        except ValueError as error:
+            raise self._inventory_incomplete("invalid media identity URL") from error
+        if not re.fullmatch(r"/ccapi/ver[0-9]+/contents(?:/[^/]+)*", path):
+            raise self._inventory_incomplete("media identity is outside CCAPI contents")
+        return path
+
+    def _inventory_paths(self, value: object) -> list[str]:
+        if not isinstance(value, dict) or not isinstance(value.get("path"), list):
+            raise self._inventory_incomplete("invalid media path listing")
+        return [self._inventory_path(path) for path in value["path"]]
+
+    def _inventory_pages(self, container: str, request: Callable[[str], object]) -> Iterator[list[str]]:
+        unsupported_count = object()
+        page_info = unsupported_count
+        for path in (f"{container}?kind=number", f"{container}?type=all,kind=number"):
+            try:
+                page_info = request(path)
+                break
+            except _CcapiHTTPError as error:
+                if error.camera_status not in {400, 404, 405}:
+                    raise
+        page_count = 0
+        if page_info is not unsupported_count:
+            if not isinstance(page_info, dict):
+                raise self._inventory_incomplete("invalid media page count response")
+            if "pagenumber" in page_info:
+                page_count = page_info["pagenumber"]
+                if type(page_count) is not int or not 0 <= page_count <= 2**31 - 1:
+                    raise self._inventory_incomplete("invalid media page count")
+            else:
+                # A camera may ignore kind=number and return an unpaged listing.
+                self._inventory_paths(page_info)
+        if page_count == 0:
+            yield self._inventory_paths(request(container))
+            return
+        for page in range(1, page_count + 1):
+            plain = f"{container}?page={page}"
+            if self._media_descending_order_supported is False:
+                value = request(plain)
+            else:
+                try:
+                    value = request(f"{plain}&order=desc")
+                    self._media_descending_order_supported = True
+                except _CcapiHTTPError as error:
+                    if error.camera_status != 400:
+                        raise
+                    self._media_descending_order_supported = False
+                    value = request(plain)
+            yield self._inventory_paths(value)
+
+    def _listing_incomplete(self, reason: str) -> BridgeError:
+        return BridgeError("MEDIA_LIST_INCOMPLETE", f"Media listing did not finish: {reason}.", status_code=502)
+
+    def _listing_paths(self, value: object) -> list[str]:
+        if not isinstance(value, dict) or not isinstance(value.get("path"), list):
+            raise self._listing_incomplete("invalid media path listing")
+        paths = []
+        for raw in value["path"]:
+            if (
+                not isinstance(raw, str) or not raw.strip() or len(raw) > 4096
+                or any(ord(character) < 32 or ord(character) == 127 for character in raw)
+            ):
+                raise self._listing_incomplete("invalid media path")
+            try:
+                path = self._normalize_resource(raw).split("?", 1)[0]
+            except (ValueError, BridgeError) as error:
+                raise self._listing_incomplete("invalid media path") from error
+            if not re.fullmatch(r"/ccapi/ver[0-9]+/contents(?:/[^/]+)*", path):
+                raise self._listing_incomplete("media path is outside contents")
+            paths.append(path)
+        return paths
+
+    def _content_paths(
+        self,
+        container: str,
+        maximum_media_paths: int | None = None,
+        *,
+        on_progress: Callable[[list[str]], None] | None = None,
+        request: Callable[[str], object] | None = None,
+    ) -> list[str]:
+        count_paths = [f"{container}?kind=number", f"{container}?type=all,kind=number"]
+        if request is None:
+            page_info = self._first_json(count_paths)
+        else:
+            unsupported_count = object()
+            page_info = unsupported_count
+            for count_path in count_paths:
+                try:
+                    page_info = request(count_path)
+                    break
+                except _CcapiHTTPError as error:
+                    if error.camera_status not in {400, 404, 405}:
+                        raise
+            if page_info is not unsupported_count:
+                if not isinstance(page_info, dict):
+                    raise self._listing_incomplete("invalid media page count response")
+                if "pagenumber" in page_info:
+                    count = page_info["pagenumber"]
+                    if type(count) is not int or not 0 <= count <= MAX_MEDIA_LIST_REQUESTS:
+                        raise self._listing_incomplete("invalid or excessive media page count")
+                else:
+                    self._listing_paths(page_info)
+            else:
+                page_info = None
         page_count = _integer_value(page_info, "pagenumber") or 0
         if page_count < 0:
             raise BridgeError(
@@ -2928,65 +4423,59 @@ class CcapiSession:
                 engine=self.engine_name,
             )
         paths: dict[str, None] = {}
+
+        def add(value: object, *, reverse: bool) -> None:
+            if request is not None:
+                value = {"path": self._listing_paths(value)}
+            self._add_content_paths(paths, value, reverse=reverse, max_media_paths=maximum_media_paths)
+            if request is not None and len(paths) > MAX_LIST_SNAPSHOT_ITEMS + MAX_MEDIA_LIST_CONTAINERS:
+                raise self._listing_incomplete("path resource bound exceeded")
+            if on_progress is not None:
+                on_progress(list(paths))
+
         if page_count <= 0:
-            value = self._first_json([container], required=True)
-            if isinstance(value, dict):
-                self._add_content_paths(
-                    paths,
-                    value,
-                    reverse=False,
-                    max_media_paths=maximum_media_paths,
-                )
+            value = self._first_json([container], required=True) if request is None else request(container)
+            add(value, reverse=False)
             return list(paths)
 
-        first_value = self._content_page(container, 1)
+        first_value = self._content_page(container, 1, request=request)
+        if request is not None:
+            self._listing_paths(first_value)
         if self._media_descending_order_supported is False:
             pages = range(page_count, 0, -1)
             for page in pages:
-                value = first_value if page == 1 else self._content_page(container, page)
-                self._add_content_paths(
-                    paths,
-                    value,
-                    reverse=True,
-                    max_media_paths=maximum_media_paths,
-                )
+                value = first_value if page == 1 else self._content_page(container, page, request=request)
+                add(value, reverse=True)
                 if (
                     maximum_media_paths is not None
                     and self._media_path_count(paths) >= maximum_media_paths
                 ):
                     break
         else:
-            self._add_content_paths(
-                paths,
-                first_value,
-                reverse=False,
-                max_media_paths=maximum_media_paths,
-            )
+            add(first_value, reverse=False)
             for page in range(2, page_count + 1):
                 if (
                     maximum_media_paths is not None
                     and self._media_path_count(paths) >= maximum_media_paths
                 ):
                     break
-                self._add_content_paths(
-                    paths,
-                    self._content_page(container, page),
-                    reverse=False,
-                    max_media_paths=maximum_media_paths,
-                )
+                add(self._content_page(container, page, request=request), reverse=False)
         return list(paths)
 
-    def _content_page(self, container: str, page: int) -> object:
+    def _content_page(
+        self, container: str, page: int, *, request: Callable[[str], object] | None = None
+    ) -> object:
+        read = request if request is not None else lambda path: self._request_json("GET", path)
         plain_path = f"{container}?page={page}"
         if self._media_descending_order_supported is False:
-            return self._request_json("GET", plain_path)
+            return read(plain_path)
         try:
-            value = self._request_json("GET", f"{plain_path}&order=desc")
+            value = read(f"{plain_path}&order=desc")
         except _CcapiHTTPError as error:
             if error.camera_status != 400:
                 raise
             self._media_descending_order_supported = False
-            return self._request_json("GET", plain_path)
+            return read(plain_path)
         self._media_descending_order_supported = True
         return value
 
@@ -3036,6 +4525,8 @@ class CcapiSession:
             prefix = path.removesuffix("/shooting/settings")
             for raw_key, setting in value.items():
                 key = SETTING_ALIASES.get(raw_key, raw_key)
+                if key == DIRECTORY_SELECTION_SETTING_KEY:
+                    continue
                 if key not in merged:
                     merged[key] = setting
                     setting_path = f"{prefix}/shooting/settings/{raw_key}"
@@ -3423,7 +4914,13 @@ class CcapiSession:
         timeout: float = 15.0,
         expected_status: int | None = None,
     ) -> None:
-        response = self._request(method, path, payload, timeout=timeout)
+        response = self._request(method, path, payload, timeout=timeout,
+                                 max_bytes=65536 if self._maintenance_control_active else MAX_JSON_BYTES)
+        if self._maintenance_control_active and expected_status is None:
+            expected_status = (204 if path.endswith(("/event/polling", "/shooting/liveview",
+                                                    "/shooting/liveview/rtp")) else 200)
+        if self._maintenance_control_active and expected_status == 204 and response.body:
+            raise BridgeError("INVALID_CCAPI_RESPONSE", "Event stop response must be empty.", status_code=502)
         if expected_status is not None and response.status != expected_status:
             raise BridgeError(
                 "INVALID_CCAPI_RESPONSE",
@@ -3451,7 +4948,15 @@ class CcapiSession:
             headers=headers,
             timeout=timeout,
             max_bytes=max_bytes,
+            **({"strict_control": True} if self._maintenance_control_active else {}),
         )
+        if self._maintenance_control_active and 200 <= response.status < 300:
+            length = response.headers.get("content-length")
+            if ("content-range" in response.headers
+                    or response.headers.get("content-encoding") not in {None, "identity"}
+                    or (length is not None and (not re.fullmatch(r"0|[1-9][0-9]*", length)
+                        or int(length) != len(response.body) or "transfer-encoding" in response.headers))):
+                raise BridgeError("INVALID_CCAPI_RESPONSE", "Incomplete maintenance control response.", status_code=502)
         if not 200 <= response.status < 300:
             raise _CcapiHTTPError(method, path, response)
         return response
@@ -3777,13 +5282,6 @@ class CcapiSession:
             )
         return None
 
-    def _stop_jpeg_live_view(self, operations: CcapiJpegOperations) -> None:
-        self._request_ok(
-            operations.stop_live_view.method,
-            operations.stop_live_view.path,
-            dict(operations.stop_payload) if operations.stop_payload is not None else None,
-        )
-
     def _multipart_live_view_operations(self) -> CcapiMultipartOperations | None:
         reads = sorted(
             (
@@ -3853,6 +5351,13 @@ class CcapiSession:
             headers={"Accept": "application/octet-stream,*/*", "Cache-Control": "no-cache"},
             max_bytes=MAX_LIVE_VIEW_SCAN_BYTES,
         )
+        if response.status != 200 or any(key.casefold() == "content-range" for key in response.headers):
+            raise BridgeError(
+                "LIVE_VIEW_COORDINATES_UNAVAILABLE",
+                "Canon image position metadata requires a complete HTTP 200 response.",
+                status_code=409,
+                engine=self.engine_name,
+            )
         _, geometry = _parse_detailed_live_view(response.body)
         if geometry is None:
             raise BridgeError(
@@ -4104,6 +5609,13 @@ def _parse_detailed_live_view(value: bytes) -> tuple[bytes | None, CcapiLiveView
             status_code=502,
             engine=ENGINE_NAME,
         )
+    if offset != len(value):
+        raise BridgeError(
+            "INVALID_LIVE_VIEW_FRAME",
+            "Detailed Live View response contained an incomplete Canon packet sequence.",
+            status_code=502,
+            engine=ENGINE_NAME,
+        )
     return image, geometry
 
 
@@ -4124,7 +5636,7 @@ def _parse_live_view_geometry(value: bytes) -> CcapiLiveViewGeometry | None:
             if all(isinstance(image_info.get(key), int) and not isinstance(image_info.get(key), bool) for key in keys):
                 width = image_info["positionwidth"]
                 height = image_info["positionheight"]
-                if width > 0 and height > 0:
+                if image_info["positionx"] >= 0 and image_info["positiony"] >= 0 and width > 0 and height > 0:
                     return CcapiLiveViewGeometry(
                         position_x=image_info["positionx"],
                         position_y=image_info["positiony"],
@@ -4263,6 +5775,26 @@ def _first_positive(value: dict[str, object], *keys: str) -> int | None:
     return None
 
 
+def _reject_media_json_constant(value: str) -> None:
+    # Python's decoder otherwise accepts NaN and infinities even in unrelated or
+    # nested fields. Invalid JSON cannot prove any media observation.
+    raise ValueError(f"Nonstandard JSON constant cannot provide media evidence: {value}")
+
+
+def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("Duplicate JSON keys cannot provide strict camera evidence")
+        value[key] = item
+    return value
+
+
+def _strict_positive_int(value: object) -> int | None:
+    # No boolean/float coercion or digit extraction from arbitrary camera text.
+    return value if type(value) is int and value > 0 else None
+
+
 def _positive_int(value: object) -> int | None:
     if isinstance(value, bool) or value is None:
         return None
@@ -4282,40 +5814,31 @@ def _optional_string(value: object) -> str | None:
 
 
 def _canon_protection(value: object) -> bool | None:
-    normalized = _optional_string(value)
-    if normalized == "enable":
+    if not isinstance(value, str):
+        return None
+    if value == "enable":
         return True
-    if normalized == "disable":
+    if value == "disable":
         return False
     return None
 
 
 def _canon_archive(value: object) -> bool | None:
-    normalized = _optional_string(value)
-    if normalized == "enable":
-        return True
-    if normalized == "disable":
-        return False
-    return None
+    return _canon_protection(value)
 
 
 def _canon_rating(value: object) -> int | None:
-    normalized = _optional_string(value)
-    if normalized == "off":
-        return 0
-    try:
-        rating = int(normalized) if normalized is not None else -1
-    except ValueError:
+    if not isinstance(value, str):
         return None
-    return rating if rating in range(1, 6) else None
+    if value == "off":
+        return 0
+    return int(value) if value in ("1", "2", "3", "4", "5") else None
 
 
 def _canon_rotation(value: object) -> int | None:
-    try:
-        degrees = int(value)
-    except (TypeError, ValueError):
+    if not isinstance(value, str):
         return None
-    return degrees if degrees in {0, 90, 180, 270} else None
+    return int(value) if value in ("0", "90", "180", "270") else None
 
 
 def _setting_value(settings: dict[str, object], key: str) -> str | None:

@@ -108,6 +108,11 @@ class SessionManager:
             raise BridgeError("SESSION_NOT_FOUND", "Camera session was not found.", status_code=404)
         return session
 
+    def is_current(self, session_id: str, session: CameraEngineSession) -> bool:
+        """Bind asynchronous work to the exact registered object, even if an ID is reused."""
+        with self._lock:
+            return self._sessions.get(session_id) is session
+
     def delete(self, session_id: str) -> None:
         with self._lock:
             session = self._sessions.pop(session_id, None)
@@ -119,6 +124,18 @@ class SessionManager:
             # Do not let a new session register while this session's final release is in flight.
             with self._lock:
                 self._camera_sessions.pop(f"{session.engine_name}:{session.camera.id}", None)
+
+    def retire_maintenance(self, session_id: str) -> None:
+        # Keep registration while retirement is in flight, so a replacement cannot race it.
+        with self._lock:
+            session = self.get(session_id)
+            retire = getattr(session, "maintenance_retire", None)
+            if not callable(retire):
+                raise BridgeError("UNSUPPORTED_MAINTENANCE_RETIRE", "Local-only retirement is unavailable.",
+                                  status_code=409, engine=session.engine_name)
+            retire()
+            self._sessions.pop(session_id, None)
+            self._camera_sessions.pop(f"{session.engine_name}:{session.camera.id}", None)
 
     def close_all(self) -> None:
         with self._lock:

@@ -328,6 +328,104 @@ async function run() {
     await page.click("#media-preview-close");
     await page.click("#disconnect-button");
     await page.waitForSelector("#connection-view:not([hidden])");
+    for (const language of ["en", "zh-TW"]) {
+      await configure({ mode: "Manual", drop_status: false, status_failure_after_release: false,
+        media_enabled: false, reject_release: false, drop_press: false });
+      await page.click("#connect-button");
+      await page.waitForSelector("#control-view:not([hidden])");
+      await page.locator("#control-view .language-select").selectOption(language);
+      await page.click("#video-mode-button");
+      const stopUnknown = language === "en" ? "Stop recording (status unconfirmed)" : "停止錄影（狀態未確認）";
+      const recordLabel = language === "en" ? "Record" : "開始錄影";
+      const responseOnly = language === "en"
+        ? "Recording response received; current camera state unavailable. No video was selected."
+        : "已收到錄影命令回應，目前相機狀態未知，未自動挑選影片。";
+      const beforeRecording = (await cameraState()).commands.length;
+      await configure({ drop_status: true });
+      // This Canon-shaped peer does not implement a verified fresh recording
+      // reader. A command receipt remains useful even when legacy status fails.
+      const startResponse = page.waitForResponse(response => response.url().endsWith("/recording/start/outcome"));
+      await page.click("#shutter-button");
+      const startResult = await startResponse;
+      assert.equal(startResult.status(), 200);
+      const startOutcome = await startResult.json();
+      assert.equal(startOutcome.responseEvidence, "response-received");
+      assert.equal(startOutcome.observation.observationEvidence, "unavailable");
+      assert.equal(startOutcome.observation.recording, null);
+      await page.waitForFunction(label => document.querySelector("#shutter-button")?.getAttribute("aria-label") === label,
+        stopUnknown);
+      await assertActionable(page, "#shutter-button");
+      assert.equal(await page.isDisabled("#photo-mode-button"), true);
+      assert.equal(await page.locator("#record-indicator").isHidden(), true);
+      assert.deepEqual((await cameraState()).commands.slice(beforeRecording), [
+        ["POST", "/ccapi/ver100/shooting/control/recbutton", {action:"start"}],
+      ], "A Start receipt never causes automatic REC replay");
+      const stopResponse = page.waitForResponse(response => response.url().endsWith("/recording/stop/outcome"));
+      await page.click("#shutter-button");
+      const stopResult = await stopResponse;
+      assert.equal(stopResult.status(), 200);
+      const stopOutcome = await stopResult.json();
+      assert.equal(stopOutcome.responseEvidence, "response-received");
+      assert.equal(stopOutcome.observation.observationEvidence, "unavailable");
+      assert.equal(stopOutcome.observation.recording, null);
+      await page.waitForFunction(({label, text}) =>
+        document.querySelector("#shutter-button")?.getAttribute("aria-label") === label &&
+        !document.querySelector("#shutter-button").disabled &&
+        document.querySelector("#operation-state")?.textContent === text, {label:recordLabel, text:responseOnly});
+      assert.equal(await page.locator("#latest-media-retry").isHidden(), true,
+        "A Stop receipt cannot authorize stopped-video review");
+      await configure({ drop_status: false });
+      const observed = page.waitForResponse(response => response.url().endsWith("/recording/observation"));
+      await page.locator("#recording-lifecycle-history button").first().click();
+      assert.equal((await (await observed).json()).observationEvidence, "unavailable");
+      await page.click("#refresh-button");
+      await page.waitForFunction(label => document.querySelector("#shutter-button")?.getAttribute("aria-label") === label,
+        recordLabel);
+      assert.deepEqual((await cameraState()).commands.slice(beforeRecording), [
+        ["POST", "/ccapi/ver100/shooting/control/recbutton", {action:"start"}],
+        ["POST", "/ccapi/ver100/shooting/control/recbutton", {action:"stop"}],
+      ], "Read-only observation and cached-status refresh never replay REC");
+      assert.equal(await page.locator("#record-indicator").isHidden(), true);
+      await page.screenshot({path:path.join(results, `bridge-recording-response-only-${language}.png`)});
+      for (const lostHop of ["camera", "bridge"]) {
+        const beforeLost = (await cameraState()).commands.length;
+        const routePattern = "**/v1/session/*/recording/start/outcome";
+        if (lostHop === "camera") await configure({drop_recording_response:true});
+        else await page.route(routePattern, async route => {
+          const response = await route.fetch();
+          assert.equal(response.status(), 200, "Bridge completed the command before its reply was lost");
+          await route.abort("connectionreset");
+        });
+        await page.click("#shutter-button");
+        await page.waitForFunction(label => document.querySelector("#shutter-button")?.getAttribute("aria-label") === label &&
+          !document.querySelector("#shutter-button").disabled, stopUnknown);
+        assert.equal((await cameraState()).recording, true, "Independent peer applied Start before losing the reply");
+        assert.equal(await page.isDisabled("#photo-mode-button"), true);
+        const statusRead = page.waitForResponse(response => response.url().endsWith("/status"));
+        await page.click("#refresh-button");
+        const statusResult = await statusRead;
+        assert.equal((await statusResult.json()).recording, lostHop === "bridge",
+          "Camera-hop loss leaves the old false ACK cache; Bridge-hop loss has a true ACK cache");
+        await page.waitForFunction(label => document.querySelector("#shutter-button")?.getAttribute("aria-label") === label &&
+          !document.querySelector("#shutter-button").disabled, stopUnknown);
+        assert.deepEqual((await cameraState()).commands.slice(beforeLost).map(command => command[2].action), ["start"],
+          "Refresh cannot replay REC or clear unknown responsibility from an ACK cache");
+        if (lostHop === "camera") await configure({drop_recording_response:false});
+        else await page.unroute(routePattern);
+        const stopAcknowledged = page.waitForResponse(response => response.url().endsWith("/recording/stop/outcome"));
+        await page.click("#shutter-button");
+        assert.equal((await stopAcknowledged).status(), 200);
+        await page.waitForFunction(label => document.querySelector("#shutter-button")?.getAttribute("aria-label") === label,
+          recordLabel);
+        assert.equal((await cameraState()).recording, false);
+        assert.deepEqual((await cameraState()).commands.slice(beforeLost).map(command => command[2].action), ["start", "stop"]);
+        await page.screenshot({path:path.join(results, `bridge-recording-lost-${lostHop}-${language}.png`)});
+        console.log(`PASS: applied REC with ${lostHop} response loss preserves deliberate Stop: ${language}`);
+      }
+      await page.click("#disconnect-button");
+      await page.waitForSelector("#connection-view:not([hidden])");
+      console.log(`PASS: recording receipts remain separate from unavailable fresh observation: ${language}`);
+    }
     assert.deepEqual(pageErrors, []);
     console.log("PASS: real Bridge HTTP peer + browser Bulb/short-control stop-only recovery and acknowledged capture JPEG recovery");
   } finally {

@@ -1000,7 +1000,9 @@ final class OpenEOSControlUITests: XCTestCase {
     private func waitForInteraction(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let predicate = NSPredicate { value, _ in
             guard let element = value as? XCUIElement else { return false }
-            return element.exists && element.isEnabled && element.isHittable
+            // Hittability already requires existence. Avoid a redundant full AX
+            // query while retaining the enabled check and the same wait budget.
+            return element.isHittable && element.isEnabled
         }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed

@@ -1,0 +1,348 @@
+{
+  "scope": "Only session-creation responses from the expected Bridge endpoint; does not prove physical camera cleanup. No credentials or real identifiers.",
+  "vectors": [
+    {
+      "id": "rejected-http-400",
+      "status": 400,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": true
+    },
+    {
+      "id": "rejected-http-401",
+      "status": 401,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": true
+    },
+    {
+      "id": "rejected-http-403",
+      "status": 403,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": true
+    },
+    {
+      "id": "rejected-http-404",
+      "status": 404,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": true
+    },
+    {
+      "id": "rejected-http-405",
+      "status": 405,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": true
+    },
+    {
+      "id": "rejected-http-409",
+      "status": 409,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": true
+    },
+    {
+      "id": "rejected-http-422",
+      "status": 422,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": true
+    },
+    {
+      "id": "rejected-http-429",
+      "status": 429,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": true
+    },
+    {
+      "id": "unknown-http-408",
+      "status": 408,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": false
+    },
+    {
+      "id": "unknown-http-410",
+      "status": 410,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": false
+    },
+    {
+      "id": "unknown-http-418",
+      "status": 418,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": false
+    },
+    {
+      "id": "unknown-http-500",
+      "status": 500,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": false
+    },
+    {
+      "id": "unknown-http-502",
+      "status": 502,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": false
+    },
+    {
+      "id": "unknown-http-503",
+      "status": 503,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": false
+    },
+    {
+      "id": "unknown-http-504",
+      "status": 504,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": false
+    },
+    {
+      "id": "unavailable-501",
+      "status": 501,
+      "code": "ENGINE_UNAVAILABLE",
+      "engine": "ccapi",
+      "creationRejected": true
+    },
+    {
+      "id": "unavailable-503",
+      "status": 503,
+      "code": "ENGINE_UNAVAILABLE",
+      "engine": "ccapi",
+      "creationRejected": true
+    },
+    {
+      "id": "ccapi-discovery-rejected",
+      "status": 502,
+      "code": "CCAPI_DISCOVERY_FAILED",
+      "engine": "ccapi",
+      "creationRejected": true
+    },
+    {
+      "id": "discovery-wrong-engine",
+      "status": 502,
+      "code": "CCAPI_DISCOVERY_FAILED",
+      "engine": "auto",
+      "creationRejected": false
+    },
+    {
+      "id": "network",
+      "status": null,
+      "code": "NETWORK_ERROR",
+      "engine": null,
+      "creationRejected": false
+    },
+    {
+      "id": "malformed-success",
+      "status": 200,
+      "code": "INVALID_RESPONSE",
+      "engine": null,
+      "creationRejected": false
+    },
+    {
+      "id": "redirect",
+      "status": 302,
+      "code": "HTTP_ERROR",
+      "engine": null,
+      "creationRejected": false
+    },
+    {
+      "id": "safety-shutter_release_unconfirmed-400",
+      "status": 400,
+      "code": "SHUTTER_RELEASE_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-shutter_release_unconfirmed-401",
+      "status": 401,
+      "code": "SHUTTER_RELEASE_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-shutter_release_unconfirmed-403",
+      "status": 403,
+      "code": "SHUTTER_RELEASE_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-shutter_release_unconfirmed-404",
+      "status": 404,
+      "code": "SHUTTER_RELEASE_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-shutter_release_unconfirmed-405",
+      "status": 405,
+      "code": "SHUTTER_RELEASE_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-shutter_release_unconfirmed-409",
+      "status": 409,
+      "code": "SHUTTER_RELEASE_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-shutter_release_unconfirmed-422",
+      "status": 422,
+      "code": "SHUTTER_RELEASE_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-shutter_release_unconfirmed-429",
+      "status": 429,
+      "code": "SHUTTER_RELEASE_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-shutter_release_unconfirmed-502",
+      "status": 502,
+      "code": "SHUTTER_RELEASE_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-live_view_stop_unconfirmed-400",
+      "status": 400,
+      "code": "LIVE_VIEW_STOP_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-live_view_stop_unconfirmed-401",
+      "status": 401,
+      "code": "LIVE_VIEW_STOP_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-live_view_stop_unconfirmed-403",
+      "status": 403,
+      "code": "LIVE_VIEW_STOP_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-live_view_stop_unconfirmed-404",
+      "status": 404,
+      "code": "LIVE_VIEW_STOP_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-live_view_stop_unconfirmed-405",
+      "status": 405,
+      "code": "LIVE_VIEW_STOP_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-live_view_stop_unconfirmed-409",
+      "status": 409,
+      "code": "LIVE_VIEW_STOP_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-live_view_stop_unconfirmed-422",
+      "status": 422,
+      "code": "LIVE_VIEW_STOP_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-live_view_stop_unconfirmed-429",
+      "status": 429,
+      "code": "LIVE_VIEW_STOP_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-live_view_stop_unconfirmed-502",
+      "status": 502,
+      "code": "LIVE_VIEW_STOP_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-recording_command_unconfirmed-400",
+      "status": 400,
+      "code": "RECORDING_COMMAND_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-recording_command_unconfirmed-401",
+      "status": 401,
+      "code": "RECORDING_COMMAND_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-recording_command_unconfirmed-403",
+      "status": 403,
+      "code": "RECORDING_COMMAND_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-recording_command_unconfirmed-404",
+      "status": 404,
+      "code": "RECORDING_COMMAND_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-recording_command_unconfirmed-405",
+      "status": 405,
+      "code": "RECORDING_COMMAND_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-recording_command_unconfirmed-409",
+      "status": 409,
+      "code": "RECORDING_COMMAND_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-recording_command_unconfirmed-422",
+      "status": 422,
+      "code": "RECORDING_COMMAND_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-recording_command_unconfirmed-429",
+      "status": 429,
+      "code": "RECORDING_COMMAND_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    },
+    {
+      "id": "safety-recording_command_unconfirmed-502",
+      "status": 502,
+      "code": "RECORDING_COMMAND_UNCONFIRMED",
+      "engine": "ccapi",
+      "creationRejected": false
+    }
+  ]
+}

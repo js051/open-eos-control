@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -53,6 +54,8 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
         page = client.get("/")
         script = client.get("/app/app.js")
         media_transfer = client.get("/app/media-transfer.js")
+        capture_configuration = client.get("/app/capture-configuration.js")
+        maintenance = client.get("/app/maintenance-lifecycle.js")
         styles = client.get("/app/styles.css")
         icon = client.get("/app/app-icon.png")
         protected_api = client.get("/v1/cameras")
@@ -65,15 +68,26 @@ def test_desktop_control_ui_and_assets_are_served_without_api_credentials() -> N
     assert script.headers["content-type"].startswith(("text/javascript", "application/javascript"))
     assert "Bearer ${state.token}" in script.text
     assert "CAMERA_CLOCK_SYNC" in script.text
-    assert "/clock/sync" in script.text
+    assert 'runMaintenance("clock-sync", false)' in script.text
+    assert "/clock/sync" not in script.text
     assert "SENSOR_CLEANING" in script.text
-    assert "/maintenance/sensor-cleaning" in script.text
+    assert 'runMaintenance("sensor-cleaning", autoPowerOff)' in script.text
     assert "CAMERA_SLEEP" in script.text
-    assert "/power/sleep" in script.text
+    assert 'runMaintenance("sleep", false)' in script.text
+    assert "/power/sleep" not in script.text
+    assert "/maintenance/${operation}/outcome" in script.text
+    assert maintenance.status_code == 200
+    assert 'src="/app/maintenance-lifecycle.js"' in page.text
+    assert "parseOutcome" in maintenance.text
     assert "DIRECTORY_CONTROL" in script.text
-    assert "/directories" in script.text
+    assert '"directories"' in script.text
+    assert 'src="/app/capture-configuration.js"' in page.text
+    assert capture_configuration.status_code == 200
+    assert "validReceipt" in capture_configuration.text
+    assert "CAPTURE_CONFIG_READBACK_FAILED" in capture_configuration.text
     assert "MEDIA_UPLOAD" in script.text
-    assert "XMLHttpRequest" in script.text
+    assert "async function sendMediaUpload" in script.text
+    assert 'redirect: "error", cache: "no-store", credentials: "omit"' in script.text
     assert "media?filename=" in script.text
     assert media_transfer.status_code == 200
     assert media_transfer.headers["content-type"].startswith(("text/javascript", "application/javascript"))
@@ -189,8 +203,25 @@ def test_authenticated_rtp_audio_endpoint_returns_bounded_pcm_and_timeout() -> N
     assert pcm.headers["x-open-eos-audio-channels"] == "2"
     assert pcm.headers["x-open-eos-audio-frames"] == "1"
     assert pcm.headers["x-open-eos-audio-discontinuity"] == "0"
+    assert 0 <= int(pcm.headers["x-open-eos-audio-age-ms"]) < 1000
     assert timeout.status_code == 204
     assert session.reads == [(4, 0.25), (5, 0.0)]
+
+
+def test_audio_endpoint_drops_pcm_that_expired_before_http_publication() -> None:
+    session = _AudioSession()
+    session.live_view_audio = lambda **_kwargs: RtpAudioChunk(
+        bytes(4), 6, 48000, 2, 1, decoded_at_monotonic=time.monotonic() - 1.0
+    )
+    headers = {"Authorization": "Bearer test-token"}
+    app = create_app(engine=GPhoto2Engine(FakeRunner()), ccapi_engine=_AudioEngine(session), token="test-token")
+    with TestClient(app) as client:
+        created = client.post("/v1/session", headers=headers,
+                              json={"engine": "ccapi", "ccapiUrl": "http://192.0.2.1:8080"})
+        response = client.get(f"/v1/session/{created.json()['id']}/liveview/audio", headers=headers)
+    assert response.status_code == 204
+    assert not response.content
+    assert response.headers["cache-control"] == "no-store, max-age=0"
 
 
 class _AudioEngine:

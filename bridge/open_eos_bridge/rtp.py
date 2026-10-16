@@ -6,7 +6,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from io import BytesIO
 from typing import Protocol
 from urllib.parse import urlsplit
@@ -14,12 +14,17 @@ from urllib.parse import urlsplit
 MAX_ACCESS_UNIT_BYTES = 8 * 1024 * 1024
 MAX_LATM_AUDIO_MUX_BYTES = 0x1FFF
 MAX_DATAGRAM_BYTES = 65_535
+MAX_DECODED_FRAME_AGE_SECONDS = 5.0
 H264_CLOCK_RATE = 90_000
 CANON_AUDIO_CLOCK_RATE = 48_000
 AUDIO_CHANNELS = 2
 AUDIO_SAMPLE_BYTES = 2
 AUDIO_QUEUE_CHUNKS = 96
+MAX_DECODED_AUDIO_AGE_SECONDS = 1.0
+MAX_AUDIO_CHUNK_FRAMES = CANON_AUDIO_CLOCK_RATE // 4
 ANNEX_B_START_CODE = b"\x00\x00\x00\x01"
+_RTP_RECEIVER_OWNERS_LOCK = threading.Lock()
+_RTP_RECEIVER_OWNERS: dict[tuple[str, ...], object] = {}
 
 
 class RtpError(ValueError):
@@ -84,6 +89,7 @@ class RtpAudioChunk:
     channels: int
     sample_frames: int
     discontinuity: bool = False
+    decoded_at_monotonic: float = field(default_factory=time.monotonic)
 
 
 @dataclass(frozen=True)
@@ -395,6 +401,8 @@ class H264RtpDepacketizer:
 
 
 class H264FrameDecoder(Protocol):
+    def reset_for_frame_epoch(self) -> None: ...
+
     def decode(self, access_unit: H264AccessUnit, *, emit_frame: bool) -> bytes | None: ...
 
     def close(self) -> None: ...
@@ -409,6 +417,13 @@ class PyAvH264FrameDecoder:
         self._jpeg_quality = min(max(jpeg_quality, 1), 95)
         self._sps: bytes | None = None
         self._pps: bytes | None = None
+        self._waiting_for_key_frame = True
+
+    def reset_for_frame_epoch(self) -> None:
+        # Only the owning receiver worker calls this, never the camera-command
+        # thread. A fresh context discards delayed decoded output; retain stream
+        # parameter sets but require a new keyframe before producing pixels.
+        self._codec = self._av.CodecContext.create("h264", "r")
         self._waiting_for_key_frame = True
 
     def decode(self, access_unit: H264AccessUnit, *, emit_frame: bool) -> bytes | None:
@@ -509,6 +524,8 @@ class RtpLiveViewSession(Protocol):
 
     def read_frame(self, timeout: float = 5.0) -> bytes: ...
 
+    def discard_pending_frames(self) -> None: ...
+
     def read_audio(self, after_generation: int = 0, timeout: float = 1.0) -> RtpAudioChunk | None: ...
 
     def close(self) -> None: ...
@@ -539,19 +556,28 @@ class UdpH264RtpSession:
         self._audio_decoder: LatmAudioDecoder | None = None
         self._audio_chunks: deque[RtpAudioChunk] = deque(maxlen=AUDIO_QUEUE_CHUNKS)
         self._audio_generation = 0
+        self._audio_input_access_units = 0
+        self._audio_decoded_sample_frames = 0
         self._audio_last_bytes = 0
         self._audio_last_frame_at_millis: int | None = None
+        self._audio_last_decoded_at: float | None = None
         self._audio_last_error: str | None = None
         self._audio_supported, self._audio_support_reason = latm_audio_support(description.audio)
         if self._audio_supported and audio_decoder_factory is None:
             self._audio_supported = False
             self._audio_support_reason = "PyAV MP4A-LATM decoder is unavailable."
         self._closed = False
+        self._starting = False
+        self._receiver_workers = 0
+        self._receiver_reservation: object | None = None
+        self._receiver_cleanup_failed = False
+        self._receiver_owner_id: str | None = None
         self._target_fps = 30
         self._latest_frame: bytes | None = None
         self._frame_generation = 0
         self._delivered_generation = 0
-        self._last_emitted_at = 0.0
+        self._frame_epoch = 0
+        self._last_emitted_at: float | None = None
         self._last_error: str | None = None
 
     @property
@@ -568,73 +594,184 @@ class UdpH264RtpSession:
         with self._condition:
             audio = self.description.audio
             active = self._audio_thread is not None and not self._closed
+            self._expire_audio_chunks()
+            fresh = active and bool(self._audio_chunks)
             return {
                 "advertised": audio is not None,
-                "available": active,
+                "available": fresh,
+                "decodingAvailable": active,
                 "active": active,
+                "decodedFresh": fresh,
+                "decodedAgeMs": (max(0, int((time.monotonic() - self._audio_last_decoded_at) * 1000))
+                                 if self._audio_last_decoded_at is not None else None),
+                "outputProgressSupported": False,
+                "physicalAudibilityConfirmed": False,
                 "codec": audio.codec if audio is not None else None,
                 "clockRate": audio.clock_rate if audio is not None else None,
                 "sampleRate": CANON_AUDIO_CLOCK_RATE if active else None,
                 "channels": AUDIO_CHANNELS if active else audio.channels if audio is not None else None,
                 "generation": self._audio_generation,
+                "decoderInputAccessUnits": self._audio_input_access_units,
+                "decodedSampleFrames": self._audio_decoded_sample_frames,
                 "lastBytes": self._audio_last_bytes,
                 "lastFrameAtMillis": self._audio_last_frame_at_millis,
                 "source": (
                     f"rtp://{self.destination_address}:{audio.port}" if audio is not None else None
                 ),
-                "reason": None if active else self._audio_support_reason,
+                "reason": (None if fresh else "Waiting for fresh decoded Canon RTP audio."
+                           if active else self._audio_support_reason),
                 "lastError": self._audio_last_error,
             }
 
-    def start(self) -> None:
+    def set_decoder_owner(self, owner_id: str) -> None:
+        if not isinstance(owner_id, str) or not owner_id:
+            raise RtpError("Canon RTP decoder owner must be a nonempty identifier.")
         with self._condition:
-            if self._thread is not None:
-                return
+            if self._closed or self._starting or self._receiver_reservation is not None:
+                raise RtpError("Canon RTP decoder ownership cannot change after preparation.")
+            self._receiver_owner_id = owner_id
+
+    def _receiver_keys(self) -> tuple[tuple[str, ...], ...]:
+        endpoint = ("endpoint", self.destination_address, str(self.description.video.port))
+        return (endpoint, ("camera", self._receiver_owner_id)) if self._receiver_owner_id is not None else (endpoint,)
+
+    def start(self) -> None:
+        key = (self.destination_address, self.description.video.port)
+        with self._condition:
             if self._closed:
                 raise RtpError("Canon RTP session is already closed.")
-        decoder = self._decoder_factory()
-        receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        receiver.settimeout(0.25)
+            if self._thread is not None or self._starting:
+                return
+            with _RTP_RECEIVER_OWNERS_LOCK:
+                if any(item in _RTP_RECEIVER_OWNERS for item in self._receiver_keys()):
+                    raise RtpError(
+                        "Canon RTP receiver owner or endpoint is still active or draining; retry after cleanup."
+                    )
+                reservation = object()
+                for item in self._receiver_keys():
+                    _RTP_RECEIVER_OWNERS[item] = reservation
+                self._receiver_reservation = reservation
+            self._starting = True
+        decoder = receiver = audio_decoder = audio_receiver = None
+        video_started = audio_started = False
         try:
-            receiver.bind((self.destination_address, self.description.video.port))
-        except Exception:
-            receiver.close()
-            decoder.close()
+            decoder = self._decoder_factory()
+            with self._condition:
+                if self._closed:
+                    raise RtpError("Canon RTP session closed during decoder preparation.")
+            receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            receiver.settimeout(0.25)
+            receiver.bind(key)
+            if self._audio_supported and self.description.audio is not None and self._audio_decoder_factory is not None:
+                try:
+                    audio_decoder = self._audio_decoder_factory()
+                    audio_receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    audio_receiver.settimeout(0.25)
+                    audio_receiver.bind((self.destination_address, self.description.audio.port))
+                except Exception as error:
+                    if audio_receiver is not None:
+                        self._close_receiver_socket(audio_receiver)
+                    if audio_decoder is not None:
+                        self._dispose_receiver_decoder(audio_decoder)
+                    audio_receiver = audio_decoder = None
+                    self._audio_support_reason = f"Could not prepare Canon RTP audio: {error}"
+                    self._audio_last_error = str(error)
+            with self._condition:
+                if self._closed or self._receiver_reservation is not reservation:
+                    raise RtpError("Canon RTP session closed during receiver preparation.")
+                self._decoder, self._socket = decoder, receiver
+                thread = threading.Thread(target=self._run_receiver,
+                    args=(self._receive_loop, decoder, receiver, False), name="open-eos-ccapi-rtp", daemon=True)
+                self._thread = thread
+                self._receiver_workers += 1
+                try:
+                    thread.start()
+                    video_started = True
+                except BaseException:
+                    self._receiver_workers -= 1
+                    self._thread = None
+                    raise
+                if audio_receiver is not None and audio_decoder is not None:
+                    self._audio_decoder, self._audio_socket = audio_decoder, audio_receiver
+                    audio_thread = threading.Thread(target=self._run_receiver,
+                        args=(self._receive_audio_loop, audio_decoder, audio_receiver, True),
+                        name="open-eos-ccapi-rtp-audio", daemon=True)
+                    self._audio_thread = audio_thread
+                    self._receiver_workers += 1
+                    try:
+                        audio_thread.start()
+                        audio_started = True
+                    except BaseException:
+                        self._receiver_workers -= 1
+                        self._audio_thread = None
+                        raise
+        except BaseException:
+            self.close()
             raise
-        thread = threading.Thread(target=self._receive_loop, name="open-eos-ccapi-rtp", daemon=True)
-        audio_receiver: socket.socket | None = None
-        audio_decoder: LatmAudioDecoder | None = None
-        audio_thread: threading.Thread | None = None
-        if self._audio_supported and self.description.audio is not None and self._audio_decoder_factory is not None:
-            try:
-                audio_decoder = self._audio_decoder_factory()
-                audio_receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                audio_receiver.settimeout(0.25)
-                audio_receiver.bind((self.destination_address, self.description.audio.port))
-                audio_thread = threading.Thread(
-                    target=self._receive_audio_loop,
-                    name="open-eos-ccapi-rtp-audio",
-                    daemon=True,
-                )
-            except Exception as error:
+        finally:
+            # Factories and unstarted workers are owned by this preparation.
+            # Started workers alone dispose their decoder, after decode returns.
+            if not video_started:
+                if receiver is not None:
+                    self._close_receiver_socket(receiver)
+                if decoder is not None:
+                    self._dispose_receiver_decoder(decoder)
+            if not audio_started:
                 if audio_receiver is not None:
-                    audio_receiver.close()
+                    self._close_receiver_socket(audio_receiver)
                 if audio_decoder is not None:
-                    audio_decoder.close()
-                audio_receiver = None
-                audio_decoder = None
-                self._audio_support_reason = f"Could not prepare Canon RTP audio: {error}"
-                self._audio_last_error = str(error)
-        with self._condition:
-            self._decoder = decoder
-            self._socket = receiver
-            self._thread = thread
-            self._audio_decoder = audio_decoder
-            self._audio_socket = audio_receiver
-            self._audio_thread = audio_thread
-        thread.start()
-        if audio_thread is not None:
-            audio_thread.start()
+                    self._dispose_receiver_decoder(audio_decoder)
+            with self._condition:
+                if not video_started:
+                    self._decoder = self._socket = None
+                if not audio_started:
+                    self._audio_decoder = self._audio_socket = None
+                self._starting = False
+                self._release_receiver_reservation()
+
+    def _close_receiver_socket(self, receiver: socket.socket) -> None:
+        try:
+            receiver.close()
+        except Exception as error:
+            with self._condition:
+                self._receiver_cleanup_failed = True
+                self._last_error = f"Canon RTP receiver cleanup failed: {error}"
+
+    def _dispose_receiver_decoder(self, decoder: H264FrameDecoder | LatmAudioDecoder) -> None:
+        try:
+            decoder.close()
+        except Exception as error:
+            with self._condition:
+                self._receiver_cleanup_failed = True
+                self._last_error = f"Canon RTP decoder cleanup failed: {error}"
+
+    def _run_receiver(self, receive: Callable[[], None], decoder: H264FrameDecoder | LatmAudioDecoder,
+                      receiver: socket.socket, audio: bool) -> None:
+        try:
+            receive()
+        finally:
+            if not audio:
+                self.close()
+            self._close_receiver_socket(receiver)
+            self._dispose_receiver_decoder(decoder)
+            with self._condition:
+                if audio:
+                    self._audio_thread = self._audio_decoder = None
+                else:
+                    self._thread = self._decoder = None
+                self._receiver_workers -= 1
+                self._release_receiver_reservation()
+                self._condition.notify_all()
+
+    def _release_receiver_reservation(self) -> None:
+        # Caller holds the condition. Logical Stop does not prove physical drain.
+        if self._starting or self._receiver_workers or self._receiver_cleanup_failed:
+            return
+        with _RTP_RECEIVER_OWNERS_LOCK:
+            for key in self._receiver_keys():
+                if _RTP_RECEIVER_OWNERS.get(key) is self._receiver_reservation:
+                    _RTP_RECEIVER_OWNERS.pop(key, None)
+        self._receiver_reservation = None
 
     def set_target_fps(self, fps: int) -> None:
         with self._condition:
@@ -643,30 +780,56 @@ class UdpH264RtpSession:
     def wait_until_ready(self, timeout: float = 5.0) -> None:
         deadline = time.monotonic() + max(timeout, 0.0)
         with self._condition:
-            while not self._closed and self._frame_generation == 0:
+            while not self._closed and not self._has_fresh_frame():
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     detail = f" Last decoder error: {self._last_error}" if self._last_error else ""
                     raise RtpError(f"Timed out waiting for the first decoded Canon RTP frame.{detail}")
                 self._condition.wait(remaining)
-            if self._frame_generation == 0:
+            if self._closed:
                 detail = f" Last decoder error: {self._last_error}" if self._last_error else ""
                 raise RtpError(f"Canon RTP session closed before its first decoded frame.{detail}")
+
+    def discard_pending_frames(self) -> None:
+        with self._condition:
+            self._frame_epoch += 1
+            self._delivered_generation = self._frame_generation
+            self._latest_frame = None
+            self._last_emitted_at = None
+            self._condition.notify_all()
 
     def read_frame(self, timeout: float = 5.0) -> bytes:
         deadline = time.monotonic() + max(timeout, 0.0)
         with self._condition:
-            while not self._closed and self._frame_generation <= self._delivered_generation:
+            while not self._closed and (
+                self._frame_generation <= self._delivered_generation or not self._has_fresh_frame()
+            ):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     detail = f" Last decoder error: {self._last_error}" if self._last_error else ""
                     raise RtpError(f"Timed out waiting for a decoded Canon RTP frame.{detail}")
                 self._condition.wait(remaining)
-            if self._latest_frame is None or self._frame_generation <= self._delivered_generation:
+            if self._closed or self._latest_frame is None:
                 detail = f" Last decoder error: {self._last_error}" if self._last_error else ""
                 raise RtpError(f"Canon RTP session closed before a frame was decoded.{detail}")
             self._delivered_generation = self._frame_generation
             return self._latest_frame
+
+    def _has_fresh_frame(self) -> bool:
+        # Called only under the condition lock. Input traffic or a pending decode
+        # is not output progress, and an old unconsumed buffer is not a new frame.
+        return (
+            bool(self._latest_frame) and self._last_emitted_at is not None
+            and 0 <= time.monotonic() - self._last_emitted_at < MAX_DECODED_FRAME_AGE_SECONDS
+        )
+
+    def _expire_audio_chunks(self) -> None:
+        # Called with the condition lock; wall-clock changes cannot renew PCM.
+        now = time.monotonic()
+        while self._audio_chunks and not (
+            0 <= now - self._audio_chunks[0].decoded_at_monotonic < MAX_DECODED_AUDIO_AGE_SECONDS
+        ):
+            self._audio_chunks.popleft()
 
     def read_audio(self, after_generation: int = 0, timeout: float = 1.0) -> RtpAudioChunk | None:
         if after_generation < 0:
@@ -675,61 +838,49 @@ class UdpH264RtpSession:
         with self._condition:
             if self._audio_thread is None:
                 raise RtpError(self._audio_support_reason)
-            while not self._closed and (
-                not self._audio_chunks or self._audio_chunks[-1].generation <= after_generation
-            ):
+            while not self._closed:
+                self._expire_audio_chunks()
+                if self._audio_chunks and self._audio_chunks[-1].generation > after_generation:
+                    chunk = self._audio_chunks[-1] if after_generation == 0 else next(
+                        candidate for candidate in self._audio_chunks if candidate.generation > after_generation
+                    )
+                    discontinuity = chunk.discontinuity or (
+                        after_generation > 0 and chunk.generation != after_generation + 1
+                    )
+                    return replace(chunk, discontinuity=discontinuity)
+                if self._audio_thread is None:
+                    raise RtpError("Canon RTP audio receiver stopped.")
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     if self._audio_last_error:
                         raise RtpError(f"Canon RTP audio decoder error: {self._audio_last_error}")
                     return None
                 self._condition.wait(remaining)
-            if self._closed:
-                raise RtpError("Canon RTP audio session is closed.")
-            chunk = self._audio_chunks[-1] if after_generation == 0 else next(
-                (candidate for candidate in self._audio_chunks if candidate.generation > after_generation),
-                None,
-            )
-            if chunk is None:
-                return None
-            discontinuity = chunk.discontinuity or (
-                after_generation > 0 and chunk.generation != after_generation + 1
-            )
-            return replace(chunk, discontinuity=discontinuity)
+            raise RtpError("Canon RTP audio session is closed.")
 
     def close(self) -> None:
         with self._condition:
             if self._closed:
                 return
             self._closed = True
-            receiver = self._socket
-            thread = self._thread
-            decoder = self._decoder
-            audio_receiver = self._audio_socket
-            audio_thread = self._audio_thread
-            audio_decoder = self._audio_decoder
-            self._socket = None
-            self._thread = None
-            self._decoder = None
-            self._audio_socket = None
-            self._audio_thread = None
-            self._audio_decoder = None
+            self._audio_chunks.clear()
+            receiver, thread = self._socket, self._thread
+            audio_receiver, audio_thread = self._audio_socket, self._audio_thread
+            self._socket = self._audio_socket = None
             self._condition.notify_all()
         if receiver is not None:
-            receiver.close()
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=2.0)
-        if decoder is not None:
-            decoder.close()
+            self._close_receiver_socket(receiver)
         if audio_receiver is not None:
-            audio_receiver.close()
-        if audio_thread is not None and audio_thread is not threading.current_thread():
-            audio_thread.join(timeout=2.0)
-        if audio_decoder is not None:
-            audio_decoder.close()
+            self._close_receiver_socket(audio_receiver)
+        for worker in (thread, audio_thread):
+            if worker is not None and worker is not threading.current_thread():
+                worker.join(timeout=2.0)
+        # Decoder refs and endpoint reservation remain owned by worker finally
+        # blocks even when the bounded join expires. Never close an active codec.
 
     def _receive_loop(self) -> None:
         depacketizer = H264RtpDepacketizer(self.description.video.payload_type)
+        decoder_epoch = 0
         while True:
             with self._condition:
                 if self._closed:
@@ -737,24 +888,45 @@ class UdpH264RtpSession:
                 receiver = self._socket
                 decoder = self._decoder
                 target_fps = self._target_fps
+                epoch = self._frame_epoch
             if receiver is None or decoder is None:
                 return
+            if decoder_epoch != epoch:
+                try:
+                    decoder.reset_for_frame_epoch()
+                except Exception as error:
+                    with self._condition:
+                        if not self._closed and epoch == self._frame_epoch:
+                            self._last_error = f"Canon RTP decoder reset failed: {error}"
+                    return
+                depacketizer = H264RtpDepacketizer(self.description.video.payload_type)
+                decoder_epoch = epoch
             try:
                 datagram, _ = receiver.recvfrom(MAX_DATAGRAM_BYTES)
+                with self._condition:
+                    if self._closed:
+                        return
+                    if epoch != self._frame_epoch:
+                        continue
                 access_unit = depacketizer.accept(datagram)
                 if access_unit is None:
                     continue
                 now = time.monotonic()
                 emit = (
-                    access_unit.key_frame or self._last_emitted_at == 0 or now - self._last_emitted_at >= 1 / target_fps
+                    access_unit.key_frame or self._last_emitted_at is None
+                    or now - self._last_emitted_at >= 1 / target_fps
                 )
                 frame = decoder.decode(access_unit, emit_frame=emit)
-                if frame is None:
+                if not frame:
                     continue
                 with self._condition:
+                    if self._closed:
+                        return
+                    if epoch != self._frame_epoch:
+                        continue
                     self._latest_frame = frame
                     self._frame_generation += 1
-                    self._last_emitted_at = now
+                    self._last_emitted_at = time.monotonic()
                     self._last_error = None
                     self._condition.notify_all()
             except TimeoutError:
@@ -763,7 +935,8 @@ class UdpH264RtpSession:
                 with self._condition:
                     if self._closed:
                         return
-                    self._last_error = str(error)
+                    if epoch == self._frame_epoch:
+                        self._last_error = str(error)
 
     def _receive_audio_loop(self) -> None:
         audio = self.description.audio
@@ -784,12 +957,27 @@ class UdpH264RtpSession:
                 access_unit = depacketizer.accept(datagram)
                 if access_unit is None:
                     continue
+                with self._condition:
+                    if self._closed:
+                        return
+                    self._audio_input_access_units += 1
                 decoder_discontinuity = decoder_discontinuity or access_unit.discontinuity
+                decode_started = time.monotonic()
                 pcm = decoder.decode(access_unit)
                 if pcm is None:
                     continue
+                decoded_at = time.monotonic()
+                if not 0 <= decoded_at - decode_started < MAX_DECODED_AUDIO_AGE_SECONDS:
+                    raise RtpError("Canon RTP audio decode exceeded the fresh PCM deadline.")
+                if (pcm.sample_rate != CANON_AUDIO_CLOCK_RATE or pcm.channels != AUDIO_CHANNELS
+                        or not 0 < pcm.sample_frames <= MAX_AUDIO_CHUNK_FRAMES
+                        or len(pcm.content) != pcm.sample_frames * AUDIO_CHANNELS * AUDIO_SAMPLE_BYTES):
+                    raise RtpError("Canon RTP audio decoder returned empty, malformed or oversized PCM.")
                 with self._condition:
+                    if self._closed:
+                        return
                     self._audio_generation += 1
+                    self._audio_decoded_sample_frames += pcm.sample_frames
                     chunk = RtpAudioChunk(
                         content=pcm.content,
                         generation=self._audio_generation,
@@ -797,8 +985,11 @@ class UdpH264RtpSession:
                         channels=pcm.channels,
                         sample_frames=pcm.sample_frames,
                         discontinuity=decoder_discontinuity,
+                        decoded_at_monotonic=decoded_at,
                     )
+                    self._expire_audio_chunks()
                     self._audio_chunks.append(chunk)
+                    self._audio_last_decoded_at = decoded_at
                     self._audio_last_bytes = len(pcm.content)
                     self._audio_last_frame_at_millis = int(time.time() * 1000)
                     self._audio_last_error = None

@@ -1,0 +1,1348 @@
+{
+  "schemaVersion": 1,
+  "contract": "media-upload-outcome-v1",
+  "limits": {
+    "maximumUploadBytes": 4294967295,
+    "maximumDispatchesPerAttempt": 1,
+    "automaticReplay": false
+  },
+  "outcomeCases": [
+    {
+      "id": "before-dispatch-finish-not-read",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "not-read",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-finish-empty-list",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "empty-list",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-finish-existing-same-name-size",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "existing-same-name-size",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-finish-existing-case-variant-name-size",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "existing-case-variant-name-size",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-finish-new-id-same-name-size",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "new-id-same-name-size",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-finish-same-name-unknown-size",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "same-name-unknown-size",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-finish-different-item",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "different-item",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-finish-read-failed",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "read-failed",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-cancel-not-read",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "not-read",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-cancel-empty-list",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "empty-list",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-cancel-existing-same-name-size",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "existing-same-name-size",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-cancel-existing-case-variant-name-size",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "existing-case-variant-name-size",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-cancel-new-id-same-name-size",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "new-id-same-name-size",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-cancel-same-name-unknown-size",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "same-name-unknown-size",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-cancel-different-item",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "different-item",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "before-dispatch-cancel-read-failed",
+      "dispatchStarted": false,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "read-failed",
+      "expectedOutcome": "not-sent"
+    },
+    {
+      "id": "after-dispatch-no-receipt-finish-not-read",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "not-read",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-finish-empty-list",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "empty-list",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-finish-existing-same-name-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "existing-same-name-size",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-finish-existing-case-variant-name-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "existing-case-variant-name-size",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-finish-new-id-same-name-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "new-id-same-name-size",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-finish-same-name-unknown-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "same-name-unknown-size",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-finish-different-item",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "different-item",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-finish-read-failed",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": false,
+      "listingObservation": "read-failed",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-cancel-not-read",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "not-read",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-cancel-empty-list",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "empty-list",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-cancel-existing-same-name-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "existing-same-name-size",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-cancel-existing-case-variant-name-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "existing-case-variant-name-size",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-cancel-new-id-same-name-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "new-id-same-name-size",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-cancel-same-name-unknown-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "same-name-unknown-size",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-cancel-different-item",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "different-item",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "after-dispatch-no-receipt-cancel-read-failed",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": false,
+      "cancellationRequested": true,
+      "listingObservation": "read-failed",
+      "expectedOutcome": "uncertain"
+    },
+    {
+      "id": "verified-response-finish-not-read",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": false,
+      "listingObservation": "not-read",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-finish-empty-list",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": false,
+      "listingObservation": "empty-list",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-finish-existing-same-name-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": false,
+      "listingObservation": "existing-same-name-size",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-finish-existing-case-variant-name-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": false,
+      "listingObservation": "existing-case-variant-name-size",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-finish-new-id-same-name-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": false,
+      "listingObservation": "new-id-same-name-size",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-finish-same-name-unknown-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": false,
+      "listingObservation": "same-name-unknown-size",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-finish-different-item",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": false,
+      "listingObservation": "different-item",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-finish-read-failed",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": false,
+      "listingObservation": "read-failed",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-cancel-not-read",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": true,
+      "listingObservation": "not-read",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-cancel-empty-list",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": true,
+      "listingObservation": "empty-list",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-cancel-existing-same-name-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": true,
+      "listingObservation": "existing-same-name-size",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-cancel-existing-case-variant-name-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": true,
+      "listingObservation": "existing-case-variant-name-size",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-cancel-new-id-same-name-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": true,
+      "listingObservation": "new-id-same-name-size",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-cancel-same-name-unknown-size",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": true,
+      "listingObservation": "same-name-unknown-size",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-cancel-different-item",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": true,
+      "listingObservation": "different-item",
+      "expectedOutcome": "confirmed"
+    },
+    {
+      "id": "verified-response-cancel-read-failed",
+      "dispatchStarted": true,
+      "verifiedReceiptForAttempt": true,
+      "cancellationRequested": true,
+      "listingObservation": "read-failed",
+      "expectedOutcome": "confirmed"
+    }
+  ],
+  "admissionCases": [
+    {
+      "id": "current",
+      "openingOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "openingToken": "picker-1",
+      "currentToken": "picker-1",
+      "singleUseAvailable": true,
+      "featureSupported": true,
+      "mediaBusy": false,
+      "sourceSelected": true,
+      "expectedAdmit": true
+    },
+    {
+      "id": "reconnected",
+      "openingOwner": "owner-a",
+      "currentOwner": "owner-b",
+      "openingToken": "picker-1",
+      "currentToken": "picker-1",
+      "singleUseAvailable": true,
+      "featureSupported": true,
+      "mediaBusy": false,
+      "sourceSelected": true,
+      "expectedAdmit": false
+    },
+    {
+      "id": "same-camera-new-generation",
+      "openingOwner": "owner-a",
+      "currentOwner": "owner-a-generation-2",
+      "openingToken": "picker-1",
+      "currentToken": "picker-1",
+      "singleUseAvailable": true,
+      "featureSupported": true,
+      "mediaBusy": false,
+      "sourceSelected": true,
+      "expectedAdmit": false
+    },
+    {
+      "id": "second-picker",
+      "openingOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "openingToken": "picker-1",
+      "currentToken": "picker-2",
+      "singleUseAvailable": true,
+      "featureSupported": true,
+      "mediaBusy": false,
+      "sourceSelected": true,
+      "expectedAdmit": false
+    },
+    {
+      "id": "consumed",
+      "openingOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "openingToken": "picker-1",
+      "currentToken": "picker-1",
+      "singleUseAvailable": false,
+      "featureSupported": true,
+      "mediaBusy": false,
+      "sourceSelected": true,
+      "expectedAdmit": false
+    },
+    {
+      "id": "unsupported",
+      "openingOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "openingToken": "picker-1",
+      "currentToken": "picker-1",
+      "singleUseAvailable": true,
+      "featureSupported": false,
+      "mediaBusy": false,
+      "sourceSelected": true,
+      "expectedAdmit": false
+    },
+    {
+      "id": "busy",
+      "openingOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "openingToken": "picker-1",
+      "currentToken": "picker-1",
+      "singleUseAvailable": true,
+      "featureSupported": true,
+      "mediaBusy": true,
+      "sourceSelected": true,
+      "expectedAdmit": false
+    },
+    {
+      "id": "cancelled-picker",
+      "openingOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "openingToken": "picker-1",
+      "currentToken": "picker-1",
+      "singleUseAvailable": true,
+      "featureSupported": true,
+      "mediaBusy": false,
+      "sourceSelected": false,
+      "expectedAdmit": false
+    },
+    {
+      "id": "retired",
+      "openingOwner": "owner-a",
+      "currentOwner": null,
+      "openingToken": "picker-1",
+      "currentToken": "picker-1",
+      "singleUseAvailable": true,
+      "featureSupported": true,
+      "mediaBusy": false,
+      "sourceSelected": true,
+      "expectedAdmit": false
+    },
+    {
+      "id": "cleared-token",
+      "openingOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "openingToken": "picker-1",
+      "currentToken": null,
+      "singleUseAvailable": true,
+      "featureSupported": true,
+      "mediaBusy": false,
+      "sourceSelected": true,
+      "expectedAdmit": false
+    },
+    {
+      "id": "new-valid-picker",
+      "openingOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "openingToken": "picker-2",
+      "currentToken": "picker-2",
+      "singleUseAvailable": true,
+      "featureSupported": true,
+      "mediaBusy": false,
+      "sourceSelected": true,
+      "expectedAdmit": true
+    },
+    {
+      "id": "new-owner-explicit-picker",
+      "openingOwner": "owner-b",
+      "currentOwner": "owner-b",
+      "openingToken": "picker-1",
+      "currentToken": "picker-1",
+      "singleUseAvailable": true,
+      "featureSupported": true,
+      "mediaBusy": false,
+      "sourceSelected": true,
+      "expectedAdmit": true
+    }
+  ],
+  "publicationCases": [
+    {
+      "id": "progress-current",
+      "stage": "progress",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-1",
+      "expectedPublish": true
+    },
+    {
+      "id": "progress-reconnect",
+      "stage": "progress",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-b",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-1",
+      "expectedPublish": false
+    },
+    {
+      "id": "progress-new-attempt",
+      "stage": "progress",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-2",
+      "expectedPublish": false
+    },
+    {
+      "id": "progress-retired",
+      "stage": "progress",
+      "attemptOwner": "owner-a",
+      "currentOwner": null,
+      "attemptToken": "upload-1",
+      "currentToken": null,
+      "expectedPublish": false
+    },
+    {
+      "id": "receipt-current",
+      "stage": "receipt",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-1",
+      "expectedPublish": true
+    },
+    {
+      "id": "receipt-reconnect",
+      "stage": "receipt",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-b",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-1",
+      "expectedPublish": false
+    },
+    {
+      "id": "receipt-new-attempt",
+      "stage": "receipt",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-2",
+      "expectedPublish": false
+    },
+    {
+      "id": "receipt-retired",
+      "stage": "receipt",
+      "attemptOwner": "owner-a",
+      "currentOwner": null,
+      "attemptToken": "upload-1",
+      "currentToken": null,
+      "expectedPublish": false
+    },
+    {
+      "id": "refresh-current",
+      "stage": "refresh",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-1",
+      "expectedPublish": true
+    },
+    {
+      "id": "refresh-reconnect",
+      "stage": "refresh",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-b",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-1",
+      "expectedPublish": false
+    },
+    {
+      "id": "refresh-new-attempt",
+      "stage": "refresh",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-2",
+      "expectedPublish": false
+    },
+    {
+      "id": "refresh-retired",
+      "stage": "refresh",
+      "attemptOwner": "owner-a",
+      "currentOwner": null,
+      "attemptToken": "upload-1",
+      "currentToken": null,
+      "expectedPublish": false
+    },
+    {
+      "id": "error-current",
+      "stage": "error",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-1",
+      "expectedPublish": true
+    },
+    {
+      "id": "error-reconnect",
+      "stage": "error",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-b",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-1",
+      "expectedPublish": false
+    },
+    {
+      "id": "error-new-attempt",
+      "stage": "error",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-2",
+      "expectedPublish": false
+    },
+    {
+      "id": "error-retired",
+      "stage": "error",
+      "attemptOwner": "owner-a",
+      "currentOwner": null,
+      "attemptToken": "upload-1",
+      "currentToken": null,
+      "expectedPublish": false
+    },
+    {
+      "id": "finally-current",
+      "stage": "finally",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-1",
+      "expectedPublish": true
+    },
+    {
+      "id": "finally-reconnect",
+      "stage": "finally",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-b",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-1",
+      "expectedPublish": false
+    },
+    {
+      "id": "finally-new-attempt",
+      "stage": "finally",
+      "attemptOwner": "owner-a",
+      "currentOwner": "owner-a",
+      "attemptToken": "upload-1",
+      "currentToken": "upload-2",
+      "expectedPublish": false
+    },
+    {
+      "id": "finally-retired",
+      "stage": "finally",
+      "attemptOwner": "owner-a",
+      "currentOwner": null,
+      "attemptToken": "upload-1",
+      "currentToken": null,
+      "expectedPublish": false
+    }
+  ],
+  "receiptCases": [
+    {
+      "id": "exact",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": true
+    },
+    {
+      "id": "ascii-case",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"img_0001.jpg\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": true
+    },
+    {
+      "id": "unicode-exact",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "café.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"café.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": true
+    },
+    {
+      "id": "unicode-exact-ascii-extension",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "café.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"café.jpg\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": true
+    },
+    {
+      "id": "maximum-size",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 4294967295,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":4294967295}",
+      "expectedVerified": true
+    },
+    {
+      "id": "opaque-id-preserved",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"x/%2f/é\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": true
+    },
+    {
+      "id": "status-200",
+      "statusCode": 200,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "status-202",
+      "statusCode": 202,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "status-204",
+      "statusCode": 204,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "status-206",
+      "statusCode": 206,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "status-400",
+      "statusCode": 400,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "status-409",
+      "statusCode": 409,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "status-500",
+      "statusCode": 500,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "other-attempt",
+      "statusCode": 201,
+      "boundToAttempt": false,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "wrong-name",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"OTHER.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "leading-space-name",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\" IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "trailing-space-name",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG \",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "unicode-case-not-ascii",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "café.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"CAFÉ.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "unicode-normalization-not-identity",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "café.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"café.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "casefold-expansion-not-identity",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "straße.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"STRASSE.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-id-",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-id-None",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":null,\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-id-7",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":7,\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-name-None",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":null,\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-name-False",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":false,\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-kind-None",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":null,\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-kind-",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-kind-7",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":7,\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-sizeBytes-None",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":null}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-sizeBytes-True",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":true}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-sizeBytes-1234_0",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234.0}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-sizeBytes-1234",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":\"1234\"}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-sizeBytes-1234_9",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234.9}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-sizeBytes-0",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":0}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-sizeBytes--1",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":-1}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-sizeBytes-4294967296",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":4294967296}",
+      "expectedVerified": false
+    },
+    {
+      "id": "invalid-sizeBytes-1235",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1235}",
+      "expectedVerified": false
+    },
+    {
+      "id": "missing-id",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "missing-name",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"kind\":\"photo\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "missing-kind",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "missing-sizeBytes",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\"}",
+      "expectedVerified": false
+    },
+    {
+      "id": "empty",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "",
+      "expectedVerified": false
+    },
+    {
+      "id": "array",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "[]",
+      "expectedVerified": false
+    },
+    {
+      "id": "null",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "null",
+      "expectedVerified": false
+    },
+    {
+      "id": "malformed",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":",
+      "expectedVerified": false
+    },
+    {
+      "id": "duplicate-size",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1,\"sizeBytes\":1234}",
+      "expectedVerified": false
+    },
+    {
+      "id": "exponent-size",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1.234e3}",
+      "expectedVerified": false
+    },
+    {
+      "id": "nonstandard-json",
+      "statusCode": 201,
+      "boundToAttempt": true,
+      "expectedFilename": "IMG_0001.JPG",
+      "expectedSizeBytes": 1234,
+      "rawResponseJSON": "{\"id\":\"media-upload-7\",\"name\":\"IMG_0001.JPG\",\"kind\":\"photo\",\"sizeBytes\":1234,\"extra\":NaN}",
+      "expectedVerified": false
+    }
+  ],
+  "journeyCases": [
+    {
+      "id": "picker-cancel",
+      "events": [
+        "open",
+        "picker-cancel"
+      ],
+      "expectedDispatches": 0,
+      "expectedOutcome": "not-sent",
+      "mayPublishConfirmationForCurrentOwner": false,
+      "automaticReplayCount": 0
+    },
+    {
+      "id": "picker-reconnect",
+      "events": [
+        "open",
+        "reconnect",
+        "picker-result"
+      ],
+      "expectedDispatches": 0,
+      "expectedOutcome": "not-sent",
+      "mayPublishConfirmationForCurrentOwner": false,
+      "automaticReplayCount": 0
+    },
+    {
+      "id": "picker-reused",
+      "events": [
+        "open",
+        "picker-result",
+        "dispatch",
+        "verified-receipt",
+        "repeated-picker-result"
+      ],
+      "expectedDispatches": 1,
+      "expectedOutcome": "confirmed",
+      "mayPublishConfirmationForCurrentOwner": true,
+      "automaticReplayCount": 0
+    },
+    {
+      "id": "staging-cancel-existing-match",
+      "events": [
+        "open",
+        "picker-result",
+        "stage",
+        "cancel",
+        "list-existing-match"
+      ],
+      "expectedDispatches": 0,
+      "expectedOutcome": "not-sent",
+      "mayPublishConfirmationForCurrentOwner": false,
+      "automaticReplayCount": 0
+    },
+    {
+      "id": "staging-read-fails",
+      "events": [
+        "open",
+        "picker-result",
+        "stage-failure"
+      ],
+      "expectedDispatches": 0,
+      "expectedOutcome": "not-sent",
+      "mayPublishConfirmationForCurrentOwner": false,
+      "automaticReplayCount": 0
+    },
+    {
+      "id": "dispatch-cancel-existing-match",
+      "events": [
+        "open",
+        "picker-result",
+        "dispatch",
+        "cancel",
+        "list-existing-match"
+      ],
+      "expectedDispatches": 1,
+      "expectedOutcome": "uncertain",
+      "mayPublishConfirmationForCurrentOwner": false,
+      "automaticReplayCount": 0
+    },
+    {
+      "id": "dispatch-cancel-empty-list",
+      "events": [
+        "open",
+        "picker-result",
+        "dispatch",
+        "cancel",
+        "list-empty"
+      ],
+      "expectedDispatches": 1,
+      "expectedOutcome": "uncertain",
+      "mayPublishConfirmationForCurrentOwner": false,
+      "automaticReplayCount": 0
+    },
+    {
+      "id": "dispatch-network-fails",
+      "events": [
+        "open",
+        "picker-result",
+        "dispatch",
+        "network-failure"
+      ],
+      "expectedDispatches": 1,
+      "expectedOutcome": "uncertain",
+      "mayPublishConfirmationForCurrentOwner": false,
+      "automaticReplayCount": 0
+    },
+    {
+      "id": "invalid-receipt",
+      "events": [
+        "open",
+        "picker-result",
+        "dispatch",
+        "invalid-receipt"
+      ],
+      "expectedDispatches": 1,
+      "expectedOutcome": "uncertain",
+      "mayPublishConfirmationForCurrentOwner": false,
+      "automaticReplayCount": 0
+    },
+    {
+      "id": "receipt-then-cancel",
+      "events": [
+        "open",
+        "picker-result",
+        "dispatch",
+        "verified-receipt",
+        "cancel"
+      ],
+      "expectedDispatches": 1,
+      "expectedOutcome": "confirmed",
+      "mayPublishConfirmationForCurrentOwner": true,
+      "automaticReplayCount": 0
+    },
+    {
+      "id": "receipt-refresh-fails",
+      "events": [
+        "open",
+        "picker-result",
+        "dispatch",
+        "verified-receipt",
+        "refresh-failure"
+      ],
+      "expectedDispatches": 1,
+      "expectedOutcome": "confirmed",
+      "mayPublishConfirmationForCurrentOwner": true,
+      "automaticReplayCount": 0
+    },
+    {
+      "id": "receipt-refresh-reconnect",
+      "events": [
+        "open",
+        "picker-result",
+        "dispatch",
+        "verified-receipt",
+        "refresh-start",
+        "reconnect",
+        "refresh-complete"
+      ],
+      "expectedDispatches": 1,
+      "expectedOutcome": "confirmed",
+      "mayPublishConfirmationForCurrentOwner": false,
+      "automaticReplayCount": 0
+    },
+    {
+      "id": "old-progress-after-new-operation",
+      "events": [
+        "open",
+        "picker-result",
+        "dispatch",
+        "reconnect",
+        "old-progress"
+      ],
+      "expectedDispatches": 1,
+      "expectedOutcome": "uncertain",
+      "mayPublishConfirmationForCurrentOwner": false,
+      "automaticReplayCount": 0
+    },
+    {
+      "id": "late-receipt-after-reconnect",
+      "events": [
+        "open",
+        "picker-result",
+        "dispatch",
+        "reconnect",
+        "verified-receipt"
+      ],
+      "expectedDispatches": 1,
+      "expectedOutcome": "confirmed",
+      "mayPublishConfirmationForCurrentOwner": false,
+      "automaticReplayCount": 0
+    }
+  ]
+}

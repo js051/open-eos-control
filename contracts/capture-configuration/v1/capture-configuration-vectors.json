@@ -1,0 +1,3869 @@
+{
+  "version": 1,
+  "receipt": [
+    {
+      "id": "directory",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "automatic-directory",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "",
+          "acknowledgedValue": "EOSXX"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "returned-suffix-is-not-requested-folder-proof",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "OTHER"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "still-filename-mode",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "usersetting1",
+        "field": "still-filename-mode",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "usersetting1",
+          "acknowledgedValue": "usersetting1",
+          "field": "still-filename-mode"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "still-user-setting-1",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "AB_1",
+        "field": "still-user-setting-1",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "AB_1",
+          "acknowledgedValue": "AB_1",
+          "field": "still-user-setting-1"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "still-user-setting-2",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "AB1",
+        "field": "still-user-setting-2",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "AB1",
+          "acknowledgedValue": "AB1",
+          "field": "still-user-setting-2"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "movie-index",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "A1",
+        "field": "movie-index",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "A1",
+          "acknowledgedValue": "A1",
+          "field": "movie-index"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "movie-reel-number",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "12",
+        "field": "movie-reel-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "12",
+          "acknowledgedValue": "12",
+          "field": "movie-reel-number"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "movie-clip-number",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "3",
+        "field": "movie-clip-number",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "3",
+          "acknowledgedValue": "3",
+          "field": "movie-clip-number"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "movie-user-defined",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "ABCDE",
+        "field": "movie-user-defined",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE",
+          "field": "movie-user-defined"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "envelope-status-200",
+      "input": {
+        "status": 200,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "envelope-status-400",
+      "input": {
+        "status": 400,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "envelope-status-503",
+      "input": {
+        "status": 503,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "envelope-code-INVALID_CCAPI_RESPONSE",
+      "input": {
+        "status": 502,
+        "code": "INVALID_CCAPI_RESPONSE",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "envelope-code-",
+      "input": {
+        "status": 502,
+        "code": "",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "envelope-engine-auto",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "auto",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "envelope-engine-libgphoto2",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "libgphoto2",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "envelope-feature-FILE_NAMING_CONTROL",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "envelope-feature-None",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": null,
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-version-0",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": true,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-version-1",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": "1",
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-version-2",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 2,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-version-3",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": null,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-operation-0",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-operation-1",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "unknown",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-stage-0",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "verified",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-stage-1",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "unknown",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-requestedValue-0",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "OTHER",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-requestedValue-1",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": null,
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-requestedValue-2",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": 1,
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-acknowledgedValue-0",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": ""
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-acknowledgedValue-1",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "abcde"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-acknowledgedValue-2",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCD"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-acknowledgedValue-3",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDEF"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-acknowledgedValue-4",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABC/D"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-acknowledgedValue-5",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": null
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-field-0",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE",
+          "field": "movie-index"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-field-1",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE",
+          "field": null
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "missing-version",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "missing-operation",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "missing-stage",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "requestedValue": "ABCDE",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "missing-requestedValue",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "acknowledgedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "missing-acknowledgedValue",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {
+          "version": 1,
+          "operation": "create-directory",
+          "stage": "acknowledged",
+          "requestedValue": "ABCDE"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "naming-ack-mismatch",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "usersetting1",
+        "field": "still-filename-mode",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "usersetting1",
+          "acknowledgedValue": "preset_code",
+          "field": "still-filename-mode"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "naming-field-mismatch",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "FILE_NAMING_CONTROL",
+        "operation": "set-file-naming",
+        "requestedValue": "usersetting1",
+        "field": "still-filename-mode",
+        "receipt": {
+          "version": 1,
+          "operation": "set-file-naming",
+          "stage": "acknowledged",
+          "requestedValue": "usersetting1",
+          "acknowledgedValue": "usersetting1",
+          "field": "still-user-setting-1"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-wrong-shape-45",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": null
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-wrong-shape-46",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": []
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-wrong-shape-47",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": {}
+      },
+      "valid": false
+    },
+    {
+      "id": "receipt-wrong-shape-48",
+      "input": {
+        "status": 502,
+        "code": "CAPTURE_CONFIG_READBACK_FAILED",
+        "engine": "ccapi",
+        "feature": "DIRECTORY_CONTROL",
+        "operation": "create-directory",
+        "requestedValue": "ABCDE",
+        "field": null,
+        "receipt": true
+      },
+      "valid": false
+    }
+  ],
+  "outcome": [
+    {
+      "id": "outcome-0",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": false,
+        "validAcknowledgment": false,
+        "readStatus": "not-read",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-1",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": false,
+        "validAcknowledgment": false,
+        "readStatus": "not-read",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-2",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": false,
+        "validAcknowledgment": false,
+        "readStatus": "unavailable",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-3",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": false,
+        "validAcknowledgment": false,
+        "readStatus": "unavailable",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-4",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": false,
+        "validAcknowledgment": false,
+        "readStatus": "success",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "refreshed"
+      }
+    },
+    {
+      "id": "outcome-5",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": false,
+        "validAcknowledgment": false,
+        "readStatus": "success",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "refreshed"
+      }
+    },
+    {
+      "id": "outcome-6",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": false,
+        "validAcknowledgment": true,
+        "readStatus": "not-read",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-7",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": false,
+        "validAcknowledgment": true,
+        "readStatus": "not-read",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-8",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": false,
+        "validAcknowledgment": true,
+        "readStatus": "unavailable",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-9",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": false,
+        "validAcknowledgment": true,
+        "readStatus": "unavailable",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-10",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": false,
+        "validAcknowledgment": true,
+        "readStatus": "success",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "refreshed"
+      }
+    },
+    {
+      "id": "outcome-11",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": false,
+        "validAcknowledgment": true,
+        "readStatus": "success",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "refreshed"
+      }
+    },
+    {
+      "id": "outcome-12",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": true,
+        "validAcknowledgment": false,
+        "readStatus": "not-read",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-13",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": true,
+        "validAcknowledgment": false,
+        "readStatus": "not-read",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-14",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": true,
+        "validAcknowledgment": false,
+        "readStatus": "unavailable",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-15",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": true,
+        "validAcknowledgment": false,
+        "readStatus": "unavailable",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-16",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": true,
+        "validAcknowledgment": false,
+        "readStatus": "success",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "refreshed"
+      }
+    },
+    {
+      "id": "outcome-17",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": true,
+        "validAcknowledgment": false,
+        "readStatus": "success",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "refreshed"
+      }
+    },
+    {
+      "id": "outcome-18",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": true,
+        "validAcknowledgment": true,
+        "readStatus": "not-read",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "acknowledged",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-19",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": true,
+        "validAcknowledgment": true,
+        "readStatus": "not-read",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "acknowledged",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-20",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": true,
+        "validAcknowledgment": true,
+        "readStatus": "unavailable",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "acknowledged",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-21",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": true,
+        "validAcknowledgment": true,
+        "readStatus": "unavailable",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "acknowledged",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-22",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": true,
+        "validAcknowledgment": true,
+        "readStatus": "success",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "acknowledged",
+        "readbackEvidence": "refreshed"
+      }
+    },
+    {
+      "id": "outcome-23",
+      "input": {
+        "operation": "create-directory",
+        "dispatched": true,
+        "validAcknowledgment": true,
+        "readStatus": "success",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "acknowledged",
+        "readbackEvidence": "refreshed"
+      }
+    },
+    {
+      "id": "outcome-24",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": false,
+        "validAcknowledgment": false,
+        "readStatus": "not-read",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-25",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": false,
+        "validAcknowledgment": false,
+        "readStatus": "not-read",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-26",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": false,
+        "validAcknowledgment": false,
+        "readStatus": "unavailable",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-27",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": false,
+        "validAcknowledgment": false,
+        "readStatus": "unavailable",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-28",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": false,
+        "validAcknowledgment": false,
+        "readStatus": "success",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "mismatch"
+      }
+    },
+    {
+      "id": "outcome-29",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": false,
+        "validAcknowledgment": false,
+        "readStatus": "success",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "matched"
+      }
+    },
+    {
+      "id": "outcome-30",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": false,
+        "validAcknowledgment": true,
+        "readStatus": "not-read",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-31",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": false,
+        "validAcknowledgment": true,
+        "readStatus": "not-read",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-32",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": false,
+        "validAcknowledgment": true,
+        "readStatus": "unavailable",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-33",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": false,
+        "validAcknowledgment": true,
+        "readStatus": "unavailable",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-34",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": false,
+        "validAcknowledgment": true,
+        "readStatus": "success",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "mismatch"
+      }
+    },
+    {
+      "id": "outcome-35",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": false,
+        "validAcknowledgment": true,
+        "readStatus": "success",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "not-sent",
+        "readbackEvidence": "matched"
+      }
+    },
+    {
+      "id": "outcome-36",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": true,
+        "validAcknowledgment": false,
+        "readStatus": "not-read",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-37",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": true,
+        "validAcknowledgment": false,
+        "readStatus": "not-read",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-38",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": true,
+        "validAcknowledgment": false,
+        "readStatus": "unavailable",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-39",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": true,
+        "validAcknowledgment": false,
+        "readStatus": "unavailable",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-40",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": true,
+        "validAcknowledgment": false,
+        "readStatus": "success",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "mismatch"
+      }
+    },
+    {
+      "id": "outcome-41",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": true,
+        "validAcknowledgment": false,
+        "readStatus": "success",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "unknown",
+        "readbackEvidence": "matched"
+      }
+    },
+    {
+      "id": "outcome-42",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": true,
+        "validAcknowledgment": true,
+        "readStatus": "not-read",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "acknowledged",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-43",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": true,
+        "validAcknowledgment": true,
+        "readStatus": "not-read",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "acknowledged",
+        "readbackEvidence": "not-read"
+      }
+    },
+    {
+      "id": "outcome-44",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": true,
+        "validAcknowledgment": true,
+        "readStatus": "unavailable",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "acknowledged",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-45",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": true,
+        "validAcknowledgment": true,
+        "readStatus": "unavailable",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "acknowledged",
+        "readbackEvidence": "unavailable"
+      }
+    },
+    {
+      "id": "outcome-46",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": true,
+        "validAcknowledgment": true,
+        "readStatus": "success",
+        "readbackMatches": false
+      },
+      "expected": {
+        "writeEvidence": "acknowledged",
+        "readbackEvidence": "mismatch"
+      }
+    },
+    {
+      "id": "outcome-47",
+      "input": {
+        "operation": "set-file-naming",
+        "dispatched": true,
+        "validAcknowledgment": true,
+        "readStatus": "success",
+        "readbackMatches": true
+      },
+      "expected": {
+        "writeEvidence": "acknowledged",
+        "readbackEvidence": "matched"
+      }
+    }
+  ],
+  "ownership": [
+    {
+      "id": "ownership-0",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-1",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-2",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-3",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-4",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-5",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-6",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-7",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-8",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-9",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-10",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-11",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-12",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-13",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-14",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-15",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-16",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-17",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-18",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-19",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-20",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-21",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-22",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-23",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-24",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-25",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-26",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-27",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-28",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-29",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-30",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-31",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-32",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-33",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-34",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-35",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-36",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-37",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-38",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-39",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-40",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-41",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-42",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-43",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-44",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-45",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-46",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-47",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-48",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-49",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-50",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-51",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-52",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-53",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-54",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-55",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-56",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-57",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-58",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-59",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-60",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-61",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-62",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-63",
+      "input": {
+        "sameOwner": false,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-64",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-65",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-66",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-67",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-68",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-69",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-70",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-71",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-72",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-73",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-74",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-75",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-76",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-77",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-78",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-79",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-80",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-81",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-82",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-83",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-84",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-85",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-86",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-87",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-88",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-89",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-90",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-91",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-92",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-93",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-94",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-95",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": false,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-96",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-97",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-98",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-99",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-100",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-101",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-102",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-103",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-104",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-105",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-106",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-107",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-108",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-109",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-110",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": true
+      }
+    },
+    {
+      "id": "ownership-111",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": false,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": true,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-112",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-113",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-114",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-115",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-116",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-117",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-118",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-119",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": false,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-120",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-121",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-122",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-123",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": false,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-124",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-125",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": false,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-126",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": false
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    },
+    {
+      "id": "ownership-127",
+      "input": {
+        "sameOwner": true,
+        "sameAttempt": true,
+        "retired": true,
+        "sameDraftRevision": true,
+        "validAcknowledgment": true,
+        "readbackMatched": true,
+        "cancelled": true
+      },
+      "expected": {
+        "canPublishCurrent": false,
+        "canConsumeDraft": false
+      }
+    }
+  ],
+  "recovery": [
+    {
+      "id": "recovery-0",
+      "input": {
+        "sameOwner": false,
+        "writeActive": false,
+        "readActive": false,
+        "hasRecord": false
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-1",
+      "input": {
+        "sameOwner": false,
+        "writeActive": false,
+        "readActive": false,
+        "hasRecord": true
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-2",
+      "input": {
+        "sameOwner": false,
+        "writeActive": false,
+        "readActive": true,
+        "hasRecord": false
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-3",
+      "input": {
+        "sameOwner": false,
+        "writeActive": false,
+        "readActive": true,
+        "hasRecord": true
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-4",
+      "input": {
+        "sameOwner": false,
+        "writeActive": true,
+        "readActive": false,
+        "hasRecord": false
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-5",
+      "input": {
+        "sameOwner": false,
+        "writeActive": true,
+        "readActive": false,
+        "hasRecord": true
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-6",
+      "input": {
+        "sameOwner": false,
+        "writeActive": true,
+        "readActive": true,
+        "hasRecord": false
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-7",
+      "input": {
+        "sameOwner": false,
+        "writeActive": true,
+        "readActive": true,
+        "hasRecord": true
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-8",
+      "input": {
+        "sameOwner": true,
+        "writeActive": false,
+        "readActive": false,
+        "hasRecord": false
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-9",
+      "input": {
+        "sameOwner": true,
+        "writeActive": false,
+        "readActive": false,
+        "hasRecord": true
+      },
+      "allowed": true,
+      "writes": 0
+    },
+    {
+      "id": "recovery-10",
+      "input": {
+        "sameOwner": true,
+        "writeActive": false,
+        "readActive": true,
+        "hasRecord": false
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-11",
+      "input": {
+        "sameOwner": true,
+        "writeActive": false,
+        "readActive": true,
+        "hasRecord": true
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-12",
+      "input": {
+        "sameOwner": true,
+        "writeActive": true,
+        "readActive": false,
+        "hasRecord": false
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-13",
+      "input": {
+        "sameOwner": true,
+        "writeActive": true,
+        "readActive": false,
+        "hasRecord": true
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-14",
+      "input": {
+        "sameOwner": true,
+        "writeActive": true,
+        "readActive": true,
+        "hasRecord": false
+      },
+      "allowed": false,
+      "writes": 0
+    },
+    {
+      "id": "recovery-15",
+      "input": {
+        "sameOwner": true,
+        "writeActive": true,
+        "readActive": true,
+        "hasRecord": true
+      },
+      "allowed": false,
+      "writes": 0
+    }
+  ]
+}

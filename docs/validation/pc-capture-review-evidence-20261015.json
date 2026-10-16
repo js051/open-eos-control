@@ -1,0 +1,39 @@
+{
+  "checked_at": "2026-10-15T05:26:20.809223+00:00",
+  "base": "3c11e937369dd5952f6393d70812cc1e04825830",
+  "local_node_reported_test_count": 1068,
+  "local_custom_explicit_test_count": 60,
+  "local_explicit_test_total": 1128,
+  "focused_capture_review_test_count": 323,
+  "shared_vectors_included_not_additive": {
+    "terminal": 106,
+    "retry": 2,
+    "retirement_specs": 4
+  },
+  "pytest": 553,
+  "pytest_warnings": 2,
+  "status": "local tests PASS; browser/native/physical NOT_RUN; unpushed",
+  "source_sha256": {
+    "bridge/open_eos_bridge/static/app.js": "cd5179d8faeb5d58900f50148af8b30a327d5a814e1b175a2e8ce43a5b23f8c4",
+    "bridge/tests/capture-review.test.js": "8415f01181eca817d04584309978cd057985eb4a3153099d27b2723388ceb3db",
+    "contracts/capture-review-evidence/v1/review-evidence-vectors.json": "aab83ace169997c2f9788ea45f2863513f0a0d99e3211143c0e60475eb7ec7b1",
+    "contracts/capture-review-evidence/v1/README.md": "8348befbf8c3cf338cd37d3452a2b2b855fa48d20dbf0db6232f1e08d99876d4"
+  },
+  "wheel_assets": {
+    "checked_at": "2026-10-15T05:26:20.809223+00:00",
+    "wheel_sha256": "bd70d05c96fbcc1597ac06ac1e052e11b495c4d28f8635328d277b5e782ef5d4",
+    "exact_source_assets": {
+      "open_eos_bridge/static/app.js": "cd5179d8faeb5d58900f50148af8b30a327d5a814e1b175a2e8ce43a5b23f8c4",
+      "open_eos_bridge/static/media-library.js": "fdd84da5b607e137ae20034b03aa54a10e8a5b2130963600c13e495b3084b048",
+      "open_eos_bridge/static/media-transfer-history.js": "d323081cfc6d54a0503a542b834dc167fcc3ae528638436e2cebcc53aeba6308",
+      "open_eos_bridge/static/index.html": "00beb96e72ba3dc329b1e52adffe73d2aebd3a00f69d137496f7a9d78289073c"
+    }
+  },
+  "release_assessment": {
+    "baseline": "v0.12.0 Development Preview",
+    "baseline_verified_at": "2026-10-15T03:54:34Z",
+    "cohort_impact": "patch",
+    "cumulative_branch_impact": "minor",
+    "release_authorized": false
+  }
+}

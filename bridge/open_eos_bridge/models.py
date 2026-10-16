@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
+from .errors import ConnectionFailureReason
 from .media_folders import MAX_FOLDER_ID_LENGTH, MAX_FOLDER_LABEL_LENGTH, optional_folder_value
 
 
@@ -201,6 +202,11 @@ class CameraStatus(ApiModel):
     bulb_exposure_active: bool | None = None
     # Stop-only responsibility, not evidence that the camera is currently exposing.
     shutter_release_unconfirmed: bool = False
+    # Optional for older/non-reporting engines. True is an acknowledged AF start;
+    # null with shutter_release_unconfirmed means stop-only recovery is required.
+    held_autofocus_active: bool | None = None
+    # Local receiver teardown is not proof that camera Live View stopped.
+    live_view_stop_unconfirmed: bool = False
     mode: str = "unknown"
     media: StorageStatus
     exposure: ExposureState
@@ -403,6 +409,8 @@ class CameraCapabilities(ApiModel):
     file_naming: FileNamingState | None = None
     evidence: CapabilityEvidence = Field(default_factory=CapabilityEvidence)
     shutter_autofocus_supported: bool = False
+    held_autofocus_supported: bool = False
+    focus_info_supported: bool = False
 
 
 class StillCaptureRequest(ApiModel):
@@ -425,6 +433,10 @@ class FileNamingUpdate(ApiModel):
     value: str = Field(min_length=1, max_length=16)
 
 
+class MaintenanceRequest(ApiModel):
+    auto_power_off: bool = Field(strict=True)
+
+
 class SensorCleaningRequest(ApiModel):
     auto_power_off: bool = False
 
@@ -437,6 +449,8 @@ class LiveViewStartRequest(ApiModel):
 
 class LiveViewState(ApiModel):
     active: bool
+    # Missing on legacy/non-reporting engines; false is affirmative stop evidence.
+    live_view_stop_unconfirmed: bool | None = None
     requested_fps: int | None = None
     source: str | None = None
     size: str | None = None
@@ -469,22 +483,77 @@ class FocusResult(ApiModel):
     y: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
+class HeldAutofocusRequest(ApiModel):
+    owner_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
+
+
+class HeldAutofocusState(ApiModel):
+    owner_id: str
+    active: bool | None
+    stop_unconfirmed: bool
+
+
+class CameraFocusFrame(ApiModel):
+    left: float = Field(ge=0.0, le=1.0)
+    top: float = Field(ge=0.0, le=1.0)
+    right: float = Field(ge=0.0, le=1.0)
+    bottom: float = Field(ge=0.0, le=1.0)
+    status: Literal["STANDBY", "FOCUSED", "UNFOCUSED", "SERVO_OFF", "FOCUSING", "UNKNOWN"]
+    kind: Literal["GENERIC", "NORMAL", "FACE", "TRACKING", "UNKNOWN"]
+
+    @model_validator(mode="after")
+    def validate_rectangle(self) -> CameraFocusFrame:
+        if self.right <= self.left or self.bottom <= self.top:
+            raise ValueError("Focus rectangles must have positive width and height.")
+        return self
+
+
+class CameraFocusInfo(ApiModel):
+    frames: list[CameraFocusFrame] = Field(max_length=512)
+    magnification: int = Field(gt=0, le=2147483647)
+    image_aspect_ratio: float = Field(gt=0, allow_inf_nan=False)
+
+
+def _media_metadata_integer(value: object, allowed: tuple[int, ...]) -> int:
+    """Parse only normalized media integers and their canonical ASCII strings."""
+    if type(value) is int and value in allowed:
+        return value
+    if isinstance(value, str) and value in tuple(str(item) for item in allowed):
+        return int(value)
+    raise ValueError("Media metadata must be an allowed integer or its canonical ASCII string.")
+
+
 class MediaItem(ApiModel):
     id: str
     name: str
     kind: str
     size_bytes: int = Field(default=0, ge=0)
     capture_time: str | None = None
-    content_type: str = "application/octet-stream"
+    content_type: str | None = "application/octet-stream"
     width_pixels: int | None = Field(default=None, gt=0)
     height_pixels: int | None = Field(default=None, gt=0)
     preview_available: bool = False
-    protected: bool | None = None
+    protected: StrictBool | None = None
     rating: int | None = Field(default=None, ge=0, le=5)
     rotation_degrees: Literal[0, 90, 180, 270] | None = None
-    archived: bool | None = None
+    archived: StrictBool | None = None
+    # Optional per-item vetoes; true/absence never grant transport capability.
+    protection_writable: StrictBool | None = None
+    rating_writable: StrictBool | None = None
+    rotation_writable: StrictBool | None = None
+    archive_writable: StrictBool | None = None
     folder_id: str | None = Field(default=None, max_length=MAX_FOLDER_ID_LENGTH)
     folder_label: str | None = Field(default=None, max_length=MAX_FOLDER_LABEL_LENGTH)
+
+    @field_validator("rating", mode="before")
+    @classmethod
+    def validate_rating(cls, value: object) -> int | None:
+        return None if value is None else _media_metadata_integer(value, (0, 1, 2, 3, 4, 5))
+
+    @field_validator("rotation_degrees", mode="before")
+    @classmethod
+    def validate_rotation(cls, value: object) -> int | None:
+        return None if value is None else _media_metadata_integer(value, (0, 90, 180, 270))
 
     @field_validator("folder_id", mode="before")
     @classmethod
@@ -505,19 +574,29 @@ class MediaItem(ApiModel):
 
 
 class MediaProtectionUpdate(ApiModel):
-    enabled: bool
+    enabled: StrictBool
 
 
 class MediaRatingUpdate(ApiModel):
     value: int = Field(ge=0, le=5)
 
+    @field_validator("value", mode="before")
+    @classmethod
+    def validate_value(cls, value: object) -> int:
+        return _media_metadata_integer(value, (0, 1, 2, 3, 4, 5))
+
 
 class MediaRotationUpdate(ApiModel):
     degrees: Literal[0, 90, 180, 270]
 
+    @field_validator("degrees", mode="before")
+    @classmethod
+    def validate_degrees(cls, value: object) -> int:
+        return _media_metadata_integer(value, (0, 90, 180, 270))
+
 
 class MediaArchiveUpdate(ApiModel):
-    enabled: bool
+    enabled: StrictBool
 
 
 class MediaList(ApiModel):
@@ -529,11 +608,52 @@ class MediaPlaybackTicket(ApiModel):
     expires_in_seconds: int = Field(gt=0, le=3600)
 
 
+class CaptureConfigurationReceipt(ApiModel):
+    version: Literal[1]
+    operation: Literal["create-directory", "set-file-naming"]
+    stage: Literal["acknowledged"]
+    requested_value: str = Field(max_length=64)
+    acknowledged_value: str = Field(min_length=1, max_length=64)
+    field: FileNamingField | None = None
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def exact_version(cls, value: object) -> object:
+        if type(value) is not int or value != 1:
+            raise ValueError("Receipt version must be the exact integer 1.")
+        return value
+
+    @model_validator(mode="after")
+    def validate_ack(self) -> CaptureConfigurationReceipt:
+        if self.operation == "create-directory":
+            if self.field is not None or not re.fullmatch(r"(?:[A-Z0-9_]{5})?", self.requested_value):
+                raise ValueError("Invalid directory receipt request.")
+            if not re.fullmatch(r"[A-Z0-9_]{5}", self.acknowledged_value):
+                raise ValueError("Invalid acknowledged directory suffix.")
+        else:
+            if self.field is None or self.acknowledged_value != self.requested_value:
+                raise ValueError("Naming receipt must identify the exact acknowledged field and value.")
+            patterns = {
+                FileNamingField.STILL_FILENAME_MODE: r"preset_code|usersetting1|usersetting2",
+                FileNamingField.STILL_USER_SETTING_1: r"[A-Z0-9][A-Z0-9_]{3}",
+                FileNamingField.STILL_USER_SETTING_2: r"[A-Z0-9][A-Z0-9_]{2}",
+                FileNamingField.MOVIE_INDEX: r"[A-Z0-9][A-Z0-9_]",
+                FileNamingField.MOVIE_USER_DEFINED: r"[A-Z0-9]{5}",
+                FileNamingField.MOVIE_REEL_NUMBER: r"[1-9][0-9]{0,3}",
+                FileNamingField.MOVIE_CLIP_NUMBER: r"[1-9][0-9]{0,2}",
+            }
+            if not re.fullmatch(patterns[self.field], self.requested_value):
+                raise ValueError("Invalid exact naming receipt value.")
+        return self
+
+
 class ErrorDetail(ApiModel):
     code: str
     message: str
     feature: str | None = None
     engine: str | None = None
+    connection_reason: ConnectionFailureReason | None = None
+    capture_config_receipt: CaptureConfigurationReceipt | None = None
 
 
 class ErrorResponse(ApiModel):

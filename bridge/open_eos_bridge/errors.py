@@ -1,5 +1,20 @@
 from __future__ import annotations
 
+from enum import StrEnum
+
+
+class ConnectionFailureReason(StrEnum):
+    """Bounded camera discovery evidence; never addresses, credentials, or response text."""
+
+    AUTHENTICATION_REJECTED = "AUTHENTICATION_REJECTED"
+    TLS_ERROR = "TLS_ERROR"
+    HOST_NOT_FOUND = "HOST_NOT_FOUND"
+    TIMEOUT = "TIMEOUT"
+    UNREACHABLE = "UNREACHABLE"
+    HTTP_ERROR = "HTTP_ERROR"
+    DISCOVERY_FAILED = "DISCOVERY_FAILED"
+    ENDPOINT_NOT_FOUND = "ENDPOINT_NOT_FOUND"
+
 
 class BridgeError(Exception):
     def __init__(
@@ -10,6 +25,8 @@ class BridgeError(Exception):
         status_code: int = 400,
         feature: str | None = None,
         engine: str | None = None,
+        connection_reason: ConnectionFailureReason | None = None,
+        capture_config_receipt: dict[str, object] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -17,6 +34,8 @@ class BridgeError(Exception):
         self.status_code = status_code
         self.feature = feature
         self.engine = engine
+        self.connection_reason = connection_reason if isinstance(connection_reason, ConnectionFailureReason) else None
+        self.capture_config_receipt = capture_config_receipt
 
 
 def unsupported(feature: str, engine: str, message: str | None = None) -> BridgeError:
