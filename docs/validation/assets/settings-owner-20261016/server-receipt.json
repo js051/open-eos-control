@@ -1,0 +1,28 @@
+{
+  "candidate": "6362b87edbf7b369d39b4427b1a62b9211cfc773",
+  "pids": [
+    26667,
+    26668
+  ],
+  "launcher_pid": 26666,
+  "ui_url": "http://127.0.0.1:18765/app/index.html",
+  "simulator_url": "http://127.0.0.1:18766/ccapi",
+  "bind": "127.0.0.1 only",
+  "source_hashes": {
+    "/workspace/shared/eos-parity-recovery-20261013/settings-ui-owner-20261016/bridge/open_eos_bridge/static/app.js": "bd0eea03f5e23f094d4b3d0d51ee4f8782984e905a65ebce7f8a14f8a48cdb2e",
+    "/workspace/shared/eos-parity-recovery-20261013/settings-ui-owner-20261016/bridge/open_eos_bridge/app.py": "1215e171990bd7db78b1ee26b84437acc966298fd1a99c1f0f9c8ec8390d5a7d",
+    "/workspace/shared/eos-parity-recovery-20261013/settings-ui-owner-20261016/bridge/tests/fakes.py": "20765f842021c8aa48206088beca927b4170529c1bd98d45274d3174589013de",
+    "/workspace/shared/eos-parity-recovery-20261013/settings-ui-owner-20261016/simulator/main.py": "4c7624aa44b9bce8c85b53f05d33c1fa7a55e62fa875ef1b7e918d72f90dedf0",
+    "/workspace/shared/eos-parity-recovery-20261013/browser-validation-20261016/settings-owner-native-firefox-20261016/safe_bridge.py": "04078c4a3798eead8b3c7e4690a462186ef5f55b57580ca79032e54726c7efe8",
+    "/workspace/shared/eos-parity-recovery-20261013/browser-validation-20261016/settings-owner-native-firefox-20261016/safe_simulator.py": "6ac0df2658345d9746ade765148c0ff4ab4c8df66e0ac7c39022d22e89547fc4"
+  },
+  "restrictions": [
+    "FakeRunner gphoto only; no physical USB",
+    "EDSDK provider loading disabled by test wrapper",
+    "CCAPI exact synthetic origin only, no credentials, no redirects",
+    "RTP disabled; no UDP socket",
+    "No public bind/tunnel/deploy",
+    "Request body limit1MiB"
+  ],
+  "ui_validation": "NOT_YET_RUN"
+}

@@ -1,0 +1,12 @@
+{
+  "candidate": "6362b87edbf7b369d39b4427b1a62b9211cfc773",
+  "scope": [
+    "ISO select without write then Escape/reopen/apply",
+    "artist current typing retains across normal render",
+    "disconnect/reconnect clears unsubmitted draft",
+    "FakeRunner no old draft set-config"
+  ],
+  "limit": "10 minutes max, profile64MiB, floor4GiB+64MiB monitor",
+  "productionChanged": false,
+  "nativeRace": "not claimed; queued race remains Node evidence"
+}

@@ -23,7 +23,7 @@ focused text 值只在同 session 的合法重畫中保留；沒有刪掉 typing
 
 iOS `CameraSheets.swift` 的 More settings 在 mediaLibrarySessionID 變更時更換 settingEditorOwner，清 text/choice/range drafts 與 revisions；`CameraAppState` 對 operation 採 sessionGeneration＋connectionConfigurationOwner。Android `AdvancedSettingRow` 以 info＋mediaSessionGeneration 建立 ShootingSettingOwner，draft/token/revision remember(owner,key)，提交攜帶該 owner。這些是 source 對照，未執行 mobile native。
 
-本群尚未在產品新 HEAD 進行 Firefox 實看；前批 media reconnect Firefox 不能替代 settings 驗收。實體相機、native、CI 均 NOT_RUN。Release assessment：patch；沒有 main/release 或可下載成品。
+產品封存當時尚未實看；本群後續新 HEAD Firefox 結果見下節，前批 media reconnect 不作本群替代證據。實體相機、native、CI 均 NOT_RUN。Release assessment：patch；沒有 main/release 或可下載成品。
 
 ## 獨立 review 補出的相鄰路徑
 
@@ -38,3 +38,18 @@ iOS `CameraSheets.swift` 的 More settings 在 mediaLibrarySessionID 變更時�
 9 份 Node 檔案共 **813 pass／0 fail／0 cancelled／0 skipped**，729.41048 ms；其中新 UI 退役矩陣 46 案。測前後 source manifest 一致。app.js SHA256 `bd0eea03f5e23f094d4b3d0d51ee4f8782984e905a65ebce7f8a14f8a48cdb2e`。相鄰 shooting-settings、capture-configuration、maintenance、media reconnect 與 connection-guidance 回歸保留所有有效斷言；沒有以 source-only mobile 核對取代原生測試。
 
 獨立只讀 review 最終未見新增 blocking；已復核 exposure owner 與 queued close 修正及對應反例。reviewer 未親跑測試，813 結果來自 owner 本地執行。
+
+## exact HEAD 原生 Firefox 實看
+
+產品固定 `6362b87edbf7b369d39b4427b1a62b9211cfc773`；2026-10-16 13:05:08.592 啟動、13:05:09.522 ready。沿既有雲端 native Firefox157.0.1、新 profile、正常 sandbox，純 FakeRunner USB（沒有硬體 USB／相機）。loopback 18765／18766，CCAPI origin restriction、EDSDK disabled、RTP disabled；本輪沒有操作 CCAPI。
+
+- ISO400 選800後按原生 Escape，modal 關閉且 FakeRunner 零寫入。重開保留合法草稿，Apply後 modal 正常關閉、ISO顯示800，只有一次對應 set-config。
+- Artist 輸入 `unsent_draft`，Apply啟用；普通 Refresh 重畫後保留草稿。沒有提交該值。
+- 斷線／重連同 fake device（無 reload）後 Artist 回原 `Jason`，舊草稿不殘留；新輸入 `fresh_artist` 並 Apply成功。
+- 終態 FakeRunner 全 command核對只有兩次寫入：ISO=800、artist=fresh_artist，未出現 unsent_draft 寫入。文字 Jason 是既有公開測試fixture值，不是使用者資料。
+
+六張原始 CUA JPEG 持久保存：[Escape未寫](assets/settings-owner-20261016/01-escape-no-write.jpg)、[ISO完成](assets/settings-owner-20261016/02-iso-applied.jpg)、[未送草稿](assets/settings-owner-20261016/03-artist-unsent.jpg)、[Refresh保留](assets/settings-owner-20261016/04-refresh-keeps-draft.jpg)、[重連清除](assets/settings-owner-20261016/05-reconnect-clears-draft.jpg)、[新Artist完成](assets/settings-owner-20261016/06-new-artist-applied.jpg)。來源、fixture、終態及影像hash見[證據目錄](assets/settings-owner-20261016/)。
+
+13:09:35.732 主動停止 owned groups，exit -15／-15；不是自然 exit0。原即時收據仍列兩個退出中的children，保留不改；13:09:42 ps與13:10:28 /proc重核皆無owned processes。已清 disposable profile 40,885,534 logical bytes，free 5,647,679,488 → 5,688,909,824 bytes；監測最低free5,650,317,312，未碰4GiB底線，非hard quota。
+
+這輪證明正常 typing、Escape、合法Apply與重連清draft。沒有在人為UI流程強制觸發所有 queued old-event race，也沒有量測 Refresh過程的caret/focus連續性；那些精準owner反例仍以Node為證據。不能稱Chromium、mobile native、真機或全功能驗收。server-receipt的NOT_YET_RUN為啟動時原狀態，終態見post-stop-observations。

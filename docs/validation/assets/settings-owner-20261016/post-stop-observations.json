@@ -1,0 +1,43 @@
+{
+  "checkedUTC": "2026-10-16T13:10:28Z",
+  "candidate": "6362b87edbf7b369d39b4427b1a62b9211cfc773",
+  "ownedRemaining": [],
+  "writes": [
+    [
+      "--port",
+      "usb:001,007",
+      "--set-config-value",
+      "/main/imgsettings/iso=800"
+    ],
+    [
+      "--port",
+      "usb:001,007",
+      "--set-config-value",
+      "/main/settings/artist=fresh_artist"
+    ]
+  ],
+  "unsentDraftWrites": 0,
+  "observed": [
+    "ISO select Escape no write, reopen Apply updates800",
+    "artist typing and ordinary refresh retain unsent draft",
+    "disconnect/reconnect clears unsent draft back to Jason",
+    "new artist fresh_artist applies"
+  ],
+  "limits": [
+    "synthetic FakeRunner only",
+    "no queued race forced in browser",
+    "no mobile native",
+    "no real camera"
+  ],
+  "profileRemovedLogicalBytes": 40885534,
+  "freeBefore": 5647679488,
+  "freeAfter": 5688909824,
+  "screenshots": {
+    "01-escape-no-write.jpg": "38d5c10afe81cb57bfa223a13ee772e887c0097bc7bb345fb0600d838609be70",
+    "02-iso-applied.jpg": "fc29f18eb440e48cda73c30e1806557ac53afa2dc9af7747fc6eb32da2d54002",
+    "03-artist-unsent.jpg": "5715ace021c33af01b3a239e6c6deb4495335c5c387c5ff45c753bec512ac8dc",
+    "04-refresh-keeps-draft.jpg": "42d1e8fbb4131ead468ece788ede4ba6afbbdbf62e384a7971c810f74fbec6e2",
+    "05-reconnect-clears-draft.jpg": "69effe9d0e0e747f26cd02d40971cc6d25ea786608084c15e8cfb72b30382e7f",
+    "06-new-artist-applied.jpg": "633adca81cd56071025f040100e095dcd6de995aba6e5aa77d38d71aa3f71a70"
+  }
+}
