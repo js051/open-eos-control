@@ -166,12 +166,34 @@
 - [gphoto 漸進清單／取消／1101筆重試](gphoto-progressive-firefox-2026-10-16.zh-TW.md)：固定2fbeeeb8（相對前者僅docs），真受控CLI與Firefox UI；取消child已reap、新attempt完整成功。
 - 兩批未提供mobile native、真相機、Windows/WSL或新發布包；每一項的範圍與未涵蓋部分以各自文件為準。
 
-## 下一個可執行驗收步驟與停止界線
+## 13:13 UTC 交付增量與目前真正待辦
 
-1. 在已存在cloud desktop Firefox用此固定產品HEAD的純合成loopback fixture走connect→Live View→1×/5×/10×→Near/Far→stop/disconnect→明確retry；先重核磁碟與唯一桌面窗口，不接USB/真相機。Firefox通過只算Firefox所測旅程，不能宣稱Playwright Chromium整套PASS。
-2. Android SDK/unit/build沿已安裝官方工具、獨立cache與4GiB保留底線；前次offline解析被提前磁碟監控停止，不是測試FAIL/PASS。需實際釋出可重建容量後才重新規劃，不重刷同一必停命令。
-3. iOS Xcode/GPU/UI及Android instrumentation需適當平台與具體驗收權限。原六KVM固定待批，不擅改SHA或把它擴成全案不能開發。
-4. Windows/WSL、實際相機/儲存provider需平台與裝置；在取得前明列缺證。D/E能力缺口須先有可證API，不為忙碌新增transport或虛構支援。
-5. 後續實際發現可證產品缺口，從共同dev建立短期分支，完整修正/本地驗證/正常掃描後回dev；main/發布另須符合整體驗收與版本條件。
+本節更新進展索引，不把前面固定 `41bf6ef` 的歷史89列改寫成新HEAD全部PASS。最後產品修正為 `6362b87edbf7b369d39b4427b1a62b9211cfc773`；其Firefox實看到13:09:35.732已停止，文件封存`99db285d`。本次對帳文件更新不算新產品開發或新測試進展。
 
-本文件不把來源整合、dev push或測試數量變成「功能全部完成」。
+| 原群 | 後續產品來源與實際證據 | 仍未證明 |
+|---|---|---|
+| P2/G09 gphoto下載準備取消 | `c5749763`，[ASGI disconnect/task cancellation→controlled child drain/reap/tmp/lock/newattempt](bridge-gphoto-download-cancellation-2026-10-16.zh-TW.md)，並補同ticket並行、executor飽和、cache put與close exception反例 | 真Windows/WSL remote child、實體相機；人工fence不能代表真remote reap |
+| P2/G09 CCAPI下載準備取消 | `bade2398`，[production urllib真HTTP headers/body stall取消](bridge-ccapi-download-cancellation-2026-10-16.zh-TW.md)，12個精準場景及契約回歸 | DNS/connect/TLS初建仍timeout-bound；沒有新增真TLS/proxy/cross-origin網路驗證 |
+| G10 單項可寫性 | `21c1de9f`，[PC/iOS逐欄false veto與原因](media-item-writable-ui-2026-10-16.zh-TW.md)；PC JS真執行及Firefox有限矩陣，unknown保留原語意 | iOS native未跑；前一輪loading完成未觀察，不能宣稱mutation-inflight |
+| G08 Media重連owner | `42e20f8f`，[舊DOM/handler/observer隔離與gallery-first](media-reconnect-owner-2026-10-16.zh-TW.md)，805 host案；同head Firefox A/B同ID新清單與info loading恢復，6圖持久保存 | queued race為host證據，未全部在人為UI觸發；非真兩相機、非mobile native |
+| G03 設定UI owner | `6362b87e`，[advanced/exposure/filename舊callback與late-close隔離](settings-ui-owner-2026-10-16.zh-TW.md)，813 host案；同head Firefox typing/Refresh/原生Escape/合法Apply/斷重連清草稿，6圖持久保存 | 未強制所有browser queued race，未量測caret連續性；mobile native與真機未跑 |
+
+以上測試是不同來源／不同範圍，不將805＋813相加成不重複全案覆蓋率。gphoto progressive 1101筆與最初連線/LiveView/倍率Firefox已完成，不再把重跑這些綠流程列成下一步。
+
+### Android：目前不是「EOS需要4GiB依賴」
+
+4GiB是此共享overlay工作空間採用的保守保留底線，不是Gradle/kernel硬限制，也不是EOS本身安裝需求；監測是提前停止而非hard quota。約365MB是為隔離活躍共用第三方cache而複製的公開dependency snapshot，並非EOS已證缺額。不能把整個Serein工具cache算EOS需求，不能直接RO借用仍被其他工作寫入的cache。
+
+- 03:44:40–03:44:59，舊候選`6b1df91a`的overlay離線解析被監測提前stop，exit -9，tests/build NOT_RUN。
+- 09:54:37–09:55:16，候選`c0af91f5`在已協調靜止窗口、來源hash一致的tmpfs snapshot／獨立寫cache下完成offline `debugUnitTestRuntimeClasspath`圖解析（exit0）。snapshot365,449,216 bytes；tmp配置峰844,681,216 bytes；最小MemAvailable3,828,719,616 bytes；overlay最小free4,395,286,528 bytes。所有owned退出並清可重建tmp。
+- **圖仍不完整**：8個failed coordinates為Media3 exoplayer/extractor/ui1.8.1、mockwebserver4.12.0、coil-compose2.7.0、coroutines-test1.9.0、serialization-core-jvm1.7.3、org.json20240303。exit0不代表依賴已解齊、artifact已存在或compile/unit已過。完整variant/BOM/transitive closure仍未知。
+- 後續官方metadata/HEAD查核09:58留下部分結果、09:59兩次自動審查取消後停止。11:33使用者明確續行後的最小probe，官方media3-ui module回 `Tunnel connection failed: 403 Forbidden`、POM回 `Connection refused`，未取得新metadata（0 bytes）；沒有換CDN／關TLS／重刷下載。artifact補件、compile、unit仍NOT_RUN。
+- 後續清理已讓free高於先前門檻（13:10讀回約5.69GB）；因此舊「容量不足」不是目前唯一或已證根因。真正下一步是讓既定官方metadata正常可達並完成最小閉包預算；成功才補件、精準compile/unit。現在不重試已停probe，不宣稱缺額固定為365MB或2–4GiB。
+
+### 其餘平台與能力界線
+
+1. iOS Xcode/GPU/UI、Android instrumentation仍需適當平台與具體驗收權限；原六KVM固定待批，不改SHA。這不是全案禁止開發的理由。
+2. Windows/WSL實際打包與相機、外部儲存provider驗收需相應OS/裝置。現有雲端Firefox可驗特定PC合成旅程，但不替代這些平台。
+3. iOS directUSB、真Canon EDSDK binding、gphoto座標AF/ClickWB及metadata mutation仍D/E未支持或Research；缺可證API／真機能力資料，不能把缺實作假稱只待驗收，也不能憑空新增命令。
+4. 目前沒有另一個已確認、可直接實作的原caller缺口。若從原需求實際發現反例，再從共同dev建立短期分支收斂；不為維持活動重刷測試、添加相似合成輪次或重試被擋下載。這不等於原89列全部完成。
+5. main／版本／可下載發布包仍未完成必要整體驗收，dev source交付不能代稱可下載App或release ready。
