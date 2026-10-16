@@ -26,3 +26,17 @@ iOS/Android 產品與原生測試目錄分別和固定來源完全相同；Bridg
 ## 明確未完成驗收
 
 以上只代表本地來源整合與 host structural checks，不是 Swift/Android 編譯、瀏覽器互動、GPU、KVM 或真相機驗收。既有 exact-head 原生失敗與後續 NOT_RUN 仍成立。原六個待批 KVM 固定快照未改，沒有啟動 CI、建立 PR、合併 main 或發版。
+
+## 後續完整修正群納入
+
+上述三來源基線封存後，再依序正常合併已獨立 review/封存的修正：
+
+- iOS legacy JSON fail-closed `976504471f2b66d7e08504e3cca362c2d0e697e7`。
+- Android legacy JSON fail-closed `0bd7592e61e652b9dd9c072d6adec77561fad455`。
+- gphoto2 逐步清單與受控取消 `deff51341846815192d1649512a39339a65a3118`。
+
+三次合併沒有衝突；整合產品 checkpoint 為 `1b3c59aedeb768dfb2f605566c88d7b2f63cf4ac`。gphoto2 原來源最終 163/163 PASS（44 個專屬 fixture）；在合併工作樹以相同已安裝 Python 環境再次驗新 44 項，exit 0。實際 PC legacy parser 的 9 個完整/超限/非法向量於整合樹通過；不拿此結果替代 mobile native。最初預設 Python 缺 pytest、PC harness 未提供必要 module path 兩次配置失敗保留在收據，改用既有 venv 和本樹精確 parser 路徑後才記 PASS，未安裝。
+
+P2/G08 的 gphoto2 清單現在使用單一可取消子程序、受控 stdout/stderr 逐步讀取及完整 folder count 驗證；失敗不提交 partial cache。mobile legacy JSON 不再把非法列、重複 ID 或超限回覆截斷成成功。兩群詳見 [gphoto2 驗證](../gphoto-progressive-listing-validation.md) 與 [mobile legacy JSON 驗證](mobile-legacy-json-listing.md)。Windows/WSL、mobile 原生和真相機後續驗收仍待完成。
+
+新 legacy 修正合入後，既有 iOS 守門因原 guard 末端的 `else` 前加入 duplicate-ID 條件而再次失敗；保留原 parse 驗證，補入 exact-ID 唯一性、兩種數量上限與禁止截斷斷言。移除 duplicate-ID guard 的反向控制確實失敗；最終整合來源守門 148/148 PASS。這一處是新修正的對應測試更新，與前述 8 個歷史過時守門分開記錄。
