@@ -1,0 +1,34 @@
+{
+  "checkedAtUTC": "2026-10-16T12:49:21Z",
+  "candidate": "42e20f8fb91df04db29f4dc6c0563843189854b7",
+  "ownedRemaining": [],
+  "profileRemovedLogicalBytes": 41136979,
+  "freeBefore": 5711646720,
+  "freeAfter": 5753155584,
+  "observed": [
+    "Media retained through disconnect/reconnect without reload",
+    "A_SAME_ID.PNG 109KB replaced automatically by B_SAME_ID.PNG 217KB",
+    "same opaque ID with different camera owner",
+    "gallery complete before latest start",
+    "B info loading disables controls; five-second info completion restores controls and rating5"
+  ],
+  "notRun": [
+    "mutation-inflight",
+    "mobile native",
+    "real camera",
+    "Chromium",
+    "RTP codec"
+  ],
+  "eventOrder": {
+    "B_galleryComplete": 1792154730.4423423,
+    "B_latestStart": 1792154730.4611566
+  },
+  "screenshots": {
+    "01-camera-a.jpg": "8b53c0bd45c1045066f17cef5cb8098b4496ee4fb65e730b70156e7678bb3529",
+    "02-a-media.jpg": "99718b544973316c5c36093e83022c509c2d0794139cbd7c435a697ca678ccdd",
+    "03-disconnected.jpg": "cdfe4a9dd5c1f28d51cd780514e97a8a6d94ed7645103c7fadd307232d09d028",
+    "04-b-media.jpg": "80d9903825af6dd9b183fc20f63011f88262a1328ccca9dc7ee04b9f31d5fda4",
+    "05-b-info-loading.jpg": "d0634e7a04f199666e9f889d9bc7e91119fd8229839c7a892656748899309016",
+    "06-b-info-recovered.jpg": "daf125e882e2ebd854c8b08e4863cbf78abdf48e9d8278319eaae78e29996efb"
+  }
+}

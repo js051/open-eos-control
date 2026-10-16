@@ -1,0 +1,36 @@
+{
+  "state": "terminal",
+  "started": 1792154555.6603959,
+  "candidate": "42e20f8fb91df04db29f4dc6c0563843189854b7",
+  "browser": "Existing native Mozilla Firefox157.0.1; NOT Playwright Chromium acceptance",
+  "url": "http://127.0.0.1:18765/app/index.html",
+  "runtime": "/workspace/shared/guzzzi-recovery-20261012/tools/firefox/firefox",
+  "limits": "sampled monitor; NOT kernel quota",
+  "floorBytes": 4294967296,
+  "stopCushionBytes": 67108864,
+  "profileBudgetBytes": 67108864,
+  "fixtureBudgetBytes": 8388608,
+  "sourceHashes": {
+    "/workspace/shared/eos-parity-recovery-20261013/media-reconnect-owner-20261016/bridge/open_eos_bridge/static/app.js": "ab3e20ec314309be401afb3c74ed5d0c0b80a65ce02b0a2efb34d2d84538ddb3",
+    "/workspace/shared/eos-parity-recovery-20261013/browser-validation-20261016/media-reconnect-native-firefox-20261016/safe_bridge.py": "40bfec176fc31b440a5297e44198a01e109fc36d1249c753b29da0a7a0e6b2e8",
+    "/workspace/shared/eos-parity-recovery-20261013/browser-validation-20261016/media-reconnect-native-firefox-20261016/safe_simulator.py": "6ac0df2658345d9746ade765148c0ff4ab4c8df66e0ac7c39022d22e89547fc4",
+    "/workspace/shared/eos-parity-recovery-20261013/browser-validation-20261016/media-reconnect-native-firefox-20261016/start.py": "2e8be99f5324b49a14c4b93fff5376ef6ba091bbe3ebd8016e23e9bcbef0de02"
+  },
+  "ready": 1792154556.5034482,
+  "ownedGroups": [
+    25625,
+    25629
+  ],
+  "profile": "/workspace/shared/eos-parity-recovery-20261013/browser-validation-20261016/media-reconnect-native-firefox-20261016/eos-native-firefox-profile",
+  "minimumFreeBytes": 5710118912,
+  "stopReason": "UI_OWNER_STOP_OR_BROWSER_EXIT_OR_10MIN_TIMEOUT",
+  "ended": 1792154915.63075,
+  "exitCodes": [
+    -15,
+    -15
+  ],
+  "ownedRemaining": [
+    25626,
+    25627
+  ]
+}

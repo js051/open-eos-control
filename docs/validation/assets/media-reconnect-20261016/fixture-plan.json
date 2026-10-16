@@ -1,0 +1,22 @@
+{
+  "product": "42e20f8fb91df04db29f4dc6c0563843189854b7",
+  "sameOpaqueMediaId": "CCAPI resource SHARED.PNG stable across synthetic connection A/B",
+  "testOnlyOverrides": [
+    "session model A/B",
+    "wire item name A_SAME_ID.PNG / B_SAME_ID.PNG",
+    "size 111111 / 222222 bytes",
+    "rating1 / 5"
+  ],
+  "delaysSeconds": {
+    "gallery": 3,
+    "latest": 2,
+    "info": 5
+  },
+  "bounds": "unchanged production; exact loopback only; no credentials/realUSB/RTP/redirect",
+  "hashes": {
+    "native_firefox.py": "156838f89b150455225ea4a03ce811c72ba8de995164cc6fc369db5d5cfe397c",
+    "safe_bridge.py": "40bfec176fc31b440a5297e44198a01e109fc36d1249c753b29da0a7a0e6b2e8",
+    "start.py": "2e8be99f5324b49a14c4b93fff5376ef6ba091bbe3ebd8016e23e9bcbef0de02",
+    "safe_simulator.py": "6ac0df2658345d9746ade765148c0ff4ab4c8df66e0ac7c39022d22e89547fc4"
+  }
+}
