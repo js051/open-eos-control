@@ -20,6 +20,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Protocol
 
 from .errors import BridgeError, unsupported
+from .gphoto_listing import listing_cancelled, run_listing_command
 from .local_media import (
     LocalCaptureStore,
     default_capture_directory,
@@ -30,6 +31,7 @@ from .local_media import (
 from .maintenance import observation as maintenance_observation
 from .maintenance import require_intent, response_received
 from .media_folders import camera_folder_fields
+from .media_listing import MAX_LIST_SNAPSHOT_ITEMS
 from .media_upload import validate_upload_request
 from .models import (
     BatteryStatus,
@@ -78,6 +80,8 @@ GPHOTO_EVENT_PROBE_ARGUMENT = "1ms"
 GPHOTO_EVENT_WAIT_ARGUMENT = "250ms"
 GPHOTO_EVENT_IDLE_SECONDS = 0.25
 GPHOTO_EVENT_COMMAND_TIMEOUT_SECONDS = 8.0
+MEDIA_LIST_TIMEOUT_SECONDS = 60.0
+MEDIA_LIST_PROGRESS_SECONDS = 0.25
 CANON_AUTO_LIGHTING_OPTIMIZER_VALUES = frozenset(
     {
         "standard",
@@ -167,6 +171,11 @@ class GPhotoRunner(Protocol):
         timeout: float,
         cancelled: threading.Event,
     ) -> CommandOutput: ...
+
+    def run_listing(
+        self, arguments: list[str], *, timeout: float,
+        on_line: Callable[[str], None], cancelled: Callable[[], bool],
+    ) -> None: ...
 
     def host_path(self, path: Path) -> str: ...
 
@@ -317,8 +326,11 @@ class SubprocessGPhotoRunner:
         self.command = command or resolve_gphoto_command(binary)
         self.binary = self.command.prefix[0]
         self._wsl_probe = wsl_probe or _probe_wsl_host
+        self._listing_cleanup_unconfirmed = False
 
     def health(self) -> tuple[bool, str | None, str | None]:
+        if self._listing_cleanup_unconfirmed:
+            return False, None, "Media listing cleanup is unconfirmed. Check the camera and restart the Bridge."
         resolved = shutil.which(self.command.prefix[0])
         if resolved is None:
             return False, None, f"Host executable '{self.command.prefix[0]}' was not found on PATH."
@@ -349,6 +361,7 @@ class SubprocessGPhotoRunner:
         return True, first_line, detail
 
     def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+        self._require_listing_cleanup()
         command = [*self.command.prefix, *arguments]
         try:
             completed = subprocess.run(
@@ -386,6 +399,7 @@ class SubprocessGPhotoRunner:
         timeout: float,
         cancelled: threading.Event,
     ) -> CommandOutput:
+        self._require_listing_cleanup()
         if cancelled.is_set():
             raise _upload_cancelled()
         with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
@@ -438,6 +452,49 @@ class SubprocessGPhotoRunner:
                 raise _command_error(arguments, process.returncode, stderr)
             return CommandOutput(stdout=stdout, stderr=stderr)
 
+    def _require_listing_cleanup(self) -> None:
+        if self._listing_cleanup_unconfirmed:
+            raise BridgeError(
+                "MEDIA_LIST_CLEANUP_UNCONFIRMED",
+                "Media listing cleanup is unconfirmed. Check the camera and restart the Bridge before retrying.",
+                status_code=409, engine=ENGINE_NAME,
+            )
+
+    def run_listing(
+        self, arguments: list[str], *, timeout: float,
+        on_line: Callable[[str], None], cancelled: Callable[[], bool],
+    ) -> None:
+        self._require_listing_cleanup()
+        if cancelled():
+            raise listing_cancelled()
+        launched = False
+
+        def mark_started() -> None:
+            nonlocal launched
+            launched = True
+
+        def fence_uncertain_cleanup() -> None:
+            if self.command.host_mode == "wsl" or os.name == "nt":
+                self._listing_cleanup_unconfirmed = True
+
+        try:
+            return_code, stderr = run_listing_command(
+                [*self.command.prefix, *arguments], environment=_command_environment(),
+                timeout=timeout, cancelled=cancelled, on_line=on_line, on_started=mark_started,
+                on_failed=fence_uncertain_cleanup,
+            )
+            if return_code != 0:
+                raise _command_error(arguments, return_code, stderr)
+        except FileNotFoundError as error:
+            raise _engine_unavailable(self.command.display) from error
+        except BaseException as error:
+            if launched and (self.command.host_mode == "wsl" or os.name == "nt"
+                             or isinstance(error, BridgeError) and error.code == "MEDIA_LIST_CLEANUP_UNCONFIRMED"):
+                # Reaping wsl.exe does not establish that the Linux camera owner stopped.
+                # Retain a runner-wide fence, including new sessions, until Bridge restart.
+                self._listing_cleanup_unconfirmed = True
+            raise
+
     def host_path(self, path: Path) -> str:
         resolved = path.resolve(strict=False)
         if self.command.host_mode != "wsl":
@@ -445,6 +502,7 @@ class SubprocessGPhotoRunner:
         return _windows_path_to_wsl(os.fspath(resolved))
 
     def open_stream(self, arguments: list[str], *, timeout: float = 300.0) -> ClosableByteStream:
+        self._require_listing_cleanup()
         return SubprocessByteStream(self.command, arguments, timeout=timeout)
 
     def stream(self, arguments: list[str], *, timeout: float = 300.0) -> Iterator[bytes]:
@@ -1053,11 +1111,8 @@ def parse_storage_info(output: str) -> StorageSnapshot:
     )
 
 
-def parse_media_list(output: str) -> list[MediaItem]:
-    current_folder = "/"
-    folder_fields: dict[str, str] = {}
-    items: list[MediaItem] = []
-    folder_pattern = re.compile(r"There (?:is|are) \d+ files? in folder '([^']+)'", re.I)
+class GPhotoMediaListParser:
+    folder_pattern = re.compile(r"There (?:is|are) (\d+|no) files? in folder '([^']+)'", re.I)
     file_pattern = re.compile(
         r"^#(?P<number>\d+)\s+(?P<name>.+?)\s+"
         r"(?:(?P<access>[a-z-]{2})\s+)?(?P<size>\d+)\s+(?P<unit>[KMGT]?B)"
@@ -1065,18 +1120,42 @@ def parse_media_list(output: str) -> list[MediaItem]:
         r"(?P<mime>\S+)(?:\s+(?P<timestamp>\d{9,}))?\s*$",
         re.I,
     )
-    for raw_line in output.splitlines():
+
+    def __init__(self, *, strict: bool = False) -> None:
+        self.current_folder = "/"
+        self.folder_fields: dict[str, str] = {}
+        self.strict = strict
+        self.observed_output = False
+        self.expected_rows: int | None = None
+        self.rows = 0
+
+    def finish(self) -> None:
+        if self.strict and self.expected_rows is not None and self.rows != self.expected_rows:
+            raise BridgeError("MEDIA_LIST_INVALID_OUTPUT", "Media listing folder count is incomplete.")
+
+    def add_line(self, raw_line: str) -> MediaItem | None:
         line = raw_line.strip()
-        folder_match = folder_pattern.search(line)
+        folder_match = self.folder_pattern.search(line)
         if folder_match:
-            current_folder = folder_match.group(1)
-            folder_fields = camera_folder_fields(
-                "gphoto2-folder", current_folder, current_folder.lstrip("/") or "/"
+            self.finish()
+            count = folder_match.group(1)
+            self.expected_rows = 0 if count.casefold() == "no" else int(count)
+            self.rows = 0
+            self.current_folder = folder_match.group(2)
+            self.observed_output = True
+            self.folder_fields = camera_folder_fields(
+                "gphoto2-folder", self.current_folder, self.current_folder.lstrip("/") or "/"
             )
-            continue
-        file_match = file_pattern.match(line)
+            return None
+        file_match = self.file_pattern.match(line)
         if not file_match:
-            continue
+            if self.strict and (line.startswith("#") or line.startswith("There ")):
+                raise BridgeError("MEDIA_LIST_INVALID_OUTPUT", "Media listing row is invalid.")
+            return None
+        self.observed_output = True
+        self.rows += 1
+        if self.strict and self.expected_rows is not None and self.rows > self.expected_rows:
+            raise BridgeError("MEDIA_LIST_INVALID_OUTPUT", "Media listing folder count is inconsistent.")
         name = file_match.group("name").strip()
         content_type = file_match.group("mime")
         size = int(file_match.group("size")) * _size_multiplier(file_match.group("unit"))
@@ -1088,20 +1167,23 @@ def parse_media_list(output: str) -> list[MediaItem]:
         capture_time = None
         if timestamp:
             capture_time = datetime.fromtimestamp(int(timestamp), UTC).isoformat().replace("+00:00", "Z")
-        items.append(
-            MediaItem(
-                id=_media_id(current_folder, name),
-                name=name,
-                kind=_media_kind(name, content_type),
-                size_bytes=size,
-                capture_time=capture_time,
-                content_type=content_type,
-                width_pixels=width_pixels,
-                height_pixels=height_pixels,
-                preview_available=is_previewable_media(name, content_type, size),
-                **folder_fields,
-            )
+        return MediaItem(
+            id=_media_id(self.current_folder, name),
+            name=name,
+            kind=_media_kind(name, content_type),
+            size_bytes=size,
+            capture_time=capture_time,
+            content_type=content_type,
+            width_pixels=width_pixels,
+            height_pixels=height_pixels,
+            preview_available=is_previewable_media(name, content_type, size),
+            **self.folder_fields,
         )
+
+
+def parse_media_list(output: str) -> list[MediaItem]:
+    parser = GPhotoMediaListParser()
+    items = [item for line in output.splitlines() if (item := parser.add_line(line)) is not None]
     return list(reversed(items))
 
 
@@ -1246,6 +1328,7 @@ class GPhoto2Session:
         self._event_lock = threading.Lock()
         self._event_state_lock = threading.Lock()
         self._event_generation = 0
+        self._listing_stopped = threading.Event()
         self._closed = False
         self._live_view_active = False
         self._cached_live_view_frame: bytes | None = None
@@ -1282,6 +1365,7 @@ class GPhoto2Session:
             self._probe_event_polling()
 
     def close(self) -> None:
+        self._listing_stopped.set()
         self.stop_event_polling()
         with self._lock:
             if self._closed:
@@ -2325,6 +2409,95 @@ class GPhoto2Session:
                 self._media_cache.update({item.id: item for item in items})
             self._observed.add(CameraFeature.MEDIA_BROWSER)
             return items
+
+    def list_media_progressive(
+        self, maximum_items: int | None = None, *,
+        on_progress: Callable[[list[MediaItem]], None], cancelled: Callable[[], bool],
+    ) -> list[MediaItem]:
+        """One complete recursive CLI traversal, with replaceable browsing snapshots.
+
+        A recent limit only bounds each response; CLI traversal cannot stop early
+        without losing the newest files. Partial output is never cached as complete.
+        """
+        if maximum_items is not None and maximum_items <= 0:
+            raise ValueError("maximum_items must be positive when provided")
+
+        def check() -> None:
+            if cancelled() or self._listing_stopped.is_set():
+                raise listing_cancelled()
+            self._require_open()
+
+        check()
+        while not self._lock.acquire(timeout=0.05):
+            check()
+        try:
+            check()
+            host_items = self._capture_store.list_items()
+            if not self._camera_media_supported and not self._host_capture_supported() and not host_items:
+                raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
+            parser = GPhotoMediaListParser(strict=True)
+            camera_items: list[MediaItem] = []
+            identities: set[str] = {item.id for item in host_items}
+            last_progress = 0.0
+            next_count = 1
+
+            def snapshot() -> list[MediaItem]:
+                # Preserve legacy stable ties: hosts first, camera rows reversed.
+                items = sorted([*host_items, *reversed(camera_items)],
+                               key=lambda item: item.capture_time or "", reverse=True)
+                return items if maximum_items is None else items[:maximum_items]
+
+            def progress() -> None:
+                nonlocal last_progress, next_count
+                check()
+                on_progress(snapshot())
+                check()
+                last_progress = time.monotonic()
+                next_count = max(len(camera_items) + 128, len(camera_items) * 2)
+
+            def on_line(line: str) -> None:
+                check()
+                item = parser.add_line(line)
+                if item is None:
+                    return
+                if item.id in identities:
+                    raise BridgeError("MEDIA_LIST_INVALID_OUTPUT", "Media listing contains a duplicate identity.")
+                identities.add(item.id)
+                if len(identities) > MAX_LIST_SNAPSHOT_ITEMS:
+                    raise BridgeError("MEDIA_LIST_RESOURCE_LIMIT", "Media listing exceeds the item resource bound.")
+                camera_items.append(item)
+                if (len(camera_items) == 1 or len(camera_items) >= next_count
+                        or time.monotonic() - last_progress >= MEDIA_LIST_PROGRESS_SECONDS):
+                    progress()
+
+            if len(identities) > MAX_LIST_SNAPSHOT_ITEMS:
+                raise BridgeError("MEDIA_LIST_RESOURCE_LIMIT", "Media listing exceeds the item resource bound.")
+            if host_items:
+                progress()
+            if self._camera_media_supported:
+                check()
+                self._stop_movie_stream()
+                check()
+                self.runner.run_listing(
+                    self._camera_arguments(["--recurse", "--list-files"]), timeout=MEDIA_LIST_TIMEOUT_SECONDS,
+                    on_line=on_line, cancelled=lambda: cancelled() or self._listing_stopped.is_set() or self._closed,
+                )
+                parser.finish()
+                if not parser.observed_output:
+                    raise BridgeError("MEDIA_LIST_INVALID_OUTPUT", "Media listing returned no recognized output.")
+            check()
+            result = snapshot()
+            # Publish before committing the cache; callback/cancellation failures retain it.
+            on_progress(result)
+            check()
+            if maximum_items is None:
+                self._media_cache = {item.id: item for item in result}
+            else:
+                self._media_cache.update({item.id: item for item in result})
+            self._observed.add(CameraFeature.MEDIA_BROWSER)
+            return result
+        finally:
+            self._lock.release()
 
     def download_media(self, media_id: str) -> tuple[MediaItem, Iterator[bytes]]:
         if is_host_media_id(media_id):

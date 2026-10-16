@@ -162,3 +162,23 @@ alone does not close an unknown session. Page dismissal revokes publication whil
 JavaScript remains alive, but a destroyed browser page cannot guarantee observing
 a late POST or delivering cleanup. The host tests cover controlled asynchronous
 ordering; browser lifetime and physical-camera acceptance remain separate.
+
+
+## Progressive USB media browsing
+
+Clients that request the existing media-list NDJSON type now receive progressive
+libgphoto2 snapshots from one controlled `--recurse --list-files` process. Cancel,
+HTTP disconnect, session retirement, and Bridge shutdown stop that worker before
+its ownership is released. Earlier complete snapshots remain partial on error;
+only a successful process and complete parse finish the selected browsing scope.
+Recent-61 still traverses the CLI output before choosing the newest 61 entries.
+There is no extra camera query, automatic retry, or strict-inventory claim.
+
+Native POSIX cleanup controls the process group. Windows-native/WSL abnormal
+listing cleanup is conservatively unconfirmed: check the camera and restart the
+Bridge before another camera command. Cancel does not certify physical USB
+release. CLI buffering and existing mobile HTTP timeouts can delay or stop
+progress; no unbounded or instant-loading claim is made.
+
+See [the protocol](../docs/desktop-bridge-protocol.md#optional-progressive-media-browsing-ccapi-and-libgphoto2)
+and [focused verification](../docs/gphoto-progressive-listing-validation.md).
