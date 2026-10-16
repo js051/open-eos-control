@@ -9,12 +9,33 @@ struct MediaView: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
     let controlRotation: Double
-    @State private var pendingDeletion: CameraMediaItem?
-    @State private var metadataItemID: String?
-    @State private var pendingPreviewMetadataItemID: String?
-    @State private var isFileImporterPresented = false
+    @State private var exportPayload: MediaBatchExportPayload?
+    @StateObject private var filesExporter = MediaFilesExportController()
+    @State private var pendingDeletion: MediaDeleteDraft?
+    @State private var pendingMetadataDeletion: MediaDeleteDraft?
+    @State private var pendingPreviewDeletion: CameraMediaItem?
+    @State private var metadataPresentation: MediaMetadataPresentation?
+    @State private var pendingPreviewMetadataPresentation: MediaMetadataPresentation?
+    @State private var uploadSelection: MediaUploadSelection?
     @State private var mediaFilter = MediaFilter.all
     @State private var mediaSort = MediaSort.newest
+    @State private var isFolderFilterPresented = false
+    @State private var folderFilterOwner: UUID?
+    @State private var folderFilterDraft = MediaFolderFilter.all
+    @State private var isRatingFilterPresented = false
+    @State private var ratingFilterOwner: UUID?
+    @State private var ratingFilterDraft = MediaRatingFilter.all
+    @State private var isDateFilterPresented = false
+    @State private var dateFilterOwner: UUID?
+    @State private var dateFilterStart = Date()
+    @State private var dateFilterEnd = Date()
+    // The picker edits literal dates using a UTC carrier, never a capture instant.
+    private let dateFilterTimeZone = MediaCaptureDate.carrierTimeZone
+
+    private struct ThumbnailDemand: Hashable {
+        let id: String
+        let deferred: Bool
+    }
 
     private let mediaColumns = [
         GridItem(.adaptive(minimum: 156, maximum: 240), spacing: 10),
@@ -24,30 +45,33 @@ struct MediaView: View {
         VStack(spacing: 0) {
             header
             Divider().overlay(Color.cameraBorder)
-            if camera.activeMediaUploadName != nil || camera.mediaUploadError != nil || camera.uploadedMediaName != nil {
+            if camera.activeMediaUploadName != nil || camera.mediaUploadError != nil || camera.mediaUploadResult != nil {
                 uploadStatus
             }
-            if camera.mediaLibraryLoading, camera.mediaItems.isEmpty {
-                Spacer()
-                ProgressView("loading_media").tint(Color.cameraAccent)
-                    .accessibilityIdentifier("media-library-loading-empty")
-                Spacer()
-            } else if camera.mediaItems.isEmpty, camera.mediaLibraryLoadStatus == .cancelled {
-                ContentUnavailableView("media_load_cancelled", systemImage: "pause.circle")
-                    .frame(maxHeight: .infinity)
-            } else if camera.mediaItems.isEmpty, camera.mediaLibraryLoadStatus == .failed {
-                ContentUnavailableView("media_load_failed", systemImage: "exclamationmark.triangle")
-                    .frame(maxHeight: .infinity)
-            } else if camera.mediaItems.isEmpty {
-                ContentUnavailableView("no_media", systemImage: "photo.on.rectangle.angled")
-                    .frame(maxHeight: .infinity)
-            } else {
-                mediaToolbar
-                if displayedMedia.isEmpty {
-                    ContentUnavailableView("no_media", systemImage: "line.3.horizontal.decrease.circle")
-                        .frame(maxHeight: .infinity)
-                } else {
-                    ScrollView {
+            ScrollView {
+                VStack(spacing: 0) {
+                    mediaToolbar
+                    MediaBatchPanel(displayedItems: displayedMedia)
+                    if camera.downloadedFileURL != nil || filesExporter.result != nil {
+                        MediaFilesExportStatusView(controller: filesExporter).padding(12)
+                    }
+                    if camera.mediaLibraryLoading, camera.mediaItems.isEmpty {
+                        ProgressView("loading_media").tint(Color.cameraAccent)
+                            .accessibilityIdentifier("media-library-loading-empty")
+                            .frame(minHeight: 180)
+                    } else if camera.mediaItems.isEmpty, camera.mediaLibraryLoadStatus == .cancelled {
+                        ContentUnavailableView("media_load_cancelled", systemImage: "pause.circle")
+                            .frame(minHeight: 180)
+                    } else if camera.mediaItems.isEmpty, camera.mediaLibraryLoadStatus == .failed {
+                        ContentUnavailableView("media_load_failed", systemImage: "exclamationmark.triangle")
+                            .frame(minHeight: 180)
+                    } else if camera.mediaItems.isEmpty {
+                        ContentUnavailableView("no_media", systemImage: "photo.on.rectangle.angled")
+                            .frame(minHeight: 180)
+                    } else if displayedMedia.isEmpty {
+                        ContentUnavailableView("no_media", systemImage: "line.3.horizontal.decrease.circle")
+                            .frame(minHeight: 180)
+                    } else {
                         LazyVStack(alignment: .leading, spacing: 12) {
                             ForEach(mediaGroups) { group in
                                 if let title = group.title {
@@ -57,9 +81,11 @@ struct MediaView: View {
                                         .padding(.top, 4)
                                 }
                                 LazyVGrid(columns: mediaColumns, alignment: .leading, spacing: 10) {
-                                    ForEach(group.items) { item in
+                                    ForEach(group.items, id: \.idBytes) { item in
                                         mediaCard(item)
-                                            .task(id: item.id) { await camera.loadMediaThumbnail(item) }
+                                            .task(id: ThumbnailDemand(id: item.id, deferred: camera.mediaListingDefersThumbnails)) {
+                                                await camera.loadMediaThumbnail(item)
+                                            }
                                     }
                                 }
                             }
@@ -73,77 +99,92 @@ struct MediaView: View {
         .safeAreaPadding(.top, 2)
         .background(Color.cameraBackground)
         .task {
+            camera.refreshMediaDateDisplayZone()
             if camera.mediaItems.isEmpty { camera.startMediaLibraryLoad() }
         }
-        .fileImporter(
-            isPresented: $isFileImporterPresented,
-            allowedContentTypes: [.data],
-            allowsMultipleSelection: false
-        ) { result in
-            guard case let .success(urls) = result,
-                  let url = urls.first,
-                  url.startAccessingSecurityScopedResource()
-            else { return }
-            if !camera.startMediaUpload(url, securityScoped: true) {
-                url.stopAccessingSecurityScopedResource()
+        .sheet(item: $uploadSelection) { selection in
+            MediaUploadPicker(selection: selection) { opening, urls in
+                if uploadSelection == opening { uploadSelection = nil }
+                guard let url = urls?.first else { camera.cancelMediaUploadSelection(opening); return }
+                camera.startMediaUpload(url, selection: opening, access: .securityScoped)
             }
+            .onDisappear { camera.cancelMediaUploadSelection(selection) }
         }
-        .onDisappear { camera.closeMediaPreview() }
+        .onDisappear {
+            if let selection = uploadSelection { camera.cancelMediaUploadSelection(selection) }
+            uploadSelection = nil
+            camera.closeMediaPreview()
+        }
+        .onChange(of: camera.mediaLibrarySessionID) { _, _ in
+            uploadSelection = nil
+            metadataPresentation = nil
+            pendingDeletion = nil
+            pendingMetadataDeletion = nil
+            pendingPreviewDeletion = nil
+            pendingPreviewMetadataPresentation = nil
+            isDateFilterPresented = false
+            dateFilterOwner = nil
+            isRatingFilterPresented = false
+            ratingFilterOwner = nil
+            isFolderFilterPresented = false
+            folderFilterOwner = nil
+        }
+        .sheet(item: $exportPayload) { payload in
+            MediaBatchActivityView(payload: payload)
+        }
+        .mediaFilesExport(filesExporter)
+        .sheet(isPresented: $isDateFilterPresented) { dateFilterSheet }
+        .sheet(isPresented: $isRatingFilterPresented) { ratingFilterSheet }
+        .sheet(isPresented: $isFolderFilterPresented) { folderFilterSheet }
         .fullScreenCover(
             isPresented: Binding(
                 get: { camera.mediaPreviewItem != nil },
                 set: { if !$0 { camera.closeMediaPreview() } }
             ),
             onDismiss: {
-                guard let pendingPreviewMetadataItemID else { return }
-                self.pendingPreviewMetadataItemID = nil
-                metadataItemID = pendingPreviewMetadataItemID
+                guard let pending = pendingPreviewMetadataPresentation else { return }
+                pendingPreviewMetadataPresentation = nil
+                guard pending.owner == camera.mediaLibrarySessionID else { return }
+                metadataPresentation = pending
             }
         ) {
+            // Capture the action owner while building this presentation, not in
+            // the later metadata Task or preview-dismiss callback.
+            let metadataOwner = camera.mediaLibrarySessionID
             MediaPreviewView(
                 items: displayedMedia.filter(canPreview),
                 controlRotation: controlRotation,
                 onActions: { item in
-                    pendingPreviewMetadataItemID = item.id
+                    guard metadataOwner == camera.mediaLibrarySessionID else { return }
+                    pendingPreviewMetadataPresentation = MediaMetadataPresentation(itemID: item.id, owner: metadataOwner)
                     camera.closeMediaPreview()
                 }
             )
                 .environmentObject(camera)
                 .environmentObject(language)
         }
-        .sheet(
-            isPresented: Binding(
-                get: { metadataItemID != nil },
-                set: { if !$0 { metadataItemID = nil } }
-            )
-        ) {
-            if let metadataItemID {
-                MediaMetadataView(itemID: metadataItemID) { item in
-                    self.metadataItemID = nil
-                    pendingDeletion = item
-                }
-                .environmentObject(camera)
-                .environmentObject(language)
+        .sheet(item: $metadataPresentation, onDismiss: {
+            guard let draft = pendingMetadataDeletion else { return }
+            pendingMetadataDeletion = nil
+            guard draft.owner == camera.mediaLibrarySessionID else { return }
+            pendingDeletion = draft
+        }) { presentation in
+            MediaMetadataView(itemID: presentation.itemID, owner: presentation.owner) { item in
+                metadataPresentation = nil
+                if camera.isPreview { pendingPreviewDeletion = item }
+                else { pendingMetadataDeletion = camera.makeMediaDeleteDraft(items: [item], displayed: displayedMedia, owner: presentation.owner) }
             }
+            .environmentObject(camera)
+            .environmentObject(language)
         }
-        .alert(
-            language.string("delete_media_title"),
-            isPresented: Binding(
-                get: { pendingDeletion != nil },
-                set: { if !$0 { pendingDeletion = nil } }
-            ),
-            presenting: pendingDeletion
-        ) { item in
-            Button(language.string("cancel"), role: .cancel) {
-                pendingDeletion = nil
-            }
+        .sheet(item: $pendingDeletion) { MediaDeleteReview(draft: $0) }
+        .alert(language.string("media_delete_preview_title"), isPresented: Binding(get: { pendingPreviewDeletion != nil }, set: { if !$0 { pendingPreviewDeletion = nil } }), presenting: pendingPreviewDeletion) { item in
+            Button(language.string("cancel"), role: .cancel) { pendingPreviewDeletion = nil }
             Button(language.string("delete"), role: .destructive) {
-                pendingDeletion = nil
-                Task { await camera.deleteMedia(item) }
+                pendingPreviewDeletion = nil
+                if camera.isPreview { Task { await camera.deleteMedia(item) } }
             }
-        } message: { item in
-            Text(language.format("delete_media_confirmation", item.name))
-        }
+        } message: { _ in Text(language.string("media_delete_preview_notice")) }
     }
 
     private var header: some View {
@@ -258,6 +299,91 @@ struct MediaView: View {
                 .foregroundStyle(Color.cameraText)
                 .accessibilityIdentifier("media-sort")
             }
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    folderFilterOwner = camera.mediaLibrarySessionID
+                    folderFilterDraft = camera.mediaFolderFilter
+                    isFolderFilterPresented = true
+                } label: {
+                    Label(language.string("media_folder_filter"), systemImage: "folder")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("media-folder-filter")
+                if camera.mediaFolderFilter != .all {
+                    Text(folderFilterLabel(camera.mediaFolderFilter))
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("media-folder-applied")
+                    Text(folderFilterSummary)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("media-folder-summary")
+                    Button(language.string("media_folder_clear")) {
+                        camera.setMediaFolderFilter(.all, owner: camera.mediaLibrarySessionID)
+                    }
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("media-folder-clear")
+                }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    ratingFilterOwner = camera.mediaLibrarySessionID
+                    ratingFilterDraft = camera.mediaRatingFilter
+                    isRatingFilterPresented = true
+                } label: {
+                    Label(language.string("media_rating_filter"), systemImage: "star")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("media-rating-filter")
+                if camera.mediaRatingFilter != .all || mediaSort == .ratingHigh || mediaSort == .ratingLow {
+                    Text(language.string(camera.mediaRatingFilter.localizationKey))
+                        .font(.caption)
+                        .accessibilityIdentifier("media-rating-applied")
+                    Text(ratingFilterSummary)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("media-rating-summary")
+                }
+                if camera.mediaRatingFilter != .all {
+                    Button(language.string("media_rating_clear")) {
+                        camera.setMediaRatingFilter(.all, owner: camera.mediaLibrarySessionID)
+                    }
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("media-rating-clear")
+                }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    dateFilterOwner = camera.mediaLibrarySessionID
+                    let today = MediaCaptureDate.dayKey(at: Date(), in: camera.mediaDateDisplayZone)
+                        .flatMap(MediaCaptureDate.dayCarrier) ?? Date()
+                    dateFilterStart = camera.mediaDateRange?.startDayCarrier ?? today
+                    dateFilterEnd = camera.mediaDateRange?.endDayCarrier ?? today
+                    isDateFilterPresented = true
+                } label: {
+                    Label(language.string("media_date_range"), systemImage: "calendar")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("media-date-range")
+                if let range = camera.mediaDateRange {
+                    Text(dateRangeLabel(range))
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("media-date-range-applied")
+                    Text(dateFilterSummary)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("media-date-range-summary")
+                    Button(language.string("media_date_clear")) {
+                        camera.setMediaDateRange(nil, owner: camera.mediaLibrarySessionID)
+                    }
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("media-date-range-clear")
+                }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -270,14 +396,14 @@ struct MediaView: View {
             Button { camera.cancelMediaUpload() } label: {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "xmark.circle.fill")
-                        .accessibilityLabel(Text("cancel_media_upload"))
+                        .accessibilityLabel(Text(camera.mediaUploadResult == nil ? "cancel_media_upload" : "cancel_media_upload_refresh"))
                 }
             }
             .buttonStyle(CameraIconButtonStyle())
             .foregroundStyle(Color.cameraRecording)
             .accessibilityIdentifier("cancel-media-upload")
         } else {
-            Button { isFileImporterPresented = true } label: {
+            Button { uploadSelection = camera.beginMediaUploadSelection() } label: {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "arrow.up.circle")
                         .accessibilityLabel(Text("upload_media"))
@@ -285,7 +411,7 @@ struct MediaView: View {
             }
             .buttonStyle(CameraIconButtonStyle())
             .foregroundStyle(Color.cameraAccent)
-            .disabled(camera.mediaLibraryLoading)
+            .disabled(camera.mediaLibraryLoading || camera.isBusy(.media))
             .accessibilityIdentifier("upload-media-button")
         }
     }
@@ -293,7 +419,7 @@ struct MediaView: View {
     @ViewBuilder
     private var uploadStatus: some View {
         VStack(alignment: .leading, spacing: 5) {
-            if let name = camera.activeMediaUploadName, let progress = camera.mediaUploadProgress {
+            if let name = camera.activeMediaUploadName, let progress = camera.mediaUploadProgress, camera.mediaUploadResult == nil {
                 HStack(spacing: 8) {
                     Text(language.format("uploading_media", name))
                         .font(.caption.weight(.semibold))
@@ -315,18 +441,36 @@ struct MediaView: View {
                 Text(mediaUploadProgressLabel(progress))
                     .font(.caption2)
                     .foregroundStyle(Color.cameraSecondaryText)
-            } else if let error = camera.mediaUploadError {
-                Label(error, systemImage: "exclamationmark.triangle")
+            } else if let result = camera.mediaUploadResult {
+                let verified = result.outcome == .verified
+                let key = verified ? "upload_complete" : (result.outcome == .uncertain ? "media_upload_uncertain" : "media_upload_not_sent")
+                Label(language.format(key, result.filename), systemImage: verified ? "checkmark.circle.fill" : "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(Color.cameraWarning)
-                    .lineLimit(3)
-                    .accessibilityIdentifier("media-upload-error")
-            } else if let name = camera.uploadedMediaName {
-                Label(language.format("upload_complete", name), systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(Color.cameraStatus)
-                    .accessibilityIdentifier("media-upload-complete")
+                    .foregroundStyle(verified ? Color.cameraStatus : Color.cameraWarning)
+                    .accessibilityIdentifier(verified ? "media-upload-complete" : "media-upload-\(result.outcome.rawValue)")
+                if result.owner != camera.mediaLibrarySessionID {
+                    Text(language.string("media_upload_previous_connection"))
+                        .font(.caption2).accessibilityIdentifier("media-upload-previous-connection")
+                }
+                if result.outcome == .uncertain {
+                    Text(language.string("media_upload_manual_recovery"))
+                        .font(.caption2).accessibilityIdentifier("media-upload-recovery")
+                }
+                if result.refreshFailed {
+                    Text(language.string("media_upload_refresh_failed"))
+                        .font(.caption2).accessibilityIdentifier("media-upload-refresh-failed")
+                }
+                if result.owner == camera.mediaLibrarySessionID,
+                   result.outcome == .uncertain || result.refreshFailed {
+                    Button(language.string("media_upload_review_files")) { camera.startMediaLibraryLoad() }
+                        .disabled(camera.isBusy(.media) || camera.mediaLibraryLoading)
+                        .accessibilityIdentifier("media-upload-review-files")
+                }
+                if let error = camera.mediaUploadError {
+                    Text(error).font(.caption2).accessibilityIdentifier("media-upload-error")
+                }
             }
+
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -370,14 +514,38 @@ struct MediaView: View {
                    let progress = camera.mediaDownloadProgress {
                     mediaDownloadProgress(progress)
                 }
-                if let captureTime = mediaCaptureDate(item) {
-                    Text(captureTime.formatted(date: .omitted, time: .shortened))
+                if let captureText = mediaCaptureDate(item, displayZone: camera.mediaDateDisplayZone)
+                    .cardText(unknownTimeZone: language.string("media_time_zone_unknown")) {
+                    Text(captureText)
                         .font(.caption2)
                         .foregroundStyle(Color.cameraSecondaryText)
                 }
                 HStack(spacing: 0) {
+                    Button {
+                        camera.toggleMediaSelection(item)
+                    } label: {
+                        Image(systemName: camera.isMediaSelected(item) ? "checkmark.circle.fill" : "circle")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .accessibilityLabel(language.format("media_batch_select_item", item.name))
+                    .accessibilityValue(language.string(camera.isMediaSelected(item) ? "media_batch_selected" : "media_batch_not_selected"))
+                    .accessibilityIdentifier("media-select-\(item.id)")
                     Spacer(minLength: 0)
                     mediaActions(item)
+                }
+                if camera.downloadedFile(for: item) != nil {
+                    Button {
+                        camera.beginMediaFilesExport(filesExporter, payload: camera.makeMediaDownloadExportPayload(for: item))
+                    } label: {
+                        Label(language.string("media_files_export_one"), systemImage: "folder")
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .foregroundStyle(Color.cameraStatus)
+                    .disabled(filesExporter.isActive)
+                    .accessibilityLabel(language.format("media_files_export_named", item.name))
+                    .accessibilityIdentifier("media-export-files-\(item.id)")
                 }
             }
             .padding(8)
@@ -406,7 +574,8 @@ struct MediaView: View {
     private func mediaThumbnailContent(_ item: CameraMediaItem) -> some View {
         ZStack {
             Color.cameraSurfaceRaised
-            if let data = camera.mediaThumbnails[item.id], let image = UIImage(data: data) {
+            if (mediaIsPhoto(item) || mediaIsVideo(item)),
+               let data = camera.mediaThumbnails[item.id], let image = UIImage(data: data) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
@@ -414,7 +583,7 @@ struct MediaView: View {
             } else if camera.loadingMediaThumbnailIDs.contains(item.id) {
                 ProgressView().tint(Color.cameraAccent).controlSize(.small)
             } else {
-                Image(systemName: mediaIcon(item.kind))
+                Image(systemName: mediaIcon(item))
                     .font(.title3)
                     .foregroundStyle(Color.cameraAccent)
             }
@@ -433,13 +602,15 @@ struct MediaView: View {
 
     @ViewBuilder
     private func mediaActions(_ item: CameraMediaItem) -> some View {
+        let metadataOwner = camera.mediaLibrarySessionID
         HStack(spacing: 2) {
             if camera.supports(.mediaDownload) {
                 downloadAction(item)
             }
             if camera.supports(.mediaBrowser) {
                 Button {
-                    metadataItemID = item.id
+                    guard metadataOwner == camera.mediaLibrarySessionID else { return }
+                    metadataPresentation = MediaMetadataPresentation(itemID: item.id, owner: metadataOwner)
                 } label: {
                     Image(systemName: "ellipsis")
                         .frame(width: 48, height: 48)
@@ -450,7 +621,7 @@ struct MediaView: View {
                 .accessibilityIdentifier("media-actions-\(item.id)")
             } else if camera.supports(.mediaDelete) {
                 Button {
-                    pendingDeletion = item
+                    pendingDeletion = camera.makeMediaDeleteDraft(items: [item], displayed: displayedMedia, owner: metadataOwner)
                 } label: {
                     Image(systemName: "trash")
                         .frame(width: 48, height: 48)
@@ -466,8 +637,10 @@ struct MediaView: View {
     @ViewBuilder
     private func downloadAction(_ item: CameraMediaItem) -> some View {
         Group {
-            if let url = camera.downloadedFile(for: item) {
-                ShareLink(item: url) {
+            if camera.downloadedFile(for: item) != nil {
+                Button {
+                    exportPayload = camera.makeMediaDownloadExportPayload(for: item)
+                } label: {
                     Image(systemName: "square.and.arrow.up")
                         .frame(width: 48, height: 48)
                         .accessibilityLabel(Text("save_media"))
@@ -538,11 +711,12 @@ struct MediaView: View {
         )
     }
 
-    private func mediaIcon(_ kind: String) -> String {
-        switch kind.lowercased() {
-        case "video": "film"
-        case "raw": "camera.aperture"
-        default: "photo"
+    private func mediaIcon(_ item: CameraMediaItem) -> String {
+        switch CameraMediaType.classify(item) {
+        case .video: "film"
+        case .photo: "photo"
+        case .audio: "waveform"
+        case .other, .unknown, .conflict: "doc"
         }
     }
 
@@ -551,11 +725,220 @@ struct MediaView: View {
         if mediaIsVideo(item) {
             return camera.supports(.mediaDownload)
         }
-        return item.previewAvailable && camera.supports(.mediaPreview)
+        return mediaIsPhoto(item) && item.previewAvailable && camera.supports(.mediaPreview)
+    }
+
+    private var dateFilterCalendar: Calendar {
+        var calendar = Calendar(identifier: .iso8601)
+        calendar.timeZone = dateFilterTimeZone
+        return calendar
+    }
+
+    private var dateFilterDraft: MediaDateRange? {
+        MediaDateRange(startDate: dateFilterStart, endDate: dateFilterEnd, timeZone: dateFilterTimeZone)
+    }
+
+    private var dateFilterSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    DatePicker(language.string("media_date_start"), selection: $dateFilterStart, displayedComponents: .date)
+                        .accessibilityIdentifier("media-date-start")
+                    DatePicker(language.string("media_date_end"), selection: $dateFilterEnd, displayedComponents: .date)
+                        .accessibilityIdentifier("media-date-end")
+                    Text(language.format("media_date_timezone", camera.mediaDateDisplayZone.identifier))
+                    if dateFilterDraft == nil {
+                        Text(language.string("media_date_invalid"))
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("media-date-invalid")
+                    }
+                }
+                Section {
+                    Text(language.string("media_date_loaded_only"))
+                    Text(language.string("media_date_unknown_excluded"))
+                }
+            }
+            .environment(\.timeZone, dateFilterTimeZone)
+            .environment(\.calendar, dateFilterCalendar)
+            .environment(\.locale, language.locale)
+            .navigationTitle(language.string("media_date_range"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(language.string("cancel")) { isDateFilterPresented = false }
+                        .accessibilityIdentifier("media-date-cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(language.string("apply")) {
+                        guard let owner = dateFilterOwner, let range = dateFilterDraft else { return }
+                        camera.setMediaDateRange(range, owner: owner)
+                        isDateFilterPresented = false
+                    }
+                    .disabled(dateFilterDraft == nil || dateFilterOwner != camera.mediaLibrarySessionID)
+                    .accessibilityIdentifier("media-date-apply")
+                }
+            }
+        }
+    }
+
+    private var folderChoices: [CameraMediaFolder] {
+        var folders = mediaFolderOptions(camera.mediaItems).map(\.folder)
+        if case let .folder(selected) = camera.mediaFolderFilter,
+           !folders.contains(where: { mediaFolderIdentity($0) == mediaFolderIdentity(selected) }) {
+            folders.append(selected)
+        }
+        return folders
+    }
+
+    private func folderFilterLabel(_ filter: MediaFolderFilter) -> String {
+        switch filter {
+        case .all: return language.string("media_folder_all")
+        case .unknown: return language.string("media_folder_unknown")
+        case let .folder(folder):
+            if let current = mediaFolderOptions(camera.mediaItems).first(where: { $0.id == mediaFolderIdentity(folder) }) {
+                return folderChoiceLabel(current.folder)
+            }
+            return folder.label + " · " + language.string("media_folder_missing")
+        }
+    }
+
+    private func folderChoiceLabel(_ folder: CameraMediaFolder) -> String {
+        let duplicates = folderChoices.filter { $0.label == folder.label }
+        guard duplicates.count > 1, let index = duplicates.firstIndex(where: { mediaFolderIdentity($0) == mediaFolderIdentity(folder) }) else {
+            return folder.label
+        }
+        return language.format("media_folder_duplicate", folder.label, index + 1)
+    }
+
+    private func folderChoiceButton(_ filter: MediaFolderFilter, label: String, identifier: String) -> some View {
+        Button { folderFilterDraft = filter } label: {
+            HStack {
+                Text(label).lineLimit(3)
+                Spacer()
+                if folderFilterDraft == filter { Image(systemName: "checkmark") }
+            }
+            .frame(minHeight: 44)
+        }
+        .accessibilityLabel(Text(label))
+        .accessibilityIdentifier(identifier)
+        .accessibilityAddTraits(folderFilterDraft == filter ? [.isSelected] : [])
+    }
+
+    private var folderFilterSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    folderChoiceButton(.all, label: language.string("media_folder_all"), identifier: "media-folder-choice-all")
+                    folderChoiceButton(.unknown, label: language.string("media_folder_unknown"), identifier: "media-folder-choice-unknown")
+                    ForEach(folderChoices, id: \.folderViewIdentity) { folder in
+                        folderChoiceButton(.folder(folder), label: folderChoiceLabel(folder),
+                            identifier: "media-folder-choice-known-\(folder.id)")
+                    }
+                }
+                Section {
+                    Text(language.string("media_folder_loaded_only"))
+                    if case let .folder(selected) = camera.mediaFolderFilter,
+                       !mediaFolderOptions(camera.mediaItems).contains(where: { $0.id == mediaFolderIdentity(selected) }) {
+                        Text(language.string("media_folder_missing"))
+                    }
+                }
+            }
+            .navigationTitle(language.string("media_folder_filter"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(language.string("cancel")) { isFolderFilterPresented = false }
+                        .accessibilityIdentifier("media-folder-cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(language.string("apply")) {
+                        guard let owner = folderFilterOwner else { return }
+                        camera.setMediaFolderFilter(folderFilterDraft, owner: owner)
+                        isFolderFilterPresented = false
+                    }
+                    .disabled(folderFilterOwner != camera.mediaLibrarySessionID)
+                    .accessibilityIdentifier("media-folder-apply")
+                }
+            }
+        }
+    }
+
+    private var folderFilterSummary: String {
+        let summary = mediaFolderFilterSummary(camera.mediaItems, filter: mediaFilter,
+            dateRange: camera.mediaDateRange, ratingFilter: camera.mediaRatingFilter,
+            folderFilter: camera.mediaFolderFilter, displayZone: camera.mediaDateDisplayZone)
+        return language.format("media_folder_summary", summary.matchedCount, summary.loadedCount,
+            summary.unknownFolderCount) + " " + language.string("media_folder_loaded_only")
+    }
+
+    private var ratingFilterSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    ForEach(MediaRatingFilter.allCases) { filter in
+                        Button {
+                            ratingFilterDraft = filter
+                        } label: {
+                            HStack {
+                                Text(language.string(filter.localizationKey))
+                                Spacer()
+                                if ratingFilterDraft == filter { Image(systemName: "checkmark") }
+                            }
+                            .frame(minHeight: 44)
+                        }
+                        .accessibilityIdentifier("media-rating-choice-\(filter.rawValue)")
+                        .accessibilityAddTraits(ratingFilterDraft == filter ? [.isSelected] : [])
+                    }
+                }
+                Section {
+                    Text(language.string("media_rating_loaded_only"))
+                    Text(language.string("media_rating_unknown_help"))
+                }
+            }
+            .navigationTitle(language.string("media_rating_filter"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(language.string("cancel")) { isRatingFilterPresented = false }
+                        .accessibilityIdentifier("media-rating-cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(language.string("apply")) {
+                        guard let owner = ratingFilterOwner else { return }
+                        camera.setMediaRatingFilter(ratingFilterDraft, owner: owner)
+                        isRatingFilterPresented = false
+                    }
+                    .disabled(ratingFilterOwner != camera.mediaLibrarySessionID)
+                    .accessibilityIdentifier("media-rating-apply")
+                }
+            }
+        }
+    }
+
+    private var ratingFilterSummary: String {
+        let summary = mediaRatingFilterSummary(camera.mediaItems, filter: mediaFilter,
+            dateRange: camera.mediaDateRange, ratingFilter: camera.mediaRatingFilter, folderFilter: camera.mediaFolderFilter, displayZone: camera.mediaDateDisplayZone)
+        return language.format("media_rating_summary", summary.matchedCount, summary.loadedCount,
+                               summary.unknownRatingCount) + " " + language.string("media_rating_loaded_only")
+    }
+
+    private func dateRangeLabel(_ range: MediaDateRange) -> String {
+        // Rebase presentation/filtering to the same snapshot without changing
+        // the user's literal endpoints or any selected media/transfer owner.
+        language.format("media_date_range_applied", range.startDayKey,
+                        range.endDayKey, camera.mediaDateDisplayZone.identifier)
+    }
+
+    private var dateFilterSummary: String {
+        let summary = mediaDateFilterSummary(camera.mediaItems, filter: mediaFilter, dateRange: camera.mediaDateRange,
+            ratingFilter: camera.mediaRatingFilter, folderFilter: camera.mediaFolderFilter, displayZone: camera.mediaDateDisplayZone)
+        return language.format("media_date_summary", summary.matchedCount, summary.loadedCount,
+                               summary.unknownDateCount) + " " + language.string("media_date_loaded_only")
     }
 
     private var displayedMedia: [CameraMediaItem] {
-        mediaItemsForDisplay(camera.mediaItems, filter: mediaFilter, sort: mediaSort)
+        mediaItemsForDisplay(camera.mediaItems, filter: mediaFilter, sort: mediaSort, dateRange: camera.mediaDateRange,
+            ratingFilter: camera.mediaRatingFilter, folderFilter: camera.mediaFolderFilter, displayZone: camera.mediaDateDisplayZone)
     }
 
     private var mediaLibrarySummary: String {
@@ -583,20 +966,21 @@ struct MediaView: View {
     }
 
     private var mediaGroups: [MediaGroup] {
-        if mediaSort == .camera {
+        if mediaSort == .camera || mediaSort == .ratingHigh || mediaSort == .ratingLow {
             return displayedMedia.isEmpty
                 ? []
                 : [MediaGroup(id: "camera", title: nil, items: displayedMedia)]
         }
+        if mediaSort == .newest || mediaSort == .oldest {
+            return mediaDateGroups(displayedMedia, displayZone: camera.mediaDateDisplayZone)
+                .enumerated().map { index, group in
+                    let title = group.dayKey ?? language.string("media_unknown_date")
+                    return MediaGroup(id: "\(index)-\(title)", title: title, items: group.items)
+                }
+        }
         var groups: [MediaGroup] = []
         for item in displayedMedia {
-            let title: String
-            if mediaSort == .name {
-                title = item.name.first.map { String($0).uppercased() } ?? "#"
-            } else {
-                title = mediaCaptureDate(item)?.formatted(date: .abbreviated, time: .omitted)
-                    ?? language.string("media_unknown_date")
-            }
+            let title = item.name.first.map { String($0).uppercased() } ?? "#"
             if groups.last?.title == title {
                 groups[groups.count - 1].items.append(item)
             } else {
@@ -620,14 +1004,22 @@ private func mediaDimensionsText(_ item: CameraMediaItem) -> String? {
     return "\(width) x \(height)"
 }
 
+private struct MediaMetadataPresentation: Identifiable {
+    let id = UUID()
+    let itemID: String
+    let owner: UUID
+}
+
 private struct MediaMetadataView: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
     let itemID: String
+    let owner: UUID
     let onDelete: (CameraMediaItem) -> Void
 
     private var item: CameraMediaItem? {
-        camera.mediaItems.first { $0.id == itemID }
+        guard owner == camera.mediaLibrarySessionID else { return nil }
+        return camera.mediaItems.first { $0.id.utf8.elementsEqual(itemID.utf8) }
     }
 
     var body: some View {
@@ -656,11 +1048,9 @@ private struct MediaMetadataView: View {
                             value: ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
                         )
                     }
-                    if let date = mediaCaptureDate(item) {
-                        metadataHeader(
-                            language.string("media_captured_at"),
-                            value: date.formatted(date: .abbreviated, time: .shortened)
-                        )
+                    if let dateText = mediaCaptureDate(item, displayZone: camera.mediaDateDisplayZone)
+                        .detailText(unknownTimeZone: language.string("media_time_zone_unknown")) {
+                        metadataHeader(language.string("media_captured_at"), value: dateText)
                     }
 
                     if camera.supports(.mediaProtect) {
@@ -674,13 +1064,13 @@ private struct MediaMetadataView: View {
                                 label: language.format("protect_media", item.name),
                                 selected: item.protected == true,
                                 enabled: item.protected != true
-                            ) { Task { await camera.setMediaProtection(item, enabled: true) } }
+                            ) { Task { await camera.setMediaProtection(item, enabled: true, owner: owner) } }
                             metadataIconButton(
                                 systemName: "lock.open",
                                 label: language.format("unprotect_media", item.name),
                                 selected: item.protected == false,
                                 enabled: item.protected != false
-                            ) { Task { await camera.setMediaProtection(item, enabled: false) } }
+                            ) { Task { await camera.setMediaProtection(item, enabled: false, owner: owner) } }
                         }
                     }
 
@@ -709,7 +1099,7 @@ private struct MediaMetadataView: View {
                             language.string("media_rotation"),
                             selection: Binding(
                                 get: { item.rotationDegrees ?? -1 },
-                                set: { value in Task { await camera.setMediaRotation(item, degrees: value) } }
+                                set: { value in Task { await camera.setMediaRotation(item, degrees: value, owner: owner) } }
                             )
                         ) {
                             ForEach([0, 90, 180, 270], id: \.self) { value in
@@ -731,13 +1121,13 @@ private struct MediaMetadataView: View {
                                 label: language.format("archive_media", item.name),
                                 selected: item.archived == true,
                                 enabled: item.archived != true
-                            ) { Task { await camera.setMediaArchive(item, enabled: true) } }
+                            ) { Task { await camera.setMediaArchive(item, enabled: true, owner: owner) } }
                             metadataIconButton(
                                 systemName: "arrow.up.bin",
                                 label: language.format("unarchive_media", item.name),
                                 selected: item.archived == false,
                                 enabled: item.archived != false
-                            ) { Task { await camera.setMediaArchive(item, enabled: false) } }
+                            ) { Task { await camera.setMediaArchive(item, enabled: false, owner: owner) } }
                         }
                     }
 
@@ -767,7 +1157,8 @@ private struct MediaMetadataView: View {
         HStack {
             Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Color.cameraText)
             Spacer()
-            Text(value).font(.caption).foregroundStyle(Color.cameraSecondaryText).lineLimit(1)
+            Text(value).font(.caption).foregroundStyle(Color.cameraSecondaryText)
+                .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -800,7 +1191,7 @@ private struct MediaMetadataView: View {
 
     private func ratingButton(_ item: CameraMediaItem, rating: Int, systemName: String) -> some View {
         Button {
-            Task { await camera.setMediaRating(item, rating: rating) }
+            Task { await camera.setMediaRating(item, rating: rating, owner: owner) }
         } label: {
             Image(systemName: systemName)
                 .frame(maxWidth: .infinity, minHeight: 48)
@@ -817,12 +1208,14 @@ private struct MediaPreviewView: View {
     let items: [CameraMediaItem]
     let controlRotation: Double
     let onActions: (CameraMediaItem) -> Void
+    @State private var exportPayload: MediaBatchExportPayload?
+    @StateObject private var filesExporter = MediaFilesExportController()
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let playback = camera.mediaVideoPlayback,
-               let item = camera.mediaPreviewItem {
+               let item = camera.mediaPreviewItem, mediaIsVideo(item) {
                 CameraVideoPreview(
                     playback: playback,
                     item: item,
@@ -835,6 +1228,7 @@ private struct MediaPreviewView: View {
                     }
                 )
             } else if let item = camera.mediaPreviewItem,
+                      mediaIsPhoto(item),
                       let data = camera.mediaPreviewData,
                       let image = UIImage(data: data) {
                 ZoomableMediaImage(
@@ -851,7 +1245,7 @@ private struct MediaPreviewView: View {
                 VStack(spacing: 12) {
                     Text("media_preview_unavailable")
                         .foregroundStyle(Color.cameraSecondaryText)
-                    if let item = camera.mediaPreviewItem, !mediaIsVideo(item), item.previewAvailable {
+                    if let item = camera.mediaPreviewItem, mediaIsPhoto(item), item.previewAvailable {
                         Button {
                             Task { await camera.retryMediaPreview() }
                         } label: {
@@ -871,11 +1265,15 @@ private struct MediaPreviewView: View {
                         RotatingControl(degrees: controlRotation) {
                             Image(systemName: "xmark")
                                 .frame(width: 48, height: 48)
+                                .contentShape(Rectangle())
                                 .accessibilityLabel(Text("close_media_preview"))
                         }
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("close-media-preview")
+                    #if DEBUG
+                    .modifier(MediaDownloadTraceAccessibility(value: camera.mediaDownloadTrace.accessibilityValue))
+                    #endif
                     if let item = camera.mediaPreviewItem {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.name)
@@ -905,6 +1303,7 @@ private struct MediaPreviewView: View {
                                 RotatingControl(degrees: controlRotation) {
                                     Image(systemName: "ellipsis")
                                         .frame(width: 48, height: 48)
+                                        .contentShape(Rectangle())
                                         .accessibilityLabel(Text(language.format("media_actions", item.name)))
                                 }
                             }
@@ -925,6 +1324,30 @@ private struct MediaPreviewView: View {
                 }
                 .padding(.horizontal, 6)
                 Spacer()
+            }
+        }
+        .sheet(item: $exportPayload) { payload in
+            MediaBatchActivityView(payload: payload)
+        }
+        .mediaFilesExport(filesExporter)
+        .safeAreaInset(edge: .bottom) {
+            if let item = camera.mediaPreviewItem, camera.downloadedFile(for: item) != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        camera.beginMediaFilesExport(filesExporter, payload: camera.makeMediaDownloadExportPayload(for: item))
+                    } label: {
+                        Label(language.string("media_files_export_one"), systemImage: "folder")
+                            .frame(minHeight: 44)
+                    }
+                    .disabled(filesExporter.isActive)
+                    .accessibilityIdentifier("media-preview-export-files-\(item.id)")
+                    MediaFilesExportStatusView(controller: filesExporter)
+                }
+                .padding(12)
+                .background(Color.cameraSurface)
+            } else if filesExporter.result != nil {
+                MediaFilesExportStatusView(controller: filesExporter)
+                    .padding(12).background(Color.cameraSurface)
             }
         }
         .alert(
@@ -993,11 +1416,14 @@ private struct MediaPreviewView: View {
 
     @ViewBuilder
     private func previewDownloadAction(_ item: CameraMediaItem) -> some View {
-        if let url = camera.downloadedFile(for: item) {
-            ShareLink(item: url) {
+        if camera.downloadedFile(for: item) != nil {
+            Button {
+                exportPayload = camera.makeMediaDownloadExportPayload(for: item)
+            } label: {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "square.and.arrow.up")
                         .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
                         .accessibilityLabel(Text("save_media"))
                 }
             }
@@ -1017,6 +1443,7 @@ private struct MediaPreviewView: View {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "xmark.circle.fill")
                         .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
                         .accessibilityLabel(Text("cancel_media_download"))
                 }
             }
@@ -1030,6 +1457,7 @@ private struct MediaPreviewView: View {
                 RotatingControl(degrees: controlRotation) {
                     Image(systemName: "arrow.down.circle")
                         .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
                         .accessibilityLabel(Text("download_media"))
                 }
             }
@@ -1216,3 +1644,22 @@ private struct CameraVideoPreview: View {
         }
     }
 }
+
+
+private extension CameraMediaFolder {
+    var folderViewIdentity: Data { mediaFolderIdentity(self) }
+}
+
+private extension CameraMediaItem {
+    var idBytes: Data { Data(id.utf8) }
+}
+
+#if DEBUG
+private struct MediaDownloadTraceAccessibility: ViewModifier {
+    let value: String?
+    @ViewBuilder func body(content: Content) -> some View {
+        if let value { content.accessibilityValue(Text(verbatim: value)) }
+        else { content }
+    }
+}
+#endif

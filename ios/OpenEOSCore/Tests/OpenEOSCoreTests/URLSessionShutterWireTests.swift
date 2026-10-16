@@ -112,6 +112,37 @@ final class URLSessionShutterWireTests: XCTestCase {
         }
     }
 
+    func testOrdinaryManualStillLostPressAndFailedReleaseKeepExactStopOnlyOnWire() async throws {
+        for endpoint in ShutterRecoveryEndpoint.variants {
+            for fault in LoopbackShutterPeer.PressFault.allCases {
+                let peer = try LoopbackShutterPeer(endpoint: endpoint, pressFault: fault,
+                    failedReleases: 1, manualOnly: true)
+                defer { XCTAssertTrue(peer.stop()) }
+                let client = try CCAPIClient(baseURL: peer.baseURL, mode: .camera)
+                try await client.initialize()
+                do { _ = try await client.captureStill(autofocus: false); XCTFail("Lost release must fail") }
+                catch {}
+                let state = await client.shutterReleaseState()
+                XCTAssertTrue(state.releaseRequired)
+                XCTAssertTrue(state.releaseUnconfirmed)
+                let before = peer.requests()
+                XCTAssertEqual(before.shutterActions, ["full_press", "release"])
+                try await client.retryShutterRelease()
+                let after = peer.requests()
+                let retry = Array(after.dropFirst(before.count))
+                XCTAssertEqual(retry.count, 1, "Real URLSession retry must contain only the saved release")
+                XCTAssertEqual(retry.first?.path, endpoint.manualPath)
+                XCTAssertEqual(retry.first?.method, endpoint.method)
+                XCTAssertEqual(retry.first?.body, before.last(where: \.isMutation)?.body)
+                let stopped = await client.shutterReleaseState()
+                XCTAssertEqual(stopped, .idle)
+                await client.close()
+                XCTAssertEqual(peer.requests().filter(\.isMutation), after.filter(\.isMutation))
+                XCTAssertTrue(peer.errors().isEmpty)
+            }
+        }
+    }
+
     func testLostPressResponsePreservesReleaseWithoutReplayingTheFullPressOnTheWire() async throws {
         for endpoint in ShutterRecoveryEndpoint.variants {
             for fault in LoopbackShutterPeer.PressFault.allCases {
@@ -160,7 +191,7 @@ final class URLSessionShutterWireTests: XCTestCase {
             let connections = peer.connectionIDs()
             XCTAssertEqual(beforeRetry[pressIndex - 1].method, "GET", context)
             XCTAssertEqual(connections[pressIndex], connections[pressIndex - 1],
-                           "\(context): this case must exercise a real URLSession reused connection")
+                           "\(context): this case must exercise a real URLSession reused connection. \(peer.connectionTrace())")
         }
 
         try await client.retryShutterRelease()
@@ -213,7 +244,7 @@ final class URLSessionShutterWireTests: XCTestCase {
                 if connectionMode == .pooled {
                     let connections = peer.connectionIDs()
                     XCTAssertEqual(connections.count, 2, context)
-                    XCTAssertEqual(connections.first, connections.last, "\(context): the press must reuse the GET connection")
+                    XCTAssertEqual(connections.first, connections.last, "\(context): the press must reuse the GET connection. \(peer.connectionTrace())")
                 }
                 XCTAssertTrue(peer.errors().isEmpty, "\(context): \(peer.errors().joined(separator: "\n"))")
             }
@@ -268,6 +299,145 @@ final class URLSessionShutterWireTests: XCTestCase {
             XCTAssertEqual(requests.first?.path, "/transport-control", control.name)
             XCTAssertTrue(peer.errors().isEmpty, "\(control.name): \(peer.errors().joined(separator: "\n"))")
         }
+    }
+
+    func testRecordingClientsPreserveReceivedRejectionHeadersWhenBodyIsTruncatedWithoutReplay() async throws {
+        for bridge in [false, true] {
+            for status in [200, 401, 403, 502, 503] {
+                let wire = Data("HTTP/1.1 \(status) Synthetic\r\nContent-Length: 64\r\nConnection: close\r\n\r\n{".utf8)
+                let applied = status == 200 || (bridge && status == 502)
+                let peer = try LoopbackShutterPeer(endpoint: ShutterRecoveryEndpoint.variants[0], pressFault: .disconnect,
+                    failedReleases: 0, controlResponse: wire, recordingControl: true, recordingApplies: applied)
+                defer { XCTAssertTrue(peer.stop(), "Every REC response reader must release its task and sockets") }
+                let expectedUnknown = status == 200 || (bridge && status == 502)
+                if bridge {
+                    let client = try DesktopBridgeClient(baseURL: peer.baseURL, transport: URLSessionCameraHTTPTransport())
+                    try await client.initialize()
+                    do { _ = try await client.startRecording(); XCTFail("Truncated REC response cannot succeed") }
+                    catch {
+                        if expectedUnknown {
+                            XCTAssertEqual(error as? DesktopBridgeError, .recordingCommandUnconfirmed(starting: true))
+                        } else if case let DesktopBridgeError.http(code, _, _, _, _, _, _) = error {
+                            XCTAssertEqual(code, status)
+                        } else { XCTFail("Received rejection status was lost: \(error)") }
+                    }
+                    let evidence = await client.recordingCommandEvidence
+                    XCTAssertEqual(evidence, expectedUnknown ? .unconfirmed(starting: true) : nil)
+                } else {
+                    let client = try CCAPIClient(baseURL: peer.baseURL, mode: .camera, transport: URLSessionCameraHTTPTransport())
+                    try await client.initialize()
+                    do { _ = try await client.startRecording(); XCTFail("Truncated REC response cannot succeed") }
+                    catch {
+                        if expectedUnknown {
+                            XCTAssertEqual(error as? CCAPIError, .recordingCommandUnconfirmed(starting: true))
+                        } else if case let CCAPIError.http(code, _, _, _) = error {
+                            XCTAssertEqual(code, status)
+                        } else { XCTFail("Received rejection status was lost: \(error)") }
+                    }
+                    let evidence = await client.recordingCommandEvidence
+                    XCTAssertEqual(evidence, expectedUnknown ? .unconfirmed(starting: true) : nil)
+                }
+                let commands = peer.requests().filter { $0.path.contains("/recording/") || $0.path.hasSuffix("/recbutton") }
+                XCTAssertEqual(commands.count, 1, "Actual URLSession must not replay a REC with a lost response body")
+                XCTAssertEqual(commands.first?.method, "POST")
+                XCTAssertEqual(commands.first?.path, bridge ? "/v1/session/synthetic/recording/start" : "/ccapi/ver100/shooting/control/recbutton")
+                XCTAssertEqual(commands.first?.body, Data((bridge ? "{}" : #"{"action":"start"}"#).utf8))
+                XCTAssertEqual(peer.didApplyRecording(), applied, "Peer state is independent of the client response")
+                XCTAssertTrue(peer.errors().isEmpty)
+            }
+        }
+    }
+
+    func testRecordingResponseReaderValidatesCompleteSuccessAndBoundsReceivedBody() async throws {
+        for (status, body, complete) in [(200, Data("{}".utf8), true), (204, Data(), true),
+                                       (200, Data(repeating: 0x78, count: 33 * 1024), false)] {
+            let headers = status == 204 ? "" : "Content-Length: \(body.count)\r\n"
+            var wire = Data("HTTP/1.1 \(status) Synthetic\r\n\(headers)Connection: close\r\n\r\n".utf8)
+            wire.append(body)
+            let peer = try LoopbackShutterPeer(endpoint: ShutterRecoveryEndpoint.variants[0], pressFault: .disconnect,
+                failedReleases: 0, controlResponse: wire)
+            defer { XCTAssertTrue(peer.stop()) }
+            var request = URLRequest(url: URL(string: peer.baseURL + "/transport-control")!)
+            request.httpMethod = "POST"
+            request.httpBody = Data(#"{"action":"start"}"#.utf8)
+            let exchange = try await URLSessionCameraHTTPTransport().sendRecordingCommand(request)
+            XCTAssertEqual(exchange.response.statusCode, status)
+            XCTAssertEqual(exchange.bodyComplete, complete)
+            XCTAssertFalse(exchange.cancelled)
+            XCTAssertLessThanOrEqual(exchange.response.body.count, 32 * 1024)
+            if complete { XCTAssertEqual(exchange.response.body, body) }
+            XCTAssertEqual(peer.requests().count, 1)
+            XCTAssertEqual(peer.requests().first?.body, request.httpBody)
+        }
+    }
+
+    func testRecordingReaderCancellationAfterReceivedHeadersClosesPendingBodyWithoutReplay() async throws {
+        for status in [200, 502, 503] {
+            // Establish a response with an explicitly typed body prefix while its
+            // HTTP framing remains incomplete. Sending bare headers alone did not
+            // reach the URLSession observer in CI; that delivery delay is unresolved.
+            let prefix = Data("{}".utf8)
+            let declaredLength = 64
+            XCTAssertLessThan(prefix.count, declaredLength)
+            var wire = Data("HTTP/1.1 \(status) Synthetic\r\nContent-Type: application/json\r\nContent-Length: \(declaredLength)\r\nConnection: close\r\n\r\n".utf8)
+            wire.append(prefix)
+            let peer = try LoopbackShutterPeer(endpoint: ShutterRecoveryEndpoint.variants[0], pressFault: .disconnect,
+                failedReleases: 0, controlResponse: wire, holdControlBodyUntilCancelled: true)
+            defer { XCTAssertTrue(peer.stop()) }
+            let headers = expectation(description: "REC reader actually received HTTP \(status) headers")
+            let finished = expectation(description: "REC reader settles while HTTP \(status) body remains gated")
+            let result = RecordingWireResult()
+            var request = URLRequest(url: URL(string: peer.baseURL + "/transport-control")!)
+            request.httpMethod = "POST"
+            request.httpBody = Data(#"{"action":"start"}"#.utf8)
+            let commandRequest = request
+            let task = Task {
+                do {
+                    let exchange = try await URLSessionCameraHTTPTransport().sendRecordingCommand(
+                        commandRequest, onResponseHeaders: { receivedStatus in
+                            XCTAssertEqual(receivedStatus, status)
+                            headers.fulfill()
+                        }
+                    )
+                    result.set(.success(exchange))
+                } catch { result.set(.failure(error)) }
+                finished.fulfill()
+            }
+            defer { task.cancel() }
+            await fulfillment(of: [headers], timeout: 2)
+            XCTAssertNil(result.get(), "The remaining body is still gated; a prefix cannot finish REC")
+            task.cancel()
+            await fulfillment(of: [finished, peer.pendingBodyCancelled], timeout: 2)
+            let exchange = try XCTUnwrap(result.get()).get()
+            XCTAssertEqual(exchange.response.statusCode, status)
+            XCTAssertFalse(exchange.bodyComplete)
+            XCTAssertTrue(exchange.cancelled)
+            // Cancellation may win before or after the prefix's data callback.
+            XCTAssertLessThanOrEqual(exchange.response.body.count, prefix.count)
+            XCTAssertEqual(exchange.response.body, Data(prefix.prefix(exchange.response.body.count)))
+            XCTAssertEqual(peer.requests().count, 1)
+            XCTAssertEqual(peer.requests().first?.method, "POST")
+            XCTAssertEqual(peer.requests().first?.path, "/transport-control")
+            XCTAssertEqual(peer.requests().first?.body, commandRequest.httpBody)
+            XCTAssertTrue(peer.errors().isEmpty)
+        }
+    }
+
+    func testAlreadyCancelledRecordingResponseReaderSendsNoRequest() async throws {
+        let peer = try LoopbackShutterPeer(endpoint: ShutterRecoveryEndpoint.variants[0], pressFault: .disconnect,
+            failedReleases: 0, controlResponse: Data("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n".utf8))
+        defer { XCTAssertTrue(peer.stop()) }
+        var request = URLRequest(url: URL(string: peer.baseURL + "/transport-control")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data(#"{"action":"start"}"#.utf8)
+        let commandRequest = request
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await URLSessionCameraHTTPTransport().sendRecordingCommand(commandRequest)
+        }
+        do { _ = try await task.value; XCTFail("Expected cancellation before sending") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertTrue(peer.requests().isEmpty)
     }
 
     func testClosePerformsRetainedReleaseAfterThePeerConsumesAnUnacknowledgedPress() async throws {
@@ -325,6 +495,21 @@ private func wireResponseDescription(_ response: CameraHTTPResponse) -> String {
         "Transfer-Encoding \(response.header("transfer-encoding") ?? "missing")"
 }
 
+private final class RecordingWireResult: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<CameraHTTPRecordingResponse, Error>?
+    func set(_ value: Result<CameraHTTPRecordingResponse, Error>) {
+        lock.lock()
+        result = value
+        lock.unlock()
+    }
+    func get() -> Result<CameraHTTPRecordingResponse, Error>? {
+        lock.lock()
+        defer { lock.unlock() }
+        return result
+    }
+}
+
 private enum LoopbackShutterPeerError: Error {
     case systemCall(String, Int32)
     case malformedRequest
@@ -350,6 +535,11 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
     private let failedReleases: Int
     private let connectionMode: ConnectionMode
     private let controlResponse: Data?
+    private let holdControlBodyUntilCancelled: Bool
+    let pendingBodyCancelled = XCTestExpectation(description: "Cancelled REC task closes its pending response socket")
+    private let recordingControl: Bool
+    private let recordingApplies: Bool
+    private var recordingApplied = false
     private let manualOnly: Bool
     private let lock = NSLock()
     private let finished = DispatchGroup()
@@ -357,6 +547,8 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
     private var activeConnection: Int32?
     private var recorded: [ShutterRecoveryRequest] = []
     private var recordedConnectionIDs: [Int] = []
+    // Synthetic test-only evidence. Never changes socket admission or transport behavior.
+    private var connectionEvents: [String] = []
     private var failures: [String] = []
     // Used only on the serial socket-serving queue.
     private var releaseCount = 0
@@ -367,13 +559,19 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
         failedReleases: Int,
         connectionMode: ConnectionMode = .fresh,
         controlResponse: Data? = nil,
-        manualOnly: Bool = false
+        manualOnly: Bool = false,
+        recordingControl: Bool = false,
+        recordingApplies: Bool = false,
+        holdControlBodyUntilCancelled: Bool = false
     ) throws {
         self.endpoint = endpoint
         self.pressFault = pressFault
         self.failedReleases = failedReleases
         self.connectionMode = connectionMode
         self.controlResponse = controlResponse
+        self.holdControlBodyUntilCancelled = holdControlBodyUntilCancelled
+        self.recordingControl = recordingControl
+        self.recordingApplies = recordingApplies
         self.manualOnly = manualOnly
         let socket = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard socket >= 0 else { throw LoopbackShutterPeerError.systemCall("socket", errno) }
@@ -431,10 +629,28 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
         return failures
     }
 
+    func didApplyRecording() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordingApplied
+    }
+
     func connectionIDs() -> [Int] {
         lock.lock()
         defer { lock.unlock() }
         return recordedConnectionIDs
+    }
+
+    func connectionTrace() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return connectionEvents.joined(separator: "; ")
+    }
+
+    private func recordConnectionEvent(_ event: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        connectionEvents.append("\(DispatchTime.now().uptimeNanoseconds): \(event)")
     }
 
     private var isStopped: Bool {
@@ -466,6 +682,7 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
             lock.lock()
             activeConnection = connection
             lock.unlock()
+            recordConnectionEvent("accepted connection \(connectionNumber)")
             var timeout = timeval(tv_sec: 3, tv_usec: 0)
             var noSignal: Int32 = 1
             _ = setsockopt(connection, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
@@ -473,12 +690,17 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
             _ = setsockopt(connection, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
             do {
                 while !isStopped {
-                    guard let request = try Self.readRequest(connection) else { break }
+                    guard let request = try Self.readRequest(connection) else {
+                        recordConnectionEvent("idle EOF on connection \(connectionNumber)")
+                        break
+                    }
+                    recordConnectionEvent("connection \(connectionNumber) received \(request.method) \(request.path)")
                     lock.lock()
                     recorded.append(request)
                     recordedConnectionIDs.append(connectionNumber)
                     lock.unlock()
                     let keepAlive = try reply(to: request, on: connection)
+                    recordConnectionEvent("connection \(connectionNumber) reply complete; keepAlive=\(keepAlive)")
                     if !keepAlive { break }
                 }
             } catch {
@@ -552,8 +774,41 @@ private final class LoopbackShutterPeer: @unchecked Sendable {
 
     /// Returns true only when the next request should be read from the same TCP socket.
     private func reply(to request: ShutterRecoveryRequest, on socket: Int32) throws -> Bool {
+        if recordingControl {
+            if request.method == "GET", request.path == "/health" {
+                try sendHTTP(status: 200, body: Data(#"{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}"#.utf8), on: socket)
+                return false
+            }
+            if request.method == "POST", request.path == "/v1/session" {
+                try sendHTTP(status: 200, body: Data(#"{"id":"synthetic","engine":"ccapi"}"#.utf8), on: socket)
+                return false
+            }
+            if request.method == "GET", request.path == "/ccapi" {
+                try sendHTTP(status: 200, body: Data(#"{"ver100":[{"path":"/shooting/control/recbutton","post":true}]}"#.utf8), on: socket)
+                return false
+            }
+            if request.method == "POST", ["/v1/session/synthetic/recording/start", "/ccapi/ver100/shooting/control/recbutton"].contains(request.path), let controlResponse {
+                lock.lock()
+                recordingApplied = recordingApplies
+                lock.unlock()
+                try sendAll(controlResponse, on: socket)
+                return false
+            }
+        }
         if request.path == "/transport-control", let controlResponse {
             try sendAll(controlResponse, on: socket)
+            if holdControlBodyUntilCancelled {
+                // The remaining body stays gated without artificial sleeps. The
+                // existing three-second socket deadline bounds broken cancellation.
+                var byte: UInt8 = 0
+                var received: Int
+                repeat { received = Darwin.recv(socket, &byte, 1, 0) } while received < 0 && errno == EINTR
+                if received == 0 || (received < 0 && errno == ECONNRESET) {
+                    pendingBodyCancelled.fulfill()
+                } else {
+                    recordFailure("Pending REC body was not closed by cancellation: recv=\(received), errno=\(errno)")
+                }
+            }
             return false
         }
         if request.method == "GET" {

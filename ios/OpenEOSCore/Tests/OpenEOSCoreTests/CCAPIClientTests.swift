@@ -26,6 +26,137 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(snapshots, [items])
     }
 
+    func testSimulatorMediaListRejectsMissingOrWrongTypeItemsWithoutPublishingEmptySuccess() async throws {
+        for body in [#"{}"#, #"{"items":null}"#, #"{"items":{}}"#, #"{"items":"invalid"}"#,
+                     #"{"items":true}"#, #"{"items":1}"#] {
+            let transport = MockCameraHTTPTransport()
+            await transport.enqueueJSON(path: "/ccapi/media", body: body)
+            let client = try CCAPIClient(baseURL: "http://127.0.0.1:18080", mode: .simulator, transport: transport)
+            let progress = MediaListProgressRecorder()
+            do {
+                _ = try await client.listMedia(maximumItems: 8) { await progress.record($0) }
+                XCTFail("A malformed HTTP 200 envelope must not become an empty successful listing: \(body)")
+            } catch {
+                XCTAssertEqual(error as? CCAPIError, .invalidResponse("Simulator media response must contain an items array."))
+            }
+            let snapshots = await progress.values()
+            let requests = await transport.requests()
+            XCTAssertTrue(snapshots.isEmpty)
+            XCTAssertEqual(requests.map(\.path), ["/ccapi/media"])
+            XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    func testSimulatorMediaListAcceptsExplicitEmptyItemsArrayAsSuccessfulRead() async throws {
+        let transport = MockCameraHTTPTransport()
+        await transport.enqueueJSON(path: "/ccapi/media", body: #"{"items":[]}"#)
+        let client = try CCAPIClient(baseURL: "http://127.0.0.1:18080", mode: .simulator, transport: transport)
+        let progress = MediaListProgressRecorder()
+        let items = try await client.listMedia(maximumItems: 8) { await progress.record($0) }
+        let snapshots = await progress.values()
+        let requests = await transport.requests()
+        XCTAssertTrue(items.isEmpty)
+        XCTAssertEqual(snapshots, [[]])
+        XCTAssertEqual(requests.map(\.path), ["/ccapi/media"])
+        XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+    }
+
+    func testSimulatorMediaListRejectsMalformedItemsBeforeTruncatingOrPublishing() async throws {
+        for body in [#"{"items":[null]}"#, #"{"items":[1]}"#, #"{"items":["bad"]}"#,
+                     #"{"items":[{}]}"#, #"{"items":[{"id":"","name":"SYNTHETIC.JPG"}]}"#,
+                     #"{"items":[{"id":1,"name":"SYNTHETIC.JPG"}]}"#,
+                     #"{"items":[{"id":"SYNTHETIC","name":"  "}]}"#,
+                     #"{"items":[{"id":"SYNTHETIC","name":1}]}"#,
+                     #"{"items":[{"id":"VALID","name":"SYNTHETIC.JPG"},null]}"#] {
+            let transport = MockCameraHTTPTransport()
+            await transport.enqueueJSON(path: "/ccapi/media", body: body)
+            let client = try CCAPIClient(baseURL: "http://127.0.0.1:18080", mode: .simulator, transport: transport)
+            let progress = MediaListProgressRecorder()
+            do {
+                _ = try await client.listMedia(maximumItems: 1) { await progress.record($0) }
+                XCTFail("An invalid item must not be silently discarded or hidden by the result limit")
+            } catch {
+                XCTAssertEqual(error as? CCAPIError, .invalidResponse("Simulator media response contains an invalid item."))
+            }
+            let snapshots = await progress.values()
+            let requests = await transport.requests()
+            XCTAssertTrue(snapshots.isEmpty)
+            XCTAssertEqual(requests.map(\.path), ["/ccapi/media"])
+            XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    func testRealMediaListRejectsMalformedPathEnvelopesBeforePublishing() async throws {
+        for body in [#"{}"#, #"{"path":null}"#, #"{"path":{}}"#, #"{"path":"invalid"}"#,
+                     #"{"path":[null]}"#, #"{"path":[1]}"#, #"{"path":["  "]}"#] {
+            for paged in [false, true] {
+                let transport = MockCameraHTTPTransport()
+                await transport.enqueueJSON(path: "/ccapi", body: #"{"ver100":[{"path":"/contents","get":true}]}"#)
+                await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number",
+                                            body: paged ? #"{"pagenumber":1}"# : #"{"pagenumber":0}"#)
+                let path = paged ? "/ccapi/ver100/contents?page=1&order=desc" : "/ccapi/ver100/contents"
+                await transport.enqueueJSON(path: path, body: body)
+                let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+                let progress = MediaListProgressRecorder()
+                do {
+                    _ = try await client.listMedia(maximumItems: 8) { await progress.record($0) }
+                    XCTFail("A malformed path envelope cannot become an empty successful listing")
+                } catch {
+                    XCTAssertEqual(error as? CCAPIError, .invalidResponse("Camera media response must contain a valid path array."))
+                }
+                let snapshots = await progress.values()
+                let requests = await transport.requests()
+                XCTAssertTrue(snapshots.isEmpty)
+                XCTAssertEqual(requests.count, 3)
+                XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+            }
+        }
+    }
+
+    func testRealMediaListRejectsMalformedPageCountWithoutInventingZero() async throws {
+        for body in [#"{}"#, #"{"pagenumber":null}"#, #"{"pagenumber":"1"}"#,
+                     #"{"pagenumber":true}"#, #"{"pagenumber":1.5}"#, #"{"pagenumber":-1}"#] {
+            let transport = MockCameraHTTPTransport()
+            await transport.enqueueJSON(path: "/ccapi", body: #"{"ver100":[{"path":"/contents","get":true}]}"#)
+            await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: body)
+            let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+            let progress = MediaListProgressRecorder()
+            do {
+                _ = try await client.listMedia(maximumItems: 8) { await progress.record($0) }
+                XCTFail("Malformed page metadata must not silently become an unpaged successful listing")
+            } catch {
+                guard let ccapiError = error as? CCAPIError, case .invalidResponse = ccapiError else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+            }
+            let snapshots = await progress.values()
+            let requests = await transport.requests()
+            XCTAssertTrue(snapshots.isEmpty)
+            XCTAssertEqual(requests.count, 2)
+            XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    func testRealMediaListKeepsUnsupportedCountAndValidUnpagedResponseFallbacks() async throws {
+        for unsupported in [false, true] {
+            let transport = MockCameraHTTPTransport()
+            await transport.enqueueJSON(path: "/ccapi", body: #"{"ver100":[{"path":"/contents","get":true}]}"#)
+            if unsupported {
+                await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", status: 404, body: #"{}"#)
+                await transport.enqueueJSON(path: "/ccapi/ver100/contents?type=all,kind=number", status: 404, body: #"{}"#)
+            } else {
+                await transport.enqueueJSON(path: "/ccapi/ver100/contents?kind=number", body: #"{"path":[]}"#)
+            }
+            await transport.enqueueJSON(path: "/ccapi/ver100/contents", body: #"{"path":[]}"#)
+            let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
+            let items = try await client.listMedia(maximumItems: 8)
+            let requests = await transport.requests()
+            XCTAssertTrue(items.isEmpty)
+            XCTAssertEqual(requests.count, unsupported ? 4 : 3)
+            XCTAssertTrue(requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
     func testSimulatorMediaListHonorsMaximumItems() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(
@@ -1032,6 +1163,11 @@ final class CCAPIClientTests: XCTestCase {
         )
         await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: settings)
         await transport.enqueue(method: "POST", path: "/ccapi/ver100/shooting/liveview", status: 204, body: Data())
+        await transport.enqueue(
+            path: "/ccapi/ver100/shooting/liveview/flip?t=0",
+            headers: ["content-type": "image/jpeg"],
+            body: CCAPILiveViewTestFixture.jpeg
+        )
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
 
         let capabilities = try await client.capabilities()
@@ -1057,7 +1193,12 @@ final class CCAPIClientTests: XCTestCase {
         }
         try await client.startLiveView()
         let finalRequestCount = await transport.requests().count
-        XCTAssertEqual(finalRequestCount, requestCount + 1)
+        XCTAssertEqual(finalRequestCount, requestCount + 2)
+        let startedRequests = await transport.requests()
+        XCTAssertEqual(startedRequests.suffix(2).map { "\($0.method) \($0.path)" }, [
+            "POST /ccapi/ver100/shooting/liveview",
+            "GET /ccapi/ver100/shooting/liveview/flip?t=0",
+        ])
     }
 
     func testCapabilityEvidenceIsBoundedAndRemovesQueries() async throws {
@@ -1261,7 +1402,7 @@ final class CCAPIClientTests: XCTestCase {
             body: #"{"message":"Invalid parameter"}"#
         )
         await transport.enqueue(method: "POST", path: "/ccapi/ver100/shooting/liveview", status: 204, body: Data())
-        let jpeg = Data([0xFF, 0xD8, 0x05, 0x06, 0xFF, 0xD9])
+        let jpeg = CCAPILiveViewTestFixture.jpeg
         await transport.enqueue(
             method: "GET",
             path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both",
@@ -1290,7 +1431,7 @@ final class CCAPIClientTests: XCTestCase {
             status: 503,
             body: #"{"message":"Device busy"}"#
         )
-        let jpeg = Data([0xFF, 0xD8, 0x09, 0x0A, 0xFF, 0xD9])
+        let jpeg = CCAPILiveViewTestFixture.jpeg
         await transport.enqueue(
             path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both",
             headers: ["content-type": "application/octet-stream"],
@@ -1337,6 +1478,11 @@ final class CCAPIClientTests: XCTestCase {
             status: 204,
             body: Data()
         )
+        await transport.enqueue(
+            path: "/ccapi/ver130/shooting/liveview/flip?t=0",
+            headers: ["content-type": "image/jpeg"],
+            body: CCAPILiveViewTestFixture.jpeg
+        )
         let client = try CCAPIClient(
             baseURL: "http://192.168.1.2:8080",
             mode: .camera,
@@ -1355,6 +1501,7 @@ final class CCAPIClientTests: XCTestCase {
         let requests = await transport.requests()
         let starts = requests.filter { $0.method == "POST" }
         XCTAssertEqual(starts.count, 3)
+        XCTAssertEqual(requests.last?.path, "/ccapi/ver130/shooting/liveview/flip?t=0")
         let bodies = try starts.map { request in
             try XCTUnwrap(
                 JSONSerialization.jsonObject(with: try XCTUnwrap(request.body)) as? [String: String]
@@ -1368,11 +1515,11 @@ final class CCAPIClientTests: XCTestCase {
     func testPostOnlyJPEGLiveViewUsesCanonPostOffStopAndReportsActiveSize() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: postOnlyLiveViewDiscovery)
-        let jpeg = Data([0xFF, 0xD8, 0x11, 0x12, 0xFF, 0xD9])
+        let jpeg = CCAPILiveViewTestFixture.jpeg
         await transport.enqueue(method: "POST", path: "/ccapi/ver130/shooting/liveview", status: 204, body: Data())
         await transport.enqueue(
             method: "GET",
-            path: "/ccapi/ver130/shooting/liveview/flip?t=21",
+            path: "/ccapi/ver130/shooting/liveview/flip?t=0",
             headers: ["content-type": "image/jpeg"],
             body: jpeg
         )
@@ -1398,9 +1545,12 @@ final class CCAPIClientTests: XCTestCase {
         let activeSizeBeforeFrame = await client.currentLiveViewSize()
         XCTAssertEqual(activeSizeBeforeFrame, .medium)
         let afterStart = try await client.capabilities()
-        XCTAssertFalse(afterStart.evidence.observedFeatures.contains(.liveViewJPEGPolling))
+        XCTAssertTrue(afterStart.evidence.observedFeatures.contains(.liveViewJPEGPolling), "Start returns only after validating its retained first JPEG")
+        let beforeRetainedRead = await transport.requests()
         let frame = try await client.liveViewFrame(cacheKey: 21)
         XCTAssertEqual(frame.data, jpeg)
+        let afterRetainedRead = await transport.requests()
+        XCTAssertEqual(afterRetainedRead.map { "\($0.method) \($0.path)" }, beforeRetainedRead.map { "\($0.method) \($0.path)" }, "First UI read consumes the validated frame without a duplicate GET")
         let activeSizeAfterFrame = await client.currentLiveViewSize()
         XCTAssertEqual(activeSizeAfterFrame, .medium)
         let afterFrame = try await client.capabilities()
@@ -1415,7 +1565,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requests.map { "\($0.method) \($0.path)" }, [
             "GET /ccapi",
             "POST /ccapi/ver130/shooting/liveview",
-            "GET /ccapi/ver130/shooting/liveview/flip?t=21",
+            "GET /ccapi/ver130/shooting/liveview/flip?t=0",
             "POST /ccapi/ver130/shooting/liveview",
         ])
         let stop = try XCTUnwrap(requests.last?.body)
@@ -1429,7 +1579,7 @@ final class CCAPIClientTests: XCTestCase {
         await transport.enqueue(method: "POST", path: "/ccapi/ver130/shooting/liveview", status: 204, body: Data())
         await transport.enqueue(
             method: "GET",
-            path: "/ccapi/ver130/shooting/liveview/flip?t=22",
+            path: "/ccapi/ver130/shooting/liveview/flip?t=0",
             status: 503,
             body: #"{"message":"Mode not supported"}"#.data(using: .utf8)!
         )
@@ -1440,10 +1590,10 @@ final class CCAPIClientTests: XCTestCase {
             body: Data()
         )
         await transport.enqueue(method: "POST", path: "/ccapi/ver130/shooting/liveview", status: 204, body: Data())
-        let jpeg = Data([0xFF, 0xD8, 0x21, 0x22, 0xFF, 0xD9])
+        let jpeg = CCAPILiveViewTestFixture.jpeg
         await transport.enqueue(
             method: "GET",
-            path: "/ccapi/ver130/shooting/liveview/flip?t=22",
+            path: "/ccapi/ver130/shooting/liveview/flip?t=0",
             headers: ["content-type": "image/jpeg"],
             body: jpeg
         )
@@ -1454,9 +1604,12 @@ final class CCAPIClientTests: XCTestCase {
         )
 
         try await client.startLiveView(LiveViewRequest(size: .medium, source: .auto))
+        let beforeRetainedRead = await transport.requests()
         let frame = try await client.liveViewFrame(cacheKey: 22)
 
         XCTAssertEqual(frame.data, jpeg)
+        let afterRetainedRead = await transport.requests()
+        XCTAssertEqual(afterRetainedRead.map { "\($0.method) \($0.path)" }, beforeRetainedRead.map { "\($0.method) \($0.path)" }, "SMALL startup retains its first frame after the confirmed MEDIUM stop")
         let activeSize = await client.currentLiveViewSize()
         XCTAssertEqual(activeSize, .small)
         let capabilities = try await client.capabilities()
@@ -1467,10 +1620,10 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requests.map { "\($0.method) \($0.path)" }, [
             "GET /ccapi",
             "POST /ccapi/ver130/shooting/liveview",
-            "GET /ccapi/ver130/shooting/liveview/flip?t=22",
+            "GET /ccapi/ver130/shooting/liveview/flip?t=0",
             "POST /ccapi/ver130/shooting/liveview",
             "POST /ccapi/ver130/shooting/liveview",
-            "GET /ccapi/ver130/shooting/liveview/flip?t=22",
+            "GET /ccapi/ver130/shooting/liveview/flip?t=0",
         ])
         let starts = requests.filter { $0.method == "POST" && $0.path.hasSuffix("/shooting/liveview") }
         XCTAssertEqual(starts.count, 3)
@@ -1495,6 +1648,11 @@ final class CCAPIClientTests: XCTestCase {
             body: #"{"ver130":[{"path":"/shooting/liveview","post":true,"delete":true},{"path":"/shooting/liveview/flip","get":true}]}"#
         )
         await transport.enqueue(method: "POST", path: "/ccapi/ver130/shooting/liveview", status: 204, body: Data())
+        await transport.enqueue(
+            path: "/ccapi/ver130/shooting/liveview/flip?t=0",
+            headers: ["content-type": "image/jpeg"],
+            body: CCAPILiveViewTestFixture.jpeg
+        )
         await transport.enqueue(method: "DELETE", path: "/ccapi/ver130/shooting/liveview", status: 204, body: Data())
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
 
@@ -1505,6 +1663,7 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertEqual(requests.map { "\($0.method) \($0.path)" }, [
             "GET /ccapi",
             "POST /ccapi/ver130/shooting/liveview",
+            "GET /ccapi/ver130/shooting/liveview/flip?t=0",
             "DELETE /ccapi/ver130/shooting/liveview",
         ])
         XCTAssertNil(requests.last?.body)
@@ -1513,7 +1672,7 @@ final class CCAPIClientTests: XCTestCase {
     func testTapFocusUsesCanonImagePositionCoordinates() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)
-        let jpeg = Data([0xFF, 0xD8, 0x01, 0x02, 0xFF, 0xD9])
+        let jpeg = CCAPILiveViewTestFixture.jpeg
         await transport.enqueue(
             method: "GET",
             path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both",
@@ -1543,7 +1702,7 @@ final class CCAPIClientTests: XCTestCase {
     func testClickWhiteBalanceUsesCanonImagePositionCoordinates() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: discovery)
-        let jpeg = Data([0xFF, 0xD8, 0x01, 0x02, 0xFF, 0xD9])
+        let jpeg = CCAPILiveViewTestFixture.jpeg
         await transport.enqueue(
             method: "GET",
             path: "/ccapi/ver100/shooting/liveview/flipdetail?kind=both",
@@ -2637,6 +2796,11 @@ final class CCAPIClientTests: XCTestCase {
         XCTAssertTrue(capabilities.evidence.writableSettings.contains("lvzoom"))
 
         await transport.enqueue(method: "POST", path: "/ccapi/ver100/shooting/liveview", status: 204)
+        await transport.enqueue(
+            path: "/ccapi/ver100/shooting/liveview/flip?t=0",
+            headers: ["content-type": "image/jpeg"],
+            body: CCAPILiveViewTestFixture.jpeg
+        )
         try await client.startLiveView(LiveViewRequest(source: .ccapiJPEGPolling))
         await transport.enqueueJSON(
             method: "PUT",
@@ -2902,7 +3066,6 @@ final class CCAPIClientTests: XCTestCase {
             path: "/ccapi/ver100/functions/directory/createdirectory",
             body: #"{"directoryname":"ABCDE"}"#
         )
-        await transport.enqueueJSON(path: "/ccapi/ver100/shooting/settings", body: "{}")
         await transport.enqueueJSON(
             path: "/ccapi/ver100/functions/directory/directoryselection",
             body: #"{"value":"101ABCDE","ability":["100EOSXX","101ABCDE"]}"#
@@ -3845,9 +4008,9 @@ final class CCAPIClientTests: XCTestCase {
         let client = try CCAPIClient(baseURL: "http://192.168.1.2:8080", mode: .camera, transport: transport)
 
         let started = try await client.startRecording()
-        XCTAssertEqual(started.recording, true)
+        XCTAssertNil(started.recording, "Canon ACK is not a fresh recording observation")
         let stopped = try await client.stopRecording()
-        XCTAssertEqual(stopped.recording, false)
+        XCTAssertNil(stopped.recording, "Canon ACK is not a fresh recording observation")
 
         let stop = (await transport.requests()).last { request in
             request.method == "POST" && request.path == "/ccapi/ver100/shooting/control/recbutton"
@@ -4062,4 +4225,12 @@ final class CCAPIClientTests: XCTestCase {
         result.append(contentsOf: [0xFF, 0xFF])
         return result
     }
+}
+
+// A complete synthetic 1x1 JPEG, shared by the migrated Live View fixtures.
+// Unlike a SOI/EOI-only envelope, these bytes are independently decodable.
+enum CCAPILiveViewTestFixture {
+    static let jpeg = Data(base64Encoded:
+        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDzmiiivTPOP//Z"
+    )!
 }

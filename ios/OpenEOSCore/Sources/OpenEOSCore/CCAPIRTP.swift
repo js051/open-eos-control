@@ -434,6 +434,8 @@ public final class CCAPIH264RTPDepacketizer {
 public protocol CCAPIRTPSession: Sendable {
     var sourceURL: URL { get }
     func start() async throws
+    /// Listener binding is not readiness. Return only after native decoding produces a frame.
+    func waitUntilReady() async throws
     func setTargetFPS(_ fps: Int) async
     func close() async
 }
@@ -505,3 +507,43 @@ private let fuStartMask: UInt8 = 0x80
 private let fuEndMask: UInt8 = 0x40
 private let fuReservedMask: UInt8 = 0x20
 private let maximumAccessUnitBytes = 8 * 1024 * 1024
+
+/// One session owns one gate. A decoded frame is distinct from renderer presentation.
+/// Polling is bounded and cancellation-aware; no continuation can outlive its owner.
+public final class CCAPIRTPReadinessGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var ready = false
+    private var failure: Error?
+
+    public init() {}
+
+    public func decodedFrame() {
+        lock.lock(); defer { lock.unlock() }
+        guard failure == nil else { return }
+        ready = true
+    }
+
+    public func fail(_ error: Error) {
+        lock.lock(); defer { lock.unlock() }
+        if failure == nil { failure = error }
+    }
+
+    private func snapshot() -> (Bool, Error?) {
+        lock.lock(); defer { lock.unlock() }
+        return (ready, failure)
+    }
+
+    public func wait(timeoutNanoseconds: UInt64 = 5_000_000_000) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(clamping: timeoutNanoseconds)))
+        while true {
+            try Task.checkCancellation()
+            let (ready, failure) = snapshot()
+            if let failure { throw failure }
+            if ready { return }
+            guard ContinuousClock.now < deadline else {
+                throw CCAPIError.invalidResponse("Canon RTP did not decode a first video frame within the readiness deadline.")
+            }
+            try await Task.sleep(nanoseconds: min(timeoutNanoseconds, 10_000_000))
+        }
+    }
+}

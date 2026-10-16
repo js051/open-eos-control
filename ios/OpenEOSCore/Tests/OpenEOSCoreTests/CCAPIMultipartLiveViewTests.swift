@@ -48,10 +48,10 @@ final class CCAPIMultipartLiveViewTests: XCTestCase {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: Self.discovery)
         await transport.enqueue(method: "POST", path: "/ccapi/ver110/shooting/liveview", body: Data())
-        await transport.enqueue(
+        await transport.enqueueLiveStream(
             path: "/ccapi/ver110/shooting/liveview/multipart",
             headers: ["content-type": "multipart/x-mixed-replace;boundary=canon"],
-            body: multipart(boundary: "canon", frame: jpeg)
+            body: multipart(boundary: "canon", frame: jpeg, openEnded: true)
         )
         await transport.enqueueJSON(
             method: "DELETE",
@@ -107,10 +107,10 @@ final class CCAPIMultipartLiveViewTests: XCTestCase {
                 body: #"{"message":"Live view not started"}"#
             )
         }
-        await transport.enqueue(
+        await transport.enqueueLiveStream(
             path: "/ccapi/ver110/shooting/liveview/multipart",
             headers: ["content-type": "multipart/x-mixed-replace;boundary=canon"],
-            body: multipart(boundary: "canon", frame: jpeg)
+            body: multipart(boundary: "canon", frame: jpeg, openEnded: true)
         )
         await transport.enqueueJSON(
             method: "DELETE",
@@ -180,15 +180,14 @@ final class CCAPIMultipartLiveViewTests: XCTestCase {
     func testPostOnlyGeneralLifecycleUsesMultipartAndAlwaysSendsPostOffAfterReader503() async throws {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: Self.postOnlyDiscovery)
-        let streamBody = multipart(boundary: "canon", frame: jpeg)
+        let streamBody = multipart(boundary: "canon", frame: jpeg, openEnded: true)
         await transport.enqueue(
             method: "POST",
             path: "/ccapi/ver130/shooting/liveview",
             status: 204,
             body: Data()
         )
-        await transport.enqueue(
-            method: "GET",
+        await transport.enqueueLiveStream(
             path: "/ccapi/ver130/shooting/liveview/multipart",
             headers: ["content-type": "multipart/x-mixed-replace;boundary=canon"],
             body: streamBody
@@ -267,7 +266,7 @@ final class CCAPIMultipartLiveViewTests: XCTestCase {
         let transport = MockCameraHTTPTransport()
         await transport.enqueueJSON(path: "/ccapi", body: Self.discovery)
         await transport.enqueue(method: "POST", path: "/ccapi/ver110/shooting/liveview", body: Data())
-        await transport.enqueue(
+        await transport.enqueueLiveStream(
             path: "/ccapi/ver110/shooting/liveview/multipart",
             headers: ["content-type": "multipart/x-mixed-replace;boundary=canon"],
             body: Data("--canon\nContent-Type: image/jpeg\nContent-Length: 3\n\nno\n--canon--\n".utf8)
@@ -280,7 +279,7 @@ final class CCAPIMultipartLiveViewTests: XCTestCase {
         await transport.enqueue(method: "DELETE", path: "/ccapi/ver110/shooting/liveview", body: Data())
         await transport.enqueue(method: "POST", path: "/ccapi/ver110/shooting/liveview", body: Data())
         await transport.enqueue(
-            path: "/ccapi/ver110/shooting/liveview/flip?t=1",
+            path: "/ccapi/ver110/shooting/liveview/flip?t=0",
             headers: ["content-type": "image/jpeg"],
             body: jpeg
         )
@@ -311,18 +310,18 @@ final class CCAPIMultipartLiveViewTests: XCTestCase {
                 "DELETE /ccapi/ver110/shooting/liveview/multipart",
                 "DELETE /ccapi/ver110/shooting/liveview",
                 "POST /ccapi/ver110/shooting/liveview",
-                "GET /ccapi/ver110/shooting/liveview/flip?t=1",
+                "GET /ccapi/ver110/shooting/liveview/flip?t=0",
                 "DELETE /ccapi/ver110/shooting/liveview",
             ]
         )
     }
 
-    private func multipart(boundary: String, frame: Data) -> Data {
+    private func multipart(boundary: String, frame: Data, openEnded: Bool = false) -> Data {
         var value = Data(
             "--\(boundary)\nContent-Type: image/jpeg\nContent-Length: \(frame.count)\n\n".utf8
         )
         value.append(frame)
-        value.append(Data("\n--\(boundary)--\n".utf8))
+        if !openEnded { value.append(Data("\n--\(boundary)--\n".utf8)) }
         return value
     }
 

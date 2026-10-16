@@ -342,6 +342,14 @@ final class CameraAppTests: XCTestCase {
         }
 
         XCTAssertGreaterThan(decodedFrames, 0)
+        // The production converter's noDataNow drain path is reachable with the
+        // real AAC fixture too. Delayed output is optional, never fabricated.
+        for _ in 0..<4 {
+            if let drained = try decoder.drain() {
+                XCTAssertGreaterThan(drained.frameLength, 0)
+                XCTAssertEqual(drained.format.sampleRate, 48_000)
+            }
+        }
     }
 
     func testCameraAudioStartsMutedAndIsNotPersisted() {

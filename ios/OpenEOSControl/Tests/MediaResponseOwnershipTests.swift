@@ -1,6 +1,8 @@
 import Foundation
 import OpenEOSCore
 import XCTest
+import UIKit
+import UniformTypeIdentifiers
 
 @testable import OpenEOSControl
 
@@ -8,6 +10,205 @@ import XCTest
 /// exact owner task's completion, rather than treating a delay as evidence.
 @MainActor
 final class MediaResponseOwnershipTests: XCTestCase {
+    func testBridgeThumbnailsWaitForCompletionAndExplicitPreviewRetiresListing() async throws {
+        let peer = MediaOwnershipPeer()
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectAndLoad(state)
+        let item = try XCTUnwrap(state.mediaItems.first)
+        await peer.enqueue(.listing, gate: "listing")
+        state.startMediaLibraryLoad()
+        try await waitForGate("listing", peer: peer)
+        let before = await peer.count(.thumbnail)
+        XCTAssertTrue(state.mediaListingDefersThumbnails)
+        await state.loadMediaThumbnail(item)
+        let during = await peer.count(.thumbnail)
+        XCTAssertEqual(during, before)
+        await state.openMediaPreview(item)
+        XCTAssertEqual(state.mediaLibraryLoadStatus, .cancelled)
+        XCTAssertTrue(state.mediaListingDefersThumbnails)
+        XCTAssertNotNil(state.mediaPreviewData)
+        await peer.release("listing")
+        // A late cancelled listing must not enable automatic thumbnail demand.
+        state.closeMediaPreview()
+        state.startMediaLibraryLoad()
+        try await waitUntil { state.mediaLibraryLoadStatus == .complete && !state.mediaLibraryLoading }
+        XCTAssertFalse(state.mediaListingDefersThumbnails)
+        await state.loadMediaThumbnail(item)
+        let after = await peer.count(.thumbnail)
+        XCTAssertEqual(after, before + 1)
+    }
+
+    func testBridgeCancelConsumesQueuedContentsHintButAllowsANewEvent() async throws {
+        let peer = MediaOwnershipPeer(events: true)
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectAndLoad(state)
+        state.screen = .media
+        try await waitUntil { await peer.eventWaiting() }
+        await peer.enqueue(.listing, gate: "manual-listing")
+        state.startMediaLibraryLoad()
+        try await waitForGate("manual-listing", peer: peer)
+        let polls = await peer.eventPolls()
+        let before = await peer.count(.listing)
+        await peer.emitContents()
+        state.cancelMediaLibraryLoad()
+        await peer.release("manual-listing")
+        try await waitUntil { await peer.eventPolls() > polls }
+        let afterCancel = await peer.count(.listing)
+        XCTAssertEqual(afterCancel, before, "Old hint must not restart latest or gallery listing")
+        XCTAssertEqual(state.mediaLibraryLoadStatus, .cancelled)
+        await peer.emitContents()
+        try await waitUntil { state.mediaLibraryLoadStatus == .complete && !state.mediaLibraryLoading }
+        let afterNewEvent = await peer.count(.listing)
+        XCTAssertEqual(afterNewEvent, before + 1, "A new event has one gallery traversal")
+    }
+
+    func testBridgeFailedEventListingIsConsumedWithoutRetryingTraversal() async throws {
+        let peer = MediaOwnershipPeer(events: true)
+        let state = makeState([peer])
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+        try await connectAndLoad(state)
+        state.screen = .media
+        try await waitUntil { await peer.eventWaiting() }
+        let before = await peer.count(.listing)
+        let polls = await peer.eventPolls()
+        await peer.enqueue(.listing, error: .networkConnectionLost)
+        await peer.emitContents()
+        try await waitUntil { await peer.eventPolls() > polls }
+        let after = await peer.count(.listing)
+        XCTAssertEqual(after, before + 1)
+        XCTAssertEqual(state.mediaLibraryLoadStatus, .failed)
+        XCTAssertTrue(state.mediaListingDefersThumbnails)
+    }
+
+    func testDateFilterAndClearPreserveAnActuallySelectedPreview() async throws {
+        for bridge in [false, true] {
+            let peer = MediaOwnershipPeer()
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            let item = try XCTUnwrap(state.latestMediaItem)
+            await state.openMediaPreview(item)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewItem).id, item.id)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewData), MediaOwnershipPeer.imageBytes)
+            let owner = state.mediaLibrarySessionID
+            let media = state.mediaItems
+            let loadStatus = state.mediaLibraryLoadStatus
+            let listingCount = await peer.count(.listing)
+            let previewCount = await peer.count(.preview)
+            let date = Date(timeIntervalSince1970: 1_786_752_000)
+            let range = try XCTUnwrap(MediaDateRange(startDate: date, endDate: date,
+                                                   timeZone: TimeZone(secondsFromGMT: 0)!))
+            XCTAssertTrue(state.setMediaDateRange(range, owner: owner))
+            // The selected fixture has an unknown capture date and is excluded from the list.
+            XCTAssertTrue(mediaItemsForDisplay(media, filter: .all, sort: .camera, dateRange: range).isEmpty)
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            XCTAssertEqual(state.mediaItems, media)
+            XCTAssertEqual(state.mediaLibraryLoadStatus, loadStatus)
+            XCTAssertTrue(state.setMediaDateRange(nil, owner: owner))
+            XCTAssertEqual(mediaItemsForDisplay(state.mediaItems, filter: .all, sort: .camera), media)
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            let afterListingCount = await peer.count(.listing)
+            let afterPreviewCount = await peer.count(.preview)
+            XCTAssertEqual(afterListingCount, listingCount)
+            XCTAssertEqual(afterPreviewCount, previewCount)
+        }
+    }
+
+    func testRatingFilterAndClearPreserveAnActuallySelectedPreviewWithoutRequests() async throws {
+        for bridge in [false, true] {
+            let peer = MediaOwnershipPeer()
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            let item = try XCTUnwrap(state.latestMediaItem)
+            await state.openMediaPreview(item)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewItem).id, item.id)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewData), MediaOwnershipPeer.imageBytes)
+            let items = state.mediaItems
+            let status = state.mediaLibraryLoadStatus
+            let owner = state.mediaLibrarySessionID
+            let listingCount = await peer.count(.listing)
+            let previewCount = await peer.count(.preview)
+            let infoCount = await peer.count(.info)
+            let mutations = await peer.mutationOperations()
+            // Choose a valid filter that excludes the selected item, regardless of fixture rating.
+            let excluded: MediaRatingFilter = item.rating == 5 ? .unrated : .five
+            XCTAssertTrue(state.setMediaRatingFilter(excluded, owner: owner))
+            XCTAssertFalse(mediaItemsForDisplay(items, filter: .all, sort: .ratingHigh,
+                ratingFilter: excluded).contains { $0.id == item.id })
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            XCTAssertEqual(state.mediaItems, items)
+            XCTAssertEqual(state.mediaLibraryLoadStatus, status)
+            XCTAssertTrue(state.setMediaRatingFilter(.all, owner: owner))
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            let afterListing = await peer.count(.listing)
+            let afterPreview = await peer.count(.preview)
+            XCTAssertEqual(afterListing, listingCount)
+            XCTAssertEqual(afterPreview, previewCount)
+            let afterInfo = await peer.count(.info)
+            let afterMutations = await peer.mutationOperations()
+            XCTAssertEqual(afterInfo, infoCount)
+            XCTAssertEqual(afterMutations, mutations)
+        }
+    }
+
+    func testFolderFilterAndClearPreserveSelectedPreviewAndDownloadWithoutRequests() async throws {
+        for bridge in [false, true] {
+            let peer = MediaOwnershipPeer()
+            let state = makeState([peer], bridge: bridge)
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            let item = try XCTUnwrap(state.latestMediaItem)
+            await state.openMediaPreview(item)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewItem).id, item.id)
+            XCTAssertEqual(try XCTUnwrap(state.mediaPreviewData), MediaOwnershipPeer.imageBytes)
+            state.startMediaDownload(item)
+            let download = try XCTUnwrap(state.mediaDownloadTask)
+            await download.value
+            let downloadedFile = try XCTUnwrap(state.downloadedFile(for: item))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: downloadedFile.path))
+            XCTAssertEqual(try Data(contentsOf: downloadedFile), MediaOwnershipPeer.imageBytes)
+            let owner = state.mediaLibrarySessionID
+            let items = state.mediaItems
+            XCTAssertTrue(items.contains { $0.id == item.id })
+            let scope = state.mediaLibraryScope
+            let status = state.mediaLibraryLoadStatus
+            let hasMore = state.mediaLibraryHasMore
+            let requests = await peer.requestOperations()
+            let limits = await peer.listLimits()
+            let excluded = try XCTUnwrap(CameraMediaFolder(id: "synthetic:not-loaded", label: "Not loaded"))
+            XCTAssertFalse(items.contains { $0.folder.map { mediaFolderIdentity($0) } == mediaFolderIdentity(excluded) })
+            XCTAssertTrue(state.setMediaFolderFilter(.folder(excluded), owner: owner))
+            XCTAssertTrue(mediaItemsForDisplay(items, filter: .all, sort: .camera,
+                folderFilter: state.mediaFolderFilter).isEmpty)
+            XCTAssertEqual(state.mediaFolderFilter, .folder(excluded))
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            XCTAssertEqual(state.downloadedFile(for: item), downloadedFile)
+            XCTAssertTrue(state.setMediaFolderFilter(.all, owner: owner))
+            XCTAssertEqual(mediaItemsForDisplay(state.mediaItems, filter: .all, sort: .camera,
+                folderFilter: state.mediaFolderFilter), items)
+            XCTAssertEqual(state.mediaPreviewItem, item)
+            XCTAssertEqual(state.mediaPreviewData, MediaOwnershipPeer.imageBytes)
+            XCTAssertEqual(state.downloadedFile(for: item), downloadedFile)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: downloadedFile.path))
+            XCTAssertEqual(state.mediaItems, items)
+            XCTAssertEqual(state.mediaLibraryScope, scope)
+            XCTAssertEqual(state.mediaLibraryLoadStatus, status)
+            XCTAssertEqual(state.mediaLibraryHasMore, hasMore)
+            let afterRequests = await peer.requestOperations()
+            let afterLimits = await peer.listLimits()
+            XCTAssertEqual(afterRequests, requests, "Folder selection cannot list, preview, download, or mutate media")
+            XCTAssertEqual(afterLimits, limits, "Folder selection cannot request full-card enumeration")
+        }
+    }
+
     func testRetiredInfoAndEveryMetadataResponseCannotOwnReplacementSession() async throws {
         for bridge in [false, true] {
             for operation in OwnershipOperation.metadataAndInfo {
@@ -48,6 +249,198 @@ final class MediaResponseOwnershipTests: XCTestCase {
         }
     }
 
+    func testRealPickerCoordinatorRetainsOpeningTicketAndDeliversOnlyOnce() async throws {
+        let peer = MediaOwnershipPeer()
+        let state = makeState([peer])
+        let file = try uploadFile("COORDINATOR.JPG")
+        defer { state.requestDisconnect(); removeUpload(file) }
+        try await connectAndLoad(state)
+        let first = try XCTUnwrap(state.beginMediaUploadSelection())
+        var completions = 0, acquisitions = 0, releases = 0
+        let access = MediaUploadFileAccess(acquire: { _ in acquisitions += 1; return true }, release: { _ in releases += 1 })
+        let oldCoordinator = MediaUploadPicker.Coordinator(selection: first) { opening, urls in
+            completions += 1
+            if let url = urls?.first { state.startMediaUpload(url, selection: opening, access: access) }
+            else { state.cancelMediaUploadSelection(opening) }
+        }
+        state.cancelMediaUploadSelection(first)
+        let second = try XCTUnwrap(state.beginMediaUploadSelection())
+        let controller = UIDocumentPickerViewController(forOpeningContentTypes: [.data])
+        oldCoordinator.documentPicker(controller, didPickDocumentsAt: [file])
+        oldCoordinator.documentPickerWasCancelled(controller)
+        oldCoordinator.documentPicker(controller, didPickDocumentsAt: [file])
+        XCTAssertEqual(completions, 1)
+        XCTAssertEqual(acquisitions, 0)
+        XCTAssertTrue(state.startMediaUpload(file, selection: second, access: access))
+        await state.mediaUploadTask?.value
+        XCTAssertEqual(acquisitions, 1); XCTAssertEqual(releases, 1)
+        let uploads = await peer.count(.upload)
+        XCTAssertEqual(uploads, 1)
+    }
+
+    func testRejectedProviderGrantNeverDispatchesAndDoesNotReleaseAnUnacquiredGrant() async throws {
+        let peer = MediaOwnershipPeer()
+        let state = makeState([peer])
+        let file = try uploadFile("DENIED-GRANT.JPG")
+        defer { state.requestDisconnect(); removeUpload(file) }
+        try await connectAndLoad(state)
+        var acquisitions = 0, releases = 0
+        let opening = try XCTUnwrap(state.beginMediaUploadSelection())
+        let access = MediaUploadFileAccess(acquire: { _ in acquisitions += 1; return false }, release: { _ in releases += 1 })
+        XCTAssertFalse(state.startMediaUpload(file, selection: opening, access: access))
+        XCTAssertFalse(state.startMediaUpload(file, selection: opening, access: access))
+        XCTAssertEqual(acquisitions, 1); XCTAssertEqual(releases, 0)
+        XCTAssertEqual(state.mediaUploadResult?.outcome, .notSent)
+        XCTAssertNotNil(state.mediaUploadError)
+        XCTAssertFalse(state.isBusy(.media))
+        let uploads = await peer.count(.upload)
+        XCTAssertEqual(uploads, 0)
+    }
+
+    func testPickerOpeningOwnerRejectsLateCallbackBeforeAcquiringTheFile() async throws {
+        let oldPeer = MediaOwnershipPeer(), newPeer = MediaOwnershipPeer()
+        let state = makeState([oldPeer, newPeer])
+        let file = try uploadFile("PICKER.JPG")
+        defer { state.requestDisconnect(); removeUpload(file) }
+        try await connectAndLoad(state)
+        let opening = try XCTUnwrap(state.beginMediaUploadSelection())
+        await state.disconnect()
+        try await connectAndLoad(state)
+        var acquisitions = 0, releases = 0
+        let access = MediaUploadFileAccess(acquire: { _ in acquisitions += 1; return true }, release: { _ in releases += 1 })
+        XCTAssertFalse(state.startMediaUpload(file, selection: opening, access: access))
+        XCTAssertEqual(acquisitions, 0)
+        XCTAssertEqual(releases, 0)
+        let oldUploads = await oldPeer.count(.upload), newUploads = await newPeer.count(.upload)
+        XCTAssertEqual(oldUploads + newUploads, 0)
+        XCTAssertNil(state.mediaUploadResult)
+    }
+
+    func testCancelledOldPickerCannotConsumeNewPickerAndDuplicateCallbackCannotResend() async throws {
+        let peer = MediaOwnershipPeer()
+        let state = makeState([peer])
+        let file = try uploadFile("SINGLE-USE.JPG")
+        defer { state.requestDisconnect(); removeUpload(file) }
+        try await connectAndLoad(state)
+        let first = try XCTUnwrap(state.beginMediaUploadSelection())
+        state.cancelMediaUploadSelection(first)
+        let second = try XCTUnwrap(state.beginMediaUploadSelection())
+        var acquisitions = 0, releases = 0
+        let access = MediaUploadFileAccess(acquire: { _ in acquisitions += 1; return true }, release: { _ in releases += 1 })
+        XCTAssertFalse(state.startMediaUpload(file, selection: first, access: access))
+        state.cancelMediaUploadSelection(first)
+        XCTAssertTrue(state.startMediaUpload(file, selection: second, access: access))
+        let task = try XCTUnwrap(state.mediaUploadTask)
+        XCTAssertFalse(state.startMediaUpload(file, selection: second, access: access))
+        await task.value
+        XCTAssertEqual(acquisitions, 1); XCTAssertEqual(releases, 1)
+        XCTAssertEqual(state.mediaUploadResult?.outcome, .verified)
+        let uploads = await peer.count(.upload)
+        XCTAssertEqual(uploads, 1)
+    }
+
+    func testGrantedSourceReleasedExactlyOnceBeforeEntryOnCancelRetireAndStagingFailure() async throws {
+        for mode in ["cancel", "retire", "missing-source"] {
+            let peer = MediaOwnershipPeer()
+            let state = makeState([peer])
+            let file = try uploadFile("GRANT.JPG")
+            defer { state.requestDisconnect(); removeUpload(file) }
+            try await connectAndLoad(state)
+            let opening = try XCTUnwrap(state.beginMediaUploadSelection())
+            var acquisitions = 0, releases = 0
+            let access = MediaUploadFileAccess(acquire: { _ in acquisitions += 1; return true }, release: { _ in releases += 1 })
+            let listings = await peer.count(.listing)
+            XCTAssertTrue(state.startMediaUpload(file, selection: opening, access: access))
+            let task = try XCTUnwrap(state.mediaUploadTask)
+            if mode == "cancel" { state.cancelMediaUpload() }
+            else if mode == "retire" { state.requestDisconnect() }
+            else { try FileManager.default.removeItem(at: file) }
+            await task.value
+            XCTAssertEqual(acquisitions, 1, mode); XCTAssertEqual(releases, 1, mode)
+            XCTAssertEqual(state.mediaUploadResult?.outcome, .notSent, mode)
+            let uploads = await peer.count(.upload), afterListings = await peer.count(.listing)
+            XCTAssertEqual(uploads, 0, mode); XCTAssertEqual(afterListings, listings, mode)
+            XCTAssertFalse(state.isBusy(.media))
+        }
+    }
+
+    func testNoReceiptNeverConfirmsPreexistingMatchingOrAbsentMedia() async throws {
+        for (name, size, folder) in [
+            ("COLLISION.JPG", Optional(Int64(MediaOwnershipPeer.imageBytes.count)), "first-folder"),
+            ("collision.jpg", Optional(Int64(MediaOwnershipPeer.imageBytes.count)), "another-folder"),
+            ("COLLISION.JPG", nil, "another-folder"),
+            ("ABSENT.JPG", Optional(Int64(MediaOwnershipPeer.imageBytes.count)), "first-folder"),
+        ] {
+            for failure in [URLError.Code.cancelled, .networkConnectionLost] {
+                let peer = MediaOwnershipPeer(acceptUpload: false, listedSize: size, folder: folder)
+                let state = makeState([peer])
+                let file = try uploadFile(name)
+                defer { state.requestDisconnect(); removeUpload(file) }
+                try await connectAndLoad(state)
+                let before = await peer.count(.listing)
+                await peer.enqueue(.upload, error: failure)
+                XCTAssertTrue(state.startMediaUpload(file, selection: try XCTUnwrap(state.beginMediaUploadSelection())))
+                await state.mediaUploadTask?.value
+                XCTAssertNil(state.uploadedMediaName)
+                XCTAssertEqual(state.mediaUploadResult?.outcome, .uncertain)
+                XCTAssertNil(state.mediaUploadResult?.receipt)
+                let uploads = await peer.count(.upload), listings = await peer.count(.listing)
+                XCTAssertEqual(uploads, 1); XCTAssertEqual(listings, before, "Uncertain uploads wait for explicit review")
+                XCTAssertEqual(state.mediaItems.count, 1, "Existing observation remains independent from the attempted upload")
+                XCTAssertFalse(state.isBusy(.media))
+            }
+        }
+    }
+
+    func testUnreadableStagingWithExistingSameNameCannotClaimSuccessOrStartHTTP() async throws {
+        let peer = MediaOwnershipPeer()
+        let state = makeState([peer])
+        let file = try uploadFile("COLLISION.JPG")
+        defer { state.requestDisconnect(); removeUpload(file) }
+        try await connectAndLoad(state)
+        let before = await peer.count(.listing)
+        try FileManager.default.removeItem(at: file)
+        XCTAssertTrue(state.startMediaUpload(file, selection: try XCTUnwrap(state.beginMediaUploadSelection())))
+        await state.mediaUploadTask?.value
+        XCTAssertEqual(state.mediaUploadResult?.outcome, .notSent)
+        XCTAssertNil(state.uploadedMediaName)
+        let uploads = await peer.count(.upload), listings = await peer.count(.listing)
+        XCTAssertEqual(uploads, 0); XCTAssertEqual(listings, before)
+    }
+
+    func testVerifiedReceiptIdentitySurvivesFailedGalleryRefresh() async throws {
+        let peer = MediaOwnershipPeer()
+        let state = makeState([peer])
+        let file = try uploadFile("COLLISION.JPG")
+        defer { state.requestDisconnect(); Task { await peer.releaseAll() }; removeUpload(file) }
+        try await connectAndLoad(state)
+        await peer.enqueue(.upload, gate: "receipt")
+        await peer.enqueue(.listing, error: .networkConnectionLost)
+        XCTAssertTrue(state.startMediaUpload(file, selection: try XCTUnwrap(state.beginMediaUploadSelection())))
+        let task = try XCTUnwrap(state.mediaUploadTask)
+        try await waitForGate("receipt", peer: peer)
+        await peer.release("receipt")
+        await task.value
+        XCTAssertEqual(state.mediaUploadResult?.outcome, .verified)
+        XCTAssertEqual(state.mediaUploadResult?.receipt?.id, "uploaded-COLLISION.JPG")
+        XCTAssertNotEqual(state.mediaUploadResult?.receipt?.id, state.mediaItems.first?.id)
+        XCTAssertEqual(state.uploadedMediaName, "COLLISION.JPG")
+        XCTAssertEqual(state.mediaUploadResult?.refreshFailed, true)
+        XCTAssertEqual(state.mediaLibraryLoadStatus, .failed)
+        let uploads = await peer.count(.upload)
+        XCTAssertEqual(uploads, 1)
+    }
+
+    func testDirectCCAPIPickerIsUnavailableAndCannotTransmitLocalFile() async throws {
+        let peer = MediaOwnershipPeer()
+        let state = makeState([peer], bridge: false)
+        defer { state.requestDisconnect() }
+        try await connectAndLoad(state)
+        XCTAssertNil(state.beginMediaUploadSelection())
+        let uploads = await peer.count(.upload)
+        XCTAssertEqual(uploads, 0)
+    }
+
     func testRetiredUploadResponseCannotReconcileOrFinishReplacementUpload() async throws {
         for failure in [nil, URLError.Code.networkConnectionLost, .cancelled] {
             let oldPeer = MediaOwnershipPeer()
@@ -62,7 +455,7 @@ final class MediaResponseOwnershipTests: XCTestCase {
             }
             try await connectAndLoad(state)
             await oldPeer.enqueue(.upload, gate: "old-upload", error: failure)
-            XCTAssertTrue(state.startMediaUpload(file))
+            XCTAssertTrue(state.startMediaUpload(file, selection: try XCTUnwrap(state.beginMediaUploadSelection())))
             let old = try XCTUnwrap(state.mediaUploadTask)
             try await waitForGate("old-upload", peer: oldPeer)
             let oldListings = await oldPeer.count(.listing)
@@ -70,7 +463,7 @@ final class MediaResponseOwnershipTests: XCTestCase {
             try await connectAndLoad(state)
             let preserved = try await prepareViewerAndWarning(state, peer: newPeer)
             await newPeer.enqueue(.upload, gate: "new-upload")
-            XCTAssertTrue(state.startMediaUpload(replacementFile))
+            XCTAssertTrue(state.startMediaUpload(replacementFile, selection: try XCTUnwrap(state.beginMediaUploadSelection())))
             let replacement = try XCTUnwrap(state.mediaUploadTask)
             try await waitForGate("new-upload", peer: newPeer)
             try await waitUntil { state.mediaUploadProgress?.bytesTransferred == 1 }
@@ -110,17 +503,17 @@ final class MediaResponseOwnershipTests: XCTestCase {
                 try await connectAndLoad(state)
                 await oldPeer.enqueue(.upload, gate: "upload")
                 await oldPeer.enqueue(.listing, gate: "old-list", error: fails ? .networkConnectionLost : nil)
-                XCTAssertTrue(state.startMediaUpload(file))
+                XCTAssertTrue(state.startMediaUpload(file, selection: try XCTUnwrap(state.beginMediaUploadSelection())))
                 let old = try XCTUnwrap(state.mediaUploadTask)
                 try await waitForGate("upload", peer: oldPeer)
-                if cancelled { state.cancelMediaUpload() }
                 await oldPeer.release("upload")
                 try await waitForGate("old-list", peer: oldPeer)
+                if cancelled { state.cancelMediaUpload() }
                 await state.disconnect()
                 try await connectAndLoad(state)
                 let preserved = try await prepareViewerAndWarning(state, peer: newPeer)
                 await newPeer.enqueue(.upload, gate: "new-upload")
-                XCTAssertTrue(state.startMediaUpload(replacementFile))
+                XCTAssertTrue(state.startMediaUpload(replacementFile, selection: try XCTUnwrap(state.beginMediaUploadSelection())))
                 let replacement = try XCTUnwrap(state.mediaUploadTask)
                 try await waitForGate("new-upload", peer: newPeer)
 
@@ -141,7 +534,7 @@ final class MediaResponseOwnershipTests: XCTestCase {
         }
     }
 
-    func testSameOwnerCancellationReconcilesOriginalSessionWithoutRetransmission() async throws {
+    func testSameOwnerCancellationPreservesOnlyVerifiedReceiptWithoutRetransmission() async throws {
         for failure in [nil, URLError.Code.cancelled] {
             let peer = MediaOwnershipPeer()
             let state = makeState([peer])
@@ -150,15 +543,16 @@ final class MediaResponseOwnershipTests: XCTestCase {
             try await connectAndLoad(state)
             let before = await peer.count(.listing)
             await peer.enqueue(.upload, gate: "upload", error: failure)
-            XCTAssertTrue(state.startMediaUpload(file))
+            XCTAssertTrue(state.startMediaUpload(file, selection: try XCTUnwrap(state.beginMediaUploadSelection())))
             let upload = try XCTUnwrap(state.mediaUploadTask)
             try await waitForGate("upload", peer: peer)
             state.cancelMediaUpload()
             await peer.release("upload")
             await upload.value
 
-            XCTAssertEqual(state.uploadedMediaName, file.lastPathComponent)
-            XCTAssertTrue(state.mediaItems.contains { $0.name == file.lastPathComponent })
+            XCTAssertEqual(state.uploadedMediaName, failure == nil ? file.lastPathComponent : nil)
+            XCTAssertEqual(state.mediaUploadResult?.outcome, failure == nil ? .verified : .uncertain)
+            XCTAssertFalse(state.mediaItems.contains { $0.name == file.lastPathComponent }, "Cancellation does not start a fresh list")
             XCTAssertEqual(state.mediaLibraryLoadStatus, .complete)
             XCTAssertNil(state.mediaUploadError)
             XCTAssertNil(state.lastError)
@@ -167,7 +561,7 @@ final class MediaResponseOwnershipTests: XCTestCase {
             let uploads = await peer.count(.upload)
             let listings = await peer.count(.listing)
             XCTAssertEqual(uploads, 1)
-            XCTAssertEqual(listings - before, 1, "Exactly one read reconciles the original Bridge session")
+            XCTAssertEqual(listings, before, "Cancellation must not start a new read or delay the result")
         }
     }
 
@@ -179,7 +573,7 @@ final class MediaResponseOwnershipTests: XCTestCase {
             defer { state.requestDisconnect(); Task { await peer.releaseAll() }; removeUpload(file) }
             try await connectAndLoad(state)
             let before = await peer.count(.listing)
-            XCTAssertTrue(state.startMediaUpload(file))
+            XCTAssertTrue(state.startMediaUpload(file, selection: try XCTUnwrap(state.beginMediaUploadSelection())))
             let queued = try XCTUnwrap(state.mediaUploadTask)
             // No suspension: invalidate the MainActor task before its first entry.
             if retire { state.requestDisconnect() }
@@ -209,12 +603,12 @@ final class MediaResponseOwnershipTests: XCTestCase {
                     let originalItems = state.mediaItems
                     await peer.enqueue(.upload, gate: "upload")
                     await peer.enqueue(.listing, gate: "old-scope", error: fails ? .networkConnectionLost : nil)
-                    XCTAssertTrue(state.startMediaUpload(file))
+                    XCTAssertTrue(state.startMediaUpload(file, selection: try XCTUnwrap(state.beginMediaUploadSelection())))
                     let upload = try XCTUnwrap(state.mediaUploadTask)
                     try await waitForGate("upload", peer: peer)
-                    if cancelled { state.cancelMediaUpload() }
                     await peer.release("upload")
                     try await waitForGate("old-scope", peer: peer)
+                    if cancelled { state.cancelMediaUpload() }
                     state.setMediaLibraryScope(.all)
                     if roundTrip { state.setMediaLibraryScope(.recent) }
                     XCTAssertEqual(state.mediaLibraryLoadStatus, .notLoaded)
@@ -314,10 +708,10 @@ final class MediaResponseOwnershipTests: XCTestCase {
     private func perform(_ operation: OwnershipOperation, state: CameraAppState, item: CameraMediaItem) async {
         switch operation {
         case .info: await state.loadMediaInfo(item)
-        case .protection: await state.setMediaProtection(item, enabled: true)
-        case .rating: await state.setMediaRating(item, rating: 5)
-        case .rotation: await state.setMediaRotation(item, degrees: 270)
-        case .archive: await state.setMediaArchive(item, enabled: true)
+        case .protection: await state.setMediaProtection(item, enabled: true, owner: state.mediaLibrarySessionID)
+        case .rating: await state.setMediaRating(item, rating: 5, owner: state.mediaLibrarySessionID)
+        case .rotation: await state.setMediaRotation(item, degrees: 270, owner: state.mediaLibrarySessionID)
+        case .archive: await state.setMediaArchive(item, enabled: true, owner: state.mediaLibrarySessionID)
         case .delete: await state.deleteMedia(item)
         default: XCTFail("Unexpected app operation")
         }
@@ -391,18 +785,26 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
     private var limits: [String?] = []
     private var item: CameraMediaItem
     private var uploaded: [CameraMediaItem] = []
+    private let events: Bool
+    private let acceptUpload: Bool
+    private var eventContinuation: CheckedContinuation<CameraHTTPResponse, Never>?
+    private var eventPollCount = 0
 
-    init(rating: Int = 0) {
+    init(rating: Int = 0, events: Bool = false, acceptUpload: Bool = true,
+         listedSize: Int64? = Int64(MediaOwnershipPeer.imageBytes.count), folder: String = "original-folder") {
+        self.events = events
+        self.acceptUpload = acceptUpload
         item = CameraMediaItem(id: "collision", name: "COLLISION.JPG", kind: "image",
-            sizeBytes: Int64(Self.imageBytes.count), previewAvailable: true,
+            sizeBytes: listedSize, previewAvailable: true,
             protected: false, rating: rating, rotationDegrees: 0, archived: false,
-            contentType: "image/jpeg")
+            contentType: "image/jpeg", folder: CameraMediaFolder(id: folder, label: folder))
     }
 
     func enqueue(_ operation: OwnershipOperation, gate: String? = nil, error: URLError.Code? = nil) {
         plans[operation, default: []].append(Plan(gate: gate, error: error))
     }
     func currentItem() -> CameraMediaItem { item }
+    func requestOperations() -> [OwnershipOperation] { operations }
     func count(_ operation: OwnershipOperation) -> Int { operations.filter { $0 == operation }.count }
     func listLimits() -> [String?] { limits }
     func mutationOperations() -> [OwnershipOperation] {
@@ -410,7 +812,18 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
     }
     func waiting(_ gate: String) -> Bool { gates[gate] != nil }
     func release(_ gate: String) { gates.removeValue(forKey: gate)?.resume() }
+    func eventWaiting() -> Bool { eventContinuation != nil }
+    func eventPolls() -> Int { eventPollCount }
+    func emitContents() {
+        let pending = eventContinuation
+        eventContinuation = nil
+        pending?.resume(returning: CameraHTTPResponse(statusCode: 200,
+            body: Data("{\"changedKeys\":[\"contents\"]}".utf8)))
+    }
     func releaseAll() {
+        eventContinuation?.resume(returning: CameraHTTPResponse(statusCode: 200,
+            body: Data("{\"changedKeys\":[]}".utf8)))
+        eventContinuation = nil
         let pending = gates
         gates.removeAll()
         for continuation in pending.values { continuation.resume() }
@@ -433,7 +846,17 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
         let simulator = path.hasPrefix("/ccapi")
         var operation: OwnershipOperation?
         var object: [String: Any] = [:]
-        if path.hasSuffix("/events") { throw CancellationError() }
+        if path.hasSuffix("/events") {
+            guard events else { throw CancellationError() }
+            if method == "DELETE" {
+                eventContinuation?.resume(returning: CameraHTTPResponse(statusCode: 200,
+                    body: Data("{\"changedKeys\":[]}".utf8)))
+                eventContinuation = nil
+                return CameraHTTPResponse(statusCode: 200)
+            }
+            eventPollCount += 1
+            return await withCheckedContinuation { eventContinuation = $0 }
+        }
         if path == "/health" {
             object = ["ok": true, "service": "open-eos-control-bridge", "version": "0.13.0"]
         } else if path == "/v1/session" {
@@ -475,7 +898,7 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
             object = ["connected": true, "model": "Synthetic media owner", "serial": "SYNTHETIC-OWNER", "api": "fixture"]
         } else if path.hasSuffix("/capabilities") {
             object = simulator ? [:] : ["supported": ["MEDIA_BROWSER", "MEDIA_THUMBNAIL", "MEDIA_PREVIEW",
-                "MEDIA_DOWNLOAD", "MEDIA_UPLOAD", "MEDIA_DELETE", "MEDIA_PROTECT", "MEDIA_RATING", "MEDIA_ROTATE", "MEDIA_ARCHIVE"]]
+                "MEDIA_DOWNLOAD", "MEDIA_UPLOAD", "MEDIA_DELETE", "MEDIA_PROTECT", "MEDIA_RATING", "MEDIA_ROTATE", "MEDIA_ARCHIVE"] + (events ? ["EVENT_POLLING"] : [])]
         } else if path.hasSuffix("/status") {
             object = ["connected": true, "recording": false, "mode": "Manual",
                 "battery": [String: Any](), "media": [String: Any](), "exposure": [String: Any]()]
@@ -483,6 +906,7 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
         if let operation {
             let plan = take(operation)
             try await finish(plan)
+            if operation == .delete { return CameraHTTPResponse(statusCode: 204) }
             if operation == .thumbnail || operation == .preview {
                 return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: Self.imageBytes)
             }
@@ -503,7 +927,7 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
         let plan = take(.upload)
         let result = CameraMediaItem(id: "uploaded-\(fileURL.lastPathComponent)", name: fileURL.lastPathComponent,
             kind: "image", sizeBytes: Int64(Self.imageBytes.count), previewAvailable: true)
-        uploaded.append(result) // The peer may accept bytes even when its reply is cancelled/lost.
+        if acceptUpload { uploaded.append(result) } // Independent of whether the response arrives.
         progress(CameraMediaTransferProgress(bytesTransferred: 1, totalBytes: result.sizeBytes))
         try await finish(plan)
         progress(CameraMediaTransferProgress(bytesTransferred: result.sizeBytes!, totalBytes: result.sizeBytes))
@@ -516,6 +940,8 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
             "previewAvailable": item.previewAvailable]
         json[simulator ? "size_bytes" : "sizeBytes"] = item.sizeBytes
         json[simulator ? "protect" : "protected"] = item.protected
+        json["folderId"] = item.folder?.id
+        json["folderLabel"] = item.folder?.label
         json["rating"] = item.rating
         json[simulator ? "rotate" : "rotationDegrees"] = item.rotationDegrees
         json[simulator ? "archive" : "archived"] = item.archived

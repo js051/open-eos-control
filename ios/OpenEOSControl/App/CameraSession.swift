@@ -10,6 +10,36 @@ enum CameraSession: Sendable {
     case ccapi(CCAPIClient)
     case desktopBridge(DesktopBridgeClient)
 
+    func foregroundMediaReadsAvailable() async -> Bool {
+        switch self {
+        case let .ccapi(client): return await client.foregroundMediaReadsAvailable()
+        case .desktopBridge: return false
+        }
+    }
+
+    func foregroundMediaInventory() async throws -> [CameraMediaItem] {
+        switch self {
+        case let .ccapi(client): return try await client.foregroundMediaInventory()
+        case .desktopBridge: throw CameraForegroundMediaError.unsupported
+        }
+    }
+
+    func foregroundMediaInfo(_ item: CameraMediaItem) async throws -> CameraMediaItem {
+        switch self {
+        case let .ccapi(client): return try await client.foregroundMediaInfo(item)
+        case .desktopBridge: throw CameraForegroundMediaError.unsupported
+        }
+    }
+
+    func downloadForegroundOriginal(_ item: CameraMediaItem, expectedBytes: Int64, to destination: URL,
+                                    progress: @escaping CameraMediaProgressHandler) async throws -> CameraMediaDownload {
+        switch self {
+        case let .ccapi(client):
+            return try await client.downloadForegroundOriginal(item, expectedBytes: expectedBytes, to: destination, progress: progress)
+        case .desktopBridge: throw CameraForegroundMediaError.unsupported
+        }
+    }
+
     func connectSnapshot() async throws -> CameraSnapshot {
         switch self {
         case let .ccapi(client): return try await client.connectSnapshot()
@@ -61,6 +91,20 @@ enum CameraSession: Sendable {
         }
     }
 
+    func connectionRetirementUnconfirmed() async -> Bool {
+        switch self {
+        case .ccapi: return false // No server-side session allocation in CCAPI discovery.
+        case let .desktopBridge(client): return await client.connectionRetirementUnconfirmed
+        }
+    }
+
+    func connectionRetirementSafetyWarnings() async -> Set<DesktopBridgeClient.ConnectionRetirementSafetyWarning> {
+        switch self {
+        case .ccapi: return []
+        case let .desktopBridge(client): return await client.connectionRetirementSafetyWarnings
+        }
+    }
+
     func capabilities() async throws -> CameraCapabilities {
         switch self {
         case let .ccapi(client): return try await client.capabilities()
@@ -82,6 +126,20 @@ enum CameraSession: Sendable {
         }
     }
 
+    func applyShootingSetting(key: String, value: String, attempt: CameraShootingSettingAttempt) async throws {
+        switch self {
+        case let .ccapi(client): try await client.applyShootingSetting(key: key, value: value, attempt: attempt)
+        case let .desktopBridge(client): try await client.applyShootingSetting(key: key, value: value, attempt: attempt)
+        }
+    }
+
+    func refreshShootingSetting(_ attempt: CameraShootingSettingAttempt) async throws {
+        switch self {
+        case let .ccapi(client): try await client.refreshShootingSetting(attempt)
+        case let .desktopBridge(client): try await client.refreshShootingSetting(attempt)
+        }
+    }
+
     func setSetting(key: String, value: String) async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.setSetting(key: key, value: value)
@@ -89,17 +147,46 @@ enum CameraSession: Sendable {
         }
     }
 
-    func createDirectory(name: String) async throws -> String {
+    func createDirectory(name: String, attempt: CameraCaptureConfigurationAttempt? = nil) async throws -> String {
         switch self {
-        case let .ccapi(client): return try await client.createDirectory(name: name)
-        case let .desktopBridge(client): return try await client.createDirectory(name: name)
+        case let .ccapi(client): return try await client.createDirectory(name: name, attempt: attempt)
+        case let .desktopBridge(client): return try await client.createDirectory(name: name, attempt: attempt)
         }
     }
 
-    func setFileNaming(field: CameraFileNamingField, value: String) async throws -> CameraFileNaming {
+    func setFileNaming(field: CameraFileNamingField, value: String,
+                       attempt: CameraCaptureConfigurationAttempt? = nil) async throws -> CameraFileNaming {
         switch self {
-        case let .ccapi(client): return try await client.setFileNaming(field: field, value: value)
-        case let .desktopBridge(client): return try await client.setFileNaming(field: field, value: value)
+        case let .ccapi(client): return try await client.setFileNaming(field: field, value: value, attempt: attempt)
+        case let .desktopBridge(client): return try await client.setFileNaming(field: field, value: value, attempt: attempt)
+        }
+    }
+
+    func refreshCaptureConfiguration(_ attempt: CameraCaptureConfigurationAttempt) async throws {
+        switch self {
+        case let .ccapi(client): try await client.refreshCaptureConfiguration(attempt)
+        case let .desktopBridge(client): try await client.refreshCaptureConfiguration(attempt)
+        }
+    }
+
+    func performMaintenance(_ attempt: CameraMaintenanceAttempt) async throws {
+        switch self {
+        case let .ccapi(client): try await client.performMaintenance(attempt)
+        case let .desktopBridge(client): try await client.performMaintenance(attempt)
+        }
+    }
+
+    func restoreMaintenanceLiveView(_ attempt: CameraMaintenanceAttempt) async throws {
+        switch self {
+        case let .ccapi(client): try await client.restoreMaintenanceLiveView(attempt)
+        case let .desktopBridge(client): try await client.restoreMaintenanceLiveView(attempt)
+        }
+    }
+
+    func observeMaintenance(_ attempt: CameraMaintenanceAttempt) async throws {
+        switch self {
+        case let .ccapi(client): try await client.observeMaintenance(attempt)
+        case let .desktopBridge(client): try await client.observeMaintenance(attempt)
         }
     }
 
@@ -145,6 +232,27 @@ enum CameraSession: Sendable {
         }
     }
 
+    func startHeldAutofocus(owner: UUID) async throws {
+        switch self {
+        case let .ccapi(client): try await client.startHeldAutofocus(owner: owner)
+        case let .desktopBridge(client): try await client.startHeldAutofocus(owner: owner)
+        }
+    }
+
+    func stopHeldAutofocus(owner: UUID) async throws {
+        switch self {
+        case let .ccapi(client): try await client.stopHeldAutofocus(owner: owner)
+        case let .desktopBridge(client): try await client.stopHeldAutofocus(owner: owner)
+        }
+    }
+
+    func liveViewFocusInfo() async throws -> CameraFocusInfo? {
+        switch self {
+        case let .ccapi(client): return try await client.liveViewFocusInfo()
+        case let .desktopBridge(client): return try await client.liveViewFocusInfo()
+        }
+    }
+
     func autofocus() async throws -> CameraStatus {
         switch self {
         case let .ccapi(client): return try await client.autofocus()
@@ -156,6 +264,27 @@ enum CameraSession: Sendable {
         switch self {
         case let .ccapi(client): return try await client.halfPressShutter()
         case let .desktopBridge(client): return try await client.halfPressShutter()
+        }
+    }
+
+    func recordingOutcome(starting: Bool, attempt: CameraRecordingAttempt) async throws -> CameraRecordingOutcome {
+        switch self {
+        case let .ccapi(client): return try await client.recordingOutcome(starting: starting, attempt: attempt)
+        case let .desktopBridge(client): return try await client.recordingOutcome(starting: starting, attempt: attempt)
+        }
+    }
+
+    func recordingObservation() async throws -> CameraRecordingObservation {
+        switch self {
+        case let .ccapi(client): return try await client.recordingObservation()
+        case let .desktopBridge(client): return try await client.recordingObservation()
+        }
+    }
+
+    func recordingCommandEvidence() async -> CameraRecordingCommandEvidence? {
+        switch self {
+        case let .ccapi(client): return await client.recordingCommandEvidence
+        case let .desktopBridge(client): return await client.recordingCommandEvidence
         }
     }
 
@@ -218,6 +347,32 @@ enum CameraSession: Sendable {
         switch self {
         case let .ccapi(client): await client.stopLiveView()
         case let .desktopBridge(client): await client.stopLiveView()
+        }
+    }
+
+    func maintenanceRetirementUnconfirmed() async -> Bool {
+        switch self {
+        case .ccapi: return false
+        case let .desktopBridge(client): return await client.maintenanceRetirementUnconfirmed
+        }
+    }
+
+    func liveViewStopState() async -> CameraLiveViewStopState {
+        switch self {
+        case let .ccapi(client): return await client.liveViewStopState()
+        case let .desktopBridge(client): return await client.liveViewStopState()
+        }
+    }
+
+    /// Local receiver teardown only. Never changes the original camera Stop duty.
+    func retireLiveViewReader() async {
+        if case let .ccapi(client) = self { await client.retireLiveViewReader() }
+    }
+
+    func retryLiveViewStop() async throws {
+        switch self {
+        case let .ccapi(client): try await client.retryLiveViewStop()
+        case let .desktopBridge(client): try await client.retryLiveViewStop()
         }
     }
 
@@ -286,6 +441,7 @@ enum CameraSession: Sendable {
     }
 
     func beginMediaPlayback(_ item: CameraMediaItem) async throws -> CameraMediaPlaybackStream {
+        guard CameraMediaType.classify(item) == .video else { throw URLError(.unsupportedURL) }
         let playbackItem: CameraMediaItem
         if item.sizeBytes?.isPositive == true {
             playbackItem = item
@@ -294,10 +450,20 @@ enum CameraSession: Sendable {
                 playbackItem = try await mediaInfo(item)
             } catch is CancellationError {
                 throw CancellationError()
+            } catch let error as CameraMediaMetadataError {
+                throw error
+            } catch let error as DesktopBridgeError {
+                // A malformed/mismatched metadata reply must not silently turn
+                // into a playback allocation using stale listing evidence.
+                if case .invalidResponse = error { throw error }
+                playbackItem = item
             } catch {
                 playbackItem = item
             }
         }
+        guard item.id.utf8.elementsEqual(playbackItem.id.utf8),
+              item.name.utf8.elementsEqual(playbackItem.name.utf8),
+              CameraMediaType.classify(playbackItem) == .video else { throw URLError(.unsupportedURL) }
         switch self {
         case let .ccapi(client):
             return CameraMediaPlaybackStream(item: playbackItem, backend: .ccapi(client))
@@ -313,6 +479,20 @@ enum CameraSession: Sendable {
         switch self {
         case let .ccapi(client): return try await client.mediaInfo(item)
         case let .desktopBridge(client): return try await client.mediaInfo(item)
+        }
+    }
+
+    func mutateMedia(_ item: CameraMediaItem, target: CameraMediaMutation,
+                     attempt: CameraMediaMutationAttempt) async throws -> CameraMediaItem {
+        switch (self, target) {
+        case let (.ccapi(client), .rating(value)): return try await client.setMediaRating(item, rating: value, attempt: attempt)
+        case let (.ccapi(client), .protection(value)): return try await client.setMediaProtection(item, enabled: value, attempt: attempt)
+        case let (.ccapi(client), .rotation(value)): return try await client.setMediaRotation(item, degrees: value, attempt: attempt)
+        case let (.ccapi(client), .archive(value)): return try await client.setMediaArchive(item, enabled: value, attempt: attempt)
+        case let (.desktopBridge(client), .rating(value)): return try await client.setMediaRating(item, rating: value, attempt: attempt)
+        case let (.desktopBridge(client), .protection(value)): return try await client.setMediaProtection(item, enabled: value, attempt: attempt)
+        case let (.desktopBridge(client), .rotation(value)): return try await client.setMediaRotation(item, degrees: value, attempt: attempt)
+        case let (.desktopBridge(client), .archive(value)): return try await client.setMediaArchive(item, enabled: value, attempt: attempt)
         }
     }
 
@@ -360,21 +540,39 @@ enum CameraSession: Sendable {
     func uploadMedia(
         from fileURL: URL,
         contentType: String? = nil,
+        attempt: CameraMediaUploadAttempt,
         progress: @escaping CameraMediaProgressHandler = { _ in }
     ) async throws -> CameraMediaItem {
         switch self {
         case let .ccapi(client):
-            return try await client.uploadMedia(from: fileURL, contentType: contentType, progress: progress)
+            return try await client.uploadMedia(from: fileURL, contentType: contentType, attempt: attempt, progress: progress)
         case let .desktopBridge(client):
-            return try await client.uploadMedia(from: fileURL, contentType: contentType, progress: progress)
+            return try await client.uploadMedia(from: fileURL, contentType: contentType, attempt: attempt, progress: progress)
         }
     }
 
-    func deleteMedia(_ item: CameraMediaItem) async throws {
+    func deleteMedia(_ item: CameraMediaItem, attempt: CameraMediaDeleteAttempt) async throws {
         switch self {
-        case let .ccapi(client): try await client.deleteMedia(item)
-        case let .desktopBridge(client): try await client.deleteMedia(item)
+        case let .ccapi(client): try await client.deleteMedia(item, attempt: attempt)
+        case let .desktopBridge(client): try await client.deleteMedia(item, attempt: attempt)
         }
+    }
+
+    func mediaDeleteBridgeEndpoint() async -> String? {
+        if case let .desktopBridge(client) = self { return await client.sanitizedBaseURL().absoluteString }
+        return nil
+    }
+
+    func mediaDeleteEngine() async -> String? {
+        switch self {
+        case .ccapi: return nil
+        case let .desktopBridge(client): return await client.mediaDeleteEngine()
+        }
+    }
+
+    var mediaDeleteUsesBridge: Bool {
+        if case .desktopBridge = self { return true }
+        return false
     }
 
     func diagnosticReport(
