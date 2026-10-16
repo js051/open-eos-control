@@ -10,6 +10,27 @@ import UniformTypeIdentifiers
 /// exact owner task's completion, rather than treating a delay as evidence.
 @MainActor
 final class MediaResponseOwnershipTests: XCTestCase {
+    func testInvalidLegacyBridgeRefreshPreservesRowsAndFailsWithoutFallback() async throws {
+        let valid = "{\"id\":\"replacement\",\"name\":\"NEW.JPG\",\"kind\":\"image\"}"
+        for body in ["{\"items\":[\(valid),null]}", "{\"items\":[\(valid),\(valid)]}"] {
+            let peer = MediaOwnershipPeer()
+            let state = makeState([peer])
+            defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+            try await connectAndLoad(state)
+            let previous = state.mediaItems
+            let reads = await peer.count(.listing)
+            await peer.enqueue(.listing, body: Data(body.utf8))
+            state.startMediaLibraryLoad()
+            try await waitUntil { !state.mediaLibraryLoading && state.mediaLibraryLoadStatus == .failed }
+            XCTAssertEqual(state.mediaItems, previous)
+            XCTAssertEqual(state.mediaLibraryLoadStatus, .failed)
+            XCTAssertTrue(state.mediaListingDefersThumbnails)
+            XCTAssertNotNil(state.lastError)
+            let after = await peer.count(.listing)
+            XCTAssertEqual(after, reads + 1, "Malformed legacy data must not start a fallback traversal")
+        }
+    }
+
     func testBridgeThumbnailsWaitForCompletionAndExplicitPreviewRetiresListing() async throws {
         let peer = MediaOwnershipPeer()
         let state = makeState([peer])
@@ -778,6 +799,7 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
     private struct Plan {
         let gate: String?
         let error: URLError.Code?
+        let body: Data?
     }
     private var plans: [OwnershipOperation: [Plan]] = [:]
     private var gates: [String: CheckedContinuation<Void, Never>] = [:]
@@ -800,8 +822,8 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
             contentType: "image/jpeg", folder: CameraMediaFolder(id: folder, label: folder))
     }
 
-    func enqueue(_ operation: OwnershipOperation, gate: String? = nil, error: URLError.Code? = nil) {
-        plans[operation, default: []].append(Plan(gate: gate, error: error))
+    func enqueue(_ operation: OwnershipOperation, gate: String? = nil, error: URLError.Code? = nil, body: Data? = nil) {
+        plans[operation, default: []].append(Plan(gate: gate, error: error, body: body))
     }
     func currentItem() -> CameraMediaItem { item }
     func requestOperations() -> [OwnershipOperation] { operations }
@@ -831,7 +853,7 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
     private func take(_ operation: OwnershipOperation) -> Plan {
         operations.append(operation)
         return plans[operation]?.isEmpty == false
-            ? plans[operation]!.removeFirst() : Plan(gate: nil, error: nil)
+            ? plans[operation]!.removeFirst() : Plan(gate: nil, error: nil, body: nil)
     }
     private func finish(_ plan: Plan) async throws {
         if let gate = plan.gate { await withCheckedContinuation { gates[gate] = $0 } }
@@ -906,6 +928,7 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
         if let operation {
             let plan = take(operation)
             try await finish(plan)
+            if let body = plan.body { return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "application/json"], body: body) }
             if operation == .delete { return CameraHTTPResponse(statusCode: 204) }
             if operation == .thumbnail || operation == .preview {
                 return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: Self.imageBytes)
