@@ -18,11 +18,21 @@ class NativeRtpMonitoringSourceTests(unittest.TestCase):
         cls.ui = (JAVA / "ui/CameraComponents.kt").read_text()
 
     def test_sampling_only_uses_the_decoder_surface_and_bounded_srgb_bitmap(self):
-        self.assertEqual(1, self.sampler.count("PixelCopy.request("))
-        self.assertIn("PixelCopy.request(target, bitmap", self.sampler)
+        self.assertNotIn("PixelCopy.request(", self.sampler)
         self.assertIn("frame.surface !== target", self.sampler)
-        self.assertIn("analysisDimensions(width, height)", self.sampler)
-        self.assertIn("Bitmap.Config.ARGB_8888, false, ColorSpace.get(ColorSpace.Named.SRGB)", self.sampler)
+        self.assertIn("val pixels = frame.pixels ?: run", self.sampler)
+        self.assertIn("analyzeLiveViewPixels(pixels.copyPixels(), pixels.width, pixels.height", self.sampler)
+        gpu = (JAVA / "data/NativeRtpLutRenderer.kt").read_text()
+        pixels = (JAVA / "data/NativeRtpFrameProgress.kt").read_text()
+        self.assertIn("minOf(1.0, 320.0 / maxOf(width, height))", gpu)
+        self.assertIn("GLES30.GL_RGBA8", gpu)
+        self.assertIn("GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, rgba)", gpu)
+        self.assertLess(gpu.index("readFramePixels(width[0], height[0])"), gpu.index("check(EGL14.eglSwapBuffers"))
+        self.assertIn("presented(presentationTimeUs, sample)", gpu)
+        self.assertIn("require(width in 1..320 && height in 1..320 && argb.size == width * height)", pixels)
+        self.assertIn("fun copyPixels(): IntArray = argb.copyOf()", pixels)
+        self.assertIn("nativeLutColorSupported", self.session)
+        self.assertIn("NativeVideoLutStatus.UNSUPPORTED_COLOR", self.session)
         code = re.sub(r"/\*.*?\*/|//[^\n]*", "", self.sampler, flags=re.DOTALL)
         self.assertNotRegex(code, r"\b(Window|MediaProjection|ImageReader|TextureView)\b")
 
@@ -39,14 +49,16 @@ class NativeRtpMonitoringSourceTests(unittest.TestCase):
         invalidate = self.gate.split("fun invalidate(", 1)[1].split("fun begin(", 1)[0]
         self.assertNotIn("inFlight = null", invalidate)
         close = self.sampler.split("override fun close()", 1)[1]
-        self.assertNotIn("nativePixelCopyInFlight.set(false)", close)
+        self.assertNotIn("nativeAnalysisInFlight.set(false)", close)
         self.assertIn("if (!gate.busy) scope.cancel()", close)
-        self.assertIn("nativePixelCopyInFlight.compareAndSet(false, true)", self.sampler)
-        self.assertIn(
-            "nativePixelCopyStartedAtNanos.get()?.let { now - it < NativeFrameSamplingGate.INTERVAL_NANOS }",
-            self.sampler,
-        )
-        self.assertIn("nativePixelCopyStartedAtNanos.set(now)", self.sampler)
+        self.assertIn("private val nativeAnalysisInFlight = AtomicBoolean(false)", self.sampler)
+        self.assertIn("nativeAnalysisInFlight.compareAndSet(false, true)", self.sampler)
+        self.assertIn("if (ticket == null) { nativeAnalysisInFlight.set(false); return }", self.sampler)
+        finish = self.sampler.split("private fun finish(", 1)[1].split("private fun sameRenderer", 1)[0]
+        self.assertLess(finish.index("gate.complete(ticket, now)"), finish.index("nativeAnalysisInFlight.set(false)"))
+        self.assertNotIn("lastStartedAt =", invalidate)
+        gpu = (JAVA / "data/NativeRtpLutRenderer.kt").read_text()
+        self.assertIn("sampleEnabled() && now - lastSampleNanos >= 250_000_000L", gpu)
 
     def test_lifecycle_owner_and_lut_contract_are_wired(self):
         self.assertIn("LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { nativeSampler.pause() }", self.ui)
@@ -58,9 +70,15 @@ class NativeRtpMonitoringSourceTests(unittest.TestCase):
             self.ui.index("state.nativeLiveViewSession != null -> key"),
             self.ui.index("lutPreviewActive && lutPreviewBitmap != null -> Image"),
         )
-        self.assertIn("val pixelSettings = settings", self.sampler)
+        self.assertIn("val capturedSettings = settings", self.sampler)
+        self.assertLess(self.sampler.index("val capturedSettings = settings"), self.sampler.index("scope.launch {"))
+        for field in ("zebraThresholdPercent", "focusPeakingEnabled", "falseColorEnabled", "waveformVisible"):
+            self.assertIn("capturedSettings." + field, self.sampler)
+        self.assertIn("sameOwner = owner === capturedOwner && current?.surface === surface", self.sampler)
+        self.assertIn("sameRenderer = sameRenderer(current?.identity, identity)", self.sampler)
+        self.assertIn("sampleLut = identity.lutRevision, currentLut = current?.identity?.lutRevision", self.sampler)
         self.assertIn("setVideoLut(nativeLut)", self.ui)
-        self.assertIn("PixelCopy.request(target, bitmap", self.sampler)
+        self.assertIn("pixels.copyPixels()", self.sampler)
         self.assertNotIn("applyCubeLut", self.sampler)
 
     def test_monotonic_freshness_has_a_fixed_budget_and_survives_new_frames(self):
