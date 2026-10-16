@@ -330,7 +330,9 @@ class FakeRunner:
         yield payload[:3]
         yield payload[3:]
 
-    def open_stream(self, arguments: list[str], *, timeout: float = 300.0) -> FakeMovieStream:
+    def open_stream(self, arguments: list[str], *, timeout: float = 300.0):
+        if "--get-file" in arguments:
+            return self.stream(arguments, timeout=timeout)
         del timeout
         self.commands.append(tuple(arguments))
         command = self._without_camera(arguments)
