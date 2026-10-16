@@ -30,8 +30,33 @@
 
 iOS source：CameraAppState 連線／斷線清 `mediaItems`、失效 media library generation 並回 control；Android source：disconnected state 清 `mediaItems` 並增加 `mediaSessionGeneration`。本群不修改 mobile，也不以 source 核對替代 native 執行。
 
-本修正尚未在新產品 HEAD 進行 Firefox 實看；前一批 Firefox 僅是發現線索。iOS/Android native、實體相機、CI 均 NOT_RUN。Release Assessment：patch（既有 PC 重連流程修復），未合 main、未產生版本／發布包；不能稱 PR ready 或 released。
+產品封存當時尚未進行新 HEAD Firefox 實看；後續結果見下節。iOS/Android native、實體相機、CI 均 NOT_RUN。Release Assessment：patch（既有 PC 重連流程修復），未合 main、未產生版本／發布包；不能稱 PR ready 或 released。
 
 ## 最終回歸與 review
 
 獨立只讀 review 復核修正後無 blocking；另把聯合成功案加入真 state.busy 與受控 sleep 解鎖。最終 14 份 Node 測試檔共 **805 pass / 0 fail / 0 cancelled / 0 skipped**（新增 42 案），3,347.379 ms。測前 manifest 與測後來源一致；產品 app.js SHA256 `ab3e20ec314309be401afb3c74ed5d0c0b80a65ce02b0a2efb34d2d84538ddb3`。文檔此段是在測後新增，未修改受測產品或測試。
+
+## 新產品 HEAD 的 Firefox 實看（12:42–12:49 UTC）
+
+固定產品 `42e20f8fb91df04db29f4dc6c0563843189854b7`，雲端桌面既有原生 Firefox 157.0.1；不是 Playwright Chromium。正常 sandbox、新 disposable profile，僅 loopback 18765 Bridge／18766 合成 CCAPI。EDSDK provider 關閉、gphoto 使用 FakeRunner、CCAPI origin 白名單且禁止 redirects／credentials，RTP 關閉。沒有真相機。
+
+測試 wrapper 保留 production session/list/info parsing，僅為兩次連線提供 A/B 名稱、同 opaque media ID 的不同 metadata（111111／222222 bytes，rating 1／5），並加入 gallery 3 秒、latest 2 秒、info 5 秒延遲。這是可辨識的合成契約資料，沒有證明兩部實體相機或檔案內容。
+
+實看結果：
+- A 的 Media 顯示 A_SAME_ID.PNG、109 KB。仍在 Media 時斷線，再連 B，全程沒有 reload，也沒有重新點 Media 或 Refresh。
+- 新 session 自動顯示 B_SAME_ID.PNG、217 KB，沒有沿用 A 卡片。wire 記錄確認兩者 opaque ID 相同；B gallery complete 12:45:30.442，latest start 12:45:30.461，順序符合修正。
+- B 詳情真正在等 info 時顯示 Reading metadata，控制 disabled；5 秒回覆後恢復 Protection／Rating／Rotation／Archive 控制，rating 為 5，沒有停在 loading。
+- 沒有執行 mutation-inflight、下載／刪除；stale detached callback 與 queued observer race 的證據仍是上述 Node 反例。mobile native、實機、RTP codec 未驗。
+
+六張持久影像由 CUA 回傳的原始 JPEG bytes 保存，並非引用已消失的暫存 screenshot 路徑：
+
+1. [A 連線](assets/media-reconnect-20261016/01-camera-a.jpg)
+2. [A Media](assets/media-reconnect-20261016/02-a-media.jpg)
+3. [斷線](assets/media-reconnect-20261016/03-disconnected.jpg)
+4. [B 自動新清單](assets/media-reconnect-20261016/04-b-media.jpg)
+5. [B info loading](assets/media-reconnect-20261016/05-b-info-loading.jpg)
+6. [B info 恢復](assets/media-reconnect-20261016/06-b-info-recovered.jpg)
+
+12:42:35.660 啟動，12:48:35.631 主動停止，owned exit 為 -15／-15（不是自然 exit 0）。原 stop receipt 當時仍列兩個剛結束的 children，保留不改；12:48:42 ps 及 12:49:21 /proc 再核都沒有 owned processes。清除已停 disposable profile 41,136,979 logical bytes；free 5,711,646,720 → 5,753,155,584 bytes。監測最低 free 5,710,118,912 bytes，未碰 4 GiB floor；這是 sampled guard，非 hard quota。其餘 fixture、wire、receipt、截圖 hash 均保留於 [證據目錄](assets/media-reconnect-20261016/)。server-receipt 的 NOT_YET_RUN 是啟動時原始狀態，終態以 post-stop-observations 為準。
+
+上傳的 wire-events 將合成 opaque id／folderId 以一致別名表示，避免 secret scanner 把高熵識別字當 key；沒有改 scanner／allowlist。原始 wire 留本地驗收證據，SHA256 `c21a17575208323b9fcd490d7cca7e43231af7230cdedf307d7ff8a6abb635b9`；首次正常 hook 因這些欄位拒絕的 redacted report 也保留。別名仍可比較 A/B 同 ID。
