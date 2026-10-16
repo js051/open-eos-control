@@ -38,3 +38,33 @@ Windows／macOS／iOS／Android native UI、browser 實看、真相機與 KVM/CI
 - `ios/OpenEOSControl/Tests/MediaMutationContractTests.swift`: `17c5f10b0a74a2d30c2f7ad68057f463c734eb159efc9693e103f348f38a4f50`
 - `scripts/validation/tests/test_ios_media_mutation_source.py`: `297872c2005b50fec6326e125b9e4e18d6cc59700c05ef504b11cc3b3aa17536`
 - `bridge/tests/media-item-writable-ui.test.js`: `f20aae43a9f9e9362ed3acdf375ac52b492ec176a885a2a96b2585e4ec56cd0f`
+
+## 2026-10-16 Firefox 實看補驗
+
+受驗產品 HEAD 固定為 `21c1de9f91bf601b3e05750127e4ee28a83a96bb`，未修改產品來源。使用既有雲端桌面的 Mozilla Firefox 157.0.1、全新拋棄式 profile；這不是 Playwright Chromium 或 mobile native 驗收。兩個服務只綁 `127.0.0.1:18765/18766`，gphoto 使用 FakeRunner、EDSDK provider 停用，CCAPI 僅允許無憑證的該 simulator origin，redirect/RTP 停用。
+
+測試專用 simulator 提供五個獨立 item：ALL_FALSE、RATING_FALSE、UNKNOWN、TRUE、BUSY。前四者分別傳四欄 false、只有 rating false、未提供 writable、四欄 true；BUSY 的 metadata info 延遲 8 秒。產品能力與 metadata parser 均走原實作。
+
+實際畫面觀察：
+
+- 不支持 metadata mutation 的 fake gphoto item：四種控制不顯示。
+- ALL_FALSE：四組控制均呈禁用，四段英文 read-only 原因可見；切繁體中文後，四段「相機回報此檔案的這項資訊不可寫入。」可見。
+- RATING_FALSE：只有評分禁用與原因，其餘保護、旋轉、封存控制仍可用。
+- UNKNOWN 和 TRUE：四組控制可用，沒有 read-only 原因。未把 unknown 解釋成 false。
+- BUSY：讀取中訊息可見，當時可見的保護、評分、旋轉與下載/刪除控制禁用；封存尚未取得已知值，因此沒有顯示。
+
+本輪未觀察 BUSY 完成後恢復，也未執行 metadata mutation-in-flight 的 busy 狀態；兩者仍不能記為 browser PASS。沒有點擊實際變更／下載／刪除，沒有實體相機。iOS/Android native 仍 NOT_RUN。
+
+連線前置曾在切換 CCAPI 後看到舊 USB 列表；刷新頁面、明確重連後顯示五個正確 fixture item。尚未獨立確認其原因，不以此畫面直接宣告產品缺陷或已修復。
+
+### 終態與證據限制
+
+- harness 開始：2026-10-16 12:11:48.610 UTC；服務就緒：12:11:49.549 UTC。
+- 操作者在排程窗口內發出停止；終態：12:19:59.705 UTC。兩個直接 owned group 主程序 exit code 均為 -15（主動 SIGTERM），不是 exit 0。
+- 原終態 receipt 瞬間仍列兩個服務子 PID；12:20:06 與 12:21:19 再核全部四個 owned PID 均不存在。保留原 receipt，不抹去短暫 remaining 紀錄。
+- 抽樣最低 free 5,772,320,768 bytes；採提前監控停止，非 kernel hard quota。未量到完整程序 RSS 峰值。
+- 已停用 profile 清除：41,396,270 logical bytes；df 增加 41,762,816 bytes，清後 free 5,813,252,096 bytes。
+- 畫面以 CUA 工具影像回覆實際觀察；其暫存 screenshot 路徑後續複製回報 ENOENT，沒有持久截圖檔，不宣稱已隨 repo 上傳 PNG。
+- fixture SHA256：safe_simulator.py `fe0fdfb56cda24079d301192016e74cce376648653d3523940b51dd22d271d0a`；safe_bridge.py `2c4212e273fc52230aa97aa508e9eebbb99364ab9e7fe6ac141d21cfa5cc68d0`。
+
+本補驗只增加上述 PC Firefox 視覺證據，不能提升為三端全驗、真機相容、PR ready 或可發布。Release Assessment：none（驗收文件），無新版本或發布產物。
