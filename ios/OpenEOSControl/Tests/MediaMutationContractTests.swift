@@ -17,6 +17,29 @@ final class MediaMutationContractTests: XCTestCase {
         return try XCTUnwrap(object[name] as? [[String: Any]])
     }
 
+    func testSingleMetadataWritablePolicyKeepsUnknownAllowedAndVetoesOnlyMatchingField() {
+        let targets: [CameraMediaMutation] = [.rating(3), .protection(true), .rotation(90), .archive(true)]
+        for global in [nil, true, false] as [Bool?] {
+            for field in [nil, true, false] as [Bool?] {
+                for vetoIndex in targets.indices {
+                    let item = CameraMediaItem(
+                        id: "writable-policy", name: "SYNTHETIC.JPG", kind: "image", archived: false,
+                        writable: global,
+                        ratingWritable: vetoIndex == 0 ? field : nil,
+                        protectionWritable: vetoIndex == 1 ? field : nil,
+                        rotationWritable: vetoIndex == 2 ? field : nil,
+                        archiveWritable: vetoIndex == 3 ? field : nil
+                    )
+                    for index in targets.indices {
+                        XCTAssertEqual(targets[index].isWritable(item),
+                            global != false && (index != vetoIndex || field != false),
+                            "Global false vetoes all fields; only explicit field false vetoes that operation")
+                    }
+                }
+            }
+        }
+    }
+
     func testAll200MetadataVectorsThroughActualBridgeAndCCAPIParsers() async throws {
         let fixtures = try vectors("metadataVectors")
         XCTAssertEqual(fixtures.count, 200)

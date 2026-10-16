@@ -666,6 +666,7 @@
       mediaMutationInvalid: "The metadata operation could not be prepared. No changes were sent.",
       mediaMutationUnavailable: "Not currently loaded",
       mediaMutationUnsupported: "Not supported for this file or connection",
+      mediaMetadataReadOnly: "The camera reports this field as read-only for this file.",
       mediaMutationHidden: "Hidden by current filters",
       mediaMutationRetired: "Connection changed",
       mediaMutationCancelled: "Remaining changes cancelled",
@@ -1415,6 +1416,7 @@
       mediaMutationInvalid: "無法準備媒體資料變更，尚未送出任何變更。",
       mediaMutationUnavailable: "目前未載入",
       mediaMutationUnsupported: "此檔案或連線不支援",
+      mediaMetadataReadOnly: "相機回報此檔案的這項資訊不可寫入。",
       mediaMutationHidden: "目前篩選已隱藏",
       mediaMutationRetired: "連線已變更",
       mediaMutationCancelled: "已取消後續變更",
@@ -2200,13 +2202,17 @@
     mediaDetailsSummary: byId("media-details-summary"),
     mediaDetailsLoading: byId("media-details-loading"),
     mediaProtectionSection: byId("media-protection-section"),
+    mediaProtectionUnavailable: byId("media-protection-unavailable"),
     mediaProtectButton: byId("media-protect-button"),
     mediaUnprotectButton: byId("media-unprotect-button"),
     mediaRatingSection: byId("media-rating-section"),
+    mediaRatingUnavailable: byId("media-rating-unavailable"),
     mediaRatingControl: byId("media-rating-control"),
     mediaRotationSection: byId("media-rotation-section"),
+    mediaRotationUnavailable: byId("media-rotation-unavailable"),
     mediaRotationControl: byId("media-rotation-control"),
     mediaArchiveSection: byId("media-archive-section"),
+    mediaArchiveUnavailable: byId("media-archive-unavailable"),
     mediaArchiveButton: byId("media-archive-button"),
     mediaUnarchiveButton: byId("media-unarchive-button"),
     mediaDetailsDownload: byId("media-details-download"),
@@ -9250,8 +9256,11 @@
 
     const protectionSupported = featureSupported(FEATURES.MEDIA_PROTECT);
     ui.mediaProtectionSection.hidden = !protectionSupported;
-    ui.mediaProtectButton.disabled = disabled;
-    ui.mediaUnprotectButton.disabled = disabled;
+    const protectionReadOnly = item.protectionWritable === false;
+    ui.mediaProtectionUnavailable.hidden = !protectionReadOnly;
+    ui.mediaProtectionUnavailable.textContent = t("mediaMetadataReadOnly");
+    ui.mediaProtectButton.disabled = disabled || protectionReadOnly;
+    ui.mediaUnprotectButton.disabled = disabled || protectionReadOnly;
     ui.mediaProtectButton.classList.toggle("active", item.protected === true);
     ui.mediaUnprotectButton.classList.toggle("active", item.protected === false);
     ui.mediaProtectButton.setAttribute("aria-pressed", String(item.protected === true));
@@ -9259,9 +9268,12 @@
 
     const ratingSupported = featureSupported(FEATURES.MEDIA_RATING);
     ui.mediaRatingSection.hidden = !ratingSupported;
+    const ratingReadOnly = item.ratingWritable === false;
+    ui.mediaRatingUnavailable.hidden = !ratingReadOnly;
+    ui.mediaRatingUnavailable.textContent = t("mediaMetadataReadOnly");
     ui.mediaRatingControl.querySelectorAll("[data-media-rating]").forEach((button) => {
       const value = Number(button.dataset.mediaRating);
-      button.disabled = disabled;
+      button.disabled = disabled || ratingReadOnly;
       button.classList.toggle("active", item.rating === value);
       button.setAttribute("aria-pressed", String(item.rating === value));
       button.setAttribute("aria-label", value === 0 ? t("ratingOff") : t("ratingValue", { value }));
@@ -9269,9 +9281,12 @@
 
     const rotationSupported = featureSupported(FEATURES.MEDIA_ROTATE);
     ui.mediaRotationSection.hidden = !rotationSupported;
+    const rotationReadOnly = item.rotationWritable === false;
+    ui.mediaRotationUnavailable.hidden = !rotationReadOnly;
+    ui.mediaRotationUnavailable.textContent = t("mediaMetadataReadOnly");
     ui.mediaRotationControl.querySelectorAll("[data-media-rotation]").forEach((button) => {
       const value = Number(button.dataset.mediaRotation);
-      button.disabled = disabled;
+      button.disabled = disabled || rotationReadOnly;
       button.classList.toggle("active", item.rotationDegrees === value);
       button.setAttribute("aria-pressed", String(item.rotationDegrees === value));
       button.setAttribute("aria-label", t("rotationValue", { value }));
@@ -9279,8 +9294,11 @@
 
     const archiveSupported = featureSupported(FEATURES.MEDIA_ARCHIVE) && typeof item.archived === "boolean";
     ui.mediaArchiveSection.hidden = !archiveSupported;
-    ui.mediaArchiveButton.disabled = disabled;
-    ui.mediaUnarchiveButton.disabled = disabled;
+    const archiveReadOnly = item.archiveWritable === false;
+    ui.mediaArchiveUnavailable.hidden = !archiveReadOnly;
+    ui.mediaArchiveUnavailable.textContent = t("mediaMetadataReadOnly");
+    ui.mediaArchiveButton.disabled = disabled || archiveReadOnly;
+    ui.mediaUnarchiveButton.disabled = disabled || archiveReadOnly;
     ui.mediaArchiveButton.classList.toggle("active", item.archived === true);
     ui.mediaUnarchiveButton.classList.toggle("active", item.archived === false);
     ui.mediaArchiveButton.setAttribute("aria-pressed", String(item.archived === true));

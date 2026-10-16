@@ -205,6 +205,31 @@ class IOSMediaMutationSourceTests(unittest.TestCase):
         self.assertIn('Replacement camera must receive zero PUTs', native)
         self.assertIn('Same-owner single-item actions remain usable', native)
 
+    def test_single_metadata_ui_uses_same_writable_policy_and_localized_reason(self):
+        view = (APP / 'MediaView.swift').read_text().split('private struct MediaMetadataView: View', 1)[1].split('private struct MediaPreviewView: View', 1)[0]
+        for operation, field in [('protection', 'protected'), ('archive', 'archived')]:
+            for value in ['true', 'false']:
+                self.assertIn(f'enabled: CameraMediaMutation.{operation}({value}).isWritable(item) && item.{field} != {value}', view)
+        self.assertIn('|| !CameraMediaMutation.rotation(0).isWritable(item)', view)
+        self.assertIn('|| !CameraMediaMutation.rating(rating).isWritable(item) || item.rating == rating', view)
+        for feature in ['mediaProtect', 'mediaRating', 'mediaRotate', 'mediaArchive']:
+            self.assertIn(f'if camera.supports(.{feature})', view)
+        self.assertIn('if camera.supports(.mediaArchive), item.archived != nil', view)
+        for target in ['protection(true)', 'rating(0)', 'rotation(0)', 'archive(true)']:
+            self.assertIn(f'metadataWritableReason(item, target: .{target})', view)
+        reason = view.split('private func metadataWritableReason', 1)[1].split('private func protectionLabel', 1)[0]
+        self.assertIn('if !target.isWritable(item)', reason)
+        self.assertIn('language.string("media_metadata_not_writable")', reason)
+        for locale in ['en', 'zh-Hant']:
+            strings = (APP / f'Resources/{locale}.lproj/Localizable.strings').read_text()
+            self.assertEqual(strings.count('"media_metadata_not_writable" = '), 1)
+        app = (APP / 'CameraAppState.swift').read_text()
+        self.assertIn('supports(target.feature), target.isWritable(current), begin(.media)', app)
+        native = (TESTS / 'MediaMutationContractTests.swift').read_text()
+        self.assertIn('testSingleMetadataWritablePolicyKeepsUnknownAllowedAndVetoesOnlyMatchingField', native)
+        self.assertIn('for global in [nil, true, false] as [Bool?]', native)
+        self.assertIn('for field in [nil, true, false] as [Bool?]', native)
+
     def test_native_suite_calls_production_clients_and_executor_and_does_not_claim_run(self):
         native = (TESTS / 'MediaMutationContractTests.swift').read_text()
         for token in ['NOT_RUN', 'client.mediaInfo(', 'client.listMedia(', 'simulator.listMedia(',

@@ -1063,15 +1063,16 @@ private struct MediaMetadataView: View {
                                 systemName: "lock",
                                 label: language.format("protect_media", item.name),
                                 selected: item.protected == true,
-                                enabled: item.protected != true
+                                enabled: CameraMediaMutation.protection(true).isWritable(item) && item.protected != true
                             ) { Task { await camera.setMediaProtection(item, enabled: true, owner: owner) } }
                             metadataIconButton(
                                 systemName: "lock.open",
                                 label: language.format("unprotect_media", item.name),
                                 selected: item.protected == false,
-                                enabled: item.protected != false
+                                enabled: CameraMediaMutation.protection(false).isWritable(item) && item.protected != false
                             ) { Task { await camera.setMediaProtection(item, enabled: false, owner: owner) } }
                         }
+                        metadataWritableReason(item, target: .protection(true))
                     }
 
                     if camera.supports(.mediaRating) {
@@ -1087,6 +1088,7 @@ private struct MediaMetadataView: View {
                             }
                         }
                         .frame(maxWidth: .infinity)
+                        metadataWritableReason(item, target: .rating(0))
                     }
 
                     if camera.supports(.mediaRotate) {
@@ -1107,7 +1109,9 @@ private struct MediaMetadataView: View {
                             }
                         }
                         .pickerStyle(.segmented)
-                        .disabled(camera.mediaLibraryLoading || camera.isBusy(.media))
+                        .disabled(camera.mediaLibraryLoading || camera.isBusy(.media)
+                            || !CameraMediaMutation.rotation(0).isWritable(item))
+                        metadataWritableReason(item, target: .rotation(0))
                     }
 
                     if camera.supports(.mediaArchive), item.archived != nil {
@@ -1120,15 +1124,16 @@ private struct MediaMetadataView: View {
                                 systemName: "archivebox",
                                 label: language.format("archive_media", item.name),
                                 selected: item.archived == true,
-                                enabled: item.archived != true
+                                enabled: CameraMediaMutation.archive(true).isWritable(item) && item.archived != true
                             ) { Task { await camera.setMediaArchive(item, enabled: true, owner: owner) } }
                             metadataIconButton(
                                 systemName: "arrow.up.bin",
                                 label: language.format("unarchive_media", item.name),
                                 selected: item.archived == false,
-                                enabled: item.archived != false
+                                enabled: CameraMediaMutation.archive(false).isWritable(item) && item.archived != false
                             ) { Task { await camera.setMediaArchive(item, enabled: false, owner: owner) } }
                         }
+                        metadataWritableReason(item, target: .archive(true))
                     }
 
                     if camera.supports(.mediaDelete) {
@@ -1159,6 +1164,15 @@ private struct MediaMetadataView: View {
             Spacer()
             Text(value).font(.caption).foregroundStyle(Color.cameraSecondaryText)
                 .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func metadataWritableReason(_ item: CameraMediaItem, target: CameraMediaMutation) -> some View {
+        if !target.isWritable(item) {
+            Text(language.string("media_metadata_not_writable"))
+                .font(.caption)
+                .foregroundStyle(Color.cameraSecondaryText)
         }
     }
 
@@ -1198,7 +1212,8 @@ private struct MediaMetadataView: View {
                 .accessibilityLabel(Text(language.format("set_media_rating", item.name, rating)))
         }
         .foregroundStyle((item.rating ?? 0) >= rating && rating > 0 ? Color.cameraWarning : Color.cameraSecondaryText)
-        .disabled(camera.mediaLibraryLoading || camera.isBusy(.media) || item.rating == rating)
+        .disabled(camera.mediaLibraryLoading || camera.isBusy(.media)
+            || !CameraMediaMutation.rating(rating).isWritable(item) || item.rating == rating)
     }
 }
 
