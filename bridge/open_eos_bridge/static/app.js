@@ -1789,6 +1789,9 @@
     settingHistory: [],
     settingOwner: null,
     settingEditor: 0,
+    settingDialogCloseOwners: [],
+    exposureRenderOwner: null,
+    advancedSettingsOwner: null,
     settingObservationRevision: 0,
     maintenanceSequence: 0,
     maintenanceObservationRevision: 0,
@@ -3013,6 +3016,11 @@
     state.settingDraftRevisions = {};
     state.settingConsumedDrafts = {};
     state.settingEditor += 1;
+    state.advancedSettingsOwner = null;
+    state.exposureRenderOwner = null;
+    ui.advancedSettings?.replaceChildren();
+    ui.exposureStrip?.replaceChildren();
+    if (ui.settingDialog?.open) closeSettingDialog();
     state.operatorConfirmedFeatures.clear();
     state.lastClockSyncAt = null;
     state.lastCreatedDirectoryName = null;
@@ -3411,6 +3419,9 @@
   }
 
   function renderExposure() {
+    const owner = { session: state.session };
+    state.exposureRenderOwner = owner;
+    const currentOwner = () => Boolean(owner.session) && owner.session === state.session && state.exposureRenderOwner === owner;
     ui.exposureStrip.replaceChildren();
     CORE_SETTINGS.forEach((key) => {
       const setting = settingByKey(key);
@@ -3425,19 +3436,25 @@
       const value = document.createElement("strong");
       value.textContent = setting ? settingValueLabel(setting, currentSettingValue(setting)) : "-";
       button.append(label, value);
-      if (setting) button.addEventListener("click", () => openSettingDialog(setting));
+      if (setting) button.addEventListener("click", () => {
+        if (currentOwner() && !cameraInteractionBusy()) openSettingDialog(setting);
+      });
       ui.exposureStrip.append(button);
     });
   }
 
   function renderAdvancedSettings() {
     const focusedControl = document.activeElement;
-    if (focusedControl && ui.advancedSettings.contains(focusedControl)) {
+    if (state.advancedSettingsOwner?.session === state.session && state.session &&
+        focusedControl && ui.advancedSettings.contains(focusedControl)) {
       const settingKey = focusedControl.dataset?.settingKey;
       if (settingKey && focusedControl.matches('input[type="text"]')) {
         state.settingDrafts[settingKey] = focusedControl.value;
       }
     }
+    const owner = { session: state.session };
+    state.advancedSettingsOwner = owner;
+    const currentOwner = () => owner.session !== null && owner.session === state.session && state.advancedSettingsOwner === owner;
     ui.advancedSettings.replaceChildren();
     const settings = (state.capabilities?.settings || []).filter(
       (setting) => !CORE_SETTINGS.includes(setting.key) && settingMatchesCaptureMode(setting),
@@ -3469,7 +3486,7 @@
       button.dataset.cameraCommand = "clock";
       button.textContent = t("syncNow");
       button.disabled = cameraInteractionBusy();
-      button.addEventListener("click", () => syncCameraClock(button));
+      button.addEventListener("click", () => { if (currentOwner()) syncCameraClock(button); });
       row.append(copy, button);
       ui.advancedSettings.append(row);
     }
@@ -3494,6 +3511,7 @@
       input.placeholder = t("directoryNamePlaceholder");
       input.setAttribute("aria-label", t("createCaptureDirectory"));
       input.addEventListener("input", () => {
+        if (!currentOwner()) return;
         input.value = input.value.toUpperCase().replace(/[^A-Z0-9_]/g, "").slice(0, 5);
         editCaptureConfigurationDraft("directory", input.value);
         button.disabled = cameraInteractionBusy() || !captureConfigurationDraftAvailable("directory") || (input.value.length > 0 && input.value.length !== 5);
@@ -3505,7 +3523,7 @@
       button.textContent = t("create");
       button.disabled = cameraInteractionBusy();
       button.disabled ||= !captureConfigurationDraftAvailable("directory");
-      button.addEventListener("click", () => createCaptureDirectory(button, input.value));
+      button.addEventListener("click", () => { if (currentOwner()) createCaptureDirectory(button, input.value); });
       actions.append(input, button);
       row.append(copy, actions);
       ui.advancedSettings.append(row);
@@ -3532,6 +3550,7 @@
       cleanButton.textContent = t("sensorCleaningNow");
       cleanButton.disabled = cameraInteractionBusy() || Boolean(state.status?.recording) || recordingRecoveryActive() || bulbControlLocked();
       cleanButton.addEventListener("click", () => {
+        if (!currentOwner()) return;
         const owner = state.session;
         if (window.confirm(t("sensorCleaningConfirm")) && state.session === owner) void cleanSensor(cleanButton, false);
       });
@@ -3542,6 +3561,7 @@
       powerOffButton.textContent = t("sensorCleaningPowerOff");
       powerOffButton.disabled = cleanButton.disabled;
       powerOffButton.addEventListener("click", () => {
+        if (!currentOwner()) return;
         const owner = state.session;
         if (window.confirm(t("sensorCleaningPowerOffConfirm")) && state.session === owner) void cleanSensor(powerOffButton, true);
       });
@@ -3571,6 +3591,7 @@
       label.textContent = t("cameraSleepNow");
       button.append(icon, label);
       button.addEventListener("click", () => {
+        if (!currentOwner()) return;
         const owner = state.session;
         if (window.confirm(t("cameraSleepConfirm")) && state.session === owner) void sleepCamera(button);
       });
@@ -3611,6 +3632,7 @@
         button.dataset.settingKey = setting.key;
         button.textContent = t("apply");
         const refresh = (event) => {
+          if (!currentOwner()) return;
           state.settingDrafts[setting.key] = input.value;
           if (event) editSettingDraft(setting.key, input.value);
           input.disabled = cameraInteractionBusy();
@@ -3619,7 +3641,7 @@
             || input.value === setting.value;
         };
         input.addEventListener("input", refresh);
-        button.addEventListener("click", () => updateSetting(setting, input.value, button));
+        button.addEventListener("click", () => { if (currentOwner()) updateSetting(setting, input.value, button); });
         refresh();
         actions.append(input, button);
         row.append(copy, actions);
@@ -3660,6 +3682,7 @@
         };
         updateOutput();
         range.addEventListener("input", () => {
+          if (!currentOwner()) return;
           editSettingDraft(setting.key, setting.values[Number(range.value)]);
           updateOutput();
         });
@@ -3668,10 +3691,11 @@
         apply.disabled = cameraInteractionBusy() || !settingDraftAvailable(setting.key) ||
           !shootingSettings.accepts(setting, selectedValue) || selectedValue === setting.value;
         range.addEventListener("change", () => {
+          if (!currentOwner()) return;
           editSettingDraft(setting.key, setting.values[Number(range.value)]);
           renderAvailability();
         });
-        apply.addEventListener("click", () => updateSetting(setting, state.settingDrafts[setting.key] ?? setting.value, apply));
+        apply.addEventListener("click", () => { if (currentOwner()) updateSetting(setting, state.settingDrafts[setting.key] ?? setting.value, apply); });
         control.append(range, output, apply);
         label.append(text, control);
         ui.advancedSettings.append(label);
@@ -3698,16 +3722,19 @@
       apply.disabled = cameraInteractionBusy() || !settingDraftAvailable(setting.key) ||
         !shootingSettings.accepts(setting, selected) || selected === setting.value;
       select.addEventListener("change", () => {
+        if (!currentOwner()) return;
         editSettingDraft(setting.key, select.value);
         renderAvailability();
       });
-      apply.addEventListener("click", () => updateSetting(setting, state.settingDrafts[setting.key] ?? setting.value, apply));
+      apply.addEventListener("click", () => { if (currentOwner()) updateSetting(setting, state.settingDrafts[setting.key] ?? setting.value, apply); });
       label.append(text, select, apply);
       ui.advancedSettings.append(label);
     });
   }
 
   function renderFileNamingSettings() {
+    const owner = state.advancedSettingsOwner;
+    const currentOwner = () => Boolean(owner?.session) && owner.session === state.session && state.advancedSettingsOwner === owner;
     const naming = state.capabilities.fileNaming;
     const heading = document.createElement("div");
     heading.className = "settings-command";
@@ -3739,6 +3766,7 @@
       });
       select.disabled = cameraInteractionBusy();
       select.addEventListener("change", () => {
+        if (!currentOwner()) return;
         editCaptureConfigurationDraft("still-filename-mode", select.value);
         updateFileNaming("still-filename-mode", select.value, select);
       });
@@ -3770,6 +3798,8 @@
   }
 
   function appendFileNamingInput(field, labelKey, current, maximumLength, allowUnderscore, numeric = false) {
+    const owner = state.advancedSettingsOwner;
+    const currentOwner = () => Boolean(owner?.session) && owner.session === state.session && state.advancedSettingsOwner === owner;
     const control = fileNamingRow(t(labelKey), t("fileNamingRule"));
     const input = document.createElement("input");
     input.type = numeric ? "number" : "text";
@@ -3791,6 +3821,7 @@
     button.textContent = t("apply");
     button.dataset.cameraCommand = "file-naming";
     const refresh = (edited = false) => {
+      if (!currentOwner()) return;
       if (!numeric) {
         const allowed = allowUnderscore ? /[^A-Z0-9_]/g : /[^A-Z0-9]/g;
         input.value = input.value.toUpperCase().replace(allowed, "").slice(0, maximumLength);
@@ -3799,7 +3830,7 @@
       button.disabled = cameraInteractionBusy() || !captureConfigurationDraftAvailable(field) || !fileNamingValueValid(field, input.value);
     };
     input.addEventListener("input", () => refresh(true));
-    button.addEventListener("click", () => updateFileNaming(field, input.value, button));
+    button.addEventListener("click", () => { if (currentOwner()) updateFileNaming(field, input.value, button); });
     refresh();
     control.actions.append(input, button);
     ui.advancedSettings.append(control.row);
@@ -4398,6 +4429,20 @@
     return !key.startsWith("focusbracketing") && !photoTokens.some((token) => key.includes(token));
   }
 
+  function closeSettingDialog() {
+    if (!ui.settingDialog.open) return;
+    (state.settingDialogCloseOwners ||= []).push(state.settingEditor);
+    ui.settingDialog.close();
+  }
+
+  function handleSettingDialogClosed() {
+    const editor = state.settingDialogCloseOwners?.shift();
+    // close events are queued by the browser and may arrive after a new editor opens.
+    if (editor !== undefined && editor !== state.settingEditor) return;
+    const retiredEditor = state.settingEditor++;
+    if (state.settingOwner?.editor === retiredEditor) cancelSetting();
+  }
+
   function openSettingDialog(setting) {
     const editor = ++state.settingEditor;
     ui.settingDialogGroup.textContent = CORE_SETTINGS.includes(setting.key) ? t("exposure") : t("cameraSetting");
@@ -4430,7 +4475,7 @@
       const value = state.settingDrafts[setting.key] ?? current;
       const matched = await updateSetting(setting, value, apply, editor);
       if (editor !== state.settingEditor) return;
-      if (matched) ui.settingDialog.close(); else refresh();
+      if (matched) closeSettingDialog(); else refresh();
     });
     ui.settingOptions.append(apply); refresh(); ui.settingDialog.showModal();
     requestAnimationFrame(() => ui.settingOptions.querySelector(".active")?.scrollIntoView({ block: "center" }));
@@ -10756,13 +10801,14 @@
     ui.diagnosticsRefreshButton.addEventListener("click", () => refreshSession({ quiet: true }));
     ui.copyDiagnosticsButton.addEventListener("click", copyDiagnostics);
     ui.copyPhysicalValidationButton.addEventListener("click", copyPhysicalValidation);
-    ui.settingDialog.addEventListener("close", () => {
-      const editor = state.settingEditor++;
-      if (state.settingOwner?.editor === editor) cancelSetting();
+    ui.settingDialog.addEventListener("close", handleSettingDialogClosed);
+    ui.settingDialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeSettingDialog();
     });
-    ui.settingDialogClose.addEventListener("click", () => ui.settingDialog.close());
+    ui.settingDialogClose.addEventListener("click", closeSettingDialog);
     ui.settingDialog.addEventListener("click", (event) => {
-      if (event.target === ui.settingDialog) ui.settingDialog.close();
+      if (event.target === ui.settingDialog) closeSettingDialog();
     });
     window.addEventListener("resize", () => {
       cancelCameraFocusInfo();
