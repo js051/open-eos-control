@@ -1,5 +1,7 @@
 # Feature Status And Acceptance
 
+Current shared-dev reconciliation (2026-10-16): [original requirements, three-platform callers/backends, implementation, platform execution and downloadable-artifact status](validation/three-platform-function-ledger-2026-10-16.zh-TW.md), pinned to product source `41bf6ef0684f982937f5d5fdf428feca3b683f04`. The original 89 rows remain indexed; native validation, explicit unsupported backends and Research are separate. A dev source push is not a new installable release.
+
 Original full-ledger audit: 2026-08-14. Scoped follow-ups below retain their own dates and validation boundaries.
 
 Product workflow audit (2026-10-04): [prioritized complete-workflow gaps and acceptance criteria](product-workflow-acceptance.zh-TW.md), based on PR #194 head `5a042d2`. This is a cross-platform gap review, not renewed physical-device validation or a declaration that every implemented capability is complete.
