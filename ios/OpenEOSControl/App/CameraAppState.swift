@@ -2538,6 +2538,7 @@ final class CameraAppState: ObservableObject {
     func driveFocus(direction: FocusDriveDirection, step: FocusDriveStep) async {
         guard supports(.focusDrive), begin(.focus) else { return }
         let generation = sessionGeneration
+        let lifetime = liveViewLifetime
         defer { end(.focus, generation: generation) }
         if isPreview {
             showFocusMarker(x: direction == .near ? 0.4 : 0.6, y: 0.5, accepted: true)
@@ -2546,11 +2547,11 @@ final class CameraAppState: ObservableObject {
         guard let session else { return }
         do {
             let result = try await session.driveFocus(direction: direction, step: step)
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration, lifetime == liveViewLifetime else { return }
             showFocusMarker(x: result.direction == .near ? 0.4 : 0.6, y: 0.5, accepted: result.accepted)
             lastError = nil
         } catch {
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration, lifetime == liveViewLifetime else { return }
             record(error)
         }
     }

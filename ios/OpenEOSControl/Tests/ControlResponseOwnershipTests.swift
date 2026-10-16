@@ -786,6 +786,81 @@ final class ControlResponseOwnershipTests: XCTestCase {
         }
     }
 
+    func testLateFocusDrivePreservesTerminalFrameFailureAndPendingStop() async throws {
+        try await assertFocusDriveRetirement("frameFailure")
+    }
+
+    func testLateFocusDrivePreservesBackgroundRetirementAndPendingStop() async throws {
+        try await assertFocusDriveRetirement("background")
+    }
+
+    func testLateFocusDriveCannotPublishIntoSameSessionReplacement() async throws {
+        try await assertFocusDriveRetirement("replacement")
+    }
+
+    private func assertFocusDriveRetirement(_ boundary: String) async throws {
+        for bridge in [false, true] {
+            for fails in [false, true] {
+                let peer = ControlOwnerPeer(owner: "focus-retirement")
+                let state = makeState([peer], bridge: bridge)
+                defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
+                try await connectAndPrepare(state)
+                await peer.enqueue(.drive, gate: "old-drive", error: fails ? .networkConnectionLost : nil)
+                let old = Task { await state.driveFocus(direction: .near, step: .small) }
+                try await waitForGate("old-drive", peer: peer)
+                if bridge { await peer.enqueue(.liveViewStop, gate: "retirement-stop") }
+                var replacement: Task<Void, Never>?
+                if boundary == "frameFailure" {
+                    await peer.enqueue(.frame, gate: "failed-frame", error: .cannotDecodeContentData)
+                    await state.setAutoRefresh(true)
+                    try await waitForGate("failed-frame", peer: peer)
+                    await peer.release("failed-frame")
+                } else if boundary == "background" {
+                    state.reportCubeLutRenderFailure()
+                    state.setApplicationActive(false)
+                } else {
+                    replacement = Task { await state.restartLiveView() }
+                }
+                if bridge {
+                    try await waitForGate("retirement-stop", peer: peer)
+                } else if replacement == nil {
+                    // Direct simulator has local presentation ownership but no
+                    // camera Stop obligation; do not wait for a nonexistent wire.
+                    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+                    while state.activeLiveViewSource != nil || state.liveViewRetiring {
+                        guard ContinuousClock.now < deadline else { throw URLError(.timedOut) }
+                        await Task.yield()
+                    }
+                }
+                if let replacement {
+                    if bridge { await peer.release("retirement-stop") }
+                    await replacement.value
+                    XCTAssertNotNil(state.activeLiveViewSource)
+                    state.reportCubeLutRenderFailure()
+                } else {
+                    if bridge { XCTAssertTrue(state.liveViewRetiring) }
+                    XCTAssertNil(state.activeLiveViewSource)
+                }
+                let preservedError = try XCTUnwrap(state.lastError)
+                let preservedSource = state.activeLiveViewSource
+                await peer.release("old-drive")
+                await old.value
+                XCTAssertEqual(state.lastError, preservedError)
+                XCTAssertEqual(state.activeLiveViewSource, preservedSource)
+                XCTAssertNil(state.focusMarker)
+                XCTAssertFalse(state.isBusy(.focus), "Retired publication must still release its focus category")
+                let drives = await peer.count(.drive)
+                XCTAssertEqual(drives, 1, "No automatic replay")
+                if bridge && boundary != "replacement" {
+                    XCTAssertTrue(state.liveViewRetiring, "Focus completion cannot retire another operation's Stop")
+                    let stopPending = await peer.waiting("retirement-stop")
+                    XCTAssertTrue(stopPending)
+                    await peer.release("retirement-stop")
+                }
+            }
+        }
+    }
+
     private func waitForImage(_ data: Data, state: CameraAppState) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
         while state.liveViewData != data {
