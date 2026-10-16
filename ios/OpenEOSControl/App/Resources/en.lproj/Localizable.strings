@@ -85,7 +85,7 @@
 "composition_grid" = "Composition grid";
 "no_settings" = "No settings are available for this mode.";
 "sync_camera_clock" = "Camera date and time";
-"sync_camera_clock_hint" = "Set the camera clock and time zone from this device, then verify the camera readback.";
+"sync_camera_clock_hint" = "Request clock synchronization, then inspect the readback and any reported time-zone / DST evidence.";
 "camera_clock_synced_at" = "Verified at %@";
 "create_capture_directory" = "Create capture directory";
 "create_capture_directory_hint" = "Leave blank for the camera default, or enter exactly 5 uppercase letters, numbers, or underscores.";
@@ -150,13 +150,13 @@
 "setting_focus_bracketing_exposure_smoothing" = "Exposure smoothing";
 "setting_auto_power_off" = "Auto power off";
 "camera_sleep" = "Put camera to sleep";
-"camera_sleep_hint" = "Ends the CCAPI connection and immediately puts the camera into power-saving sleep.";
+"camera_sleep_hint" = "Request power-saving sleep and pause controls and monitoring. Check the camera to confirm its physical state.";
 "camera_sleep_confirm_title" = "Put camera to sleep?";
-"camera_sleep_confirm_message" = "Live View and the current camera connection will end. Wake the camera physically before reconnecting.";
+"camera_sleep_confirm_message" = "Live View will stop and controls and monitoring will pause. A response or lost contact cannot confirm sleep. Wake the camera if needed, then reconnect explicitly.";
 "sensor_cleaning" = "Clean camera sensor";
-"sensor_cleaning_hint" = "Runs the camera's built-in sensor-cleaning cycle. Live View pauses while cleaning is in progress.";
+"sensor_cleaning_hint" = "Request the camera’s built-in sensor cleaning. Controls and monitoring stay paused until you explicitly restore them or reconnect.";
 "sensor_cleaning_confirm_title" = "Clean the camera sensor?";
-"sensor_cleaning_confirm_message" = "The camera cannot shoot or record during the cleaning cycle.";
+"sensor_cleaning_confirm_message" = "The camera cannot shoot or record during cleaning. Check the camera’s physical state. Keeping power on requires a separate Restore controls / monitoring action; power-off requires reconnecting.";
 "sensor_cleaning_keep_power" = "Clean sensor";
 "sensor_cleaning_power_off" = "Clean and turn off camera";
 "clean_now" = "Clean now";
@@ -279,7 +279,7 @@
 "cancel_media_upload" = "Cancel media upload";
 "uploading_media" = "Uploading %@";
 "media_upload_progress_known" = "%@ / %@ (%d%%)";
-"media_upload_progress_unknown" = "%@ uploaded";
+"media_upload_progress_unknown" = "%@ sent; awaiting verification";
 "upload_complete" = "Uploaded %@";
 "save_media" = "Save or share media";
 "delete_media" = "Delete media";
@@ -322,7 +322,8 @@
 "camera_audio_muted" = "Muted by default. Audio plays only while this switch is on and the app is active.";
 "camera_audio_unavailable" = "This RTP session does not provide supported camera audio.";
 "camera_audio_failed" = "Camera audio stopped. Open Debug for the exact receiver or decoder error.";
-"camera_audio_active_format" = "Active · %d Hz · %d ch";
+"camera_audio_active_format" = "Player render progress · %d Hz · %d ch";
+"camera_audio_output_unknown" = "Monitoring enabled; waiting for verified player render progress. Device audibility is unknown.";
 "lut_preview" = "3D LUT preview";
 "load_cube_lut" = "Load .cube LUT";
 "remove_cube_lut" = "Remove LUT";
@@ -479,6 +480,10 @@
 "capture_without_autofocus" = "Capture photo without requesting autofocus";
 
 // Bounded still-capture review and read-only recovery.
+"capture_review_not_checked" = "Shot accepted. No photo-list check completed. Check again when the camera is ready.";
+"recording_review_not_checked" = "Recording stopped. No video-list check completed. Check again when the camera is ready.";
+"capture_review_last_read_failed" = "The last photo-list read failed. Check again when the camera is ready.";
+"recording_review_last_read_failed" = "The last video-list read failed. Check again when the camera is ready.";
 "capture_review_capturing" = "Waiting for the shutter response…";
 "capture_review_searching" = "Shot accepted. Looking for a newly visible photo…";
 "capture_review_notReady" = "Shot accepted. No newly visible photo found yet.";
@@ -491,4 +496,549 @@
 "retry_media_preview" = "Load preview again";
 "media_viewer_outside_list" = "Not in the current list";
 "capture_review_readFailed" = "Shot accepted, but the photo list could not be read. Check again when the camera is ready.";
+"recording_review_capturing" = "Waiting for the recording stop response…";
+"recording_review_searching" = "Recording stopped. Looking for a newly visible video…";
+"recording_review_notReady" = "Recording stopped. No newly visible video found yet.";
+"recording_review_available" = "A newly visible video is ready to review.";
+"recording_review_readFailed" = "Recording stopped, but the video list could not be read. Check again when the camera is ready.";
+"recording_review_limited_list" = "Only 8 recent items are checked. A newly visible video may be an older file.";
+"recording_review_retry" = "Check again · no new recording";
+"recording_review_previous_badge" = "Earlier";
+"open_previous_video_named" = "Open previous video %@";
+"open_visible_video_named" = "Open newly visible video %@";
 "capture_status_readback_failed" = "The shutter command was acknowledged, but camera status could not be read. Check recent media without taking another photo.";
+
+// Loaded-media calendar-day filtering.
+"media_date_range" = "Media date range";
+"media_date_start" = "Start date";
+"media_date_end" = "End date";
+"media_date_timezone" = "Calendar days in %@";
+"media_date_invalid" = "Choose an end date on or after the start date.";
+"media_date_loaded_only" = "Only already loaded media is filtered. Recent or incomplete lists do not search the whole card.";
+"media_date_unknown_excluded" = "Media with an unknown capture date is excluded while a date range is active.";
+"media_date_range_applied" = "%@ to %@ · %@";
+"media_date_summary" = "%d matching of %d loaded; %d unknown dates excluded in this type/rating/folder scope.";
+"media_date_clear" = "Clear date range";
+
+"media_rating_filter" = "Media rating filter";
+"media_rating_filter_all" = "All ratings";
+"media_rating_filter_unrated" = "Unrated (known 0)";
+"media_rating_filter_at_least_1" = "At least 1 star";
+"media_rating_filter_at_least_2" = "At least 2 stars";
+"media_rating_filter_at_least_3" = "At least 3 stars";
+"media_rating_filter_at_least_4" = "At least 4 stars";
+"media_rating_filter_five" = "5 stars";
+"media_rating_filter_unknown" = "Unknown rating";
+"media_rating_clear" = "Clear rating filter";
+"media_rating_loaded_only" = "Filters only loaded media; no extra metadata requests.";
+"media_rating_unknown_help" = "Unknown ratings are different from known 0 and sort after known ratings.";
+"media_rating_summary" = "%d matching of %d loaded; %d unknown ratings in the date/type/folder scope.";
+"media_sort_rating_high" = "Rating: high to low";
+"media_sort_rating_low" = "Rating: low to high";
+
+"media_folder_filter" = "Camera folder filter";
+"media_folder_all" = "All loaded folders";
+"media_folder_unknown" = "Unknown folder";
+"media_folder_clear" = "Clear folder filter";
+"media_folder_loaded_only" = "Uses only loaded folder information. No extra camera requests; labels do not establish physical card slots.";
+"media_folder_missing" = "The selected folder is not in the currently loaded list. Clear the filter to see other loaded media.";
+"media_folder_duplicate" = "%@ · distinct folder %d";
+"media_folder_summary" = "%d matching of %d loaded; %d unknown folders in the other filter conditions.";
+
+"media_batch_selection_count" = "%d selected · %d hidden by filters · %d not currently loaded";
+"media_batch_select_visible" = "Select filtered loaded items";
+"media_batch_clear_selection" = "Clear selection";
+"media_batch_select_item" = "Select %@";
+"media_batch_selected" = "Selected";
+"media_batch_not_selected" = "Not selected";
+"media_batch_prepare" = "Prepare selected originals";
+"media_batch_cancel" = "Stop after current transfer settles";
+"media_batch_cancelling" = "Stopping current transfer…";
+"media_batch_bytes" = "%lld bytes received for current item";
+"media_batch_result_notice" = "Ready files are temporary copies in this app. Choose Save or Share to hand them to a destination. This does not confirm external saving; destinations may handle duplicate names differently.";
+"media_batch_share_ready" = "Save or share ready originals";
+"media_batch_status_notStarted" = "Not started";
+"media_batch_status_downloading" = "Preparing original…";
+"media_batch_status_ready" = "Original ready in app";
+"media_batch_status_failed" = "Failed";
+"media_batch_status_cancelledOrUnknown" = "Cancelled or result unconfirmed";
+"media_batch_offline_notice" = "Offline preview supports selection only; connect a camera to prepare originals.";
+
+// Local preparation history and retained originals. External saving is unconfirmed.
+"media_delivery_history_title" = "Recent originals";
+"media_delivery_history_help" = "Works offline, without downloading again. Prepared earlier describes a past download; check whether an app copy is available now. Saving or sharing does not confirm that a destination saved the file.";
+"media_delivery_history_limits" = "Worklist rows and other preparation attempts share a 100-entry limit, plus 512 MiB of app copies. At the limit, new records or copies are not added. Clear history to free this space.";
+"media_delivery_history_counts" = "%d attempts · %d copies available now";
+"media_delivery_history_retained_bytes" = "Copies kept in app: %lld bytes";
+"media_delivery_history_retained_unknown" = "The size of app copies could not be checked.";
+"media_delivery_history_warning" = "Some history records or app copies could not be checked or kept. Check the app copies again. Ready originals may still be available from their current batch.";
+"media_delivery_history_batch_warning" = "Ready originals can still be shared from this batch, but their history or copies for later may be unavailable.";
+"media_delivery_history_loading" = "Checking history and app copies…";
+"media_delivery_history_checking_share" = "Checking prepared originals…";
+"media_delivery_history_share_all" = "Save or share all available copies";
+"media_delivery_history_share_one" = "Save or share this copy";
+"media_delivery_history_share_named" = "Save or share app copy of %@";
+"media_delivery_history_share_unavailable" = "The selected app copies could not be prepared for sharing. Check their current availability and try again. Nothing was downloaded again.";
+"media_delivery_history_refresh" = "Check app copies again";
+"media_delivery_history_empty" = "No preparation attempts are recorded here yet. Prepare selected originals from camera media to begin.";
+"media_delivery_history_started" = "Started: %@";
+"media_delivery_history_finished" = "Finished: %@";
+"media_delivery_history_original_bytes" = "Original size: %lld bytes";
+"media_delivery_history_status_started" = "Preparation started · result pending";
+"media_delivery_history_status_prepared" = "Prepared earlier";
+"media_delivery_history_status_failed" = "Preparation failed";
+"media_delivery_history_status_cancelled" = "Preparation cancelled";
+"media_delivery_history_status_unknown" = "Preparation result unconfirmed";
+"media_delivery_history_availability_available" = "App copy available now";
+"media_delivery_history_availability_missing" = "App copy is missing";
+"media_delivery_history_availability_changed" = "App copy changed · cannot share";
+"media_delivery_history_availability_unsafe" = "App copy could not be verified · cannot share";
+"media_delivery_history_availability_notRetained" = "No app copy kept for later";
+"media_delivery_history_reason_interrupted" = "Preparation was interrupted. It will not restart automatically.";
+"media_delivery_history_reason_downloadFailed" = "The download did not finish successfully. It will not retry automatically.";
+"media_delivery_history_reason_cancelled" = "Preparation was stopped. It will not restart automatically.";
+"media_delivery_history_reason_retentionUnavailable" = "The original was prepared, but no copy could be kept here for later. It may still be available from its current batch.";
+"media_delivery_history_clear" = "Clear history and app copies";
+"media_delivery_history_clearing" = "Clearing history and app copies…";
+"media_delivery_history_clear_title" = "Clear history and app copies?";
+"media_delivery_history_clear_message" = "Remove all saved worklists, history records and copies kept here. Copies being shared are removed after sharing ends. Files saved elsewhere and temporary originals in the current batch are not removed.";
+"media_delivery_history_clear_confirm" = "Remove history and app copies";
+
+"foreground_media_title" = "Foreground JPEG copies";
+"foreground_media_help" = "Choose a Files folder for this run. Newly detected JPEG originals are kept in the app, then copied to your selected local or cloud provider. Files present during the initial check are skipped.";
+"foreground_media_foreground_help" = "Keep the app in the foreground. Closing this panel keeps the run active; leaving the app stops it. Nothing resumes or retries automatically.";
+"foreground_media_counts" = "This run: %d kept in app · %d copied to Files · %d unconfirmed · %d pending";
+"foreground_media_start" = "Choose Files folder and start";
+"foreground_media_stop" = "Stop importing";
+"foreground_media_stopping" = "Stopping…";
+"foreground_media_start_unavailable" = "Connect directly with CCAPI. Wait for any earlier Files operation to finish before starting.";
+"foreground_media_destination_help" = "Choose a folder every time you start. The app does not save folder access. Recent originals keeps separate preparation and Files copy results; a completed copy does not confirm cloud sync.";
+"foreground_media_temporary_count" = "%d temporary originals available";
+"foreground_media_temporary_help" = "After stopping, you can export the current temporary originals to Files or share them. Check Recent originals for copies kept for later; an original may be available here even if the app could not retain it. Export or share it before starting again or disconnecting, which clears this temporary result.";
+"foreground_media_share_temporary" = "Share current temporary originals";
+"foreground_media_share_unavailable" = "The temporary originals are no longer available for sharing. Check Recent originals for retained app copies.";
+"foreground_media_limits_title" = "Scope and limits";
+"foreground_media_limits_files" = "JPEG only, through direct CCAPI. The complete card listing must contain no more than 1,000 files. Each run remembers up to 4,096 encountered files, queues up to 20 JPEGs, and keeps up to 100 originals.";
+"foreground_media_limits_history" = "Shared history holds up to 100 preparation attempts, 100 linked Files attempts and 512 MiB of app copies. Existing history uses these limits too.";
+"foreground_media_limits_stop" = "New files must pass readiness checks within 30 seconds. The first uncertain check, transfer, storage or Files result stops the run. No automatic retry or resume. A copy already in progress may finish after Stop.";
+"foreground_media_banner_title" = "Foreground JPEG import active";
+"foreground_media_details" = "View import";
+"foreground_media_state_idle" = "Not started";
+"foreground_media_state_checking" = "Checking support…";
+"foreground_media_state_baseline" = "Checking existing files…";
+"foreground_media_state_watching" = "Waiting for new JPEGs";
+"foreground_media_state_waiting" = "Waiting for other camera work";
+"foreground_media_state_stabilizing" = "Checking the current JPEG…";
+"foreground_media_state_preparing" = "Keeping an original in the app…";
+"foreground_media_state_stopped" = "Stopped";
+"foreground_media_state_failed" = "Stopped for review";
+"foreground_media_reason_user" = "Stopped by you. Choose a Files folder to begin a new run.";
+"foreground_media_reason_background" = "Stopped when the app left the foreground. Choose a Files folder to begin a new run.";
+"foreground_media_reason_session" = "The connection changed or ended. Check the connection before starting again.";
+"foreground_media_reason_unsupported" = "A direct CCAPI connection with complete media support is required.";
+"foreground_media_reason_inventory" = "The complete camera file list could not be confirmed. Check the camera and connection before starting again.";
+"foreground_media_reason_metadata" = "The original could not be confirmed ready. Check the camera before starting again.";
+"foreground_media_reason_storage" = "The app could not keep the original. Check Recent originals; a temporary original may still be available below.";
+"foreground_media_reason_transfer" = "The original transfer could not be confirmed. Check the connection before starting again.";
+"foreground_media_reason_limit" = "A safety limit or file check stopped this run. Review the scope and limits before starting again.";
+
+"media_worklist_counts" = "%d worklists · %d rows not started";
+"media_worklist_help" = "Saved worklists keep the original selection order, including items not started. Names are labels, not proof of camera or file identity. Opening this screen never reconnects, retries, or asks for a destination.";
+"media_worklist_position" = "Item %d of %d";
+"media_worklist_queued" = "Not started: no attempt was recorded for this row.";
+"media_worklist_created" = "Worklist created %@";
+"media_worklist_legacy_attempts" = "Other recorded attempts · complete selection unknown";
+"media_worklist_recording_warning" = "The complete worklist could not be saved or updated. Check each current result; files already prepared remain available. Do not assume an unrecorded selection can be recovered after closing the app.";
+
+// First connection guidance and evidence-based recovery.
+"connection_camera_setup_title" = "CCAPI setup and Camera Connect pairing";
+"connection_bridge_setup_title" = "USB uses a computer; direct iOS USB is unavailable";
+"connection_camera_setup" = "Enable CCAPI on a supported EOS, connect this iPhone or iPad to the camera’s network, and enter the camera’s CCAPI URL including its port.";
+"connection_camera_pairing_help" = "Canon Camera Connect pairing alone does not enable CCAPI. Use the CCAPI settings shown on the camera; support and setup vary by model.";
+"connection_bridge_setup" = "Connect the camera to a computer by USB and run Open EOS Control Desktop Bridge there. Enter that computer’s network URL and Bridge token, then scan and select a camera.";
+"connection_ios_usb_limit" = "Direct USB/PTP control from this iOS app is not implemented. Desktop Bridge requires the computer to stay connected to both the camera and this device’s network.";
+"connection_camera_auth_help" = "Use the username and password configured for camera CCAPI authentication, if enabled. These are separate from Wi-Fi pairing and the Desktop Bridge token.";
+"connection_bridge_token_help" = "Use the bearer token configured on Desktop Bridge. Do not enter the camera’s CCAPI password here.";
+"connection_recovery_title" = "Connection needs attention";
+"connection_camera_invalid_address" = "Enter a complete http:// or https:// camera address with its port. Leave out paths, query text, and credentials; enter authentication below.";
+"connection_bridge_invalid_address" = "Enter the computer’s complete http:// or https:// Bridge address and port. Keep the Bridge token in its separate field.";
+"connection_camera_authentication" = "The camera endpoint rejected authentication (HTTP 401 or 403). Check its CCAPI username and password, then retry.";
+"connection_bridge_authentication" = "Desktop Bridge rejected access (HTTP 401 or 403). Check the Bridge bearer token and its server configuration, then retry.";
+"connection_bridge_camera_authentication" = "Desktop Bridge reached the camera, but the camera rejected CCAPI authentication. Check the camera’s CCAPI username and password in the Bridge’s camera connection settings on the computer. The Bridge token field here is separate.";
+"connection_bridge_camera_tls_error" = "Desktop Bridge could not establish a secure connection to the camera. Check the camera’s HTTPS address and certificate in the Bridge’s camera connection settings on the computer.";
+"connection_bridge_camera_host_not_found" = "Desktop Bridge could not find the camera host. Check the camera address in the Bridge’s camera connection settings and the computer’s network access to that host.";
+"connection_bridge_camera_timeout" = "Desktop Bridge’s connection to the camera timed out. Check that the camera is awake and reachable from the computer, and review the Bridge’s camera connection settings.";
+"connection_bridge_camera_unreachable" = "Desktop Bridge could not reach the camera. Check the network between the computer and camera, and the Bridge’s camera connection settings.";
+"connection_bridge_camera_http_error" = "The camera returned an HTTP error to Desktop Bridge. Check the camera’s CCAPI service and the Bridge’s camera connection settings on the computer.";
+"connection_bridge_camera_discovery_failed" = "Desktop Bridge could not discover a usable camera API. Check that camera CCAPI is enabled and review the Bridge’s camera connection settings on the computer.";
+"connection_bridge_camera_endpoint_missing" = "Desktop Bridge could not find the camera’s CCAPI endpoint. Check that CCAPI is enabled and that the camera address and port in the Bridge’s camera connection settings match the camera.";
+"connection_bridge_camera_retry_help" = "Review the camera connection settings on the computer running Desktop Bridge, then retry the connection or scan here when ready. No retry starts automatically.";
+"connection_camera_endpoint_missing" = "The requested CCAPI endpoint was not found. Check that CCAPI is enabled and that the address and port match the camera’s CCAPI settings.";
+"connection_bridge_endpoint_missing" = "The requested Bridge endpoint was not found. Check the computer’s Bridge address and port, and that the expected service is running.";
+"connection_tls_error" = "A secure connection could not be established. Check the configured HTTPS address and certificate with the camera or Bridge administrator.";
+"connection_host_not_found" = "The host could not be found. Check the address spelling and the network used to reach it.";
+"connection_timeout" = "The connection timed out. Check that the camera or computer is awake and reachable, then retry.";
+"connection_camera_unreachable" = "The camera could not be reached over the network. Check this device’s Wi-Fi connection and Local Network access in iOS Settings.";
+"connection_bridge_unreachable" = "The computer could not be reached over the network. Check its Bridge service, this device’s network, and Local Network access in iOS Settings.";
+"connection_http_error" = "The service returned an HTTP error. Check the camera or Bridge service and retry when it is ready.";
+"connection_discovery_failed" = "Discovery did not produce a usable camera API. Check CCAPI setup and the selected address before retrying.";
+"connection_unknown_error" = "The connection failed without a confirmed cause. Check the selected connection method and its settings, then retry.";
+"connection_edit_then_connect" = "Review or edit the fields above, then use the connection button below when ready. No retry starts automatically.";
+"connection_edit_then_scan" = "Review or edit the fields above, then use the scan button again. Scanning does not start camera control or shooting.";
+"connection_edit_settings" = "Edit settings";
+"connection_retry_connect" = "Retry connection";
+"connection_retry_scan" = "Retry scan";
+"connection_bridge_unscanned" = "No scan yet. Tap Scan cameras to look for cameras on the computer.";
+"connection_bridge_scan_failed" = "The scan failed. Review the connection guidance before trying again.";
+"connection_bridge_empty" = "Scan completed with no cameras. Check the camera’s power, USB cable, and availability in Desktop Bridge on the computer, then scan again.";
+
+"recording_start_status_unknown" = "Start was acknowledged, but recording status is unknown. Refresh status or explicitly stop recording.";
+"recording_stop_status_unknown" = "Stop response received. Current recording state is unavailable. Refresh for fresh status before reviewing the video. A deliberate new Start is available.";
+"recording_start_not_confirmed" = "The camera reports that recording is stopped. Start was not confirmed.";
+
+"recording_command_unconfirmed" = "Recording command result is unknown. The camera may still be recording. Refresh reads fresh evidence without replaying the command; Stop remains available.";
+"previous_recording_warning" = "Recording on the previous camera was not confirmed stopped. Check that camera directly. Connecting another camera does not stop the previous one.";
+"confirm_previous_recording_stopped" = "I checked the previous camera";
+"previous_recording_physically_verified" = "Recording is stopped on the previous camera";
+"previous_recording_confirmation_help" = "Only confirm after checking the previous camera. This dismisses the warning without sending a command.";
+
+"live_view_stop_unconfirmed" = "The Live View stop was not confirmed. Retry Stop before starting again.";
+"previous_live_view_stop_warning" = "The previous camera’s Live View stop was not confirmed. Check that camera directly.";
+"confirm_previous_live_view_stopped" = "Confirm previous Live View stopped";
+"retry_live_view_stop" = "Retry Live View Stop";
+"previous_live_view_physically_verified" = "I checked that Live View stopped";
+"previous_live_view_confirmation_help" = "This clears the warning only and sends no command to the current camera.";
+
+"media_worklist_continue_title" = "Continue a worklist";
+"media_worklist_continue_help" = "Select unfinished rows from one worklist, then explicitly choose a currently loaded original for each row. Prepared copies can be shared again above.";
+"media_worklist_continue_selected" = "Choose originals for %d selected rows";
+"media_worklist_select_row" = "Select this unfinished row";
+"media_worklist_origin" = "New attempt for worklist %@, item %d: %@. The original result is unchanged.";
+"media_worklist_binding_help" = "Choose each source yourself. Similar names, sizes or dates do not establish that a current original is the old file. Every field starts unassigned; each source can be chosen once.";
+"media_worklist_loaded_help" = "Only originals already loaded in this connection are offered. If you need another file, cancel, load it in the gallery and select the worklist rows again. Refreshing the gallery (including camera events), changing scope or connection, or clearing history dismisses these choices.";
+"media_worklist_no_loaded_originals" = "No originals are loaded. Cancel and load the gallery first.";
+"media_worklist_choose_original" = "Current original";
+"media_worklist_no_binding" = "Choose an original…";
+"media_worklist_mapping" = "Old row: %@ → chosen original: %@";
+"media_worklist_unknown_warning" = "An unknown attempt may already have prepared or saved a copy. Check the previous destination before creating another copy; this app cannot verify what Files, Photos or another provider saved.";
+"media_worklist_unknown_acknowledgement" = "I checked the previous destination and understand another copy may be created.";
+"media_worklist_share_semantics" = "This prepares new full originals in the app. Afterwards, use Share ready originals and explicitly choose Files, Photos or another destination. Preparation and the share sheet do not prove the destination saved the files.";
+"media_worklist_share_acknowledgement" = "I will choose the destination when sharing the prepared originals.";
+"media_worklist_review_confirm" = "Confirm these mappings…";
+"media_worklist_confirm_title" = "Prepare new attempts?";
+"media_worklist_confirm_prepare" = "Prepare the chosen originals";
+"media_worklist_confirm_message" = "Start %d new full-original attempts using the mappings shown. A new linked worklist is saved first. Old results stay unchanged. Nothing resumes automatically.";
+"media_worklist_continue_unavailable" = "Continuation could not be safely recorded. No unrecorded original will be requested. Check history availability and the 100-row / 512 MiB limits; records are never evicted. Select and confirm again when ready.";
+
+"media_worklist_source_kind" = "Type: %@";
+"media_worklist_source_folder" = "Folder: %@";
+"media_worklist_source_captured" = "Captured: %@";
+"media_worklist_source_size" = "Size: %@";
+
+"held_autofocus" = "Hold AF-ON";
+"held_autofocus_active" = "AF-ON held";
+"held_autofocus_released" = "Released";
+"held_autofocus_hint" = "Hold to focus; release or move outside to stop. Attempts to release after 30 seconds. With VoiceOver, activate to start and activate again to stop.";
+"focus_command_accepted" = "Focus command accepted; focus is not confirmed";
+"focus_command_failed" = "Focus command failed";
+"camera_focus_standby" = "Camera focus: standby";
+"camera_focus_focused" = "Camera confirms focus";
+"camera_focus_unfocused" = "Camera reports focus failed";
+"camera_focus_servo_off" = "Camera focus: servo off";
+"camera_focus_focusing" = "Camera reports focusing";
+"camera_focus_unknown" = "Camera focus: unknown";
+
+"media_files_export_one" = "Export original to Files…";
+"media_files_export_ready" = "Export prepared originals to Files…";
+"media_files_export_all" = "Export all available copies to Files…";
+"media_files_export_named" = "Export %@ to Files";
+"media_files_export_help" = "Choose a destination in Files for these prepared copies. History keeps bounded export observations, not proof of external bytes or cloud sync. Check Files before exporting again to avoid duplicates. Your chosen provider manages cloud sync.";
+"media_files_export_reported" = "iOS reported export destinations for %d originals. External bytes and cloud sync have not been verified.";
+"media_files_export_cancelled" = "Files export was cancelled. Check the destination before trying again; copies already made may remain.";
+"media_files_export_unconfirmed" = "Files export outcome is unknown. Check the destination before starting another export.";
+"media_files_export_mismatch" = "iOS reported %d destinations for %d originals. Individual results are unknown. Check Files before trying again.";
+"media_files_export_source_unavailable" = "The prepared source is unavailable. Refresh history or explicitly prepare the original again before exporting.";
+
+"native_monitor_off" = "Sampled scopes paused";
+"native_monitor_requires_ios174" = "Pixel monitoring is unavailable on this unprocessed native stream.";
+"native_monitor_waiting" = "Sampled scopes · waiting for pixels";
+"native_monitor_no_pixels" = "Sampled scopes · image unavailable";
+"native_monitor_failed" = "Sampled scopes · unsupported image or conversion failed";
+"native_monitor_sampled" = "Processed-output scopes · up to 4 samples/sec";
+"native_monitor_stale" = "Sampled scopes · expired";
+"native_monitor_lut_inactive" = "Saved LUT inactive on native RTP";
+"native_monitor_scope_notice" = "Scopes analyze the exact processed output submitted to the native renderer, up to 4 times/sec. Sampled histograms/waveforms are bounded to 1 second. Spatial overlays require the same positively identified displayed frame. Display progress remains unverified when the OS cannot identify it. Supported 8-bit SDR LUT processing never changes camera media.";
+
+"foreground_media_state_copying" = "Copying the retained original to Files…";
+
+"foreground_media_reason_delivery" = "Files delivery or its history record needs review. The retained app original remains separate. Check Recent originals and the selected folder before starting again.";
+
+"foreground_files_destination" = "This run’s folder: %@";
+
+"foreground_files_drain_help" = "An admitted Files operation may still be using the original. Stop prevents later copies; another run waits until this operation actually returns.";
+
+"foreground_files_result_started" = "Files operation started; completion is pending";
+
+"foreground_files_result_copied" = "Files copy operation completed";
+
+"foreground_files_result_notCopied" = "No Files copy completed";
+
+"foreground_files_result_unconfirmed" = "Files result unconfirmed; a partial or complete file may remain";
+
+"foreground_files_reason_cancelled" = "Stopped before the copy began.";
+
+"foreground_files_reason_sourceUnavailable" = "The retained source could not be confirmed unchanged. If copying began, inspect the destination file.";
+
+"foreground_files_reason_permissionDenied" = "Folder access was unavailable. Choose the folder again for a new run.";
+
+"foreground_files_reason_coordination" = "The provider did not admit the copy operation.";
+
+"foreground_files_reason_collision" = "That generated filename already existed. It was not replaced; this attempt was not retried.";
+
+"foreground_files_reason_copyFailed" = "Copying began but did not return successfully. The app did not remove any external file.";
+
+"foreground_files_reason_interrupted" = "The previous process ended without a final result. Inspect the attempted filename in Files.";
+
+"foreground_files_history_help" = "This is a local operation record, not proof of cloud sync or current destination availability. Clearing app history does not remove Files copies.";
+
+"native_lut_off" = "Native video without a LUT";
+
+"native_lut_waiting" = "Waiting for a frame with the selected LUT";
+
+"native_lut_applied" = "LUT applied to native video";
+
+"native_lut_unsupported_color" = "LUT not applied: unsupported color format; native video retained";
+
+"native_lut_unavailable" = "LUT processor unavailable; native video retained";
+
+"native_lut_failed" = "LUT processing failed; native video fallback, LUT retained";
+"media_files_export_recording" = "Recording export attempt…";
+"media_files_export_history_warning" = "Export history is unavailable or incomplete. Check Files before trying again; an unrecorded final result does not undo copying.";
+"media_files_export_history_unavailable" = "The export attempt could not be recorded. Files was not opened. Check history and available local storage before starting another export.";
+"media_files_export_history_title" = "Manual Files export attempts";
+"media_files_export_history_help" = "These are batch-level observations, not individual destination receipts. Up to 100 source labels are retained across attempts. An interrupted attempt is unknown. Selecting originals and a destination again creates a new attempt; nothing resumes automatically.";
+"media_files_export_history_sources" = "%d source labels (no destination mapping)";
+"media_files_export_history_started" = "Export started; final result is pending.";
+
+"media_time_zone_unknown" = "Time zone unknown";
+
+// Explicit metadata batches and per-item readback evidence.
+"media_mutation_menu" = "Change selected media…";
+"media_mutation_rating_menu" = "Rating";
+"media_mutation_rotation_menu" = "Set rotation";
+"media_mutation_rating" = "Set rating to %d";
+"media_mutation_protect" = "Protect";
+"media_mutation_unprotect" = "Unprotect";
+"media_mutation_rotate" = "Set rotation to %d°";
+"media_mutation_archive" = "Archive";
+"media_mutation_unarchive" = "Unarchive";
+"media_mutation_review" = "Review media changes";
+"media_mutation_apply" = "Apply to this list";
+"media_mutation_cancel" = "Cancel remaining changes";
+"media_mutation_confirmation" = "Only the exact items shown below are included, including hidden selections. Unloaded or unsupported items stay listed without being sent. Each change is sent at most once. The batch stops on an unconfirmed result; cancellation cannot undo a change already sent.";
+"media_mutation_result_notice" = "Confirmed means the same exact item reported the requested value. Earlier results are retained. Nothing is retried automatically; a new confirmation starts a separate operation.";
+"media_mutation_previous_session" = "Results from a previous connection. No further changes will be sent from this batch.";
+"media_mutation_status_notStarted" = "Not started";
+"media_mutation_status_applying" = "Applying and checking readback…";
+"media_mutation_status_confirmed" = "Confirmed";
+"media_mutation_status_failedNotSent" = "Unavailable; not sent";
+"media_mutation_status_unconfirmed" = "Result unconfirmed; may have changed";
+"media_mutation_reason_unloaded" = "Not currently loaded. No item lookup or broader card scan was started.";
+"media_mutation_reason_unsupported" = "This connection does not advertise this operation.";
+"media_mutation_reason_invalid" = "The selected item or requested value is invalid.";
+"media_mutation_reason_cancelled" = "Remaining work was cancelled. An already-sent change may still take effect.";
+"media_mutation_reason_ownerChanged" = "The connection changed. This batch cannot continue on another camera.";
+"media_mutation_reason_blocked" = "The camera is busy, disconnected, or requires shutter recovery. Nothing was sent.";
+"media_mutation_reason_notSent" = "Local checks stopped this item before any change was sent.";
+"media_mutation_reason_uncertain" = "Readback did not confirm the requested change. Remaining items were not sent. Review the camera before starting another operation.";
+"media_mutation_reason_limit" = "More than 1,000 unique items were selected. The entire batch was not started. Choose a smaller selection.";
+"media_mutation_reason_unknownMetadata" = "Archive status is unknown. No change was sent.";
+"media_mutation_reason_notWritable" = "This item is explicitly marked as not writable. No change was sent.";
+
+// Bounded result history and explicit non-undo clearing.
+"media_mutation_rejected_count" = "Batch rejected: %d selected items. Nothing was sent.";
+"media_mutation_rejection_capacity" = "Result history is full (20 batches or 2,000 rows across all connections). Review and explicitly clear a finished batch before creating a new review. No results were removed.";
+"media_mutation_rejection_limit" = "More than 1,000 unique items were selected. The entire batch was rejected, without truncation or a retained result list. Choose a smaller selection and create a new review.";
+"media_mutation_rejection_staleReview" = "History was cleared after this review was created. Nothing was sent. Create a new review; old confirmations cannot be reused.";
+"media_mutation_history_capacity" = "Result history: %d/%d batches, %d/%d rows. Clearing is available only when no batch is running.";
+"media_mutation_history_clear" = "Clear this finished batch record…";
+"media_mutation_history_clear_title" = "Clear this batch record?";
+"media_mutation_history_clear_confirm" = "Clear record only";
+"media_mutation_history_clear_warning" = "This permanently removes this app-session result record and cannot restore it. It is not an undo: camera commands and changes are not reversed. Unconfirmed changes may already have taken effect. Review the camera before another operation. Running batches cannot be cleared; other batches remain.";
+
+// Per-attempt upload evidence and manual recovery.
+"media_upload_not_sent" = "Not sent: %@. No upload request was dispatched.";
+"media_upload_uncertain" = "Upload outcome unconfirmed: %@. The camera may have accepted it.";
+"media_upload_manual_recovery" = "Check the original camera and folder before choosing the file again. Refreshing the list cannot confirm this attempt. Nothing is resent or deleted automatically.";
+"media_upload_previous_connection" = "Result from a previous connection. It does not describe the current camera.";
+"media_upload_refresh_failed" = "The gallery refresh did not finish. The upload result above is unchanged. Refresh the gallery manually.";
+"media_upload_review_files" = "Review camera files";
+"cancel_media_upload_refresh" = "Cancel gallery refresh";
+
+/* Exact-source deletion journey */
+"media_delete_review" = "Review permanent deletion";
+"media_delete_warning" = "Permanently delete only the exact items below from their stated sources. This cannot be undone. No backup is promised.";
+"media_delete_cancel_notice" = "Cancelling stops remaining dispatches. It cannot withdraw a DELETE already sent.";
+"media_delete_confirm" = "Permanently delete";
+"media_delete_selected" = "Delete selected…";
+"media_delete_source_camera" = "Source: camera card";
+"media_delete_source_desktop-host" = "Source: Desktop Bridge host capture store on the connected desktop";
+"media_delete_source_unknown" = "Source not established; will not send";
+"media_delete_qualification_unknown" = "Protection or writability is unknown. Available delete support is not proof this item is safe to delete.";
+"media_delete_history" = "Deletion results";
+"media_delete_summary" = "Confirmed %d · Rejected %d · Uncertain %d";
+"media_delete_cancel_remaining" = "Stop remaining deletions";
+"media_delete_view_results" = "View deletion results";
+"media_delete_recovery_notice" = "An uncertain item may already be deleted. Inspect its original source before starting another operation. Missing from a recent, filtered or partial list is not proof of this deletion. Any new deletion needs a new review and confirmation.";
+"media_delete_history_lifetime" = "Results stay across reconnects in this app session. Keep up to 20 batches / 2,000 rows; the oldest whole inactive batches are removed automatically. This is not a backup or durable audit log.";
+"media_delete_previous_owner" = "Previous connection: information only. It cannot send commands to a replacement connection.";
+"media_delete_inspect" = "Refresh current source view (read only)";
+"media_delete_inspected_notice" = "A current-scope refresh was requested. It does not change any deletion outcome.";
+"media_delete_applying" = "Dispatching; awaiting outcome";
+"media_delete_clear" = "Remove this result record";
+"media_delete_clear_warning" = "Permanently remove this local result record? This does not undo deletion or verify an uncertain result.";
+"media_delete_status_not-started" = "Not started";
+"media_delete_status_not-sent" = "Not sent";
+"media_delete_status_confirmed" = "Deletion confirmed";
+"media_delete_status_rejected" = "Explicitly rejected";
+"media_delete_status_uncertain" = "Dispatched; completion uncertain";
+"media_delete_status_skipped" = "Skipped; no DELETE sent";
+"media_delete_reason_unloaded" = "Not loaded in this view; skipped";
+"media_delete_reason_unsupported" = "Delete capability unavailable; skipped";
+"media_delete_reason_protected" = "Known protected; skipped without unprotecting";
+"media_delete_reason_notWritable" = "Known not writable; skipped";
+"media_delete_reason_invalid" = "Invalid exact identity; skipped";
+"media_delete_reason_unknownSource" = "Source unknown; skipped";
+"media_delete_reason_sourceChanged" = "Source changed since review; skipped";
+"media_delete_reason_cancelled" = "Remaining dispatch stopped by cancellation";
+"media_delete_reason_ownerChanged" = "Original connection retired; no continuation";
+"media_delete_reason_blocked" = "Operation blocked before dispatch";
+"media_delete_reason_uncertain" = "Completion cannot be established; remaining dispatch stopped";
+"media_delete_reason_notSent" = "No transport dispatch was entered";
+"media_delete_reason_rejected" = "A complete response explicitly refused the operation";
+"media_delete_reason_capacity" = "This result cannot fit within the 20-batch / 2,000-row history limit without removing an active batch. Wait for the current operation to finish.";
+"media_delete_reason_limit" = "More than 1,000 items: the whole attempt is blocked; nothing is silently truncated.";
+"media_delete_reason_staleReview" = "This review is no longer valid. Open a new review.";
+"media_delete_preview_title" = "Remove sample from preview?";
+"media_delete_preview_notice" = "Only this synthetic preview item is removed. No camera or host file is deleted.";
+
+"capture_config_not_sent" = "The request was not sent.";
+"capture_config_unknown" = "The write result is unknown. Reading current settings cannot confirm whether this request succeeded. Do not repeat creation to check it.";
+"capture_config_ack_matched" = "The camera acknowledged the write, and the complete naming readback matches.";
+"capture_config_ack_refreshed" = "The camera acknowledged creation. Current directory settings were refreshed.";
+"capture_config_ack_mismatch" = "The camera acknowledged the write, but the current naming value differs. Your draft is kept.";
+"capture_config_ack_unavailable" = "The camera acknowledged the write, but its current settings could not be read. Your draft is kept.";
+"capture_config_reading" = "Reading current settings…";
+"capture_config_working" = "Waiting for this request…";
+"capture_config_refresh" = "Refresh settings (read only)";
+"capture_config_new_request" = "Prepare a new request";
+"capture_config_new_request_hint" = "Refreshing sends no writes. A new request may create another directory or apply another naming change.";
+"capture_config_history" = "Recent configuration requests";
+"capture_config_requested" = "Requested: %@";
+"capture_config_automatic" = "Automatic suffix";
+"capture_config_suffix" = "Acknowledged suffix: %@";
+"capture_config_suffix_limits" = "This suffix does not identify the exact numbered directory or storage card created.";
+"capture_config_current_directory" = "Current capture directory: %@";
+"capture_config_current_value" = "Current field value: %@";
+"capture_config_cancelled" = "Cancelled waiting. Any valid camera acknowledgment is retained; cancellation does not undo the write.";
+"capture_config_original_owner" = "Original connection only. This record cannot change the current connection.";
+"capture_config_readback_not_read" = "Current settings have not been read.";
+"capture_config_readback_unavailable" = "Current settings could not be read.";
+"capture_config_readback_matched" = "The current readback matches the requested value.";
+"capture_config_readback_mismatch" = "The current readback differs from the requested value.";
+"capture_config_readback_refreshed" = "Current directory settings were refreshed.";
+
+// Ordinary shooting-setting response and current-value evidence.
+"shooting_setting_not_sent" = "Setting command was not sent.";
+"shooting_setting_unknown" = "The command result is unknown. Do not assume it failed or resend automatically.";
+"shooting_setting_responded" = "A successful transport response was received. This is not proof of the current setting.";
+"shooting_setting_not_read" = "Current value has not been read.";
+"shooting_setting_unavailable" = "Fresh current value is unavailable.";
+"shooting_setting_matched" = "Fresh observed value matches the request; it does not prove causation.";
+"shooting_setting_mismatch" = "Fresh observed value differs from the request.";
+"shooting_setting_reading" = "Reading this setting only…";
+"shooting_setting_working" = "Applying one setting change…";
+"shooting_setting_refresh" = "Read current value";
+"shooting_setting_new" = "Prepare new change";
+"shooting_setting_no_replay" = "Refresh only reads. A new change requires a new explicit selection or Apply.";
+"shooting_setting_history" = "Recent setting changes";
+"shooting_setting_requested" = "Requested: %@";
+"shooting_setting_observed" = "Observed: %@";
+"shooting_setting_cancelled" = "Cancelled observation; any dispatched write may already have taken effect.";
+"shooting_setting_retired" = "Original connection only. Reconnect does not replay this change.";
+"shooting_setting_superseded" = "A newer observation or operation owns the current display.";
+"shooting_setting_draft_unavailable" = "The selected draft is no longer in the advertised choices. Select again before applying.";
+
+/* Independent maintenance lifecycle evidence */
+"maintenance_history" = "Maintenance history";
+"maintenance_monitoring_paused" = "Controls and monitoring are paused. Restore them explicitly after keep-power cleaning, or reconnect.";
+"maintenance_restoring" = "Restoring controls and monitoring…";
+"maintenance_reading" = "Reading current evidence…";
+"maintenance_working" = "Sending this maintenance request…";
+"maintenance_observe" = "Read current state";
+"maintenance_restore" = "Restore controls / monitoring";
+"maintenance_not_sent" = "Command not sent.";
+"maintenance_unknown" = "Command delivery is unknown. Do not repeat it automatically.";
+"maintenance_response_received" = "A complete command response was received.";
+"maintenance_stop_phase" = "Live View / event stop: %@";
+"maintenance_clock_proof" = "Original clock verification: %@";
+"maintenance_clock_sample" = "Camera time: %@ (%@)";
+"maintenance_latest_read" = "Latest read-only observation: %@";
+"maintenance_not_physical_completion" = "A response or loss of contact does not prove cleaning or sleep completed.";
+"maintenance_restore_phase" = "Control / monitoring restoration: %@";
+"maintenance_cancelled" = "Cancelled. A command already sent cannot be undone.";
+"maintenance_retired" = "Original connection only. No action can target the replacement camera.";
+"maintenance_zone_unavailable" = "Time-zone / DST evidence unavailable";
+"maintenance_partial_failure" = "This maintenance step could not be verified. Retained command and clock evidence remain in its history.";
+"maintenance_stop_not-required" = "not required";
+"maintenance_stop_pending" = "pending";
+"maintenance_stop_confirmed" = "confirmed";
+"maintenance_stop_unknown" = "unconfirmed";
+"maintenance_restore_not-requested" = "not requested";
+"maintenance_restore_pending" = "pending";
+"maintenance_restore_confirmed" = "controls restored; no physical completion claim";
+"maintenance_restore_unknown" = "unconfirmed";
+"maintenance_restore_not-applicable" = "not applicable";
+"maintenance_observation_not-read" = "not read";
+"maintenance_observation_unavailable" = "unavailable";
+"maintenance_observation_matched" = "matched";
+"maintenance_observation_mismatch" = "mismatch";
+"maintenance_observation_observed" = "observed; original proof unchanged";
+"maintenance_observation_reachable" = "camera responded; not physical completion";
+"maintenance_observation_not-applicable" = "not applicable";
+"maintenance_retirement_unconfirmed" = "The previous Bridge session’s local retirement was not confirmed. No automatic retry or camera action was sent. Camera Stop evidence remains separate.";
+"maintenance_retirement_dismiss" = "Dismiss retirement notice";
+
+"recording_command_rejected" = "The recording command was rejected. The previous recording responsibility is unchanged.";
+"recording_original_response" = "Original %@ response: %@";
+"recording_current_observation" = "Current recording state: %@";
+"recording_response_not-sent" = "not sent";
+"recording_response_unconfirmed" = "unconfirmed";
+"recording_response_rejected" = "rejected";
+"recording_response_response-received" = "response received";
+"recording_observed_active" = "freshly observed recording";
+"recording_observed_stopped" = "freshly observed stopped";
+"recording_observed_unavailable" = "unavailable";
+
+"live_view_retiring" = "Live View has ended locally. Waiting for the camera's Stop acknowledgement.";
+"live_view_restart_required" = "Live View ended. Start a new view when you are ready.";
+"live_view_start_again" = "Start Live View again";
+"live_view_render_stalled" = "Live View decoder or confirmed renderer output stopped progressing. Confirm Stop before starting again.";
+"live_view_stop_pending" = "Live View cleanup is still required. Release the active camera control, then retry Stop.";
+"native_lut_processed_unverified" = "LUT processed · display match unverified";
+"native_presentation_waiting" = "Waiting for native output";
+"native_presentation_progressing" = "Display frame progress verified";
+"native_presentation_unknown" = "Decoded output · display progress unverified";
+"native_presentation_stalled" = "Native output stopped progressing";
+
+"camera_audio_retiring" = "Audio is stopping. Native output retirement is pending; device audibility is unknown.";
+
+"lut_import_loading" = "Importing 3D LUT…";
+"lut_import_stopping" = "Waiting for the previous file read to finish…";
+
+// Connecting attempt cancellation and exact-owner retirement.
+"connection_cancel" = "Cancel connection";
+"connection_waiting_cleanup" = "Waiting for previous connection cleanup…";
+"connection_cancelled_help" = "Connection cancelled. You can edit the settings and retry when ready. No retry starts automatically.";
+"connection_cleanup_pending" = "The previous connection is still being cleaned up. Settings can be edited now; camera scanning is paused and an explicit retry waits for this cleanup. Local cancellation does not confirm that the camera was released.";
+"connection_cleanup_unconfirmed" = "The previous Bridge session cleanup was not confirmed. New connections and camera scanning are blocked. Check the original camera, restart that Bridge, then reopen this app before retrying.";

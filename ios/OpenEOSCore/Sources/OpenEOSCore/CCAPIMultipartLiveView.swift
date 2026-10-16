@@ -51,6 +51,7 @@ struct CCAPIMultipartParser {
     private let closingDelimiter: String
     private var state = State.boundary(scanned: 0)
     private var buffer = Data()
+    private var discardCurrentPart = false
 
     init(boundary: String) {
         delimiter = "--\(boundary)"
@@ -127,7 +128,8 @@ struct CCAPIMultipartParser {
                         "Canon multipart Live View part did not contain a complete JPEG frame."
                     )
                 }
-                frames.append(frame)
+                if !discardCurrentPart { frames.append(frame) }
+                discardCurrentPart = false
                 state = .boundary(scanned: 0)
             case .closed:
                 guard buffer.allSatisfy({ $0 == 0x0D || $0 == 0x0A }) else {
@@ -138,6 +140,21 @@ struct CCAPIMultipartParser {
             }
         }
         return frames
+    }
+
+    /// Keep exact Content-Length framing and all validation, but never publish
+    /// a part whose boundary, headers or body were already locally admitted.
+    mutating func discardPendingFrame() {
+        switch state {
+        case .headers, .body: discardCurrentPart = true
+        case .boundary: if !buffer.isEmpty { discardCurrentPart = true }
+        case .closed: break
+        }
+    }
+
+    var isClosed: Bool {
+        if case .closed = state { return true }
+        return false
     }
 
     mutating func finish() throws {
@@ -165,63 +182,130 @@ struct CCAPIMultipartParser {
     }
 }
 
-final class CCAPIMultipartLiveViewSession: @unchecked Sendable {
-    private static let firstFrameTimeoutNanoseconds: UInt64 = 5_000_000_000
+/// Used only under the session lock. A receive admitted before retirement may
+/// finish parsing for framing/validation, but neither its output nor remaining
+/// partial part can be relabeled as belonging to the new local crop revision.
+struct CCAPIMultipartGeometryParser {
+    private var parser: CCAPIMultipartParser
+    private(set) var revision = UUID()
 
-    private var iterator: AsyncThrowingStream<Data, Error>.Iterator
-    private let continuation: AsyncThrowingStream<Data, Error>.Continuation
-    private let worker: Task<Void, Never>
+    init(boundary: String) { parser = CCAPIMultipartParser(boundary: boundary) }
+
+    mutating func append(_ data: Data, revision admitted: UUID) throws -> [Data] {
+        let crossed = admitted != revision
+        if crossed { parser.discardPendingFrame() }
+        let frames = try parser.append(data)
+        if crossed { parser.discardPendingFrame() }
+        return crossed ? [] : frames
+    }
+
+    mutating func retire() {
+        revision = UUID()
+        parser.discardPendingFrame()
+    }
+
+    var isClosed: Bool { parser.isClosed }
+    mutating func finish() throws { try parser.finish() }
+}
+
+final class CCAPIMultipartLiveViewSession: @unchecked Sendable {
     private let response: CameraHTTPStreamResponse
+    private let lock = NSLock()
+    private var frame: Data?
+    private var terminal: Error?
+    private var worker: Task<Void, Never>?
+    private var parser: CCAPIMultipartGeometryParser
 
     init(response: CameraHTTPStreamResponse, boundary: String) {
         self.response = response
-        let output = AsyncThrowingStream<Data, Error>.makeStream(bufferingPolicy: .bufferingNewest(1))
-        iterator = output.stream.makeAsyncIterator()
-        continuation = output.continuation
-        worker = Task {
-            var parser = CCAPIMultipartParser(boundary: boundary)
+        parser = CCAPIMultipartGeometryParser(boundary: boundary)
+        worker = Task { [weak self] in
+            var iterator = response.chunks.makeAsyncIterator()
             do {
-                for try await chunk in response.chunks {
+                while true {
+                    guard let revision = self?.currentGeometryRevision() else { response.cancel(); return }
+                    guard let chunk = try await iterator.next() else { break }
                     try Task.checkCancellation()
-                    for frame in try parser.append(chunk) {
-                        output.continuation.yield(frame)
+                    if try self?.receive(chunk, revision: revision) == true {
+                        self?.finish(CCAPIError.invalidResponse("Canon multipart Live View stream closed."))
+                        response.cancel()
+                        return
                     }
                 }
-                try parser.finish()
-                output.continuation.finish()
-            } catch {
-                output.continuation.finish(throwing: error)
-            }
+                try self?.finishStream()
+                self?.finish(CCAPIError.invalidResponse("Canon multipart Live View stream ended."))
+            } catch { self?.finish(error) }
         }
     }
 
-    func nextFrame() async throws -> Data {
-        guard let frame = try await iterator.next() else {
-            throw CCAPIError.invalidResponse("Canon multipart Live View stream ended before the next frame.")
-        }
-        return frame
+    private func currentGeometryRevision() -> UUID {
+        lock.lock(); defer { lock.unlock() }
+        return parser.revision
     }
 
-    func validatedFirstFrame() async throws -> Data {
-        try await withThrowingTaskGroup(of: Data.self) { group in
-            group.addTask { [self] in try await nextFrame() }
-            group.addTask {
-                try await Task.sleep(nanoseconds: Self.firstFrameTimeoutNanoseconds)
-                throw CCAPIError.invalidResponse(
-                    "Canon multipart Live View did not return a valid JPEG frame within 5 seconds."
-                )
+    private func receive(_ chunk: Data, revision: UUID) throws -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard terminal == nil else { return true }
+        // Parsing and newest-frame publication are atomic with retirement.
+        for value in try parser.append(chunk, revision: revision) { frame = value }
+        if parser.isClosed { return true }
+        return false
+    }
+
+    private func finishStream() throws {
+        lock.lock(); defer { lock.unlock() }
+        try parser.finish()
+    }
+
+    private func finish(_ error: Error) {
+        lock.lock(); defer { lock.unlock() }
+        if terminal == nil { terminal = error }
+    }
+
+    private func takeFrame() throws -> Data? {
+        lock.lock(); defer { lock.unlock() }
+        if let terminal { throw terminal }
+        if let frame { self.frame = nil; return frame }
+        return nil
+    }
+
+    func nextFrame(timeoutNanoseconds: UInt64 = 5_000_000_000) async throws -> Data {
+        let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(clamping: timeoutNanoseconds)))
+        while true {
+            try Task.checkCancellation()
+            if let frame = try takeFrame() { return frame }
+            guard ContinuousClock.now < deadline else {
+                let error = CCAPIError.invalidResponse("Canon multipart Live View did not return a valid JPEG frame within the frame deadline.")
+                finish(error)
+                worker?.cancel(); response.cancel()
+                throw error
             }
-            defer { group.cancelAll() }
-            guard let frame = try await group.next() else {
-                throw CCAPIError.invalidResponse("Canon multipart Live View did not return a first frame.")
-            }
-            return frame
+            // Cancelling one UI reader does not consume or terminate the stream iterator.
+            try await Task.sleep(nanoseconds: min(timeoutNanoseconds, 10_000_000))
         }
     }
+
+    /// Retire the mailbox, partial part and in-flight receive across a crop change without
+    /// closing the stream or claiming physical frame/magnification synchronization.
+    func discardPendingFrame() {
+        lock.lock(); defer { lock.unlock() }
+        frame = nil
+        parser.retire()
+    }
+
+    func checkUsable() throws {
+        lock.lock(); defer { lock.unlock() }
+        if let terminal { throw terminal }
+    }
+
+    func validatedFirstFrame() async throws -> Data { try await nextFrame() }
 
     func close() {
-        worker.cancel()
+        lock.lock()
+        frame = nil
+        terminal = CancellationError()
+        lock.unlock()
+        worker?.cancel()
         response.cancel()
-        continuation.finish(throwing: CancellationError())
     }
 }

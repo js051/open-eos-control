@@ -263,6 +263,13 @@ final class ShutterReleaseRecoveryTests: XCTestCase {
         XCTAssertTrue(state.shutterReleaseRequired)
         XCTAssertTrue(state.shutterReleaseUnconfirmed)
         XCTAssertFalse(state.shutterFlash)
+        let releaseWarning = state.lastError
+        state.setConnectionMode(.desktopBridge)
+        state.setConnectionMode(.ccapi)
+        state.password = "synthetic-edited-password"
+        XCTAssertEqual(state.lastError, releaseWarning, "Connection field edits must not clear shutter safety errors")
+        XCTAssertTrue(state.shutterReleaseRequired)
+        XCTAssertTrue(state.shutterReleaseUnconfirmed)
         await transport.enqueue(
             "GET /ccapi/status",
             json: #"{"connected":true,"mode":"Manual","bulb_exposure_active":true,"temperature":"disablerelease","battery":{},"media":{},"exposure":{}}"#

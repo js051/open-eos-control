@@ -41,6 +41,9 @@ enum CameraSheet: String, Identifiable {
     case more
     case focusDrive
     case language
+    case deliveryHistory
+    case deleteHistory
+    case foregroundImport
 
     var id: String { rawValue }
 }
@@ -112,6 +115,7 @@ extension CameraStatus {
             recording: recording ?? self.recording,
             bulbExposureActive: bulbExposureActive,
             shutterReleaseUnconfirmed: shutterReleaseUnconfirmed,
+            liveViewStopUnconfirmed: liveViewStopUnconfirmed,
             mode: mode,
             mediaAvailable: mediaAvailable,
             remainingMinutes: remainingMinutes,

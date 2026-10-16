@@ -111,11 +111,88 @@ final class ShutterAutofocusStateTests: XCTestCase {
         await state.disconnect()
     }
 
-    private func makeState(_ transport: AppShutterAutofocusTransport) throws -> CameraAppState {
+    func testLutSuccessAndFailureCannotOverwriteCameraErrorRaisedDuringImport() async throws {
+        for fails in [false, true] {
+            let transport = AppShutterAutofocusTransport()
+            let gate = LutCameraErrorGate()
+            let lut = try parseCubeLut("LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n", fallbackName: "candidate")
+            let state = try makeState(transport, cubeLutLoader: { _ in
+                await gate.wait()
+                if fails { throw CocoaError(.fileReadNoPermission) }
+                return lut
+            })
+            await state.connect()
+            let pending = Task { await state.importCubeLut(from: URL(fileURLWithPath: "/synthetic/candidate.cube")) }
+            let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+            while !(await gate.waiting()), ContinuousClock.now < deadline { await Task.yield() }
+            let waiting = await gate.waiting()
+            XCTAssertTrue(waiting)
+            await transport.setFailure(true)
+            await state.captureStill() // Injected transport, no socket or physical camera.
+            let cameraError = state.lastError
+            XCTAssertNotNil(cameraError)
+            await gate.release()
+            await pending.value
+            XCTAssertEqual(state.lastError, cameraError)
+            XCTAssertEqual(state.cubeLutImportError == nil, !fails)
+            XCTAssertEqual(state.monitorSettings.cubeLut, fails ? nil : lut)
+            XCTAssertFalse(state.isImportingCubeLut)
+            state.cancelCubeLutImport()
+            XCTAssertEqual(state.lastError, cameraError)
+            state.clearCubeLut()
+            XCTAssertEqual(state.lastError, cameraError)
+            await state.disconnect()
+        }
+    }
+
+    func testIdenticalCameraErrorTextHasANewOwnerAndSurvivesLutMutations() async throws {
+        for renderWarning in [false, true] {
+            let transport = AppShutterAutofocusTransport()
+            let lut = try parseCubeLut("LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n", fallbackName: "candidate")
+            let state = try makeState(transport, cubeLutLoader: { _ in lut })
+            await state.connect()
+            if renderWarning { state.reportCubeLutRenderFailure() }
+            else { state.reportCubeLutImportError(CocoaError(.fileReadNoPermission)) }
+            let identicalText = try XCTUnwrap(state.lastError)
+            await transport.setFailureMessage(identicalText)
+            await state.captureStill()
+            XCTAssertEqual(state.lastError, identicalText)
+            state.cancelCubeLutImport()
+            XCTAssertEqual(state.lastError, identicalText, "A same-text camera write is not the old LUT error owner")
+            state.clearCubeLut()
+            XCTAssertEqual(state.lastError, identicalText)
+            state.reportCubeLutImportError(CocoaError(.fileReadCorruptFile))
+            XCTAssertEqual(state.lastError, identicalText, "A new LUT failure cannot overwrite the same-text camera error")
+            await state.importCubeLut(from: URL(fileURLWithPath: "/synthetic/candidate.cube"))
+            XCTAssertEqual(state.lastError, identicalText, "Success cannot clear a later same-text camera error")
+            XCTAssertEqual(state.monitorSettings.cubeLut, lut)
+            await state.disconnect()
+        }
+    }
+
+    func testConnectedDiagnosticReportOmitsDetailedLutFailureCanaries() async throws {
+        let transport = AppShutterAutofocusTransport()
+        let state = try makeState(transport)
+        await state.connect()
+        let canaries = ["SYNTHETIC_LUT_FILENAME_ONLY.cube", "SYNTHETIC_LUT_TITLE_ONLY", "/synthetic/lut-private/location"]
+        let error = NSError(domain: "SyntheticLutProvider", code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: canaries.joined(separator: " ")])
+        state.reportCubeLutImportError(error)
+        let report = try await state.diagnosticReport()
+        for canary in canaries {
+            XCTAssertTrue(state.cubeLutImportError?.contains(canary) == true)
+            XCTAssertFalse(report.text.contains(canary))
+        }
+        XCTAssertTrue(report.text.contains("LUT_IMPORT_FAILED"))
+        await state.disconnect()
+    }
+
+    private func makeState(_ transport: AppShutterAutofocusTransport,
+                           cubeLutLoader: (@Sendable (URL) async throws -> CubeLut)? = nil) throws -> CameraAppState {
         let defaults = UserDefaults(suiteName: "ShutterAutofocusStateTests.\(UUID().uuidString)")!
         let state = CameraAppState(defaults: defaults, sessionFactory: {
             .desktopBridge(try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: transport))
-        })
+        }, cubeLutLoader: cubeLutLoader)
         state.autoRefresh = false
         return state
     }
@@ -126,6 +203,7 @@ private actor AppShutterAutofocusTransport: CameraHTTPTransport {
     private var choices: [Bool] = []
     private var support = true
     private var failCapture = false
+    private var failureMessage: String?
     private var suspendCapture = false
     private var captureContinuation: CheckedContinuation<Void, Never>?
 
@@ -133,6 +211,7 @@ private actor AppShutterAutofocusTransport: CameraHTTPTransport {
     func captureChoices() -> [Bool] { choices }
     func setSupport(_ value: Bool) { support = value }
     func setFailure(_ value: Bool) { failCapture = value }
+    func setFailureMessage(_ value: String?) { failureMessage = value }
     func suspendNextCapture() { suspendCapture = true }
     func captureIsWaiting() -> Bool { captureContinuation != nil }
     func resumeCapture() { captureContinuation?.resume(); captureContinuation = nil }
@@ -158,11 +237,29 @@ private actor AppShutterAutofocusTransport: CameraHTTPTransport {
                 suspendCapture = false
                 await withCheckedContinuation { captureContinuation = $0 }
             }
+            if let failureMessage {
+                throw NSError(domain: "SyntheticCamera", code: 1, userInfo: [NSLocalizedDescriptionKey: failureMessage])
+            }
             if failCapture { return CameraHTTPResponse(statusCode: 503, body: Data("{}".utf8)) }
             body = #"{"connected":true,"recording":false,"mode":"Manual"}"#
         case "/v1/session/af-ui-session/status": body = #"{"connected":true,"recording":false,"mode":"Manual"}"#
         default: body = "{}"
         }
         return CameraHTTPResponse(statusCode: 200, body: Data(body.utf8))
+    }
+}
+
+private actor LutCameraErrorGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released = false
+    func wait() async {
+        if released { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func waiting() -> Bool { continuation != nil }
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
     }
 }

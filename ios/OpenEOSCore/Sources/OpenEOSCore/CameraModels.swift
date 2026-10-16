@@ -190,6 +190,7 @@ public struct CameraStatus: Equatable, Sendable {
     public let bulbExposureActive: Bool?
     /// Nil means an older peer did not supply release-confirmation evidence.
     public let shutterReleaseUnconfirmed: Bool?
+    public let liveViewStopUnconfirmed: Bool?
     public let mode: String
     public let mediaAvailable: Bool?
     public let remainingMinutes: Int?
@@ -213,6 +214,7 @@ public struct CameraStatus: Equatable, Sendable {
         recording: Bool? = nil,
         bulbExposureActive: Bool? = nil,
         shutterReleaseUnconfirmed: Bool? = nil,
+        liveViewStopUnconfirmed: Bool? = nil,
         mode: String = "unknown",
         mediaAvailable: Bool? = nil,
         remainingMinutes: Int? = nil,
@@ -235,6 +237,7 @@ public struct CameraStatus: Equatable, Sendable {
         self.recording = recording
         self.bulbExposureActive = bulbExposureActive
         self.shutterReleaseUnconfirmed = shutterReleaseUnconfirmed
+        self.liveViewStopUnconfirmed = liveViewStopUnconfirmed
         self.mode = mode
         self.mediaAvailable = mediaAvailable
         self.remainingMinutes = remainingMinutes
@@ -250,6 +253,17 @@ public struct CameraStatus: Equatable, Sendable {
         self.rawRecordableJSON = rawRecordableJSON
         self.lens = lens
         self.temperature = temperature
+    }
+
+    public func withRecordingObservation(_ observation: CameraRecordingObservation) -> CameraStatus {
+        CameraStatus(connected: connected, batteryLevel: batteryLevel, batteryStatus: batteryStatus,
+            recording: observation.observedRecording, bulbExposureActive: bulbExposureActive,
+            shutterReleaseUnconfirmed: shutterReleaseUnconfirmed, liveViewStopUnconfirmed: liveViewStopUnconfirmed,
+            mode: mode, mediaAvailable: mediaAvailable, remainingMinutes: remainingMinutes, exposure: exposure,
+            storageTotalBytes: storageTotalBytes, storageFreeBytes: storageFreeBytes, storageFreeImages: storageFreeImages,
+            storageDeviceCount: storageDeviceCount, recordableShots: recordableShots,
+            remainingRecordingSeconds: remainingRecordingSeconds, rawBatteryJSON: rawBatteryJSON,
+            rawStorageJSON: rawStorageJSON, rawRecordableJSON: rawRecordableJSON, lens: lens, temperature: temperature)
     }
 
     public func withBulbExposureActive(_ active: Bool?) -> CameraStatus {
@@ -268,6 +282,7 @@ public struct CameraStatus: Equatable, Sendable {
             recording: recording,
             bulbExposureActive: active,
             shutterReleaseUnconfirmed: unconfirmed,
+            liveViewStopUnconfirmed: liveViewStopUnconfirmed,
             mode: mode,
             mediaAvailable: mediaAvailable,
             remainingMinutes: remainingMinutes,
@@ -424,17 +439,17 @@ public struct CameraFileNaming: Equatable, Sendable {
         case .stillFilenameMode:
             stillFilenameModeOptions.contains(value)
         case .stillUserSetting1:
-            value.range(of: #"^[A-Z0-9][A-Z0-9_]{3}$"#, options: .regularExpression) != nil
+            CameraCaptureConfigurationValue.exactPattern(value, #"^[A-Z0-9][A-Z0-9_]{3}$"#)
         case .stillUserSetting2:
-            value.range(of: #"^[A-Z0-9][A-Z0-9_]{2}$"#, options: .regularExpression) != nil
+            CameraCaptureConfigurationValue.exactPattern(value, #"^[A-Z0-9][A-Z0-9_]{2}$"#)
         case .movieIndex:
-            value.range(of: #"^[A-Z0-9][A-Z0-9_]$"#, options: .regularExpression) != nil
+            CameraCaptureConfigurationValue.exactPattern(value, #"^[A-Z0-9][A-Z0-9_]$"#)
         case .movieReelNumber:
             movieReelRange.accepts(value)
         case .movieClipNumber:
             movieClipRange.accepts(value)
         case .movieUserDefined:
-            value.range(of: #"^[A-Z0-9]{5}$"#, options: .regularExpression) != nil
+            CameraCaptureConfigurationValue.exactPattern(value, #"^[A-Z0-9]{5}$"#)
         }
     }
 }
@@ -484,6 +499,7 @@ public struct LiveViewCapabilities: Equatable, Sendable {
     public let currentMagnification: LiveViewMagnification?
     public let minimumFPS: Int
     public let maximumFPS: Int
+    public let focusInfoSupported: Bool
 
     public init(
         sources: [LiveViewSource] = [],
@@ -494,7 +510,8 @@ public struct LiveViewCapabilities: Equatable, Sendable {
         magnifications: [LiveViewMagnification] = [],
         currentMagnification: LiveViewMagnification? = nil,
         minimumFPS: Int = 1,
-        maximumFPS: Int = 30
+        maximumFPS: Int = 30,
+        focusInfoSupported: Bool = false
     ) {
         self.sources = sources
         self.defaultSource = defaultSource
@@ -505,6 +522,7 @@ public struct LiveViewCapabilities: Equatable, Sendable {
         self.currentMagnification = currentMagnification
         self.minimumFPS = minimumFPS
         self.maximumFPS = maximumFPS
+        self.focusInfoSupported = focusInfoSupported
     }
 }
 
@@ -566,6 +584,7 @@ public struct CameraCapabilityEvidence: Equatable, Sendable {
 
 public struct CameraCapabilities: Equatable, Sendable {
     public let shutterAutofocusSupported: Bool
+    public let heldAutofocusSupported: Bool
     public let settings: [CameraSetting]
     public let fileNaming: CameraFileNaming?
     public let matrix: CapabilityMatrix
@@ -580,7 +599,8 @@ public struct CameraCapabilities: Equatable, Sendable {
         liveView: LiveViewCapabilities,
         profile: CameraProfile,
         evidence: CameraCapabilityEvidence = CameraCapabilityEvidence(),
-        shutterAutofocusSupported: Bool = false
+        shutterAutofocusSupported: Bool = false,
+        heldAutofocusSupported: Bool = false
     ) {
         self.settings = settings
         self.fileNaming = fileNaming
@@ -589,6 +609,7 @@ public struct CameraCapabilities: Equatable, Sendable {
         self.profile = profile
         self.evidence = evidence
         self.shutterAutofocusSupported = shutterAutofocusSupported
+        self.heldAutofocusSupported = heldAutofocusSupported
     }
 
     public func setting(_ key: String) -> CameraSetting? {
@@ -613,7 +634,8 @@ public struct CameraCapabilities: Equatable, Sendable {
                 discoveryTrace: evidence.discoveryTrace,
                 truncated: evidence.truncated
             ),
-            shutterAutofocusSupported: shutterAutofocusSupported
+            shutterAutofocusSupported: shutterAutofocusSupported,
+            heldAutofocusSupported: heldAutofocusSupported
         )
     }
 }
@@ -681,6 +703,30 @@ public struct LiveViewMagnificationResult: Equatable, Sendable {
     }
 }
 
+/// Folder provenance reported by a transport. The ID is opaque and is not a filesystem path.
+public struct CameraMediaFolder: Equatable, Sendable {
+    public let id: String
+    public let label: String
+
+    public init?(id: String, label: String) {
+        guard Self.isValid(id, maximumUTF16Count: 4_096),
+              Self.isValid(label, maximumUTF16Count: 1_024) else { return nil }
+        self.id = id
+        self.label = label
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        // Swift String equality normalizes Unicode; provenance retains the exact transport values.
+        lhs.id.utf8.elementsEqual(rhs.id.utf8) && lhs.label.utf8.elementsEqual(rhs.label.utf8)
+    }
+
+    private static func isValid(_ value: String, maximumUTF16Count: Int) -> Bool {
+        !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && value.utf16.count <= maximumUTF16Count
+            && !value.unicodeScalars.contains { $0.value <= 0x1F || (0x7F...0x9F).contains($0.value) }
+    }
+}
+
 public struct CameraMediaItem: Identifiable, Equatable, Sendable {
     public let id: String
     public let name: String
@@ -695,6 +741,13 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
     public let contentType: String?
     public let widthPixels: Int?
     public let heightPixels: Int?
+    public let folder: CameraMediaFolder?
+    /// An explicit transport denial vetoes metadata writes; absence grants no new capability.
+    public let writable: Bool?
+    public let ratingWritable: Bool?
+    public let protectionWritable: Bool?
+    public let rotationWritable: Bool?
+    public let archiveWritable: Bool?
 
     public init(
         id: String,
@@ -709,7 +762,13 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
         archived: Bool? = nil,
         contentType: String? = nil,
         widthPixels: Int? = nil,
-        heightPixels: Int? = nil
+        heightPixels: Int? = nil,
+        folder: CameraMediaFolder? = nil,
+        writable: Bool? = nil,
+        ratingWritable: Bool? = nil,
+        protectionWritable: Bool? = nil,
+        rotationWritable: Bool? = nil,
+        archiveWritable: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -724,6 +783,12 @@ public struct CameraMediaItem: Identifiable, Equatable, Sendable {
         self.contentType = contentType
         self.widthPixels = widthPixels
         self.heightPixels = heightPixels
+        self.folder = folder
+        self.writable = writable
+        self.ratingWritable = ratingWritable
+        self.protectionWritable = protectionWritable
+        self.rotationWritable = rotationWritable
+        self.archiveWritable = archiveWritable
     }
 }
 
@@ -794,4 +859,11 @@ public struct CameraSnapshot: Equatable, Sendable {
         self.status = status
         self.capabilities = capabilities
     }
+}
+
+/// Command-boundary evidence, never an independent observation of camera state.
+/// Kept separately from thrown errors so cancellation still propagates unchanged.
+public enum CameraRecordingCommandEvidence: Equatable, Sendable {
+    case unconfirmed(starting: Bool)
+    case acknowledged(starting: Bool)
 }

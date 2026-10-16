@@ -23,6 +23,8 @@ final class AsyncUIOwnershipTests: XCTestCase {
 
                     change.apply(to: state)
                     XCTAssertFalse(state.isBusy(.scan), "\(change) must retire scan admission synchronously")
+                    XCTAssertEqual(state.bridgeScanState, .notScanned)
+                    XCTAssertNil(state.connectionRecovery)
                     state.reportCubeLutRenderFailure()
                     let saved = ScanPresentation(state)
                     await fixture.discovery.release("old")
@@ -52,6 +54,7 @@ final class AsyncUIOwnershipTests: XCTestCase {
                     let new = fixture.scan()
                     try await waitForGate("new", in: fixture.discovery)
                     XCTAssertTrue(state.isBusy(.scan))
+                    XCTAssertEqual(state.bridgeScanState, .scanning)
                     state.reportCubeLutRenderFailure()
                     let saved = ScanPresentation(state)
 
@@ -63,6 +66,8 @@ final class AsyncUIOwnershipTests: XCTestCase {
                     await fixture.discovery.release("new")
                     await new.value
                     XCTAssertEqual(state.bridgeCameras, cameras("new"))
+                    XCTAssertEqual(state.bridgeScanState, .completed)
+                    XCTAssertNil(state.connectionRecovery)
                     XCTAssertEqual(state.selectedBridgeCameraID, "new-first")
                     XCTAssertNil(state.lastError)
                     XCTAssertFalse(state.isBusy(.scan))
@@ -107,6 +112,7 @@ final class AsyncUIOwnershipTests: XCTestCase {
     func testCurrentScanKeepsValidSelectionFallsBackAndClearsAnEmptyResult() async throws {
         try await withFixture { fixture in
             let state = fixture.state
+            XCTAssertEqual(state.bridgeScanState, .notScanned)
             state.selectedBridgeCameraID = "current-second"
             state.reportCubeLutRenderFailure()
             try await completeScan("selected", cameras: cameras("current"), fixture: fixture)
@@ -114,6 +120,7 @@ final class AsyncUIOwnershipTests: XCTestCase {
             XCTAssertEqual(state.bridgeCameras, cameras("current"))
             XCTAssertNil(state.lastError)
             XCTAssertFalse(state.isBusy(.scan))
+            XCTAssertEqual(state.bridgeScanState, .completed)
 
             state.selectedBridgeCameraID = "missing"
             try await completeScan("fallback", cameras: cameras("current"), fixture: fixture)
@@ -121,16 +128,19 @@ final class AsyncUIOwnershipTests: XCTestCase {
             try await completeScan("empty", cameras: [], fixture: fixture)
             XCTAssertTrue(state.bridgeCameras.isEmpty)
             XCTAssertNil(state.selectedBridgeCameraID)
+            XCTAssertEqual(state.bridgeScanState, .completed, "An empty completed scan is different from no scan")
+            XCTAssertNil(state.connectionRecovery)
             XCTAssertNil(state.lastError)
             XCTAssertFalse(state.isBusy(.scan))
         }
     }
 
-    func testCurrentScanFailureClearsPriorResultsAndReportsTheRealError() async throws {
+    func testCurrentScanFailureReportsOnlyTypedRecoveryAndKeepsUnrelatedWarning() async throws {
         try await withFixture { fixture in
             let state = fixture.state
             try await completeScan("seed", cameras: cameras("seed"), fixture: fixture)
             state.reportCubeLutRenderFailure()
+            let unrelatedWarning = state.lastError
             await fixture.discovery.enqueue("failure", outcome: .failure("current discovery failed"))
             let current = fixture.scan()
             try await waitForGate("failure", in: fixture.discovery)
@@ -139,7 +149,10 @@ final class AsyncUIOwnershipTests: XCTestCase {
 
             XCTAssertTrue(state.bridgeCameras.isEmpty)
             XCTAssertNil(state.selectedBridgeCameraID)
-            XCTAssertEqual(state.lastError, "current discovery failed")
+            XCTAssertEqual(state.lastError, unrelatedWarning)
+            XCTAssertEqual(state.bridgeScanState, .failed)
+            XCTAssertEqual(state.connectionRecovery,
+                           ConnectionRecovery(mode: .desktopBridge, operation: .scan, reason: .unknown))
             XCTAssertFalse(state.isBusy(.scan))
         }
     }
@@ -167,7 +180,72 @@ final class AsyncUIOwnershipTests: XCTestCase {
                 XCTAssertEqual(state.selectedBridgeCameraID, savedSelection)
                 XCTAssertEqual(state.lastError, savedError)
                 XCTAssertFalse(state.isBusy(.scan))
+                XCTAssertEqual(state.bridgeScanState, .completed)
+                XCTAssertNil(state.connectionRecovery)
             }
+        }
+    }
+
+    func testScanAuthenticationRetryAndRetiredErrorCannotReplaceNewGuidance() async throws {
+        try await withFixture { fixture in
+            let state = fixture.state
+            await fixture.discovery.enqueue("old", outcome: .authenticationRejected)
+            let old = fixture.scan()
+            try await waitForGate("old", in: fixture.discovery)
+            state.bridgeToken = "synthetic-corrected-token"
+            XCTAssertEqual(state.bridgeScanState, .notScanned)
+            await fixture.discovery.enqueue("current", outcome: .unreachable)
+            let current = fixture.scan()
+            try await waitForGate("current", in: fixture.discovery)
+            await fixture.discovery.release("current")
+            await current.value
+            let saved = ScanPresentation(state)
+            XCTAssertEqual(state.connectionRecovery?.reason, .unreachable)
+            await fixture.discovery.release("old")
+            await old.value
+            saved.assertPreserved(in: state)
+
+            await fixture.discovery.enqueue("auth", outcome: .authenticationRejected)
+            let auth = fixture.scan()
+            try await waitForGate("auth", in: fixture.discovery)
+            await fixture.discovery.release("auth")
+            await auth.value
+            XCTAssertEqual(state.connectionRecovery?.messageKey, "connection_bridge_authentication")
+            XCTAssertEqual(state.connectionRecovery?.needsCameraAuthentication, false)
+            XCTAssertEqual(state.bridgeScanState, .failed)
+            let failedRequestCount = await fixture.discovery.requests().count
+            XCTAssertEqual(failedRequestCount, 3, "Failure must not automatically retry")
+
+            state.bridgeToken = "synthetic-next-token"
+            XCTAssertEqual(state.bridgeScanState, .notScanned)
+            XCTAssertNil(state.connectionRecovery)
+            let editedRequestCount = await fixture.discovery.requests().count
+            XCTAssertEqual(editedRequestCount, failedRequestCount, "Editing must not scan")
+            try await completeScan("retry", cameras: [], fixture: fixture)
+            XCTAssertEqual(state.bridgeScanState, .completed)
+            XCTAssertTrue(state.bridgeCameras.isEmpty)
+            XCTAssertNil(state.connectionRecovery)
+        }
+    }
+
+    func testCancelledRetryRestoresItsPreviousFailureGuidance() async throws {
+        try await withFixture { fixture in
+            let state = fixture.state
+            await fixture.discovery.enqueue("auth", outcome: .authenticationRejected)
+            let auth = fixture.scan()
+            try await waitForGate("auth", in: fixture.discovery)
+            await fixture.discovery.release("auth")
+            await auth.value
+            let saved = ScanPresentation(state)
+            await fixture.discovery.enqueue("retry", outcome: .success([]))
+            let retry = fixture.scan()
+            try await waitForGate("retry", in: fixture.discovery)
+            XCTAssertEqual(state.bridgeScanState, .scanning)
+            XCTAssertNil(state.connectionRecovery)
+            retry.cancel()
+            await fixture.discovery.release("retry")
+            await retry.value
+            saved.assertPreserved(in: state)
         }
     }
 
@@ -501,6 +579,180 @@ final class AsyncUIOwnershipTests: XCTestCase {
         XCTAssertTrue(state.lastError?.contains("not valid UTF-8") == true)
     }
 
+    func testAcceptedSelectionOwnsBeforeItsTaskStartsAndCannotBeResurrected() async throws {
+        for remove in [false, true] {
+            try await withFixture { fixture in
+                let state = fixture.state
+                let seed = lut("seed")
+                state.monitorSettings.cubeLut = seed
+                let accepted = try XCTUnwrap(state.acceptCubeLutSelection(from: URL(fileURLWithPath: "/synthetic/old.cube")))
+                XCTAssertTrue(state.isImportingCubeLut)
+                if remove { state.clearCubeLut() } else { state.cancelCubeLutImport() }
+                XCTAssertFalse(state.isImportingCubeLut)
+                await state.importCubeLut(accepted)
+                XCTAssertEqual(state.monitorSettings.cubeLut, remove ? nil : seed)
+                XCTAssertNil(state.cubeLutImportError)
+                let requests = await fixture.importer.requests()
+                XCTAssertTrue(requests.isEmpty, "Retired accepted selection must not open a file")
+            }
+        }
+    }
+
+    func testLatestAcceptedSelectionWinsWhenTasksStartInReverseOrder() async throws {
+        try await withFixture { fixture in
+            let state = fixture.state
+            let old = try XCTUnwrap(state.acceptCubeLutSelection(from: URL(fileURLWithPath: "/synthetic/old.cube")))
+            let latest = try XCTUnwrap(state.acceptCubeLutSelection(from: URL(fileURLWithPath: "/synthetic/latest.cube")))
+            await fixture.importer.enqueue("latest", outcome: .success(lut("latest")))
+            let task = fixture.importLut(latest)
+            try await waitForGate("latest", in: fixture.importer)
+            await state.importCubeLut(old)
+            XCTAssertTrue(state.isImportingCubeLut)
+            let requests = await fixture.importer.requests()
+            XCTAssertEqual(requests.map(\.lastPathComponent), ["latest.cube"])
+            await fixture.importer.release("latest")
+            await task.value
+            XCTAssertEqual(state.monitorSettings.cubeLut?.name, "latest")
+            XCTAssertFalse(state.isImportingCubeLut)
+        }
+    }
+
+    func testExplicitCancelRetiresNonCooperativeReadWithoutClearingAppliedLut() async throws {
+        for fails in [false, true] {
+            try await withFixture { fixture in
+                let state = fixture.state
+                let seed = lut("seed")
+                state.monitorSettings.cubeLut = seed
+                await fixture.importer.enqueue("old", outcome: fails ? .failure("retired failure") : .success(lut("old")))
+                let old = fixture.importLut("old")
+                try await waitForGate("old", in: fixture.importer)
+                XCTAssertTrue(state.isImportingCubeLut)
+                state.cancelCubeLutImport()
+                XCTAssertFalse(state.isImportingCubeLut)
+                XCTAssertEqual(state.monitorSettings.cubeLut, seed)
+                state.reportCubeLutRenderFailure()
+                let warning = state.lastError
+                await fixture.importer.release("old")
+                await old.value
+                XCTAssertEqual(state.monitorSettings.cubeLut, seed)
+                XCTAssertEqual(state.lastError, warning)
+                XCTAssertNil(state.cubeLutImportError)
+                XCTAssertFalse(state.isImportingCubeLut)
+                try await completeImport("retry", lut: lut("retry"), fixture: fixture)
+                XCTAssertEqual(state.monitorSettings.cubeLut?.name, "retry")
+            }
+        }
+    }
+
+    func testPickerOpenNullAndUserCancellationPreserveAcceptedWorkAcrossBackground() async throws {
+        let results: [Result<URL?, Error>] = [
+            .success(nil), .failure(CancellationError()), .failure(CocoaError(.userCancelled)),
+        ]
+        for result in results {
+            try await withFixture { fixture in
+                let state = fixture.state
+                let seed = lut("seed")
+                state.monitorSettings.cubeLut = seed
+                await fixture.importer.enqueue("latest", outcome: .success(lut("latest")))
+                let latest = fixture.importLut("latest")
+                try await waitForGate("latest", in: fixture.importer)
+                let picker = state.beginCubeLutPicker()
+                state.setApplicationActive(false)
+                XCTAssertTrue(state.isImportingCubeLut)
+                XCTAssertNil(state.completeCubeLutPicker(result, owner: picker))
+                XCTAssertTrue(state.isImportingCubeLut)
+                XCTAssertNil(state.cubeLutImportError)
+                XCTAssertEqual(state.monitorSettings.cubeLut, seed)
+                state.setApplicationActive(true)
+                await fixture.importer.release("latest")
+                await latest.value
+                XCTAssertEqual(state.monitorSettings.cubeLut?.name, "latest")
+                XCTAssertFalse(state.isImportingCubeLut)
+            }
+        }
+    }
+
+    func testStalePickerSuccessFailureAndCancellationCannotRetireANewerAcceptedSelection() async throws {
+        let results: [Result<URL?, Error>] = [
+            .success(URL(fileURLWithPath: "/synthetic/stale.cube")),
+            .failure(AsyncUIFailure(message: "stale picker failure")), .success(nil),
+        ]
+        for result in results {
+            try await withFixture { fixture in
+                let state = fixture.state
+                let picker = state.beginCubeLutPicker()
+                let newerPicker = state.beginCubeLutPicker()
+                XCTAssertNil(state.completeCubeLutPicker(result, owner: picker))
+                let accepted = try XCTUnwrap(state.completeCubeLutPicker(
+                    .success(URL(fileURLWithPath: "/synthetic/latest.cube")), owner: newerPicker))
+                state.reportCubeLutRenderFailure()
+                let warning = state.lastError
+                XCTAssertNil(state.completeCubeLutPicker(result, owner: newerPicker))
+                XCTAssertTrue(state.isImportingCubeLut)
+                XCTAssertEqual(state.lastError, warning)
+                XCTAssertNil(state.cubeLutImportError)
+                await fixture.importer.enqueue("latest", outcome: .success(lut("latest")))
+                let task = fixture.importLut(accepted)
+                try await waitForGate("latest", in: fixture.importer)
+                await fixture.importer.release("latest")
+                await task.value
+                XCTAssertEqual(state.monitorSettings.cubeLut?.name, "latest")
+            }
+        }
+    }
+
+    func testCurrentPickerFailureRetiresPendingReadAndRetryClearsOnlyItsError() async throws {
+        try await withFixture { fixture in
+            let state = fixture.state
+            let seed = lut("seed")
+            state.monitorSettings.cubeLut = seed
+            await fixture.importer.enqueue("old", outcome: .success(lut("old")))
+            let old = fixture.importLut("old")
+            try await waitForGate("old", in: fixture.importer)
+            let picker = state.beginCubeLutPicker()
+            XCTAssertNil(state.completeCubeLutPicker(.failure(AsyncUIFailure(message: "picker unavailable")), owner: picker))
+            XCTAssertFalse(state.isImportingCubeLut)
+            let failure = state.cubeLutImportError
+            XCTAssertTrue(failure?.contains("picker unavailable") == true)
+            await fixture.importer.release("old")
+            await old.value
+            XCTAssertEqual(state.monitorSettings.cubeLut, seed)
+            XCTAssertEqual(state.cubeLutImportError, failure)
+            try await completeImport("retry", lut: lut("retry"), fixture: fixture)
+            XCTAssertNil(state.cubeLutImportError)
+            XCTAssertNil(state.lastError)
+        }
+    }
+
+    func testPickerCoordinatorKeepsItsImmutableTicketAndDeliversOnlyOnce() {
+        let owner = UUID()
+        var delivered: [UUID] = []
+        let coordinator = CubeLutDocumentPicker.Coordinator(owner: owner) { ticket, _ in delivered.append(ticket) }
+        coordinator.finish(.success(nil))
+        coordinator.finish(.failure(AsyncUIFailure(message: "late failure")))
+        coordinator.finish(.success(URL(fileURLWithPath: "/synthetic/late.cube")))
+        XCTAssertEqual(delivered, [owner])
+    }
+
+    func testDisconnectedDiagnosticsNeverIncludeLutProviderErrorCanaries() async throws {
+        for mode in [AppConnectionMode.ccapi, .desktopBridge] {
+            try await withFixture { fixture in
+                let state = fixture.state
+                state.connectionMode = mode
+                let canaries = ["SYNTHETIC_LUT_FILENAME_ONLY.cube", "SYNTHETIC_LUT_TITLE_ONLY", "/synthetic/lut-private/location"]
+                state.monitorSettings.cubeLut = lut(canaries[1])
+                state.reportCubeLutImportError(AsyncUIFailure(message: canaries.joined(separator: " ")))
+                let report = try await state.diagnosticReport()
+                for canary in canaries {
+                    XCTAssertTrue(state.cubeLutImportError?.contains(canary) == true)
+                    XCTAssertFalse(report.text.contains(canary))
+                }
+                XCTAssertTrue(report.text.contains("LUT_IMPORT_FAILED"))
+                XCTAssertTrue(report.text.contains("monitorLut=loaded (2x2x2)"))
+            }
+        }
+    }
+
     private func cameras(_ owner: String) -> [DesktopBridgeCamera] {
         ["first", "second"].map {
             DesktopBridgeCamera(id: "\(owner)-\($0)", model: "Synthetic \(owner) \($0)",
@@ -564,12 +816,16 @@ final class AsyncUIOwnershipTests: XCTestCase {
         let selection: String?
         let error: String?
         let busy: Set<CameraOperation>
+        let scanState: BridgeScanState
+        let recovery: ConnectionRecovery?
 
         init(_ state: CameraAppState) {
             cameras = state.bridgeCameras
             selection = state.selectedBridgeCameraID
             error = state.lastError
             busy = state.busyOperations
+            scanState = state.bridgeScanState
+            recovery = state.connectionRecovery
         }
 
         func assertPreserved(in state: CameraAppState, file: StaticString = #filePath, line: UInt = #line) {
@@ -577,6 +833,8 @@ final class AsyncUIOwnershipTests: XCTestCase {
             XCTAssertEqual(state.selectedBridgeCameraID, selection, file: file, line: line)
             XCTAssertEqual(state.lastError, error, file: file, line: line)
             XCTAssertEqual(state.busyOperations, busy, file: file, line: line)
+            XCTAssertEqual(state.bridgeScanState, scanState, file: file, line: line)
+            XCTAssertEqual(state.connectionRecovery, recovery, file: file, line: line)
         }
     }
 }
@@ -667,6 +925,12 @@ private final class AsyncUIFixture {
         return task
     }
 
+    func importLut(_ selection: CubeLutImportSelection) -> Task<Void, Never> {
+        let task = Task { await state.importCubeLut(selection) }
+        tasks.append(task)
+        return task
+    }
+
     func focus() async throws -> Task<Void, Never> {
         await state.autofocus()
         let task = try XCTUnwrap(state.focusMarkerExpiryTask)
@@ -695,12 +959,18 @@ private enum AsyncUIOutcome<Value: Sendable>: Sendable {
     case success(Value)
     case failure(String)
     case cancelled
+    case authenticationRejected
+    case unreachable
 
     func get() throws -> Value {
         switch self {
         case let .success(value): return value
         case let .failure(message): throw AsyncUIFailure(message: message)
         case .cancelled: throw CancellationError()
+        case .authenticationRejected:
+            throw DesktopBridgeError.http(statusCode: 401, method: "GET", url: "http://bridge.invalid/api/v1/cameras",
+                                          code: "UNAUTHORIZED", message: "Synthetic rejection", feature: nil, engine: nil)
+        case .unreachable: throw URLError(.cannotConnectToHost)
         }
     }
 }

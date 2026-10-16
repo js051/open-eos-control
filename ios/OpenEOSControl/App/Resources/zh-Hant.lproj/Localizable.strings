@@ -85,7 +85,7 @@
 "composition_grid" = "構圖格線";
 "no_settings" = "此模式沒有可用設定。";
 "sync_camera_clock" = "相機日期與時間";
-"sync_camera_clock_hint" = "使用此裝置的時間與時區設定相機，並回讀確認結果。";
+"sync_camera_clock_hint" = "要求同步相機時鐘，再檢查回讀時間及可取得的時區／夏令時間證據。";
 "camera_clock_synced_at" = "已於 %@ 驗證";
 "create_capture_directory" = "建立拍攝目錄";
 "create_capture_directory_hint" = "留空可使用相機預設名稱，或輸入剛好 5 個大寫英文字母、數字或底線。";
@@ -150,13 +150,13 @@
 "setting_focus_bracketing_exposure_smoothing" = "曝光平滑";
 "setting_auto_power_off" = "自動關閉電源";
 "camera_sleep" = "讓相機進入休眠";
-"camera_sleep_hint" = "結束 CCAPI 連線並立即讓相機進入省電休眠。";
+"camera_sleep_hint" = "要求相機進入省電休眠，並暫停控制與監看。請在相機上確認實際狀態。";
 "camera_sleep_confirm_title" = "讓相機進入休眠？";
-"camera_sleep_confirm_message" = "Live View 與目前的相機連線將會結束。再次連線前，請先在相機上將其喚醒。";
+"camera_sleep_confirm_message" = "將停止 Live View 並暫停控制與監看。收到回應或失去聯絡都無法確認已休眠。需要時請在相機上喚醒，再明確重新連線。";
 "sensor_cleaning" = "清潔相機感光元件";
-"sensor_cleaning_hint" = "執行相機內建的感光元件清潔程序；清潔期間會暫停 Live View。";
+"sensor_cleaning_hint" = "要求執行相機內建的感光元件清潔程序。控制與監看會持續暫停，直到您明確恢復或重新連線。";
 "sensor_cleaning_confirm_title" = "清潔相機感光元件？";
-"sensor_cleaning_confirm_message" = "清潔期間無法拍照或錄影。";
+"sensor_cleaning_confirm_message" = "清潔期間無法拍照或錄影。請在相機上確認實際狀態；保持開機時需另按「恢復控制／監看」，關機後則需重新連線。";
 "sensor_cleaning_keep_power" = "清潔感光元件";
 "sensor_cleaning_power_off" = "清潔後關閉相機";
 "clean_now" = "立即清潔";
@@ -279,7 +279,7 @@
 "cancel_media_upload" = "取消媒體上傳";
 "uploading_media" = "正在上傳 %@";
 "media_upload_progress_known" = "%@ / %@（%d%%）";
-"media_upload_progress_unknown" = "已上傳 %@";
+"media_upload_progress_unknown" = "已傳送 %@；等待確認";
 "upload_complete" = "已上傳 %@";
 "save_media" = "儲存或分享媒體";
 "delete_media" = "刪除媒體";
@@ -322,7 +322,8 @@
 "camera_audio_muted" = "預設靜音；只有開啟此選項且 App 位於前景時才會播放。";
 "camera_audio_unavailable" = "此 RTP 工作階段沒有可支援的相機音訊。";
 "camera_audio_failed" = "相機音訊已停止；請到 Debug 查看接收或解碼的完整錯誤。";
-"camera_audio_active_format" = "播放中 · %d Hz · %d 聲道";
+"camera_audio_active_format" = "播放器渲染有進度 · %d Hz · %d 聲道";
+"camera_audio_output_unknown" = "監聽已開啟，正在等待可驗證的播放器渲染進度；無法確認裝置實際發聲。";
 "lut_preview" = "3D LUT 預覽";
 "load_cube_lut" = "載入 .cube LUT";
 "remove_cube_lut" = "移除 LUT";
@@ -479,6 +480,10 @@
 "capture_without_autofocus" = "拍照，不要求自動對焦";
 
 // Bounded still-capture review and read-only recovery.
+"capture_review_not_checked" = "快門已接受，尚未完成照片清單查詢。請在相機就緒後重新查找。";
+"recording_review_not_checked" = "錄影已停止，尚未完成影片清單查詢。請在相機就緒後重新查找。";
+"capture_review_last_read_failed" = "最後一次照片清單讀取失敗。請在相機就緒後重新查找。";
+"recording_review_last_read_failed" = "最後一次影片清單讀取失敗。請在相機就緒後重新查找。";
 "capture_review_capturing" = "等待快門回應…";
 "capture_review_searching" = "快門已接受。正在尋找新出現的照片…";
 "capture_review_notReady" = "快門已接受。尚未找到新出現的照片。";
@@ -491,4 +496,549 @@
 "retry_media_preview" = "重新載入預覽";
 "media_viewer_outside_list" = "目前清單未列出";
 "capture_review_readFailed" = "快門已接受，但無法讀取照片清單。請在相機就緒後重新查找。";
+"recording_review_capturing" = "等待停止錄影的回應…";
+"recording_review_searching" = "錄影已停止。正在尋找新出現的影片…";
+"recording_review_notReady" = "錄影已停止。尚未找到新出現的影片。";
+"recording_review_available" = "找到新出現的影片，可開啟檢視。";
+"recording_review_readFailed" = "錄影已停止，但無法讀取影片清單。請在相機就緒後重新查找。";
+"recording_review_limited_list" = "僅檢查最近 8 個項目，新出現的影片仍可能是舊檔。";
+"recording_review_retry" = "重新查找 · 不會重新錄影";
+"recording_review_previous_badge" = "先前媒體";
+"open_previous_video_named" = "開啟先前影片 %@";
+"open_visible_video_named" = "開啟新出現的影片 %@";
 "capture_status_readback_failed" = "相機已確認收到快門指令，但未能讀取相機狀態。請只重新查找最近素材，不要再次拍攝。";
+
+// Loaded-media calendar-day filtering.
+"media_date_range" = "素材日期區間";
+"media_date_start" = "開始日期";
+"media_date_end" = "結束日期";
+"media_date_timezone" = "以 %@ 的日曆日期篩選";
+"media_date_invalid" = "結束日期必須等於或晚於開始日期。";
+"media_date_loaded_only" = "僅篩選已載入素材。最近素材或未完成的清單不代表已搜尋整張記憶卡。";
+"media_date_unknown_excluded" = "啟用日期區間時，拍攝日期未知的素材會被排除。";
+"media_date_range_applied" = "%@ 至 %@ · %@";
+"media_date_summary" = "已載入 %2$d 項中有 %1$d 項符合；此類型／評分／資料夾範圍排除 %3$d 項未知日期。";
+"media_date_clear" = "清除日期區間";
+
+"media_rating_filter" = "素材評分篩選";
+"media_rating_filter_all" = "所有評分";
+"media_rating_filter_unrated" = "未評分（已知 0）";
+"media_rating_filter_at_least_1" = "至少 1 星";
+"media_rating_filter_at_least_2" = "至少 2 星";
+"media_rating_filter_at_least_3" = "至少 3 星";
+"media_rating_filter_at_least_4" = "至少 4 星";
+"media_rating_filter_five" = "5 星";
+"media_rating_filter_unknown" = "未知評分";
+"media_rating_clear" = "清除評分篩選";
+"media_rating_loaded_only" = "僅篩選已載入素材，不額外查詢中繼資料。";
+"media_rating_unknown_help" = "未知評分與已知 0 不同，排序時放在已知評分之後。";
+"media_rating_summary" = "已載入 %2$d 項中符合 %1$d 項；日期／類型／資料夾範圍內有 %3$d 項未知評分。";
+"media_sort_rating_high" = "評分：高至低";
+"media_sort_rating_low" = "評分：低至高";
+
+"media_folder_filter" = "相機資料夾篩選";
+"media_folder_all" = "全部已載入資料夾";
+"media_folder_unknown" = "未知資料夾";
+"media_folder_clear" = "清除資料夾篩選";
+"media_folder_loaded_only" = "僅使用已載入的資料夾資訊，不額外查詢相機；名稱不代表已驗證的實體卡槽。";
+"media_folder_missing" = "目前載入清單沒有先前選取的資料夾；清除篩選可查看其他已載入素材。";
+"media_folder_duplicate" = "%1$@ · 不同資料夾 %2$d";
+"media_folder_summary" = "已載入 %2$d 項中符合 %1$d 項；其他篩選條件內有 %3$d 項未知資料夾。";
+
+"media_batch_selection_count" = "已選 %d 項 · 篩選隱藏 %d 項 · 目前未載入 %d 項";
+"media_batch_select_visible" = "選取篩選後已載入素材";
+"media_batch_clear_selection" = "清除選取";
+"media_batch_select_item" = "選取 %@";
+"media_batch_selected" = "已選取";
+"media_batch_not_selected" = "未選取";
+"media_batch_prepare" = "準備所選原檔";
+"media_batch_cancel" = "目前傳輸結束後停止";
+"media_batch_cancelling" = "正在停止目前傳輸…";
+"media_batch_bytes" = "目前素材已接收 %lld 位元組";
+"media_batch_result_notice" = "已備妥檔案是 App 內的暫存副本。請選擇儲存或分享以交付至目的地，這不代表外部已保存；不同目的地可能以不同方式處理同名檔案。";
+"media_batch_share_ready" = "儲存或分享已備妥原檔";
+"media_batch_status_notStarted" = "未開始";
+"media_batch_status_downloading" = "正在準備原檔…";
+"media_batch_status_ready" = "原檔已在 App 內備妥";
+"media_batch_status_failed" = "失敗";
+"media_batch_status_cancelledOrUnknown" = "已取消或結果未確認";
+"media_batch_offline_notice" = "離線預覽只提供選取操作；請連接相機以準備原檔。";
+
+// Local preparation history and retained originals. External saving is unconfirmed.
+"media_delivery_history_title" = "最近準備的原檔";
+"media_delivery_history_help" = "離線也能使用，不會重新下載。「先前已備妥」記錄過去的下載結果，仍需查看 App 副本目前是否可用。儲存或分享不代表已確認目的地保存了檔案。";
+"media_delivery_history_limits" = "工作清單項目與其他準備嘗試合計最多保留 100 項，以及 512 MiB 的 App 副本。達到上限時，不再加入新紀錄或副本。清除歷史紀錄可釋放此空間。";
+"media_delivery_history_counts" = "%d 次嘗試 · %d 份副本目前可用";
+"media_delivery_history_retained_bytes" = "App 保留的副本：%lld 位元組";
+"media_delivery_history_retained_unknown" = "無法確認 App 副本佔用的空間。";
+"media_delivery_history_warning" = "部分歷史紀錄或 App 副本無法檢查或保留。請重新檢查 App 副本；目前批次中已備妥的原檔仍可能可用。";
+"media_delivery_history_batch_warning" = "此批次已備妥的原檔仍可儲存或分享，但可能無法保留歷史紀錄或供日後使用的副本。";
+"media_delivery_history_loading" = "正在檢查歷史紀錄與 App 副本…";
+"media_delivery_history_checking_share" = "正在檢查已準備的原檔…";
+"media_delivery_history_share_all" = "儲存或分享全部可用副本";
+"media_delivery_history_share_one" = "儲存或分享此副本";
+"media_delivery_history_share_named" = "儲存或分享 %@ 的 App 副本";
+"media_delivery_history_share_unavailable" = "所選 App 副本無法備妥供分享。請檢查目前是否可用，再試一次。此次並未重新下載。";
+"media_delivery_history_refresh" = "重新檢查 App 副本";
+"media_delivery_history_empty" = "目前沒有準備紀錄。請從相機素材選取原檔並開始準備。";
+"media_delivery_history_started" = "開始：%@";
+"media_delivery_history_finished" = "結束：%@";
+"media_delivery_history_original_bytes" = "原檔大小：%lld 位元組";
+"media_delivery_history_status_started" = "已開始準備 · 結果待確認";
+"media_delivery_history_status_prepared" = "先前已備妥";
+"media_delivery_history_status_failed" = "準備失敗";
+"media_delivery_history_status_cancelled" = "已取消準備";
+"media_delivery_history_status_unknown" = "準備結果未確認";
+"media_delivery_history_availability_available" = "App 副本目前可用";
+"media_delivery_history_availability_missing" = "App 副本已遺失";
+"media_delivery_history_availability_changed" = "App 副本已變更 · 無法分享";
+"media_delivery_history_availability_unsafe" = "無法驗證 App 副本 · 無法分享";
+"media_delivery_history_availability_notRetained" = "未保留供日後使用的 App 副本";
+"media_delivery_history_reason_interrupted" = "準備過程曾中斷，不會自動重新開始。";
+"media_delivery_history_reason_downloadFailed" = "下載未成功完成，不會自動重試。";
+"media_delivery_history_reason_cancelled" = "準備過程已停止，不會自動重新開始。";
+"media_delivery_history_reason_retentionUnavailable" = "原檔已備妥，但無法在此保留供日後使用的副本。原檔仍可能可從目前批次取得。";
+"media_delivery_history_clear" = "清除歷史紀錄與 App 副本";
+"media_delivery_history_clearing" = "正在清除歷史紀錄與 App 副本…";
+"media_delivery_history_clear_title" = "清除歷史紀錄與 App 副本？";
+"media_delivery_history_clear_message" = "移除此處的所有工作清單、歷史紀錄及保留副本。正在分享的副本會在分享結束後移除。已儲存至其他目的地的檔案，以及目前批次的暫存原檔，不會被移除。";
+"media_delivery_history_clear_confirm" = "移除歷史紀錄與 App 副本";
+
+"foreground_media_title" = "前景 JPEG 副本";
+"foreground_media_help" = "為本次執行選擇「檔案」資料夾。新偵測到的 JPEG 原始檔會先保留在 App，再複製至您選擇的本機或雲端供應商。首次檢查時已存在的檔案不會匯入。";
+"foreground_media_foreground_help" = "請保持 App 在前景。關閉此面板仍會繼續；離開 App 就會停止。不會自動恢復或重試。";
+"foreground_media_counts" = "本次：App 保留 %d · 複製至檔案 %d · 未確認 %d · 等待 %d";
+"foreground_media_start" = "選擇檔案資料夾並開始";
+"foreground_media_stop" = "停止匯入";
+"foreground_media_stopping" = "正在停止…";
+"foreground_media_start_unavailable" = "請直接以 CCAPI 連線，並等待先前的檔案作業實際結束後再開始。";
+"foreground_media_destination_help" = "每次開始都需重新選擇資料夾，App 不會保存存取授權。「最近原始檔」分別記錄 App 準備結果與檔案複製結果；複製完成不代表雲端同步完成。";
+"foreground_media_temporary_count" = "%d 份暫存原檔可用";
+"foreground_media_temporary_help" = "停止後可將目前的暫存原檔匯出至「檔案」或分享。可供日後使用的 App 副本請查看「最近準備的原檔」；即使無法保留副本，此處仍可能有可用的原檔。請先匯出或分享再重新開始或斷線，這兩項操作會清除目前的暫存結果。";
+"foreground_media_share_temporary" = "分享目前的暫存原檔";
+"foreground_media_share_unavailable" = "暫存原檔已無法分享。請查看「最近準備的原檔」是否有保留的 App 副本。";
+"foreground_media_limits_title" = "適用範圍與上限";
+"foreground_media_limits_files" = "僅支援直接 CCAPI 連線的 JPEG。記憶卡完整清單不得超過 1,000 個檔案。每次最多記住 4,096 個遇過的檔案、排入 20 份 JPEG，並保留 100 份原檔。";
+"foreground_media_limits_history" = "共用歷史最多保留 100 筆準備嘗試、100 筆關聯的檔案嘗試與 512 MiB 的 App 副本。既有歷史也計入限制。";
+"foreground_media_limits_stop" = "新檔案須在 30 秒內通過就緒檢查。檢查、傳輸、儲存或檔案複製首次出現不確定結果就會停止；不會自動重試或恢復。已開始的複製可能在停止後完成。";
+"foreground_media_banner_title" = "前景 JPEG 匯入中";
+"foreground_media_details" = "查看匯入";
+"foreground_media_state_idle" = "尚未開始";
+"foreground_media_state_checking" = "正在確認支援範圍…";
+"foreground_media_state_baseline" = "正在檢查既有檔案…";
+"foreground_media_state_watching" = "正在等待新的 JPEG";
+"foreground_media_state_waiting" = "正在等待其他相機操作完成";
+"foreground_media_state_stabilizing" = "正在檢查目前的 JPEG…";
+"foreground_media_state_preparing" = "正在將原檔保留於 App…";
+"foreground_media_state_stopped" = "已停止";
+"foreground_media_state_failed" = "已停止，請檢查";
+"foreground_media_reason_user" = "已依您的操作停止。請重新選擇檔案資料夾以開始新一輪。";
+"foreground_media_reason_background" = "App 離開前景時已停止。請重新選擇檔案資料夾以開始新一輪。";
+"foreground_media_reason_session" = "連線已變更或結束。請確認連線後再開始。";
+"foreground_media_reason_unsupported" = "需要直接 CCAPI 連線，且相機須支援完整的素材讀取。";
+"foreground_media_reason_inventory" = "無法確認相機的完整檔案清單。請檢查相機與連線後再開始。";
+"foreground_media_reason_metadata" = "無法確認原檔已準備就緒。請檢查相機後再開始。";
+"foreground_media_reason_storage" = "App 無法保留原檔。請查看「最近準備的原檔」；下方仍可能有可用的暫存原檔。";
+"foreground_media_reason_transfer" = "無法確認原檔傳輸完成。請檢查連線後再開始。";
+"foreground_media_reason_limit" = "此次準備因安全上限或檔案檢查而停止。請查看適用範圍與上限後再開始。";
+
+"media_worklist_counts" = "%d 份工作清單 · %d 項未開始";
+"media_worklist_help" = "已保存的工作清單保留原選取順序及未開始項目。名稱只是標籤，不能證明相機或檔案身分。開啟此頁不會重連、重試或要求目的地。";
+"media_worklist_position" = "第 %d 項，共 %d 項";
+"media_worklist_queued" = "未開始：此項尚未記錄任何準備嘗試。";
+"media_worklist_created" = "工作清單建立於 %@";
+"media_worklist_legacy_attempts" = "其他已記錄嘗試 · 完整選取清單未知";
+"media_worklist_recording_warning" = "完整工作清單無法保存或更新。請查看目前各項結果；已備妥的檔案仍可使用。未記錄的選取清單不保證能在關閉 App 後恢復。";
+
+// First connection guidance and evidence-based recovery.
+"connection_camera_setup_title" = "CCAPI 設定與 Camera Connect 配對";
+"connection_bridge_setup_title" = "USB 需透過電腦；iOS 尚不支援直接 USB 控制";
+"connection_camera_setup" = "請在支援的 EOS 啟用 CCAPI，將 iPhone 或 iPad 連上相機所在網路，再輸入相機的 CCAPI 網址（含連接埠）。";
+"connection_camera_pairing_help" = "僅完成 Canon Camera Connect 配對不代表已啟用 CCAPI。請依相機顯示的 CCAPI 設定操作；支援程度與設定方式會因機型而異。";
+"connection_bridge_setup" = "請以 USB 將相機接到電腦，並在電腦執行 Open EOS Control Desktop Bridge。輸入該電腦的網路網址與 Bridge 權杖，再掃描並選取相機。";
+"connection_ios_usb_limit" = "此 iOS App 尚未實作直接 USB/PTP 控制。使用 Desktop Bridge 時，電腦必須持續連接相機，並與本裝置保持網路連線。";
+"connection_camera_auth_help" = "若相機啟用 CCAPI 驗證，請使用該驗證設定的使用者名稱與密碼；這與 Wi-Fi 配對及 Desktop Bridge 權杖不同。";
+"connection_bridge_token_help" = "請使用 Desktop Bridge 設定的 Bearer 權杖；此欄位不是相機的 CCAPI 密碼。";
+"connection_recovery_title" = "需要檢查連線設定";
+"connection_camera_invalid_address" = "請輸入完整的 http:// 或 https:// 相機網址及連接埠，不要包含路徑、查詢字串或帳密；驗證資料請填在下方。";
+"connection_bridge_invalid_address" = "請輸入電腦完整的 http:// 或 https:// Bridge 網址及連接埠，並將 Bridge 權杖填在獨立欄位。";
+"connection_camera_authentication" = "相機端點拒絕驗證（HTTP 401 或 403）。請確認相機的 CCAPI 使用者名稱與密碼，再重試。";
+"connection_bridge_authentication" = "Desktop Bridge 拒絕存取（HTTP 401 或 403）。請確認 Bridge 的 Bearer 權杖及伺服器設定，再重試。";
+"connection_bridge_camera_authentication" = "Desktop Bridge 已連到相機，但相機拒絕 CCAPI 驗證。請在電腦上檢查 Bridge 相機連線設定中的 CCAPI 使用者名稱與密碼；此處的 Bridge 權杖是另一組驗證資料。";
+"connection_bridge_camera_tls_error" = "Desktop Bridge 無法與相機建立安全連線。請在電腦上檢查 Bridge 相機連線設定中的相機 HTTPS 網址及憑證。";
+"connection_bridge_camera_host_not_found" = "Desktop Bridge 找不到相機主機。請檢查 Bridge 相機連線設定中的相機位址，以及電腦連往該主機的網路。";
+"connection_bridge_camera_timeout" = "Desktop Bridge 連往相機時逾時。請確認相機未休眠且可從電腦連線，並檢查 Bridge 的相機連線設定。";
+"connection_bridge_camera_unreachable" = "Desktop Bridge 無法連到相機。請檢查電腦與相機之間的網路，以及 Bridge 的相機連線設定。";
+"connection_bridge_camera_http_error" = "相機向 Desktop Bridge 回傳 HTTP 錯誤。請檢查相機的 CCAPI 服務，以及電腦上 Bridge 的相機連線設定。";
+"connection_bridge_camera_discovery_failed" = "Desktop Bridge 未探索到可用的相機 API。請確認相機已啟用 CCAPI，並檢查電腦上 Bridge 的相機連線設定。";
+"connection_bridge_camera_endpoint_missing" = "Desktop Bridge 找不到相機的 CCAPI 端點。請確認已啟用 CCAPI，且 Bridge 相機連線設定中的相機位址與連接埠符合相機設定。";
+"connection_bridge_camera_retry_help" = "請在執行 Desktop Bridge 的電腦上檢查相機連線設定，就緒後再回到此處重試連線或掃描；不會自動重試。";
+"connection_camera_endpoint_missing" = "找不到要求的 CCAPI 端點。請確認已啟用 CCAPI，且網址與連接埠符合相機的 CCAPI 設定。";
+"connection_bridge_endpoint_missing" = "找不到要求的 Bridge 端點。請確認電腦的 Bridge 網址與連接埠，以及對應服務是否正在執行。";
+"connection_tls_error" = "無法建立安全連線。請與相機或 Bridge 管理者確認 HTTPS 網址及憑證設定。";
+"connection_host_not_found" = "找不到主機。請確認網址拼寫，以及可連到該主機的網路。";
+"connection_timeout" = "連線逾時。請確認相機或電腦未休眠且可透過網路連線，再重試。";
+"connection_camera_unreachable" = "無法透過網路連到相機。請檢查本裝置的 Wi-Fi 連線，以及 iOS「設定」中的區域網路存取權限。";
+"connection_bridge_unreachable" = "無法透過網路連到電腦。請檢查電腦的 Bridge 服務、本裝置的網路，以及 iOS「設定」中的區域網路存取權限。";
+"connection_http_error" = "服務回傳 HTTP 錯誤。請檢查相機或 Bridge 服務，待服務就緒後再重試。";
+"connection_discovery_failed" = "探索未取得可用的相機 API。請檢查 CCAPI 設定與選取的網址，再重試。";
+"connection_unknown_error" = "連線失敗，尚無法確認原因。請檢查選取的連線方式與設定，再重試。";
+"connection_edit_then_connect" = "確認或修改上方欄位後，再點選下方的連線按鈕。App 不會自動重試。";
+"connection_edit_then_scan" = "確認或修改上方欄位後，再次點選掃描按鈕。掃描不會開始控制相機或拍攝。";
+"connection_edit_settings" = "修改設定";
+"connection_retry_connect" = "重試連線";
+"connection_retry_scan" = "重新掃描";
+"connection_bridge_unscanned" = "尚未掃描。點選「掃描相機」以尋找電腦上的相機。";
+"connection_bridge_scan_failed" = "掃描失敗。請先查看連線提示，再重新掃描。";
+"connection_bridge_empty" = "掃描完成，但未找到相機。請確認相機電源、USB 線材，以及電腦上的 Desktop Bridge 是否能偵測相機，再重新掃描。";
+
+"recording_start_status_unknown" = "相機已接受開始指令，但錄影狀態不明。請重新整理狀態，或明確停止錄影。";
+"recording_stop_status_unknown" = "已收到停止回覆，目前錄影狀態仍未知。請重新整理取得即時狀態後再檢視影片；可自行開始新的錄影。";
+"recording_start_not_confirmed" = "相機回報目前未錄影，尚未確認開始錄影。";
+
+"recording_command_unconfirmed" = "錄影指令結果未知，相機可能仍在錄影。重新整理僅讀取即時證據，不會重送指令；仍可按下停止。";
+"previous_recording_warning" = "尚未確認上一台相機已停止錄影，請直接檢查該相機。連接其他相機不會停止上一台相機。";
+"confirm_previous_recording_stopped" = "我已檢查上一台相機";
+"previous_recording_physically_verified" = "上一台相機已停止錄影";
+"previous_recording_confirmation_help" = "請直接檢查上一台相機後再確認。此操作只關閉警示，不會發送指令。";
+
+"live_view_stop_unconfirmed" = "尚未確認 Live View 已停止。請先重試停止，再重新啟動。";
+"previous_live_view_stop_warning" = "上一台相機尚未確認 Live View 已停止，請直接檢查該相機。";
+"confirm_previous_live_view_stopped" = "確認上一台 Live View 已停止";
+"retry_live_view_stop" = "重試停止 Live View";
+"previous_live_view_physically_verified" = "我已檢查 Live View 已停止";
+"previous_live_view_confirmation_help" = "此操作只清除警示，不會傳送指令到目前的相機。";
+
+"media_worklist_continue_title" = "接續工作清單";
+"media_worklist_continue_help" = "從同一份工作清單選取未完成項目，再逐項明確選擇目前已載入的原檔。已準備好的副本可直接再次分享。";
+"media_worklist_continue_selected" = "為已選取的 %d 項選擇原檔";
+"media_worklist_select_row" = "選取此未完成項目";
+"media_worklist_origin" = "此新嘗試來自 %@ 的工作清單，第 %d 項：%@。原結果保持不變。";
+"media_worklist_binding_help" = "請自行逐項選擇來源。相似檔名、大小或日期不能證明目前原檔就是舊檔。每一欄初始皆未選取，同一來源只能選一次。";
+"media_worklist_loaded_help" = "只列出這次連線中已載入的原檔。若需要其他檔案，請取消、到圖庫載入，再重新選取工作清單項目。重新載入圖庫（含相機事件更新）、切換範圍或連線，以及清除紀錄，都會關閉本次選擇。";
+"media_worklist_no_loaded_originals" = "尚未載入原檔。請取消，先到圖庫載入。";
+"media_worklist_choose_original" = "目前原檔";
+"media_worklist_no_binding" = "選擇原檔⋯";
+"media_worklist_mapping" = "舊項目：%@ → 選取原檔：%@";
+"media_worklist_unknown_warning" = "結果未知的嘗試可能已準備或儲存副本。建立另一份前，請先檢查先前的目的地；App 無法驗證「檔案」、照片或其他提供者是否已儲存。";
+"media_worklist_unknown_acknowledgement" = "我已檢查先前目的地，並了解可能建立另一份副本。";
+"media_worklist_share_semantics" = "這會在 App 內準備新的完整原檔。完成後請使用「分享已準備原檔」，明確選擇「檔案」、照片或其他目的地。準備成功與分享面板皆不代表目的地已儲存。";
+"media_worklist_share_acknowledgement" = "我會在分享已準備原檔時選擇目的地。";
+"media_worklist_review_confirm" = "確認這些對應⋯";
+"media_worklist_confirm_title" = "開始新的準備嘗試？";
+"media_worklist_confirm_prepare" = "準備所選原檔";
+"media_worklist_confirm_message" = "依畫面中的對應開始 %d 次新的完整原檔嘗試。先保存新的連結工作清單，舊結果維持不變；不會自動恢復。";
+"media_worklist_continue_unavailable" = "無法安全記錄接續工作，因此不會要求未記錄的原檔。請確認紀錄可用，以及 100 項／512 MiB 限制；不會淘汰舊紀錄。準備好後請重新選取並確認。";
+
+"media_worklist_source_kind" = "類型：%@";
+"media_worklist_source_folder" = "資料夾：%@";
+"media_worklist_source_captured" = "拍攝時間：%@";
+"media_worklist_source_size" = "大小：%@";
+
+"held_autofocus" = "按住 AF-ON";
+"held_autofocus_active" = "正在按住 AF-ON";
+"held_autofocus_released" = "已放開";
+"held_autofocus_hint" = "按住以對焦；放開或移出按鈕即停止，30 秒後自動嘗試放開。使用 VoiceOver 時，啟用以開始，再啟用一次以停止。";
+"focus_command_accepted" = "對焦指令已接受；尚未確認合焦";
+"focus_command_failed" = "對焦指令失敗";
+"camera_focus_standby" = "相機對焦：待命";
+"camera_focus_focused" = "相機確認合焦";
+"camera_focus_unfocused" = "相機回報未合焦";
+"camera_focus_servo_off" = "相機對焦：伺服關閉";
+"camera_focus_focusing" = "相機回報正在對焦";
+"camera_focus_unknown" = "相機對焦：未知";
+
+"media_files_export_one" = "將原檔匯出至「檔案」…";
+"media_files_export_ready" = "將已準備原檔匯出至「檔案」…";
+"media_files_export_all" = "將所有可用副本匯出至「檔案」…";
+"media_files_export_named" = "將 %@ 匯出至「檔案」";
+"media_files_export_help" = "在「檔案」中為已準備副本選擇目的地。歷史紀錄保留有上限的匯出觀察結果，不代表已驗證外部檔案內容或雲端同步。再次匯出前請先檢查「檔案」，以免產生重複副本。雲端同步由所選服務處理。";
+"media_files_export_reported" = "iOS 已回報 %d 份原檔的匯出目的地；尚未驗證外部檔案內容或雲端同步。";
+"media_files_export_cancelled" = "已取消「檔案」匯出。先前產生的副本可能仍存在，請先檢查目的地再重試。";
+"media_files_export_unconfirmed" = "「檔案」匯出結果不明。請先檢查目的地，再開始另一次匯出。";
+"media_files_export_mismatch" = "iOS 為 %2$d 份原檔回報了 %1$d 個目的地；各檔案結果不明。請先檢查「檔案」再重試。";
+"media_files_export_source_unavailable" = "已準備的來源目前無法使用。請重新整理歷史紀錄，或明確重新準備原檔後再匯出。";
+
+"native_monitor_off" = "取樣監看已暫停";
+"native_monitor_requires_ios174" = "此未處理的原生串流沒有可用的像素監看。";
+"native_monitor_waiting" = "取樣監看 · 等待影像";
+"native_monitor_no_pixels" = "取樣監看 · 暫無可取樣影像";
+"native_monitor_failed" = "取樣監看 · 不支援的影像或轉換失敗";
+"native_monitor_sampled" = "處理後影格取樣監看 · 每秒最多 4 次";
+"native_monitor_stale" = "取樣監看 · 影像已過期";
+"native_monitor_lut_inactive" = "原生 RTP 未套用已載入的 LUT";
+"native_monitor_scope_notice" = "監看分析送入原生顯示器的同一處理後影格，每秒最多 4 次；直方圖與波形取樣最長保留 1 秒。空間疊圖另須確認為當前顯示的同一影格。作業系統無法識別時，顯示進度保持未驗證。支援 8-bit SDR 的 LUT 處理不會變更相機媒體。";
+
+"foreground_media_state_copying" = "正在將保留的原始檔複製至檔案…";
+
+"foreground_media_reason_delivery" = "檔案交付或歷史紀錄需要檢查；App 保留的原始檔獨立存在。再次開始前，請檢查最近原始檔與所選資料夾。";
+
+"foreground_files_destination" = "本次資料夾：%@";
+
+"foreground_files_drain_help" = "已開始的檔案作業可能仍在使用原始檔。停止會阻擋後續複製；必須等這次作業實際回傳，才能開始新一輪。";
+
+"foreground_files_result_started" = "檔案作業已開始，尚待完成結果";
+
+"foreground_files_result_copied" = "檔案複製作業已完成";
+
+"foreground_files_result_notCopied" = "未完成檔案複製";
+
+"foreground_files_result_unconfirmed" = "檔案結果未確認，可能留下部分或完整檔案";
+
+"foreground_files_reason_cancelled" = "已在複製開始前停止。";
+
+"foreground_files_reason_sourceUnavailable" = "無法確認保留的來源檔案未被變更。若複製已開始，請檢查目的地檔案。";
+
+"foreground_files_reason_permissionDenied" = "無法存取資料夾。下次執行請重新選擇資料夾。";
+
+"foreground_files_reason_coordination" = "供應商未允許此次複製作業開始。";
+
+"foreground_files_reason_collision" = "產生的檔名已存在；未覆寫該檔案，也未重試此次複製。";
+
+"foreground_files_reason_copyFailed" = "複製已開始，但未成功回傳。App 未移除任何外部檔案。";
+
+"foreground_files_reason_interrupted" = "上次程序結束前未取得最終結果。請在檔案中檢查這次嘗試的檔名。";
+
+"foreground_files_history_help" = "此為本機作業紀錄，不代表雲端已同步或目的地目前仍可使用。清除 App 歷史不會刪除檔案中的副本。";
+
+"native_lut_off" = "原生影片未套 LUT";
+
+"native_lut_waiting" = "等待套用所選 LUT 的影格";
+
+"native_lut_applied" = "原生影片已套用 LUT";
+
+"native_lut_unsupported_color" = "未套用 LUT：色彩格式不支援，保留原生影片";
+
+"native_lut_unavailable" = "LUT 處理器不可用，保留原生影片";
+
+"native_lut_failed" = "LUT 處理失敗；降回原生影片並保留 LUT";
+"media_files_export_recording" = "正在記錄匯出嘗試…";
+"media_files_export_history_warning" = "匯出歷史紀錄無法使用或不完整。重試前請先檢查「檔案」；無法記錄最終結果，不代表已撤回複製。";
+"media_files_export_history_unavailable" = "無法記錄這次匯出嘗試，尚未開啟「檔案」。請先檢查歷史紀錄與本機可用空間，再開始另一次匯出。";
+"media_files_export_history_title" = "手動「檔案」匯出嘗試";
+"media_files_export_history_help" = "這些是整批觀察結果，不是逐檔目的地收據。所有嘗試合計最多保留 100 個來源名稱；中斷的嘗試保留為結果不明。再次明確選擇原檔與目的地才會建立新嘗試，不會自動續傳。";
+"media_files_export_history_sources" = "%d 個來源名稱（沒有目的地對應）";
+"media_files_export_history_started" = "匯出已開始，尚待最終結果。";
+
+"media_time_zone_unknown" = "時區未知";
+
+// Explicit metadata batches and per-item readback evidence.
+"media_mutation_menu" = "變更所選素材…";
+"media_mutation_rating_menu" = "評分";
+"media_mutation_rotation_menu" = "設定旋轉角度";
+"media_mutation_rating" = "設定評分為 %d";
+"media_mutation_protect" = "保護";
+"media_mutation_unprotect" = "取消保護";
+"media_mutation_rotate" = "設定旋轉角度為 %d°";
+"media_mutation_archive" = "封存";
+"media_mutation_unarchive" = "取消封存";
+"media_mutation_review" = "確認素材變更";
+"media_mutation_apply" = "套用至此清單";
+"media_mutation_cancel" = "取消剩餘變更";
+"media_mutation_confirmation" = "僅處理以下列出的確切素材，包含被篩選隱藏的選取項目。未載入或不支援的項目會保留在清單中，不會送出變更。每項最多送出一次；結果未確認時即停止後續項目。取消無法撤回已送出的變更。";
+"media_mutation_result_notice" = "「已確認」表示同一確切素材已回報要求的值。先前結果會保留，不會自動重試；再次確認會開始另一項獨立操作。";
+"media_mutation_previous_session" = "此為先前連線的結果。本批次不會再送出變更。";
+"media_mutation_status_notStarted" = "未開始";
+"media_mutation_status_applying" = "正在套用並讀回確認…";
+"media_mutation_status_confirmed" = "已確認";
+"media_mutation_status_failedNotSent" = "無法執行；未送出";
+"media_mutation_status_unconfirmed" = "結果未確認；可能已變更";
+"media_mutation_reason_unloaded" = "目前未載入。未另行查找素材，也未擴大掃描記憶卡。";
+"media_mutation_reason_unsupported" = "此連線未宣告支援這項操作。";
+"media_mutation_reason_invalid" = "所選素材或要求的值無效。";
+"media_mutation_reason_cancelled" = "剩餘工作已取消。已送出的變更仍可能生效。";
+"media_mutation_reason_ownerChanged" = "連線已變更。本批次不會在另一台相機上繼續執行。";
+"media_mutation_reason_blocked" = "相機忙碌、未連線，或需要先處理快門恢復。未送出變更。";
+"media_mutation_reason_notSent" = "本機檢查已在送出變更前停止此項目。";
+"media_mutation_reason_uncertain" = "讀回未能確認要求的變更。剩餘項目未送出。開始另一項操作前，請先確認相機狀態。";
+"media_mutation_reason_limit" = "選取超過 1,000 個不同素材。整批未開始，請減少選取數量。";
+"media_mutation_reason_unknownMetadata" = "封存狀態未知，未送出變更。";
+"media_mutation_reason_notWritable" = "此素材明確標示為不可寫入，未送出變更。";
+
+// Bounded result history and explicit non-undo clearing.
+"media_mutation_rejected_count" = "批次已拒絕：已選取 %d 項。未送出任何命令。";
+"media_mutation_rejection_capacity" = "結果歷史已滿（所有連線合計最多 20 批或 2,000 列）。請檢視並明確清除一批已結束的記錄，再建立新的審閱。既有結果均未移除。";
+"media_mutation_rejection_limit" = "選取超過 1,000 個不同項目。已拒絕整批，未截斷清單，也未保留結果列。請縮小選取範圍並建立新的審閱。";
+"media_mutation_rejection_staleReview" = "建立此審閱後，歷史記錄已清除。未送出任何命令。請重新審閱；舊確認不可重複使用。";
+"media_mutation_history_capacity" = "結果歷史：%d/%d 批、%d/%d 列。僅在沒有批次執行時可清除。";
+"media_mutation_history_clear" = "清除此已結束批次的記錄⋯";
+"media_mutation_history_clear_title" = "清除此批次記錄？";
+"media_mutation_history_clear_confirm" = "只清除記錄";
+"media_mutation_history_clear_warning" = "這會永久移除此 app 執行期間的結果記錄，無法復原記錄。這不是復原操作：不會撤銷相機命令或已發生的變更。未確認的變更可能已生效；再次操作前請檢查相機。執行中的批次不能清除；其他批次會保留。";
+
+// Per-attempt upload evidence and manual recovery.
+"media_upload_not_sent" = "未送出：%@。未派送上傳要求。";
+"media_upload_uncertain" = "上傳結果未確認：%@。相機可能已接收檔案。";
+"media_upload_manual_recovery" = "再次選檔前，請先檢查原相機與資料夾。重新整理清單無法確認這次上傳；不會自動重送或刪檔。";
+"media_upload_previous_connection" = "這是先前連線的結果，不代表目前相機的狀態。";
+"media_upload_refresh_failed" = "媒體庫重新整理未完成；上方上傳結果不變。請手動重新整理媒體庫。";
+"media_upload_review_files" = "檢查相機檔案";
+"cancel_media_upload_refresh" = "取消媒體庫重新整理";
+
+/* Exact-source deletion journey */
+"media_delete_review" = "確認永久刪除";
+"media_delete_warning" = "只會從以下標示的來源永久刪除這份清單中的精確項目。此操作無法復原，也不保證另有備份。";
+"media_delete_cancel_notice" = "取消只會停止剩餘項目派送，無法撤回已送出的刪除。";
+"media_delete_confirm" = "永久刪除";
+"media_delete_selected" = "刪除已選項目⋯";
+"media_delete_source_camera" = "來源：相機記憶卡";
+"media_delete_source_desktop-host" = "來源：已連線桌面上的 Desktop Bridge 拍攝檔案儲存區";
+"media_delete_source_unknown" = "來源尚未確認；不會派送";
+"media_delete_qualification_unknown" = "保護或可寫入資格未知。已公布刪除能力不代表已確認這個項目可安全刪除。";
+"media_delete_history" = "刪除結果";
+"media_delete_summary" = "已確認 %d · 已拒絕 %d · 不確定 %d";
+"media_delete_cancel_remaining" = "停止剩餘刪除";
+"media_delete_view_results" = "查看刪除結果";
+"media_delete_recovery_notice" = "結果不確定的項目可能已被刪除。請先查看原來源現況，再決定是否開始新操作。近期、篩選或部分清單中找不到，不能證明這次刪除成功。再次刪除必須重新檢閱並確認。";
+"media_delete_history_lifetime" = "結果在本次 App 執行期間跨重新連線保留，最多 20 批／2,000 列；超限會自動移除最舊且非執行中的完整批次。這不是備份，也不是永久稽核紀錄。";
+"media_delete_previous_owner" = "先前連線：僅供查看，不會對替換連線派送命令。";
+"media_delete_inspect" = "重新讀取目前來源清單（僅讀取）";
+"media_delete_inspected_notice" = "已要求重新讀取目前範圍，這不會改變任何刪除結果。";
+"media_delete_applying" = "派送中；等待結果";
+"media_delete_clear" = "移除此結果紀錄";
+"media_delete_clear_warning" = "永久移除此本機結果紀錄？此動作不會復原刪除，也不會確認不確定的結果。";
+"media_delete_status_not-started" = "尚未開始";
+"media_delete_status_not-sent" = "未送出";
+"media_delete_status_confirmed" = "已確認刪除";
+"media_delete_status_rejected" = "明確拒絕";
+"media_delete_status_uncertain" = "已派送；完成狀態不確定";
+"media_delete_status_skipped" = "已略過；未派送刪除";
+"media_delete_reason_unloaded" = "目前未載入此項目；略過";
+"media_delete_reason_unsupported" = "未提供刪除能力；略過";
+"media_delete_reason_protected" = "已知受保護；略過且不解除保護";
+"media_delete_reason_notWritable" = "已知不可寫入；略過";
+"media_delete_reason_invalid" = "精確識別無效；略過";
+"media_delete_reason_unknownSource" = "來源未知；略過";
+"media_delete_reason_sourceChanged" = "來源與確認時不同；略過";
+"media_delete_reason_cancelled" = "取消已停止剩餘派送";
+"media_delete_reason_ownerChanged" = "原連線已失效；不會接續派送";
+"media_delete_reason_blocked" = "操作在派送前被阻止";
+"media_delete_reason_uncertain" = "無法確認完成；已停止剩餘派送";
+"media_delete_reason_notSent" = "尚未進入傳輸派送";
+"media_delete_reason_rejected" = "完整回應明確拒絕此操作";
+"media_delete_reason_capacity" = "此結果無法在保留執行中批次的情況下符合 20 批／2,000 列上限。請等待目前操作結束。";
+"media_delete_reason_limit" = "超過 1,000 個項目：整批被阻止，不會偷偷截斷清單。";
+"media_delete_reason_staleReview" = "此確認清單已失效，請重新檢閱。";
+"media_delete_preview_title" = "從預覽移除範例？";
+"media_delete_preview_notice" = "只會移除此合成預覽項目，不會刪除任何相機或桌面檔案。";
+
+"capture_config_not_sent" = "尚未送出這項要求。";
+"capture_config_unknown" = "寫入結果不明。讀取目前設定無法證明這次要求是否成功；請勿為了確認而重複建立資料夾。";
+"capture_config_ack_matched" = "相機已確認寫入，且完整命名設定讀回與要求一致。";
+"capture_config_ack_refreshed" = "相機已確認建立；目前資料夾設定已重新讀取。";
+"capture_config_ack_mismatch" = "相機已確認寫入，但目前命名值與要求不同。草稿已保留。";
+"capture_config_ack_unavailable" = "相機已確認寫入，但目前設定無法讀取。草稿已保留。";
+"capture_config_reading" = "正在讀取目前設定⋯";
+"capture_config_working" = "正在等待這次要求⋯";
+"capture_config_refresh" = "重新讀取設定（唯讀）";
+"capture_config_new_request" = "準備另一項要求";
+"capture_config_new_request_hint" = "重新讀取不會寫入。另一項要求可能會再建立資料夾或套用另一個命名變更。";
+"capture_config_history" = "最近的設定要求";
+"capture_config_requested" = "要求值：%@";
+"capture_config_automatic" = "自動後綴";
+"capture_config_suffix" = "相機確認的後綴：%@";
+"capture_config_suffix_limits" = "這個後綴無法證明實際建立的完整編號資料夾或儲存卡位置。";
+"capture_config_current_directory" = "目前拍攝資料夾：%@";
+"capture_config_current_value" = "目前欄位值：%@";
+"capture_config_cancelled" = "已取消等待。相機有效的確認仍會保留；取消不會復原已送出的寫入。";
+"capture_config_original_owner" = "僅屬於原連線。這筆紀錄不會變更目前連線。";
+"capture_config_readback_not_read" = "尚未讀取目前設定。";
+"capture_config_readback_unavailable" = "目前設定無法讀取。";
+"capture_config_readback_matched" = "目前讀回值與要求值一致。";
+"capture_config_readback_mismatch" = "目前讀回值與要求值不同。";
+"capture_config_readback_refreshed" = "目前資料夾設定已重新讀取。";
+
+// Ordinary shooting-setting response and current-value evidence.
+"shooting_setting_not_sent" = "設定指令尚未送出。";
+"shooting_setting_unknown" = "指令結果未明，不能判定失敗或自動重送。";
+"shooting_setting_responded" = "已收到成功的傳輸回應；這不代表目前設定已符合要求。";
+"shooting_setting_not_read" = "尚未讀回目前值。";
+"shooting_setting_unavailable" = "目前無法取得新的設定讀值。";
+"shooting_setting_matched" = "新讀回的值符合要求，但不證明是此次寫入造成。";
+"shooting_setting_mismatch" = "新讀回的值與要求不同。";
+"shooting_setting_reading" = "正在唯讀更新這個設定⋯";
+"shooting_setting_working" = "正在套用一次設定變更⋯";
+"shooting_setting_refresh" = "唯讀更新目前值";
+"shooting_setting_new" = "準備新的變更";
+"shooting_setting_no_replay" = "更新只會讀取。新的寫入需要重新選擇或按下套用。";
+"shooting_setting_history" = "最近的設定變更";
+"shooting_setting_requested" = "要求值：%@";
+"shooting_setting_observed" = "讀回值：%@";
+"shooting_setting_cancelled" = "已取消等待；已送出的寫入仍可能生效。";
+"shooting_setting_retired" = "僅屬原連線；重新連線不會重送此變更。";
+"shooting_setting_superseded" = "目前畫面由較新的觀測或操作負責。";
+"shooting_setting_draft_unavailable" = "草稿選值已不在相機提供的選項中，請重新選擇後套用。";
+
+/* Independent maintenance lifecycle evidence */
+"maintenance_history" = "維護操作紀錄";
+"maintenance_monitoring_paused" = "控制與監看已暫停。保留電源清潔後請明確恢復，或重新連線。";
+"maintenance_restoring" = "正在恢復控制與監看⋯";
+"maintenance_reading" = "正在唯讀檢查目前狀態⋯";
+"maintenance_working" = "正在傳送這次維護要求⋯";
+"maintenance_observe" = "唯讀檢查狀態";
+"maintenance_restore" = "恢復控制／監看";
+"maintenance_not_sent" = "尚未傳送命令。";
+"maintenance_unknown" = "命令送達情況不明。不可自動重送。";
+"maintenance_response_received" = "已收到完整命令回應。";
+"maintenance_stop_phase" = "Live View／事件停止：%@";
+"maintenance_clock_proof" = "原始時鐘驗證：%@";
+"maintenance_clock_sample" = "相機時間：%@（%@）";
+"maintenance_latest_read" = "最近一次唯讀觀察：%@";
+"maintenance_not_physical_completion" = "收到回應或失去連線均不代表已完成清潔或睡眠。";
+"maintenance_restore_phase" = "控制／監看恢復：%@";
+"maintenance_cancelled" = "已取消。已送出的命令無法撤回。";
+"maintenance_retired" = "僅屬於原始連線，不會操作後來連線的相機。";
+"maintenance_zone_unavailable" = "無時區／夏令時間證據";
+"maintenance_partial_failure" = "此維護步驟無法驗證。已保留的命令與時鐘證據仍在紀錄中。";
+"maintenance_stop_not-required" = "不需要";
+"maintenance_stop_pending" = "進行中";
+"maintenance_stop_confirmed" = "已確認";
+"maintenance_stop_unknown" = "尚未確認";
+"maintenance_restore_not-requested" = "尚未要求";
+"maintenance_restore_pending" = "進行中";
+"maintenance_restore_confirmed" = "控制已恢復，不代表實體維護已完成";
+"maintenance_restore_unknown" = "尚未確認";
+"maintenance_restore_not-applicable" = "不適用";
+"maintenance_observation_not-read" = "尚未讀取";
+"maintenance_observation_unavailable" = "無法取得";
+"maintenance_observation_matched" = "相符";
+"maintenance_observation_mismatch" = "不相符";
+"maintenance_observation_observed" = "已觀察，原始證據不變";
+"maintenance_observation_reachable" = "相機有回應，不代表實體操作完成";
+"maintenance_observation_not-applicable" = "不適用";
+"maintenance_retirement_unconfirmed" = "未能確認上一個 Bridge 工作階段已在伺服器本機退役。未自動重試或另送相機操作；相機停止證據另行保留。";
+"maintenance_retirement_dismiss" = "關閉退役通知";
+
+"recording_command_rejected" = "錄影指令遭拒絕，先前的錄影停止責任維持不變。";
+"recording_original_response" = "原始「%@」回覆：%@";
+"recording_current_observation" = "目前錄影狀態：%@";
+"recording_response_not-sent" = "未送出";
+"recording_response_unconfirmed" = "未確認";
+"recording_response_rejected" = "遭拒絕";
+"recording_response_response-received" = "已收到回覆";
+"recording_observed_active" = "即時觀測為錄影中";
+"recording_observed_stopped" = "即時觀測為已停止";
+"recording_observed_unavailable" = "無法取得";
+
+"live_view_retiring" = "已停止本機即時影像，正在等待相機確認 Stop。";
+"live_view_restart_required" = "即時影像已結束，準備好後請重新開始。";
+"live_view_start_again" = "重新開始即時影像";
+"live_view_render_stalled" = "即時影像解碼或已確認的顯示輸出已停止更新，請確認 Stop 後再重新開始。";
+"live_view_stop_pending" = "即時影像仍需清理。請先釋放使用中的相機控制，再重試 Stop。";
+"native_lut_processed_unverified" = "LUT 已處理 · 尚未確認顯示對應影格";
+"native_presentation_waiting" = "等待原生影格輸出";
+"native_presentation_progressing" = "已驗證顯示影格持續更新";
+"native_presentation_unknown" = "解碼輸出 · 顯示進度未驗證";
+"native_presentation_stalled" = "原生輸出已停止更新";
+
+"camera_audio_retiring" = "音訊正在停止，原生輸出仍待退場；無法確認裝置實際發聲。";
+
+"lut_import_loading" = "正在匯入 3D LUT…";
+"lut_import_stopping" = "正在等待先前的檔案讀取結束…";
+
+// Connecting attempt cancellation and exact-owner retirement.
+"connection_cancel" = "取消連線";
+"connection_waiting_cleanup" = "等待前次連線清理⋯";
+"connection_cancelled_help" = "已取消本次連線。可先修改設定，再自行按下重試；不會自動重新連線。";
+"connection_cleanup_pending" = "前次連線仍在清理中。現在可修改設定；相機掃描暫停，按下重試後會等待這次清理結束。本機取消不代表相機已確認釋放。";
+"connection_cleanup_unconfirmed" = "尚未確認前次 Bridge 工作階段已清理，已阻擋新連線與相機掃描。請先檢查原本的相機、重新啟動該 Bridge，再重新開啟本 App 後重試。";

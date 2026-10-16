@@ -15,6 +15,10 @@ public struct CameraMediaStreamResponse: Sendable {
         response: CameraHTTPStreamResponse,
         fallbackTotalBytes: Int64?
     ) throws {
+        guard CameraMediaType.admitsVideoStream(item, contentType: response.header("content-type")) else {
+            response.cancel()
+            throw CameraMediaMetadataError.invalidMetadata
+        }
         let range = try Self.parseContentRange(response.header("content-range"))
         let contentLength = response.header("content-length").flatMap(Int64.init).flatMap { $0 >= 0 ? $0 : nil }
 

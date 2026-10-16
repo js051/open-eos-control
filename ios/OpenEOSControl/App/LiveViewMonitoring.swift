@@ -142,7 +142,7 @@ func analyzeLiveViewImage(_ image: UIImage, settings: LiveViewMonitorSettings) -
     return analyzeLiveViewCGImage(source, settings: settings)
 }
 
-private func analyzeLiveViewCGImage(
+func analyzeLiveViewCGImage(
     _ source: CGImage,
     settings: LiveViewMonitorSettings
 ) -> LiveViewMonitorAnalysis? {
@@ -161,8 +161,9 @@ private func analyzeLiveViewCGImage(
             return false
         }
         context.interpolationQuality = .medium
-        context.translateBy(x: 0, y: CGFloat(dimensions.height))
-        context.scaleBy(x: 1, y: -1)
+        // This is a raw bitmap context, not a UIKit view context. Keep the
+        // CGImage row order that overlayImage() will consume; a UIKit-style
+        // vertical transform here mirrors spatial overlays relative to video.
         context.draw(
             source,
             in: CGRect(x: 0, y: 0, width: dimensions.width, height: dimensions.height)

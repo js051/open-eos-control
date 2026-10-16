@@ -97,4 +97,44 @@ final class CameraHTTPTransportTests: XCTestCase {
         let response = CameraHTTPResponse(statusCode: 200, body: Data("close-delimited content".utf8))
         XCTAssertNoThrow(try CameraHTTPResponseIntegrity.validate(response, requestMethod: "GET"))
     }
+
+    func testDownloadIntegrityRejectsDirectoriesAndMissingFiles() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        for url in [directory, directory.appendingPathComponent("missing.JPG")] {
+            let response = CameraHTTPDownloadResponse(statusCode: 200, temporaryFileURL: url)
+            XCTAssertThrowsError(try CameraHTTPResponseIntegrity.validateOriginalMedia(response))
+        }
+    }
+
+    func testDownloadIntegrityKeepsBodylessResponseSemanticsOutsideOriginalDownloads() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data().write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let response = CameraHTTPDownloadResponse(
+            statusCode: 204, headers: ["Content-Length": "64"], temporaryFileURL: url
+        )
+
+        XCTAssertEqual(try CameraHTTPResponseIntegrity.validate(response, requestMethod: "GET"), 0)
+        XCTAssertThrowsError(try CameraHTTPResponseIntegrity.validateOriginalMedia(response))
+    }
+
+    func testDownloadPrefixReadsOnlyTheRequestedBytesFromALargeSparseFile() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let prefix = Data(repeating: 0xFF, count: 4_000)
+        try prefix.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let handle = try FileHandle(forWritingTo: url)
+        // A sparse four-GiB file exposes accidental whole-file materialization without
+        // allocating a four-GiB test payload or using the network.
+        try handle.truncate(atOffset: 4 * 1024 * 1024 * 1024)
+        try handle.close()
+        let response = CameraHTTPDownloadResponse(statusCode: 200, temporaryFileURL: url)
+
+        XCTAssertEqual(try response.readPrefix(limit: 2_000), Data(prefix.prefix(2_000)))
+        XCTAssertEqual(try response.readPrefix(limit: 0), Data())
+        XCTAssertEqual(try CameraHTTPResponseIntegrity.validateOriginalMedia(response), 4 * 1024 * 1024 * 1024)
+    }
 }

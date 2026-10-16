@@ -6,13 +6,25 @@ import UIKit
 
 struct LiveViewSurface: View {
     @EnvironmentObject private var camera: CameraAppState
+
+    var body: some View {
+        LiveViewSurfaceContent(nativeMonitor: camera.rtpController.pixelMonitor, nativeVideo: camera.rtpController.videoPresentation)
+    }
+}
+
+private struct LiveViewSurfaceContent: View {
+    @EnvironmentObject private var camera: CameraAppState
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject var nativeMonitor: IOSRTPPixelMonitor
+    @ObservedObject var nativeVideo: IOSNativeVideoPresentation
+    @State private var monitorOwner = UUID()
     @State private var monitorAnalysis: LiveViewMonitorAnalysis?
     @State private var lutPreviewFrame: LiveViewLutPreviewFrame?
     @State private var lutPreviewWorker = LiveViewLutPreviewWorker()
 
     var body: some View {
         GeometryReader { proxy in
-            let sourceImage = camera.liveViewData.flatMap(UIImage.init(data:))
+            let sourceImage = camera.activeLiveViewSource == .ccapiRTP ? nil : camera.liveViewData.flatMap(UIImage.init(data:))
             let image = activeLutPreviewFrame?.image ?? sourceImage
             let sourceSize = sourceImage?.size ?? (camera.activeLiveViewSource == .ccapiRTP ? camera.nativeLiveViewSize : nil)
             let contentSize = sourceSize.map {
@@ -23,7 +35,11 @@ struct LiveViewSurface: View {
             }
             let imageRect = contentSize.map { aspectFitRect(contentSize: $0, containerSize: proxy.size) }
                 ?? CGRect(origin: .zero, size: proxy.size)
-            let overlayImage = monitorAnalysis?.overlayImage()
+            let monitorAnalysis = displayedAnalysis
+            let overlayImage = camera.activeLiveViewSource == .ccapiRTP
+                ? nativeMonitor.currentOverlayAnalysis(settings: camera.monitorSettings,
+                    frame: nativeVideo.presentedFrame, owner: monitorOwner)?.overlayImage()
+                : monitorAnalysis?.overlayImage()
 
             ZStack {
                 Color.black
@@ -40,6 +56,25 @@ struct LiveViewSurface: View {
                         .accessibilityIdentifier("live-view-decoded-frame")
                 } else {
                     offlineSurface
+                }
+
+                if camera.activeLiveViewSource == .ccapiRTP {
+                    VStack(spacing: 3) {
+                        Text(LocalizedStringKey(nativeVideo.progress.rawValue))
+                        if camera.monitorSettings.needsPixelAnalysis {
+                            Text(LocalizedStringKey(nativeMonitor.status.rawValue))
+                        }
+                        if camera.monitorSettings.cubeLut != nil {
+                            Text(LocalizedStringKey(nativeVideo.status.rawValue))
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(Color.cameraSecondaryText)
+                    .padding(6)
+                    .background(Color.black.opacity(0.72))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("native-monitor-status")
                 }
 
                 Color.clear
@@ -112,6 +147,15 @@ struct LiveViewSurface: View {
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                         .accessibilityIdentifier("live-view-waveform")
+                }
+
+                if let info = camera.cameraFocusInfo, let sampledAt = camera.cameraFocusInfoAt,
+                   let sourceSize, sourceSize.height > 0,
+                   info.matchesImage(aspectRatio: sourceSize.width / sourceSize.height) {
+                    CameraReportedFocusOverlay(info: info, sampledAt: sampledAt)
+                        .frame(width: imageRect.width, height: imageRect.height)
+                        .position(x: imageRect.midX, y: imageRect.midY)
+                        .allowsHitTesting(false)
                 }
 
                 if let marker = camera.focusMarker {
@@ -194,6 +238,15 @@ struct LiveViewSurface: View {
                 }
             }
         }
+        .task(id: nativeMonitorTaskID) {
+            let settings = nativeMonitorTaskID.enabled ? camera.monitorSettings : nil
+            nativeMonitor.configure(settings: settings, owner: monitorOwner)
+            camera.rtpController.configureVideoProcessing(settings: settings, owner: monitorOwner)
+        }
+        .onDisappear {
+            nativeMonitor.deactivate(owner: monitorOwner)
+            camera.rtpController.deactivateVideoProcessing(owner: monitorOwner)
+        }
         .task(id: lutPreviewTaskID) {
             guard pixelMonitoringAvailable,
                   let data = camera.liveViewData,
@@ -258,7 +311,8 @@ struct LiveViewSurface: View {
     }
 
     private var liveViewTapAvailable: Bool {
-        switch camera.effectiveLiveViewTapAction {
+        guard camera.liveViewCoordinateControlsReady else { return false }
+        return switch camera.effectiveLiveViewTapAction {
         case .focus: !camera.isBusy(.focus)
         case .whiteBalance: !camera.isBusy(.setting)
         case nil: false
@@ -269,6 +323,20 @@ struct LiveViewSurface: View {
         !camera.isPreview
             && camera.activeLiveViewSource != nil
             && camera.activeLiveViewSource != .ccapiRTP
+    }
+
+    private var displayedAnalysis: LiveViewMonitorAnalysis? {
+        if camera.activeLiveViewSource == .ccapiRTP {
+            guard nativeMonitorTaskID.enabled else { return nil }
+            return nativeMonitor.currentAnalysis(settings: camera.monitorSettings, owner: monitorOwner)
+        }
+        return monitorAnalysis
+    }
+
+    private var nativeMonitorTaskID: NativeMonitorTaskID {
+        NativeMonitorTaskID(settings: camera.monitorSettings,
+                            enabled: !camera.isPreview && camera.activeLiveViewSource == .ccapiRTP
+                                && camera.autoRefresh && camera.liveViewTemperatureAllowed && scenePhase == .active)
     }
 
     private var monitorAnalysisTaskID: LiveViewMonitorTaskID {
@@ -313,6 +381,13 @@ struct LiveViewSurface: View {
 private struct IOSCcapiRTPVideoSurface: UIViewRepresentable {
     let controller: IOSCcapiRTPController
 
+    final class Coordinator {
+        weak var controller: IOSCcapiRTPController?
+        init(controller: IOSCcapiRTPController) { self.controller = controller }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(controller: controller) }
+
     func makeUIView(context: Context) -> IOSCcapiRTPVideoView {
         let view = IOSCcapiRTPVideoView()
         view.displayLayer.videoGravity = .resize
@@ -321,13 +396,21 @@ private struct IOSCcapiRTPVideoSurface: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: IOSCcapiRTPVideoView, context: Context) {
+        if context.coordinator.controller !== controller {
+            context.coordinator.controller?.detach(uiView.displayLayer)
+            context.coordinator.controller = controller
+        }
         controller.attach(uiView.displayLayer)
     }
 
-    static func dismantleUIView(_ uiView: IOSCcapiRTPVideoView, coordinator: Void) {
-        // The controller is retained by CameraAppState; detaching is handled when another layer attaches.
-        uiView.displayLayer.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
+    static func dismantleUIView(_ uiView: IOSCcapiRTPVideoView, coordinator: Coordinator) {
+        coordinator.controller?.detach(uiView.displayLayer)
     }
+}
+
+private struct NativeMonitorTaskID: Hashable {
+    let settings: LiveViewMonitorSettings
+    let enabled: Bool
 }
 
 private struct LiveViewMonitorTaskID: Hashable {
@@ -558,5 +641,54 @@ private struct FocusMarkerView: View {
             .stroke(accepted ? Color.cameraAccent : Color.cameraWarning, lineWidth: 2)
             .frame(width: 52, height: 52)
             .shadow(color: .black.opacity(0.65), radius: 1)
+            .accessibilityLabel(Text(accepted ? "focus_command_accepted" : "focus_command_failed"))
+            .accessibilityIdentifier("focus-command-marker")
+    }
+}
+
+private struct CameraReportedFocusOverlay: View {
+    let info: CameraFocusInfo
+    let sampledAt: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: sampledAt, by: 0.1)) { context in
+            if CameraFocusInfo.isFresh(sampledAt: sampledAt, now: context.date), !info.frames.isEmpty {
+                Canvas { context, size in
+                    context.clip(to: Path(CGRect(origin: .zero, size: size)))
+                    for frame in info.frames {
+                        let rect = CGRect(x: frame.left * size.width, y: frame.top * size.height,
+                            width: (frame.right - frame.left) * size.width, height: (frame.bottom - frame.top) * size.height)
+                        let arm = min(12, min(rect.width, rect.height) * 0.22)
+                        var path = Path()
+                        for right in [false, true] {
+                            for bottom in [false, true] {
+                                let x = right ? rect.maxX : rect.minX
+                                let y = bottom ? rect.maxY : rect.minY
+                                path.move(to: CGPoint(x: x + (right ? -arm : arm), y: y))
+                                path.addLine(to: CGPoint(x: x, y: y))
+                                path.addLine(to: CGPoint(x: x, y: y + (bottom ? -arm : arm)))
+                            }
+                        }
+                        context.stroke(path, with: .color(.black.opacity(0.65)), lineWidth: 3)
+                        context.stroke(path, with: .color(color(frame.status)), lineWidth: 1.5)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(info.frames.map { NSLocalizedString("camera_focus_" + $0.status.rawValue.lowercased(), comment: "") }.reduce(into: [String]()) { values, value in
+                    if !values.contains(value) { values.append(value) }
+                }.joined(separator: ", "))
+                .accessibilityIdentifier("camera-reported-focus-frames")
+            }
+        }
+    }
+
+    private func color(_ status: CameraFocusStatus) -> Color {
+        switch status {
+        case .focused: .green
+        case .unfocused: .cameraRecording
+        case .focusing: .cameraAccent
+        case .standby: .white
+        case .servoOff, .unknown: .cameraSecondaryText
+        }
     }
 }

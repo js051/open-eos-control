@@ -199,8 +199,16 @@ struct DebugView: View {
                         value("rtp_audio_packets", "\(camera.rtpAudioStatus.packetsReceived)", mono: true)
                         value("rtp_audio_access_units", "\(camera.rtpAudioStatus.accessUnitsReceived)", mono: true)
                         value("rtp_audio_decoded", "\(camera.rtpAudioStatus.decodedAccessUnits)", mono: true)
-                        value("rtp_audio_played_frames", "\(camera.rtpAudioStatus.playedSampleFrames)", mono: true)
+                        value("rtp_audio_decoder_inputs", "\(camera.rtpAudioStatus.decoderInputs)", mono: true)
+                        value("rtp_audio_decoded_frames", "\(camera.rtpAudioStatus.decodedSampleFrames)", mono: true)
+                        value("rtp_audio_submitted_frames", "\(camera.rtpAudioStatus.submittedSampleFrames)", mono: true)
+                        value("rtp_audio_player_rendered_frames", "\(camera.rtpAudioStatus.renderedSampleFrames)", mono: true)
+                        value("rtp_audio_output_progress", camera.rtpAudioStatus.outputProgress.rawValue, mono: true)
+                        value("rtp_audio_render_progress_supported", "\(camera.rtpAudioStatus.renderProgressSupported)", mono: true)
+                        value("rtp_audio_audibility", "unknown", mono: true)
+                        value("rtp_audio_resources_retiring", "\(camera.rtpAudioStatus.retiringResources)", mono: true)
                         value("rtp_audio_dropped", "\(camera.rtpAudioStatus.droppedAccessUnits)", mono: true)
+                        value("rtp_audio_expired_output_buffers", "\(camera.rtpAudioStatus.expiredOutputBuffers)", mono: true)
                         value(
                             "rtp_audio_last_packet",
                             camera.rtpAudioStatus.lastPacketAt?.formatted(date: .omitted, time: .standard) ?? language.string("none"),
