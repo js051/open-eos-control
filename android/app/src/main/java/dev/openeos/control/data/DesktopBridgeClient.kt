@@ -1336,9 +1336,21 @@ class DesktopBridgeClient(
                     val json = JSONObject(text)
                     checkOwner()
                     val raw = json.opt("items") as? JSONArray ?: error("Invalid media listing JSON.")
-                    val legacy = raw.objects().mapNotNull(::parseMediaItem).let {
-                        if (maximumItems == null) it else it.take(maximumItems)
+                    check(raw.length() <= BridgeMediaListingDecoder.MAX_ITEMS &&
+                        (maximumItems == null || raw.length() <= maximumItems)) {
+                        "Desktop Bridge listing exceeds the requested or supported item limit."
                     }
+                    val identities = HashSet<String>()
+                    val legacy = ArrayList<CameraMediaItem>(raw.length())
+                    for (index in 0 until raw.length()) {
+                        val value = raw.opt(index) as? JSONObject ?: error("Invalid media listing item.")
+                        val item = parseMediaItem(value) ?: error("Invalid media listing item.")
+                        check(identities.add(item.id)) { "Duplicate media listing identity." }
+                        legacy.add(item)
+                    }
+                    // Publish only after every row passed. Dropping rows or truncating
+                    // an over-limit reply must never become successful completion.
+                    checkOwner()
                     onProgress(legacy)
                     checkOwner()
                     legacy

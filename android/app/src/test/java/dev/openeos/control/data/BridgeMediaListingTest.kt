@@ -176,12 +176,72 @@ class BridgeMediaListingTest {
         }
     }
 
+    @Test(timeout = 15_000)
+    fun legacyRejectsInvalidRowsDuplicateIdentitiesAndExcessLimitWithoutPublishing() = runBlocking<Unit> {
+        val valid = """{"id":"image","name":"IMG.JPG","kind":"image"}"""
+        val cases = listOf(
+            Triple("non-object row", """{"items":[$valid,null]}""", null),
+            Triple("invalid row", """{"items":[$valid,{"id":"broken","kind":"image"}]}""", null),
+            Triple("duplicate identity", """{"items":[$valid,$valid]}""", null),
+            Triple("escaped duplicate identity", """{"items":[$valid,{"id":"\u0069mage","name":"OTHER.JPG","kind":"image"}]}""", null),
+            Triple("requested limit", """{"items":[$valid,{"id":"other","name":"OTHER.JPG","kind":"image"}]}""", 1),
+        )
+        for ((name, body, limit) in cases) Peer(legacyBody = body).use { peer ->
+            val client = peer.client()
+            client.initialize()
+            val progress = ArrayList<List<CameraMediaItem>>()
+            val outcome = runCatching { client.listMedia(limit, progress::add) }
+            assertTrue("Accepted $name", outcome.isFailure)
+            assertTrue("A failed legacy response cannot replace a previous partial: $name", progress.isEmpty())
+            assertEquals("No fallback traversal: $name", 1, peer.mediaRequests.size)
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun legacyFullCardItemBoundaryRejectsOverflowWithoutTruncation() = runBlocking<Unit> {
+        for (count in listOf(100_000, 100_001)) {
+            val body = JSONObject().put("items", JSONArray((0 until count).map { item("image-$it") })).toString()
+            Peer(legacyBody = body).use { peer ->
+                val client = peer.client()
+                client.initialize()
+                val progress = ArrayList<List<CameraMediaItem>>()
+                val outcome = runCatching { client.listMedia(onProgress = progress::add) }
+                if (count == 100_000) {
+                    assertEquals(count, outcome.getOrThrow().size)
+                    assertEquals("image-99999", outcome.getOrThrow().last().id)
+                } else assertTrue("Accepted legacy item overflow", outcome.isFailure)
+                assertEquals(if (count == 100_000) listOf(count) else emptyList<Int>(), progress.map { it.size })
+                assertEquals(1, peer.mediaRequests.size)
+                assertNull(peer.mediaRequests.single().url.query)
+            }
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun legacyEmptyAndExactLimitPreserveOpaqueUnicodeIdentities() = runBlocking<Unit> {
+        val ids = listOf(" 影像%2F+ ", "caf\u00e9", "cafe\u0301")
+        for (expected in listOf(emptyList(), ids)) {
+            val body = JSONObject().put("items", JSONArray(expected.map(::item))).toString()
+            Peer(legacyBody = body).use { peer ->
+                val client = peer.client()
+                client.initialize()
+                val progress = ArrayList<List<CameraMediaItem>>()
+                val items = client.listMedia(3, progress::add)
+                assertEquals(expected, items.map { it.id })
+                assertEquals(listOf(items), progress)
+                assertEquals(1, peer.mediaRequests.size)
+                assertEquals("3", peer.mediaRequests.single().url.queryParameter("limit"))
+            }
+        }
+    }
+
     private fun feed(decoder: BridgeMediaListingDecoder, record: JSONObject, published: MutableList<List<CameraMediaItem>>) {
         for (byte in line(record)) decoder.consume(byte, ::parse)?.let(published::add)
     }
     private fun parse(value: JSONObject): CameraMediaItem? = CameraMediaItem(value.getString("id"), value.getString("name"), "image")
 
-    private class Peer(val legacy: Boolean = false, val truncated: Boolean = false, val staleTail: Boolean = false) : Closeable {
+    private class Peer(val legacy: Boolean = false, val truncated: Boolean = false, val staleTail: Boolean = false,
+                       val legacyBody: String? = null) : Closeable {
         val mediaRequests = CopyOnWriteArrayList<Request>()
         val calls = CopyOnWriteArrayList<Call>()
         val gates = CopyOnWriteArrayList<GateSource>()
@@ -193,7 +253,8 @@ class BridgeMediaListingTest {
                 request.url.encodedPath.endsWith("/media") -> {
                     mediaRequests += request
                     calls += chain.call()
-                    if (legacy) "{\"items\":[{\"id\":\"image\",\"name\":\"IMG.JPG\"}]}".toResponseBody(JSON)
+                    if (legacyBody != null) legacyBody.toResponseBody(JSON)
+                    else if (legacy) "{\"items\":[{\"id\":\"image\",\"name\":\"IMG.JPG\"}]}".toResponseBody(JSON)
                     else {
                         val prefix = frames().take(2).flatMap { line(it).toList() }.toByteArray()
                         val tail = if (truncated) byteArrayOf() else if (staleTail && gates.isEmpty()) {
