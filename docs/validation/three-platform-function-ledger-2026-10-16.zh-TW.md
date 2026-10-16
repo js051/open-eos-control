@@ -158,6 +158,14 @@
 | 128 | iOS camera-control app | G04/G06/G08/G13 | A+B：對應產品入口存在；能力/readback gate與平台驗證分開。 | 原生N／browser待驗／成品無 |
 | 129 | iOS USB/PTP | G12 | D/E：iOS direct USB/PTP未實作；Bridge不等同直連。 | 原生N／browser待驗／成品無 |
 
+## 08:05 UTC 後新增的窄平台證據
+
+本表仍保留初始盤點時的逐列未驗狀態，不追溯改寫為89列全部已驗。以下是後續已實際執行的有界增量：
+
+- [原生 Firefox 合成 CCAPI 連線／Live View／倍率／Near-Far accepted／斷重連](native-firefox-synthetic-2026-10-16.zh-TW.md)：固定產品41bf6ef，已完成所列流程。
+- [gphoto 漸進清單／取消／1101筆重試](gphoto-progressive-firefox-2026-10-16.zh-TW.md)：固定2fbeeeb8（相對前者僅docs），真受控CLI與Firefox UI；取消child已reap、新attempt完整成功。
+- 兩批未提供mobile native、真相機、Windows/WSL或新發布包；每一項的範圍與未涵蓋部分以各自文件為準。
+
 ## 下一個可執行驗收步驟與停止界線
 
 1. 在已存在cloud desktop Firefox用此固定產品HEAD的純合成loopback fixture走connect→Live View→1×/5×/10×→Near/Far→stop/disconnect→明確retry；先重核磁碟與唯一桌面窗口，不接USB/真相機。Firefox通過只算Firefox所測旅程，不能宣稱Playwright Chromium整套PASS。
