@@ -30,6 +30,7 @@ from .local_media import (
 )
 from .maintenance import observation as maintenance_observation
 from .maintenance import require_intent, response_received
+from .media_cancellation import MediaCancellation
 from .media_folders import camera_folder_fields
 from .media_listing import MAX_LIST_SNAPSHOT_ITEMS
 from .media_upload import validate_upload_request
@@ -327,8 +328,11 @@ class SubprocessGPhotoRunner:
         self.binary = self.command.prefix[0]
         self._wsl_probe = wsl_probe or _probe_wsl_host
         self._listing_cleanup_unconfirmed = False
+        self._download_cleanup_unconfirmed = False
 
     def health(self) -> tuple[bool, str | None, str | None]:
+        if self._download_cleanup_unconfirmed:
+            return False, None, "Media download cleanup is unconfirmed. Check the camera and restart the Bridge."
         if self._listing_cleanup_unconfirmed:
             return False, None, "Media listing cleanup is unconfirmed. Check the camera and restart the Bridge."
         resolved = shutil.which(self.command.prefix[0])
@@ -453,6 +457,12 @@ class SubprocessGPhotoRunner:
             return CommandOutput(stdout=stdout, stderr=stderr)
 
     def _require_listing_cleanup(self) -> None:
+        if self._download_cleanup_unconfirmed:
+            raise BridgeError(
+                "MEDIA_DOWNLOAD_CLEANUP_UNCONFIRMED",
+                "Media download cleanup is unconfirmed. Check the camera and restart the Bridge before retrying.",
+                status_code=409, engine=ENGINE_NAME,
+            )
         if self._listing_cleanup_unconfirmed:
             raise BridgeError(
                 "MEDIA_LIST_CLEANUP_UNCONFIRMED",
@@ -2499,7 +2509,9 @@ class GPhoto2Session:
         finally:
             self._lock.release()
 
-    def download_media(self, media_id: str) -> tuple[MediaItem, Iterator[bytes]]:
+    def download_media(
+        self, media_id: str, *, cancellation: MediaCancellation | None = None,
+    ) -> tuple[MediaItem, Iterator[bytes]]:
         if is_host_media_id(media_id):
             with self._lock:
                 self._require_open()
@@ -2531,7 +2543,33 @@ class GPhoto2Session:
         def stream() -> Iterator[bytes]:
             with self._lock:
                 self._require_open()
-                yield from self.runner.stream(arguments, timeout=600.0)
+                if cancellation is None:
+                    yield from self.runner.stream(arguments, timeout=600.0)
+                else:
+                    cancellation.check()
+                    active = self.runner.open_stream(arguments, timeout=600.0)
+                    def cancel_stream() -> None:
+                        if isinstance(self.runner, SubprocessGPhotoRunner) and (
+                            self.runner.command.host_mode == "wsl" or os.name == "nt"
+                        ):
+                            # Reaping a launcher does not prove the remote camera owner stopped.
+                            self.runner._download_cleanup_unconfirmed = True
+                        try:
+                            active.close()
+                        except Exception:
+                            if isinstance(self.runner, SubprocessGPhotoRunner):
+                                self.runner._download_cleanup_unconfirmed = True
+                            raise
+
+                    try:
+                        cancellation.register(cancel_stream)
+                        for chunk in active:
+                            cancellation.check()
+                            yield chunk
+                        cancellation.check()
+                    finally:
+                        active.close()
+                        cancellation.unregister(cancel_stream)
                 self._observed.add(CameraFeature.MEDIA_DOWNLOAD)
 
         return item, stream()

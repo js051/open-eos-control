@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Literal
@@ -27,8 +28,9 @@ from .edsdk import EdsdkEngine
 from .engine import CameraEngine, NetworkCameraEngine
 from .engine_registry import LocalEngineRegistry
 from .errors import BridgeError, unsupported
-from .gphoto2 import GPhoto2Engine
+from .gphoto2 import GPhoto2Engine, GPhoto2Session
 from .jpeg_original import MAX_ENCODED_BYTES, validate_jpeg_original
+from .media_cancellation import MediaCancellation
 from .media_listing import MediaListingStreams, accepts_media_stream
 from .media_metadata import media_response_content_type
 from .media_streaming import (
@@ -83,6 +85,8 @@ from .models import (
 from .rtp import MAX_DECODED_AUDIO_AGE_SECONDS
 from .sessions import SessionManager
 
+MEDIA_CANCEL_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="media-cancel")
+
 LOOPBACK_CLIENTS = {"127.0.0.1", "::1", "testclient"}
 STATIC_DIRECTORY = Path(__file__).with_name("static")
 UI_HEADERS = {
@@ -109,6 +113,7 @@ def _stage_media(
     playback: bool = False,
     max_bytes: int | None = None,
     jpeg_validation: bool = False,
+    cancellation: MediaCancellation | None = None,
     on_activity: Callable[[], bool] | None = None,
 ) -> tuple[MediaItem, Path]:
     """Read a camera response completely so HTTP length errors happen before headers."""
@@ -133,6 +138,8 @@ def _stage_media(
                               status_code=502, feature=CameraFeature.MEDIA_DOWNLOAD.value)
         with staged.open("wb") as destination:
             for chunk in iterator:
+                if cancellation is not None:
+                    cancellation.check()
                 if not chunk:
                     continue
                 if (
@@ -169,6 +176,8 @@ def _stage_media(
                     status_code=502,
                     feature=CameraFeature.MEDIA_DOWNLOAD.value,
                 )
+        if cancellation is not None:
+            cancellation.check()
         if digest is not None:
             validate_jpeg_original(staged, expected_sha256=digest.hexdigest())
         return item.model_copy(update={"size_bytes": actual}), staged
@@ -225,6 +234,39 @@ def _staged_media_chunks(
     finally:
         if on_close is not None:
             on_close()
+
+
+async def _run_media_preparation(request: Request, prepare: Callable[[MediaCancellation], Response]) -> Response:
+    cancellation = MediaCancellation()
+    task = asyncio.create_task(asyncio.to_thread(prepare, cancellation))
+
+    async def cancel_and_drain_signal() -> None:
+        # A failed close must not abandon the preparation worker or replace the
+        # original task cancellation. The owner remains cancelled; gphoto2 also
+        # fences the runner when child cleanup cannot be confirmed.
+        with suppress(Exception):
+            await asyncio.get_running_loop().run_in_executor(MEDIA_CANCEL_EXECUTOR, cancellation.cancel)
+
+    try:
+        while not task.done():
+            if await request.is_disconnected():
+                await cancel_and_drain_signal()
+            await asyncio.wait({task}, timeout=0.05)
+        response = await task
+        try:
+            cancellation.check()
+        except BridgeError:
+            if response.background is not None:
+                await response.background()
+            raise
+        return response
+    except asyncio.CancelledError:
+        await cancel_and_drain_signal()
+        with suppress(Exception, asyncio.CancelledError):
+            response = await asyncio.shield(task)
+            if response.background is not None:
+                await response.background()
+        raise
 
 
 async def _run_media_upload(
@@ -317,7 +359,10 @@ def create_app(
         playback_token: str | None = None,
         single_attempt: bool = False,
         jpeg_validation: bool = False,
+        cancellation: MediaCancellation | None = None,
     ) -> Response:
+        if cancellation is not None:
+            cancellation.check()
         session = manager.get(session_id)
         if jpeg_validation and not single_attempt:
             raise BridgeError("INVALID_ORIGINAL_VALIDATION", "JPEG validation requires a single original GET.",
@@ -350,7 +395,8 @@ def create_app(
             item, chunks = (
                 session.download_media(media_id, single_attempt=True, jpeg_validation=True)
                 if jpeg_validation else session.download_media(media_id, single_attempt=True)
-                if single_attempt else session.download_media(media_id)
+                if single_attempt else session.download_media(media_id, cancellation=cancellation)
+                if isinstance(session, GPhoto2Session) else session.download_media(media_id)
             )
             item, staged = _stage_media(
                 item,
@@ -358,6 +404,7 @@ def create_app(
                 playback=playback_token is not None,
                 max_bytes=MAX_ENCODED_BYTES if jpeg_validation else None,
                 jpeg_validation=jpeg_validation,
+                cancellation=cancellation,
                 on_activity=(
                     lambda: renew_playback(playback_token)
                     if playback_token
@@ -440,7 +487,7 @@ def create_app(
         )
 
     @application.api_route("/v1/media-playback/{ticket}", methods=["GET", "HEAD"], include_in_schema=False)
-    def play_media(ticket: str, request: Request) -> Response:
+    async def play_media(ticket: str, request: Request) -> Response:
         grant = playback_tickets.resolve(ticket, renew=True)
         if grant is None:
             playback_cache.remove(ticket)
@@ -448,27 +495,24 @@ def create_app(
         playback_cache.renew(ticket, grant.expires_at)
         try:
             if request.method == "HEAD":
-                return media_response(
-                    grant.session_id,
-                    grant.media_id,
-                    request,
-                    inline=True,
-                    playback_token=ticket,
-                )
-            with playback_cache.preparing(ticket):
-                active_grant = playback_tickets.resolve(ticket, renew=True)
-                if active_grant is None:
-                    playback_cache.remove(ticket)
-                    return Response(status_code=404, headers={"Cache-Control": "no-store"})
-                playback_cache.renew(ticket, active_grant.expires_at)
-                return media_response(
-                    active_grant.session_id,
-                    active_grant.media_id,
-                    request,
-                    inline=True,
-                    playback_token=ticket,
-                )
-        except BridgeError:
+                return await _run_media_preparation(request, lambda cancellation: media_response(
+                    grant.session_id, grant.media_id, request, inline=True,
+                    playback_token=ticket, cancellation=cancellation))
+            def prepare_playback(cancellation: MediaCancellation) -> Response:
+                # The cache lock is synchronous. Never hold/wait for it on the event loop.
+                with playback_cache.preparing(ticket):
+                    cancellation.check()
+                    active_grant = playback_tickets.resolve(ticket, renew=True)
+                    if active_grant is None:
+                        playback_cache.remove(ticket)
+                        return Response(status_code=404, headers={"Cache-Control": "no-store"})
+                    playback_cache.renew(ticket, active_grant.expires_at)
+                    return media_response(
+                        active_grant.session_id, active_grant.media_id, request, inline=True,
+                        playback_token=ticket, cancellation=cancellation)
+
+            return await _run_media_preparation(request, prepare_playback)
+        except (BridgeError, asyncio.CancelledError):
             playback_tickets.revoke(ticket)
             playback_cache.remove(ticket)
             raise
@@ -1030,15 +1074,16 @@ def create_app(
         return manager.get(session_id).set_media_archive(media_id, update.enabled)
 
     @router.api_route("/session/{session_id}/media/{media_id}", methods=["GET", "HEAD"])
-    def download_media(
+    async def download_media(
         session_id: str,
         media_id: str,
         request: Request,
         attempt: Literal["single"] | None = Query(default=None),
         validation: Literal["jpeg-v1"] | None = Query(default=None),
     ) -> Response:
-        return media_response(session_id, media_id, request, inline=False,
-                              single_attempt=attempt == "single", jpeg_validation=validation == "jpeg-v1")
+        return await _run_media_preparation(request, lambda cancellation: media_response(
+            session_id, media_id, request, inline=False, single_attempt=attempt == "single",
+            jpeg_validation=validation == "jpeg-v1", cancellation=cancellation))
 
     @router.delete("/session/{session_id}/media/{media_id}", status_code=204)
     def delete_media(session_id: str, media_id: str) -> Response:
