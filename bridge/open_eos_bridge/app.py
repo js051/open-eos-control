@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import hashlib
 import hmac
 import os
 import shutil
@@ -11,6 +12,7 @@ import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request, Response
@@ -26,6 +28,9 @@ from .engine import CameraEngine, NetworkCameraEngine
 from .engine_registry import LocalEngineRegistry
 from .errors import BridgeError, unsupported
 from .gphoto2 import GPhoto2Engine
+from .jpeg_original import MAX_ENCODED_BYTES, validate_jpeg_original
+from .media_listing import MediaListingStreams, accepts_media_stream
+from .media_metadata import media_response_content_type
 from .media_streaming import (
     InvalidMediaRange,
     MediaPlaybackCache,
@@ -39,6 +44,7 @@ from .models import (
     CameraCapabilities,
     CameraEvent,
     CameraFeature,
+    CameraFocusInfo,
     CameraInfo,
     CameraList,
     CameraStatus,
@@ -53,10 +59,13 @@ from .models import (
     FocusDriveRequest,
     FocusResult,
     HealthResponse,
+    HeldAutofocusRequest,
+    HeldAutofocusState,
     LiveViewMagnificationRequest,
     LiveViewMagnificationResult,
     LiveViewStartRequest,
     LiveViewState,
+    MaintenanceRequest,
     MediaArchiveUpdate,
     MediaItem,
     MediaList,
@@ -71,6 +80,7 @@ from .models import (
     StillCaptureRequest,
     TapFocusRequest,
 )
+from .rtp import MAX_DECODED_AUDIO_AGE_SECONDS
 from .sessions import SessionManager
 
 LOOPBACK_CLIENTS = {"127.0.0.1", "::1", "testclient"}
@@ -97,6 +107,8 @@ def _stage_media(
     chunks,
     *,
     playback: bool = False,
+    max_bytes: int | None = None,
+    jpeg_validation: bool = False,
     on_activity: Callable[[], bool] | None = None,
 ) -> tuple[MediaItem, Path]:
     """Read a camera response completely so HTTP length errors happen before headers."""
@@ -105,6 +117,7 @@ def _stage_media(
     staged = Path(name)
     expected = item.size_bytes
     actual = 0
+    digest = hashlib.sha256() if jpeg_validation else None
     iterator = iter(chunks)
     next_activity_at = 0.0
     try:
@@ -115,6 +128,9 @@ def _stage_media(
                 status_code=507,
                 feature=CameraFeature.MEDIA_DOWNLOAD.value,
             )
+        if max_bytes is not None and expected > max_bytes:
+            raise BridgeError("MEDIA_ORIGINAL_JPEG_INVALID", "Original JPEG exceeds the encoded-size limit.",
+                              status_code=502, feature=CameraFeature.MEDIA_DOWNLOAD.value)
         with staged.open("wb") as destination:
             for chunk in iterator:
                 if not chunk:
@@ -133,6 +149,9 @@ def _stage_media(
                 if on_activity is not None and time.monotonic() >= next_activity_at:
                     next_activity_at = time.monotonic() + 30
                 actual += len(chunk)
+                if max_bytes is not None and actual > max_bytes:
+                    raise BridgeError("MEDIA_ORIGINAL_JPEG_INVALID", "Original JPEG exceeds the encoded-size limit.",
+                                      status_code=502, feature=CameraFeature.MEDIA_DOWNLOAD.value)
                 if expected > 0 and actual > expected:
                     raise BridgeError(
                         "MEDIA_LENGTH_MISMATCH",
@@ -141,6 +160,8 @@ def _stage_media(
                         feature=CameraFeature.MEDIA_DOWNLOAD.value,
                     )
                 destination.write(chunk)
+                if digest is not None:
+                    digest.update(chunk)
             if expected > 0 and actual != expected:
                 raise BridgeError(
                     "MEDIA_LENGTH_MISMATCH",
@@ -148,6 +169,8 @@ def _stage_media(
                     status_code=502,
                     feature=CameraFeature.MEDIA_DOWNLOAD.value,
                 )
+        if digest is not None:
+            validate_jpeg_original(staged, expected_sha256=digest.hexdigest())
         return item.model_copy(update={"size_bytes": actual}), staged
     except OSError as error:
         _remove_staged_media(staged)
@@ -249,10 +272,12 @@ def create_app(
     manager = SessionManager(local_engines, network_engine)
     playback_tickets = MediaPlaybackTickets()
     playback_cache = MediaPlaybackCache(max_entries=4)
+    media_listings = MediaListingStreams()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         yield
+        media_listings.close()
         playback_cache.clear()
         manager.close_all()
 
@@ -262,6 +287,7 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.session_manager = manager
+    application.state.media_listings = media_listings
 
     @application.get("/", include_in_schema=False, response_class=FileResponse)
     def desktop_control() -> FileResponse:
@@ -289,9 +315,29 @@ def create_app(
         *,
         inline: bool,
         playback_token: str | None = None,
+        single_attempt: bool = False,
+        jpeg_validation: bool = False,
     ) -> Response:
         session = manager.get(session_id)
+        if jpeg_validation and not single_attempt:
+            raise BridgeError("INVALID_ORIGINAL_VALIDATION", "JPEG validation requires a single original GET.",
+                              status_code=422)
+        if single_attempt:
+            if not isinstance(session, CcapiSession):
+                raise unsupported("MEDIA_SINGLE_ORIGINAL", session.engine_name)
+            if request.method != "GET":
+                raise BridgeError(
+                    "INVALID_ORIGINAL_ATTEMPT",
+                    "Single original evidence requires a GET transfer.",
+                    status_code=422,
+                )
         range_header = request.headers.get("range")
+        if single_attempt and range_header is not None:
+            raise BridgeError(
+                "INVALID_ORIGINAL_ATTEMPT",
+                "Single original evidence requires a complete response without Range.",
+                status_code=422,
+            )
         cached = playback_cache.get(playback_token) if playback_token else None
         cache_owned = cached is not None
         if cached is not None:
@@ -301,17 +347,25 @@ def create_app(
             item = session.media_info(media_id)
             staged = None
         else:
-            item, chunks = session.download_media(media_id)
+            item, chunks = (
+                session.download_media(media_id, single_attempt=True, jpeg_validation=True)
+                if jpeg_validation else session.download_media(media_id, single_attempt=True)
+                if single_attempt else session.download_media(media_id)
+            )
             item, staged = _stage_media(
                 item,
                 chunks,
                 playback=playback_token is not None,
+                max_bytes=MAX_ENCODED_BYTES if jpeg_validation else None,
+                jpeg_validation=jpeg_validation,
                 on_activity=(
                     lambda: renew_playback(playback_token)
                     if playback_token
                     else True
                 ),
             )
+            if jpeg_validation:
+                item = item.model_copy(update={"content_type": "image/jpeg"})
             if playback_token:
                 try:
                     grant = playback_tickets.resolve(playback_token, renew=True)
@@ -347,6 +401,10 @@ def create_app(
             "Cache-Control": "private, no-store, max-age=0",
             "Content-Disposition": f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(item.name)}",
         }
+        if single_attempt:
+            headers["X-Open-EOS-Original-Attempt"] = "single-v1"
+        if jpeg_validation:
+            headers["X-Open-EOS-Original-Validation"] = "jpeg-v1"
         if byte_range is not None:
             headers["X-Open-EOS-Range-Mode"] = "staged-file"
         status_code = 200
@@ -357,7 +415,9 @@ def create_app(
         elif size_bytes > 0:
             headers["Content-Length"] = str(size_bytes)
         if request.method == "HEAD":
-            return Response(status_code=status_code, media_type=item.content_type, headers=headers)
+            return Response(
+                status_code=status_code, media_type=media_response_content_type(item.content_type), headers=headers,
+            )
         return StreamingResponse(
             _staged_media_chunks(
                 staged,
@@ -374,7 +434,7 @@ def create_app(
                 ),
             ),
             status_code=status_code,
-            media_type=item.content_type,
+            media_type=media_response_content_type(item.content_type),
             headers=headers,
             background=None if cache_owned else BackgroundTask(_remove_staged_media, staged),
         )
@@ -427,6 +487,18 @@ def create_app(
                 message=error.message,
                 feature=error.feature,
                 engine=error.engine,
+                connection_reason=(
+                    error.connection_reason
+                    if error.code == "CCAPI_DISCOVERY_FAILED" and error.status_code == 502 and error.engine == "ccapi"
+                    else None
+                ),
+                capture_config_receipt=(
+                    error.capture_config_receipt
+                    if error.code == "CAPTURE_CONFIG_READBACK_FAILED"
+                    and error.status_code == 502 and error.engine == "ccapi"
+                    and error.feature in {"DIRECTORY_CONTROL", "FILE_NAMING_CONTROL"}
+                    else None
+                ),
             )
         )
         return JSONResponse(
@@ -517,6 +589,26 @@ def create_app(
         manager.get(session_id).stop_event_polling()
         return Response(status_code=204)
 
+    @router.get("/session/{session_id}/settings/{key}")
+    def read_camera_setting(session_id: str, key: str, response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        reader = getattr(manager.get(session_id), "read_setting", None)
+        if not callable(reader):
+            raise BridgeError("UNSUPPORTED_SETTING_READBACK", "Fresh scoped setting readback is unavailable.",
+                              status_code=409)
+        return reader(key)
+
+    @router.post("/session/{session_id}/settings/{key}/outcome")
+    def apply_camera_setting_outcome(session_id: str, key: str, payload: SettingUpdate,
+                                     response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        session = manager.get(session_id)
+        writer = getattr(session, "apply_setting_outcome", None)
+        if not callable(writer):
+            raise BridgeError("UNSUPPORTED_SETTING_OUTCOME", "Scoped setting writes are unavailable for this provider.",
+                              status_code=409)
+        return writer(key, payload.value)
+
     @router.post("/session/{session_id}/settings/{key}", response_model=CameraStatus)
     def set_camera_setting(session_id: str, key: str, payload: SettingUpdate) -> CameraStatus:
         return manager.get(session_id).set_setting(key, payload.value)
@@ -524,6 +616,16 @@ def create_app(
     @router.post("/session/{session_id}/directories", response_model=DirectoryCreateResult)
     def create_camera_directory(session_id: str, payload: DirectoryCreateRequest) -> DirectoryCreateResult:
         return DirectoryCreateResult(name=manager.get(session_id).create_directory(payload.name))
+
+    @router.get("/session/{session_id}/capture-configuration/{operation}")
+    def read_capture_configuration(session_id: str, operation: str, response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        session = manager.get(session_id)
+        reader = getattr(session, "read_capture_configuration", None)
+        if operation not in {"create-directory", "set-file-naming"} or not callable(reader):
+            raise BridgeError("UNSUPPORTED_CAPTURE_CONFIGURATION_READBACK",
+                              "Fresh capture-configuration readback is unavailable.", status_code=409)
+        return reader(operation)
 
     @router.put(
         "/session/{session_id}/file-naming/{field}",
@@ -535,6 +637,67 @@ def create_app(
         payload: FileNamingUpdate,
     ) -> FileNamingState:
         return manager.get(session_id).set_file_naming(field, payload.value)
+
+    @router.post("/session/{session_id}/maintenance/{operation}/outcome")
+    def perform_maintenance_outcome(session_id: str, operation: str, payload: MaintenanceRequest,
+                                    response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        session = manager.get(session_id)
+        performer = getattr(session, "perform_maintenance_outcome", None)
+        if not callable(performer):
+            raise BridgeError("UNSUPPORTED_MAINTENANCE_OUTCOME", "Scoped maintenance is unavailable.", status_code=409)
+        return performer(operation, payload.auto_power_off)
+
+    @router.get("/session/{session_id}/maintenance/{operation}")
+    def read_maintenance(session_id: str, operation: str, response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        session = manager.get(session_id)
+        reader = getattr(session, "read_maintenance", None)
+        if not callable(reader):
+            raise BridgeError("UNSUPPORTED_MAINTENANCE_READBACK", "Read-only maintenance observation unavailable.",
+                              status_code=409)
+        return reader(operation)
+
+    @router.delete("/session/{session_id}/maintenance/control/session", status_code=204)
+    def retire_maintenance_session(session_id: str) -> Response:
+        manager.retire_maintenance(session_id)
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+    @router.delete("/session/{session_id}/maintenance/control/events", status_code=204)
+    def stop_maintenance_events(session_id: str) -> Response:
+        session = manager.get(session_id)
+        operation = getattr(session, "maintenance_stop_events", None)
+        if not callable(operation):
+            raise unsupported("MAINTENANCE_CONTROLS", session.engine_name)
+        operation()
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+    @router.post("/session/{session_id}/maintenance/control/liveview/stop", response_model=LiveViewState)
+    def stop_maintenance_live_view(session_id: str, response: Response) -> LiveViewState:
+        session = manager.get(session_id)
+        operation = getattr(session, "maintenance_stop_live_view", None)
+        if not callable(operation):
+            raise unsupported("MAINTENANCE_CONTROLS", session.engine_name)
+        operation()
+        response.headers["Cache-Control"] = "no-store"
+        return LiveViewState(active=False, live_view_stop_unconfirmed=
+            getattr(session, "live_view_stop_unconfirmed", None))
+
+    @router.post("/session/{session_id}/maintenance/control/liveview/start", response_model=LiveViewState,
+                 response_model_exclude_none=True)
+    def start_maintenance_live_view(
+        session_id: str, payload: LiveViewStartRequest, response: Response,
+    ) -> LiveViewState:
+        session = manager.get(session_id)
+        operation = getattr(session, "maintenance_start_live_view", None)
+        if not callable(operation):
+            raise unsupported("MAINTENANCE_CONTROLS", session.engine_name)
+        operation(payload)
+        response.headers["Cache-Control"] = "no-store"
+        return LiveViewState(active=True, requested_fps=getattr(session, "requested_fps", min(payload.fps, 5)),
+                            source=getattr(session, "live_view_source", payload.source),
+                            size=getattr(session, "live_view_size", None),
+                            live_view_stop_unconfirmed=getattr(session, "live_view_stop_unconfirmed", None))
 
     @router.post("/session/{session_id}/clock/sync", response_model=CameraStatus)
     def sync_camera_clock(session_id: str) -> CameraStatus:
@@ -579,6 +742,40 @@ def create_app(
     def autofocus(session_id: str) -> CameraStatus:
         return manager.get(session_id).autofocus()
 
+    @router.post("/session/{session_id}/focus/auto/start", response_model=HeldAutofocusState)
+    def start_autofocus(session_id: str, payload: HeldAutofocusRequest) -> HeldAutofocusState:
+        session = manager.get(session_id)
+        if not isinstance(session, CcapiSession):
+            raise unsupported(CameraFeature.AUTOFOCUS.value, session.engine_name,
+                              "This engine does not support held autofocus.")
+        return session.start_autofocus(payload.owner_id)
+
+    @router.post("/session/{session_id}/focus/auto/stop", response_model=HeldAutofocusState)
+    def stop_autofocus(session_id: str, payload: HeldAutofocusRequest) -> HeldAutofocusState:
+        session = manager.get(session_id)
+        if not isinstance(session, CcapiSession):
+            raise unsupported(CameraFeature.AUTOFOCUS.value, session.engine_name,
+                              "This engine does not support held autofocus.")
+        return session.stop_autofocus(payload.owner_id)
+
+    @router.get("/session/{session_id}/recording/observation")
+    def read_recording_observation(session_id: str, response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        session = manager.get(session_id)
+        reader = getattr(session, "read_recording_observation", None)
+        if not callable(reader):
+            raise unsupported("RECORDING_OBSERVATION", session.engine_name)
+        return reader()
+
+    @router.post("/session/{session_id}/recording/{operation}/outcome")
+    def perform_recording_outcome(session_id: str, operation: str, response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        session = manager.get(session_id)
+        performer = getattr(session, "perform_recording_outcome", None)
+        if not callable(performer):
+            raise unsupported("RECORDING_OUTCOME", session.engine_name)
+        return performer(operation)
+
     @router.post("/session/{session_id}/recording/start", response_model=CameraStatus)
     def start_recording(session_id: str) -> CameraStatus:
         return manager.get(session_id).start_recording()
@@ -614,8 +811,10 @@ def create_app(
 
     @router.post("/session/{session_id}/liveview/stop", response_model=LiveViewState)
     def stop_live_view(session_id: str) -> LiveViewState:
-        manager.get(session_id).stop_live_view()
-        return LiveViewState(active=False)
+        session = manager.get(session_id)
+        session.stop_live_view()
+        return LiveViewState(active=False, live_view_stop_unconfirmed=
+            getattr(session, "live_view_stop_unconfirmed", None))
 
     @router.post(
         "/session/{session_id}/liveview/magnification",
@@ -636,6 +835,14 @@ def create_app(
             headers={"Cache-Control": "no-store, max-age=0"},
         )
 
+    @router.get("/session/{session_id}/liveview/focus-info", response_model=CameraFocusInfo | None)
+    def live_view_focus_info(session_id: str, response: Response) -> CameraFocusInfo | None:
+        session = manager.get(session_id)
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        if not isinstance(session, CcapiSession):
+            raise unsupported("FOCUS_INFO", session.engine_name)
+        return session.live_view_focus_info()
+
     @router.get("/session/{session_id}/liveview/audio")
     def live_view_audio(
         session_id: str,
@@ -651,11 +858,12 @@ def create_app(
                 "The active camera engine does not provide RTP audio.",
             )
         chunk = reader(after_generation=after, timeout=timeout_ms / 1_000)
-        if chunk is None:
+        if chunk is None or not 0 <= time.monotonic() - chunk.decoded_at_monotonic < MAX_DECODED_AUDIO_AGE_SECONDS:
             return Response(status_code=204, headers={"Cache-Control": "no-store, max-age=0"})
         headers = {
             "Cache-Control": "no-store, max-age=0",
             "X-Open-EOS-Audio-Generation": str(chunk.generation),
+            "X-Open-EOS-Audio-Age-Ms": str(max(0, int((time.monotonic() - chunk.decoded_at_monotonic) * 1000))),
             "X-Open-EOS-Audio-Sample-Rate": str(chunk.sample_rate),
             "X-Open-EOS-Audio-Channels": str(chunk.channels),
             "X-Open-EOS-Audio-Frames": str(chunk.sample_frames),
@@ -672,9 +880,26 @@ def create_app(
     @router.get("/session/{session_id}/media", response_model=MediaList)
     def media(
         session_id: str,
+        request: Request,
+        response: Response,
         limit: int | None = Query(default=None, ge=1, le=1000),
+        inventory: Literal["strict"] | None = Query(default=None),
     ) -> MediaList:
-        return MediaList(items=manager.get(session_id).list_media(limit))
+        session = manager.get(session_id)
+        if inventory == "strict":
+            if not isinstance(session, CcapiSession):
+                raise unsupported("MEDIA_STRICT_INVENTORY", session.engine_name)
+            items = session.list_media_strict(limit if limit is not None else 1000)
+            response.headers["X-Open-EOS-Inventory"] = "complete-v1"
+            response.headers["Cache-Control"] = "private, no-store, max-age=0"
+            return MediaList(items=items)
+        progressive = getattr(session, "list_media_progressive", None)
+        if callable(progressive) and accepts_media_stream(request.headers.get("accept", "")):
+            return media_listings.response(
+                request, session_id, session, limit, progressive,
+                lambda: manager.is_current(session_id, session),
+            )
+        return MediaList(items=session.list_media(limit))
 
     @router.post("/session/{session_id}/media", response_model=MediaItem, status_code=201)
     async def upload_media(session_id: str, request: Request, filename: str = Query(..., min_length=1)) -> MediaItem:
@@ -739,8 +964,16 @@ def create_app(
         )
 
     @router.get("/session/{session_id}/media/{media_id}/info", response_model=MediaItem)
-    def media_info(session_id: str, media_id: str) -> MediaItem:
-        return manager.get(session_id).media_info(media_id)
+    def media_info(session_id: str, media_id: str, response: Response, fresh: bool = Query(default=False)) -> MediaItem:
+        session = manager.get(session_id)
+        if fresh:
+            if not isinstance(session, CcapiSession):
+                raise unsupported("MEDIA_FRESH_METADATA", session.engine_name)
+            item = session.media_info(media_id, fresh=True)
+            response.headers["X-Open-EOS-Fresh-Metadata"] = "v1"
+            response.headers["Cache-Control"] = "private, no-store, max-age=0"
+            return item
+        return session.media_info(media_id)
 
     @router.post(
         "/session/{session_id}/media/{media_id}/playback",
@@ -797,8 +1030,15 @@ def create_app(
         return manager.get(session_id).set_media_archive(media_id, update.enabled)
 
     @router.api_route("/session/{session_id}/media/{media_id}", methods=["GET", "HEAD"])
-    def download_media(session_id: str, media_id: str, request: Request) -> Response:
-        return media_response(session_id, media_id, request, inline=False)
+    def download_media(
+        session_id: str,
+        media_id: str,
+        request: Request,
+        attempt: Literal["single"] | None = Query(default=None),
+        validation: Literal["jpeg-v1"] | None = Query(default=None),
+    ) -> Response:
+        return media_response(session_id, media_id, request, inline=False,
+                              single_attempt=attempt == "single", jpeg_validation=validation == "jpeg-v1")
 
     @router.delete("/session/{session_id}/media/{media_id}", status_code=204)
     def delete_media(session_id: str, media_id: str) -> Response:

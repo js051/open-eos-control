@@ -216,7 +216,10 @@ def test_static_labels_exist_in_both_supported_languages() -> None:
     assert "settingDrafts" in script
     assert "textSettingValueValid" in script
     assert 'input.className = "text-metadata-input"' in script
-    assert 'method: "POST", json: { value }' in script
+    assert 'method: "POST", payload: { value }' in script
+    assert '/settings/${encodeURIComponent(record.key)}/outcome' in script
+    assert 'shootingSettings.parseOutcome' in script
+    assert 'setting.value = value;' not in script
     assert "function diagnosticCapabilities()" in script
     assert "choiceCount:" in script
     assert "option.value = value" in script
@@ -257,7 +260,9 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "FEATURES.MEDIA_RATING" in script
     assert "FEATURES.MEDIA_ROTATE" in script
     assert "FEATURES.MEDIA_ARCHIVE" in script
-    assert '{ method: "PUT", json }' in script
+    assert '{ method: "PUT", json: spec.json, signal, responseType: "mediaMetadata", redirect: "error" }' in script
+    assert "mediaMutations.run(roster, requested" in script
+    assert "mediaMutations.parseReadback(await response.text())" in script
     assert 'FEATURES.MEDIA_PROTECT, "protection", { enabled: true }' in script
     assert 'FEATURES.MEDIA_PROTECT, "protection", { enabled: false }' in script
     assert 'FEATURES.MEDIA_RATING, "rating", { value:' in script
@@ -268,13 +273,22 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'EVENT_POLLING: "EVENT_POLLING"' in script
     assert "function startEventLoop()" in script
     assert "function cancelEventLoop()" in script
-    assert "await refreshSession({ quiet: true })" in script
+    assert "await refreshSession({ quiet: true, eventGeneration: generation })" in script
     assert 'String(key).toLowerCase().includes("content")' in script
     assert "contentsChanged && state.mediaLoaded" in script
-    assert "await refreshMedia({ preservePreview: true })" in script
+    event_loop = script.split("  function startEventLoop() {", 1)[1].split(
+        "  function cancelEventLoop() {", 1,
+    )[0]
+    assert re.search(
+        r"const listing = refreshMedia\(\{ preservePreview: true \}\);\s*"
+        r"refreshed = await listing;\s*(?://[^\n]*\n\s*)*"
+        r'if \(\["cancelled", "failed", "retired"\]\.includes\(listing\.mediaOutcome\)\) \{\s*'
+        r"pending = null;\s*failures = 0;\s*continue;\s*\}",
+        event_loop,
+    )
     assert "mediaRefreshPromise: null" in script
     assert 'mediaLoadStatus: "NOT_LOADED"' in script
-    assert "function refreshMediaWhenCurrent({ preservePreview = false } = {})" in script
+    assert "function refreshMediaWhenCurrent({ preservePreview = false, owner } = {})" in script
     assert "const LATEST_MEDIA_LIMIT = 8" in script
     assert "?limit=${LATEST_MEDIA_LIMIT}" in script
     assert "function refreshLatestMedia()" in script
@@ -285,7 +299,9 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert 'ui.latestMediaRetry.addEventListener("click", retryLatestMedia)' in script
     assert 'mediaScope: "recent"' in script
     assert 'mediaHasMore: false' in script
-    assert 'const limitQuery = mediaScope === "recent" ? "?limit=61" : ""' in script
+    assert 'const limit = scope === "recent" ? 61 : null' in script
+    assert '/media${limit === null ? "" : "?limit=61"}' in script
+    assert 'listing: { sessionId: session.id, limit, onSnapshot: publish }' in script
     assert 'querySelectorAll("[data-media-scope]")' in script
     assert 'id="media-scope-control"' in html
     assert 'state.mediaLoadStatus = "LOADING"' in script
@@ -311,7 +327,15 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     }:
         declarations = re.findall(rf"^\s+{key}:\s+\"", script, flags=re.MULTILINE)
         assert len(declarations) == 2, f"{key} must be declared in both supported languages"
-    assert "state.refreshGeneration !== interactionGeneration" in script
+    listing_owner = script.split("  async function refreshMediaWhenCurrent(", 1)[1].split(
+        "  function renderMedia() {", 1,
+    )[0]
+    assert re.search(
+        r"const current = \(\) => state\.mediaListingOwner === owner && state\.session === session &&\s*"
+        r"state\.mediaScope === scope && state\.refreshGeneration === owner\.interactionGeneration &&\s*"
+        r"!controller\.signal\.aborted;",
+        listing_owner,
+    )
     assert 'MEDIA_THUMBNAIL: "MEDIA_THUMBNAIL"' in script
     assert 'MEDIA_PREVIEW: "MEDIA_PREVIEW"' in script
     assert "MAX_MEDIA_PREVIEW_BYTES" in script
@@ -352,10 +376,12 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "function updateFileNaming(field, value, source)" in script
     assert "fileNamingDrafts: {}" in script
     assert "state.fileNamingDrafts[field] ?? current" in script
-    assert "delete state.fileNamingDrafts[field]" in script
+    assert "permission.canConsumeDraft && record.field" in script
+    assert "delete state.fileNamingDrafts[record.field]" in script
     assert 'button.dataset.cameraCommand = "file-naming"' in script
     assert 'file-naming/${encodeURIComponent(field)}' in script
-    assert '{ method: "PUT", json: { value } }' in script
+    assert 'method: field ? "PUT" : "POST"' in script
+    assert 'payload: field ? { value: requestedValue } : { name: requestedValue }' in script
     assert "featureSupported(FEATURES.LIVE_VIEW_MAGNIFICATION)" in script
     assert "featureSupported(FEATURES.SHUTTER_HALF_PRESS)" in script
     assert "featureSupported(FEATURES.BULB_EXPOSURE)" in script
@@ -397,7 +423,16 @@ def test_desktop_ui_uses_real_bridge_paths_and_never_persists_authentication() -
     assert "const viewfinderBounds = ui.viewfinder.getBoundingClientRect()" in script
     assert 'source: state.liveSource || "AUTO"' in script
     assert "CCAPI_RTP" in script
-    assert "engine?.detail" in script
+    # Health comes from the selected real engine; unavailable-engine recovery is
+    # localized. Behavioral readiness checks live in connection-guidance.test.js.
+    health_source = script.split("function renderHealth()", 1)[1].split("\n  function ", 1)[0]
+    assert "state.health.engines?.[engineName]" in health_source
+    assert "connectionGuidance.availableUsbEngine(state.health)" in health_source
+    ready_health, unavailable_health = health_source.split("if (engine?.available)", 1)[1].split("} else {", 1)
+    assert 't("bridgeReady", { engine: display })' in ready_health
+    assert 'ui.engineState.title = engine.detail || ""' in ready_health
+    assert 't(state.connectionMode === "ccapi" ? "connectionCcapiEngine" : "connectionUsbEngine")' in unavailable_health
+    assert "engine.detail" not in unavailable_health
     assert 'state.previewInput === "LOCAL_VIDEO"' in script
     assert "await localVideo.start(navigator.mediaDevices" in script
     assert "localVideo.stop(state.localVideoStream)" in script
@@ -483,3 +518,23 @@ def test_shutter_recovery_alerts_do_not_cover_controls_and_live_start_has_a_guar
     bulb_lock = script.split("function bulbControlLocked()", 1)[1].split("function clearBulbTimer", 1)[0]
     assert "shutterReleaseUnconfirmed() || state.status?.bulbExposureActive === true" in bulb_lock
     assert "ui.toast.hidden = true;" in toast
+
+
+def test_lut_import_has_owned_status_and_explicit_cancel_without_clearing_applied_summary() -> None:
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert 'id="monitor-lut-status" class="supporting" role="status" aria-live="polite" hidden' in html
+    assert 'id="monitor-lut-cancel"' in html
+    assert 'data-i18n="cancelLutImport"' in html
+    assert 'ui.monitorLutCancel.addEventListener("click", cancelCubeLutImport)' in script
+    assert 'ui.monitorLutLoad.addEventListener("click", openCubeLutPicker)' in script
+    controls = script.split("  function renderMonitoringControls() {", 1)[1].split(
+        "  function openMonitoringDialog() {", 1,
+    )[0]
+    assert "settings.cubeLut.name" in controls
+    assert "state.monitorLutImportError" in controls
+    assert 'setAttribute("aria-busy", String(importing || reading))' in controls
+    assert 't("lutWaiting")' in controls
+    assert 't("lutStopping")' in controls
+    assert "lutImportPending: Boolean(state.monitorLutImportOwner)" in script
+    assert "lutImportFailed: Boolean(state.monitorLutImportError)" in script

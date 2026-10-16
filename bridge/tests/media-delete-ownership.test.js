@@ -48,6 +48,7 @@ function context({ reuseSessionId = false, confirmed = true } = {}) {
     operatorConfirmedFeatures: new Set(), refreshGeneration: 0, captureMode: "photo",
     localVideoSupport: { available: false }, localVideoBusy: false, liveActive: false,
     previewInput: "CAMERA", mediaDownloadPreparing: false, mediaDownload: null, mediaUpload: null,
+    mediaDeleteOwner: null, mediaDeleteHistory: [],
     media: [], mediaThumbnailUrls: new Map(), mediaThumbnailLoads: new Map(),
     mediaThumbnailFailures: new Set(), mediaGeneration: 0, mediaPreviewGeneration: 0,
     mediaDetailsGeneration: 0, mediaPreviewItem: null, mediaDetailsItem: null,
@@ -58,15 +59,18 @@ function context({ reuseSessionId = false, confirmed = true } = {}) {
   let connections = 0;
   const sandbox = vm.createContext({
     state, ui, heldDelete, requests, confirmations, feedback, released, renders,
+    Headers, AbortController, Date, URL,
+    connectionGuidance: require("../open_eos_bridge/static/connection-guidance.js"),
     FEATURES: new Proxy({}, { get: (_, key) => key }), Error, ApiError: class ApiError extends Error {},
     mediaThumbnailObserver: null,
-    window: { confirm(message) { confirmations.push(message); return confirmed; } },
+    window: { location: { href: "http://bridge.invalid/" }, confirm(message) { confirmations.push(message); return confirmed; } },
     document: { querySelector: () => element(), querySelectorAll: () => [] },
     api: async (url, options = {}) => {
+      url = url.replace(/^http:\/\/bridge.invalid/, "");
       requests.push({ url, method: options.method || "GET" });
       if (url === "/v1/session" && options.method === "POST") {
         connections += 1;
-        return { id: connections === 1 || reuseSessionId ? "synthetic-A" : "synthetic-B" };
+        return { id: connections === 1 || reuseSessionId ? "synthetic-A" : "synthetic-B", engine: "ccapi" };
       }
       if (options.method === "DELETE" && url.includes("/media/")) return heldDelete.promise;
       if (options.method === "DELETE" && /^\/v1\/session\/[^/]+$/.test(url)) return {};
@@ -83,8 +87,20 @@ function context({ reuseSessionId = false, confirmed = true } = {}) {
     releaseObjectUrl: url => { if (url) released.push(url); },
     renderMedia: () => renders.push("media"), renderDiagnostics: () => renders.push("diagnostics"),
   });
-  for (const name of ["clearConnectionError", "syncLiveMagnificationFromCapabilities", "startEventLoop",
-    "refreshLatestMedia", "renderHealth", "cancelMediaDownload", "stopLiveLoop", "stopLocalVideo",
+  sandbox.mediaDelete = { ...require("../open_eos_bridge/static/media-delete.js"),
+    transferHttp(url, options) {
+      return require("../open_eos_bridge/static/media-delete.js").transferHttp(url, {
+        ...options, fetchImpl: async (target, init) => {
+          requests.push({ url: target, method: init.method });
+          const result = await heldDelete.promise;
+          return result instanceof Response ? result : new Response(null, { status: 204 });
+        },
+      });
+    },
+  };
+  sandbox.renderMediaDeleteHistory = () => {};
+  for (const name of ["renderHeldAutofocus", "cameraFocusInfoEligible", "cancelCameraFocusInfo", "releaseHeldAutofocusForLifecycle", "clearConnectionError", "syncLiveMagnificationFromCapabilities", "startEventLoop",
+    "refreshLatestMedia", "renderHealth", "renderConnectionGuidance", "cancelMediaDownload", "stopLiveLoop", "stopLocalVideo",
     "stopEventLoop", "cancelEventLoop", "cancelMediaUpload", "clearScheduledMediaTransferRender",
     "cancelLatestMediaRefresh", "clearBulbTimer", "renderLiveMagnification", "renderMediaTransfer",
     "renderLatestMedia", "renderMediaDetails", "renderMediaPreviewNavigation"]) sandbox[name] = () => {};
@@ -92,9 +108,9 @@ function context({ reuseSessionId = false, confirmed = true } = {}) {
     sandbox[name] = (...args) => feedback.push([name, ...args]);
   }
   sandbox.renderSession = () => sandbox.renderAvailability();
-  const names = ["connectCamera", "disconnectCamera", "resetSession", "refreshSession",
+  const names = ["adoptCameraStatus", "recordingRecoveryActive", "connectionRetirementBlocked", "renderConnectionCleanup", "recordConnectionCleanupWarning", "cancelCameraConnection", "retireConnectionAttempt", "connectCamera", "disconnectCamera", "cancelSetting", "resetSession", "refreshSession",
     "featureSupported", "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
-    "renderAvailability", "deleteMedia", "captureError", "clearMediaThumbnails",
+    "liveViewStopRequired", "maintenanceStopRetryAvailable", "renderAvailability", "deleteMedia", "runMediaDelete", "sendMediaDelete", "mediaDeleteRows", "mediaDeleteConfirmation", "mediaDeleteOwnerDescription", "applyConfirmedMediaDelete", "captureError", "clearMediaThumbnails",
     "closeMediaPreview", "clearMediaPreview", "resetMediaPreviewTransform",
     "closeMediaDetails", "clearMediaDetails"];
   vm.runInContext(names.map(productionFunction).join("\n"), sandbox);
@@ -102,8 +118,8 @@ function context({ reuseSessionId = false, confirmed = true } = {}) {
 }
 
 function populateMedia(subject, owner) {
-  const item = { id: "DCIM/IMG_0001.JPG", name: "IMG_0001.JPG", owner };
-  const other = { id: "DCIM/IMG_0002.JPG", name: "IMG_0002.JPG", owner };
+  const item = { id: "ccapi:DCIM/IMG_0001.JPG", name: "IMG_0001.JPG", owner };
+  const other = { id: "ccapi:DCIM/IMG_0002.JPG", name: "IMG_0002.JPG", owner };
   Object.assign(subject.state, {
     media: [item, other], mediaPreviewItem: item, mediaDetailsItem: item,
     mediaThumbnailUrls: new Map([[item.id, `blob:${owner}-target`], [other.id, `blob:${owner}-other`]]),
@@ -146,9 +162,12 @@ async function pendingDelete(options) {
   assert.equal(subject.state.busy, false, "Deletion must not acquire a new global lock");
   assert.equal(subject.ui.disconnectButton.disabled, false, "Production UI permits disconnect during deletion");
   assert.equal(subject.ui.refreshButton.disabled, false, "Production UI permits refresh during deletion");
-  assert.deepEqual(subject.confirmations, ["deleteConfirm: IMG_0001.JPG"]);
+  assert.equal(subject.confirmations.length, 1);
+  assert.match(subject.confirmations[0], /mediaDeleteConfirmHeader/);
+  assert.match(subject.confirmations[0], /ccapi:DCIM\/IMG_0001.JPG/);
+  assert.match(subject.confirmations[0], /mediaDeleteSource_camera/);
   assert.deepEqual(mediaDeletes(subject), [{
-    url: "/v1/session/synthetic-A/media/DCIM%2FIMG_0001.JPG", method: "DELETE",
+    url: "/v1/session/synthetic-A/media/ccapi%3ADCIM%2FIMG_0001.JPG", method: "DELETE",
   }]);
   return { subject, pending, ...media };
 }
@@ -179,6 +198,8 @@ for (const outcome of ["success", "rejection"]) {
       const newerError = { message: "synthetic newer feedback" };
       subject.state.lastError = newerError;
       const expected = snapshot(subject);
+      const priorFeedback = expected.feedback;
+      const priorError = expected.lastError;
       const requests = subject.requests.slice();
       if (outcome === "success") subject.heldDelete.resolve({});
       else subject.heldDelete.reject(new Error("synthetic old delete failed"));
@@ -203,6 +224,8 @@ for (const outcome of ["success", "rejection"]) {
         assert.equal(subject.state.refreshGeneration, generation + Number(otherInteraction));
       }
       const expected = snapshot(subject);
+      const priorFeedback = expected.feedback;
+      const priorError = expected.lastError;
       const requests = subject.requests.slice();
       if (outcome === "success") subject.heldDelete.resolve({});
       else subject.heldDelete.reject(new Error("synthetic current delete failed"));
@@ -224,16 +247,18 @@ for (const outcome of ["success", "rejection"]) {
         assert.deepEqual(subject.released, ["blob:A-target"]);
         assert.deepEqual(subject.renders, ["media"]);
         assert.equal(subject.state.lastError, null);
-        assert.deepEqual(subject.feedback.at(-1), ["showToast", `deleted: ${item.name}`]);
+        assert.equal(subject.state.mediaDeleteHistory.at(-1).results[0].status, "confirmed");
+        assert.deepEqual(subject.feedback, priorFeedback);
       } else {
         const actual = snapshot(subject);
         for (const key of ["lastError", "buttonDisabled", "feedback", "renders"]) delete actual[key];
         for (const key of ["lastError", "buttonDisabled", "feedback", "renders"]) delete expected[key];
         assert.deepEqual(actual, expected, "Failed deletion retains media, caches and dialogs");
-        assert.equal(subject.state.lastError.message, "synthetic current delete failed");
-        assert.equal(subject.ui.mediaDetailsDelete.disabled, false);
-        assert.deepEqual(subject.renders, ["diagnostics"]);
-        assert.deepEqual(subject.feedback.at(-1), ["showToast", "synthetic current delete failed", true]);
+        assert.equal(subject.state.lastError, priorError);
+        assert.equal(subject.ui.mediaDetailsDelete.disabled, otherInteraction);
+        assert.deepEqual(subject.renders, ["media"]);
+        assert.deepEqual(subject.feedback, priorFeedback);
+        assert.equal(subject.state.mediaDeleteHistory.at(-1).results[0].status, "uncertain");
       }
     });
   }
@@ -256,5 +281,42 @@ for (const guard of ["no session", "unsupported", "busy", "download preparing", 
     assert.equal(mediaDeletes(subject).length, 0);
     assert.deepEqual(snapshot(subject), expected);
     assert.equal(subject.confirmations.length, guard === "cancelled" ? 1 : 0);
+  });
+}
+
+
+test("normal render cannot admit a second overlapping confirmed DELETE", async () => {
+  const { subject, pending, item } = await pendingDelete();
+  subject.ui.mediaDetailsDelete.disabled = false;
+  await subject.deleteMedia(item, subject.ui.mediaDetailsDelete);
+  assert.equal(subject.confirmations.length, 1);
+  assert.equal(mediaDeletes(subject).length, 1);
+  subject.heldDelete.resolve({}); await pending;
+});
+
+test("all-ineligible target records skipped without dispatch", async () => {
+  const subject = context(); await subject.connectCamera();
+  const { item } = populateMedia(subject, "A"); item.protected = true;
+  await subject.deleteMedia(item, subject.ui.mediaDetailsDelete);
+  assert.equal(mediaDeletes(subject).length, 0);
+  assert.equal(subject.state.mediaDeleteHistory[0].results[0].status, "skipped");
+  assert.equal(subject.state.media.length, 2);
+});
+
+for (const changed of ["protected", "unloaded", "not-writable", "capability"]) {
+  test(`queued deletion rechecks ${changed} at the last dispatch gate`, async () => {
+    const subject = context(); await subject.connectCamera();
+    const { item, other } = populateMedia(subject, "A");
+    const pending = subject.runMediaDelete([{ item, loaded: true }, { item: other, loaded: true }]);
+    assert.equal(mediaDeletes(subject).length, 1);
+    if (changed === "protected") other.protected = true;
+    if (changed === "unloaded") subject.state.media = [item];
+    if (changed === "not-writable") other.writable = false;
+    if (changed === "capability") subject.state.capabilities.supported = ["MEDIA_BROWSER"];
+    subject.heldDelete.resolve({}); await pending;
+    assert.equal(mediaDeletes(subject).length, 1);
+    assert.deepEqual(Array.from(subject.state.mediaDeleteHistory.at(-1).results, row => row.status), ["confirmed", "skipped"]);
+    assert.equal(subject.state.mediaDeleteHistory.at(-1).results[1].reason,
+      ({ protected: "protected", unloaded: "not-loaded", "not-writable": "not-writable", capability: "no-capability" })[changed]);
   });
 }

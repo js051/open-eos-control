@@ -190,6 +190,13 @@ class FakeRunner:
             return CommandOutput(ABILITIES.encode())
         if command == ["--list-all-config"]:
             return CommandOutput(self._config_dump().encode())
+        if len(command) == 2 and command[0] == "--get-config":
+            blocks = self._config_dump().split("\n/main/")
+            for block in blocks:
+                block = "/main/" + block if not block.startswith("/main/") else block
+                if block.splitlines()[0] == command[1]:
+                    return CommandOutput(("\n".join(block.splitlines()[1:]) + "\n").encode())
+            raise AssertionError(f"Unexpected exact config path: {command[1]}")
         if command == ["--storage-info"]:
             return CommandOutput(STORAGE.encode())
         if command == ["--folder", "/", "--no-recurse", "--list-files"]:

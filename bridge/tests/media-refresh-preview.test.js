@@ -103,7 +103,8 @@ function fixture(t, { dated = false } = {}) {
     sleep: async (delay) => { delays.push(delay); },
     clampFps: (value) => value,
     reviewResponse: () => ({ items: [LATEST, OLD] }),
-    chooseMediaWritable: async () => ({ writable: null, cancelled: false }),
+    chooseMediaWritable: async () => ({ handle: null, cancelled: false }),
+    mediaHistoryCall: async () => ({ ok: true, ticket: {}, receipt: {}, updated: true }),
     saveMediaBlob: (blob, name) => savedBlobs.push({ blob, name }),
     fetch: async (url, options) => {
       assert.equal(options.method, "DELETE", "Only playback-ticket cleanup may use fetch");
@@ -143,12 +144,12 @@ function fixture(t, { dated = false } = {}) {
     "renderMediaTransfer", "scheduleMediaTransferRender", "cancelMediaUpload",
     "clearScheduledMediaTransferRender", "closeMediaDetails",
     "clearBulbTimer", "renderHealth"]) s[name] = () => {};
-  const names = ["startEventLoop", "cancelEventLoop", "refreshSession", "refreshMedia", "refreshMediaWhenCurrent",
+  const names = ["maintenanceHeld", "maintenancePaused", "adoptCameraStatus", "startEventLoop", "cancelEventLoop", "refreshSession", "refreshMedia", "refreshMediaWhenCurrent",
     "mediaTransferActive", "cameraInteractionBusy", "openMediaPreview", "closeMediaPreview", "clearMediaPreview",
     "resetMediaPreviewTransform", "renderMediaPreviewNavigation", "previewableMedia", "displayedMedia",
-    "renderMediaSummary", "renderMediaDateFilter", "mediaDisplayTimeZone", "resetSession", "cancelLatestMediaRefresh",
+    "renderMediaSummary", "renderMediaSelection", "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel", "mediaDisplayTimeZone", "cancelSetting", "resetSession", "cancelLatestMediaRefresh",
     "retryLatestMedia", "refreshLatestMedia", "latestMediaFrom", "publishLatestMedia",
-    "downloadMedia", "cancelMediaDownload"];
+    "downloadMedia", "cancelMediaDownload", "cancelMediaBatch"];
   vm.runInContext(names.map(extract).join("\n"), s, { timeout: 1000 });
   s.renderMedia = () => {
     renders.push(Array.from(state.media, (entry) => entry.id));
@@ -552,7 +553,7 @@ test("closing an image preview leaves its independently requested original save 
     s.previews[0].reject(new Error("Synthetic retired preview failed after original save"));
     await preview;
     assert.deepEqual(previewSnapshot(s), current);
-    assert.equal(s.feedback.some((message) => message.startsWith("downloaded:")), true);
+    assert.equal(s.feedback.some((message) => message.startsWith("downloadHandedOff:")), true);
     assertReadOnly(s);
   });
 
@@ -609,3 +610,16 @@ test("cancelling an original save leaves its independently opened image preview 
     assert.equal(s.ui.mediaPreviewUnavailable.hidden, true);
     assertReadOnly(s);
   });
+
+test("unknown and conflicting media remain visible without opening a photo or video decoder", async (t) => {
+  const s = fixture(t);
+  for (const item of [{ id: "unknown", name: "FILE.bin", kind: "unknown", previewAvailable: true },
+    { id: "conflict", name: "FRAME.JPG", kind: "video", previewAvailable: true },
+    { id: "audio", name: "SOUND.wav", kind: "audio", previewAvailable: true }]) {
+    await s.openMediaPreview(item);
+  }
+  assert.equal(s.requests.length, 0);
+  assert.equal(s.previews.length, 0);
+  assert.equal(s.playbacks.length, 0);
+  assert.equal(s.decodeCalls(), 0);
+});

@@ -18,14 +18,14 @@ function extract(name) {
   return app.slice(match.index, ending + 4);
 }
 const realFunctions = [
-  "api", "connectCamera", "disconnectCamera", "resetSession", "refreshSession",
+  "recordingRecoveryActive", "api", "connectionRetirementBlocked", "renderConnectionCleanup", "recordConnectionCleanupWarning", "cancelCameraConnection", "retireConnectionAttempt", "connectCamera", "disconnectCamera", "cancelSetting", "resetSession", "refreshSession",
   "featureSupported", "cancelEventLoop", "stopEventLoop", "mediaTransferActive",
   "cameraInteractionBusy", "beginCameraInteraction", "settingByKey", "isBulbMode",
   "captureModeFromCamera", "shutterReleaseUnconfirmed", "bulbControlLocked",
-  "localPreviewSelected", "previewActive", "changePreviewInput", "clampFps", "toggleLiveView", "startLiveView", "stopLiveView",
+  "localPreviewSelected", "previewActive", "changePreviewInput", "clampFps", "toggleLiveView", "startLiveView", "liveViewControlRequest", "stopLiveView",
   "stopLiveLoop", "changeLiveSource", "currentRtpAudioStatus", "refreshRtpAudioStatus",
-  "renderRtpAudio", "toggleRtpAudio", "pollRtpAudio", "stopRtpAudioSources", "stopRtpAudio",
-  "renderAvailability", "setOperationState",
+  "renderRtpAudio", "ownsRtpAudio", "armRtpAudioWatchdog", "checkRtpAudioProgress", "toggleRtpAudio", "pollRtpAudio", "stopRtpAudioSources", "stopRtpAudio",
+  "adoptCameraStatus", "liveViewStopRequired", "maintenanceStopRetryAvailable", "renderAvailability", "setOperationState",
 ];
 const stateStart = app.indexOf("  const state = {");
 const stateEnd = app.indexOf("\n  };", stateStart);
@@ -60,15 +60,16 @@ function harness() {
   let liveSource = "CCAPI_RTP";
   let delayNextStatus = false;
   class FakeAudioContext {
-    constructor() {this.resumeGate = deferred(); this.closeCount = 0; contexts.push(this);}
+    constructor() {this.state = "running"; this.resumeGate = deferred(); this.closeCount = 0; contexts.push(this);}
     resume() {return this.resumeGate.promise;}
-    close() {this.closeCount += 1; return Promise.resolve();}
+    close() {this.closeCount += 1; this.state = "closed"; return Promise.resolve();}
   }
   const sandbox = {
-    console, Headers, AbortController, Date, Set, Map, Number, Error, encodeURIComponent,
-    ui, window: {AudioContext: FakeAudioContext}, navigator: {mediaDevices: {}},
+    console, URL, Headers, AbortController, Date, Set, Map, Number, Error, encodeURIComponent, setTimeout, clearTimeout, performance,
+    connectionGuidance: require("../open_eos_bridge/static/connection-guidance.js"),
+    ui, window: {location: {href: "http://bridge.invalid/"}, AudioContext: FakeAudioContext}, navigator: {mediaDevices: {}},
     localVideo: {supportState: () => ({available: true})},
-    document: {querySelector: () => element(), querySelectorAll: () => []},
+    document: {visibilityState: "visible", querySelector: () => element(), querySelectorAll: () => []},
     readLanguagePreference: () => "en",
     FEATURES: new Proxy({}, {get: (_, name) => name}),
     t: key => key,
@@ -80,9 +81,11 @@ function harness() {
     shutterAFSupported: () => true, canChangeShutterAF: () => true,
     effectiveTapAction: () => null, validCcapiUrl: () => true,
     liveCapabilities: () => sandbox.state.capabilities?.liveView || {},
-    rtpAudio: {readPcmResponse: () => {throw new Error("Audio fixture must stay pending");}},
+    mediaBatch: require("../open_eos_bridge/static/media-batch.js"),
+    rtpAudio: require("../open_eos_bridge/static/rtp-audio.js"),
     renderLiveState: () => sandbox.renderRtpAudio(),
     fetch: async (url, options) => {
+      url = url.replace(/^http:\/\/bridge.invalid/, "");
       requests.push({url, method: options.method, signal: options.signal});
       let body;
       if (url === "/v1/session" && options.method === "POST") body = nextSession;
@@ -96,20 +99,21 @@ function harness() {
         body = currentStatus;
       } else if (url.endsWith("/info")) body = {model: "synthetic-camera"};
       else if (url.endsWith("/capabilities")) body = caps;
-      else if (url.endsWith("/liveview/start")) body = {source: liveSource, requestedFps: 15};
+      else if (url.endsWith("/liveview/start")) body = {active: true, source: liveSource, requestedFps: 15};
       else if (url.includes("/liveview/audio?")) {
         return new Promise((_, reject) => {
           const abort = () => {const error = new Error("synthetic abort"); error.name = "AbortError"; reject(error);};
           if (options.signal?.aborted) abort();
           else options.signal?.addEventListener("abort", abort, {once: true});
         });
-      } else if (options.method === "DELETE" || url.endsWith("/liveview/stop")) body = null;
+      } else if (url.endsWith("/liveview/stop")) body = {active: false, liveViewStopUnconfirmed: false};
+      else if (options.method === "DELETE") body = null;
       else throw new Error(`Unexpected mocked request: ${url}`);
       return response(body);
     },
   };
-  for (const name of ["clearConnectionError", "renderSession", "startEventLoop", "refreshLatestMedia",
-    "writeCameraPreference", "showConnectionError", "renderHealth", "cancelMediaDownload",
+  for (const name of ["renderHeldAutofocus", "cameraFocusInfoEligible", "cancelCameraFocusInfo", "releaseHeldAutofocusForLifecycle", "clearConnectionError", "renderSession", "startEventLoop", "refreshLatestMedia",
+    "writeCameraPreference", "showConnectionError", "renderHealth", "renderConnectionGuidance", "cancelMediaDownload",
     "cancelMediaUpload", "clearScheduledMediaTransferRender", "clearMediaThumbnails", "cancelLatestMediaRefresh",
     "closeMediaPreview", "closeMediaDetails", "releaseObjectUrl", "clearBulbTimer", "stopLocalVideo",
     "syncLiveMagnificationFromCapabilities", "pollLiveView", "renderFps", "clearMonitoringLayers",
@@ -209,7 +213,7 @@ test("same-owner RTP status succeeds and ordinary unmute/mute retains normal con
   assert.equal(h.state.status, fresh);
   const start = h.toggleRtpAudio();
   assert.equal(h.state.rtpAudioBusy, true);
-  assert.equal(h.ui.rtpAudioButton.disabled, true);
+  assert.equal(h.ui.rtpAudioButton.disabled, false, "pending start remains cancellable");
   assertNormalLiveControls(h);
   await nextTask();
   h.contexts[0].resumeGate.resolve();
@@ -304,6 +308,7 @@ test("same-owner resume rejection closes its context and permits a fresh unmute"
   assert.equal(h.contexts[0].closeCount, 1);
   assert.equal(audioRequests(h).length, 0);
   assert.deepEqual(h.toasts.at(-1), { message: "Synthetic current resume failure", error: true });
+  await flush(); // A new output context waits for the previous close promise to fulfill.
   const retry = h.toggleRtpAudio();
   h.contexts[1].resumeGate.resolve();
   await retry;
@@ -351,6 +356,7 @@ for (const newState of ["pending", "playing", "failed"]) {
       if (newState === "playing") h.contexts[1].resumeGate.resolve();
       if (newState === "failed") h.contexts[1].resumeGate.reject(new Error("Synthetic new resume failure"));
       if (newState !== "pending") await newStart;
+      await flush(); // Settle the current context's own resource-release confirmation before testing an old resume.
       const before = {
         toasts: h.toasts.slice(), renders: h.audioRenders.length,
         context: h.state.rtpAudioContext, error: h.state.rtpAudioError,
@@ -394,12 +400,14 @@ test("Stop closes a still-pending context without waiting for resume to settle",
   await pending;
 });
 
-test("repeated unmute while resume is pending opens only one context", async t => {
+test("second speaker gesture cancels a pending resume without opening another context", async t => {
   const h = await liveHarness(t);
   const pending = h.toggleRtpAudio();
   const duplicate = h.toggleRtpAudio();
   assert.equal(h.contexts.length, 1);
   h.contexts[0].resumeGate.resolve();
   await Promise.all([pending, duplicate]);
-  assert.equal(audioRequests(h).length, 1);
+  assert.equal(audioRequests(h).length, 0);
+  assert.equal(h.contexts[0].closeCount, 1);
+  assert.equal(h.state.rtpAudioEnabled, false);
 });

@@ -1,0 +1,232 @@
+{
+  "schemaVersion": 1,
+  "scope": "Synthetic authoritative rectangles supplied independently after each magnification; rectangles are not inferred from zoom ratios or physical-camera evidence. Each transition must retire the preceding geometry and wait for a fresh existing detailed-frame response.",
+  "sequence": [
+    "initial-1x",
+    "after-5x",
+    "after-10x",
+    "return-1x"
+  ],
+  "coordinateActions": [
+    "Touch AF",
+    "Click WB"
+  ],
+  "vectors": [
+    {
+      "id": "initial-1x-origin",
+      "observedMagnification": 1,
+      "reportedGeometry": {
+        "x": 100,
+        "y": 200,
+        "width": 1000,
+        "height": 800
+      },
+      "normalized": {
+        "x": 0,
+        "y": 0
+      },
+      "expectedCameraPoint": {
+        "x": 100,
+        "y": 200
+      }
+    },
+    {
+      "id": "initial-1x-interior",
+      "observedMagnification": 1,
+      "reportedGeometry": {
+        "x": 100,
+        "y": 200,
+        "width": 1000,
+        "height": 800
+      },
+      "normalized": {
+        "x": 0.25,
+        "y": 0.75
+      },
+      "expectedCameraPoint": {
+        "x": 350,
+        "y": 800
+      }
+    },
+    {
+      "id": "initial-1x-edge",
+      "observedMagnification": 1,
+      "reportedGeometry": {
+        "x": 100,
+        "y": 200,
+        "width": 1000,
+        "height": 800
+      },
+      "normalized": {
+        "x": 1,
+        "y": 1
+      },
+      "expectedCameraPoint": {
+        "x": 1099,
+        "y": 999
+      }
+    },
+    {
+      "id": "after-5x-origin",
+      "observedMagnification": 5,
+      "reportedGeometry": {
+        "x": 220,
+        "y": 350,
+        "width": 200,
+        "height": 160
+      },
+      "normalized": {
+        "x": 0,
+        "y": 0
+      },
+      "expectedCameraPoint": {
+        "x": 220,
+        "y": 350
+      }
+    },
+    {
+      "id": "after-5x-interior",
+      "observedMagnification": 5,
+      "reportedGeometry": {
+        "x": 220,
+        "y": 350,
+        "width": 200,
+        "height": 160
+      },
+      "normalized": {
+        "x": 0.25,
+        "y": 0.75
+      },
+      "expectedCameraPoint": {
+        "x": 270,
+        "y": 470
+      }
+    },
+    {
+      "id": "after-5x-edge",
+      "observedMagnification": 5,
+      "reportedGeometry": {
+        "x": 220,
+        "y": 350,
+        "width": 200,
+        "height": 160
+      },
+      "normalized": {
+        "x": 1,
+        "y": 1
+      },
+      "expectedCameraPoint": {
+        "x": 419,
+        "y": 509
+      }
+    },
+    {
+      "id": "after-10x-origin",
+      "observedMagnification": 10,
+      "reportedGeometry": {
+        "x": 270,
+        "y": 390,
+        "width": 100,
+        "height": 80
+      },
+      "normalized": {
+        "x": 0,
+        "y": 0
+      },
+      "expectedCameraPoint": {
+        "x": 270,
+        "y": 390
+      }
+    },
+    {
+      "id": "after-10x-interior",
+      "observedMagnification": 10,
+      "reportedGeometry": {
+        "x": 270,
+        "y": 390,
+        "width": 100,
+        "height": 80
+      },
+      "normalized": {
+        "x": 0.25,
+        "y": 0.75
+      },
+      "expectedCameraPoint": {
+        "x": 295,
+        "y": 450
+      }
+    },
+    {
+      "id": "after-10x-edge",
+      "observedMagnification": 10,
+      "reportedGeometry": {
+        "x": 270,
+        "y": 390,
+        "width": 100,
+        "height": 80
+      },
+      "normalized": {
+        "x": 1,
+        "y": 1
+      },
+      "expectedCameraPoint": {
+        "x": 369,
+        "y": 469
+      }
+    },
+    {
+      "id": "return-1x-origin",
+      "observedMagnification": 1,
+      "reportedGeometry": {
+        "x": 90,
+        "y": 180,
+        "width": 1000,
+        "height": 800
+      },
+      "normalized": {
+        "x": 0,
+        "y": 0
+      },
+      "expectedCameraPoint": {
+        "x": 90,
+        "y": 180
+      }
+    },
+    {
+      "id": "return-1x-interior",
+      "observedMagnification": 1,
+      "reportedGeometry": {
+        "x": 90,
+        "y": 180,
+        "width": 1000,
+        "height": 800
+      },
+      "normalized": {
+        "x": 0.25,
+        "y": 0.75
+      },
+      "expectedCameraPoint": {
+        "x": 340,
+        "y": 780
+      }
+    },
+    {
+      "id": "return-1x-edge",
+      "observedMagnification": 1,
+      "reportedGeometry": {
+        "x": 90,
+        "y": 180,
+        "width": 1000,
+        "height": 800
+      },
+      "normalized": {
+        "x": 1,
+        "y": 1
+      },
+      "expectedCameraPoint": {
+        "x": 1089,
+        "y": 979
+      }
+    }
+  ]
+}

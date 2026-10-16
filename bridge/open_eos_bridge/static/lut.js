@@ -10,6 +10,37 @@
   const MAX_CUBE_BYTES = 16 * 1024 * 1024;
   const MAX_NAME_LENGTH = 120;
 
+  async function readCubeLutBytes(file) {
+    if (!Number.isSafeInteger(file?.size) || file.size < 0) {
+      throw new TypeError("3D LUT file size is unavailable.");
+    }
+    if (file.size > MAX_CUBE_BYTES) throw new RangeError("3D LUT exceeds the 16 MiB limit.");
+    // Bound the read itself, including a sentinel byte if the reported size is
+    // stale. Blob.arrayBuffer cannot be aborted; callers fence its completion.
+    const bytes = await file.slice(0, MAX_CUBE_BYTES + 1).arrayBuffer();
+    if (bytes.byteLength > MAX_CUBE_BYTES) throw new RangeError("3D LUT exceeds the 16 MiB limit.");
+    if (bytes.byteLength !== file.size) throw new Error("3D LUT file could not be read completely.");
+    return bytes;
+  }
+
+  function decodeCubeLutText(bytes) {
+    if (bytes.byteLength > MAX_CUBE_BYTES) throw new RangeError("3D LUT exceeds the 16 MiB limit.");
+    let text;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch (_) {
+      throw new TypeError("3D LUT must be valid UTF-8 text.");
+    }
+    // TextDecoder removes one leading UTF-8 BOM. Do not let the text parser's
+    // whitespace trimming silently accept a second BOM at the file start.
+    if (text.startsWith("\uFEFF")) throw new Error("3D LUT contains repeated UTF-8 byte order marks.");
+    return text;
+  }
+
+  function parseCubeLutBytes(bytes, fallbackName) {
+    return parseCubeLut(decodeCubeLutText(bytes), fallbackName);
+  }
+
   function parseCubeLut(text, fallbackName = "Imported LUT.cube") {
     if (typeof text !== "string") throw new TypeError("3D LUT must be UTF-8 text.");
     if (new TextEncoder().encode(text).byteLength > MAX_CUBE_BYTES) {
@@ -146,6 +177,7 @@
 
     return {
       render(source, lut) {
+        if (gl.isContextLost()) throw new Error("WebGL2 LUT context is lost.");
         const dimensions = sourceDimensions(source);
         if (!dimensions.width || !dimensions.height) throw new Error("Live View frame dimensions are unavailable.");
         if (activeLut !== lut) uploadLut(lut);
@@ -173,6 +205,9 @@
         gl.uniform3fv(domainMinUniform, lut.domainMin);
         gl.uniform3fv(domainMaxUniform, lut.domainMax);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
+        if (gl.isContextLost() || gl.getError() !== gl.NO_ERROR) {
+          throw new Error("WebGL2 LUT frame submission failed.");
+        }
       },
       dispose() {
         gl.deleteTexture(sourceTexture);
@@ -282,5 +317,6 @@
     }
   `;
 
-  return { parseCubeLut, sampleCubeLut, createWebGLRenderer, MAX_CUBE_BYTES };
+  return { readCubeLutBytes, decodeCubeLutText, parseCubeLutBytes, parseCubeLut,
+    sampleCubeLut, createWebGLRenderer, MAX_CUBE_BYTES };
 });

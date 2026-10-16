@@ -10,6 +10,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const mediaBatch = require("../open_eos_bridge/static/media-batch.js");
 const mediaLibrary = require("../open_eos_bridge/static/media-library.js");
 const source = fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static/app.js"), "utf8");
 
@@ -62,7 +63,7 @@ function context(item = media(), { metadata } = {}) {
     mediaThumbnailUrls: new Map(), mediaThumbnailLoads: new Set(),
     mediaDetailsItem: item, mediaDetailsBusy: false, mediaDetailsGeneration: 0, mediaPreviewItem: item,
     latestMediaItem: null, mediaDownloadPreparing: false, mediaDownloadOwner: null,
-    mediaDownload: null, mediaUpload: null,
+    mediaDownload: null, mediaUpload: null, mediaSelection: mediaBatch.createSelection(),
   };
   const effects = [];
   const requests = [];
@@ -103,7 +104,7 @@ function context(item = media(), { metadata } = {}) {
   // Session widgets do not participate in the storage-size formatting contract.
   for (const name of ["renderCaptureMode", "renderExposure", "renderAdvancedSettings",
     "renderPreviewInput", "renderLiveSource", "renderFps", "renderTapAction",
-    "renderTemperatureStatus", "syncBulbTimer", "renderAvailability", "renderDiagnostics"]) {
+    "renderTemperatureStatus", "syncBulbTimer", "renderAvailability", "renderDiagnostics", "renderRecordingHistory"]) {
     sandbox[name] = () => {};
   }
   const names = [
@@ -112,8 +113,8 @@ function context(item = media(), { metadata } = {}) {
     "formatMediaTime", "renderMediaThumbnail", "mediaMetadataSupported", "mediaManagementSupported",
     "mediaTransferActive", "cameraInteractionBusy", "replaceMediaItem",
     "openMediaDetails", "clearMediaDetails",
-    "renderMedia", "renderMediaSummary", "renderMediaDateFilter", "mediaDisplayTimeZone", "renderMediaDetails", "renderMediaPreviewNavigation",
-    "renderMediaTransfer", "renderSession",
+    "renderMedia", "renderMediaSummary", "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel", "mediaDisplayTimeZone", "renderMediaDetails", "renderMediaPreviewNavigation",
+    "renderMediaTransfer", "renderMediaSelection", "renderMediaBatch", "renderSession",
   ];
   // The unchanged baseline must fail on its rendered claims, not a missing import.
   // Once present, load the production helper without supplying a test substitute.

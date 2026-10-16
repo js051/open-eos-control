@@ -12,7 +12,9 @@ Dual-card cameras expose a Photo-only recording-card selector only when gphoto2 
 
 The built-in browser control surface includes decoded-frame monitoring assists for CCAPI JPEG, decoded RTP, libgphoto2 USB preview, and browser-owned local UVC/HDMI input: memory-only imported 3D `.cube` LUT preview through WebGL2, a mutually exclusive bounded luminance histogram or 64x64 luma waveform, configurable zebra, false color, focus peaking, frame guides, action/title safe areas, and anamorphic desqueeze. LUT import accepts only the bounded 2-64 3D subset and rejects 1D/shaper or oversized files; filenames, titles and table data stay out of diagnostics. Local video replaces only the viewfinder while the active Bridge session keeps camera control; device identifiers remain in page memory and all media tracks are stopped during source, device, session, or page teardown. Coordinate Canon controls stay unavailable because local video does not carry Canon Live View geometry. These overlays are local display tools and never imply that the camera accepted a control command.
 
-When Canon advertises an RFC 6416 `MP4A-LATM/48000` stream beside RTP video, the PC Bridge binds its separate UDP port, reassembles complete audioMuxElements, decodes in-band LATM through PyAV/FFmpeg, and serves bounded 48 kHz stereo s16le PCM to the authenticated browser session. Camera audio is muted by default to satisfy browser autoplay policy and starts only from the visible speaker control. Audio bind or decode failure is diagnostic and does not stop usable H.264 video; source changes, Live View stop, disconnect and page teardown cancel polling and scheduled playback.
+When Canon advertises an RFC 6416 `MP4A-LATM/48000` stream beside RTP video, the PC Bridge binds its separate UDP port, reassembles complete audioMuxElements, decodes in-band LATM through PyAV/FFmpeg, and serves bounded 48 kHz stereo s16le PCM to the authenticated browser session. Camera audio is muted by default to satisfy browser autoplay policy and starts only from the visible speaker control. Audio bind or decode failure is diagnostic and does not stop usable H.264 video. Fresh PCM expires after one second, independently of receiver-thread/input activity. The speaker control reports the separate requested, decoded, scheduled, and supported output-clock progress stages; digital silence still counts as PCM. WebAudio output timestamps are software/device-clock evidence, never proof of physical audibility. Browsers without that API retain usable audio with output progress explicitly unverified.
+
+Mute, background/pagehide, source change, Live View stop, disconnect, a suspended context, or a long event-loop pause clear pending playback and require an explicit new speaker gesture. A five-second deadline covers pending context resume, missing PCM, hanging GET/body reads, and stalled supported output-clock progress; it never stops video. Pending source nodes have a one-second PCM expiry and the schedule remains bounded to half a second. Cleanup runs at the next available JavaScript opportunity; it is not a hard-real-time or downstream-speaker guarantee. A replacement AudioContext is blocked until the old close promise fulfills and its state is closed. If cleanup fails or remains pending, wait or reload the page; no new audio context competes with an unconfirmed old owner.
 
 Camera media downloads are consumed as cancellable Fetch streams with visible byte progress. Files below 64 MiB use a cross-browser Blob download after the streamed transfer completes. Unknown-size and larger files prefer the browser File System Access writer, whose temporary file is committed only after the camera stream completes; unsupported browsers retain the Blob fallback. Disconnecting, closing the page, or pressing cancel aborts the request and does not report a successful download.
 
@@ -67,3 +69,96 @@ open-eos-bridge
 The service listens on `127.0.0.1:18181` by default. LAN binding requires `OPEN_EOS_BRIDGE_TOKEN`; the standalone executable intentionally accepts the token only through the environment and never through a process-list-visible command argument. See the main [Open EOS Control repository](https://github.com/js051/open-eos-control) for platform clients, source code, documentation, and issue tracking.
 
 This is an unofficial Canon EOS project and is licensed under Apache-2.0.
+
+## Automatic original JPEG validation
+
+Foreground automatic JPEG import requests the existing exact original once with
+`attempt=single&validation=jpeg-v1`. The opt-in Bridge path rejects unsupported or
+ambiguous HTTP MIME, caps the encoded transfer at 64 MiB, verifies its closed
+private spool against the streaming SHA-256, parses the complete JPEG, then forces
+strict native PyAV/FFmpeg decode in a separate process. Only success emits
+`X-Open-EOS-Original-Validation: jpeg-v1`. The browser requires this proof before
+writing or closing its pending output. Default/manual JPEG and RAW downloads, and
+the older `attempt=single` route, retain their format behavior.
+
+The [shared JPEG contract](../contracts/jpeg-original/v1/README.md) defines the
+conservative envelope: 64,000,000 source pixels, 16,384 per source axis, bounded
+markers/scans, and supported 8-bit sequential/progressive coding. Decode uses one
+thread and one-eighth output resolution, capped at 2,048 per decoded axis. One
+validation process can run at a time; its 15-second deadline includes startup,
+and timeout triggers termination. Stop/disconnect prevents browser publication;
+it does not instantly interrupt an opaque native call. This is bounded format
+and decoder evidence, not proof that every corruption is detected or that the
+camera supplied the intended photograph. Original bytes are never re-encoded.
+
+Any validation, transfer or save failure stops the watcher without a redownload
+or shutter resend. Only owned pending outputs are aborted/removed; already saved
+files and existing transfer-history entries are retained. History remains subject
+to the existing unavailable-storage warning. Review the failed result and any
+partial file, then explicitly enable again to select a destination and establish
+two fresh baselines. Existing files, including the failed ID, are skipped; the
+new run watches newly observed photos only.
+
+## RTP decoded-output and monitoring evidence
+
+The RTP receiver advances frame progress only after a nonempty decoder output
+returns. Packet arrival, NAL assembly, and an in-progress decoder call do not
+refresh readiness. An undelivered buffer expires after five seconds; a closed
+receiver cannot return cached readiness or publish a late decode. The existing
+read deadline and exact-source Stop recovery remain in place. This deadline does
+not claim to interrupt an opaque native decoder call or prove camera capture time.
+
+The browser decodes each JPEG privately before installing that same image object
+in the viewfinder. LUT submission and pixel analysis carry the same frame and LUT
+revision, with five-second evidence expiry; no new image, unbounded request, or
+pending decode can keep old monitoring overlays or FPS fresh. A LUT/context error
+hides its overlays and remains diagnostic until a later valid render recovers.
+The original frame can remain visible while awaiting the next bounded request.
+
+Diagnostics distinguish decoded output and successful WebGL surface submission.
+Neither an installed image nor a canvas draw is a compositor/physical-presentation
+confirmation. The shared [monitor gate](../contracts/rtp-presentation/v1/monitor-vectors.json)
+and controlled-decoder/JavaScript tests exercise lifecycle, same-frame identity,
+expiry, errors, and recovery. Browser/GPU and physical-camera acceptance are
+separate evidence and are not established by these tests.
+
+Logical Stop also does not prove that a receiver worker has physically drained.
+A worker alone closes its decoder after the active decode returns. Preparation
+reserves the existing local UDP endpoint and, for CCAPI, the existing normalized
+camera identity in memory. A replacement for that camera or endpoint is rejected
+until all of its started video/audio workers finish cleanup, including after a
+reconnect or SDP port change. Different cameras on distinct endpoints remain
+independent. Failed cleanup retains the reservation; a codec that never returns
+or a cleanup failure may require restarting the Bridge. The reservation neither
+sends/persists camera identifiers nor acknowledges a camera Stop.
+
+## Cancel a pending connection
+
+The PC connection page offers **Cancel connection** while session creation or
+initial metadata reads are pending. Cancel immediately retires that attempt's UI
+publication rights and allows editing the connection method, camera, address and
+authentication fields. It does not prove that a Bridge or camera request stopped.
+The admitted creation request remains observed to recover its exact session ID;
+all admitted metadata reads settle before the same captured Bridge endpoint,
+token and session are used for one cleanup DELETE.
+
+Scan and Connect remain unavailable while the shared backend is being retired.
+No new attempt is queued: after cleanup, choose **Retry connection** explicitly.
+Late success, error or completion cannot restore the canceled session, clear new
+settings, replace a newer error, or unlock another owner. Only the Bridge's exact
+HTTP 204 DELETE response acknowledges local session retirement; this is separate
+from physical-camera validation and does not clear existing shutter warnings.
+Late creation or cleanup replies identifying unconfirmed shutter/autofocus,
+Live View, or recording retain separate fixed, localized previous-camera warnings.
+Recording uncertainty explicitly says recording may still be active. These
+warnings direct the user to the old camera and never grant Stop control to a new
+session or display raw provider messages.
+
+An explicit session-creation rejection permits correcting settings and retrying.
+If the creation result is lost or malformed, or DELETE fails/has an unexpected
+response, cleanup remains **unconfirmed** and camera access stays blocked. Check
+the camera, restart this Bridge and reload the page before retrying. Reloading
+alone does not close an unknown session. Page dismissal revokes publication while
+JavaScript remains alive, but a destroyed browser page cannot guarantee observing
+a late POST or delivering cleanup. The host tests cover controlled asynchronous
+ordering; browser lifetime and physical-camera acceptance remain separate.

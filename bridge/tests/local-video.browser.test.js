@@ -234,6 +234,7 @@ async function run() {
           testState.audioContexts += 1;
           testState.audioContextOptions = options;
           this.destination = {};
+          this.state = "suspended";
         }
 
         get currentTime() {
@@ -241,7 +242,7 @@ async function run() {
         }
 
         resume() {
-          if (!testState.delayNextAudioResume) return Promise.resolve();
+          if (!testState.delayNextAudioResume) { this.state = "running"; return Promise.resolve(); }
           testState.delayNextAudioResume = false;
           testState.pendingAudioResume = true;
           testState.audioResumeConsumed = false;
@@ -249,7 +250,7 @@ async function run() {
             testState.releasePendingAudioResume = (shouldReject) => {
               testState.pendingAudioResume = false;
               if (shouldReject) reject(new Error("Synthetic old resume rejection"));
-              else resolve();
+              else { if (this.state !== "closed") this.state = "running"; resolve(); }
               // Observe a task after the production resume continuation has run.
               const channel = new MessageChannel();
               channel.port1.onmessage = () => {
@@ -263,6 +264,7 @@ async function run() {
 
         close() {
           testState.audioCloses += 1;
+          this.state = "closed";
           return Promise.resolve();
         }
 
@@ -274,6 +276,7 @@ async function run() {
         createBufferSource() {
           const source = new EventTarget();
           source.connect = () => {};
+          source.disconnect = () => {};
           source.start = () => {
             testState.audioStarts += 1;
             setTimeout(() => source.dispatchEvent(new Event("ended")), 10);
@@ -304,6 +307,7 @@ async function run() {
     await page.click('.exposure-control[data-setting-key="iso"]');
     await page.waitForSelector("#setting-dialog[open]");
     await page.getByRole("button", { name: "800", exact: true }).click();
+    await page.locator("#setting-dialog .button.primary").click();
     await waitForBridgeState(
       origin,
       (backend) => backend.values["/main/imgsettings/iso"] === "800" &&
@@ -758,6 +762,7 @@ async function run() {
     );
 
     await page.click("#video-mode-button");
+    if (await page.locator("#mode-apply-button").isVisible()) await page.click("#mode-apply-button");
     await page.click("#shutter-button");
     await waitForBridgeState(
       origin,
@@ -772,8 +777,10 @@ async function run() {
       "video recording stop to release the camera recorder",
     );
     await page.click("#photo-mode-button");
+    if (await page.locator("#mode-apply-button").isVisible()) await page.click("#mode-apply-button");
 
     await page.selectOption('#advanced-settings select[data-setting-key="shootingmode"]', "Bulb");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="shootingmode"]');
     await waitForBridgeState(
       origin,
       (candidate) => candidate.values["/main/capturesettings/autoexposuremode"] === "Bulb",
@@ -813,6 +820,7 @@ async function run() {
     );
     assert.ok(bulbPress >= bulbStart && bulbRelease > bulbPress);
     await page.selectOption('#advanced-settings select[data-setting-key="shootingmode"]', "Manual");
+    await page.click('#advanced-settings button[data-camera-command="setting"][data-setting-key="shootingmode"]');
     await waitForBridgeState(
       origin,
       (candidate) => candidate.values["/main/capturesettings/autoexposuremode"] === "Manual",
@@ -879,6 +887,7 @@ async function run() {
         status: 200,
         contentType: "audio/pcm;rate=48000;channels=2;format=s16le",
         headers: {
+          "X-Open-EOS-Audio-Age-Ms": "0",
           "X-Open-EOS-Audio-Generation": String(generation),
           "X-Open-EOS-Audio-Sample-Rate": "48000",
           "X-Open-EOS-Audio-Channels": "2",
