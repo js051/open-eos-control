@@ -62,6 +62,7 @@ function fixture(t, { dated = false } = {}) {
       hidden: false, disabled: false, open: false, textContent: "", value: "", dataset: {},
       style: { removeProperty() {} }, classList: { remove() {} },
       showModal() { this.open = true; }, close() { this.open = false; },
+      replaceChildren(...children) { this.children = children; },
       setAttribute(name, value) { this[name] = value; },
       removeAttribute(name) { delete this[name]; }, pause() {}, load() {},
     };

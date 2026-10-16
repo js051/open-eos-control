@@ -23,6 +23,7 @@ function fixture() {
     mediaPreviewItem: null };
   const ui = new Proxy({}, { get(target, key) {
     if (!target[key]) target[key] = { value: "", textContent: "", hidden: false, disabled: false, dataset: {},
+      replaceChildren(...children) { this.children = children; },
       attributes: {}, setAttribute(k, v) { this.attributes[k] = v; },
       removeAttribute(k) { delete this.attributes[k]; }, focus() { this.focused = true; } };
     return target[key];

@@ -24,6 +24,7 @@ function fixture() {
     operatorConfirmedFeatures: new Set(), refreshGeneration: 0 };
   const ui = new Proxy({}, { get(target, key) {
     if (!target[key]) target[key] = { value: "", textContent: "", hidden: false, disabled: false, dataset: {},
+      replaceChildren(...children) { this.children = children; },
       attributes: {}, setAttribute(k, v) { this.attributes[k] = v; } };
     return target[key];
   }});
