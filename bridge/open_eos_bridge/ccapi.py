@@ -14,12 +14,12 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
-from http.client import HTTPException
+from http.client import HTTPConnection, HTTPException, HTTPSConnection
 from pathlib import Path
 from typing import BinaryIO, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, unquote, urlencode, urlsplit, urlunsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+from urllib.request import HTTPHandler, HTTPRedirectHandler, HTTPSHandler, Request, build_opener, urlopen
 
 from .errors import BridgeError, ConnectionFailureReason, unsupported
 from .focus_info import MAX_FOCUS_INFO_BYTES, parse_ccapi_focus_info_packet
@@ -28,6 +28,7 @@ from .liveview_decode import validate_first_jpeg
 from .liveview_lifecycle import evaluate as liveview_policy
 from .maintenance import observation as maintenance_observation
 from .maintenance import require_intent, response_received
+from .media_cancellation import MediaCancellation
 from .media_folders import camera_folder_fields
 from .media_listing import MAX_LIST_SNAPSHOT_ITEMS
 from .media_metadata import MIME_ALIASES, declared_media_mime
@@ -707,6 +708,99 @@ class _NoCcapiRedirect(HTTPRedirectHandler):
         return None
 
 
+class _CcapiDownloadAbort:
+    """Own sockets for one request, including its redirects, never the session.
+
+    shutdown wakes a blocked buffered read without acquiring its buffer lock.
+    Closing the HTTPResponse is left to the worker that owns that read.
+    """
+
+    def __init__(self, cancellation: MediaCancellation) -> None:
+        self.cancellation = cancellation
+        self._lock = threading.Lock()
+        self._sockets: list[socket.socket] = []
+        self._cancelled = False
+        cancellation.register(self.abort)
+
+    def watch(self, connection_socket: socket.socket) -> None:
+        with self._lock:
+            # Redirect handlers close earlier response bodies before opening the
+            # next hop. Retire those sockets rather than retaining stale owners.
+            self._sockets = [active for active in self._sockets if active.fileno() >= 0]
+            self._sockets.append(connection_socket)
+            cancelled = self._cancelled
+        if cancelled:
+            self._shutdown(connection_socket)
+        self.cancellation.check()
+
+    @staticmethod
+    def _shutdown(connection_socket: socket.socket) -> None:
+        with suppress(OSError):
+            connection_socket.shutdown(socket.SHUT_RDWR)
+
+    def abort(self) -> None:
+        with self._lock:
+            self._cancelled = True
+            sockets = tuple(self._sockets)
+        for connection_socket in sockets:
+            self._shutdown(connection_socket)
+
+    def release(self) -> None:
+        self.cancellation.unregister(self.abort)
+        with self._lock:
+            self._sockets.clear()
+
+    def handlers(self) -> tuple[HTTPHandler, HTTPSHandler]:
+        owner = self
+
+        class DownloadHTTPConnection(HTTPConnection):
+            def connect(self) -> None:
+                super().connect()
+                assert self.sock is not None
+                owner.watch(self.sock)
+
+        class DownloadHTTPSConnection(HTTPSConnection):
+            def connect(self) -> None:
+                super().connect()
+                assert self.sock is not None
+                owner.watch(self.sock)
+
+        class DownloadHTTPHandler(HTTPHandler):
+            def http_open(self, req):
+                return self.do_open(DownloadHTTPConnection, req)
+
+        class DownloadHTTPSHandler(HTTPSHandler):
+            def https_open(self, req):
+                return self.do_open(DownloadHTTPSConnection, req, context=self._context)
+
+        return DownloadHTTPHandler(), DownloadHTTPSHandler()
+
+
+class _CcapiDownloadBody:
+    def __init__(self, body: BinaryIO, owner: _CcapiDownloadAbort) -> None:
+        self._body = body
+        self._owner = owner
+
+    def __getattr__(self, name):
+        return getattr(self._body, name)
+
+    def read(self, size: int = -1) -> bytes:
+        self._owner.cancellation.check()
+        try:
+            chunk = self._body.read(size)
+        except Exception:
+            self._owner.cancellation.check()
+            raise
+        self._owner.cancellation.check()
+        return chunk
+
+    def close(self) -> None:
+        try:
+            self._body.close()
+        finally:
+            self._owner.release()
+
+
 class UrllibCcapiTransport:
     def __init__(self, username: str = "", password: str = "") -> None:
         self._authorization: str | None = None
@@ -808,6 +902,31 @@ class UrllibCcapiTransport:
         return self._open(method, url, headers=headers, timeout=timeout, follow_redirects=follow_redirects,
                           strict_control=strict_control)
 
+    def open_cancellable_stream(
+        self,
+        method: str,
+        url: str,
+        *,
+        cancellation: MediaCancellation,
+        headers: Mapping[str, str] | None = None,
+        timeout: float = 60.0,
+        follow_redirects: bool = True,
+    ) -> CcapiStreamResponse:
+        cancellation.check()
+        owner = _CcapiDownloadAbort(cancellation)
+        response = None
+        try:
+            response = self._open(method, url, headers=headers, timeout=timeout,
+                                  follow_redirects=follow_redirects, download_abort=owner)
+            cancellation.check()
+            return CcapiStreamResponse(response.status, response.headers, _CcapiDownloadBody(response.body, owner))
+        except Exception:
+            if response is not None:
+                response.close()
+            owner.release()
+            cancellation.check()
+            raise
+
     def close(self) -> None:
         self._authorization = None
 
@@ -821,6 +940,7 @@ class UrllibCcapiTransport:
         timeout: float,
         follow_redirects: bool = True,
         strict_control: bool = False,
+        download_abort: _CcapiDownloadAbort | None = None,
     ) -> CcapiStreamResponse:
         request_headers = {
             "Accept": "application/json,*/*",
@@ -834,7 +954,12 @@ class UrllibCcapiTransport:
             request_headers.setdefault("Content-Type", "application/json; charset=utf-8")
         request = Request(url, data=body, headers=request_headers, method=method)
         try:
-            if follow_redirects:
+            if download_abort is not None:
+                handlers = list(download_abort.handlers())
+                if not follow_redirects:
+                    handlers.append(_NoCcapiRedirect())
+                response = build_opener(*handlers).open(request, timeout=timeout)
+            elif follow_redirects:
                 response = urlopen(request, timeout=timeout)  # noqa: S310 - user-selected camera origin is intentional.
             else:
                 response = build_opener(_NoCcapiRedirect()).open(request, timeout=timeout)
@@ -3786,11 +3911,16 @@ class CcapiSession:
 
     def download_media(
         self, media_id: str, *, single_attempt: bool = False, jpeg_validation: bool = False,
+        cancellation: MediaCancellation | None = None,
     ) -> tuple[MediaItem, Iterator[bytes]]:
         if jpeg_validation and not single_attempt:
             raise BridgeError("INVALID_ORIGINAL_VALIDATION", "JPEG validation requires a single original GET.",
                               status_code=422)
+        if cancellation is not None:
+            cancellation.check()
         with self._lock:
+            if cancellation is not None:
+                cancellation.check()
             if single_attempt:
                 self._require_open()
                 if not self._initialized:
@@ -3811,13 +3941,25 @@ class CcapiSession:
             failures: list[str] = []
             candidates = (path,) if single_attempt else (path, f"{path}?kind=main", f"{path}?type=main")
             for candidate in candidates:
-                response = self.transport.open_stream(
+                if cancellation is not None:
+                    cancellation.check()
+                cancellable_open = getattr(self.transport, "open_cancellable_stream", None)
+                stream_open = (cancellable_open if cancellation is not None and callable(cancellable_open)
+                               else self.transport.open_stream)
+                response = stream_open(
                     "GET",
                     self._url(candidate),
                     headers={"Accept": "application/octet-stream,*/*", "Cache-Control": "no-cache"},
                     timeout=600.0,
+                    **({"cancellation": cancellation} if stream_open is cancellable_open else {}),
                     **({"follow_redirects": False} if single_attempt else {}),
                 )
+                if cancellation is not None:
+                    try:
+                        cancellation.check()
+                    except BridgeError:
+                        response.close()
+                        raise
                 strict_length = None
                 if single_attempt:
                     try:
@@ -3882,8 +4024,17 @@ class CcapiSession:
                     def stream(active: CcapiStreamResponse = response) -> Iterator[bytes]:
                         with self._lock:
                             try:
-                                while chunk := active.body.read(TRANSFER_CHUNK_BYTES):
+                                while True:
+                                    if cancellation is not None:
+                                        cancellation.check()
+                                    chunk = active.body.read(TRANSFER_CHUNK_BYTES)
+                                    if cancellation is not None:
+                                        cancellation.check()
+                                    if not chunk:
+                                        break
                                     yield chunk
+                                if cancellation is not None:
+                                    cancellation.check()
                                 self._observed.add(CameraFeature.MEDIA_DOWNLOAD)
                             finally:
                                 active.close()
