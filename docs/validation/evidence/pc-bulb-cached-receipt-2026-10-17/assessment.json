@@ -1,0 +1,6 @@
+{
+  "result": "PASS",
+  "sourceHead": "4faea09a2697b192bb84133f0531704dab302146",
+  "proof": "A cached released/no status keeps later B unknown AF warning; only explicit legacy recovery clears B",
+  "syntheticTransport": true
+}

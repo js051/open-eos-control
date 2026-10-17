@@ -1,0 +1,11 @@
+{
+  "sourceHead": "f3373bb7fd9a76d9a5a5efcd90349574ec603162",
+  "confirmedFailure": "Apply pending then Escape; matched stream body is released after native close returns, before queued close handling; visible ISO becomes 200/Ready and focus is BODY",
+  "fixtureCorrections": [
+    "Initial fetch-held response did not reproduce publication; ISO remained100",
+    "Overriding json/text did not represent production captureConfiguration streaming reader and produced no useful ordering evidence",
+    "Final actual ReadableStream held body reproduces ISO200; preserve all prior screenshots as fixture development, not accepted failures"
+  ],
+  "syntheticTransport": true,
+  "physicalCamera": false
+}

@@ -1,0 +1,14 @@
+{
+  "sourceHead": "f3373bb7fd9a76d9a5a5efcd90349574ec603162",
+  "result": "PASS bounded PC synthetic journeys",
+  "startCount": 3,
+  "stopCount": 4,
+  "firstOwnerNeverPressed": true,
+  "lateFirstStartCancelled": true,
+  "pendingStartStopAndDisconnectReachable": true,
+  "startTimeoutRetainsStop": true,
+  "failedStopRetainsRetry": true,
+  "explicitRetryThenPendingDisconnectReleased": true,
+  "serverBoundary": "Real Bridge owner ordering separately host tested; this browser fixture simulates it",
+  "remaining": "Cross-caller admission and cached receipt warning fixes still pending at this source; no complete parity/native/physical acceptance"
+}

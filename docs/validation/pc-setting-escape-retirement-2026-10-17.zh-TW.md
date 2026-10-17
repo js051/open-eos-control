@@ -35,3 +35,11 @@
 ## 驗證界線
 
 這些測試證明 production caller 的事件排序保護，不代表瀏覽器的真實鍵盤／焦點時序或實體相機驗證。父任務另行驗證 Firefox pending Apply→Escape→late receipt；本文件建立時該 GUI 對照仍 pending。Windows 原生包、screen reader、AX 與真相機 NOT_RUN。未推送、未執行 CI、未合併或發布。
+
+## 20:20 UTC Firefox增量
+
+[baseline/fixed圖與telemetry](evidence/pc-setting-escape-2026-10-17/fixed/assessment.json)：f3373bb7基準以真正ReadableStream合成body在native close返回後就緒，ISO被改成200/Ready。4faea09a fixed同流程保留ISO100，late receipt只留cancelled歷史，不自動publish。最初fetch-held未命中、json/text替身不符合production streaming reader，均保存而不當成功證據。
+
+**仍有獨立缺口：** pending Apply時ISO按鈕disabled；Escape同步關窗時無可聚焦目標，之後response settlement重繪，焦點仍BODY，Enter不能重開。這不是先前成功Apply焦點路徑，也未因本次receipt修正解決，列為下一段修復。不能宣稱整段pending Escape鍵盤驗收通過。
+
+整合產品1128b4b2完整PC modules3791、Python主608及相鄰77全過；4faea09a僅test格式整理，再驗34案及Ruff通過。未執行native/真機驗收。

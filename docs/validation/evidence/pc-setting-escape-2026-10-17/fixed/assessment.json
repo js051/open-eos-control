@@ -1,0 +1,6 @@
+{
+  "result": "PASS receipt retirement; FAIL pending-dismissal focus restoration",
+  "sourceHead": "4faea09a2697b192bb84133f0531704dab302146",
+  "proof": "ISO stays100 after matched stream late receipt; cancel retained. Focus remains BODY and Enter does not reopen. This remaining keyboard path is not claimed fixed.",
+  "syntheticTransport": true
+}
