@@ -1,0 +1,17 @@
+{
+  "result": "PASS keyboard continuation; returned card region scrolls into viewport",
+  "scope": "Production PC HTML/JS in cloud Firefox, synthetic metadata transport. No camera or native-platform acceptance.",
+  "source": "6fd825c5da550528bdb7b44ffab0cef8d72a6a79",
+  "observations": [
+    "Rating 3 held until native Details close",
+    "Late matching receipt confirms without reopening itself",
+    "Focused current synthetic-photo/manage button after redraw",
+    "Card region appears in viewport after native focus scroll; fixture footer overlays lower edge, so screenshot is not evidence of every card control being unobscured",
+    "Enter reopens Details showing Rating 3"
+  ],
+  "tests": {
+    "node_modules": 3812,
+    "static_ui": 15,
+    "focused": 68
+  }
+}
