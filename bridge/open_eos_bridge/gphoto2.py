@@ -1349,6 +1349,7 @@ class GPhoto2Session:
         self._bulb_exposure_active: bool | None = False
         self._bulb_release_values: tuple[str, str] | None = None
         self._bulb_start_confirmed = False
+        self._short_control_release: tuple[str, str, CameraFeature] | None = None
         self._shutter_release_unconfirmed = False
         self._requested_fps = 1
         self._last_error: str | None = None
@@ -1384,6 +1385,12 @@ class GPhoto2Session:
             if self._closed:
                 return
             release_error = None
+            if self._short_control_release is not None:
+                try:
+                    self._release_short_control_locked()
+                except BridgeError:
+                    release_error = self._shutter_release_error(disconnected=True)
+                    self._last_error = release_error.message
             if self._bulb_release_values is not None:
                 try:
                     self._release_bulb_locked()
@@ -1490,7 +1497,8 @@ class GPhoto2Session:
                     "eventPollingTransport": (
                         "GPHOTO2_WAIT_EVENT" if self._event_polling_supported else None
                     ),
-                    "eventPollingPaused": self._live_view_active or self._bulb_release_values is not None,
+                    "eventPollingPaused": (self._live_view_active or self._bulb_release_values is not None
+                                           or self._short_control_release is not None),
                 },
             )
 
@@ -1663,7 +1671,8 @@ class GPhoto2Session:
                 if self._pending_event_keys:
                     changed_keys = self._pending_event_keys
                     self._pending_event_keys = []
-                elif self._live_view_active or self._bulb_release_values is not None:
+                elif (self._live_view_active or self._bulb_release_values is not None
+                      or self._short_control_release is not None):
                     changed_keys = []
                     paused = True
                 else:
@@ -2094,15 +2103,10 @@ class GPhoto2Session:
             values = self._half_press_values()
             if values is None:
                 raise unsupported(CameraFeature.SHUTTER_HALF_PRESS.value, self.engine_name)
+            self._require_short_control_available()
             config, press_value, release_value = values
-            pressed = False
-            try:
-                self._set_config_value(config, press_value, refresh=False)
-                pressed = True
-                self._sleep(0.35)
-            finally:
-                if pressed:
-                    self._set_config_value(config, release_value, refresh=False)
+            self._run_short_control(config, press_value, config.path, release_value,
+                                    CameraFeature.SHUTTER_HALF_PRESS)
             self._observed.add(CameraFeature.SHUTTER_HALF_PRESS)
             return self.status()
 
@@ -2137,6 +2141,7 @@ class GPhoto2Session:
     def stop_bulb_exposure(self) -> CameraStatus:
         with self._lock:
             self._require_open()
+            self._release_short_control_locked()
             if self._release_bulb_locked():
                 self._observed.add(CameraFeature.BULB_EXPOSURE)
             return self.status()
@@ -2164,7 +2169,60 @@ class GPhoto2Session:
         self._last_error = None
         return confirmed_start
 
+    def _require_short_control_available(self) -> None:
+        if self._bulb_release_values is not None:
+            raise BridgeError("CAMERA_BUSY", "Stop Bulb before starting another shutter or autofocus control.",
+                              status_code=409, engine=self.engine_name)
+
+    def _run_short_control(self, config: GPhotoConfig, press_value: str,
+                           release_path: str, release_value: str, feature: CameraFeature) -> None:
+        # Save the validated exact Stop before the first command may reach the camera.
+        self._short_control_release = (release_path, release_value, feature)
+        self._shutter_release_unconfirmed = True
+        primary: Exception | None = None
+        try:
+            self._set_config_value(config, press_value, refresh=False)
+            self._sleep(0.35)
+        except Exception as error:
+            primary = error
+        try:
+            self._release_short_control_locked()
+        except BridgeError as release_error:
+            if primary is not None:
+                raise release_error from primary
+            raise
+        if primary is not None:
+            raise primary
+
+    def _release_short_control_locked(self) -> None:
+        pending = self._short_control_release
+        if pending is None:
+            return
+        path, value, _ = pending
+        try:
+            self._run(["--set-config-value", f"{path}={value}"], timeout=30.0)
+        except Exception as error:
+            self._shutter_release_unconfirmed = True
+            failure = self._shutter_release_error()
+            self._last_error = failure.message
+            raise failure from error
+        self._short_control_release = None
+        self._shutter_release_unconfirmed = False
+        self._last_error = None
+
     def _shutter_release_error(self, *, disconnected: bool = False, blocked: bool = False) -> BridgeError:
+        if self._short_control_release is not None:
+            return BridgeError(
+                "SHUTTER_RELEASE_UNCONFIRMED",
+                ("The Bridge session was closed, but camera control stop was not confirmed. "
+                 "Check and stop the shutter or autofocus on the camera before reconnecting."
+                 if disconnected else
+                 "The shutter or autofocus may still be active because its stop was not confirmed. "
+                 "Retry stopping the camera control in this session, or check the camera before disconnecting."),
+                status_code=409 if blocked else 502,
+                feature=self._short_control_release[2].value,
+                engine=self.engine_name,
+            )
         return BridgeError(
             "SHUTTER_RELEASE_UNCONFIRMED",
             ("The Bridge session was closed, but shutter release was not confirmed. "
@@ -2190,21 +2248,9 @@ class GPhoto2Session:
                 status = self.half_press_shutter()
                 self._observed.add(CameraFeature.AUTOFOCUS)
                 return status
+            self._require_short_control_available()
             drive, cancel = configs
-            primary_error: BaseException | None = None
-            try:
-                self._set_config_value(drive, "1", refresh=False)
-                self._sleep(0.35)
-            except BaseException as error:
-                primary_error = error
-                raise
-            finally:
-                try:
-                    self._set_config_value(cancel, "1", refresh=False)
-                except BaseException as cancel_error:
-                    if primary_error is None:
-                        raise
-                    primary_error.add_note(f"Canon EOS autofocus cancel also failed: {cancel_error}")
+            self._run_short_control(drive, "1", cancel.path, "1", CameraFeature.AUTOFOCUS)
             self._observed.add(CameraFeature.AUTOFOCUS)
             return self.status()
 
