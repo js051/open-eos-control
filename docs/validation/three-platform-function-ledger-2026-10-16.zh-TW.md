@@ -213,3 +213,7 @@
 ## 2026-10-17 G07 browser 延遲列舉增量
 
 [原列 #123 local preview Firefox 操作](local-preview-firefox-2026-10-17.zh-TW.md)：source `4efb9a33`，合成 canvas stream 已播放、enumerateDevices unresolved 時 Stop 可用；停止後晚回覆不覆寫 stopped。三張截圖與狀態 receipt 已保存。這是 cloud Firefox production UI 的窄旅程，不是實體 UVC／HDMI 或三端完整驗收。
+
+## 2026-10-17 Android G08/G11 USB 清單完成
+
+[原列 #73/#90 USB 媒體列舉](android-usb-listing-completion-2026-10-17.zh-TW.md)：修復 directory handle 吃掉 Recent 的媒體預算，以及部分必要 ObjectInfo 失敗卻將剩餘清單或 host item 宣告成功。基準 byte-exact production declaration 的6案有3個預期失敗；修正後13/13 host JUnit通過，包含取消優先、host預填、全卡、optional rating未知。4 source guards／2 Kotlin PSI語法通過；6完整backend protocol新增測試尚未執行，完整Android compile/native/真USB仍NOT_RUN。已審查窄production差異，不更改D/E能力或宣稱原89列完成。
