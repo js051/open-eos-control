@@ -66,3 +66,23 @@
 ## 交付狀態
 
 本文件記錄 task worktree 中已實作的窄修正和 host source 證據；沒有新增 iOS 建置產物、版本、main 合併、tag 或發布。後續 dev 交付須以獨立 exact-commit readback 為準，原89列與原生 NOT_RUN 不因此變為全通過。
+
+## 同日後續：既有對焦 accessibility 文案
+
+前述恢復訊息提交為 `aef18c9d47f9753faefa9f180607af61c3f40beb`。續查仍找到同一個 bundle mismatch 的獨立 caller：
+
+- `HeldAutofocusButton.updateUIView` 的 accessibility label／active-or-released value／hint 使用 `NSLocalizedString`，且原 representable 只觀察 camera。繁中選擇下，VoiceOver 所需「啟用以開始，再啟用一次以停止」提示仍從系統 bundle 取值。
+- `LiveViewSurfaceContent` 的 magnification accessibility label，以及 `CameraReportedFocusOverlay` 的合焦／未合焦等狀態 accessibility label，亦從系統 bundle 取值。
+
+後續只讓這三個既有 view 觀察同一個 environment `AppLanguageStore`，並把上述既有 label/value/hint 改成其 `string/format`。沒有新增 accessibility 操作或改變焦點／announcement 設計。`BULB %02d:%02d` 在英繁中內容相同，這一行保持原樣，不列為新 bug。
+
+這對回原列 **#128／G13** 與 **#67 held AF-ON 的既有 iOS 對照／G05**；修正的是 caller 文字來源，不是新的 AF 能力或物理合焦證明。magnification 與 camera-reported frame 幾何、freshness、去重、touch-down／cancel／drag-exit／release、coordinator owner／activation 邏輯都不改。對實際前一提交的比較確認 button creation／target wiring／teardown／coordinator／activation 程式碼 byte-identical。
+
+新 `AccessibilityLanguageTests.swift` 有兩項已撰寫原生測試：
+
+1. 在 app-hosted `UIHostingController`／`UIWindowScene` 放入實際 `HeldAutofocusButton`，同一個 language store 依序切 English → 繁中 → English，等待真 representable 更新 label/value/hint，並要求仍為同一個 UIKit button、enabled/selected/held 狀態不變。這使用未連線 state，不送 AF 命令；active value 分支另外由資源測試及 source 接線檢查涵蓋。
+2. 驗證既有 store 取出的 magnification 模板、全部 `CameraFocusStatus.allCases` 與 active label 對應兩種 bundle。這是資源/helper coverage，未 render Live View overlay。
+
+兩項皆 **NOT_RUN**：沒有 Swift compiler／Xcode／iOS runner。Hosted test 需要實際 app scene；尚未證明原生編譯、UIKit 更新、VoiceOver 朗讀或 hold 中的裝置互動。本批沒有將 timeout 或 source assertion 說成實測 UI 結果。
+
+後續本地檢查：4/4 新 source/resource guards、**147/147** 完整 source guards、4/4 iOS source-path checks 通過；對真正 `git show aef18c9d` 的兩個 accessibility caller guards 均拒絕，修正版通過（2/2 static negative controls）；`git diff --check` 通過。前段 143/143 是前一提交的結果，不混稱原生測試。
