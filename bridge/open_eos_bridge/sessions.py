@@ -146,7 +146,9 @@ class SessionManager:
         for session in sessions:
             try:
                 session.close()
-            except BridgeError as error:
+            except Exception as error:
+                # Provider and subprocess cleanup can raise ordinary OS errors.
+                # Drain every session, then preserve the first reported failure.
                 failure = failure or error
         if failure is not None:
             raise failure
