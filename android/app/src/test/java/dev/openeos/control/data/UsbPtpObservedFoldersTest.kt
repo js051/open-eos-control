@@ -22,9 +22,100 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
+import java.io.OutputStream
 
 /** Real backend and PtpSession over synthetic USB containers; no physical-camera claim. */
 class UsbPtpObservedFoldersTest {
+    @Test
+    fun requiredObjectInfoFailureRetainsProgressButCannotCompleteASubset() = runTest {
+        val firstPage = (100L..149L).map { media(it) }
+        val unread = media(150)
+        val later = media(151)
+        val objects = firstPage + unread + later
+        val wire = FolderWire(objects, objectInfoErrors = mapOf(unread.handle to PtpResponseCode.GENERAL_ERROR))
+        val backend = backend(wire)
+        backend.initialize()
+        val progress = mutableListOf<List<CameraMediaItem>>()
+        val failure = runCatching { backend.listMedia(onProgress = progress::add) }.exceptionOrNull()
+        assertTrue(failure is PtpResponseException)
+        assertEquals(listOf(50), progress.map { it.size })
+        assertTrue(CameraFeature.MEDIA_BROWSER !in backend.observedFeatures())
+        backend.close()
+        wire.assertCommands(listCommands(objects))
+    }
+
+    @Test
+    fun vanishedHandleRequiresExplicitRetryAndDoesNotInventAtomicInventory() = runTest {
+        val first = media(42)
+        val vanished = media(43)
+        val errors = mutableMapOf(vanished.handle to PtpResponseCode.INVALID_OBJECT_HANDLE)
+        val wire = FolderWire(listOf(first, vanished),
+            listings = listOf(listOf(first.handle, vanished.handle), listOf(first.handle)), objectInfoErrors = errors)
+        val backend = backend(wire)
+        backend.initialize()
+        val failure = runCatching { backend.listMedia() }.exceptionOrNull()
+        assertTrue(failure is PtpResponseException)
+        assertEquals(PtpResponseCode.INVALID_OBJECT_HANDLE, (failure as PtpResponseException).responseCode)
+        errors.clear()
+        assertEquals(first.filename, backend.listMedia().single().name)
+        backend.close()
+        wire.assertCommands(listCommands(listOf(first, vanished)) + listCommands(listOf(first)))
+    }
+
+    @Test
+    fun savedHostItemDoesNotHideARequiredRemoteObjectReadFailure() = runTest {
+        val unread = media(42)
+        val wire = FolderWire(listOf(unread), objectInfoErrors = mapOf(unread.handle to PtpResponseCode.GENERAL_ERROR))
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-folders"),
+            PtpTransportFactory { wire }, ListingOnlyHostStore(listOf(CameraMediaItem("usb-host:saved", "SAVED.JPG", "image"))))
+        backend.initialize()
+        assertTrue(runCatching { backend.listMedia() }.exceptionOrNull() is PtpResponseException)
+        backend.close()
+        wire.assertCommands(listCommands(listOf(unread)))
+    }
+
+    @Test
+    fun recentLookaheadCountsMediaRatherThanDirectoryHandles() = runTest {
+        val directory = folder(10, "DCIM")
+        val files = (100L..161L).map { media(it, parent = directory.handle) }
+        val wire = FolderWire(listOf(directory) + files)
+        val backend = backend(wire)
+        backend.initialize()
+        val listed = backend.listMedia(maximumItems = 61)
+        assertEquals(61, listed.size)
+        assertEquals(files.take(61).map { it.filename }, listed.map { it.name })
+        backend.close()
+        wire.assertCommands(listCommands(listOf(directory) + files.take(61)))
+    }
+
+    @Test
+    fun hostPrefillLeavesOnlyTheRemainingMediaBudgetAndCanFillItEntirely() = runTest {
+        val directory = folder(10, "DCIM")
+        val files = (100L..103L).map { media(it, parent = directory.handle) }
+        val wire = FolderWire(listOf(directory) + files,
+            listings = List(2) { listOf(directory.handle) + files.map { it.handle } })
+        val saved = CameraMediaItem("usb-host:saved", "SAVED.JPG", "image")
+        val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-folders"),
+            PtpTransportFactory { wire }, ListingOnlyHostStore(listOf(saved)))
+        backend.initialize()
+        assertEquals(listOf(saved.name) + files.take(2).map { it.filename }, backend.listMedia(maximumItems = 3).map { it.name })
+        assertEquals(listOf(saved), backend.listMedia(maximumItems = 1))
+        backend.close()
+        wire.assertCommands(listCommands(listOf(directory) + files.take(2)) + listCommands(emptyList()))
+    }
+
+    @Test
+    fun fullCardReadHasNoRecentBudget() = runTest {
+        val directory = folder(10, "DCIM")
+        val files = (100L..169L).map { media(it, parent = directory.handle) }
+        val wire = FolderWire(listOf(directory) + files)
+        val backend = backend(wire)
+        backend.initialize()
+        assertEquals(70, backend.listMedia().size)
+        backend.close()
+        wire.assertCommands(listCommands(listOf(directory) + files))
+    }
+
     @Test
     fun observedParentChainAndRootNeedOnlyExistingListingCommands() = runTest {
         val dcim = folder(10, "DCIM")
@@ -585,12 +676,25 @@ class UsbPtpObservedFoldersTest {
         PtpTransportFactory { wire },
     )
 
+    private class ListingOnlyHostStore(private val items: List<CameraMediaItem>) : UsbHostCaptureStore {
+        override fun owns(item: CameraMediaItem) = item.id.startsWith("usb-host:")
+        override suspend fun list() = items
+        override suspend fun save(filename: String, kind: String, expectedSizeBytes: Long,
+            writer: suspend (OutputStream) -> Long): CameraMediaItem = error("Unexpected host save")
+        override suspend fun thumbnail(item: CameraMediaItem): CameraMediaThumbnail = error("Unexpected host thumbnail")
+        override suspend fun preview(item: CameraMediaItem): CameraMediaPreview = error("Unexpected host preview")
+        override suspend fun download(item: CameraMediaItem, destination: OutputStream,
+            onProgress: (CameraMediaTransferProgress) -> Unit): CameraMediaDownloadResult = error("Unexpected host download")
+        override suspend fun delete(item: CameraMediaItem): Unit = error("Unexpected host deletion")
+    }
+
     private class FolderWire(
         observed: List<PtpObjectInfo>,
         listings: List<List<Long>> = listOf(observed.map { it.handle }),
         private val advertiseRating: Boolean = false,
         storageIdResponses: List<List<Long>>? = null,
         storageInfoResponses: List<Int>? = null,
+        private val objectInfoErrors: Map<Long, Int> = emptyMap(),
     ) : PtpTransport {
         val objects = observed.associateBy { it.handle }.toMutableMap()
         private val pendingListings = ArrayDeque(listings)
@@ -637,7 +741,14 @@ class UsbPtpObservedFoldersTest {
                     }.bytes()
                 }
                 PtpOperationCode.GET_OBJECT_HANDLES -> u32Array(pendingListings.removeFirst().reversed())
-                PtpOperationCode.GET_OBJECT_INFO -> PtpDatasets.encodeObjectInfo(objects.getValue(container.parameters().single()))
+                PtpOperationCode.GET_OBJECT_INFO -> {
+                    val handle = container.parameters().single()
+                    objectInfoErrors[handle]?.let { code ->
+                        incoming += PtpContainer(PtpContainerType.RESPONSE, code, container.transactionId)
+                        return
+                    }
+                    PtpDatasets.encodeObjectInfo(objects.getValue(handle))
+                }
                 PtpOperationCode.GET_OBJECT, PtpOperationCode.GET_THUMB -> JPEG
                 PtpOperationCode.GET_PARTIAL_OBJECT -> JPEG.copyOfRange(
                     container.parameters()[1].toInt(),

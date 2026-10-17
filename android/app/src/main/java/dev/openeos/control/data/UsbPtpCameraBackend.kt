@@ -1004,11 +1004,14 @@ class UsbPtpCameraBackend(
             }
             .distinct()
             .reversed()
-            .let { values -> maximumItems?.let { values.take((it - hostItems.size).coerceAtLeast(0)) } ?: values }
 
+        val remainingItems = maximumItems?.let { (it - hostItems.size).coerceAtLeast(0) }
         var firstFailure: Exception? = null
         val objectInfos = mutableListOf<PtpObjectInfo>()
-        handles.forEach { handle ->
+        for (handle in handles) {
+            // The caller's lookahead is a media-item budget, not a raw handle budget.
+            // Directories and unnamed non-media objects must not hide later valid files.
+            if (remainingItems != null && objectInfos.size >= remainingItems) break
             ensureMediaListingSession(context)
             try {
                 val objectInfo = ptp.objectInfo(handle)
@@ -1032,6 +1035,9 @@ class UsbPtpCameraBackend(
             }
         }
         ensureMediaListingSession(context)
+        // Retain published progress, but never promote an omitted required object read to
+        // a complete listing, even when other camera files or saved host items survived.
+        firstFailure?.let { throw it }
         val ratingSamples = mutableMapOf<Long, MtpMediaRatingRead>()
         if (supportsMtpObjectProperties(info)) {
             objectInfos.groupBy(PtpObjectInfo::objectFormat).values.forEach { sameFormat ->
@@ -1059,7 +1065,6 @@ class UsbPtpCameraBackend(
                 deleteWritable = false.takeIf { storageSnapshot.any { storage -> storage.storageId == objectInfo.storageId && storage.accessCapability == 1 } },
             )
         }
-        if (handles.isNotEmpty() && items.isEmpty() && firstFailure != null && hostItems.isEmpty()) throw firstFailure!!
         return completeMediaOperation(context, CameraFeature.MEDIA_BROWSER) {
             publishMediaFolders(context, snapshot)
             (hostItems + items).let { listed -> maximumItems?.let(listed::take) ?: listed }
