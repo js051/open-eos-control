@@ -1,0 +1,15 @@
+{
+  "integration_source_commit": "6de30ab3",
+  "bridge_focused": {
+    "passed": 96,
+    "exit_code": 0
+  },
+  "api_cases": 7,
+  "pc_cases": 7,
+  "android_host_passed": 10,
+  "source": {
+    "filename": "bridge/open_eos_bridge/ccapi.py",
+    "sha256": "0f1acca76337c01fc83317b315386b52f96f4791407e5fc378de9418bdb0b5be"
+  },
+  "limits": "Synthetic HTTP peer, PC function extraction and Android host only. No browser, native device or physical camera acceptance."
+}
