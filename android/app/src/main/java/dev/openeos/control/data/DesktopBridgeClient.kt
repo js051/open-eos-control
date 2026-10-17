@@ -2206,6 +2206,12 @@ class DesktopBridgeClient(
         captureEvidence: CaptureConfigurationEvidence? = null, captureResponse: ((JSONObject) -> Unit)? = null,
         captureRecovery: Boolean = false, captureOwner: BridgeShutterReleaseSession? = null,
     ): JSONObject = withContext(Dispatchers.IO) {
+        if (captureRecovery) {
+            check(!observeStatus && captureEvidence == null && captureResponse == null && recordingEvidence == null) {
+                "Capture recovery cannot publish status or carry mutation evidence."
+            }
+            return@withContext captureRecoveryJson(request, requireNotNull(captureOwner))
+        }
         val maintenanceOwner = currentCoroutineContext()[MaintenanceBridgeOwnerContext]?.owner
         if (maintenanceOwner != null) {
             val owner = maintenanceOwner
@@ -2320,6 +2326,46 @@ class DesktopBridgeClient(
         } finally {
             cancelCall.set(false)
             cancellationWatcher.cancel()
+        }
+    }
+
+    /** Read-only capture recovery owns no physical command or release duty. Bound the full body
+     * outside the caller's structured job; cancellation never waits for a broken HTTP callback. */
+    private suspend fun captureRecoveryJson(request: Request, owner: BridgeShutterReleaseSession): JSONObject {
+        require(request.method == "GET" && CaptureConfigurationOperation.entries.any { operation ->
+            request.url.encodedPath == endpoint("v1", "session", owner.id, "capture-configuration", operation.wireName).encodedPath
+        }) { "Capture recovery requires an exact read-only route." }
+        currentCoroutineContext().ensureActive()
+        requireCurrentSession(owner)
+        check(sessionForRequest(request) === owner) { "Capture configuration target does not belong to the frozen session." }
+        val revision = owner.revision
+        val call = newBridgeCall(request, true)
+        val maximum = TimeUnit.SECONDS.toNanos(15)
+        if (call.timeout().timeoutNanos() == 0L || call.timeout().timeoutNanos() > maximum) {
+            call.timeout().timeout(maximum, TimeUnit.NANOSECONDS)
+        }
+        val (code, body) = awaitBridgeBulbCallback<Pair<Int, String>> { complete ->
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                override fun onResponse(call: Call, response: Response) {
+                    complete(runCatching {
+                        response.use {
+                            response.code to response.body?.let { value -> value.byteStream().use {
+                                readCaptureConfigurationJsonText(it, value.contentLength())
+                            } }.orEmpty()
+                        }
+                    })
+                }
+            })
+            val cancel: () -> Unit = { call.cancel() }
+            cancel
+        }
+        // A late body can only close its own resources. Parsing/adoption remains with the live owner.
+        currentCoroutineContext().ensureActive()
+        requireCurrentSession(owner)
+        if (code !in 200..299) throw bridgeError(code, body, request.url.encodedPath, owner, revision)
+        return runCatching { JSONObject(body) }.getOrElse {
+            throw IllegalStateException("Desktop Bridge returned invalid JSON for ${request.url.encodedPath}.", it)
         }
     }
 
