@@ -4958,7 +4958,9 @@
       // api() includes fetch AND response-body parsing. Abort is an optimization,
       // never release proof; Promise.race bounds transports that ignore abort.
       const base = `/v1/session/${encodeURIComponent(owner.sessionId)}`;
-      return await Promise.race([api(operation === "close" ? base : `${base}/bulb/${operation}/owned`, {
+      const path = operation === "close" ? base
+        : `${base}${operation === "start" ? "/bulb/start/owned" : "/bulb/stop/owned"}`;
+      return await Promise.race([api(path, {
         method: operation === "close" ? "DELETE" : "POST",
         json: operation === "close" ? undefined : { ownerId: owner.ownerId },
         authToken: owner.token, keepalive, signal: controller.signal,
