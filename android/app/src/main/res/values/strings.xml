@@ -477,6 +477,13 @@
     <string name="camera_error_upload_size_invalid">The selected file is empty or its size is outside the upload limit. Choose another file.</string>
     <string name="camera_error_upload_receipt_missing">The upload did not return a completion receipt. Check the camera before retrying.</string>
     <string name="camera_error_download_destination_unavailable">Android could not open the selected save location. Choose a save location again.</string>
+    <string name="camera_error_download_document_create_failed">Android could not create a file in the selected folder. Choose another folder.</string>
+    <string name="camera_error_gallery_create_failed">Android could not create the Gallery save location. Try saving to another folder.</string>
+    <string name="camera_error_gallery_output_unavailable">Android could not open the Gallery save location. Try saving to another folder.</string>
+    <string name="camera_error_download_incomplete">The downloaded file is incomplete. Retry saving the original.</string>
+    <string name="camera_error_download_length_mismatch">The downloaded file size does not match the original. Retry saving the original.</string>
+    <string name="camera_error_gallery_publish_failed">Android could not publish the downloaded file to Gallery. Try saving to another folder.</string>
+    <string name="camera_error_automatic_jpeg_not_published">Automatic JPEG import did not publish this original.</string>
     <string name="media_protection">Protection</string>
     <string name="media_protected">Protected</string>
     <string name="media_unprotected">Unprotected</string>

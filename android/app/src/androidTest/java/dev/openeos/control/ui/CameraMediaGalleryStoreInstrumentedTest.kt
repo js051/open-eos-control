@@ -414,6 +414,33 @@ class CameraMediaGalleryStoreInstrumentedTest {
         assertEquals(0, completions)
     }
 
+    @Test fun appValidationFailuresHaveTypedReasonsWithoutPublication() = runBlocking {
+        var completions = 0
+        var publications = 0
+        suspend fun rejected(expected: CameraAppError, target: CameraMediaGalleryStore = store,
+            original: CameraMediaItem = item, download: suspend (OutputStream) -> CameraMediaDownloadResult) {
+            val failure = runCatching { target.save(model, original, onFinalized = { completions++ },
+                onPublished = { publications++ }, download = download) }.exceptionOrNull()
+            assertTrue(failure is CameraAppException)
+            assertEquals(expected, (failure as CameraAppException).error)
+            assertTrue(testUris().isEmpty())
+        }
+        rejected(CameraAppError.GALLERY_OUTPUT_UNAVAILABLE,
+            CameraMediaGalleryStore(resolver, openOutput = { null })) { error("Must not download") }
+        rejected(CameraAppError.DOWNLOAD_INCOMPLETE) { CameraMediaDownloadResult(item, 0L, "image/jpeg") }
+        rejected(CameraAppError.DOWNLOAD_INCOMPLETE) { output ->
+            output.write(jpeg); CameraMediaDownloadResult(item, jpeg.size.toLong() + 1L, "image/jpeg")
+        }
+        rejected(CameraAppError.DOWNLOAD_LENGTH_MISMATCH, original = item.copy(sizeBytes = jpeg.size.toLong() + 1L)) { output ->
+            output.write(jpeg); CameraMediaDownloadResult(item, jpeg.size.toLong(), "image/jpeg")
+        }
+        rejected(CameraAppError.DOWNLOAD_LENGTH_MISMATCH) { output ->
+            output.write(jpeg); CameraMediaDownloadResult(item.copy(sizeBytes = jpeg.size.toLong() + 1L), jpeg.size.toLong(), "image/jpeg")
+        }
+        assertEquals(0, completions)
+        assertEquals(0, publications)
+    }
+
     @Test fun writeCloseAndPublishFailuresRemoveTheRealPendingRowWithoutRegistration() = runBlocking {
         val delivered = DeliveredJpegStore()
         var publications = 0

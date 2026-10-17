@@ -49,8 +49,8 @@ class CameraMediaGalleryPublishFailureTest {
                     CameraMediaDownloadResult(item, original.size.toLong(), "image/jpeg")
                 }
             }.exceptionOrNull()
-            assertTrue(failure is IllegalStateException)
-            assertTrue(failure?.message.orEmpty().contains("publish"))
+            assertTrue(failure is CameraAppException)
+            assertEquals(CameraAppError.GALLERY_PUBLISH_FAILED, (failure as CameraAppException).error)
             assertEquals(1, provider.insertCalls)
             assertEquals(1, provider.publishCalls)
             assertEquals(1, provider.deleteCalls)

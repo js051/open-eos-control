@@ -81,9 +81,41 @@ class AndroidAppErrorLanguageSourceTests(unittest.TestCase):
         self.assertIn("cameraAppErrorResource(feedback.message)?.let { stringResource(it) } ?: feedback.message", body)
         self.assertIn("onClick = onRetry, enabled = retryEnabled", body)
 
+    def test_folder_creation_keeps_filename_and_provider_arguments(self):
+        source = (UI / "CameraViewModel.kt").read_text()
+        body = source.split("private fun createMediaDocument(", 1)[1].split("internal fun mergeRecentMedia(", 1)[0]
+        self.assertIn('item.name.substringAfterLast(\'/\').ifBlank { "camera-media" }', body)
+        self.assertIn("DocumentsContract.createDocument(resolver, parent, contentType, filename)", body)
+        self.assertIn("?: throw CameraAppException(CameraAppError.DOWNLOAD_DOCUMENT_CREATE_FAILED)", body)
+        gallery = (UI / "MediaGalleryComponents.kt").read_text()
+        self.assertIn("item.name,", gallery.split("internal fun MediaViewerDialog(", 1)[1])
+
+    def test_gallery_checks_and_publication_boundary_remain_fail_closed(self):
+        body = (UI / "CameraMediaGalleryStore.kt").read_text()
+        for reason in ("GALLERY_CREATE_FAILED", "GALLERY_OUTPUT_UNAVAILABLE", "DOWNLOAD_INCOMPLETE",
+                       "DOWNLOAD_LENGTH_MISMATCH", "GALLERY_PUBLISH_FAILED"):
+            self.assertIn(f"throw CameraAppException(CameraAppError.{reason})", body)
+        self.assertIn("counted.bytes <= 0 || result.bytesTransferred != counted.bytes", body)
+        self.assertIn("listOfNotNull(item.sizeBytes, result.item.sizeBytes)", body)
+        self.assertIn("if (expected != counted.bytes)", body)
+        self.assertLess(body.index("if (publishOutput(destination, published) != 1)"), body.index("finalization.confirm {"))
+        self.assertIn("created?.let { destination ->", body)
+        self.assertIn("onCleanupFailure()", body)
+
+    def test_automatic_fallback_preserves_receipt_and_cancellation_priority(self):
+        source = (UI / "CameraViewModel.kt").read_text()
+        body = source.split("val feedback = when {", 1)[1].split("publishMediaSave(request, item, feedback)", 1)[0]
+        self.assertLess(body.index("receipt.published -> MediaSaveFeedback.Saved(owner.location)"),
+                        body.index("failure is CancellationException -> MediaSaveFeedback.Cancelled"))
+        self.assertIn("else -> MediaSaveFeedback.Failed(CameraAppError.AUTOMATIC_JPEG_NOT_PUBLISHED.messageToken)", body)
+        runner = (UI / "ForegroundJpegImportRunner.kt").read_text()
+        self.assertIn("policy.finishTransfer(receipt.published, failed, receipt.cleanupConfirmed)", runner)
+        self.assertIn("if (!receipt.published) throw failure", runner)
+        self.assertNotIn("failure.message", runner)
+
     def test_every_app_error_has_english_and_traditional_chinese_resources(self):
         names = set(re.findall(r"R\.string\.(\w+)", (UI / "CameraAppError.kt").read_text()))
-        self.assertEqual(7, len(names))
+        self.assertEqual(14, len(names))
         localized = []
         for folder in ("values", "values-zh-rTW"):
             rows = ET.parse(MAIN / "res" / folder / "strings.xml").getroot().findall("string")

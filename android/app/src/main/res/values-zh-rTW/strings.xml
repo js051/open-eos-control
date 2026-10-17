@@ -885,4 +885,11 @@
     <string name="camera_error_upload_size_invalid">所選檔案是空的，或大小不在上傳限制內。請選擇其他檔案。</string>
     <string name="camera_error_upload_receipt_missing">上傳未傳回完成收據。重試前請先檢查相機。</string>
     <string name="camera_error_download_destination_unavailable">Android 無法開啟所選儲存位置。請重新選擇儲存位置。</string>
+    <string name="camera_error_download_document_create_failed">Android 無法在所選資料夾建立檔案。請選擇其他資料夾。</string>
+    <string name="camera_error_gallery_create_failed">Android 無法建立圖庫儲存位置。請嘗試另存至其他資料夾。</string>
+    <string name="camera_error_gallery_output_unavailable">Android 無法開啟圖庫儲存位置。請嘗試另存至其他資料夾。</string>
+    <string name="camera_error_download_incomplete">下載的檔案不完整。請重試儲存原檔。</string>
+    <string name="camera_error_download_length_mismatch">下載的檔案大小與原檔不符。請重試儲存原檔。</string>
+    <string name="camera_error_gallery_publish_failed">Android 無法將下載的檔案發布至圖庫。請嘗試另存至其他資料夾。</string>
+    <string name="camera_error_automatic_jpeg_not_published">自動 JPEG 匯入未發布這個原檔。</string>
 </resources>
