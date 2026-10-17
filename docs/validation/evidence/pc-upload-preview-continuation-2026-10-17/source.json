@@ -1,0 +1,7 @@
+{
+  "head": "5b5cc7afd8a086000babae34694c9b751072809c",
+  "fixture_sha256": "45ec47b594cce3133963fdda65e5724d55f285813b0d250678c4049499a12021",
+  "boundary": "Production app, synthetic network only; native file picker uses fixture-owned file. No camera/server upload.",
+  "controlled_boundary": "Receipt released 3 seconds after native preview image load, then listing omits displayed item.",
+  "file_picker_alias": "/workspace/shared/e.jpg -> /workspace/shared/eos-parity-recovery-20261013/upload-preview-continuation-v2-firefox-20261017/SYNTHETIC.JPG"
+}
