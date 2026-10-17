@@ -197,3 +197,7 @@
 3. iOS directUSB、真Canon EDSDK binding、gphoto座標AF/ClickWB及metadata mutation仍D/E未支持或Research；缺可證API／真機能力資料，不能把缺實作假稱只待驗收，也不能憑空新增命令。
 4. 目前沒有另一個已確認、可直接實作的原caller缺口。若從原需求實際發現反例，再從共同dev建立短期分支收斂；不為維持活動重刷測試、添加相似合成輪次或重試被擋下載。這不等於原89列全部完成。
 5. main／版本／可下載發布包仍未完成必要整體驗收，dev source交付不能代稱可下載App或release ready。
+
+## 2026-10-17 再盤點的產品反例
+
+先前「沒有另一個已確認 caller 缺口」只代表當時觀察，現由兩個真反例更新：[G07 local preview／G09 download lifecycle](local-preview-transfer-lifecycle-2026-10-17.zh-TW.md)。預覽不再由裝置列舉鎖住 Stop，舊列舉不能覆蓋新狀態；目的地處理失敗會取消來源 reader。已本地實作與 host 回歸；初次缺 pwsh 的掃描阻擋已依既有授權恢復官方工具，交付沿正常掃描及非 force dev 流程。本批不是原生／瀏覽器／真機驗收，不改 D/E 能力界線。

@@ -72,13 +72,11 @@
       throw new TypeError("writeChunk must be a function");
     }
 
-    throwIfAborted(signal);
     const declaredBytes = totalBytesForResponse(response, expectedBytes);
     let totalBytes = declaredBytes;
     let bytesTransferred = 0;
     const chunks = writeChunk ? null : [];
     const report = () => onProgress({ bytesTransferred, totalBytes });
-    report();
 
     const acceptChunk = async (value) => {
       const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
@@ -92,17 +90,25 @@
       report();
     };
 
-    if (response.body && typeof response.body.getReader === "function") {
-      const reader = response.body.getReader();
-      const cancelReader = () => {
-        try {
-          Promise.resolve(reader.cancel(cancellationError())).catch(() => {});
-        } catch (_) {
-          // A reader that has already closed needs no additional cancellation.
-        }
-      };
-      signal?.addEventListener("abort", cancelReader, { once: true });
+    const reader = response.body && typeof response.body.getReader === "function"
+      ? response.body.getReader() : null;
+    let cancellationRequested = false;
+    let failed = false;
+    const cancelReader = (reason) => {
+      if (!reader || cancellationRequested) return;
+      cancellationRequested = true;
       try {
+        // A destination/progress failure must also stop the camera response.
+        // Cleanup may fail or stall; neither may replace the primary failure.
+        Promise.resolve(reader.cancel(reason)).catch(() => {});
+      } catch (_) { /* Keep the original transfer failure. */ }
+    };
+    const abortReader = () => cancelReader(cancellationError());
+    signal?.addEventListener("abort", abortReader, { once: true });
+    try {
+      throwIfAborted(signal);
+      report();
+      if (reader) {
         while (true) {
           throwIfAborted(signal);
           const { done, value } = await reader.read();
@@ -110,28 +116,33 @@
           if (done) break;
           await acceptChunk(value);
         }
-      } finally {
-        signal?.removeEventListener("abort", cancelReader);
-        reader.releaseLock?.();
+      } else {
+        await acceptChunk(new Uint8Array(await response.arrayBuffer()));
+        throwIfAborted(signal);
       }
-    } else {
-      await acceptChunk(new Uint8Array(await response.arrayBuffer()));
-      throwIfAborted(signal);
-    }
 
-    throwIfAborted(signal);
-    if (declaredBytes !== null && bytesTransferred !== declaredBytes) {
-      throw lengthMismatchError(declaredBytes, bytesTransferred);
+      throwIfAborted(signal);
+      if (declaredBytes !== null && bytesTransferred !== declaredBytes) {
+        throw lengthMismatchError(declaredBytes, bytesTransferred);
+      }
+      totalBytes = bytesTransferred;
+      report();
+      const contentType = response.headers?.get?.("content-type") || "application/octet-stream";
+      return {
+        blob: chunks ? new Blob(chunks, { type: contentType }) : null,
+        bytesTransferred,
+        totalBytes,
+        contentType,
+      };
+    } catch (error) {
+      failed = true;
+      cancelReader(error);
+      throw error;
+    } finally {
+      signal?.removeEventListener("abort", abortReader);
+      try { reader?.releaseLock?.(); }
+      catch (error) { if (!failed) throw error; }
     }
-    totalBytes = bytesTransferred;
-    report();
-    const contentType = response.headers?.get?.("content-type") || "application/octet-stream";
-    return {
-      blob: chunks ? new Blob(chunks, { type: contentType }) : null,
-      bytesTransferred,
-      totalBytes,
-      contentType,
-    };
   }
 
   return {

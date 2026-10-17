@@ -1819,6 +1819,7 @@
     localVideoActive: false,
     localVideoBusy: false,
     localVideoGeneration: 0,
+    localVideoInputsOwner: null,
     localVideoFrameHandle: null,
     localVideoFrameTimes: [],
     localVideoFrameSamples: [],
@@ -5576,10 +5577,17 @@
 
   async function refreshLocalVideoInputs({ quiet = true } = {}) {
     if (!state.localVideoSupport.available) return;
+    const owner = { generation: state.localVideoGeneration };
+    state.localVideoInputsOwner = owner;
+    const current = () => state.localVideoInputsOwner === owner &&
+      state.localVideoGeneration === owner.generation;
     try {
-      state.localVideoInputs = await localVideo.enumerateInputs(navigator.mediaDevices);
+      const inputs = await localVideo.enumerateInputs(navigator.mediaDevices);
+      if (!current()) return;
+      state.localVideoInputs = inputs;
       renderLocalVideoDevices();
     } catch (error) {
+      if (!current()) return;
       state.localVideoError = {
         at: new Date().toISOString(),
         code: localVideo.errorCode(error),
@@ -5675,7 +5683,14 @@
         renderDiagnostics();
       });
       scheduleLocalVideoFrame(generation);
-      await refreshLocalVideoInputs();
+      // Playback is already running. Optional label enrichment must not keep
+      // Stop/source controls disabled while enumerateDevices is pending.
+      state.localVideoBusy = false;
+      renderLiveState();
+      renderAvailability();
+      // Enumeration owns only device-list updates, never this operation's
+      // completion. It cannot delay Start feedback or overwrite newer actions.
+      void refreshLocalVideoInputs();
       setOperationState(t("localVideoStarted"));
       if (announce) showToast(t("localVideoStarted"));
     } catch (error) {
