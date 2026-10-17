@@ -1,0 +1,50 @@
+[
+  {
+    "file": "baseline-receipt.json",
+    "sha256": "a25c2607aeb24541499a4537e8594732a66235496f2553cfc7ad7f98c38dc1cd",
+    "original_receipt_sha256": "2e9080e4ea50c6c1d07e7d4690c8fb95598eba6311a03d4632f474f173d6ccc0"
+  },
+  {
+    "file": "baseline-junit.txt",
+    "sha256": "2c5511a7ee9ab086a8281abe75b828bae6c1addb5e290eb8443a57cf097e3058",
+    "original_output_sha256": "d9b868ef51a5564a912495b5d18a6f545329a4a3edc15cbd8687365afc416077"
+  },
+  {
+    "file": "current-receipt.json",
+    "sha256": "45a206631677d59a418b36679217cd8deb5b41c440423f7f42249d2553d9d410",
+    "original_receipt_sha256": "6e5c6526b5b2db816b68764613b2924c15a589313792854c57571589ffbd0650"
+  },
+  {
+    "file": "current-junit.txt",
+    "sha256": "2b5110a9a8631bedb093c4c8b6df99ba382ea3234ca814faf4d34a0059365c5c",
+    "original_output_sha256": "4292708692a59c228d85010b2933d8dd6ef6c80c13b74c7c8d6a81efa79c4290"
+  },
+  {
+    "file": "liveview-regression-receipt.json",
+    "sha256": "bde0afaf2c1140afa65dc56633f0ed5a3b095f3d836685417f8eb12ea8a7172d",
+    "original_receipt_sha256": "dd6470d405c67e3942ae1aa9014e77e36c753ab30d59da838b592057ddf3f71d"
+  },
+  {
+    "file": "liveview-regression-junit.txt",
+    "sha256": "0428c8af05348ad82a64ab0708fcfa8d2cd3e9429dc5b84a660a7f5c2e115802",
+    "original_output_sha256": "e5fc7a6be26a12258346fbc8f3f70c293baf298aef624397009efca2145caa3f"
+  },
+  {
+    "file": "still-regression-receipt.json",
+    "sha256": "b5790567645cf34730d2390db4b0fb3421d255de5b06dc0345b712f083c752dd",
+    "original_receipt_sha256": "eccdf7772a2899aeb38c82bb7dc67a17993ba3cac7e76ae8198e684a8ea494cf"
+  },
+  {
+    "file": "still-regression-junit.txt",
+    "sha256": "4fb614a5713358fa4c914d1b8212c533efcae76748224aaa19a95f2d74427f81",
+    "original_output_sha256": "4a4d0e51c7b0d58943d843ed91bd5bc7d1bfe96cfe46a896a7c9246f6781a47c"
+  },
+  {
+    "file": "syntax.txt",
+    "sha256": "c80e0343f608055ab8b24c4dcc9cbe91e85125ec0fb33fd3e56573719b07190a"
+  },
+  {
+    "file": "additional-checks.json",
+    "sha256": "46606415a7f980f2f3de6a4722b357d8b56b82b478c70484d2d4f3cdbef95ecd"
+  }
+]

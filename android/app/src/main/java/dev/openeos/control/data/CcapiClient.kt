@@ -1695,6 +1695,7 @@ class CcapiClient(
                             "/shooting/control/shutterbutton/manual",
                             JSONObject().put("af", false).put("action", "full_press"),
                             operation,
+                            releaseControl = true,
                         )
                     } else postJson("/ccapi/bulb/start", JSONObject())
                 },
@@ -1704,6 +1705,7 @@ class CcapiClient(
                             "/shooting/control/shutterbutton/manual",
                             JSONObject().put("af", false).put("action", "release"),
                             operation,
+                            releaseControl = true,
                         )
                     } else postJson("/ccapi/bulb/stop", JSONObject())
                 },
@@ -1737,10 +1739,10 @@ class CcapiClient(
             ?: error("Camera did not advertise AF start/stop control.")
         heldAutofocus.hold(
             start = {
-                commandOk("/shooting/control/af", JSONObject().put("action", "start"), operation)
+                commandOk("/shooting/control/af", JSONObject().put("action", "start"), operation, releaseControl = true)
                 observedFeatures.add(CameraFeature.AUTOFOCUS)
             },
-            stop = { commandOk("/shooting/control/af", JSONObject().put("action", "stop"), operation) },
+            stop = { commandOk("/shooting/control/af", JSONObject().put("action", "stop"), operation, releaseControl = true) },
             whileHeld = whileHeld,
         )
     }
@@ -1761,6 +1763,7 @@ class CcapiClient(
                             pathSuffix = "/shooting/control/af",
                             payload = JSONObject().put("action", "start"),
                             operation = operation,
+                            releaseControl = true,
                         )
                     },
                     release = {
@@ -1768,6 +1771,7 @@ class CcapiClient(
                             pathSuffix = "/shooting/control/af",
                             payload = JSONObject().put("action", "stop"),
                             operation = operation,
+                            releaseControl = true,
                         )
                     },
                     afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
@@ -1779,6 +1783,7 @@ class CcapiClient(
                             pathSuffix = "/shooting/control/shutterbutton/manual",
                             payload = JSONObject().put("af", true).put("action", "half_press"),
                             operation = manualOperation,
+                            releaseControl = true,
                         )
                     },
                     release = {
@@ -1786,6 +1791,7 @@ class CcapiClient(
                             pathSuffix = "/shooting/control/shutterbutton/manual",
                             payload = JSONObject().put("af", false).put("action", "release"),
                             operation = manualOperation,
+                            releaseControl = true,
                         )
                     },
                     afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
@@ -1814,6 +1820,7 @@ class CcapiClient(
                         pathSuffix = "/shooting/control/shutterbutton/manual",
                         payload = JSONObject().put("af", true).put("action", "half_press"),
                         operation = operation,
+                        releaseControl = true,
                     )
                 },
                 release = {
@@ -1821,6 +1828,7 @@ class CcapiClient(
                         pathSuffix = "/shooting/control/shutterbutton/manual",
                         payload = JSONObject().put("af", false).put("action", "release"),
                         operation = operation,
+                        releaseControl = true,
                     )
                 },
                 afterPress = { delay(HALF_PRESS_DURATION_MILLIS) },
@@ -3344,6 +3352,7 @@ class CcapiClient(
         recordingEvidence: RecordingRequestEvidence? = null,
         checkOwner: (() -> Unit)? = null,
         stillCapture: Boolean = false,
+        releaseControl: Boolean = false,
     ) {
         val selected = operation ?: if (!enforceAdvertisedOperations) {
             CcapiApiOperation(method = "POST", path = "$apiVersionPrefix$pathSuffix")
@@ -3357,7 +3366,8 @@ class CcapiClient(
             "POST" -> builder.post(requestBody).build()
             else -> error("Unsupported CCAPI command method ${selected.method} for ${selected.path}")
         }
-        requestOk(request, recordingEvidence = recordingEvidence, checkOwner = checkOwner, stillCapture = stillCapture)
+        requestOk(request, recordingEvidence = recordingEvidence, checkOwner = checkOwner,
+            stillCapture = stillCapture, releaseControl = releaseControl)
     }
 
     private suspend fun withRecoverableFocusRelease(
@@ -4709,6 +4719,7 @@ class CcapiClient(
         checkOwner: (() -> Unit)? = null,
         stillCapture: Boolean = false,
         liveViewControl: Boolean = false,
+        releaseControl: Boolean = false,
     ): Unit = withContext(Dispatchers.IO) {
         currentCoroutineContext().ensureActive()
         checkOwner?.invoke()
@@ -4723,10 +4734,10 @@ class CcapiClient(
         val shootingEvidence = currentCoroutineContext()[ShootingSettingWriteContext]?.evidence
         shootingEvidence?.let { currentCoroutineContext().ensureActive(); it.beforeDispatch() }
         val recordingIo = currentCoroutineContext()[RecordingIoContext] != null || recordingEvidence != null
-        // Still capture and Live View control remain joined through the response and owned release.
+        // Still, Live View and AF/Bulb control stay joined through the response and owned release.
         // Bound the producer itself, including NonCancellable Stop; never detach its cleanup.
-        val call = newCameraCall(request.newBuilder().tag(RecordingRequestEvidence::class.java, recordingEvidence).build(), shootingEvidence != null || recordingIo || stillCapture || liveViewControl)
-        val watcher = if (shootingEvidence != null || recordingIo || checkOwner != null || stillCapture || liveViewControl) launch(start = CoroutineStart.UNDISPATCHED) {
+        val call = newCameraCall(request.newBuilder().tag(RecordingRequestEvidence::class.java, recordingEvidence).build(), shootingEvidence != null || recordingIo || stillCapture || liveViewControl || releaseControl)
+        val watcher = if (shootingEvidence != null || recordingIo || checkOwner != null || stillCapture || liveViewControl || releaseControl) launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { call.cancel() }
         } else null
         try {
@@ -4735,12 +4746,13 @@ class CcapiClient(
             call.execute().use { response ->
             recordingEvidence?.rejected = !response.isSuccessful
             val body = response.body?.let { body -> when {
-                liveViewControl -> body.byteStream().use { readStrictMediaJsonText(it, body.contentLength(), 65_536) }.also {
-                    // Preserve Canon's plain-text errors and the existing HTTP 400 size fallback.
-                    check(body.contentLength() < 0 || it.toByteArray(Charsets.UTF_8).size.toLong() == body.contentLength())
-                }
+                // Combined flags must not weaken existing strict JSON command receipts.
                 shootingEvidence != null || recordingIo || stillCapture ->
                     body.byteStream().use { readShootingSettingResponseText(it, body.contentLength()) }
+                liveViewControl || releaseControl -> body.byteStream().use { readStrictMediaJsonText(it, body.contentLength(), 65_536) }.also {
+                    // Preserve Canon's plain-text control errors and Live View HTTP 400 size fallback.
+                    check(body.contentLength() < 0 || it.toByteArray(Charsets.UTF_8).size.toLong() == body.contentLength())
+                }
                 else -> body.string()
             } }.orEmpty()
             if (!response.isSuccessful) {
