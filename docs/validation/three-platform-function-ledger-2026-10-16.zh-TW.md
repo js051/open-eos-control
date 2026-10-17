@@ -314,3 +314,9 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - G07/#62、G13/#122：[LUT 鍵盤接續](pc-monitor-lut-keyboard-2026-10-17.zh-TW.md) 真 Firefox baseline 重現 Remove 隱藏後 BODY 焦點；固定版保留 Load 焦點，下一次 Enter 原生 picker 實際開啟。完整 modules 3823、static 15、focused 58 通過；取消與 settlement 分支僅 host 覆蓋，未宣稱 GPU 色彩或三端驗收。
 - G11/G13：[maintenance dispatch deadline](../android-maintenance-dispatch-deadline.md) 精確 submitMaintenance→operation job→dispatch→Disconnect join 基準兩案真紅，包括真 15 秒 body 仍阻塞。固定 62＋5＋前 cleanup 16＋前 Bulb 59＝142 host runtime、40 source checks 通過。保留原 join、receipt/history、較新 recovery 與 replacement session；晚 callback 只更新捕捉的原 evidence。
 - bridge 與已驗 PC source、android 與已驗 Android source 整合後 tree 相同，沒有以未變更回歸重跑充數。一般 maintenance read／preview restore、其他 operation join、physical AF 與 iOS caller 仍需獨立精確審核；完整 Android／Compose／實際 OkHttp socket／裝置未驗。原 89 列的大目標仍未完成。
+
+## 21:38 UTC local preview timestamps／maintenance reads
+
+- G07/#123、G02：[本地預覽最後影格時間](pc-local-frame-timestamp-2026-10-17.zh-TW.md) 的 timer fallback 曾把無新 frame counter／0／unknown 的輪詢當新影格。Production handler 基準2 pass／5 fail，固定3835 modules與15 static通過；只改可觀察影格timestamp，保留render cadence。沒有UVC／HDMI或GPU實機證據。
+- G11/G13：[Android三條精確maintenance GET](../android-maintenance-read-deadline.md) 已將初始read、recovery與restore前fresh read改為有界caller；四個已修真紅與第五個仍未修restore Start真紅明確區分。Read67 distinct，dispatch67／cleanup16／Bulb59回歸與40 source checks另列。普通transport／join／strict Start未變。
+- 新確認的server維護restore排序反例：Stop可超越已admitted但尚未進provider的Start；local-only DELETE204不代表物理Stop。正在另批處理owned restore permit與caller，未先將Start改有界。iOS未同等遷移，原生三端驗收與原89列大目標仍未完成。
