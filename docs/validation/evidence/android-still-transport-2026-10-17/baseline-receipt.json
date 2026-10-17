@@ -1,0 +1,87 @@
+{
+  "phase": "baseline",
+  "ref": "34669de2bea88fb318aca0a9a3ed16e5a681b3d5",
+  "source_sha256": [
+    {
+      "file": "android/app/src/main/java/dev/openeos/control/data/ShutterReleaseSession.kt",
+      "sha256": "b1e1708555c7938c94f13bd9c8cb90f5fb0e37a993d9153c479a3df144363749"
+    },
+    {
+      "file": "android/app/src/main/java/dev/openeos/control/data/ShootingSettingJson.kt",
+      "sha256": "c2c0967a4fd4589e198bd7913a1425d09b881c5cbd17784f91c8ea4cc3ad2930"
+    },
+    {
+      "file": "android/app/src/main/java/dev/openeos/control/data/StrictMediaJson.kt",
+      "sha256": "9ea850d244a64b2a2776062d75bb07ac4709a1fe33cecdc326f86c56cd8bf169"
+    },
+    {
+      "file": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+      "sha256": "1f2253fe6d5ec76bb73b99612e9698d3fbe3a881b0163ea7f7fb39c02b953169"
+    }
+  ],
+  "extracted_methods_sha256": [
+    {
+      "method": "requestOk",
+      "sha256": "542a0b51051934f0a583792acc5094218b556bc63d3df7d93b791fad85627485"
+    }
+  ],
+  "fixture_sha256": [
+    {
+      "file": "HostClient.kt",
+      "sha256": "1204cc879d5c68f63c003965118d858afae5d68093b0108b08303ec8f24605c6"
+    },
+    {
+      "file": "StillTransportTest.kt",
+      "sha256": "5984fa4231d380a94e61ef07623e9ce49c11116ed740b8c4d90adfde816b9f57"
+    }
+  ],
+  "verified_tools": [
+    {
+      "file": "kotlin-compiler-embeddable-2.2.21.jar",
+      "sha256": "9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295"
+    },
+    {
+      "file": "kotlin-stdlib-2.2.21.jar",
+      "sha256": "6558a3d233da56a20934b32159f9db5f86ed5816ef098f78a2c223dc6abb79dd"
+    },
+    {
+      "file": "kotlin-script-runtime-2.2.21.jar",
+      "sha256": "2b1519b427b514d1536c1b425674b03fe914af637924028e9959c6625442df51"
+    },
+    {
+      "file": "kotlin-reflect-1.6.10.jar",
+      "sha256": "3277ac102ae17aad10a55abec75ff5696c8d109790396434b496e75087854203"
+    },
+    {
+      "file": "kotlin-daemon-embeddable-2.2.21.jar",
+      "sha256": "91c0673c22e44b054ae0314d323860ebe1f3aff3f0ebc74fff82c4733dde09be"
+    },
+    {
+      "file": "kotlinx-coroutines-core-jvm-1.8.0.jar",
+      "sha256": "9860906a1937490bf5f3b06d2f0e10ef451e65b95b269f22daf68a3d1f5065c5"
+    },
+    {
+      "file": "kotlinx-coroutines-core-jvm-1.9.0.jar",
+      "sha256": "ad89c2892235e670f222d819cb3d81188143cb19a05b59df9889ae4269f5c70a"
+    },
+    {
+      "file": "annotations-23.0.0.jar",
+      "sha256": "7b0f19724082cbfcbc66e5abea2b9bc92cf08a1ea11e191933ed43801eb3cd05"
+    },
+    {
+      "file": "junit-4.13.2.jar",
+      "sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3"
+    },
+    {
+      "file": "hamcrest-core-1.3.jar",
+      "sha256": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+    }
+  ],
+  "compile_exit": 0,
+  "boundary": "Exact production requestOk, ShutterReleaseSession and bounded JSON readers; synthetic synchronous Call/Response/InputStream. No real OkHttp, socket, Android or device execution.",
+  "jvm_heap_limit_mb": 256,
+  "active_processor_count": 1,
+  "junit_exit": 1,
+  "expected_result_verified": true,
+  "original_receipt_sha256": "110b02a382753f4d9b5a649371ea4827ad63b5d2b95f3943853f53d2d17fe580"
+}

@@ -3612,6 +3612,72 @@ class CcapiClientTest {
     }
 
     @Test
+    fun realStillCaptureCancellationJoinsPacedResponseWithoutReplay() = runBlocking {
+        client.forceRealCamera()
+        server.enqueue(MockResponse().setBody("{           }").throttleBody(1, 200, TimeUnit.MILLISECONDS))
+        val capture = launch(Dispatchers.IO) { runCatching { client.captureStill() } }
+        assertEquals("/ccapi/ver100/shooting/control/shutterbutton",
+            server.takeRequest(2, TimeUnit.SECONDS)?.path)
+        val joined = withTimeoutOrNull(700) { capture.cancelAndJoin(); true }
+        // A finite fixture also lets the baseline fail cleanly instead of leaving a blocked test.
+        capture.cancelAndJoin()
+        assertEquals("Cancellation must terminate and join the actual response producer", true, joined)
+        assertEquals(1, server.requestCount)
+        assertFalse(CameraFeature.STILL_CAPTURE in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun realStillCaptureRejectsOversizedBodyWithoutStatusOrReplay() = runBlocking {
+        client.forceRealCamera()
+        server.enqueue(MockResponse().setBody(" ".repeat(65_537)))
+        assertTrue(runCatching { client.captureStill() }.isFailure)
+        assertEquals(1, server.requestCount)
+        assertFalse(CameraFeature.STILL_CAPTURE in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun realStillCaptureManualCancellationWaitsForMatchingRelease() = runBlocking {
+        client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver100":[{"path":"/shooting/control/shutterbutton/manual","put":true}]}"""))
+        client.initialize(); server.takeRequest()
+        server.enqueue(MockResponse().setBody("{           }").throttleBody(1, 200, TimeUnit.MILLISECONDS))
+        server.enqueue(MockResponse().setBody("{}").setBodyDelay(250, TimeUnit.MILLISECONDS))
+        val capture = launch(Dispatchers.IO) { runCatching { client.captureStill() } }
+        assertEquals("full_press", JSONObject(requireNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()).getString("action"))
+        capture.cancel()
+        val release = server.takeRequest(1, TimeUnit.SECONDS)
+        val joinedBeforeReleaseBody = withTimeoutOrNull(75) { capture.join(); true }
+        val joined = withTimeoutOrNull(700) { capture.join(); true }
+        capture.join()
+        assertNotNull("Cancellation still owes one mandatory release", release)
+        assertEquals("release", JSONObject(requireNotNull(release).body.readUtf8()).getString("action"))
+        assertNull("Cancellation cannot detach the mandatory release body", joinedBeforeReleaseBody)
+        assertEquals(true, joined)
+        assertEquals(3, server.requestCount)
+        assertFalse(CameraFeature.STILL_CAPTURE in client.observedFeatureSnapshot())
+    }
+
+    @Test
+    fun realStillCaptureManualReleaseTimeoutRetainsRetryObligation() = runBlocking {
+        client = CcapiClient(server.url("/").toString(),
+            httpClient = OkHttpClient.Builder().callTimeout(250, TimeUnit.MILLISECONDS).build(), treatAsSimulator = false)
+        server.enqueue(jsonResponse("""{"ver100":[{"path":"/shooting/control/shutterbutton/manual","put":true}]}"""))
+        client.initialize(); server.takeRequest()
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setBody("{           }").throttleBody(1, 200, TimeUnit.MILLISECONDS))
+        val failure = runCatching { client.captureStill() }.exceptionOrNull()
+        assertTrue(failure is ShutterReleaseException)
+        assertEquals("full_press", JSONObject(server.takeRequest().body.readUtf8()).getString("action"))
+        assertEquals("release", JSONObject(server.takeRequest().body.readUtf8()).getString("action"))
+        assertTrue(runCatching { client.captureStill() }.isFailure)
+        assertEquals(3, server.requestCount)
+        server.enqueue(MockResponse().setResponseCode(204))
+        client.retryShutterRelease()
+        assertEquals("release", JSONObject(server.takeRequest().body.readUtf8()).getString("action"))
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
     fun realStillCaptureUsesAdvertisedShutterEndpointWithAutofocus() = runTest {
         client.forceRealCamera(
             prefix = "/ccapi/ver110",
