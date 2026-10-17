@@ -18,6 +18,10 @@ from .test_ccapi import FakeCcapiTransport
     [
         (204, {}, b"", True),
         (204, {"content-length": "0"}, b"", True),
+        (204, {"content-range": "bytes 0-0/1"}, b"", False),
+        (204, {"content-range": ""}, b"", False),
+        (204, {"cOnTeNt-RaNgE": "bytes */1", "content-length": "0"}, b"", False),
+        (206, {}, b"", False),
         (200, {}, b"", False),
         (201, {}, b"", False),
         (202, {}, b"", False),
@@ -92,7 +96,11 @@ def test_delete_does_not_convert_invalid_refusal_framing_into_certain_rejection(
     ("status", "headers", "body", "expected_status"),
     [(204, {}, b"", 204), (403, {"content-length": "3"}, b"no!", 403),
      (403, {"content-length": "4"}, b"no!", 502), (503, {}, b"error", 502),
-     (204, {"content-length": "1"}, b"", 502)],
+     (204, {"content-length": "1"}, b"", 502),
+     (204, {"content-range": "bytes 0-0/1"}, b"", 502),
+     (204, {"Content-Range": ""}, b"", 502),
+     (204, {"cOnTeNt-RaNgE": "bytes */1", "content-length": "0"}, b"", 502),
+     (403, {"content-range": "bytes 0-2/3"}, b"no!", 403)],
 )
 def test_real_bridge_route_preserves_only_valid_delete_receipts(status, headers, body, expected_status):
     transport = FakeCcapiTransport()

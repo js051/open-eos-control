@@ -22,6 +22,30 @@ class MediaDeleteHttpTest {
             assertEquals(1, server.requestCount)
         }
     }
+    @Test fun contentRangeCannotConfirm204AndPreservesRefusalWithoutReplay() = runBlocking {
+        for (code in listOf(204, 403)) {
+            for ((name, value) in listOf("Content-Range" to "bytes 0-0/1", "Content-Range" to "",
+                "cOnTeNt-RaNgE" to "bytes */1")) MockWebServer().use { server ->
+                server.enqueue(MockResponse().setResponseCode(code).setHeader(name, value))
+                server.enqueue(MockResponse().setResponseCode(204))
+                val attempt = MediaDeleteAttempt()
+                var confirmed = 0
+                var rejected = 0
+                val result = runCatching {
+                    executeMediaDeleteHttp(OkHttpClient(), request(server), MediaDeleteEvidence(
+                        beforeDispatch = attempt::beforeDispatch,
+                        onConfirmed = { confirmed++; attempt.confirm() },
+                        onRejected = { rejected++; attempt.reject() },
+                    ))
+                }
+                assertTrue(result.isFailure)
+                assertEquals(if (code == 403) MediaDeleteOutcome.REJECTED else MediaDeleteOutcome.UNCERTAIN, attempt.finish())
+                assertEquals(0, confirmed)
+                assertEquals(if (code == 403) 1 else 0, rejected)
+                assertEquals(1, server.requestCount)
+            }
+        }
+    }
     @Test fun redirectsAndRetryableErrorsNeverSendASecondDelete() = runBlocking {
         for (code in listOf(307, 308, 408, 421, 503)) MockWebServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", server.url("/other")))

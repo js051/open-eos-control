@@ -4231,6 +4231,7 @@ class CcapiSession:
                 )
             if (
                 response.status != 204
+                or any(name.casefold() == "content-range" for name in response.headers)
                 or not framing_valid
                 or response.body
                 or (length is not None and length != "0")
