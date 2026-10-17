@@ -175,3 +175,20 @@ for (const reason of ["no-restore", "unrelated-item", "different-session", "new-
     assert.equal(mutation.dismissedFocus, undefined);
   });
 }
+
+test("pending mutation return allows the browser to reveal the card moved by its result panel", () => {
+  const c = fixture(), original = c.button(), current = c.button();
+  c.state.mediaDetailsGeneration = 2; c.state.refreshGeneration = 4;
+  const mutation = { session: c.state.session };
+  c.state.mediaMutationOwner = mutation;
+  c.state.mediaMutation = { queue: { results: [{ id: "a" }] } };
+  c.open("Details", original); original.isConnected = false;
+  const busy = c.button(); busy.disabled = true; c.cards([busy]);
+  c.context.closeMediaDetails();
+  let options;
+  current.focus = value => { options = value; c.document.activeElement = current; };
+  c.cards([current]); c.state.mediaMutationOwner = null;
+  c.context.restoreMediaMutationFocus(mutation);
+  assert.equal(c.document.activeElement, current);
+  assert.equal(options.preventScroll, false);
+});

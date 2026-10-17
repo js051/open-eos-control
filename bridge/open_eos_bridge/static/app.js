@@ -9765,7 +9765,7 @@
     };
   }
 
-  function restoreMediaDialogFocus(owner, eligible, closedDialog) {
+  function restoreMediaDialogFocus(owner, eligible, closedDialog, preventScroll = true) {
     if (!eligible || !owner || owner.session !== state.session ||
         state.mediaPreviewFocusOwner || state.mediaDetailsFocusOwner ||
         document.querySelector("dialog[open]")) return;
@@ -9783,7 +9783,7 @@
       target = currentCards.find(button => button.dataset.mediaId === owner.itemId &&
         button.dataset.mediaAction === owner.role && mediaDialogFocusTarget(button));
     }
-    target?.focus({ preventScroll: true });
+    target?.focus({ preventScroll });
   }
 
   function setMediaDialogActionDisabled(kind, button, disabled) {
@@ -9829,7 +9829,8 @@
     delete mutation.dismissedFocus;
     if (!target || state.mediaDetailsGeneration !== target.detailsGeneration ||
         state.refreshGeneration !== target.refreshGeneration) return;
-    restoreMediaDialogFocus(target.owner, true, target.dialog);
+    // The result panel can move the card outside the viewport while the dialog is open.
+    restoreMediaDialogFocus(target.owner, true, target.dialog, false);
   }
 
   async function openMediaDetails(item, inheritedFocus = null) {
