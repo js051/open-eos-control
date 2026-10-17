@@ -5006,8 +5006,11 @@
       }
       if (bulb) {
         // Keep stop responsibility even if the API response or a later read is lost.
+        // An unreadable 502 cannot prove Start was rejected; cached idle status
+        // must not permit another Start instead of an explicit Stop.
         const uncertain = bulbWasActive || [
           "SHUTTER_RELEASE_UNCONFIRMED", "NETWORK_ERROR", "HTTP_ERROR",
+          "RESPONSE_BODY_UNAVAILABLE",
         ].includes(normalized.code);
         state.shutterReleaseUnconfirmed ||= uncertain;
         try {
