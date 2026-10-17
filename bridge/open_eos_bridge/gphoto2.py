@@ -1346,7 +1346,10 @@ class GPhoto2Session:
         self._live_view_transport: str | None = None
         self._live_view_fallback_reason: str | None = None
         self._live_view_magnification: int | None = None
-        self._bulb_exposure_active = False
+        self._bulb_exposure_active: bool | None = False
+        self._bulb_release_values: tuple[str, str] | None = None
+        self._bulb_start_confirmed = False
+        self._shutter_release_unconfirmed = False
         self._requested_fps = 1
         self._last_error: str | None = None
         self._summary_text = ""
@@ -1380,26 +1383,36 @@ class GPhoto2Session:
         with self._lock:
             if self._closed:
                 return
-            if self._bulb_exposure_active:
-                bulb_values = self._bulb_values()
-                if bulb_values is not None:
-                    try:
-                        config, _, release_value = bulb_values
-                        self._set_config_value(config, release_value, refresh=False)
-                        self._bulb_exposure_active = False
-                    except BridgeError as error:
-                        self._last_error = error.message
+            release_error = None
+            if self._bulb_release_values is not None:
+                try:
+                    self._release_bulb_locked()
+                except BridgeError:
+                    release_error = self._shutter_release_error(disconnected=True)
+                    self._last_error = release_error.message
             was_live_view_active = self._live_view_active
             self._live_view_active = False
-            self._stop_movie_stream()
+            try:
+                self._stop_movie_stream()
+            except Exception as error:
+                if release_error is None:
+                    raise
+                release_error.add_note(f"Movie stream cleanup also failed: {type(error).__name__}")
             if was_live_view_active:
                 try:
                     self._set_viewfinder(False)
-                except BridgeError as error:
-                    self._last_error = error.message
+                except Exception as error:
+                    if release_error is not None:
+                        release_error.add_note(f"Viewfinder cleanup also failed: {type(error).__name__}")
+                    elif isinstance(error, BridgeError):
+                        self._last_error = error.message
+                    else:
+                        raise
             self._cached_live_view_frame = None
             self._live_view_transport = None
             self._closed = True
+            if release_error is not None:
+                raise release_error
 
     def info(self) -> CameraInfo:
         with self._lock:
@@ -1444,6 +1457,7 @@ class GPhoto2Session:
                 ),
                 recording=(recording_config.current.casefold() == "card") if recording_config else None,
                 bulb_exposure_active=self._bulb_exposure_active,
+                shutter_release_unconfirmed=self._shutter_release_unconfirmed,
                 mode=self._config_value("autoexposuremode") or "unknown",
                 media=StorageStatus(
                     available=storage.available,
@@ -1476,7 +1490,7 @@ class GPhoto2Session:
                     "eventPollingTransport": (
                         "GPHOTO2_WAIT_EVENT" if self._event_polling_supported else None
                     ),
-                    "eventPollingPaused": self._live_view_active or self._bulb_exposure_active,
+                    "eventPollingPaused": self._live_view_active or self._bulb_release_values is not None,
                 },
             )
 
@@ -1649,7 +1663,7 @@ class GPhoto2Session:
                 if self._pending_event_keys:
                     changed_keys = self._pending_event_keys
                     self._pending_event_keys = []
-                elif self._live_view_active or self._bulb_exposure_active:
+                elif self._live_view_active or self._bulb_release_values is not None:
                     changed_keys = []
                     paused = True
                 else:
@@ -1764,6 +1778,7 @@ class GPhoto2Session:
         if not self._lock.acquire(timeout=15.0):
             raise BridgeError("SETTING_WRITE_TIMEOUT", "Setting write lock timed out.", status_code=504)
         try:
+            self._require_shutter_release_confirmed()
             advertised_card = (self._advertised_storage_targets.get(value.casefold())
                                if key == "capturestorage" else None)
             config, control = self._ordinary_setting_config(key)
@@ -1783,6 +1798,7 @@ class GPhoto2Session:
 
     def set_setting(self, key: str, value: str) -> CameraStatus:
         with self._lock:
+            self._require_shutter_release_confirmed()
             text_spec = next((candidate for candidate in TEXT_METADATA_SPECS if candidate.key == key), None)
             if text_spec is not None:
                 return self._set_text_metadata(text_spec, value)
@@ -1939,7 +1955,7 @@ class GPhoto2Session:
         if not self._lock.acquire(timeout=15.0):
             raise BridgeError("MAINTENANCE_TIMEOUT", "Clock write lock timed out.", status_code=504)
         try:
-            self._require_open()
+            self._require_shutter_release_confirmed()
             if self._bulb_exposure_active:
                 raise BridgeError("CAMERA_BUSY", "Stop Bulb before synchronizing the clock.", status_code=409)
             pair = self._camera_clock_control()
@@ -1975,6 +1991,7 @@ class GPhoto2Session:
 
     def sync_camera_clock(self) -> CameraStatus:
         with self._lock:
+            self._require_shutter_release_confirmed()
             control = self._camera_clock_control()
             if control is None:
                 raise unsupported(
@@ -2005,7 +2022,7 @@ class GPhoto2Session:
 
     def capture_still(self) -> CameraStatus:
         with self._lock:
-            self._require_open()
+            self._require_shutter_release_confirmed()
             capture_target = self._find_config(("capturetarget",), writable=True)
             if capture_target is not None and _is_host_capture_target(capture_target.current):
                 if self._abilities.capture_image:
@@ -2073,6 +2090,7 @@ class GPhoto2Session:
 
     def half_press_shutter(self) -> CameraStatus:
         with self._lock:
+            self._require_shutter_release_confirmed()
             values = self._half_press_values()
             if values is None:
                 raise unsupported(CameraFeature.SHUTTER_HALF_PRESS.value, self.engine_name)
@@ -2090,6 +2108,7 @@ class GPhoto2Session:
 
     def start_bulb_exposure(self) -> CameraStatus:
         with self._lock:
+            self._require_shutter_release_confirmed()
             if self._bulb_exposure_active:
                 return self.status()
             values = self._bulb_values()
@@ -2097,32 +2116,75 @@ class GPhoto2Session:
                 raise unsupported(CameraFeature.BULB_EXPOSURE.value, self.engine_name)
             baseline = self.status()
             config, press_value, release_value = values
+            # Freeze only the validated release path/value, never a mutable discovery
+            # descriptor. An admitted press may apply even when its CLI response is lost.
+            self._bulb_release_values = (config.path, release_value)
+            self._bulb_exposure_active = None
+            self._shutter_release_unconfirmed = True
             try:
                 self._set_config_value(config, press_value, refresh=False)
-            except BridgeError as error:
+            except Exception as error:
                 try:
-                    self._set_config_value(config, release_value, refresh=False)
+                    self._release_bulb_locked()
                 except BridgeError as release_error:
-                    error.add_note(f"Bulb cleanup failed: {release_error.message}")
+                    raise release_error from error
                 raise
             self._bulb_exposure_active = True
+            self._bulb_start_confirmed = True
+            self._shutter_release_unconfirmed = False
             return baseline.model_copy(update={"bulb_exposure_active": True})
 
     def stop_bulb_exposure(self) -> CameraStatus:
         with self._lock:
-            if not self._bulb_exposure_active:
-                return self.status()
-            values = self._bulb_values()
-            if values is None:
-                raise unsupported(CameraFeature.BULB_EXPOSURE.value, self.engine_name)
-            config, _, release_value = values
-            self._set_config_value(config, release_value, refresh=False)
-            self._bulb_exposure_active = False
-            self._observed.add(CameraFeature.BULB_EXPOSURE)
+            self._require_open()
+            if self._release_bulb_locked():
+                self._observed.add(CameraFeature.BULB_EXPOSURE)
             return self.status()
+
+    def _release_bulb_locked(self) -> bool:
+        release = self._bulb_release_values
+        if release is None:
+            return False
+        path, value = release
+        try:
+            # Safety Stop uses the exact pre-admission descriptor even when later
+            # reads remove or change that capability. It never sends another press.
+            self._run(["--set-config-value", f"{path}={value}"], timeout=30.0)
+        except Exception as error:
+            self._bulb_exposure_active = None
+            self._shutter_release_unconfirmed = True
+            failure = self._shutter_release_error()
+            self._last_error = failure.message
+            raise failure from error
+        confirmed_start = self._bulb_start_confirmed
+        self._bulb_start_confirmed = False
+        self._bulb_release_values = None
+        self._bulb_exposure_active = False
+        self._shutter_release_unconfirmed = False
+        self._last_error = None
+        return confirmed_start
+
+    def _shutter_release_error(self, *, disconnected: bool = False, blocked: bool = False) -> BridgeError:
+        return BridgeError(
+            "SHUTTER_RELEASE_UNCONFIRMED",
+            ("The Bridge session was closed, but shutter release was not confirmed. "
+             "Check the camera and stop the exposure on the camera before reconnecting."
+             if disconnected else
+             "Shutter release was not confirmed; the camera may still be exposing. "
+             "Retry stopping the exposure in this session, or stop it on the camera before disconnecting."),
+            status_code=409 if blocked else 502,
+            feature=CameraFeature.BULB_EXPOSURE.value,
+            engine=self.engine_name,
+        )
+
+    def _require_shutter_release_confirmed(self) -> None:
+        self._require_open()
+        if self._shutter_release_unconfirmed:
+            raise self._shutter_release_error(blocked=True)
 
     def autofocus(self) -> CameraStatus:
         with self._lock:
+            self._require_shutter_release_confirmed()
             configs = self._autofocus_configs()
             if configs is None:
                 status = self.half_press_shutter()
@@ -2184,6 +2246,8 @@ class GPhoto2Session:
         try:
             self._require_open()
             starting = operation == "start"
+            if starting:
+                self._require_shutter_release_confirmed()
             prior = getattr(self, "_recording_stop_values", None)
             if starting and prior is not None:
                 raise BridgeError("RECORDING_STOP_REQUIRED", "Resolve previous recording with Stop.", status_code=409)
@@ -2242,6 +2306,7 @@ class GPhoto2Session:
 
     def drive_focus(self, direction: str, step: str) -> FocusResult:
         with self._lock:
+            self._require_shutter_release_confirmed()
             if not self._live_view_active:
                 raise BridgeError(
                     "LIVE_VIEW_REQUIRED",
@@ -2272,6 +2337,7 @@ class GPhoto2Session:
 
     def set_live_view_magnification(self, value: int) -> LiveViewMagnificationResult:
         with self._lock:
+            self._require_shutter_release_confirmed()
             if not self._live_view_active:
                 raise BridgeError(
                     "LIVE_VIEW_REQUIRED",
@@ -2314,6 +2380,7 @@ class GPhoto2Session:
 
     def start_live_view(self, request: LiveViewStartRequest) -> None:
         with self._lock:
+            self._require_shutter_release_confirmed()
             if not self._abilities.capture_preview:
                 raise unsupported(CameraFeature.LIVE_VIEW.value, self.engine_name)
             if request.source.upper() not in {"AUTO", "DESKTOP_BRIDGE_STREAM"}:
@@ -2827,6 +2894,8 @@ class GPhoto2Session:
 
     def _set_recording(self, recording: bool) -> CameraStatus:
         with self._lock:
+            if recording:
+                self._require_shutter_release_confirmed()
             values = self._recording_values()
             if values is None:
                 raise unsupported(CameraFeature.VIDEO_RECORDING.value, self.engine_name)
