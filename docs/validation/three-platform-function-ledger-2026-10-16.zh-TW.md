@@ -209,3 +209,7 @@
 ## 2026-10-17 Android G08/G09/G10 原畫面 owner
 
 [媒體 callback 原連線 gate](android-media-callback-owner-2026-10-17.zh-TW.md) 修正原列 #73/#75/#76/#77/#78 相關 gallery、preview、transfer、upload/cancel caller：舊畫面不再於重連後替新相機取得操作 owner，已儲存 Gallery JPEG 的獨立交付不受影響。既有離線 Kotlin 工具直接編譯 production 純 gate／metadata helper，以及 byte-exact callback binding＋shape adapters，22/22；完整 Compose/Gradle/native/真機仍 NOT_RUN。與 iOS lifecycle 兩項修正整合後，134 source guards 通過；source guards 不代表原生 runtime 通過。
+
+## 2026-10-17 G07 browser 延遲列舉增量
+
+[原列 #123 local preview Firefox 操作](local-preview-firefox-2026-10-17.zh-TW.md)：source `4efb9a33`，合成 canvas stream 已播放、enumerateDevices unresolved 時 Stop 可用；停止後晚回覆不覆寫 stopped。三張截圖與狀態 receipt 已保存。這是 cloud Firefox production UI 的窄旅程，不是實體 UVC／HDMI 或三端完整驗收。

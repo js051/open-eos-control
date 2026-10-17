@@ -1,0 +1,7 @@
+{"at":1792255679521,"starts":0,"stops":0,"pending":0,"button":"\n                \n                Start Live View\n              ","disabled":true,"videoWidth":0,"videoHidden":true,"stream":false,"operation":"Ready"}
+{"at":1792255834887,"starts":0,"stops":0,"pending":0,"button":"\n                \n                Start Live View\n              ","disabled":true,"videoWidth":0,"videoHidden":true,"stream":false,"operation":"Ready"}
+{"at":1792255875951,"starts":0,"stops":0,"pending":0,"button":"Start Live View","disabled":false,"videoWidth":0,"videoHidden":true,"stream":false,"operation":"Ready"}
+{"at":1792255885208,"starts":0,"stops":0,"pending":0,"button":"Start video input","disabled":false,"videoWidth":0,"videoHidden":true,"stream":false,"operation":"Ready"}
+{"at":1792256001844,"starts":1,"stops":0,"pending":1,"button":"\n                \n                Stop video input\n              ","disabled":false,"videoWidth":640,"videoHidden":false,"stream":true,"operation":"Local video input started"}
+{"at":1792256010353,"starts":1,"stops":1,"pending":1,"button":"Start video input","disabled":false,"videoWidth":0,"videoHidden":true,"stream":false,"operation":"Local video input stopped"}
+{"at":1792256019388,"starts":1,"stops":1,"pending":0,"button":"Start video input","disabled":false,"videoWidth":0,"videoHidden":true,"stream":false,"operation":"Local video input stopped"}
