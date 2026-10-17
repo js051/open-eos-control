@@ -1983,7 +1983,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
 @Composable
 fun ErrorBanner(error: String?, onDismiss: () -> Unit, dismissible: Boolean = true) {
     if (error == null) return
-    val displayError = (cameraAppErrorResource(error) ?: userFacingCameraErrorResource(error))
+    val displayError = liveViewDecodeFailureMessage(error) ?: (cameraAppErrorResource(error) ?: userFacingCameraErrorResource(error))
         ?.let { stringResource(it) } ?: error
     if (!dismissible) {
         PersistentCameraWarning(displayError)

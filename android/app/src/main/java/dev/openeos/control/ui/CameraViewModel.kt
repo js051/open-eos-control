@@ -4103,10 +4103,7 @@ class CameraViewModel(
             val frame = repository.fetchLiveViewFrame()
             val bitmap = withContext(Dispatchers.Default) {
                 BitmapFactory.decodeByteArray(frame.bytes, 0, frame.bytes.size)
-            } ?: error(
-                "Live view frame was received but Android could not decode it " +
-                    "(${frame.bytes.size} bytes, ${frame.contentType ?: "unknown content type"})."
-            )
+            } ?: throw LiveViewFrameDecodeException(frame.bytes.size, frame.contentType)
 
             _uiState.update {
                 if (it.connected && !it.shutterReleaseUnconfirmed && it.liveViewAutoRefresh &&
@@ -4175,6 +4172,8 @@ class CameraViewModel(
 
     private fun formatException(exception: Exception): String = if (exception is CameraAppException) {
         exception.error.messageToken
+    } else if (exception is LiveViewFrameDecodeException) {
+        exception.failure.messageToken
     } else buildString {
         append(exception.javaClass.simpleName)
         append(": ")
