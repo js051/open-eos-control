@@ -1,0 +1,20 @@
+{
+  "result": "PASS",
+  "scope": "Production PC UI in cloud Firefox with synthetic stream receipt; no camera/native acceptance",
+  "source": "3987b5f32b0f8c18e55712ffdacb87be78c1173b",
+  "observed": [
+    "Pending Apply ISO200 holds write; current ISO100",
+    "Escape then matched stream: current ISO100, focus BUTTON iso, local cancelled-waiting text",
+    "Enter reopens dialog with draft200 retained"
+  ],
+  "sha256": {
+    "run.py": "195be2cef94eee0c79cd29c38ab4ee51a8598ecbc07eeafc43e66daf6e16597c",
+    "03-keyboard-reopen-draft.png": "e04b9e3e677f16a5561ce740ec9fc349f1f88fdb847f0b87d26fced03553834a",
+    "receipt.json": "ad9816f50dabde002a8d34de9e4475076a36722675d2926f2e5ca764130b9feb",
+    "02-closed-focus-restored.png": "6722136c5ffe1722b0b0f4843f105931d065e697a60f55f70909795da53b22fd",
+    "events.jsonl": "571d3c940ba030f56a503efcbb90b59f5326652cb427338220f36d09964a0fbf",
+    "01-pending.png": "8fb8da76f52d0514960d535045c0fe956a7131a8322aae3b4fdea1da11c8764d",
+    "source.json": "6a8939d8a17cb0967fb97bda67d00ffd925a8c4ec21e82e726a9282a629bbef7",
+    "fixture.js": "be40942dd4c6ee92d66fc28212b138e2e725dbc21e58fb268b75c6630cfa4ee2"
+  }
+}

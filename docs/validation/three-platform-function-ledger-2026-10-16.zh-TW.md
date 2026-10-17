@@ -289,3 +289,7 @@
 - Android/iOS完整原生驗證、Windows成品、實體相機/外部儲存與原D/E列限制仍存在；沒有把原89列改成全過。
 
 20:21 UTC Firefox補驗：cached A receipt保留新AF B警告、僅明確Recovery解除，三圖通過；G03晚receipt資料退休通過，但pendingEscape仍回BODY、Enter不能重開，該鍵盤殘缺明列下一段，未被successfulApply或host綠燈掩蓋。
+
+## 20:32 UTC pending 設定取消鍵盤補齊
+
+G03/#42/#43、G13/#122：[pending Apply 焦點](pc-setting-pending-focus-2026-10-17.zh-TW.md) 補上前段實看失敗項。只在原 record settlement、精確 owner 未變且焦點仍 BODY 時，回到重繪後目前同 key 按鈕；不搶新焦點，不把取消等待說成相機取消。3799 modules、15 static UI；真 Firefox pending Escape→late matched stream→Enter 重開草稿三圖通過。Android Bridge owned Bulb caller 正獨立修正，原生與全89列未完成。
