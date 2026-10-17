@@ -229,7 +229,7 @@ test("UI strings, script order, review and lifecycle entry points are wired into
     cancelCubeLutImport: () => lifecycle.push("lut"), stopRtpAudio: () => lifecycle.push("audio"),
     suspendMaintenanceForLifecycle: () => lifecycle.push("maintenance"),
     cancelMediaUpload: options => lifecycle.push({ upload: { ...options } }),
-    cancelCameraConnection() {}, stopMediaAutoImport() {}, releaseHeldAutofocusForLifecycle() {}, cancelCameraFocusInfo() {},
+    cancelCameraConnection() {}, stopMediaAutoImport() {}, releaseHeldAutofocusForLifecycle() {}, releaseBulbForLifecycle() {}, cancelCameraFocusInfo() {},
   });
   handlers.pagehide();
   assert.deepEqual(lifecycle.filter(item => item?.upload), [{ upload: { silent: true, retire: true } }]);

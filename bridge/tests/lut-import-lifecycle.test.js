@@ -269,7 +269,7 @@ function lifecycle(h, event) {
   Object.assign(h.context, { window: { addEventListener: (key, callback) => { handlers[key] = callback; } },
     document: { visibilityState: "hidden", addEventListener: (key, callback) => { handlers[key] = callback; } },
     suspendMaintenanceForLifecycle: noop, cancelMediaUpload: noop, stopMediaAutoImport: noop,
-    releaseHeldAutofocusForLifecycle: noop, cancelCameraFocusInfo: noop, cancelCameraScan: noop, cancelCameraConnection: noop,
+    releaseHeldAutofocusForLifecycle: noop, releaseBulbForLifecycle: noop, cancelCameraFocusInfo: noop, cancelCameraScan: noop, cancelCameraConnection: noop,
     cancelMediaDownload: noop, clearMediaThumbnails: noop, closeMediaPreview: noop, closeMediaDetails: noop,
     stopLocalVideo: noop, stopRtpAudio: noop, refreshMediaDateZone: noop, renderAvailability: noop,
     renderMediaAutoImport: noop,

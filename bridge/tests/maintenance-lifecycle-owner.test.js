@@ -97,7 +97,7 @@ test('maintenance prerequisite control freezes token, abort signal, no replay pa
 });
 function installLifecycle(h,event){
  const handlers={};Object.assign(h.context,{document:{visibilityState:'hidden',addEventListener:(name,handler)=>{handlers[name]=handler;}},window:{addEventListener:(name,handler)=>{handlers[name]=handler;}},
- cancelEventLoop:()=>h.calls.push('cancel-events-local'),stopMediaAutoImport(){},cancelMediaMutation(){},releaseHeldAutofocusForLifecycle(){},cancelCameraFocusInfo(){},cancelMediaUpload(){},cancelCameraScan(){},cancelCameraConnection(){},
+ cancelEventLoop:()=>h.calls.push('cancel-events-local'),stopMediaAutoImport(){},cancelMediaMutation(){},releaseHeldAutofocusForLifecycle(){},releaseBulbForLifecycle(){},cancelCameraFocusInfo(){},cancelMediaUpload(){},cancelCameraScan(){},cancelCameraConnection(){},
  cancelMediaDownload(){},clearMediaThumbnails(){},closeMediaPreview(){},closeMediaDetails(){},stopLocalVideo(){},stopRtpAudio(){},lutPreviewRenderer:null,
  api:(...args)=>{h.calls.push({unloadRemote:args});return Promise.resolve();},refreshMediaDateZone(){},renderMediaAutoImport(){}});
  const marker=event==='visibilitychange'?'    document.addEventListener?.("visibilitychange"':'    window.addEventListener("'+event+'"';

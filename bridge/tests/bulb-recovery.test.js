@@ -19,7 +19,7 @@ function productionFunction(name) {
 
 function context(status = {}) {
   const state = {
-    session: { id: "synthetic-session" }, captureMode: "photo", busy: false,
+    session: { id: "synthetic-session" }, captureMode: "photo", busy: false, refreshGeneration: 0,
     status: { mode: "Bulb", bulbExposureActive: false, shutterReleaseUnconfirmed: false, ...status },
     shutterReleaseUnconfirmed: false,
   };
@@ -34,12 +34,13 @@ function context(status = {}) {
   };
   const sandbox = vm.createContext({
     state, ui, requests, feedback, AbortController, setTimeout, clearTimeout,
+    crypto: require("node:crypto").webcrypto,
     FEATURES: { BULB_EXPOSURE: "BULB_EXPOSURE", VIDEO_RECORDING: "VIDEO_RECORDING" },
     featureSupported: () => true,
     isBulbMode: () => state.status.mode === "Bulb",
     captureModeFromCamera: () => null,
     cameraInteractionBusy: () => state.busy,
-    beginCameraInteraction: () => { state.busy = true; },
+    beginCameraInteraction: () => { state.refreshGeneration++; state.busy = true; },
     t: (key) => key,
     pauseLivePolling: () => feedback.push("pause"),
     resumeLivePolling: () => feedback.push("resume"),
@@ -54,7 +55,7 @@ function context(status = {}) {
     },
   });
   vm.runInContext([
-    "adoptCameraStatus", "recordingRecoveryActive", "shutterReleaseUnconfirmed", "bulbControlLocked", "renderCaptureMode", "readBulbRecoveryStatus", "operateShutter",
+    "adoptCameraStatus", "recordingRecoveryActive", "shutterReleaseUnconfirmed", "bulbControlLocked", "renderCaptureMode", "readBulbRecoveryStatus", "bulbOwnerCurrent", "bulbStopAvailable", "bulbOwnerRequest", "startOwnedBulb", "stopOwnedBulb", "operateShutter",
   ].map(productionFunction).join("\n"), sandbox);
   return sandbox;
 }
@@ -91,17 +92,17 @@ async function run() {
       throw { code: "SHUTTER_RELEASE_UNCONFIRMED", message: "Synthetic release failed" };
     };
     await test.operateShutter();
-    assert.equal(test.state.shutterReleaseUnconfirmed, true);
+    assert.equal(test.shutterReleaseUnconfirmed(), true);
     assert.equal(test.feedback.includes("resume"), false);
     test.state.status = { mode: "Manual", bulbExposureActive: false, shutterReleaseUnconfirmed: false };
     test.featureSupported = () => false;
     test.renderCaptureMode();
     assert.equal(test.ui.shutterButton["aria-label"], "retryBulbStop");
     await test.operateShutter();
-    assert.deepEqual(test.requests.map(([url]) => url.split("/").slice(-2).join("/")), [
-      "bulb/start", "synthetic-session/status", "bulb/stop", "synthetic-session/status",
+    assert.deepEqual(test.requests.map(([url]) => url.split("/").slice(-3).join("/")), [
+      "bulb/start/owned", "bulb/stop/owned",
     ]);
-    assert.equal(test.state.shutterReleaseUnconfirmed, true);
+    assert.equal(test.shutterReleaseUnconfirmed(), true);
   }
   {
     const test = context({ bulbExposureActive: null, shutterReleaseUnconfirmed: true });

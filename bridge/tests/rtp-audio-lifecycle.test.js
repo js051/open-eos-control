@@ -69,7 +69,7 @@ function harness({ outputSupported = false, closePending = false } = {}) {
     clearTimeout(id) { timers.delete(id); },
   };
   for (const name of ["cancelCameraConnection", "cancelRecordingWait", "suspendMaintenanceForLifecycle", "stopMediaAutoImport", "cancelMediaMutation",
-    "releaseHeldAutofocusForLifecycle", "cancelCameraFocusInfo", "refreshMediaDateZone", "renderAvailability",
+    "releaseHeldAutofocusForLifecycle", "releaseBulbForLifecycle", "cancelCameraFocusInfo", "refreshMediaDateZone", "renderAvailability",
     "renderMediaAutoImport", "cancelMediaUpload"]) h[name] = () => {};
   vm.createContext(h);
   const start = app.indexOf("  const state = {");
