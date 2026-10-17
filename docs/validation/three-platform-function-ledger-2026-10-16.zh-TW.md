@@ -201,3 +201,7 @@
 ## 2026-10-17 再盤點的產品反例
 
 先前「沒有另一個已確認 caller 缺口」只代表當時觀察，現由兩個真反例更新：[G07 local preview／G09 download lifecycle](local-preview-transfer-lifecycle-2026-10-17.zh-TW.md)。預覽不再由裝置列舉鎖住 Stop，舊列舉不能覆蓋新狀態；目的地處理失敗會取消來源 reader。已本地實作與 host 回歸；初次缺 pwsh 的掃描阻擋已依既有授權恢復官方工具，交付沿正常掃描及非 force dev 流程。本批不是原生／瀏覽器／真機驗收，不改 D/E 能力界線。
+
+## 2026-10-17 iOS G03/G06/G08 續查反例
+
+基底 `20251fcd` 的既有 iOS caller 續查找到兩個可實作缺口：[event admission／maintenance RTP watcher](ios-lifecycle-continuation-2026-10-17.zh-TW.md)。原列 #41/#73 的 content event 在 Live View retirement 擋住 admission 時同步空轉；#55/#81 的 sensor-cleaning Restore 遺漏重新註冊 RTP render watcher。兩者均已有窄修正與已撰寫的原生 regression；本地只執行 source／contract guards，Swift/Xcode/XCTest/GPU 仍 NOT_RUN。新文件列出 G01–G10 查核及各群 residual blockers，不把原89列改寫為全通過，也不把未實作 transport 改稱僅待測試。
