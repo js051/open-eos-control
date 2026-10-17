@@ -379,3 +379,11 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - [Android Direct AF／Bulb](android-direct-release-transport-bound-2026-10-17.zh-TW.md)：10個原有held AF、pulse AF／manual fallback、half-press與Bulb press/release呼叫使用bounded single-attempt transport。不是先前已具5秒界線的Android Bridge AF；兩條transport分開。基準12指定真紅＋2相容性綠，固定14/14；LV12與still3既有回歸另列。兩個release owner class逐byte未變，原mutex、NonCancellable cleanup、原operation closure與Simulator保留。9個socket案已寫未跑，PSI僅語法，15秒真socket未驗。
 - [Bridge cooperative control body](bridge-control-body-budget-2026-10-17.zh-TW.md)：真urllib loopback證明socket timeout不能阻止持續滴流累積body。只將8個method/suffix加入既有合作式read1 budget；Start producer完結後才補償Stop，晚Stop保留原owner／未知責任。相同34案基準14紅／20綠→固定34綠，445 distinct窄回歸已含34案；重跑不重複計數。快速錯誤診斷、已收到拒絕status、configuration與redirect規則不變。
 - 整合Android tree與受驗38f96f52、Bridge tree與受驗63c199b5逐檔相同並經獨立窄審。Bridge只證body讀取合作式期限；DNS/open/header、單次blocking read、其他GET/recording/drivefocus及整條Disconnect不在完成claim。原89列平台／真相機／OS驗收仍未完成。
+
+
+## 23:33 UTC G04/G05/G06 partial control ACK 與原 Stop 責任
+
+- [Bridge／Android partial ACK](control-partial-ack-2026-10-17.zh-TW.md)：原 AF／Bulb Stop 503 後，206 或 200+Content-Range（含空值）曾清掉原停止責任，讓新 Start 通過。只對原有 physical-control routes／flags 拒絕部分成功收據；原 owner、join、mutex、deadline、非2xx錯誤與media range保留。完整空body／純文字／JSON及既有成功status相容性不變。
+- Bridge同一86案基準30紅／56綠→固定86綠；466 distinct回歸已包含新案。Android精確production入口host同一13案基準9紅／4綠→固定13綠，既有release14、LV12、still3回歸另列。Android四個新MockWebServer測試已寫未跑，host不等於真OkHttp或完整type-check。
+- [iOS同一收據gate](ios-partial-control-receipt-20261017.md) 以相同8組method／suffix保護原AF、Bulb、JPEG／RTP Stop。保留原捕捉的method／path／payload與未知責任；完整原Stop成功才釋放。獨立來源複審無blocker；96 supplementary source checks已含5新項，12個native XCTest methods已寫但編譯／執行NOT_RUN，不宣稱iOS runtime紅綠。
+- 三端本批仍是原功能恢復契約增量；原89列的原生、實體相機、OS目的地、安裝／分發與unsupported provider缺口未因host或來源檢查變為通過。
