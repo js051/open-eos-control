@@ -4,6 +4,8 @@ import re
 from html.parser import HTMLParser
 from pathlib import Path
 
+import pytest
+
 STATIC = Path(__file__).parents[1] / "open_eos_bridge" / "static"
 
 
@@ -11,12 +13,14 @@ class UiDocumentParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.ids: list[str] = []
+        self.elements: list[tuple[str, dict[str, str | None]]] = []
         self.assets: list[str] = []
         self.inline_script_text: list[str] = []
         self._inside_inline_script = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = dict(attrs)
+        self.elements.append((tag, values))
         element_id = values.get("id")
         if element_id:
             self.ids.append(element_id)
@@ -34,6 +38,32 @@ class UiDocumentParser(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._inside_inline_script and data.strip():
             self.inline_script_text.append(data)
+
+
+DIALOG_TITLES = {
+    "monitoring-dialog": "monitoring-dialog-title",
+    "setting-dialog": "setting-dialog-title",
+    "media-preview-dialog": "media-preview-title",
+    "media-details-dialog": "media-details-name",
+    "media-history-dialog": "media-history-title",
+    "media-date-dialog": "media-date-title",
+    "media-folder-dialog": "media-folder-title",
+    "media-rating-dialog": "media-rating-title",
+}
+
+
+@pytest.mark.parametrize(("dialog_id", "title_id"), DIALOG_TITLES.items())
+def test_native_dialog_references_its_visible_title(dialog_id: str, title_id: str) -> None:
+    parser = UiDocumentParser()
+    parser.feed((STATIC / "index.html").read_text(encoding="utf-8"))
+    dialogs = {attrs["id"]: attrs for tag, attrs in parser.elements if tag == "dialog"}
+    assert set(dialogs) == set(DIALOG_TITLES), "new dialogs need an explicit naming regression"
+    assert dialogs[dialog_id].get("aria-labelledby") == title_id
+    titles = [(tag, attrs) for tag, attrs in parser.elements if attrs.get("id") == title_id]
+    assert len(titles) == 1, "the dialog title reference must resolve uniquely"
+    tag, title = titles[0]
+    assert tag in {"h2", "strong"}
+    assert "hidden" not in title and title.get("aria-hidden") != "true"
 
 
 def test_desktop_ui_document_has_stable_unique_controls_and_local_assets() -> None:
