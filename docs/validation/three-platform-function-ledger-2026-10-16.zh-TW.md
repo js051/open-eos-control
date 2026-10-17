@@ -348,3 +348,5 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - G04/G13：[iOS Bridge held-AF](ios-held-af-retirement-2026-10-17.zh-TW.md) 原 App/Core雙重等待 cancellation-ignoring Start，連 Stop與Disconnect都無法送出。本批獨立且合併原owner Stop、精確task identity、bounded原session retirement；匹配Stop ACK後仍保留pending Start reservation，防止live session循環新owner跨過server有限取消紀錄。409／timeout保留未知責任，DELETE不是物理釋放。
 - iOS App新增同generation／observer ID／release observation保護的晚settlement observer，只在原Start實際結束且Core明確idle後清同一舊警告；不清較新warning、不自動恢復。獨立審查抓到並修正重複native test宣告及App殘留警告。31 supplementary source checks；Core/App native fixtures仍未編譯／執行，不作原生驗收宣稱。Direct CCAPI流程保留。
 - 上述仍是原功能恢復與三端對齊增量，不是原89列全過。另在核對Android held-AF mutex／registered job／Disconnect的精確同類等待，不能將本批still capture修正擴張成所有focus cleanup已完成。
+
+22:31 UTC Android held-AF精確複核：Start與NonCancellable Stop原本皆經recoveryRead=true，設有min(existing,5秒)完整Call timeout，涵蓋response與body；三層join/mutex是現有安全順序。尚無足以支持ownership重寫的實際production反例，未因iOS差異就強行改Android。既有native取消/Stop測試仍未在本環境執行，保留平台驗證缺口。
