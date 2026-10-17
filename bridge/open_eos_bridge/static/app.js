@@ -4481,7 +4481,13 @@
     // Retire at dismissal, before a late receipt or saved callback can run.
     // The native close event is queued and only acknowledges this generation.
     state.settingEditor += 1;
-    if (state.settingOwner?.editor === editor) cancelSetting();
+    if (state.settingOwner?.editor === editor) {
+      // Pending Apply disables its opener. Retain only this dismissal's return
+      // target until its own settlement makes the control available again.
+      state.settingOwner.dismissedFocus = owner ? { ...owner, retiredEditor: editor + 1 } : null;
+      cancelSetting();
+      setOperationState(t("configCancelled"));
+    }
     ui.settingDialog.close();
     // A successful Apply replaces the exposure strip before closing this dialog.
     // Recover synchronously, never from a queued close event or a later response.
@@ -4671,6 +4677,21 @@
       if (settingCurrent(record)) {
         state.refreshGeneration += 1;
         state.settingOwner = null; state.busy = false; source.disabled = false; renderSession();
+        const focus = record.dismissedFocus;
+        record.dismissedFocus = null;
+        if (focus?.session === state.session && focus.retiredEditor === state.settingEditor &&
+            state.refreshGeneration === record.generation + 1 && state.activeView === "live" &&
+            !ui.controlView.hidden && !ui.settingDialog.open && !document.querySelector("dialog[open]")) {
+          const active = document.activeElement;
+          // A later response may recover an abandoned body focus, never another
+          // control, editor, camera, view or operation's focus destination.
+          if (!active || active === document.body) {
+            const target = [...ui.exposureStrip.querySelectorAll("button[data-setting-key]")]
+              .find(button => button.dataset.settingKey === focus.key && button.isConnected && !button.disabled &&
+                !button.closest("[hidden], [inert]") && button.getClientRects().length > 0);
+            target?.focus({ preventScroll: true });
+          }
+        }
       }
     }
   }

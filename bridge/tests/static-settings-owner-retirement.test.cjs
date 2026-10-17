@@ -576,3 +576,46 @@ test("ordinary close retires only its editor without cancelling an independent a
   assert.equal(h.state.capabilities.settings.find(s => s.key === "iso").value, "200");
   assert.equal(h.state.settingDrafts.iso, undefined); assert.equal(h.requests.length, 1);
 });
+
+test("pending Escape restores same-key focus only after its owned settlement", async () => {
+  const h = focusFixture(); let resolve;
+  h.response = new Promise(done => { resolve = done; });
+  await h.open(); const operation = h.apply(); await new Promise(done => setImmediate(done));
+  await h.cancel(); await h.ui.settingDialog.dispatch("close");
+  assert.equal(h.doc.activeElement, h.doc.body);
+  resolve(h.matched()); await operation;
+  assert.equal(h.doc.activeElement, h.ui.exposureStrip.children[0]);
+  assert.equal(h.doc.activeElement.disabled, false);
+  assert.equal(h.state.settingDrafts.iso, "200");
+  assert.equal(h.state.capabilities.settings.find(setting => setting.key === "iso").value, "100");
+  await h.doc.activeElement.dispatch("click");
+  assert.equal(h.ui.settingDialog.open, true);
+});
+for (const changed of ["new-editor", "new-session", "new-generation", "other-dialog", "hidden-control", "other-view"]) {
+  test(`pending Escape settlement never steals focus after ${changed}`, async () => {
+    const h = focusFixture(); let resolve;
+    h.response = new Promise(done => { resolve = done; });
+    await h.open(); const operation = h.apply(); await new Promise(done => setImmediate(done));
+    await h.cancel(); await h.ui.settingDialog.dispatch("close");
+    if (changed === "new-editor") h.state.settingEditor++;
+    if (changed === "new-session") h.state.session = { ...h.state.session };
+    if (changed === "new-generation") h.state.refreshGeneration++;
+    if (changed === "other-dialog") h.otherDialog = h.create("dialog");
+    if (changed === "hidden-control") h.ui.controlView.hidden = true;
+    if (changed === "other-view") h.state.activeView = "media";
+    const count = h.focusCalls.length; resolve(h.matched()); await operation;
+    assert.equal(h.focusCalls.length, count);
+  });
+}
+test("pending Escape replaces stale Working feedback with local-cancellation wording", async () => {
+  const h = focusFixture(); let resolve, message;
+  h.c.setOperationState = value => { message = value; };
+  h.response = new Promise(done => { resolve = done; });
+  await h.open(); const operation = h.apply(); await new Promise(done => setImmediate(done));
+  assert.equal(message, "busy");
+  await h.cancel();
+  const dismissedMessage = message;
+  resolve(h.matched()); await operation;
+  assert.equal(dismissedMessage, "configCancelled");
+  assert.equal(message, "configCancelled");
+});
