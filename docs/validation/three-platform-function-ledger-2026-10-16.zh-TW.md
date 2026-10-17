@@ -340,3 +340,11 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - G03/G13：[Android capture-configuration recovery](android-capture-recovery-bound-20261017.md) 修正 read-only GET 的 response/body 卡住 registered DIRECTORY job、阻止 Disconnect join 的缺口。原版3項真正 runtime 紅，固定13項通過；四組既有維護回歸16+67+67+68，合計231 executions，非231新案。[精確收據與輸出](evidence/android-capture-recovery-bound-20261017/README.md) 包含真15秒期限、Cancel、同名換session與late callback。保留 mutation／physical release join；僅明確 read-only recovery 使用有界 callback。
 - 整合 iOS／Android 來源與各自驗證 worktree 逐檔相同。沒有重跑未改綠燈充作新進度。完整 Android／Compose／真 OkHttp、Swift／Xcode、實體相機及原89列的平台驗收仍未完成。
 - 下一個已確認原功能缺口：Android Direct CCAPI 一般 still capture 的取消 watcher／whole-call timeout／bounded body 缺失；mandatory manual release 仍須保留原順序。另精確核對 iOS focus 退休等待，不把 owned Bulb 修正擴張成所有 cleanup 完成。
+
+
+## 22:30 UTC still capture 與 held-AF 退休
+
+- G04/G13：[Android Direct CCAPI still capture](android-still-transport-bound-2026-10-17.zh-TW.md) 只將真相機 direct/manual 三個既有呼叫（含原 release closure）接到既有 single-attempt、有全程期限的 client，加取消 watcher 與64KiB body上限。保留 synchronous producer join 與 NonCancellable mandatory release；沒有把 mutation 改成脫離 caller 的 callback。精確抽取production基準3案真紅→固定3案綠；4項 MockWebServer socket tests 已寫但未執行，15秒 production期限未實測。Simulator unchanged，完整 Android／真相機仍未驗。
+- G04/G13：[iOS Bridge held-AF](ios-held-af-retirement-2026-10-17.zh-TW.md) 原 App/Core雙重等待 cancellation-ignoring Start，連 Stop與Disconnect都無法送出。本批獨立且合併原owner Stop、精確task identity、bounded原session retirement；匹配Stop ACK後仍保留pending Start reservation，防止live session循環新owner跨過server有限取消紀錄。409／timeout保留未知責任，DELETE不是物理釋放。
+- iOS App新增同generation／observer ID／release observation保護的晚settlement observer，只在原Start實際結束且Core明確idle後清同一舊警告；不清較新warning、不自動恢復。獨立審查抓到並修正重複native test宣告及App殘留警告。31 supplementary source checks；Core/App native fixtures仍未編譯／執行，不作原生驗收宣稱。Direct CCAPI流程保留。
+- 上述仍是原功能恢復與三端對齊增量，不是原89列全過。另在核對Android held-AF mutex／registered job／Disconnect的精確同類等待，不能將本批still capture修正擴張成所有focus cleanup已完成。
