@@ -4668,6 +4668,11 @@ class CcapiClient(
                             response.headers("Content-Length"), response.headers("Transfer-Encoding"))
                         shootingEvidence?.responseReceived()
                     }
+                    if (captureEvidence != null) {
+                        check(response.code != 206 && response.headers("Content-Range").isEmpty()) {
+                            "Partial response is not a configuration acknowledgement."
+                        }
+                    }
                     captureResponse?.invoke(it)
                 }
             }

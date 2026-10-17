@@ -2104,6 +2104,10 @@ class CcapiSession:
     ) -> object:
         response = self._request(method, path, payload, timeout=timeout, max_bytes=65536,
                                  headers={"Cache-Control": "no-cache, no-store", "Accept": "application/json"})
+        if method not in {"GET", "HEAD"} and (response.status == 206
+                or any(name.casefold() == "content-range" for name in response.headers)):
+            raise BridgeError("INVALID_CCAPI_RESPONSE", "Partial response is not a configuration acknowledgement.",
+                              status_code=502, engine=self.engine_name)
         if strict_setting and (response.status != 200 or "content-range" in response.headers
                                or len(response.body) > 65536):
             raise BridgeError("INVALID_CCAPI_RESPONSE", "Incomplete setting read response.", status_code=502)

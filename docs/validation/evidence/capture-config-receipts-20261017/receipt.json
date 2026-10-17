@@ -1,0 +1,110 @@
+{
+  "baseline": "faefa520f8341d32a34badf5019d077b36017ee7",
+  "production_change_lines": 9,
+  "sources": [
+    {
+      "filename": "bridge/open_eos_bridge/ccapi.py",
+      "sha256": "1ba2b8d1f541ad406221a80119f33311b76252c255846c9f7149ecf4d863a773"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+      "sha256": "a9ba80c5af7e4a66af26939b95c3bb7ba244205b637aa3b9876224bc13e41a94"
+    },
+    {
+      "filename": "bridge/tests/test_capture_configuration_partial_ack.py",
+      "sha256": "28dbf145893151125adfaeb1b6e6470897d83b5768a064f8a5e6bb7c23b801d3"
+    },
+    {
+      "filename": "android/app/src/test/java/dev/openeos/control/data/CcapiClientTest.kt",
+      "sha256": "0dcbcab70d983cd9e19a9378d5e6f2d4d0ec45576fe486b870e8864ab0930aec"
+    },
+    {
+      "filename": "scripts/validation/run_android_capture_config_receipt_host.py",
+      "sha256": "5a33a0cd653e987af5b69cbed366ecdba0ca71be46b0273f2f3c5f676d2c3ba8"
+    }
+  ],
+  "bridge": {
+    "baseline": {
+      "exit": 1,
+      "failed": 6,
+      "passed": 9
+    },
+    "focused": {
+      "exit": 0,
+      "passed": 35
+    },
+    "regression": {
+      "exit": 0,
+      "passed": 545
+    },
+    "regression_files": [
+      "test_capture_configuration_partial_ack.py",
+      "test_capture_configuration.py",
+      "test_ccapi.py",
+      "test_shooting_settings.py",
+      "test_maintenance_lifecycle.py",
+      "test_maintenance_restore_ownership.py",
+      "test_recording_lifecycle.py",
+      "test_recording_readback_recovery.py"
+    ]
+  },
+  "android": {
+    "host_baseline_compile_exit": 0,
+    "host_baseline_junit_exit": 1,
+    "baseline_failed": 6,
+    "baseline_passed": 6,
+    "host_green_compile_exit": 0,
+    "host_green_junit_exit": 0,
+    "green_passed": 12,
+    "native_tests_added": 3,
+    "native": "AUTHORED_NOT_RUN",
+    "type_check": "NOT_RUN",
+    "physical_camera": "NOT_RUN",
+    "psi_files": 2,
+    "psi_errors": 0
+  },
+  "independent_review": "Production ACK boundary and nonoverlap reviewed; no blocker.",
+  "delivery": "implemented; local commit only; no push or release",
+  "artifacts": [
+    {
+      "filename": "android-green-compile.log",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "filename": "android-green-junit.log",
+      "sha256": "6ca552653e6ade649c87c6f861c2fe6e4161a09007c6a5038590549f5348f51a"
+    },
+    {
+      "filename": "android-green-receipt.json",
+      "sha256": "27b4f3f3ea78cff4c641a6ba8d5cf69323c6e2d5898756afaf1b0f50a6265e09"
+    },
+    {
+      "filename": "android-red-compile.log",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "filename": "android-red-junit.log",
+      "sha256": "6eecb6965ec2f5eed21c017b9cccc50193fcdfb8d67366a4775b963bc0c20aac"
+    },
+    {
+      "filename": "android-red-receipt.json",
+      "sha256": "6dd80491afae99a0a97f1ea4d79576d21365912c6a060e563afac645dc1a9303"
+    },
+    {
+      "filename": "bridge-green.log",
+      "sha256": "7255b23a512461c7aebffefd8601ff1178ee538ab6009e8869f56d608b21b21c"
+    },
+    {
+      "filename": "bridge-red.log",
+      "sha256": "fd156050e851d6e3bd73e5a95221cab573b497fe65c723d8348da43733c68aef"
+    },
+    {
+      "filename": "bridge-regression.log",
+      "sha256": "3e06e3553a1ffccd7751069dd74b3ae1055fb9f6c6a47a2ca04634cbc6466896"
+    },
+    {
+      "filename": "kotlin-psi.log",
+      "sha256": "8a136457fff632743d91f31a121f0591f881620b43492d4327c489a6bfb7defa"
+    }
+  ]
+}
