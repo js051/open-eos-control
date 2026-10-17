@@ -365,3 +365,46 @@ test("partial response stream failure cannot create a receipt and releases its r
   await assert.rejects(mediaUpload.readResponseText(response), /stream failure/);
   assert.equal(released, true); assert.equal(cancelled, true);
 });
+
+for (const destinationOutcome of ["picker-cancelled", "history-admission-failed"]) {
+  for (const receiptTiming of ["picker-pending", "download-settled"]) {
+    test(`single download fences cancelled upload receipt: ${destinationOutcome}, ${receiptTiming}`, async () => {
+      const c = fixture({ lateResponse: true });
+      const pending = c.choose(), uploadOwner = c.state.mediaUploadOwner;
+      c.context.cancelMediaUpload();
+      const uploadSnapshot = c.state.mediaUploadResult;
+      const picker = deferred();
+      let originalRequests = 0;
+      Object.assign(c.context, {
+        chooseMediaWritable: () => picker.promise,
+        mediaTransfer: require("../open_eos_bridge/static/media-transfer.js"),
+        mediaHistoryCall: async () => ({ ok: false }),
+        api: async () => { originalRequests += 1; throw new Error("Unexpected original request"); },
+        renderMedia() {}, renderMediaPreviewNavigation() {}, captureError: error => error,
+      });
+      c.context.FEATURES.MEDIA_DOWNLOAD = "MEDIA_DOWNLOAD";
+      vm.runInContext(["mediaTransferActive", "cameraInteractionBusy", "downloadMedia"].map(extract).join("\n"), c.context);
+      const download = c.context.downloadMedia({ id: "synthetic-download", name: "NEXT.JPG", sizeBytes: 4 });
+      assert.equal(c.state.mediaDownloadPreparing, true);
+      const settleDownload = async () => {
+        picker.resolve({ cancelled: destinationOutcome === "picker-cancelled", handle: null });
+        await download;
+        assert.equal(c.state.mediaDownloadPreparing, false);
+        assert.equal(c.state.mediaDownloadOwner, null);
+        assert.equal(originalRequests, 0);
+        assert.match(c.calls.operations.at(-1)[0], destinationOutcome === "picker-cancelled"
+          ? /^ready:/ : /^mediaSingleAdmissionFailed:/);
+      };
+      if (receiptTiming === "download-settled") await settleDownload();
+      const observed = { operations: c.calls.operations.length, toasts: c.calls.toasts.length,
+        lists: c.calls.lists, renders: c.calls.renders };
+      pending.reply(); await tick(); await tick();
+      assert.equal(mediaUpload.outcome(uploadOwner), "confirmed", "Keep the original attempt's receipt");
+      assert.equal(c.state.mediaUploadResult, uploadSnapshot, "Do not replace the newer interaction's snapshot");
+      assert.deepEqual({ operations: c.calls.operations.length, toasts: c.calls.toasts.length,
+        lists: c.calls.lists, renders: c.calls.renders }, observed,
+      "An old receipt cannot publish or request a refresh after single-download admission");
+      if (receiptTiming === "picker-pending") await settleDownload();
+    });
+  }
+}

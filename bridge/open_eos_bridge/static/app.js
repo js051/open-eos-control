@@ -9754,6 +9754,9 @@
   async function downloadMedia(item) {
     if (!state.session || !featureSupported(FEATURES.MEDIA_DOWNLOAD) || cameraInteractionBusy()) return;
     state.mediaListingOwner?.cancel({ silent: true });
+    // Retire publication from earlier interactions before the native picker can
+    // yield, including a cancelled upload's late same-operation receipt.
+    state.refreshGeneration += 1;
     const session = state.session;
     const sessionId = session.id;
     const owner = { cancelled: false, silent: false };
