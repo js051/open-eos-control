@@ -8500,6 +8500,7 @@
         renderMedia();
         renderAvailability();
         renderMediaPreviewNavigation();
+        if (owner.dismissedFocus) restoreMediaMutationFocus(owner);
       }
     }
   }
@@ -9811,7 +9812,24 @@
     state.mediaDetailsFocusOwner = null;
     if (dialog?.open) dialog.close();
     clearMediaDetails();
+    if (restoreFocus && eligible && owner && state.mediaMutationOwner?.session === owner.session &&
+        state.mediaMutation?.queue.results.some(row => row.id === owner.itemId)) {
+      // The card is disabled while this write settles. Keep only this operation's
+      // return target; a later editor/session/interaction must never inherit it.
+      state.mediaMutationOwner.dismissedFocus = {
+        owner, dialog, detailsGeneration: state.mediaDetailsGeneration,
+        refreshGeneration: state.refreshGeneration,
+      };
+    }
     if (restoreFocus && owner) restoreMediaDialogFocus(owner, eligible, dialog);
+  }
+
+  function restoreMediaMutationFocus(mutation) {
+    const target = mutation.dismissedFocus;
+    delete mutation.dismissedFocus;
+    if (!target || state.mediaDetailsGeneration !== target.detailsGeneration ||
+        state.refreshGeneration !== target.refreshGeneration) return;
+    restoreMediaDialogFocus(target.owner, true, target.dialog);
   }
 
   async function openMediaDetails(item, inheritedFocus = null) {
