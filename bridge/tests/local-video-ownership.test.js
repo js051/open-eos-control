@@ -228,3 +228,13 @@ test("initialize still reaches health and scan when local video is unavailable",
   assert.deepEqual(h.calls, ["bind", "health", "scan"]);
   assert.equal(h.enumerations.length, 0);
 });
+
+test("local preview restart retires the previous fallback frame counter", async () => {
+  const h = harness();
+  h.state.localVideoLastFrameCount = 99;
+  await h.startLocalVideo();
+  assert.equal(h.state.localVideoLastFrameCount, null);
+  h.state.localVideoLastFrameCount = 12;
+  h.stopLocalVideo({announce: false});
+  assert.equal(h.state.localVideoLastFrameCount, null);
+});
