@@ -599,6 +599,7 @@
       mediaDateFrom: "From",
       mediaDateTo: "To",
       mediaDateApply: "Apply",
+      cancel: "Cancel",
       mediaDateCancel: "Cancel",
       mediaDateClear: "Clear date range",
       mediaDateHelp: "Filters loaded media only, without reading more dates from the camera. Some connections do not report dates. Dates may be file modification dates, not capture dates.",
@@ -1355,6 +1356,7 @@
       mediaDateFrom: "開始日期",
       mediaDateTo: "結束日期",
       mediaDateApply: "套用",
+      cancel: "取消",
       mediaDateCancel: "取消",
       mediaDateClear: "清除日期區間",
       mediaDateHelp: "僅篩選已載入素材，不向相機補查日期。部分連線不提供日期；素材日期可能是檔案修改日期，不一定是拍攝日期。",
@@ -3512,7 +3514,7 @@
     const sleepSupported = featureSupported(FEATURES.CAMERA_SLEEP);
     if (clockSupported) {
       const row = document.createElement("div");
-      row.className = "settings-command";
+      row.className = "settings-command maintenance-command";
       const copy = document.createElement("span");
       const title = document.createElement("strong");
       title.textContent = t("syncCameraClock");
@@ -3580,7 +3582,7 @@
     renderMaintenanceHistory();
     if (sensorCleaningSupported) {
       const row = document.createElement("div");
-      row.className = "settings-command";
+      row.className = "settings-command maintenance-command";
       const copy = document.createElement("span");
       const title = document.createElement("strong");
       title.textContent = t("sensorCleaning");
@@ -3617,7 +3619,7 @@
     }
     if (sleepSupported) {
       const row = document.createElement("div");
-      row.className = "settings-command";
+      row.className = "settings-command maintenance-command";
       const copy = document.createElement("span");
       const title = document.createElement("strong");
       title.textContent = t("cameraSleep");
@@ -3962,7 +3964,7 @@
     const section = document.createElement("section"); section.dataset.maintenanceHistory = "true";
     const title = document.createElement("h3"); title.textContent = t("maintenanceHistory"); section.append(title);
     for (const record of [...state.maintenanceHistory].reverse()) {
-      const row = document.createElement("div"); row.className = "settings-command";
+      const row = document.createElement("div"); row.className = "settings-command maintenance-command";
       const copy = document.createElement("span"), heading = document.createElement("strong"), detail = document.createElement("small");
       heading.textContent = t(record.operation === "clock-sync" ? "syncCameraClock" : record.operation === "sleep" ? "cameraSleep" :
         record.autoPowerOff ? "sensorCleaningPowerOff" : "sensorCleaning");

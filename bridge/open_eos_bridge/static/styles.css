@@ -1203,6 +1203,24 @@ input:disabled {
   gap: 8px;
 }
 
+/* Maintenance evidence and descriptions keep the full sidebar width. */
+.settings-command.maintenance-command {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.maintenance-command .settings-command-actions {
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.settings-command.maintenance-command button {
+  justify-self: start;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .settings-command-actions input[type="text"] {
   width: 132px;
   min-height: 48px;

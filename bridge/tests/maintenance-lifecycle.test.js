@@ -58,3 +58,35 @@ test('maintenance event Stop accepts only the explicit empty 204 contract',async
   }
  }finally{global.fetch=previous;}
 });
+
+test('maintenance command copy occupies a full sidebar row and action labels can wrap', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../open_eos_bridge/static/app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '../open_eos_bridge/static/styles.css'), 'utf8');
+  for (const [start, end] of [
+    ['if (clockSupported) {', 'if (directorySupported) {'],
+    ['if (sensorCleaningSupported) {', 'if (sleepSupported) {'],
+    ['if (sleepSupported) {', 'if (!settings.length'],
+    ['function renderMaintenanceHistory()', 'async function maintenanceControlRequest'],
+  ]) {
+    const offset = app.indexOf(start);
+    const section = app.slice(offset, app.indexOf(end, offset));
+    assert.match(section, /row\.className = "settings-command maintenance-command"/, start);
+  }
+  const rule = selector => {
+    const start = css.indexOf(`${selector} {`);
+    assert.notEqual(start, -1, selector);
+    return css.slice(start, css.indexOf('}', start));
+  };
+  assert.match(rule('.settings-command.maintenance-command'), /grid-template-columns:\s*minmax\(0, 1fr\)/);
+  assert.match(rule('.maintenance-command .settings-command-actions'), /justify-content:\s*flex-start/);
+  assert.match(rule('.maintenance-command .settings-command-actions'), /min-width:\s*0/);
+  assert.match(rule('.settings-command.maintenance-command button'), /white-space:\s*normal/);
+  assert.match(rule('.settings-command.maintenance-command button'), /overflow-wrap:\s*anywhere/);
+  assert.match(rule('.settings-command.maintenance-command button'), /max-width:\s*100%/);
+});
+
+test('pending maintenance cancellation has a translated label in both dictionaries', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../open_eos_bridge/static/app.js'), 'utf8');
+  assert.equal((app.match(/cancel: "Cancel"/g) || []).length, 1);
+  assert.equal((app.match(/cancel: "取消"/g) || []).length, 1);
+});
