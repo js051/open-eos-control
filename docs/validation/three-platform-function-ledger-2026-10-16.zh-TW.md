@@ -364,3 +364,11 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - [Bridge upload retirement](bridge-upload-retirement-2026-10-17.md)：真 ASGI endpoint／SessionManager／GPhoto2Session 加合成 FakeRunner 重現 body staging 尚未完成時 Disconnect 已退休 registry、仍在 drain 先前 control，body 接續後卻 dispatch 一次 upload 並回201。並非已完成close後寫入新session；原provider closed檢查原本已能拒絕該控制案。
 - 最小修正讓同步 upload worker 於正式dispatch前進入原 camera_mutation guard，持有至provider終態；guard內核對原物件與取消。排隊後退休、重用文字ID、HTTP取消、已commit upload的readback/drain/staging壽命皆保留。原碼真紅；217 distinct pytest通過（含8新案），額外8案重跑不重複加計，Ruff與正常secret hook通過。
 - 整合app/test tree與受驗085be203相同並經獨立窄審；沒有新upload能力，實際相機／USB／三端原生仍未驗。
+
+
+## 23:08 UTC G06/G13 Android Direct Live View 控制
+
+- [Live View control transport](android-liveview-transport-bound-2026-10-17.zh-TW.md)：JPEG／multipart／RTP 原有Start/Stop（含400降級與closeStream）明確選用最長15秒single-attempt client、取消watcher及64KiB完整body讀取。保留同步producer join、NonCancellable Stop、unknown Stop阻擋新Start/fallback與RTP finally close。純文字400仍可執行原尺寸降級。
+- 精確production入口萃取同一fixture基線12案在指定assertion真紅，固定12/12；共用requestOk既有still回歸3/3另列。multipart stream只做wiring source guard；8個MockWebServer案已編寫未編譯/執行，真socket15秒未證。PSI語法不是Android type-check。整合Android與受驗89ae6aad逐檔相同，獨立窄審無新增blocker。前置temperature/capability read、RTP SDP與整條Connect/Disconnect總期限不在此claim。
+- G07歷史native失敗已對照較晚診斷：Android fixture VUI的兩個SPS metadata bytes早已修正（17da77a1），swap誤差0、nonlinear max0.416支持fixture診斷；修正後API34/36仍NOT_RUN。iOS extended-sRGB與插值後clamp早已實作，Metal/H264原容差保留，仍需native。沒有新production數學反例就不重跑host綠燈當進度。
+- iOS普通Bridge Live View仍用URLSession每request120秒resource上限，不能將自訂忽略取消transport無界等待當成真URLSession已證缺陷；無owned token的普通Start/Stop維持physical排序。下一最小驗證為真URLSession loopback取消/滴流，現無Swift/Xcode。上述兩個新產品缺口已修，原89列的native/真相機/OS目的地與unsupported項仍未完成。
