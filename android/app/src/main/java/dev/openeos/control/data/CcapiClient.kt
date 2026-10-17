@@ -3135,12 +3135,12 @@ class CcapiClient(
             .put("cameradisplay", "on")
             .put("liveviewsize", request.size.ccapiValue)
         try {
-            postOk(path, requestedPayload)
+            postOk(path, requestedPayload, liveViewControl = true)
             liveViewSizeControlSupported = true
         } catch (exception: CcapiHttpException) {
             if (currentCoroutineContext()[MaintenanceIoContext] != null || exception.statusCode != 400) throw exception
             try {
-                postOk(path, JSONObject().put("cameradisplay", "on"))
+                postOk(path, JSONObject().put("cameradisplay", "on"), liveViewControl = true)
                 liveViewSizeControlSupported = false
             } catch (parameterException: CcapiHttpException) {
                 if (parameterException.statusCode != 400) throw parameterException
@@ -3157,6 +3157,7 @@ class CcapiClient(
                             JSONObject()
                                 .put("cameradisplay", "on")
                                 .put("liveviewsize", fallbackSize.ccapiValue),
+                            liveViewControl = true,
                         )
                         rejectedLiveViewSizes.add(request.size)
                         liveViewSizeControlSupported = true
@@ -3187,8 +3188,8 @@ class CcapiClient(
             closeCcapiMultipartSession(multipartLiveViewSession)
             multipartLiveViewSession = null
             // Canon's multipart DELETE closes the stream; the general stop owns Live View itself.
-            if (currentCoroutineContext()[MaintenanceIoContext] != null) deleteOk(operation.closeStream.path)
-            else runCatching { deleteOk(operation.closeStream.path) }
+            if (currentCoroutineContext()[MaintenanceIoContext] != null) deleteOk(operation.closeStream.path, liveViewControl = true)
+            else runCatching { deleteOk(operation.closeStream.path, liveViewControl = true) }
             stopCcapiLiveView(operation.stopLiveView, operation.stopMethod)
         }) {
             activeMultipartLiveViewOperations = operation
@@ -3277,12 +3278,13 @@ class CcapiClient(
         stopMethod: CcapiLiveViewStopMethod,
     ) {
         when (stopMethod) {
-            CcapiLiveViewStopMethod.DELETE -> deleteOk(operation.path)
+            CcapiLiveViewStopMethod.DELETE -> deleteOk(operation.path, liveViewControl = true)
             CcapiLiveViewStopMethod.POST_OFF -> postOk(
                 operation.path,
                 JSONObject()
                     .put("liveviewsize", "off")
                     .put("cameradisplay", "on"),
+                liveViewControl = true,
             )
         }
     }
@@ -3301,7 +3303,7 @@ class CcapiClient(
             if (nativeLiveViewSession === session) nativeLiveViewSession = null
         }, stop = {
             try {
-                postOk(controlPath, JSONObject().put("action", "stop").put("ipaddress", ""))
+                postOk(controlPath, JSONObject().put("action", "stop").put("ipaddress", ""), liveViewControl = true)
             } finally {
                 session.close()
                 if (nativeLiveViewSession === session) nativeLiveViewSession = null
@@ -3313,6 +3315,7 @@ class CcapiClient(
                 JSONObject()
                     .put("action", "start")
                     .put("ipaddress", checkNotNull(rtpDestinationAddress)),
+                liveViewControl = true,
             )
             session.awaitReady(RTP_FIRST_VIDEO_TIMEOUT_MILLIS)
             currentCoroutineContext().ensureActive()
@@ -4553,12 +4556,14 @@ class CcapiClient(
         path: String,
         payload: JSONObject,
         expectedStatusCode: Int? = null,
+        liveViewControl: Boolean = false,
     ): Unit = requestOk(
         Request.Builder()
             .url("$baseUrl$path")
             .post(payload.toString().toRequestBody(jsonMediaType))
             .build(),
         expectedStatusCode = expectedStatusCode,
+        liveViewControl = liveViewControl,
     )
 
     private suspend fun putOk(
@@ -4575,11 +4580,12 @@ class CcapiClient(
         checkOwner = checkOwner,
     )
 
-    private suspend fun deleteOk(path: String): Unit = requestOk(
+    private suspend fun deleteOk(path: String, liveViewControl: Boolean = false): Unit = requestOk(
         Request.Builder()
             .url("$baseUrl$path")
             .delete()
             .build(),
+        liveViewControl = liveViewControl,
     )
 
     private fun newCameraCall(request: Request, captureConfiguration: Boolean = false): Call {
@@ -4702,6 +4708,7 @@ class CcapiClient(
         recordingEvidence: RecordingRequestEvidence? = null,
         checkOwner: (() -> Unit)? = null,
         stillCapture: Boolean = false,
+        liveViewControl: Boolean = false,
     ): Unit = withContext(Dispatchers.IO) {
         currentCoroutineContext().ensureActive()
         checkOwner?.invoke()
@@ -4716,10 +4723,10 @@ class CcapiClient(
         val shootingEvidence = currentCoroutineContext()[ShootingSettingWriteContext]?.evidence
         shootingEvidence?.let { currentCoroutineContext().ensureActive(); it.beforeDispatch() }
         val recordingIo = currentCoroutineContext()[RecordingIoContext] != null || recordingEvidence != null
-        // Still capture remains joined through the complete response and mandatory manual release.
-        // Bound the synchronous producer itself; cancellation must not detach it from release.
-        val call = newCameraCall(request.newBuilder().tag(RecordingRequestEvidence::class.java, recordingEvidence).build(), shootingEvidence != null || recordingIo || stillCapture)
-        val watcher = if (shootingEvidence != null || recordingIo || checkOwner != null || stillCapture) launch(start = CoroutineStart.UNDISPATCHED) {
+        // Still capture and Live View control remain joined through the response and owned release.
+        // Bound the producer itself, including NonCancellable Stop; never detach its cleanup.
+        val call = newCameraCall(request.newBuilder().tag(RecordingRequestEvidence::class.java, recordingEvidence).build(), shootingEvidence != null || recordingIo || stillCapture || liveViewControl)
+        val watcher = if (shootingEvidence != null || recordingIo || checkOwner != null || stillCapture || liveViewControl) launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { call.cancel() }
         } else null
         try {
@@ -4727,9 +4734,15 @@ class CcapiClient(
             checkOwner?.invoke()
             call.execute().use { response ->
             recordingEvidence?.rejected = !response.isSuccessful
-            val body = response.body?.let { body -> if (shootingEvidence == null && !recordingIo && !stillCapture) body.string() else
-                body.byteStream().use { readShootingSettingResponseText(it, body.contentLength()) }
-            }.orEmpty()
+            val body = response.body?.let { body -> when {
+                liveViewControl -> body.byteStream().use { readStrictMediaJsonText(it, body.contentLength(), 65_536) }.also {
+                    // Preserve Canon's plain-text errors and the existing HTTP 400 size fallback.
+                    check(body.contentLength() < 0 || it.toByteArray(Charsets.UTF_8).size.toLong() == body.contentLength())
+                }
+                shootingEvidence != null || recordingIo || stillCapture ->
+                    body.byteStream().use { readShootingSettingResponseText(it, body.contentLength()) }
+                else -> body.string()
+            } }.orEmpty()
             if (!response.isSuccessful) {
                 throw CcapiHttpException(
                     statusCode = response.code,

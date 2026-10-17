@@ -1,0 +1,2 @@
+SYNTAX PASS android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt
+SYNTAX PASS android/app/src/test/java/dev/openeos/control/data/CcapiLiveViewControlTransportTest.kt
