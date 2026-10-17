@@ -306,3 +306,5 @@ G03/#42/#43、G13/#122：[pending Apply 焦點](pc-setting-pending-focus-2026-10
 G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) 的 caller 已改用有界 callback 等待，保留精確 saved session、strict Stop／events DELETE／session DELETE 契約及原 error priority。基準4/4確實紅，包含未主動cancel、真15秒已觸發而body仍卡住；固定16/16、前批owned Bulb59/59、40 source/resource checks通過。真15秒證據不等於transport producer實際停止。
 
 仍未宣稱整個maintenance Disconnect有界：ViewModel先join一般maintenance dispatch/read/restore的caller鏈，以及physical AF cleanup另有邊界；下一段先驗證精確入口反例。完整Android／Compose／實際OkHttp／裝置與iOS同等修正仍未完成。另校正前段metadata #56分類為原G10。
+
+21:08 UTC G10/#78＋G08/#75：[上傳晚收據／預覽接續](pc-upload-preview-continuation-2026-10-17.zh-TW.md) 真Firefox與原生picker補驗：cancel unknown→明確Preview→late201 confirmed＋空listing不關預覽，僅一個write。合成network邊界清楚分列，非新增功能或真機上傳證據。

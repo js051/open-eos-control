@@ -1,0 +1,19 @@
+{
+  "result": "PASS for the synthetic late-receipt continuation boundary",
+  "actual_head": "0654a99736a83fdd939a2cff9d74881f087076ca",
+  "prepared_source_head": "5b5cc7afd8a086000babae34694c9b751072809c",
+  "product_bridge_tree_unchanged": true,
+  "native_file_picker": {
+    "name": "e.jpg",
+    "size": 25
+  },
+  "observed": [
+    "Exactly one held upload dispatch",
+    "Cancel shows unknown, not rollback",
+    "Explicit preview opened before late receipt",
+    "Same-write 201 receipt after abort confirms original upload",
+    "Follow-up listing omits preview item; already displayed preview remains open",
+    "Escape explicitly closes preview; upload receipt remains confirmed"
+  ],
+  "boundary": "Real cloud Firefox and native file chooser, production page. Synthetic fetch deliberately returns held 201 after cancellation; this does not claim native network ignores abort or prove camera upload/direct CCAPI support. First attempt interrupted during long-path input was inconclusive and is not counted."
+}
