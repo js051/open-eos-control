@@ -1,0 +1,10 @@
+{
+  "sourceHead": "f3373bb7fd9a76d9a5a5efcd90349574ec603162",
+  "appSha256": "3c96291b2e40460a4f4d1078646815e31a5fa18a1fc0a86a0320c6a8f781d2fb",
+  "scope": "production PC HTML/JS, synthetic fetch owner responses; no physical camera or native-platform acceptance",
+  "plannedJourneys": [
+    "pending-before-admission Start then Stop, late Start cancelled without press",
+    "pending post-dispatch timeout, failed Stop retains retry, explicit retry releases",
+    "pending Start Disconnect sends saved owner Stop and session close"
+  ]
+}

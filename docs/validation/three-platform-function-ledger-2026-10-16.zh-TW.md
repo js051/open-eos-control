@@ -280,3 +280,12 @@
 - Pending Start的HTTP順序仍需owner cancellation契約；另已發現gphoto半按／獨立AF cleanup缺少saved retry責任，尚未由本批修正。這些是具體仍可開發的原功能缺口，不能寫成只待native驗收。
 - G13完整四區metadata在Firefox200%／CSS594×381實看：dialog bottom361、Download/Delete bottom354，末端按鈕完整；未確認裁切，未為候選修改CSS。證據保留本地，不重複計為功能交付。
 - 仍無mobile native、真相機或新installer證據；原89列平台缺口不因host增量改為全過。
+
+## 2026-10-17 owned Bulb 與 G03 Escape 整合增量
+
+- G04/#65、G05/#66/#69、G13/#122：[owned Bulb整合](pc-owned-bulb-integrated-2026-10-17.zh-TW.md) 修復pending Start無Stop、HTTP Stop超車late Start、短控制release責任，以及整合時發現的跨caller新AF被舊owner Stop誤停。cached receipt不得抹掉較新AF未知警告。PC/Bridge與gphoto為本批範圍；mobile Bridge caller尚在獨立核對，不能升級成三端完成。
+- G03/#42/#43、G13/#122：[Escape同步退休](pc-setting-escape-retirement-2026-10-17.zh-TW.md) 補queued native close之前的late receipt／舊Apply callback空窗；取消保留原write receipt，不消耗draft、不自動重送。Firefox baseline已重現matched stream在Escape後更新ISO200/Ready，與之前普通成功Apply不同路徑。
+- 產品source1128b4b2整合PC modules3791/3791、Python608＋77通過；後續僅短控制test格式整理，34案再過、相關Python Ruff全過。真正PC bounded Firefox、host合成provider/transport與native/真機證據仍分開記錄。
+- Android/iOS完整原生驗證、Windows成品、實體相機/外部儲存與原D/E列限制仍存在；沒有把原89列改成全過。
+
+20:21 UTC Firefox補驗：cached A receipt保留新AF B警告、僅明確Recovery解除，三圖通過；G03晚receipt資料退休通過，但pendingEscape仍回BODY、Enter不能重開，該鍵盤殘缺明列下一段，未被successfulApply或host綠燈掩蓋。
