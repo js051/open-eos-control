@@ -147,13 +147,26 @@ class DesktopBridgeClientTest {
         val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), preview)
         server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")); access.stopLiveView()
         server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}""")); access.restore()
-        server.enqueue(jsonResponse("""{"bulbExposureActive":true,"shutterReleaseUnconfirmed":false}""")); client.startBulbExposure()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.requestUrl!!.encodedPath
+                return when {
+                    path.endsWith("/bulb/start/owned") || path.endsWith("/bulb/stop/owned") -> {
+                        val ownerId = JSONObject(request.body.clone().readUtf8()).getString("ownerId")
+                        val active = path.endsWith("/start/owned")
+                        jsonResponse(JSONObject().put("ownerId", ownerId).put("outcome", if (active) "started" else "released")
+                            .put("status", JSONObject().put("bulbExposureActive", active).put("shutterReleaseUnconfirmed", false)).toString())
+                    }
+                    path.endsWith("/maintenance/control/liveview/stop") -> jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")
+                    path.endsWith("/maintenance/control/session") -> MockResponse().setResponseCode(204)
+                    else -> MockResponse().setResponseCode(404)
+                }
+            }
+        }
+        client.startBulbExposure()
         repeat(6) { server.takeRequest() }
-        server.enqueue(jsonResponse("""{"bulbExposureActive":false,"shutterReleaseUnconfirmed":false}"""))
-        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}"""))
-        server.enqueue(MockResponse().setResponseCode(204))
         assertFalse(client.closeMaintenanceSession())
-        assertEquals(listOf("/v1/session/session-1/bulb/stop", "/v1/session/session-1/maintenance/control/liveview/stop",
+        assertEquals(listOf("/v1/session/session-1/bulb/stop/owned", "/v1/session/session-1/maintenance/control/liveview/stop",
             "/v1/session/session-1/maintenance/control/session"), (0 until 3).map { server.takeRequest().path })
         assertEquals(9, server.requestCount)
     }
@@ -561,8 +574,13 @@ class DesktopBridgeClientTest {
         assertEquals("PUT", fileNamingRequest.method)
         assertEquals("EOS_", JSONObject(fileNamingRequest.body.readUtf8()).getString("value"))
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/capture/still") == true })
-        assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/bulb/start") == true })
-        assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/bulb/stop") == true })
+        val bulbStart = requests.single { it.requestUrl?.encodedPath?.endsWith("/bulb/start/owned") == true }
+        val bulbStop = requests.single { it.requestUrl?.encodedPath?.endsWith("/bulb/stop/owned") == true }
+        val startOwner = JSONObject(bulbStart.body.clone().readUtf8())
+        val stopOwner = JSONObject(bulbStop.body.clone().readUtf8())
+        assertEquals(1, startOwner.length()); assertEquals(1, stopOwner.length())
+        assertTrue(startOwner.opt("ownerId") is String)
+        assertEquals(startOwner.getString("ownerId"), stopOwner.getString("ownerId"))
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/focus/auto") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/shutter/half-press") == true })
         assertTrue(requests.any { it.requestUrl?.encodedPath?.endsWith("/focus/drive") == true })
@@ -1253,13 +1271,13 @@ class DesktopBridgeClientTest {
                     json(fileNamingJson())
                 }
                 path.endsWith("/capture/still") -> json(statusJson())
-                path.endsWith("/bulb/start") -> {
-                    bulbExposureActive = true
-                    json(statusJson())
-                }
-                path.endsWith("/bulb/stop") -> {
-                    bulbExposureActive = false
-                    json(statusJson())
+                path.endsWith("/bulb/start/owned") || path.endsWith("/bulb/stop/owned") -> {
+                    val payload = JSONObject(request.body.clone().readUtf8())
+                    check(payload.length() == 1 && payload.opt("ownerId") is String)
+                    bulbExposureActive = path.endsWith("/start/owned")
+                    json(JSONObject().put("ownerId", payload.getString("ownerId"))
+                        .put("outcome", if (bulbExposureActive) "started" else "released")
+                        .put("status", JSONObject(statusJson()).put("shutterReleaseUnconfirmed", false)).toString())
                 }
                 path.endsWith("/focus/auto") -> json(statusJson())
                 path.endsWith("/shutter/half-press") -> json(statusJson())

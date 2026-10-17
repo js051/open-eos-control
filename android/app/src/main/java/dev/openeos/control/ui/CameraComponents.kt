@@ -1899,7 +1899,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
     val photo = state.captureMode == CaptureMode.PHOTO && !state.recordingStopAvailable
     val bulb = photo && state.bulbMode
     val bulbActive = state.bulbExposureActive
-    val releaseOnly = state.shutterReleaseUnconfirmed
+    val releaseOnly = state.shutterReleaseUnconfirmed || state.bridgeBulbStopRequired
     val recordingActive = !photo && state.recordingStopAvailable
     val supported = releaseOnly || bulbActive || recordingActive || state.supports(
         when {
@@ -1911,6 +1911,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
     val shutterAFAllowed = releaseOnly || bulbActive || bulb || !photo ||
         state.shutterAutofocus || state.capabilities?.shutterAutofocusSupported == true
     val description = when {
+        state.bridgeBulbStopRequired && !state.bridgeBulbUnconfirmed -> stringResource(R.string.stop_bulb_exposure)
         releaseOnly -> stringResource(R.string.retry_shutter_release)
         bulbActive -> stringResource(R.string.stop_bulb_exposure)
         bulb -> stringResource(R.string.start_bulb_exposure)
@@ -1960,7 +1961,7 @@ fun CaptureButton(state: CameraUiState, actions: CameraActions) {
                 ),
                 contentAlignment = Alignment.Center,
             ) {
-                if (releaseOnly) {
+                if (releaseOnly && (!state.bridgeBulbStopRequired || state.bridgeBulbUnconfirmed)) {
                     CameraRotatingSquareSlot(size = 50.dp) {
                         CameraHudText(value = stringResource(R.string.shutter_release_retry_short), color = AppBackground,
                             fontWeight = FontWeight.SemiBold, maxFontSize = 11.sp, minFontSize = 8.sp,

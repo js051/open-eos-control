@@ -115,7 +115,7 @@ class AndroidAppErrorLanguageSourceTests(unittest.TestCase):
 
     def test_every_app_error_has_english_and_traditional_chinese_resources(self):
         names = set(re.findall(r"R\.string\.(\w+)", (UI / "CameraAppError.kt").read_text()))
-        self.assertEqual(14, len(names))
+        self.assertEqual(18, len(names))
         localized = []
         for folder in ("values", "values-zh-rTW"):
             rows = ET.parse(MAIN / "res" / folder / "strings.xml").getroot().findall("string")

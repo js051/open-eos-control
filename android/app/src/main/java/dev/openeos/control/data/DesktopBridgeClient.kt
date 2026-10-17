@@ -272,13 +272,20 @@ class DesktopBridgeClient(
             activeMediaListing.getAndSet(null)?.call?.cancel()
             // Disconnect drops this client. Still request server cleanup if its explicit focus
             // stop failed, and keep the failure visible instead of abandoning the remote session.
+            val ownedCleanup = session.bulb.retire()
+            val bulbFailure = if (ownedCleanup) runCatching { stopOwnedBulb(session) }.exceptionOrNull() else null
             val focusFailure = runCatching { heldAutofocusSession?.close() }.exceptionOrNull()
+            val cleanupFailure = bulbFailure ?: focusFailure
+            if (bulbFailure != null && focusFailure != null) bulbFailure.addSuppressed(focusFailure)
             session.mutex.withLock {
                 if (session.closed) return@withLock
                 try {
-                    stopEventPolling()
+                    if (ownedCleanup) activeEventCall.getAndSet(null)?.cancel() else stopEventPolling()
                     val deleteRequest = Request.Builder().url(endpoint("v1", "session", session.id)).delete().build()
-                    if (focusFailure != null || session.hasReleaseResponsibility) {
+                    if (ownedCleanup) {
+                        val receipt = requestOwnedBulb(deleteRequest, session)
+                        check(bridgeSessionRetirementAcknowledged(receipt.first, receipt.second)) { "Desktop Bridge session retirement was not acknowledged." }
+                    } else if (focusFailure != null || session.hasReleaseResponsibility) {
                         // Unresolved release still needs a remote cleanup attempt after caller
                         // cancellation. This bounded app cleanup policy is not a camera ACK.
                         requestOk(deleteRequest, recoveryCleanup = true)
@@ -287,7 +294,13 @@ class DesktopBridgeClient(
                         withContext(callerContext) { requestOk(deleteRequest) }
                     }
                 } catch (exception: Exception) {
-                    focusFailure?.let(exception::addSuppressed)
+                    // Repository classifies the primary cause. Do not hide an owned release
+                    // failure as a suppressed detail of a later DELETE transport failure.
+                    if (bulbFailure != null) {
+                        if (bulbFailure !== exception) bulbFailure.addSuppressed(exception)
+                        throw bulbFailure
+                    }
+                    cleanupFailure?.let(exception::addSuppressed)
                     throw exception
                 } finally {
                     session.close()
@@ -306,7 +319,7 @@ class DesktopBridgeClient(
                     }
                 }
             }
-            if (focusFailure != null) throw focusFailure
+            if (cleanupFailure != null) throw cleanupFailure
         }
     }
 
@@ -857,25 +870,124 @@ class DesktopBridgeClient(
         }
     }
 
-    suspend fun startBulbExposure(): CameraStatus {
+    val ownedBulbCleanupRequired: Boolean get() = shutterSession?.bulb?.requiresBoundedRetirement == true
+
+    /** Reserve synchronously, before the UI can suspend or launch Start. */
+    fun prepareOwnedBulb(): BridgeBulbAccess {
         val session = requireShutterSession()
-        return session.start(read = ::status, press = {
-            parseBulbStatus(postJson(endpoint("v1", "session", session.id, "bulb", "start"), JSONObject(), shutterStart = true))
-        }, admit = {
+        requireCurrentSession(session)
+        if (session.hasReleaseResponsibility) throw ShutterReleaseException(IllegalStateException("Stop the previous camera control before Bulb."))
+        val owner = session.bulb.reserve {
+            check(!session.hasUnownedReleaseResponsibility && !session.unconfirmed) { "Release the shutter before Bulb." }
             check(heldAutofocusSession?.hasReleaseResponsibility != true) { "Stop held autofocus before starting Bulb." }
-        })
+        }
+        return BridgeBulbAccess(
+            start = {
+                requireCurrentSession(session)
+                session.bulb.start(owner) { ownedBulbCommand(session, it, start = true) }
+            },
+            stop = {
+                requireCurrentSession(session)
+                stopOwnedBulb(session, owner)
+            },
+            releaseRequired = { !session.closed && session.bulb.ownerId == owner.id && session.bulb.hasReleaseResponsibility },
+            hasFreshReleaseObservation = { !session.closed && session.bulb.hasFreshReleaseObservation(owner) },
+            retire = { if (shutterSession === session && !session.closed) session.bulb.requestRetirement(owner) },
+        )
+    }
+
+    suspend fun startBulbExposure(): CameraStatus = prepareOwnedBulb().start()
+
+    private suspend fun stopOwnedBulb(session: BridgeShutterReleaseSession, owner: BridgeBulbRequestSession.Owner? = null): CameraStatus? {
+        requireCurrentSession(session)
+        val confirmedStart = session.bulb.hasConfirmedStart
+        val release: suspend (String) -> BridgeBulbReceipt = { ownedBulbCommand(session, it, start = false) }
+        val display = if (owner == null) session.bulb.stop(release) else session.bulb.stop(owner, release)
+        requireCurrentSession(session)
+        // The receipt clears only this owner. A separately observed warning remains recoverable.
+        if (!session.bulb.hasReleaseResponsibility && display != null) session.observe(display, session.revision)
+        if (confirmedStart && !session.bulb.hasReleaseResponsibility) observedFeatures.add(CameraFeature.BULB_EXPOSURE)
+        return display
+    }
+
+    private suspend fun ownedBulbCommand(session: BridgeShutterReleaseSession, ownerId: String, start: Boolean): BridgeBulbReceipt {
+        requireCurrentSession(session)
+        val url = if (start) endpoint("v1", "session", session.id, "bulb", "start", "owned")
+            else endpoint("v1", "session", session.id, "bulb", "stop", "owned")
+        val request = Request.Builder().url(url)
+            .tag(BridgeShutterStart::class.java, if (start) BridgeShutterStart else null)
+            .post(JSONObject().put("ownerId", ownerId).toString().toRequestBody(jsonMediaType)).build()
+        val response = requestOwnedBulb(request, session)
+        requireCurrentSession(session)
+        val body = JSONObject(response.second)
+        check(body.opt("ownerId") == ownerId) { "Desktop Bridge returned a different Bulb owner." }
+        val outcome = body.opt("outcome") as? String ?: error("Desktop Bridge omitted the Bulb outcome.")
+        val status = if (body.has("status")) {
+            parseBulbStatus(body.optJSONObject("status") ?: error("Desktop Bridge returned invalid Bulb status."), publishRecordingDisplay = false)
+        } else null
+        return BridgeBulbReceipt(ownerId, outcome, status)
+    }
+
+    /** Callback completion is detached from blocking body I/O; timeout/cancel never proves release. */
+    private suspend fun requestOwnedBulb(request: Request, session: BridgeShutterReleaseSession): Pair<Int, String> {
+        requireCurrentSession(session)
+        val call = newBridgeCall(request)
+        val maximum = TimeUnit.SECONDS.toNanos(15)
+        if (call.timeout().timeoutNanos() == 0L || call.timeout().timeoutNanos() > maximum) {
+            call.timeout().timeout(maximum, TimeUnit.NANOSECONDS)
+        }
+        val result = awaitBridgeBulbCallback<Pair<Int, String>> { complete ->
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                override fun onResponse(call: Call, response: Response) {
+                    complete(runCatching {
+                        response.use {
+                            val output = ByteArrayOutputStream()
+                            response.body?.byteStream()?.use { input ->
+                                val buffer = ByteArray(4096)
+                                while (true) {
+                                    val count = input.read(buffer)
+                                    if (count < 0) break
+                                    check(output.size() <= 65_536 - count) { "Desktop Bridge Bulb response was too large." }
+                                    output.write(buffer, 0, count)
+                                }
+                            }
+                            response.code to output.toByteArray().toString(Charsets.UTF_8)
+                        }
+                    })
+                }
+            })
+            val cancel: () -> Unit = { call.cancel() }
+            cancel
+        }
+        requireCurrentSession(session)
+        if (result.first !in 200..299) {
+            // Do not feed an owned failure into the legacy GET-based recovery state.
+            throw bridgeError(result.first, result.second, request.url.encodedPath, null)
+        }
+        return result
     }
 
     suspend fun stopBulbExposure(): CameraStatus = stopBulbExposure(requireShutterSession())
 
     private suspend fun stopBulbExposure(session: BridgeShutterReleaseSession): CameraStatus {
         requireCurrentSession(session)
+        if (session.bulb.hasReleaseResponsibility) {
+            return stopOwnedBulb(session) ?: unknownBulbDisplayStatus()
+        }
+        if (!session.hasUnownedReleaseResponsibility) return session.bulb.displayStatus ?: unknownBulbDisplayStatus()
         val confirmedStart = session.hasConfirmedStart
         return session.stop(
             release = { parseBulbStatus(postJson(endpoint("v1", "session", session.id, "bulb", "stop"), JSONObject())) },
             read = { readBridgeStatus(session, recoveryRead = true) },
         ).also { if (confirmedStart) observedFeatures.add(CameraFeature.BULB_EXPOSURE) }
     }
+
+    private fun unknownBulbDisplayStatus() = CameraStatus(
+        connected = true, batteryLevel = null, batteryStatus = "unknown", recording = null,
+        mode = "unknown", mediaAvailable = null, remainingMinutes = null,
+        exposure = ExposureState("-", "-", "-", "-"),
+    )
 
     suspend fun retryShutterRelease() {
         val session = requireShutterSession()
@@ -1801,7 +1913,7 @@ class DesktopBridgeClient(
         return cameraMediaFolderOrNull(id, label)
     }
 
-    private fun parseStatus(body: JSONObject): CameraStatus {
+    private fun parseStatus(body: JSONObject, publishRecordingDisplay: Boolean = true): CameraStatus {
         val battery = body.optJSONObject("battery") ?: JSONObject()
         val media = body.optJSONObject("media") ?: JSONObject()
         val exposure = body.optJSONObject("exposure") ?: JSONObject()
@@ -1848,14 +1960,14 @@ class DesktopBridgeClient(
             },
             temperature = body.optNullableString("temperature")
                 ?.let(CameraTemperatureStatus::fromCcapiValue),
-        ).also { lastRecordingDisplayStatus = it }
+        ).also { if (publishRecordingDisplay) lastRecordingDisplayStatus = it }
     }
 
-    private fun parseBulbStatus(body: JSONObject): CameraStatus {
+    private fun parseBulbStatus(body: JSONObject, publishRecordingDisplay: Boolean = true): CameraStatus {
         check(!body.has("shutterReleaseUnconfirmed") || body.opt("shutterReleaseUnconfirmed") is Boolean) {
             "Desktop Bridge returned an invalid shutter release confirmation."
         }
-        return parseStatus(body)
+        return parseStatus(body, publishRecordingDisplay)
     }
 
     private suspend fun readBridgeStatus(
@@ -2178,13 +2290,18 @@ class DesktopBridgeClient(
         val path = request.url.encodedPath
         val root = session?.let { endpoint("v1", "session", it.id).encodedPath }
         val stopOnly = (request.method == "POST" && path in setOf(
-            "$root/bulb/stop", "$root/liveview/stop", "$root/recording/stop", "$root/recording/stop/outcome", "$root/focus/auto/stop",
-        )) || (request.method == "DELETE" && path in setOf(root, "$root/events"))
+            "$root/bulb/stop", "$root/bulb/stop/owned", "$root/liveview/stop", "$root/recording/stop", "$root/recording/stop/outcome", "$root/focus/auto/stop",
+            "$root/maintenance/control/liveview/stop",
+        )) || (request.method == "DELETE" && path in setOf(root, "$root/events",
+            "$root/maintenance/control/events", "$root/maintenance/control/session"))
+        if (session?.bulb?.isRetired == true && !stopOnly) {
+            throw CancellationException("Desktop Bridge session is retiring.")
+        }
         if (session != null && heldAutofocusSession?.hasReleaseResponsibility == true &&
             request.tag(BridgeFocusStart::class.java) == null && !stopOnly) {
             throw AutofocusReleaseException(IllegalStateException("Stop held autofocus before another Bridge operation."))
         }
-        if (session?.unconfirmed == true && request.tag(BridgeShutterStart::class.java) == null) {
+        if ((session?.unconfirmed == true || session?.bulb?.hasReleaseResponsibility == true) && request.tag(BridgeShutterStart::class.java) == null) {
             if (!stopOnly) throw ShutterReleaseException(IllegalStateException("Retry stopping the camera control before another Bridge operation."))
         }
     }

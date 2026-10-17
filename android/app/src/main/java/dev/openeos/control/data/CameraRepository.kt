@@ -254,13 +254,17 @@ class CameraRepository(
         val hadLiveView = liveViewRunning || backend.liveViewStopRequired
         var liveViewStopUnconfirmed = false
         try {
-            runCatching { backend.retryAutofocusStop() }
-            try {
-                backend.stopLiveView()
-            } catch (_: Exception) {
-                liveViewStopUnconfirmed = hadLiveView
-                // A backend without Live View still needs its session closed.
+            if (!backend.bridgeBulbCleanupRequired) {
+                runCatching { backend.retryAutofocusStop() }
+                try {
+                    backend.stopLiveView()
+                } catch (_: Exception) {
+                    liveViewStopUnconfirmed = hadLiveView
+                    // A backend without Live View still needs its session closed.
+                }
             }
+            // Owned Bulb close performs bounded saved-owner Stop + DELETE itself; unrelated
+            // legacy preview I/O must not delay that release behind a pending Start.
             backend.close()
         } catch (failure: Exception) {
             connectionRetirementSafetyWarnings += previousConnectionSafetyWarnings(failure)
@@ -377,6 +381,11 @@ class CameraRepository(
     suspend fun clickWhiteBalance(x: Double, y: Double): CameraStatus = backend.clickWhiteBalance(x, y)
 
     suspend fun captureStill(autofocus: Boolean = true): CameraStatus = backend.captureStill(autofocus)
+
+    fun prepareBridgeBulb(): BridgeBulbAccess? {
+        check(active) { "Camera is disconnected." }
+        return backend.prepareBridgeBulb()
+    }
 
     suspend fun startBulbExposure(): CameraStatus = backend.startBulbExposure()
 

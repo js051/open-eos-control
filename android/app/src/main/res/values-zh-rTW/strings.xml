@@ -894,4 +894,8 @@
     <string name="camera_error_download_length_mismatch">下載的檔案大小與原檔不符。請重試儲存原檔。</string>
     <string name="camera_error_gallery_publish_failed">Android 無法將下載的檔案發布至圖庫。請嘗試另存至其他資料夾。</string>
     <string name="camera_error_automatic_jpeg_not_published">自動 JPEG 匯入未發布這個原檔。</string>
+    <string name="bridge_bulb_start_pending">Bulb 啟動仍在等待回覆。現在即可按停止；收到停止確認前，請保留此連線。</string>
+    <string name="bridge_bulb_stop_pending">正在停止這次 Bulb 請求，等待它的釋放確認。</string>
+    <string name="bridge_bulb_release_required">這次 Bulb 請求尚未確認釋放。請重試停止；若仍失敗，請檢查機身並在機身停止。</string>
+    <string name="bridge_bulb_ownership_unavailable">此 Bridge 無法確認安全的 Bulb 請求歸屬，請更新 Bridge。請勿開始另一段曝光；請重試停止，或在斷線前檢查機身。</string>
 </resources>

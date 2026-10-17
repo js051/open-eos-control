@@ -12,6 +12,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
@@ -173,17 +174,17 @@ class DesktopBridgeLiveViewRecoveryTest {
         }
     }
 
-    @Test fun repeatedConfirmedBulbStartCanReadStatusAndStillStop() = runBlocking<Unit> {
+    @Test fun repeatedConfirmedBulbStartIsRejectedWithoutReplayAndStillStops() = runBlocking<Unit> {
         Peer().use { peer ->
             val client = peer.client(); client.initialize()
             withTimeout(3_000) {
                 client.startBulbExposure()
-                client.startBulbExposure()
+                assertTrue(runCatching { client.startBulbExposure() }.isFailure)
                 client.stopBulbExposure()
             }
-            assertEquals(1, peer.count("bulb/start"))
-            assertEquals(1, peer.count("bulb/stop"))
-            assertEquals(1, peer.count("status"))
+            assertEquals(1, peer.count("bulb/start/owned"))
+            assertEquals(1, peer.count("bulb/stop/owned"))
+            assertEquals(0, peer.count("status"))
         }
     }
 
@@ -292,8 +293,15 @@ class DesktopBridgeLiveViewRecoveryTest {
                         path.endsWith("/liveview/start") -> start()
                         path.endsWith("/liveview/stop") -> stop()
                         path.endsWith("/status") -> status()
-                        path.endsWith("/bulb/start") -> { bulbActive = true; status(false, true) }
-                        path.endsWith("/bulb/stop") -> { bulbActive = false; status(false, false) }
+                        path.endsWith("/bulb/start/owned") || path.endsWith("/bulb/stop/owned") -> {
+                            val payload = JSONObject(request.body.clone().readUtf8())
+                            check(payload.length() == 1 && payload.opt("ownerId") is String)
+                            bulbActive = path.endsWith("/start/owned")
+                            json(JSONObject().put("ownerId", payload.getString("ownerId"))
+                                .put("outcome", if (bulbActive) "started" else "released")
+                                .put("status", JSONObject().put("connected", true).put("bulbExposureActive", bulbActive)
+                                    .put("shutterReleaseUnconfirmed", false)).toString())
+                        }
                         request.method == "DELETE" -> MockResponse().setResponseCode(204)
                         else -> MockResponse().setResponseCode(404)
                     }
