@@ -79,7 +79,26 @@ private class MediaScreenSessionKey(private val info: CameraInfo?, private val g
 }
 
 @Composable
-private fun MediaScreenContent(state: CameraUiState, actions: CameraActions, currentOwner: () -> MediaMetadataOwner) {
+private fun MediaScreenContent(state: CameraUiState, unownedActions: CameraActions, currentOwner: () -> MediaMetadataOwner) {
+    val actionGate = MediaScreenActionGate(MediaMetadataOwner(state.info, state.mediaSessionGeneration), currentOwner)
+    // Check the originating screen before the ViewModel/picker can capture the current camera.
+    // This also prevents old viewer dismissals and thumbnail disposal from cancelling new work.
+    val actions = unownedActions.copy(
+        downloadMedia = { item -> actionGate.dispatch { unownedActions.downloadMedia(item) } },
+        downloadMediaBatch = { items -> actionGate.dispatch { unownedActions.downloadMediaBatch(items) } },
+        saveMediaToPhone = { items -> actionGate.dispatch { unownedActions.saveMediaToPhone(items) } },
+        openInSerein = { items -> actionGate.dispatch { unownedActions.openInSerein(items) } },
+        cancelMediaDownload = { actionGate.dispatch { unownedActions.cancelMediaDownload() } },
+        uploadMedia = { actionGate.dispatch { unownedActions.uploadMedia() } },
+        cancelMediaUpload = { actionGate.dispatch { unownedActions.cancelMediaUpload() } },
+        refreshMedia = { actionGate.dispatch { unownedActions.refreshMedia() } },
+        cancelMediaLibraryLoad = { actionGate.dispatch { unownedActions.cancelMediaLibraryLoad() } },
+        openMediaPreview = { item -> actionGate.dispatch { unownedActions.openMediaPreview(item) } },
+        previewAdjacentMedia = { items, direction -> actionGate.dispatch { unownedActions.previewAdjacentMedia(items, direction) } },
+        closeMediaPreview = { actionGate.dispatch { unownedActions.closeMediaPreview() } },
+        loadMediaThumbnail = { item -> actionGate.dispatch { unownedActions.loadMediaThumbnail(item) } },
+        cancelMediaThumbnail = { item -> actionGate.dispatch { unownedActions.cancelMediaThumbnail(item) } },
+    )
     var pendingDelete by remember { mutableStateOf<MediaDeleteSelection?>(null) }
     var pendingBatchDelete by remember { mutableStateOf<MediaDeleteSelection?>(null) }
     var activeMetadataItemId by remember { mutableStateOf<String?>(null) }
