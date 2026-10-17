@@ -1,0 +1,20 @@
+[
+  {
+    "file": "baseline-receipt.json",
+    "sha256": "fcd399ec23d255b2953f41ed60897f188b473f3457cf66da7910eb5befeacb2b",
+    "original_receipt_sha256": "110b02a382753f4d9b5a649371ea4827ad63b5d2b95f3943853f53d2d17fe580"
+  },
+  {
+    "file": "baseline-junit.txt",
+    "sha256": "1f0501fde43c227c74a695cc1846767be2e7ed6844c20ff34df5a73a57ccf983"
+  },
+  {
+    "file": "current-receipt.json",
+    "sha256": "ab67d5ad6de3f45dbbfb7e6600c4a7562ca0c1283101c6389b44d381612e42d1",
+    "original_receipt_sha256": "b0178281817c9e6cae6f8a9d6153a8cedcce94fb5c3ea8680d926998f88bd6a8"
+  },
+  {
+    "file": "current-junit.txt",
+    "sha256": "1f014e209ccdf856e7f5804f21b3af34d8dae65f6bc53a93a6500c841042a836"
+  }
+]

@@ -1,0 +1,51 @@
+JUnit version 4.13.2
+.E.E.E
+Time: 1.051
+There were 3 failures:
+1) cancellationMustJoinHeldProducer(dev.openeos.control.data.StillTransportTest)
+java.lang.AssertionError: Still cancellation must join the stopped producer expected:<true> but was:<null>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:120)
+	at dev.openeos.control.data.StillTransportTest$cancellationMustJoinHeldProducer$1.invokeSuspend(StillTransportTest.kt:16)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.data.StillTransportTest.cancellationMustJoinHeldProducer(StillTransportTest.kt:9)
+2) mandatoryReleaseMustRemainJoinedAfterCancelledPress(dev.openeos.control.data.StillTransportTest)
+java.lang.AssertionError: Cancelled press must reach its matching release
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.data.StillTransportTest$mandatoryReleaseMustRemainJoinedAfterCancelledPress$1.invokeSuspend(StillTransportTest.kt:30)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.data.StillTransportTest.mandatoryReleaseMustRemainJoinedAfterCancelledPress(StillTransportTest.kt:20)
+3) oversizedBodyMustNotBeAccepted(dev.openeos.control.data.StillTransportTest)
+java.lang.AssertionError: Still response must enforce its byte limit
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.data.StillTransportTest$oversizedBodyMustNotBeAccepted$1.invokeSuspend(StillTransportTest.kt:38)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.data.StillTransportTest.oversizedBodyMustNotBeAccepted(StillTransportTest.kt:36)
+
+FAILURES!!!
+Tests run: 3,  Failures: 3
+

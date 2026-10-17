@@ -161,7 +161,7 @@ class CcapiClient(
             }
         }
     }.build()
-    // Capture configuration only: no redirect, authentication replay, HTTP cache or retry.
+    // Bounded single-attempt commands and their reads: no redirect, authentication replay, HTTP cache or retry.
     private val captureConfigurationHttpClient = this.httpClient.newBuilder()
         .retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false)
         .authenticator(okhttp3.Authenticator.NONE).proxyAuthenticator(okhttp3.Authenticator.NONE).cache(null)
@@ -1638,6 +1638,7 @@ class CcapiClient(
                     pathSuffix = "/shooting/control/shutterbutton",
                     payload = JSONObject().put("af", autofocus),
                     operation = directOperation,
+                    stillCapture = true,
                 )
             } else {
                 heldShutter.pressAndRelease(
@@ -1646,6 +1647,7 @@ class CcapiClient(
                             pathSuffix = "/shooting/control/shutterbutton/manual",
                             payload = JSONObject().put("af", autofocus).put("action", "full_press"),
                             operation = manualOperation,
+                            stillCapture = true,
                         )
                     },
                     stop = {
@@ -1653,6 +1655,7 @@ class CcapiClient(
                             pathSuffix = "/shooting/control/shutterbutton/manual",
                             payload = JSONObject().put("af", false).put("action", "release"),
                             operation = manualOperation,
+                            stillCapture = true,
                         )
                     },
                 )
@@ -3337,6 +3340,7 @@ class CcapiClient(
         operation: CcapiApiOperation? = null,
         recordingEvidence: RecordingRequestEvidence? = null,
         checkOwner: (() -> Unit)? = null,
+        stillCapture: Boolean = false,
     ) {
         val selected = operation ?: if (!enforceAdvertisedOperations) {
             CcapiApiOperation(method = "POST", path = "$apiVersionPrefix$pathSuffix")
@@ -3350,7 +3354,7 @@ class CcapiClient(
             "POST" -> builder.post(requestBody).build()
             else -> error("Unsupported CCAPI command method ${selected.method} for ${selected.path}")
         }
-        requestOk(request, recordingEvidence = recordingEvidence, checkOwner = checkOwner)
+        requestOk(request, recordingEvidence = recordingEvidence, checkOwner = checkOwner, stillCapture = stillCapture)
     }
 
     private suspend fun withRecoverableFocusRelease(
@@ -4697,6 +4701,7 @@ class CcapiClient(
         expectedStatusCode: Int? = null,
         recordingEvidence: RecordingRequestEvidence? = null,
         checkOwner: (() -> Unit)? = null,
+        stillCapture: Boolean = false,
     ): Unit = withContext(Dispatchers.IO) {
         currentCoroutineContext().ensureActive()
         checkOwner?.invoke()
@@ -4711,8 +4716,10 @@ class CcapiClient(
         val shootingEvidence = currentCoroutineContext()[ShootingSettingWriteContext]?.evidence
         shootingEvidence?.let { currentCoroutineContext().ensureActive(); it.beforeDispatch() }
         val recordingIo = currentCoroutineContext()[RecordingIoContext] != null || recordingEvidence != null
-        val call = newCameraCall(request.newBuilder().tag(RecordingRequestEvidence::class.java, recordingEvidence).build(), shootingEvidence != null || recordingIo)
-        val watcher = if (shootingEvidence != null || recordingIo || checkOwner != null) launch(start = CoroutineStart.UNDISPATCHED) {
+        // Still capture remains joined through the complete response and mandatory manual release.
+        // Bound the synchronous producer itself; cancellation must not detach it from release.
+        val call = newCameraCall(request.newBuilder().tag(RecordingRequestEvidence::class.java, recordingEvidence).build(), shootingEvidence != null || recordingIo || stillCapture)
+        val watcher = if (shootingEvidence != null || recordingIo || checkOwner != null || stillCapture) launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { call.cancel() }
         } else null
         try {
@@ -4720,7 +4727,7 @@ class CcapiClient(
             checkOwner?.invoke()
             call.execute().use { response ->
             recordingEvidence?.rejected = !response.isSuccessful
-            val body = response.body?.let { body -> if (shootingEvidence == null && !recordingIo) body.string() else
+            val body = response.body?.let { body -> if (shootingEvidence == null && !recordingIo && !stillCapture) body.string() else
                 body.byteStream().use { readShootingSettingResponseText(it, body.contentLength()) }
             }.orEmpty()
             if (!response.isSuccessful) {
