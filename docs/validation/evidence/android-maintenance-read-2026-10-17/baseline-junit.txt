@@ -1,0 +1,54 @@
+JUnit version 4.13.2
+.Actual runtime counterexample: phase=RECOVERY_READ; repository.disconnect=0; registeredJob.completed=false; held=true; execute=1; enqueue=0
+E.Actual runtime counterexample: phase=RESTORE_START; repository.disconnect=0; registeredJob.completed=false; held=true; execute=1; enqueue=0
+E.Actual runtime counterexample: phase=RESTORE_READ; repository.disconnect=0; registeredJob.completed=false; held=true; execute=1; enqueue=0
+E.Actual runtime counterexample: phase=INITIAL_READ; repository.disconnect=0; registeredJob.completed=false; held=true; execute=1; enqueue=0
+E.Actual unmodified 15000ms maintenance read deadline: 15017ms; producer held=true
+Actual runtime counterexample: phase=INITIAL_READ; repository.disconnect=0; registeredJob.completed=false; held=true; execute=1; enqueue=0
+E
+Time: 34.316
+There were 5 failures:
+1) cancelledExplicitRecoveryMustReleaseRegisteredJob(dev.openeos.control.ui.BaselineMaintenanceReadRestoreTest)
+java.lang.AssertionError: Blocked maintenance read or strict restore Start must release the registered job before Disconnect cleanup
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.ui.ReadRestoreRig.assertCleanupWhileHeld(MaintenanceReadRestoreTest.kt:101)
+	at dev.openeos.control.ui.MaintenanceReadRestoreTestKt.cancelProbe(MaintenanceReadRestoreTest.kt:125)
+	at dev.openeos.control.ui.MaintenanceReadRestoreTestKt.cancelProbe$default(MaintenanceReadRestoreTest.kt:116)
+	at dev.openeos.control.ui.BaselineMaintenanceReadRestoreTest.cancelledExplicitRecoveryMustReleaseRegisteredJob(MaintenanceReadRestoreTest.kt:159)
+2) cancelledStrictRestoreStartMustReleaseRegisteredJobAtPhaseDeadline(dev.openeos.control.ui.BaselineMaintenanceReadRestoreTest)
+java.lang.AssertionError: Blocked maintenance read or strict restore Start must release the registered job before Disconnect cleanup
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.ui.ReadRestoreRig.assertCleanupWhileHeld(MaintenanceReadRestoreTest.kt:101)
+	at dev.openeos.control.ui.MaintenanceReadRestoreTestKt.cancelProbe(MaintenanceReadRestoreTest.kt:125)
+	at dev.openeos.control.ui.MaintenanceReadRestoreTestKt.cancelProbe$default(MaintenanceReadRestoreTest.kt:116)
+	at dev.openeos.control.ui.BaselineMaintenanceReadRestoreTest.cancelledStrictRestoreStartMustReleaseRegisteredJobAtPhaseDeadline(MaintenanceReadRestoreTest.kt:162)
+3) cancelledRestoreFreshReadMustReleaseRegisteredJob(dev.openeos.control.ui.BaselineMaintenanceReadRestoreTest)
+java.lang.AssertionError: Blocked maintenance read or strict restore Start must release the registered job before Disconnect cleanup
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.ui.ReadRestoreRig.assertCleanupWhileHeld(MaintenanceReadRestoreTest.kt:101)
+	at dev.openeos.control.ui.MaintenanceReadRestoreTestKt.cancelProbe(MaintenanceReadRestoreTest.kt:125)
+	at dev.openeos.control.ui.MaintenanceReadRestoreTestKt.cancelProbe$default(MaintenanceReadRestoreTest.kt:116)
+	at dev.openeos.control.ui.BaselineMaintenanceReadRestoreTest.cancelledRestoreFreshReadMustReleaseRegisteredJob(MaintenanceReadRestoreTest.kt:160)
+4) cancelledInitialReadMustReleaseRegisteredJob(dev.openeos.control.ui.BaselineMaintenanceReadRestoreTest)
+java.lang.AssertionError: Blocked maintenance read or strict restore Start must release the registered job before Disconnect cleanup
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.ui.ReadRestoreRig.assertCleanupWhileHeld(MaintenanceReadRestoreTest.kt:101)
+	at dev.openeos.control.ui.MaintenanceReadRestoreTestKt.cancelProbe(MaintenanceReadRestoreTest.kt:125)
+	at dev.openeos.control.ui.MaintenanceReadRestoreTestKt.cancelProbe$default(MaintenanceReadRestoreTest.kt:116)
+	at dev.openeos.control.ui.BaselineMaintenanceReadRestoreTest.cancelledInitialReadMustReleaseRegisteredJob(MaintenanceReadRestoreTest.kt:158)
+5) realFifteenSecondReadDeadlineMustReleaseRegisteredJob(dev.openeos.control.ui.BaselineMaintenanceReadRestoreTest)
+java.lang.AssertionError: Blocked maintenance read or strict restore Start must release the registered job before Disconnect cleanup
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.ui.ReadRestoreRig.assertCleanupWhileHeld(MaintenanceReadRestoreTest.kt:101)
+	at dev.openeos.control.ui.ReadRestoreRig.assertCleanupWhileHeld$default(MaintenanceReadRestoreTest.kt:92)
+	at dev.openeos.control.ui.MaintenanceReadRestoreTestKt.realDeadlineProbe(MaintenanceReadRestoreTest.kt:153)
+	at dev.openeos.control.ui.MaintenanceReadRestoreTestKt.access$realDeadlineProbe(MaintenanceReadRestoreTest.kt:1)
+	at dev.openeos.control.ui.BaselineMaintenanceReadRestoreTest.realFifteenSecondReadDeadlineMustReleaseRegisteredJob(MaintenanceReadRestoreTest.kt:161)
+
+FAILURES!!!
+Tests run: 5,  Failures: 5
