@@ -239,9 +239,17 @@
 
 ## 2026-10-17 Android G03/G10/G13 app 錯誤語言
 
-- [退役警告與上傳驗證](android-app-error-language-2026-10-17.zh-TW.md)：原列 #55/#78/#128 修復 disconnect 既有缺失 import／越域 appContext 編譯缺陷；app 自有維護與上傳錯誤改用精確型別 token，於畫面依選定語言解析。原始 provider／相機診斷保留。production helper／抽出 declaration host 10/10、實際上傳驗證 6/6、source 14/14、語法 6/6；原生 Compose／完整編譯仍 NOT_RUN。
+- [退役警告與上傳驗證](android-app-error-language-2026-10-17.zh-TW.md)：原列 #55/#78 與 G13 英繁中恢復細節修復 disconnect 既有缺失 import／越域 appContext 編譯缺陷；app 自有維護與上傳錯誤改用精確型別 token，於畫面依選定語言解析。原始 provider／相機診斷保留。production helper／抽出 declaration host 10/10、實際上傳驗證 6/6、source 14/14、語法 6/6；原生 Compose／完整編譯仍 NOT_RUN。
 - [文件與資料夾儲存失敗](android-download-error-language-2026-10-17.zh-TW.md)：原列 #76 的 null output stream 錯誤在總覽與每檔失敗提示均遵守選定語言；cleanup、收據、owner 與明確重試不改。基準 4 fail／6 pass，修正 host 10/10、source 7/7、語法 4/4；新增 instrumentation 尚未執行，實際 SAF/provider 仍未驗。
 
 ## 2026-10-17 官方公開依賴隔離快取核對
 
 在已授權且停止 writer 的共用工具快取／公開材料目錄，精確核對原八項座標，找到並以官方 Maven Central 來源收據／hash 核實 mockwebserver 4.12.0 的 jar、pom、module，已複製到 EOS 隔離快取，未重新下載。其餘七項 Media3 exoplayer／extractor／ui 1.8.1、coil-compose 2.7.0、kotlinx-coroutines-test 1.9.0、kotlinx-serialization-core-jvm 1.7.3、org.json 20240303 在該限定範圍仍缺；不能據此執行或宣稱完整 Android 依賴閉合。工具二進位與其他專案資料未上傳。這是 blocker 的縮小，非產品功能完成或原生驗收。
+
+## 2026-10-17 G09/G13 資料夾與圖庫失敗續查
+
+[原列 #76 的相鄰儲存 caller](android-folder-gallery-error-language-2026-10-17.zh-TW.md)：補齊 folder create-null、Gallery insert/open/byte-count/length/publication 五類原因，以及自動 JPEG 未發布 fallback 的選定語言。保留 exact item 檔名、原始 provider 診斷、cleanup-unconfirmed 與 receipt 優先順序。整個 production Gallery 類別搭配明示的合成 Android adapters，加上原樣 SAF／auto caller，基準 9 fail／9 pass，修正 18/18；source 10/10、PSI 5/5。原生/provider 未驗，沒有改檔案交付成功條件。此有界儲存路徑續查未再確認可見 App 英文缺口，不代表全平台語言驗收完成。
+
+## 2026-10-17 G06/G13 JPEG decode 診斷與語言
+
+[原列 #57/#58 的 Android null-decode 錯誤](android-liveview-decode-language-2026-10-17.zh-TW.md)：以單一 canonical typed payload 保留 byte count 與 nullable content type，並於畫面依目前語言格式化；診斷內容含 SocketTimeoutException 也不會誤取代成 timeout 原因。原始 provider/cause、owner/attempt、取消、retirement/Stop/顯式重啟不變。基準 4 fail／6 controls pass；實際 helper 與抽出 production caller／banner 加合成 adapters 共16/16。新增4 source guards、相鄰7 guards與6 syntax checks通過；3 instrumentation案例NOT_RUN。整合後 decode/format/retire/banner 與 Gallery/error helper 對照受驗來源逐字一致，兩批合計14個 source guards通過。沒有因此聲稱 native decoder、實體Stop或原89列完成。
