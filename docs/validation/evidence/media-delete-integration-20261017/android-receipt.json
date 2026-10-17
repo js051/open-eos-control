@@ -1,0 +1,100 @@
+{
+  "phase": "current",
+  "ref": "WORKTREE",
+  "sources": [
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/MediaDeleteHttp.kt",
+      "sha256": "6db915902f9a1e8bfc3556ff92e3760e05281fae39217d39d69dd0e004347d79"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/MediaDeleteEvidence.kt",
+      "sha256": "628a19c06393f03c887952ea8bd211c8f251f2f72e3582963876bc98aa232d3f"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+      "sha256": "6a167f932ca33544ec308d107c75396799933ec767c48b23745b5f3d5249c3cf"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/ui/CameraViewModel.kt",
+      "sha256": "7ee9f8de806a32d891c5a80e7c85eee74108568d6ccccfa94939e57839dbb9ae"
+    }
+  ],
+  "extracts": [
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+      "method": "DELETE",
+      "sha256": "e6f6965c3086858006e3309313e3330fc03c5f6b62a6c1338b1efb8498e04569"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/ui/CameraViewModel.kt",
+      "method": "UI_DELETE",
+      "sha256": "18fcd3eae1e4d9136088c31bbf5bd06d634f3b65b68bdd36fb05d80447fa9b07"
+    }
+  ],
+  "fixtures": [
+    {
+      "path": "scripts/validation/fixtures/android-media-delete-host/HostClient.kt",
+      "sha256": "eee4bd867cc8e93fddd7eb5ff5456541e711526914168f5a035e2989112aebb1"
+    },
+    {
+      "path": "scripts/validation/fixtures/android-media-delete-host/HostHttp.kt",
+      "sha256": "b914dd0aec987292abb27a581311ecd9b8361cc34fb83dedf7a6ebc9602e4950"
+    },
+    {
+      "path": "scripts/validation/fixtures/android-media-delete-host/HostSink.kt",
+      "sha256": "31569482139fa24c1d97a7d7639afa00a339dee0870a8d6da285f7579ad400d4"
+    },
+    {
+      "path": "scripts/validation/fixtures/android-media-delete-host/MediaDeleteHostTest.kt",
+      "sha256": "48997f24d96217919d07829f491875c8d83ba34eaa2d38dfbbcb9a2f6f0b44c9"
+    }
+  ],
+  "verified_tools": [
+    {
+      "path": "kotlin-compiler-embeddable-2.2.21.jar",
+      "sha256": "9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295"
+    },
+    {
+      "path": "kotlin-stdlib-2.2.21.jar",
+      "sha256": "6558a3d233da56a20934b32159f9db5f86ed5816ef098f78a2c223dc6abb79dd"
+    },
+    {
+      "path": "kotlin-script-runtime-2.2.21.jar",
+      "sha256": "2b1519b427b514d1536c1b425674b03fe914af637924028e9959c6625442df51"
+    },
+    {
+      "path": "kotlin-reflect-1.6.10.jar",
+      "sha256": "3277ac102ae17aad10a55abec75ff5696c8d109790396434b496e75087854203"
+    },
+    {
+      "path": "kotlin-daemon-embeddable-2.2.21.jar",
+      "sha256": "91c0673c22e44b054ae0314d323860ebe1f3aff3f0ebc74fff82c4733dde09be"
+    },
+    {
+      "path": "kotlinx-coroutines-core-jvm-1.8.0.jar",
+      "sha256": "9860906a1937490bf5f3b06d2f0e10ef451e65b95b269f22daf68a3d1f5065c5"
+    },
+    {
+      "path": "kotlinx-coroutines-core-jvm-1.9.0.jar",
+      "sha256": "ad89c2892235e670f222d819cb3d81188143cb19a05b59df9889ae4269f5c70a"
+    },
+    {
+      "path": "annotations-23.0.0.jar",
+      "sha256": "7b0f19724082cbfcbc66e5abea2b9bc92cf08a1ea11e191933ed43801eb3cd05"
+    },
+    {
+      "path": "junit-4.13.2.jar",
+      "sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3"
+    },
+    {
+      "path": "hamcrest-core-1.3.jar",
+      "sha256": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+    }
+  ],
+  "compile_exit": 0,
+  "jvm_heap_limit_mb": 256,
+  "active_processor_count": 1,
+  "boundary": "Exact full MediaDeleteHttp and MediaDeleteEvidence; exact CcapiClient.deleteMedia and CameraViewModel.withDeletedMedia. HTTP/Okio, models and confirmation callback are synthetic. No full ViewModel, repository, OkHttp, socket, Android lifecycle or physical camera execution. Formal MockWebServer tests authored separately, NOT_RUN.",
+  "junit_exit": 0,
+  "expected_result_verified": true
+}

@@ -1,0 +1,12 @@
+[
+  {
+    "filename": "api.jsonl",
+    "original_raw_sha256": "8e6d3eed2acd34550e37d32809ee4266199b8e4ca55afcbca7e70bcce6af15a8",
+    "normalization": "Opaque synthetic media/folder identifiers omitted; media path decoded and existing folderLabel retained. Original raw receipts remain local; replay runners reproduce them. No authentication secret was present; normal secret scan remains unchanged."
+  },
+  {
+    "filename": "baseline-api.jsonl",
+    "original_raw_sha256": "4f5762f761863bb75bc27e8925dbe17f97d446b986689634c6680eb270859be2",
+    "normalization": "Opaque synthetic media/folder identifiers omitted; media path decoded and existing folderLabel retained. Original raw receipts remain local; replay runners reproduce them. No authentication secret was present; normal secret scan remains unchanged."
+  }
+]

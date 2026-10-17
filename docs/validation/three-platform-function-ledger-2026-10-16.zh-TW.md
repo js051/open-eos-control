@@ -402,3 +402,10 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - [Capture configuration receipts](capture-config-receipts-20261017.zh-TW.md)：真API證實206／Content-Range曾將未建立的五字元suffix回報為成功；檔名讀回不符原本會拒絕完成，但誤標stage=acknowledged。Bridge／Android只在原capture ACK前加入完整性gate，保留原未知寫入恢復、非2xx與嚴格JSON、suffix／讀回／選取語義，不重送mutation。iOS原有完整性判定已涵蓋，未改。
 - Bridge同一新15案基準6紅／9綠；與既有capture案35綠，較廣545回歸已含新案。Android同12案基準6個runtime紅→固定12綠；原owner／取消fence與readback mismatch保持。兩個完整Kotlin檔PSI零語法錯誤，三個MockWebServer測試已寫未跑；不是完整type-check或原生通過。
 - 九行產品diff經兩方窄審。整合focus與capture兩批不同hunk後，Bridge focused73案通過；另用最終合併來源核對Android capture12／focus13入口host皆通過，[合併收據](evidence/focus-capture-integration-20261017/)另存。這是合併驗證，不重複計為新功能。原89列平台驗收仍未完成。
+
+
+## 23:56 UTC G08/G10 媒體刪除不完整204
+
+- [Media DELETE receipts](media-delete-partial-receipts-2026-10-17.zh-TW.md)：帶Content-Range的空204曾被確認刪除，真API與原PC函式因此移除項目／消耗選取並抑制晚清單，即使合成peer仍保留原檔。Bridge／Android兩行修正只收窄204成功界線，包含空header；403與帶range的403維持原拒絕分類。iOS原本已拒絕，PC錯誤處理原樣保留。
+- 新focused基準6紅／37綠；Bridge相關188通過，PC ownership48通過。相同7案API→原PC函式中，3個partial204改為uncertain並保留項目／選取；完整204兩控制仍成功，206／403原分類保留，每案只一次DELETE。Android exact transport/helper＋擷取caller host基準3紅→10綠；native MockWebServer已寫未跑。
+- 合併capture／focus來源後Bridge focused96、API7→PC7、Android10再次通過，[精確收據與基準／固定回覆](evidence/media-delete-integration-20261017/)保留。這是同檔不同hunk整合驗證，不重複計為新功能；原生／真相機／OS目的地與原89列其他驗收未因此完成。
