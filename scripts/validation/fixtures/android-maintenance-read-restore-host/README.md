@@ -27,9 +27,9 @@ abandonment.
 
 At a failed join, the tests require `repository.disconnect == 0`, teardown still
 pending, and the real registered maintenance job incomplete. They do not bypass
-the join. Fixed read cleanup must run strict session DELETE. A separate
-compatibility control leaves admitted strict Start blocking and verifies that its saved strict
-Stop executes before DELETE only after that Start producer returns. Core caller
+the join. Fixed read cleanup must run strict session DELETE. A separate compatibility control retains the registered strict-Start join until
+its phase finishes and verifies saved strict Stop before DELETE. Since the owned
+restore follow-on, current Start carries a prepared token and uses callbacks. Core caller
 probe traffic stays inside the maintenance namespace, and Start must have saved its Stop duty before I/O.
 
 ## Exact production boundary
@@ -56,8 +56,9 @@ block, fixture and tool checksums.
 Current controls exercise original-attempt/history preservation, same-text
 replacement session identity, no late read publication or auto restore,
 strict response validation, exact routes/no-cache read headers, and unchanged
-non-maintenance generic transports. Strict Start remains on its original blocking
-transport and is an explicit known limitation, not a repaired path. Current mode includes all production
+non-maintenance generic transports. The immutable baseline retains blocking strict Start. Current tests now prepare
+a restore token and verify the owned callback path; the separate restore-token
+runner provides its real deadline and server-contract evidence. Current mode includes all production
 MaintenanceWorkflowTest cases. `--test-class` can run a compiled class subset.
 
 This is host protocol/lifecycle evidence only. It does not prove full Android,

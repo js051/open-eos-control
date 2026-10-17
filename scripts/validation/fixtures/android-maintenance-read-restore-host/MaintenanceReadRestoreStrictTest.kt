@@ -35,15 +35,16 @@ class MaintenanceReadRestoreStrictTest {
             for (case in cases) {
                 val client = ExtractedMaintenanceClient(false)
                 val response = Response(case.status, ResponseBody(ByteArrayInputStream(case.bytes), case.declared), case.headers)
-                client.respond = { _, _ -> response }
                 val access = client.maintenanceAccess(request, if (start) LiveViewRequest() else null)
+                if (start) access.stopLiveView()
+                client.respond = { _, _ -> response }
                 val failure = runCatching { if (start) access.restore() else access.read(request) }.exceptionOrNull()
                 assertNotNull("${case.name}, start=$start", failure)
-                assertEquals(1, client.requests.size)
-                assertEquals(if (start) 0 else 1, client.calls.single().enqueueCount.get())
-                assertEquals(if (start) 1 else 0, client.calls.single().executeCount.get())
+                assertEquals(if (start) 2 else 1, client.requests.size)
+                assertEquals(1, client.calls.last().enqueueCount.get())
+                assertEquals(0, client.calls.last().executeCount.get())
                 assertEquals(1, response.closes.get())
-                assertEquals(if (start) 0L else TimeUnit.SECONDS.toNanos(15), client.calls.single().timeout().timeoutNanos())
+                assertEquals(TimeUnit.SECONDS.toNanos(15), client.calls.last().timeout().timeoutNanos())
                 assertEquals(start, client.liveViewStopRequired)
                 if (start) assertTrue(client.maintenanceStopOwned)
                 tested++
@@ -68,8 +69,9 @@ class MaintenanceReadRestoreStrictTest {
             JSONObject().put("active", true).put("liveViewStopUnconfirmed", "false"))
         for (body in cases) {
             val client = ExtractedMaintenanceClient(false)
+            val access = client.maintenanceAccess(request, LiveViewRequest()); access.stopLiveView()
             client.respond = { _, _ -> client.jsonResponse(body) }
-            assertNotNull(runCatching { client.maintenanceAccess(request, LiveViewRequest()).restore() }.exceptionOrNull())
+            assertNotNull(runCatching { access.restore() }.exceptionOrNull())
             assertTrue(client.liveViewStopRequired); assertTrue(client.maintenanceStopOwned)
         }
     }
@@ -91,7 +93,7 @@ class MaintenanceReadRestoreStrictTest {
             assertEquals("GET", sent.method)
             assertEquals("/v1/session/synthetic-session/maintenance/${action.wireName}", sent.url.encodedPath)
             assertEquals("no-cache, no-store", sent.headerMap["Cache-Control"])
-            assertEquals(1, client.calls.single().enqueueCount.get())
+            assertEquals(1, client.calls.last().enqueueCount.get())
         }
     }
     @Test(timeout = 7000) fun unrelatedMaintenancePathsAndOrdinaryLiveViewKeepTheirGenericTransport() = runBlocking {
@@ -104,15 +106,15 @@ class MaintenanceReadRestoreStrictTest {
         for ((method, path) in cases) {
             val client = ExtractedMaintenanceClient(false)
             client.routeProbe(method, path)
-            assertEquals(path, 1, client.calls.single().executeCount.get())
-            assertEquals(path, 0, client.calls.single().enqueueCount.get())
+            assertEquals(path, 1, client.calls.last().executeCount.get())
+            assertEquals(path, 0, client.calls.last().enqueueCount.get())
             assertEquals(path, 1, client.accepts.get())
         }
         val client = ExtractedMaintenanceClient(false)
         client.startLiveView(LiveViewRequest())
         assertEquals("/v1/session/synthetic-session/liveview/start", client.requests.single().url.encodedPath)
-        assertEquals(1, client.calls.single().executeCount.get())
-        assertEquals(0, client.calls.single().enqueueCount.get())
+        assertEquals(1, client.calls.last().executeCount.get())
+        assertEquals(0, client.calls.last().enqueueCount.get())
         assertTrue(client.liveViewStopRequired); assertFalse(client.maintenanceStopOwned)
     }
     @Test(timeout = 7000) fun cancelledReadWaiterCannotInvokeLateAccept() = runBlocking {
@@ -130,7 +132,7 @@ class MaintenanceReadRestoreStrictTest {
             job.cancel(); withTimeout(2000) { job.join() }
             assertEquals(1L, release.count); assertEquals(0, client.accepts.get())
         } finally { release.countDown(); withTimeout(2000) { job.join() } }
-        withTimeout(2000) { while (client.calls.single().callbacksCompleted.get() == 0) delay(5) }
+        withTimeout(2000) { while (client.calls.last().callbacksCompleted.get() == 0) delay(5) }
         assertEquals(0, client.accepts.get())
     }
 
@@ -162,11 +164,11 @@ class MaintenanceReadRestoreStrictTest {
         val responses = java.util.concurrent.CopyOnWriteArrayList<Response>()
         client.respond = { _, _ -> client.jsonResponse(readback()).also { responses += it } }
         client.routeProbe("GET", "/v1/session/synthetic-session/maintenance/sensor-cleaning")
-        withTimeout(2000) { while (client.calls.single().callbacksCompleted.get() < 2) delay(5) }
+        withTimeout(2000) { while (client.calls.last().callbacksCompleted.get() < 2) delay(5) }
         assertEquals(1, client.accepts.get())
         assertEquals(2, responses.size); assertTrue(responses.all { it.closes.get() == 1 })
-        assertEquals(1, client.calls.single().enqueueCount.get())
-        assertEquals(0, client.calls.single().executeCount.get())
+        assertEquals(1, client.calls.last().enqueueCount.get())
+        assertEquals(0, client.calls.last().executeCount.get())
     }
 
 }

@@ -1,0 +1,123 @@
+{
+  "at": "2026-10-17T21:55:21.964247+00:00",
+  "phase": "current",
+  "ref": "WORKTREE",
+  "source_sha256": [
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/BridgeShutterReleaseSession.kt",
+      "sha256": "81b62c61e6245e8546df2d84eb8b6995f991f57b55787a104d3ac9f399d6c752"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/ShutterReleaseSession.kt",
+      "sha256": "b1e1708555c7938c94f13bd9c8cb90f5fb0e37a993d9153c479a3df144363749"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/BridgeBulbRequestSession.kt",
+      "sha256": "77082b0492cda953e6cba413785e130e1d9abee52c6cc0e4810dba313a88cd77"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/BridgeBulbDeadline.kt",
+      "sha256": "b14c921a10fa2bbeb606f14acb718e511a7a9d888772c5895ed2c381bcd160d3"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/MaintenanceEvidence.kt",
+      "sha256": "7fe769d5dda7f4bd0acfe5b5777de505533a70066623b08ecc69fdddda99941d"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/ShootingSettingJson.kt",
+      "sha256": "c2c0967a4fd4589e198bd7913a1425d09b881c5cbd17784f91c8ea4cc3ad2930"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/StrictMediaJson.kt",
+      "sha256": "9ea850d244a64b2a2776062d75bb07ac4709a1fe33cecdc326f86c56cd8bf169"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/ui/MaintenanceWorkflow.kt",
+      "sha256": "fc0e033cd8c8efb7e4c3a2c239d94b107d2ec62d8243fd9c7c4a39229dd0093e"
+    },
+    {
+      "source_file": "android/app/src/test/java/dev/openeos/control/ui/MaintenanceWorkflowTest.kt",
+      "sha256": "50f6b3d11e2c30ca9d73f79d22c616789e489cf50026fe3fd6892c84cb95cff3"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt",
+      "sha256": "5be59e60584975510a1edc544819604e3415747dcae498a8ffcb062569234527"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/ui/CameraViewModel.kt",
+      "sha256": "7ee9f8de806a32d891c5a80e7c85eee74108568d6ccccfa94939e57839dbb9ae"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/CameraRepository.kt",
+      "sha256": "c10522ca55c67f42dfd534e1afbdc74b6401b6f8930d29aa4b0a2328d2c9196e"
+    }
+  ],
+  "extracted_methods_sha256": {
+    "suspend fun retireMaintenanceLocally()": "14c947d121eaa6ce63250b3560909466de4a968f7594b9279cb21090151f2f7b",
+    "suspend fun status(): CameraStatus {": "9e08b295645eb415d3fc3a4ab1d71aabbc558628c24c1f076b913ec5f0bb73b6",
+    "suspend fun stopEventPolling()": "c00581d22355cce549c4174b78ca799a44b6868e36809e8439f60486d6caccc2",
+    "fun maintenanceAccess(": "7357ba5c9d591fc019900b601df221025ad6077b0680e13d996fd8341e0cb227",
+    "private fun JSONObject.toMaintenanceMap()": "39c8d4dadfdaf5a0ff45e00ea53fcfda186c8603fa3801c38b289cbb539a18a6",
+    "suspend fun startLiveView(request:": "672ccd40fbc5d69acaf890bcb13720cb87e91e372b78f35dc751f077d0282a49",
+    "private suspend fun postJson(": "9474ea71720d0aabd7d5d35e60f5be3c50ffaae5520da5cf36ac866433c321c5",
+    "private suspend fun requestJson(": "25756bdcc6bdf6bff3cca3ef4fb8c144482ccf7fb53d625bb423df2852242793",
+    "private fun requireCurrentSession(": "e9316b76e6f9a790a6e800f3f3fb75d903ed3186b960a74df8cec2c6103d6967",
+    "private class MaintenanceRestoreOwner": "1d6371b3eeec64170b0810c9a37ca90d326c76106cf7c9d85fcb695ee724f7c2",
+    "fun submitMaintenance(draft: MaintenanceDraft) {": "e46b017a8cc7b99b2ea0dbe36e03110c896efa242342154085ee172713d71146",
+    "fun refresh() = runCamera(CameraOperation.STATUS)": "ad15b46ce69f4c07d4f626438b8f1b45c625db6c95e0aabb7c96c6197e53a070",
+    "private suspend fun readCameraStateSnapshot():": "382df147f12066ae974a91e62c9bc6e3809866d48be274e842f9bceb66e052b4",
+    "fun restartLiveView() {": "f2febc27692f9b7962ffb7f169624dc6714b7c6a1ed92ad2bdb17e3b6ddc154f",
+    "fun disconnect() {": "ce4ac0867c5481c754e935b448e83194f07aa094d6551988956f3e907b5dac0a",
+    "private fun launchCameraOperation(": "f49e909203b534b30212dd7129df91bf2fdb6b7a71fd693ecb8c9337de5f5a80",
+    "fun maintenanceAccess(request: MaintenanceRequest, eventPollingActive: Boolean)": "6bd301996ad436f330808d3ca24c06746a8831f689118ff72eb8110b7e7ede88",
+    "fun maintenanceStopRecoveryAccess():": "535b098402b41593a62b1f77cfb0529cce5bc1b673e1a3bcd24de4b4d84a627b"
+  },
+  "fixture_sha256": [
+    {
+      "fixture_file": "HostClient.kt",
+      "sha256": "b6482af6afdc67799f42fb5aa501c437ba8cba8b712b64124a15a18be896c74f"
+    },
+    {
+      "fixture_file": "HostViewModel.kt",
+      "sha256": "c62e261e51bdf266c9e2b7a421b3215daac1add05bb27e05d0f8fb1657379fcd"
+    },
+    {
+      "fixture_file": "JsonException.kt",
+      "sha256": "92261fdd06afa0f4cff49d32fe0d7a560c61b63c6e0e2f28272cf33a2d467e25"
+    },
+    {
+      "fixture_file": "MaintenanceRestoreCallerTest.kt",
+      "sha256": "a79da0ccf4ae44893a4a132ea1c8211cf53e525c559d2206cb90330225adf339"
+    },
+    {
+      "fixture_file": "MaintenanceRestoreTokenTest.kt",
+      "sha256": "481a5b9961ec4ddc81093803c8e1b466fbc8ad9df0252dc3ff40fbf18c171180"
+    },
+    {
+      "fixture_file": "MaintenanceStatusPublicationTest.kt",
+      "sha256": "b93f867942bf8744e79c90a56aab92a2a749789d7a0cdc5109a52010527d5703"
+    }
+  ],
+  "verified_tools": {
+    "kotlin-compiler-embeddable-2.2.21.jar": "9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295",
+    "kotlin-stdlib-2.2.21.jar": "6558a3d233da56a20934b32159f9db5f86ed5816ef098f78a2c223dc6abb79dd",
+    "kotlin-script-runtime-2.2.21.jar": "2b1519b427b514d1536c1b425674b03fe914af637924028e9959c6625442df51",
+    "kotlin-reflect-1.6.10.jar": "3277ac102ae17aad10a55abec75ff5696c8d109790396434b496e75087854203",
+    "kotlin-daemon-embeddable-2.2.21.jar": "91c0673c22e44b054ae0314d323860ebe1f3aff3f0ebc74fff82c4733dde09be",
+    "kotlinx-coroutines-core-jvm-1.8.0.jar": "9860906a1937490bf5f3b06d2f0e10ef451e65b95b269f22daf68a3d1f5065c5",
+    "kotlinx-coroutines-core-jvm-1.9.0.jar": "ad89c2892235e670f222d819cb3d81188143cb19a05b59df9889ae4269f5c70a",
+    "annotations-23.0.0.jar": "7b0f19724082cbfcbc66e5abea2b9bc92cf08a1ea11e191933ed43801eb3cd05",
+    "junit-4.13.2.jar": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3",
+    "hamcrest-core-1.3.jar": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+  },
+  "compile_exit": 0,
+  "jvm_heap_limit_mb": 256,
+  "active_processor_count": 1,
+  "boundary": "Entire production MaintenanceWorkflow and MaintenanceEvidence, BridgeShutterReleaseSession, ShutterReleaseSession, BridgeBulbRequestSession, BridgeBulbDeadline, ShootingSettingJson and StrictMediaJson; byte-exact CameraViewModel submitMaintenance/cancelMaintenance/publishMaintenanceStopWarning, recoverMaintenance/restoreMaintenance/continueMaintenance; full production CameraRepository maintenanceAccess; full launchCameraOperation registered-job lifetime and disconnect join; byte-exact DesktopBridgeClient maintenance close/local retirement, maintenanceAccess, maintenanceJson and cleanup helpers, live-view Start/Stop, postJson, requestJson, stopEventPolling, exact-owner helpers. Explicit synthetic HTTP Call/Response/InputStream, typed-registry JSON, model, focus and unrelated transport adapters. No Android/OkHttp/Compose/device execution.",
+  "test_classes": [
+    "dev.openeos.control.ui.MaintenanceStatusPublicationTest"
+  ],
+  "junit_exit": 1,
+  "runtime_tests_passed": false,
+  "publication_note": "Source and fixture hash maps expanded to source_file/sha256 and fixture_file/sha256 records with unchanged values to avoid filename/hash false positives. Synthetic extracted-* labels retain their original meaning. Raw receipt is retained locally. Empty compiler log denotes compile_exit 0; JUnit trailing blank lines normalized only."
+}

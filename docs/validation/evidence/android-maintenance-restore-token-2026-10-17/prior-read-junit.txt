@@ -1,0 +1,7 @@
+JUnit version 4.13.2
+.............Actual unmodified 15000ms maintenance read deadline: 15015ms; producer held=true
+................................................Strict read/Start rejection matrix: 30 actual access read/restore cases passed
+......
+Time: 16.257
+
+OK (67 tests)

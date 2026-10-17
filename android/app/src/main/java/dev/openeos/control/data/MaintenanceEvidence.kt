@@ -13,7 +13,9 @@ enum class MaintenanceCommandEvidence { NOT_SENT, UNKNOWN, RESPONSE_RECEIVED }
 enum class MaintenanceStopEvidence { NOT_REQUIRED, NOT_ATTEMPTED, UNKNOWN, STOPPED }
 enum class MaintenanceClockEvidence { NOT_READ, NOT_APPLICABLE, UNAVAILABLE, MISMATCH, MATCHED }
 enum class MaintenanceAvailability { NOT_READ, UNAVAILABLE, REACHABLE }
-enum class MaintenanceRestoreEvidence { NOT_REQUESTED, UNKNOWN, RESTORED }
+enum class MaintenanceRestoreEvidence { NOT_REQUESTED, UNKNOWN, RESTORED, BRIDGE_UNAVAILABLE }
+/** The Bridge did not issue a request-owned restore permit. No Start was sent. */
+internal class MaintenanceRestoreUnavailableException : IllegalStateException()
 
 /** Clock intent is captured before confirmation, including timezone and DST, never regenerated on retry. */
 data class MaintenanceClockTarget(val epochMillis: Long, val offsetSeconds: Int, val daylightSaving: Boolean) {
@@ -124,6 +126,7 @@ class MaintenanceEvidence(val request: MaintenanceRequest, private val requireOw
         check(value.restore == MaintenanceRestoreEvidence.NOT_REQUESTED) { "Restore cannot be silently replayed." }
         update(value.copy(restore = MaintenanceRestoreEvidence.UNKNOWN))
     }
+    @Synchronized fun bridgeRestoreUnavailable() { check(value.restore == MaintenanceRestoreEvidence.UNKNOWN); update(value.copy(restore = MaintenanceRestoreEvidence.BRIDGE_UNAVAILABLE)) }
     @Synchronized fun restored() { check(value.restore == MaintenanceRestoreEvidence.UNKNOWN); update(value.copy(restore = MaintenanceRestoreEvidence.RESTORED)) }
     private fun update(next: MaintenanceSnapshot) { value = next; publish(next) }
 }

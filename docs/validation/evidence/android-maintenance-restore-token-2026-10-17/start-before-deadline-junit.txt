@@ -1,0 +1,27 @@
+JUnit version 4.13.2
+..Actual runtime counterexample: phase=RESTORE_START; repository.disconnect=0; registeredJob.completed=false; held=true; execute=1; enqueue=0
+E.Actual unmodified 15000ms maintenance restore Start deadline: 15025ms; producer held=true
+Actual runtime counterexample: phase=RESTORE_START; repository.disconnect=0; registeredJob.completed=false; held=true; execute=1; enqueue=0
+E
+Time: 32.769
+There were 2 failures:
+1) cancelledRestoreStartIsBoundedAndLateBodyCannotPublishToReplacement(dev.openeos.control.ui.FixedRestoreTokenCallerTest)
+java.lang.AssertionError: Blocked maintenance read or strict restore Start must release the registered job before Disconnect cleanup
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.ui.ReadRestoreRig.assertCleanupWhileHeld(MaintenanceRestoreCallerTest.kt:104)
+	at dev.openeos.control.ui.MaintenanceRestoreCallerTestKt.cancelProbe(MaintenanceRestoreCallerTest.kt:128)
+	at dev.openeos.control.ui.MaintenanceRestoreCallerTestKt.access$cancelProbe(MaintenanceRestoreCallerTest.kt:1)
+	at dev.openeos.control.ui.FixedRestoreTokenCallerTest.cancelledRestoreStartIsBoundedAndLateBodyCannotPublishToReplacement(MaintenanceRestoreCallerTest.kt:161)
+2) realDefaultRestoreStartDeadlineReleasesRegisteredJob(dev.openeos.control.ui.FixedRestoreTokenCallerTest)
+java.lang.AssertionError: Blocked maintenance read or strict restore Start must release the registered job before Disconnect cleanup
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.ui.ReadRestoreRig.assertCleanupWhileHeld(MaintenanceRestoreCallerTest.kt:104)
+	at dev.openeos.control.ui.ReadRestoreRig.assertCleanupWhileHeld$default(MaintenanceRestoreCallerTest.kt:95)
+	at dev.openeos.control.ui.MaintenanceRestoreCallerTestKt.realDeadlineProbe(MaintenanceRestoreCallerTest.kt:156)
+	at dev.openeos.control.ui.MaintenanceRestoreCallerTestKt.access$realDeadlineProbe(MaintenanceRestoreCallerTest.kt:1)
+	at dev.openeos.control.ui.FixedRestoreTokenCallerTest.realDefaultRestoreStartDeadlineReleasesRegisteredJob(MaintenanceRestoreCallerTest.kt:162)
+
+FAILURES!!!
+Tests run: 3,  Failures: 2

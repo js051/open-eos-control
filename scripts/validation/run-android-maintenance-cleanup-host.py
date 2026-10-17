@@ -51,10 +51,12 @@ def main():
     methods += between(client, "    private suspend fun postJson(", "    private suspend fun postEmptyJson(")
     methods += between(client, "    private suspend fun requestJson(", "    private suspend fun requestEventJson(")
     methods += between(client, "    private fun requireCurrentSession(", "    private object BridgeShutterStart")
+    state = between(client, "    private class MaintenanceRestoreOwner" if "    private class MaintenanceRestoreOwner" in client else "    private class MaintenanceBridgeOwnerContext", "    val liveViewStopRequired:")
     fixture_dir = repo / "scripts/validation/fixtures/android-maintenance-cleanup-host"
     fixture_hashes = {}
     for fixture in sorted(fixture_dir.glob("*.kt")):
         data = fixture.read_text(); fixture_hashes[fixture.name] = digest(data.encode())
+        data = data.replace("    // HOST_PRODUCTION_LIVE_VIEW_STATE", state)
         if "// HOST_PRODUCTION_METHODS" in data:
             assert data.count("// HOST_PRODUCTION_METHODS") == 1
             data = data.replace("    // HOST_PRODUCTION_METHODS", methods)
