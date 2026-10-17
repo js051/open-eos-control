@@ -43,6 +43,8 @@ from .media_streaming import (
 )
 from .media_upload import validate_upload_request
 from .models import (
+    BulbOwnerRequest,
+    BulbOwnerResult,
     CameraCapabilities,
     CameraEvent,
     CameraFeature,
@@ -773,11 +775,23 @@ def create_app(
 
     @router.post("/session/{session_id}/bulb/start", response_model=CameraStatus)
     def start_bulb_exposure(session_id: str) -> CameraStatus:
-        return manager.get(session_id).start_bulb_exposure()
+        return manager.start_bulb_exposure(session_id)
 
     @router.post("/session/{session_id}/bulb/stop", response_model=CameraStatus)
     def stop_bulb_exposure(session_id: str) -> CameraStatus:
-        return manager.get(session_id).stop_bulb_exposure()
+        return manager.stop_bulb_exposure(session_id)
+
+    @router.post("/session/{session_id}/bulb/start/owned", response_model=BulbOwnerResult,
+                 response_model_exclude_none=True)
+    def start_owned_bulb(session_id: str, payload: BulbOwnerRequest, response: Response) -> BulbOwnerResult:
+        response.headers["Cache-Control"] = "no-store"
+        return manager.start_bulb_exposure(session_id, payload.owner_id)
+
+    @router.post("/session/{session_id}/bulb/stop/owned", response_model=BulbOwnerResult,
+                 response_model_exclude_none=True)
+    def stop_owned_bulb(session_id: str, payload: BulbOwnerRequest, response: Response) -> BulbOwnerResult:
+        response.headers["Cache-Control"] = "no-store"
+        return manager.stop_bulb_exposure(session_id, payload.owner_id)
 
     @router.post("/session/{session_id}/shutter/half-press", response_model=CameraStatus)
     def half_press_shutter(session_id: str) -> CameraStatus:

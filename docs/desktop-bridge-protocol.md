@@ -420,6 +420,61 @@ this meaning. Finding a JPEG is a media observation, not physical validation of 
 
 `POST /v1/session/{id}/bulb/stop` retries only the saved release, never the start or a newly discovered path. HTTP 502 with `SHUTTER_RELEASE_UNCONFIRMED` preserves the obligation. Once camera release is acknowledged, the server clears responsibility even if a subsequent status read fails. A fresh same-session status reporting both `shutterReleaseUnconfirmed: false` and `bulbExposureActive: false` can confirm that result. Missing fields in older server payloads are not equivalent recovery proof. An unacknowledged start followed by successful cleanup does not count as an observed completed Bulb exposure.
 
+### Owned desktop Bulb request ordering
+
+The additive `POST /v1/session/{id}/bulb/start/owned` and `.../bulb/stop/owned`
+routes accept exactly `{"ownerId":"unique-request-uuid"}`. The identifier has
+1–128 characters from `[A-Za-z0-9._:-]`. These routes preserve the original
+zero-argument provider `start_bulb_exposure()` and `stop_bulb_exposure()` methods;
+the no-payload mobile/legacy routes and their `CameraStatus` response shape remain.
+An old Bridge does not have these owned routes. A client requiring this ordering
+must report that incompatibility and must never fall back to a legacy Start.
+
+Success is `{"ownerId":"...","outcome":"started|released|cancelled-before-start"}`,
+with an optional `status` containing `CameraStatus`. `started` requires a literal
+`bulbExposureActive: true` from the serialized provider Start. The first `released`
+receipt requires the serialized provider Stop to complete and return literal
+`bulbExposureActive: false` and `shutterReleaseUnconfirmed: false`. It is command
+release evidence, not a new physical-camera observation. Repeating a completed
+owner's Stop returns its terminal receipt without `status` or new camera I/O.
+
+Stop for an unadmitted owner records cancellation before waiting for any provider
+lock and returns `cancelled-before-start`, without camera I/O or a status read.
+That receipt only proves that this owner's late Start cannot be dispatched; it
+does not assert that another camera control stopped. Once Start has entered its
+provider call, Stop cannot return `released` before that call finishes and the
+same session's provider Stop completes. Unknown or completed owner Stops never
+stop a newer owner's operation. An owner is admitted at most once, even after a
+lost Start response. A failed provider Stop, including a failed status read after
+successful release, retains its owner for an explicit owned Stop retry. Ordinary
+`GET /status` cannot clear this owned request obligation: a status request can also
+overtake an unadmitted Start.
+
+The Bridge keeps at most 256 owner records for each exact registered session
+object. Completed/cancelled records are never evicted. At the ceiling every unseen
+Start is rejected, while the active owner's Stop/retry remains available. Unknown
+Stops at the ceiling need no new record because every unseen Start is permanently
+blocked in that session. Resolve Stop before reconnecting to obtain a new session.
+This limit is separate from held-AF ownership and recording request contracts.
+
+Ownership errors use the normal error envelope: `BULB_OWNER_REPLAY`,
+`BULB_OWNER_BUSY`, `BULB_OWNER_LIMIT`, `BULB_OWNER_PENDING`, and
+`BULB_SESSION_RETIRED` are HTTP 409; an unconfirmed Start reply is HTTP 502
+`BULB_START_UNCONFIRMED`, and an unconfirmed Stop is HTTP 502
+`SHUTTER_RELEASE_UNCONFIRMED`. Provider errors otherwise retain their original
+codes. Waiting for the serialized execution lock is bounded to 15 seconds;
+`BULB_OWNER_PENDING` is not release evidence and permits explicit Stop retry.
+It does not prove that an in-flight provider operation was cancelled or stopped.
+
+Both legacy and owned Bulb calls use the same execution serialization. Legacy
+Start cannot bypass an active owned obligation, and an owned Start cannot adopt
+an unresolved legacy operation. Retirement fences queued Starts before provider
+close and retains the camera reservation through cleanup. Failed local-only
+maintenance retirement restores explicit Stop access, but never resurrects a
+previously queued Start. Owners and receipts never transfer to a replacement
+session, even if its wire identifier is reused. These are deterministic protocol
+guarantees; they are not physical-device validation or a hard stop deadline.
+
 `DELETE /v1/session/{id}` keeps the camera registration reserved while final cleanup runs, then removes the session even on cleanup failure. An unresolved release returns HTTP 502 with a camera-side recovery warning rather than false-success 204. That removed session cannot be retried; the old release is never sent in a replacement session. Client UI must distinguish an old-connection warning from a current-session stop obligation. Closing a browser or process cannot guarantee a physical camera was stopped.
 
 The PC UI implements stop-only recovery and a separately acknowledged previous-connection warning. Before a Bulb start, Android Bridge retains a session-bound responsibility, exposes persistent Stop-only recovery, and accepts only literal Boolean proof from the same Stop or its fresh status readback. For short autofocus, half-press, and manual still controls, the Bridge server retains the exact stop before dispatch; Android adopts that same-session responsibility from error or status evidence. A normal acknowledged start/stop remains compatible with an older Bridge; an ambiguous operation cannot be cleared by missing legacy fields. Android maps only the acknowledged-capture readback code into its existing read-only capture review. Shared stop warnings cover shutter or autofocus uncertainty without claiming a Bulb exposure. The iOS acknowledged-capture readback mapping and shared short-control wording remain a separate integration step. This is deterministic protocol coverage, not physical-camera validation.

@@ -487,6 +487,16 @@ class HeldAutofocusRequest(ApiModel):
     owner_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
 
 
+class BulbOwnerRequest(ApiModel):
+    owner_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
+
+
+class BulbOwnerResult(ApiModel):
+    owner_id: str
+    outcome: Literal["started", "released", "cancelled-before-start"]
+    status: CameraStatus | None = None
+
+
 class HeldAutofocusState(ApiModel):
     owner_id: str
     active: bool | None
