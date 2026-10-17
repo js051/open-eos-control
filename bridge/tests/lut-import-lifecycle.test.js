@@ -39,7 +39,9 @@ function fixture({ existing = true, rendererFailure = false } = {}) {
   const ui = new Proxy({}, { get(target, key) { return target[key] ||= element(); } });
   const calls = { toasts: [], renders: 0, diagnostics: 0, rendererCreations: 0, parses: 0, reads: [] };
   const options = { rendererFailure, afterParse: null, afterRenderer: null };
-  const context = vm.createContext({ state, ui, Error, RangeError, TypeError,
+  const document = { body: {}, activeElement: null, querySelector: () => null };
+  document.activeElement = document.body;
+  const context = vm.createContext({ state, ui, document, Error, RangeError, TypeError,
     lut: { ...lut, parseCubeLutBytes(bytes, name) {
       calls.parses++; const parsed = lut.parseCubeLutBytes(bytes, name); options.afterParse?.(); return parsed;
     }, createWebGLRenderer() {
@@ -78,7 +80,7 @@ function fixture({ existing = true, rendererFailure = false } = {}) {
     input.fire("change");
     return input;
   }
-  return { context, state, ui, calls, options, previous, file, choose };
+  return { context, state, ui, calls, options, previous, file, choose, document };
 }
 
 for (const vector of contract.vectors) test(`shared UTF-8 contract: ${vector.id}`, () => {
@@ -376,4 +378,68 @@ for (const stage of ["provider", "renderer"]) test(`production diagnostics omit 
   assert.equal(report.lastError, "Synthetic independent camera error");
   h.state.monitorLutImportError = null;
   assert.equal(h.context.diagnosticReport().liveView.monitoring.lutImportFailed, false);
+});
+
+// Model the focus eviction observed in real Firefox when the focused button is hidden.
+function focusedLutControl(h, key, onHide = () => {}) {
+  const button = h.ui[key];
+  let hidden = false;
+  Object.defineProperty(button, "hidden", { configurable: true, get: () => hidden, set(value) {
+    hidden = value; if (value && h.document.activeElement === button) h.document.activeElement = h.document.body;
+    if (value) onHide();
+  } });
+  h.ui.monitoringDialog.open = true;
+  h.ui.monitoringDialog.contains = element => [button, h.ui.monitorLutLoad].includes(element);
+  Object.assign(h.ui.monitorLutLoad, { isConnected: true, hidden: false, disabled: false,
+    getClientRects: () => [{}], focus(options) { this.focusOptions = options; h.document.activeElement = this; } });
+  h.document.activeElement = button;
+  return button;
+}
+
+test("keyboard LUT removal returns to its visible load control", () => {
+  const h = fixture(); focusedLutControl(h, "monitorLutRemove");
+  h.context.removeCubeLut();
+  assert.equal(h.document.activeElement, h.ui.monitorLutLoad);
+  assert.equal(h.ui.monitorLutLoad.focusOptions.preventScroll, true);
+});
+
+test("cancelling a pending LUT import preserves keyboard continuation", async () => {
+  const h = fixture(), input = h.file("Held", { hold: true });
+  const work = h.context.importCubeLutFile(input); focusedLutControl(h, "monitorLutCancel");
+  h.context.cancelCubeLutImport();
+  assert.equal(h.document.activeElement, h.ui.monitorLutLoad);
+  input.gate.resolve(); await work;
+  assert.equal(h.state.monitorSettings.cubeLut, h.previous);
+});
+
+test("settled pending LUT read returns a disappearing cancel control only", async () => {
+  const h = fixture(), input = h.file("New", { hold: true });
+  const work = h.context.importCubeLutFile(input); focusedLutControl(h, "monitorLutCancel");
+  input.gate.resolve(); await work;
+  assert.equal(h.document.activeElement, h.ui.monitorLutLoad);
+  assert.equal(h.state.monitorSettings.cubeLut.name, "New");
+});
+
+for (const boundary of ["closed", "other-focus", "detached", "disabled", "hidden", "no-rect", "other-dialog"]) {
+  test(`retiring LUT control does not steal focus across ${boundary}`, () => {
+    const h = fixture(); focusedLutControl(h, "monitorLutRemove");
+    const other = {};
+    if (boundary === "closed") h.ui.monitoringDialog.open = false;
+    if (boundary === "other-focus") h.document.activeElement = other;
+    if (boundary === "detached") h.ui.monitorLutLoad.isConnected = false;
+    if (boundary === "disabled") h.ui.monitorLutLoad.disabled = true;
+    if (boundary === "hidden") h.ui.monitorLutLoad.hidden = true;
+    if (boundary === "no-rect") h.ui.monitorLutLoad.getClientRects = () => [];
+    if (boundary === "other-dialog") h.document.querySelector = () => ({});
+    h.context.removeCubeLut();
+    assert.notEqual(h.document.activeElement, h.ui.monitorLutLoad);
+    if (boundary === "other-focus") assert.equal(h.document.activeElement, other);
+  });
+}
+
+test("LUT hiding does not steal focus moved by a synchronous blur handler", () => {
+  const h = fixture(), other = {};
+  focusedLutControl(h, "monitorLutRemove", () => { h.document.activeElement = other; });
+  h.context.removeCubeLut();
+  assert.equal(h.document.activeElement, other);
 });
