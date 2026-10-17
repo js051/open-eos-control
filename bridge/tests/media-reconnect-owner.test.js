@@ -14,19 +14,30 @@ const source = fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static/a
 function extract(name) {
   const match = new RegExp(`^  (?:async )?function ${name}\\(`, "m").exec(source);
   assert.ok(match, `Missing production function ${name}`);
-  return source.slice(match.index, source.indexOf("\n  }", match.index) + 4);
+  const dialogDependencies = ["openMediaPreview", "openMediaDetails", "renderMediaPreviewNavigation",
+    "renderMediaDetails", "closeMediaPreview", "closeMediaDetails"].includes(name)
+    ? ["mediaDialogFocusTarget", "beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"]
+      .map(extract).join("\n") + "\n" : "";
+  return dialogDependencies + source.slice(match.index, source.indexOf("\n  }", match.index) + 4);
 }
-function element(tagName = "div") {
+function element(tagName = "div", document = null) {
   const listeners = {};
-  return { tagName, children: [], dataset: {}, className: "", hidden: false, disabled: false, open: false, value: "",
+  return { tagName: tagName.toUpperCase(), isConnected: true, children: [], dataset: {}, className: "", hidden: false, disabled: false, open: false, value: "",
     classList: { toggle() {}, remove() {} }, style: { removeProperty() {} },
-    append(...nodes) { this.children.push(...nodes); }, replaceChildren(...nodes) { this.children = nodes; },
-    setAttribute() {}, removeAttribute() {}, close() { this.open = false; }, showModal() { this.open = true; },
+    append(...nodes) { nodes.forEach(node => { node.parent = this; }); this.children.push(...nodes); },
+    replaceChildren(...nodes) {
+      this.querySelectorAll("*").forEach(node => { node.isConnected = false; });
+      this.children = []; this.append(...nodes);
+    },
+    contains(node) { return node === this || this.querySelectorAll("*").includes(node); },
+    closest() { return this.hidden ? this : null; }, getClientRects() { return this.hidden ? [] : [1]; },
+    focus() { document.activeElement = this; },
+    setAttribute() {}, removeAttribute() {}, close() { this.open = false; document.activeElement = document.body; }, showModal() { this.open = true; document.activeElement = this; },
     addEventListener(type, callback) { listeners[type] = callback; },
-    dispatch(type) { return listeners[type]?.({ target: this }); },
+    dispatch(type, event = {}) { return listeners[type]?.({ target: this, ...event }); },
     querySelectorAll(selector) {
       const all = this.children.flatMap(node => [node, ...node.querySelectorAll("*")]);
-      return selector === "*" ? all : selector.startsWith(".")
+      return selector === "button[data-media-id][data-media-action]" ? all.filter(node => node.tagName === "BUTTON" && node.dataset.mediaId && node.dataset.mediaAction) : selector === "*" ? all : selector.startsWith(".")
         ? all.filter(node => node.className.split(" ").includes(selector.slice(1))) : [];
     },
   };
@@ -41,7 +52,12 @@ function fixture({ thumbnails = false } = {}) {
     mediaGeneration: 0, mediaThumbnailLoads: new Set(), mediaThumbnailFailures: new Set(),
     cameras: [{ id: "camera", engine: "synthetic" }],
   };
-  const ui = new Proxy({}, { get(target, name) { return target[name] ||= element(); } });
+  const document = { body: {}, activeElement: null };
+  document.activeElement = document.body;
+  document.createElement = tag => element(tag, document);
+  const ui = new Proxy({}, { get(target, name) { return target[name] ||= element("div", document); } });
+  for (const kind of ["Preview", "Details"]) ui[`media${kind}Close`] = element("button", document);
+  document.querySelector = () => [ui.mediaPreviewDialog, ui.mediaDetailsDialog].find(dialog => dialog.open) || null;
   const requests = [], observers = [];
   const panels = [Object.assign(element(), { id: "live-panel", hidden: true }), Object.assign(element(), { id: "media-panel", hidden: false })];
   class Observer {
@@ -54,7 +70,7 @@ function fixture({ thumbnails = false } = {}) {
     MEDIA_PAGE_SIZE: 72, MAX_MEDIA_PREVIEW_BYTES: 32 * 1024 * 1024,
     FEATURES: new Proxy({}, { get: (_, name) => name }),
     featureSupported: feature => thumbnails || feature !== "MEDIA_THUMBNAIL",
-    document: { createElement: element, querySelectorAll: selector => selector === ".view-panel" ? panels : [] }, window: { location: { href: "http://synthetic.invalid/" }, IntersectionObserver: Observer },
+    document: Object.assign(document, { querySelectorAll: selector => selector === ".view-panel" ? panels : [] }), window: { location: { href: "http://synthetic.invalid/" }, IntersectionObserver: Observer },
     connectionRetirementBlocked: () => false, clampFps: value => value, captureModeFromCamera: () => "photo",
     adoptCameraStatus: status => { state.status = status; },
     showConnectionError: error => { throw error; },
@@ -444,3 +460,67 @@ for (const competing of ["latest review", "replacement listing", "new camera int
     }
   });
 }
+
+
+test("actual Manage metadata completion replaces cards and close restores the same current action", async () => {
+  const c = fixture();
+  let resolve;
+  c.api = () => new Promise(done => { resolve = done; });
+  c.replaceMediaItem = item => { c.state.media = [item]; c.state.mediaDetailsItem = item; };
+  c.captureError = error => error;
+  const original = controls(c).details;
+  original.focus(); original.dispatch("click");
+  assert.equal(c.state.mediaDetailsFocusOwner.original, original);
+  resolve({ ...oldItem(), rating: 3 });
+  await new Promise(done => setImmediate(done));
+  assert.equal(original.isConnected, false);
+  const replacement = controls(c).details;
+  assert.notEqual(replacement, original);
+  c.closeMediaDetails();
+  assert.equal(c.document.activeElement, replacement);
+});
+
+test("actual Preview open, navigation/retry and Preview-to-Details retain the initial card invoker", () => {
+  const c = fixture(), original = controls(c).preview;
+  original.focus(); original.dispatch("click");
+  const owner = c.state.mediaPreviewFocusOwner;
+  assert.equal(owner.original, original);
+  void c.openMediaPreview({ ...oldItem(), id: "next-item" });
+  void c.openMediaPreview({ ...oldItem(), id: "next-item" });
+  assert.equal(c.state.mediaPreviewFocusOwner, owner);
+  // Execute the production toolbar event body, preserving its transfer behavior.
+  const start = source.indexOf('    ui.mediaPreviewDetails.addEventListener("click", () => {');
+  vm.runInContext(source.slice(start, source.indexOf("\n    });", start) + 8), c);
+  c.ui.mediaPreviewDetails.dispatch("click");
+  assert.equal(c.state.mediaPreviewFocusOwner, null);
+  assert.equal(c.state.mediaDetailsFocusOwner.original, original);
+  c.renderMedia(); c.closeMediaDetails();
+  assert.equal(c.document.activeElement, controls(c).preview);
+});
+
+test("reset retires modal owners before close and cannot focus the old card", () => {
+  const c = fixture(), original = controls(c).details;
+  original.focus(); original.dispatch("click");
+  let restored = 0; original.focus = () => { restored++; };
+  c.resetSession();
+  assert.equal(c.state.mediaDetailsFocusOwner, null);
+  assert.equal(c.state.mediaPreviewFocusOwner, null);
+  assert.equal(restored, 0);
+});
+
+test("queued close from an earlier opening cannot erase a newer same-session Details", () => {
+  const c = fixture(); c.mediaMetadataSupported = () => false;
+  const start = source.indexOf('    ui.mediaDetailsDialog.addEventListener("cancel",');
+  vm.runInContext(source.slice(start, source.indexOf("\n    });", start) + 8), c);
+  controls(c).details.focus(); void c.openMediaDetails(oldItem());
+  let prevented = false;
+  c.ui.mediaDetailsDialog.dispatch("cancel", { preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(c.ui.mediaDetailsDialog.open, false);
+  assert.equal(c.document.activeElement, controls(c).details);
+  controls(c).details.focus(); void c.openMediaDetails({ ...oldItem(), id: "new-opening" });
+  const owner = c.state.mediaDetailsFocusOwner;
+  c.ui.mediaDetailsDialog.dispatch("close");
+  assert.equal(c.state.mediaDetailsItem.id, "new-opening");
+  assert.equal(c.state.mediaDetailsFocusOwner, owner);
+});

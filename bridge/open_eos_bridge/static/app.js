@@ -1937,6 +1937,8 @@
     mediaDetailsItem: null,
     mediaDetailsGeneration: 0,
     mediaDetailsBusy: false,
+    mediaPreviewFocusOwner: null,
+    mediaDetailsFocusOwner: null,
     mediaDownloadPreparing: false,
     mediaDownloadOwner: null,
     mediaDownload: null,
@@ -2978,6 +2980,9 @@
   }
 
   function resetSession() {
+    // Retire before close: the session itself is cleared later in this function.
+    state.mediaPreviewFocusOwner = null;
+    state.mediaDetailsFocusOwner = null;
     if (typeof cancelRecordingWait === "function") cancelRecordingWait({ retire: true });
     state.liveViewStopOwner?.maintenanceController?.abort();
     state.maintenanceCloseOwner?.maintenanceController?.abort();
@@ -7805,6 +7810,7 @@
       thumbnail.dataset.mediaId = item.id;
       if (previewSupported) {
         thumbnail.type = "button";
+        thumbnail.dataset.mediaAction = "preview";
         thumbnail.disabled = Boolean(state.mediaBatchOwner || state.mediaMutationOwner);
         thumbnail.setAttribute("aria-label", t("previewMedia", { name: item.name }));
         thumbnail.addEventListener("click", () => { if (current()) void openMediaPreview(item); });
@@ -7828,6 +7834,8 @@
       if (actionSupported) {
         const manage = document.createElement("button");
         manage.type = "button";
+        manage.dataset.mediaId = item.id;
+        manage.dataset.mediaAction = "manage";
         manage.className = "icon-button";
         manage.dataset.tooltip = t("mediaDetails");
         manage.setAttribute("aria-label", t("manageMedia", { name: item.name }));
@@ -9384,8 +9392,8 @@
     const protectionReadOnly = item.protectionWritable === false;
     ui.mediaProtectionUnavailable.hidden = !protectionReadOnly;
     ui.mediaProtectionUnavailable.textContent = t("mediaMetadataReadOnly");
-    ui.mediaProtectButton.disabled = disabled || protectionReadOnly;
-    ui.mediaUnprotectButton.disabled = disabled || protectionReadOnly;
+    setMediaDialogActionDisabled("Details", ui.mediaProtectButton, disabled || protectionReadOnly);
+    setMediaDialogActionDisabled("Details", ui.mediaUnprotectButton, disabled || protectionReadOnly);
     ui.mediaProtectButton.classList.toggle("active", item.protected === true);
     ui.mediaUnprotectButton.classList.toggle("active", item.protected === false);
     ui.mediaProtectButton.setAttribute("aria-pressed", String(item.protected === true));
@@ -9398,7 +9406,7 @@
     ui.mediaRatingUnavailable.textContent = t("mediaMetadataReadOnly");
     ui.mediaRatingControl.querySelectorAll("[data-media-rating]").forEach((button) => {
       const value = Number(button.dataset.mediaRating);
-      button.disabled = disabled || ratingReadOnly;
+      setMediaDialogActionDisabled("Details", button, disabled || ratingReadOnly);
       button.classList.toggle("active", item.rating === value);
       button.setAttribute("aria-pressed", String(item.rating === value));
       button.setAttribute("aria-label", value === 0 ? t("ratingOff") : t("ratingValue", { value }));
@@ -9411,7 +9419,7 @@
     ui.mediaRotationUnavailable.textContent = t("mediaMetadataReadOnly");
     ui.mediaRotationControl.querySelectorAll("[data-media-rotation]").forEach((button) => {
       const value = Number(button.dataset.mediaRotation);
-      button.disabled = disabled || rotationReadOnly;
+      setMediaDialogActionDisabled("Details", button, disabled || rotationReadOnly);
       button.classList.toggle("active", item.rotationDegrees === value);
       button.setAttribute("aria-pressed", String(item.rotationDegrees === value));
       button.setAttribute("aria-label", t("rotationValue", { value }));
@@ -9422,17 +9430,64 @@
     const archiveReadOnly = item.archiveWritable === false;
     ui.mediaArchiveUnavailable.hidden = !archiveReadOnly;
     ui.mediaArchiveUnavailable.textContent = t("mediaMetadataReadOnly");
-    ui.mediaArchiveButton.disabled = disabled || archiveReadOnly;
-    ui.mediaUnarchiveButton.disabled = disabled || archiveReadOnly;
+    setMediaDialogActionDisabled("Details", ui.mediaArchiveButton, disabled || archiveReadOnly);
+    setMediaDialogActionDisabled("Details", ui.mediaUnarchiveButton, disabled || archiveReadOnly);
     ui.mediaArchiveButton.classList.toggle("active", item.archived === true);
     ui.mediaUnarchiveButton.classList.toggle("active", item.archived === false);
     ui.mediaArchiveButton.setAttribute("aria-pressed", String(item.archived === true));
     ui.mediaUnarchiveButton.setAttribute("aria-pressed", String(item.archived === false));
 
     ui.mediaDetailsDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
-    ui.mediaDetailsDownload.disabled = disabled || !featureSupported(FEATURES.MEDIA_DOWNLOAD);
+    setMediaDialogActionDisabled("Details", ui.mediaDetailsDownload, disabled || !featureSupported(FEATURES.MEDIA_DOWNLOAD));
     ui.mediaDetailsDelete.hidden = !featureSupported(FEATURES.MEDIA_DELETE);
-    ui.mediaDetailsDelete.disabled = disabled || Boolean(state.mediaDeleteOwner) || !featureSupported(FEATURES.MEDIA_DELETE);
+    setMediaDialogActionDisabled("Details", ui.mediaDetailsDelete, disabled || Boolean(state.mediaDeleteOwner) || !featureSupported(FEATURES.MEDIA_DELETE));
+  }
+
+  function mediaDialogFocusTarget(button) {
+    return button?.tagName === "BUTTON" && button.isConnected && !button.disabled &&
+      !button.closest("[hidden], [inert]") && button.getClientRects().length > 0;
+  }
+
+  function beginMediaDialogFocus(kind, inherited = null) {
+    const key = `media${kind}FocusOwner`;
+    if (ui[`media${kind}Dialog`].open && state[key]?.session === state.session) return;
+    const original = inherited?.session === state.session ? inherited.original : document.activeElement;
+    state[key] = {
+      session: state.session,
+      original,
+      itemId: inherited?.session === state.session ? inherited.itemId : original?.dataset?.mediaId,
+      role: inherited?.session === state.session ? inherited.role : original?.dataset?.mediaAction,
+    };
+  }
+
+  function restoreMediaDialogFocus(owner, eligible) {
+    if (!eligible || !owner || owner.session !== state.session ||
+        state.mediaPreviewFocusOwner || state.mediaDetailsFocusOwner ||
+        document.querySelector("dialog[open]")) return;
+    // Native close may already restore the original; never override another focus choice.
+    if (document.activeElement !== document.body && document.activeElement !== owner.original) return;
+    const cardInvoker = Boolean(owner.itemId && owner.role);
+    const currentCards = cardInvoker && state.activeView === "media" &&
+      state.mediaRenderOwner?.session === state.session && state.media.some(item => item.id === owner.itemId)
+      ? Array.from(ui.mediaList.querySelectorAll("button[data-media-id][data-media-action]")) : [];
+    let target = mediaDialogFocusTarget(owner.original) && (!cardInvoker || currentCards.includes(owner.original))
+      ? owner.original : null;
+    if (!target && cardInvoker) {
+      target = currentCards.find(button => button.dataset.mediaId === owner.itemId &&
+        button.dataset.mediaAction === owner.role && mediaDialogFocusTarget(button));
+    }
+    target?.focus({ preventScroll: true });
+  }
+
+  function setMediaDialogActionDisabled(kind, button, disabled) {
+    const owner = state[`media${kind}FocusOwner`];
+    const dialog = ui[`media${kind}Dialog`];
+    const close = ui[`media${kind}Close`];
+    if (disabled && owner && owner.session === state.session && dialog.open &&
+        document.activeElement === button && dialog.contains(button) && mediaDialogFocusTarget(close)) {
+      close.focus({ preventScroll: true });
+    }
+    button.disabled = disabled;
   }
 
   function clearMediaDetails() {
@@ -9442,14 +9497,21 @@
     if (typeof renderMediaAutoImport === "function") renderMediaAutoImport();
   }
 
-  function closeMediaDetails() {
-    if (ui.mediaDetailsDialog?.open) ui.mediaDetailsDialog.close();
+  function closeMediaDetails(restoreFocus = true) {
+    const owner = state.mediaDetailsFocusOwner;
+    const dialog = ui.mediaDetailsDialog;
+    const eligible = Boolean(owner && dialog?.open &&
+      (dialog.contains(document.activeElement) || document.activeElement === document.body));
+    state.mediaDetailsFocusOwner = null;
+    if (dialog?.open) dialog.close();
     clearMediaDetails();
+    if (restoreFocus && owner) restoreMediaDialogFocus(owner, eligible);
   }
 
-  async function openMediaDetails(item) {
+  async function openMediaDetails(item, inheritedFocus = null) {
     if (!state.session || cameraInteractionBusy()) return;
     state.mediaListingOwner?.cancel({ silent: true });
+    beginMediaDialogFocus("Details", inheritedFocus);
     clearMediaDetails();
     const generation = state.mediaDetailsGeneration;
     const session = state.session;
@@ -9491,9 +9553,15 @@
     await runMediaMutation([{ id: item.id, item, loaded: true, hidden: false }], requested);
   }
 
-  function closeMediaPreview() {
-    if (ui.mediaPreviewDialog.open) ui.mediaPreviewDialog.close();
+  function closeMediaPreview(restoreFocus = true) {
+    const owner = state.mediaPreviewFocusOwner;
+    const dialog = ui.mediaPreviewDialog;
+    const eligible = Boolean(owner && dialog?.open &&
+      (dialog.contains(document.activeElement) || document.activeElement === document.body));
+    state.mediaPreviewFocusOwner = null;
+    if (dialog?.open) dialog.close();
     clearMediaPreview();
+    if (restoreFocus && owner) restoreMediaDialogFocus(owner, eligible);
   }
 
   async function openMediaPreview(item) {
@@ -9506,6 +9574,7 @@
       (!video && (!mediaLibrary.isPhoto(item) || item.previewAvailable !== true || !featureSupported(FEATURES.MEDIA_PREVIEW)))
     ) return;
     state.mediaListingOwner?.cancel({ silent: true });
+    beginMediaDialogFocus("Preview");
     clearMediaPreview();
     const generation = state.mediaPreviewGeneration;
     // Playback allocation must return its ticket so stale responses can revoke it.
@@ -9578,10 +9647,10 @@
     if (typeof renderMediaAutoImport === "function") renderMediaAutoImport();
     const items = previewableMedia();
     const index = items.findIndex((item) => item.id === state.mediaPreviewItem?.id);
-    ui.mediaPreviewPrevious.disabled = Boolean(state.mediaBatchOwner || state.mediaMutationOwner || state.mediaAutoImportReading) || index <= 0;
-    ui.mediaPreviewNext.disabled = Boolean(state.mediaBatchOwner || state.mediaMutationOwner || state.mediaAutoImportReading) || index < 0 || index >= items.length - 1;
-    ui.mediaPreviewRetry.disabled = Boolean(state.mediaBatchOwner || state.mediaMutationOwner || state.mediaAutoImportReading);
-    ui.mediaPreviewFailureDownload.disabled = cameraInteractionBusy();
+    setMediaDialogActionDisabled("Preview", ui.mediaPreviewPrevious, Boolean(state.mediaBatchOwner || state.mediaMutationOwner || state.mediaAutoImportReading) || index <= 0);
+    setMediaDialogActionDisabled("Preview", ui.mediaPreviewNext, Boolean(state.mediaBatchOwner || state.mediaMutationOwner || state.mediaAutoImportReading) || index < 0 || index >= items.length - 1);
+    setMediaDialogActionDisabled("Preview", ui.mediaPreviewRetry, Boolean(state.mediaBatchOwner || state.mediaMutationOwner || state.mediaAutoImportReading));
+    setMediaDialogActionDisabled("Preview", ui.mediaPreviewFailureDownload, cameraInteractionBusy());
     const item = state.mediaPreviewItem;
     if (!item) return;
     ui.mediaPreviewTitle.textContent = item.name;
@@ -9593,9 +9662,9 @@
     ].filter((value) => value && value !== "-");
     ui.mediaPreviewMeta.textContent = summary.join(" · ");
     ui.mediaPreviewDownload.hidden = !featureSupported(FEATURES.MEDIA_DOWNLOAD);
-    ui.mediaPreviewDownload.disabled = cameraInteractionBusy();
+    setMediaDialogActionDisabled("Preview", ui.mediaPreviewDownload, cameraInteractionBusy());
     ui.mediaPreviewDetails.hidden = !mediaManagementSupported();
-    ui.mediaPreviewDetails.disabled = cameraInteractionBusy();
+    setMediaDialogActionDisabled("Preview", ui.mediaPreviewDetails, cameraInteractionBusy());
   }
 
   function openAdjacentMedia(offset) {
@@ -10765,8 +10834,9 @@
     ui.mediaPreviewDetails.addEventListener("click", () => {
       const item = state.mediaPreviewItem;
       if (!item) return;
-      closeMediaPreview();
-      void openMediaDetails(item);
+      const inheritedFocus = state.mediaPreviewFocusOwner;
+      closeMediaPreview(false);
+      void openMediaDetails(item, inheritedFocus);
     });
     ui.mediaPreviewResetZoom.addEventListener("click", resetMediaPreviewTransform);
     ui.mediaPreviewImage.addEventListener("dblclick", () => {
@@ -10808,12 +10878,20 @@
     };
     ui.mediaPreviewImage.addEventListener("pointerup", finishMediaPreviewDrag);
     ui.mediaPreviewImage.addEventListener("pointercancel", finishMediaPreviewDrag);
-    ui.mediaPreviewDialog.addEventListener("close", clearMediaPreview);
+    // Cleanup is synchronous. A queued native close event may belong to an older opening.
+    ui.mediaPreviewDialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeMediaPreview();
+    });
     ui.mediaPreviewDialog.addEventListener("click", (event) => {
       if (event.target === ui.mediaPreviewDialog) closeMediaPreview();
     });
     ui.mediaDetailsClose.addEventListener("click", closeMediaDetails);
-    ui.mediaDetailsDialog.addEventListener("close", clearMediaDetails);
+    // Cleanup is synchronous. A queued native close event may belong to an older opening.
+    ui.mediaDetailsDialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeMediaDetails();
+    });
     ui.mediaDetailsDialog.addEventListener("click", (event) => {
       if (event.target === ui.mediaDetailsDialog) closeMediaDetails();
     });

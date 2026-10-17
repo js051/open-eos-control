@@ -22,7 +22,7 @@ function fixture(item = {}, disabled = []) {
   const context = vm.createContext({ state, ui, FEATURES, featureSupported: value => !disabled.includes(value),
     cameraInteractionBusy: () => false, formatDate: () => "", formatMediaDimensions: () => "", formatMediaSize: () => "",
     formatMediaContentType: () => "", t: key => key });
-  vm.runInContext(extract("renderMediaDetails"), context);
+  vm.runInContext(["mediaDialogFocusTarget", "setMediaDialogActionDisabled", "renderMediaDetails"].map(extract).join("\n"), context);
   context.renderMediaDetails();
   return { state, ui, render: () => context.renderMediaDetails() };
 }

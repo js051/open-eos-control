@@ -15,7 +15,11 @@ const source = fs.readFileSync(path.join(__dirname, "../open_eos_bridge/static/a
 function extract(name) {
   const start = new RegExp(`^  (?:async )?function ${name}\\(`, "m").exec(source);
   assert.ok(start, name);
-  return source.slice(start.index, source.indexOf("\n  }", start.index) + 4);
+  const dialogDependencies = ["openMediaPreview", "openMediaDetails", "renderMediaPreviewNavigation",
+    "renderMediaDetails", "closeMediaPreview", "closeMediaDetails"].includes(name)
+    ? ["mediaDialogFocusTarget", "beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"]
+      .map(extract).join("\n") + "\n" : "";
+  return dialogDependencies + source.slice(start.index, source.indexOf("\n  }", start.index) + 4);
 }
 function deferred() {
   let resolve, reject;
