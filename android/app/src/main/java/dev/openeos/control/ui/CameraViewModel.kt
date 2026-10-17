@@ -1340,8 +1340,13 @@ class CameraViewModel(
             stop()
             coroutineContext.ensureActive()
             if (generation == cameraSessionGeneration && _uiState.value.info === state.info) {
-                _uiState.update { it.copy(liveViewStopUnconfirmed = false,
-                    status = it.status?.copy(liveViewStopUnconfirmed = false), liveViewAutoRefresh = false) }
+                _uiState.update {
+                    // A receipt-only owned Stop resolves this request, never a newer UI observation.
+                    if (it.status !== state.status || it.liveViewStopUnconfirmed != state.liveViewStopUnconfirmed)
+                        it.copy(liveViewAutoRefresh = false)
+                    else it.copy(liveViewStopUnconfirmed = false,
+                        status = it.status?.copy(liveViewStopUnconfirmed = false), liveViewAutoRefresh = false)
+                }
                 // This explicit Stop does not release maintenance hold, restore events, or replay the action.
             }
         }

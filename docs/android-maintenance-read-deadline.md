@@ -1,5 +1,8 @@
 # Android Bridge maintenance read deadlines
 
+Follow-on: [request-owned restoration](android-maintenance-restore-token.md)
+closes the strict Start boundary deferred by this historical read-only batch.
+
 ## Scope and implementation
 
 This follows `a42aad06d0c2521c3196ce6773dda62f9a0856ac`. Only these existing,

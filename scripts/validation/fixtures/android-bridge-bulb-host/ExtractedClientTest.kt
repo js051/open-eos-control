@@ -379,7 +379,7 @@ internal class ExtractedOwnedClient {
     private var maintenanceSessionOwned = false
     private var closingMediaSession: BridgeShutterReleaseSession? = null
     private class HostListing(val call: Call)
-    private class LiveViewStopOwner(val session: BridgeShutterReleaseSession, val url: HttpUrl, var confirmedStart: Boolean = false)
+    private class LiveViewStopOwner(val session: BridgeShutterReleaseSession, val url: HttpUrl, var confirmedStart: Boolean = false, val maintenanceOwned: Boolean = false)
     private var liveViewStopOwner: LiveViewStopOwner? = null
     private var liveViewRevision = 0L
     private val liveViewStateLock = Any()

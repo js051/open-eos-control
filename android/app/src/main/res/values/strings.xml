@@ -1135,4 +1135,5 @@
     <string name="bridge_bulb_stop_pending">Stopping this Bulb request. Waiting for its release acknowledgement.</string>
     <string name="bridge_bulb_release_required">This Bulb request is not confirmed released. Retry Stop; if it fails, check and stop the camera itself.</string>
     <string name="bridge_bulb_ownership_unavailable">This Bridge cannot acknowledge safe Bulb request ownership. Update Bridge. Do not start another exposure; retry Stop or check the camera before disconnecting.</string>
+    <string name="maintenance_restore_bridge_unavailable">This Bridge did not provide a safe restoration permit. No Live View Start was sent. Update Bridge and reconnect before restoring monitoring.</string>
 </resources>

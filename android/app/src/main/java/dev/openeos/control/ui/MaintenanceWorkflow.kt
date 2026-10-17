@@ -92,7 +92,8 @@ class MaintenanceAttempt(val draft: MaintenanceDraft, private val access: Mainte
             maintenancePhase { access.restore(); evidence.restored() }
             coroutineContext.ensureActive(); requireOwner()
             true
-        } catch (_: Exception) { false }
+        } catch (_: MaintenanceRestoreUnavailableException) { evidence.bridgeRestoreUnavailable(); false }
+        catch (_: Exception) { false }
         finally { synchronized(this) { occupied = false }; update { it.copy(restoring = false) } }
     }
 }

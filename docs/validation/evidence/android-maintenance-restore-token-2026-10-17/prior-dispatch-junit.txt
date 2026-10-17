@@ -1,0 +1,8 @@
+JUnit version 4.13.2
+............Actual production clock dispatch deadline: 15001ms; producer held=true
+....Actual production maintenance dispatch deadline: 15003ms; producer held=true
+...................................................Strict dispatch rejection matrix: 15 actual maintenanceAccess.dispatch cases passed
+
+Time: 30.762
+
+OK (67 tests)

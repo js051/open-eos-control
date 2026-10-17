@@ -62,11 +62,13 @@ def main():
     ui_methods = between(ui, "    fun submitMaintenance(draft: MaintenanceDraft) {", "    fun recoverMaintenance(id: String)")
     ui_methods += between(ui, "    fun disconnect() {", "    /** Explicit receipt recovery")
     ui_methods += between(ui, "    private fun launchCameraOperation(", "    private fun refreshCapabilityEvidence()")
+    state = between(client, "    private class MaintenanceRestoreOwner" if "    private class MaintenanceRestoreOwner" in client else "    private class MaintenanceBridgeOwnerContext", "    val liveViewStopRequired:")
     fixture_dir = repo / "scripts/validation/fixtures/android-maintenance-dispatch-host"
     fixture_hashes = {}
     for fixture in sorted(fixture_dir.glob("*.kt")):
         if args.phase == "baseline" and fixture.name == "MaintenanceAtomicFenceTest.kt": continue
         data = fixture.read_text(); fixture_hashes[fixture.name] = digest(data.encode())
+        data = data.replace("    // HOST_PRODUCTION_LIVE_VIEW_STATE", state)
         if "// HOST_PRODUCTION_METHODS" in data:
             assert data.count("// HOST_PRODUCTION_METHODS") == 1
             data = data.replace("    // HOST_PRODUCTION_METHODS", methods)

@@ -26,7 +26,8 @@ private class ReadRestoreRig(val phase: BlockedPhase) {
     val draft = vm.draft(autoPowerOff = false)
     var blockEnabled = phase == BlockedPhase.INITIAL_READ
     var readResponse = readback().toString()
-    var startResponse = JSONObject().put("active", true).put("liveViewStopUnconfirmed", false).toString()
+    var startResponse = JSONObject().put("active", true).put("liveViewStopUnconfirmed", false)
+        .put("restoreToken", "synthetic_restore_token_000000001").put("restoreOutcome", "started").toString()
     lateinit var id: String
     lateinit var originalJob: Job
     lateinit var blockedCall: HostCall
@@ -166,7 +167,7 @@ class FixedMaintenanceReadRestoreTest {
     @Test(timeout = 7000) fun cancelledExplicitRecoveryReleasesJobAndLateBodyCannotPublish() = cancelProbe(BlockedPhase.RECOVERY_READ, true)
     @Test(timeout = 7000) fun cancelledRestoreFreshReadReleasesJobAndLateBodyCannotStart() = cancelProbe(BlockedPhase.RESTORE_READ, true)
     @Test(timeout = 25000) fun realFifteenSecondReadDeadlineReleasesRegisteredJob() = realDeadlineProbe()
-    @Test(timeout = 7000) fun strictRestoreStartRemainsBlockingAndDisconnectStillJoinsIt() {
+    @Test(timeout = 7000) fun strictRestoreStartRetainsRegisteredJoinUntilItsBoundedPhaseEnds() {
         val rig = ReadRestoreRig(BlockedPhase.RESTORE_START); rig.start()
         try {
             rig.vm.cancelMaintenance(rig.id); rig.vm.disconnect(); rig.queue.drain()
@@ -175,7 +176,7 @@ class FixedMaintenanceReadRestoreTest {
             assertEquals(0, rig.repository.disconnects)
             assertEquals(1L, rig.release.count)
             assertTrue(rig.client.liveViewStopRequired); assertTrue(rig.client.maintenanceStopOwned)
-            assertEquals(1, rig.blockedCall.executeCount.get()); assertEquals(0, rig.blockedCall.enqueueCount.get())
+            assertEquals(0, rig.blockedCall.executeCount.get()); assertEquals(1, rig.blockedCall.enqueueCount.get())
         } finally { rig.finish() }
         assertTrue(rig.queue.until { rig.repository.closed })
         assertEquals(listOf("POST /v1/session/synthetic-session/maintenance/control/liveview/stop",
@@ -321,7 +322,7 @@ class FixedMaintenanceReadRestoreTest {
             assertFalse(rig.vm.state.maintenanceSuspended); assertTrue(rig.vm.state.liveViewAutoRefresh)
             assertEquals(3, rig.vm.restoredUiCalls)
             val call = rig.client.calls.single { it.request.url.encodedPath.endsWith("/start") }
-            assertEquals(1, call.executeCount.get()); assertEquals(0, call.enqueueCount.get())
+            assertEquals(0, call.executeCount.get()); assertEquals(1, call.enqueueCount.get())
             rig.vm.disconnect(); assertTrue(rig.queue.until { rig.repository.closed })
             assertEquals(listOf("POST /v1/session/synthetic-session/maintenance/control/liveview/stop",
                 "DELETE /v1/session/synthetic-session/maintenance/control/session"), rig.requests.takeLast(2))

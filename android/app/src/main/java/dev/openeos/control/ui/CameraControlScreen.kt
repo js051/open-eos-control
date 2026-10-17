@@ -2274,7 +2274,11 @@ internal fun MaintenanceReceiptView(receipt: MaintenanceReceipt, state: CameraUi
         if (receipt.cancelled) Text(stringResource(R.string.maintenance_cancelled), color = AppSubtleText)
         if (!ownerCurrent || receipt.retired) Text(stringResource(R.string.maintenance_retired), color = AppSubtleText)
         if (evidence.restore != MaintenanceRestoreEvidence.NOT_REQUESTED) Text(stringResource(
-            if (evidence.restore == MaintenanceRestoreEvidence.RESTORED) R.string.maintenance_restored else R.string.maintenance_restore_unknown), color = AppSubtleText)
+            when (evidence.restore) {
+                MaintenanceRestoreEvidence.RESTORED -> R.string.maintenance_restored
+                MaintenanceRestoreEvidence.BRIDGE_UNAVAILABLE -> R.string.maintenance_restore_bridge_unavailable
+                else -> R.string.maintenance_restore_unknown
+            }), color = AppSubtleText)
         if (ownerCurrent && (receipt.running || receipt.recovering || receipt.restoring)) {
             TextButton(onClick = { actions.cancelMaintenance(receipt.id) }, modifier = Modifier.testTag("maintenance-cancel-${receipt.id}")) { Text(stringResource(R.string.cancel)) }
         } else if (ownerCurrent) {

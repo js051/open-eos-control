@@ -244,9 +244,12 @@ class FixedMaintenanceCleanupTest {
         }
         val restore = ExtractedMaintenanceClient(false)
         restore.respond = { _, _ -> restore.jsonResponse(JSONObject().put("active", true).put("liveViewStopUnconfirmed", false)) }
-        restore.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), LiveViewRequest()).restore()
-        assertEquals(1, restore.calls.single().executeCount.get())
-        assertTrue(restore.liveViewStopRequired)
+        // The owned caller now fails closed before I/O without an initial prepared permit.
+        assertTrue(runCatching {
+            restore.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), LiveViewRequest()).restore()
+        }.exceptionOrNull() is MaintenanceRestoreUnavailableException)
+        assertTrue(restore.calls.isEmpty())
+        assertFalse(restore.liveViewStopRequired)
     }
 
     @Test(timeout=5000) fun originalMaintenanceOwnerGateBlocksAcceptAfterCallback() {

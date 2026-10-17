@@ -18,16 +18,9 @@ internal class ExtractedMaintenanceClient(val initialLiveView: Boolean = false) 
     private val activeEventCall = AtomicReference<Call?>(null)
     private class MediaListingOwner(val call: Call)
     private val activeMediaListing = AtomicReference<MediaListingOwner?>(null)
-    private class MaintenanceBridgeOwnerContext(val owner: BridgeShutterReleaseSession) :
-        kotlin.coroutines.AbstractCoroutineContextElement(Key) {
-        companion object Key : kotlin.coroutines.CoroutineContext.Key<MaintenanceBridgeOwnerContext>
-    }
-    private class LiveViewStopOwner(val session: BridgeShutterReleaseSession, val stopUrl: HttpUrl,
-        var confirmedStart: Boolean = false, val maintenanceOwned: Boolean = false)
-    @Volatile private var liveViewStopOwner: LiveViewStopOwner? = if (initialLiveView)
-        LiveViewStopOwner(requireNotNull(shutterSession), endpoint("v1", "session", "synthetic-session", "maintenance", "control", "liveview", "stop"), true, true) else null
-    @Volatile private var liveViewRevision = 0L
-    private val liveViewStateLock = Any()
+    // HOST_PRODUCTION_LIVE_VIEW_STATE
+    init { if (initialLiveView) liveViewStopOwner = LiveViewStopOwner(requireNotNull(shutterSession),
+        endpoint("v1", "session", "synthetic-session", "maintenance", "control", "liveview", "stop"), true, true) }
     val liveViewStopRequired: Boolean get() = liveViewStopOwner?.let { it.session === shutterSession && !it.session.closed } == true
     val maintenanceStopOwned: Boolean get() = liveViewStopRequired && liveViewStopOwner?.maintenanceOwned == true
     private val jsonMediaType = "application/json"
