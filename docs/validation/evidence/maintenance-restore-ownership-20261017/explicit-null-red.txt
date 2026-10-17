@@ -1,0 +1,172 @@
+FFFFFF                                                                   [100%]
+=================================== FAILURES ===================================
+_ test_explicit_null_token_never_falls_back_to_legacy_or_global_io[start-restoreToken] _
+
+api = (<starlette.testclient.TestClient object at 0x7f2e5c06b410>, <open_eos_bridge.sessions.SessionManager object at 0x7f2e...be8a120>, <tests.test_maintenance_lifecycle.MaintenanceTransport object at 0x7f2e5e9699d0>, 'aN-7WSncowku3H62Jql6Rp9q')
+field = 'restoreToken', operation = 'start'
+
+    @pytest.mark.parametrize('field', ['restoreToken', 'restore_token'])
+    @pytest.mark.parametrize('operation', ['start', 'stop', 'prepare'])
+    def test_explicit_null_token_never_falls_back_to_legacy_or_global_io(api, field, operation):
+        if operation == 'start':
+            start_original(api)
+            assert api[0].post(path(api, 'stop'), json={}).status_code == 200
+        elif operation == 'stop':
+            token = prepare(api)
+            assert start(api, token).status_code == 200
+        else:
+            start_original(api)
+        before = len(api[3].requests)
+        payload = {field: None}
+        if operation == 'prepare':
+            payload['prepareRestore'] = True
+        result = api[0].post(path(api, 'start' if operation == 'start' else 'stop'), json=payload)
+>       assert result.status_code == 422
+E       assert 200 == 422
+E        +  where 200 = <Response [200 OK]>.status_code
+
+bridge/tests/test_maintenance_restore_ownership.py:524: AssertionError
+_ test_explicit_null_token_never_falls_back_to_legacy_or_global_io[start-restore_token] _
+
+api = (<starlette.testclient.TestClient object at 0x7f2e5b642f90>, <open_eos_bridge.sessions.SessionManager object at 0x7f2e...ab83b60>, <tests.test_maintenance_lifecycle.MaintenanceTransport object at 0x7f2e6565ba40>, '03nUfsNewWa80Wmm03O1Bnof')
+field = 'restore_token', operation = 'start'
+
+    @pytest.mark.parametrize('field', ['restoreToken', 'restore_token'])
+    @pytest.mark.parametrize('operation', ['start', 'stop', 'prepare'])
+    def test_explicit_null_token_never_falls_back_to_legacy_or_global_io(api, field, operation):
+        if operation == 'start':
+            start_original(api)
+            assert api[0].post(path(api, 'stop'), json={}).status_code == 200
+        elif operation == 'stop':
+            token = prepare(api)
+            assert start(api, token).status_code == 200
+        else:
+            start_original(api)
+        before = len(api[3].requests)
+        payload = {field: None}
+        if operation == 'prepare':
+            payload['prepareRestore'] = True
+        result = api[0].post(path(api, 'start' if operation == 'start' else 'stop'), json=payload)
+>       assert result.status_code == 422
+E       assert 200 == 422
+E        +  where 200 = <Response [200 OK]>.status_code
+
+bridge/tests/test_maintenance_restore_ownership.py:524: AssertionError
+_ test_explicit_null_token_never_falls_back_to_legacy_or_global_io[stop-restoreToken] _
+
+api = (<starlette.testclient.TestClient object at 0x7f2e5ea06720>, <open_eos_bridge.sessions.SessionManager object at 0x7f2e...b5b0950>, <tests.test_maintenance_lifecycle.MaintenanceTransport object at 0x7f2e5ab83740>, 'eZhTNwwbEAUMJBuLnf2ULB8d')
+field = 'restoreToken', operation = 'stop'
+
+    @pytest.mark.parametrize('field', ['restoreToken', 'restore_token'])
+    @pytest.mark.parametrize('operation', ['start', 'stop', 'prepare'])
+    def test_explicit_null_token_never_falls_back_to_legacy_or_global_io(api, field, operation):
+        if operation == 'start':
+            start_original(api)
+            assert api[0].post(path(api, 'stop'), json={}).status_code == 200
+        elif operation == 'stop':
+            token = prepare(api)
+            assert start(api, token).status_code == 200
+        else:
+            start_original(api)
+        before = len(api[3].requests)
+        payload = {field: None}
+        if operation == 'prepare':
+            payload['prepareRestore'] = True
+        result = api[0].post(path(api, 'start' if operation == 'start' else 'stop'), json=payload)
+>       assert result.status_code == 422
+E       assert 200 == 422
+E        +  where 200 = <Response [200 OK]>.status_code
+
+bridge/tests/test_maintenance_restore_ownership.py:524: AssertionError
+_ test_explicit_null_token_never_falls_back_to_legacy_or_global_io[stop-restore_token] _
+
+api = (<starlette.testclient.TestClient object at 0x7f2e5aa86b70>, <open_eos_bridge.sessions.SessionManager object at 0x7f2e...a8911c0>, <tests.test_maintenance_lifecycle.MaintenanceTransport object at 0x7f2e5ab4c500>, 'rY0pIoaTc2YdWQQcUSpHNpp1')
+field = 'restore_token', operation = 'stop'
+
+    @pytest.mark.parametrize('field', ['restoreToken', 'restore_token'])
+    @pytest.mark.parametrize('operation', ['start', 'stop', 'prepare'])
+    def test_explicit_null_token_never_falls_back_to_legacy_or_global_io(api, field, operation):
+        if operation == 'start':
+            start_original(api)
+            assert api[0].post(path(api, 'stop'), json={}).status_code == 200
+        elif operation == 'stop':
+            token = prepare(api)
+            assert start(api, token).status_code == 200
+        else:
+            start_original(api)
+        before = len(api[3].requests)
+        payload = {field: None}
+        if operation == 'prepare':
+            payload['prepareRestore'] = True
+        result = api[0].post(path(api, 'start' if operation == 'start' else 'stop'), json=payload)
+>       assert result.status_code == 422
+E       assert 200 == 422
+E        +  where 200 = <Response [200 OK]>.status_code
+
+bridge/tests/test_maintenance_restore_ownership.py:524: AssertionError
+_ test_explicit_null_token_never_falls_back_to_legacy_or_global_io[prepare-restoreToken] _
+
+api = (<starlette.testclient.TestClient object at 0x7f2e5aa6b2c0>, <open_eos_bridge.sessions.SessionManager object at 0x7f2e...a705760>, <tests.test_maintenance_lifecycle.MaintenanceTransport object at 0x7f2e5aa6b9e0>, 'v7dAjBTRBdxECQz8_FbPIHXL')
+field = 'restoreToken', operation = 'prepare'
+
+    @pytest.mark.parametrize('field', ['restoreToken', 'restore_token'])
+    @pytest.mark.parametrize('operation', ['start', 'stop', 'prepare'])
+    def test_explicit_null_token_never_falls_back_to_legacy_or_global_io(api, field, operation):
+        if operation == 'start':
+            start_original(api)
+            assert api[0].post(path(api, 'stop'), json={}).status_code == 200
+        elif operation == 'stop':
+            token = prepare(api)
+            assert start(api, token).status_code == 200
+        else:
+            start_original(api)
+        before = len(api[3].requests)
+        payload = {field: None}
+        if operation == 'prepare':
+            payload['prepareRestore'] = True
+        result = api[0].post(path(api, 'start' if operation == 'start' else 'stop'), json=payload)
+>       assert result.status_code == 422
+E       assert 200 == 422
+E        +  where 200 = <Response [200 OK]>.status_code
+
+bridge/tests/test_maintenance_restore_ownership.py:524: AssertionError
+_ test_explicit_null_token_never_falls_back_to_legacy_or_global_io[prepare-restore_token] _
+
+api = (<starlette.testclient.TestClient object at 0x7f2e5a837770>, <open_eos_bridge.sessions.SessionManager object at 0x7f2e...aa18f80>, <tests.test_maintenance_lifecycle.MaintenanceTransport object at 0x7f2e5a840050>, 'cix4kRjvGMjOCeI9xiejzWgB')
+field = 'restore_token', operation = 'prepare'
+
+    @pytest.mark.parametrize('field', ['restoreToken', 'restore_token'])
+    @pytest.mark.parametrize('operation', ['start', 'stop', 'prepare'])
+    def test_explicit_null_token_never_falls_back_to_legacy_or_global_io(api, field, operation):
+        if operation == 'start':
+            start_original(api)
+            assert api[0].post(path(api, 'stop'), json={}).status_code == 200
+        elif operation == 'stop':
+            token = prepare(api)
+            assert start(api, token).status_code == 200
+        else:
+            start_original(api)
+        before = len(api[3].requests)
+        payload = {field: None}
+        if operation == 'prepare':
+            payload['prepareRestore'] = True
+        result = api[0].post(path(api, 'start' if operation == 'start' else 'stop'), json=payload)
+>       assert result.status_code == 422
+E       assert 200 == 422
+E        +  where 200 = <Response [200 OK]>.status_code
+
+bridge/tests/test_maintenance_restore_ownership.py:524: AssertionError
+=============================== warnings summary ===============================
+../../../../opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED bridge/tests/test_maintenance_restore_ownership.py::test_explicit_null_token_never_falls_back_to_legacy_or_global_io[start-restoreToken]
+FAILED bridge/tests/test_maintenance_restore_ownership.py::test_explicit_null_token_never_falls_back_to_legacy_or_global_io[start-restore_token]
+FAILED bridge/tests/test_maintenance_restore_ownership.py::test_explicit_null_token_never_falls_back_to_legacy_or_global_io[stop-restoreToken]
+FAILED bridge/tests/test_maintenance_restore_ownership.py::test_explicit_null_token_never_falls_back_to_legacy_or_global_io[stop-restore_token]
+FAILED bridge/tests/test_maintenance_restore_ownership.py::test_explicit_null_token_never_falls_back_to_legacy_or_global_io[prepare-restoreToken]
+FAILED bridge/tests/test_maintenance_restore_ownership.py::test_explicit_null_token_never_falls_back_to_legacy_or_global_io[prepare-restore_token]
+6 failed, 37 deselected, 1 warning in 2.11s
