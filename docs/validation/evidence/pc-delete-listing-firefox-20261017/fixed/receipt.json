@@ -1,0 +1,12 @@
+{
+  "head": "2432dd5d08ee61fcf4e1f10c8ceb7f02c0213c35",
+  "source": "Production HTML/JS; synthetic delayed listing delivered after confirmed DELETE, no camera/USB",
+  "started": 1792277330.817916,
+  "worktreeHead": "2432dd5d08ee61fcf4e1f10c8ceb7f02c0213c35",
+  "mode": "fixed",
+  "appSha256": "79d6b9ad96b7f7fc9d3c2761353b09ccb91e54994796ff3f049566141c32c524",
+  "pid": 52689,
+  "state": "terminal",
+  "exit": -15,
+  "ended": 1792277565.7241614
+}

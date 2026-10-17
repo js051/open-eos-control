@@ -1,0 +1,12 @@
+{
+  "baselineCommit": "3358c0286e0a05e06e1128b53108dd03d9a68049",
+  "baselineAppSha256": "2b107c9e0b4a94c93a4cf56638eed8ad3d7ac78287ce2e34420aebf3c6ef5368",
+  "fixedAppSha256": "79d6b9ad96b7f7fc9d3c2761353b09ccb91e54994796ff3f049566141c32c524",
+  "fixtureSha256": "fb718c3c907cd3da7ac63046e9e9b797d02101477ac85dd3fb0f9731dd100187",
+  "runnerSha256": "4659838bb17e163c38e5bb385429a5937131ec1578774297decc76d1b08b3b4a",
+  "scope": "Production HTML/assets with synthetic fetch gates; fixture controls only HTTP delivery. No app-state injection. Browser validation pending parent execution. No physical camera.",
+  "fixedCommit": "2432dd5d08ee61fcf4e1f10c8ceb7f02c0213c35",
+  "baselineFixtureSha256": "03c45bcd0668b62ff76f389f3f7fe4a1e3efe73acde81ed33aef40e774780106",
+  "baselineRunnerSha256": "653ffe7bec5124740cb02a76234143eaf6fb16bd2619aceacc9f9162bc6b9239",
+  "fixtureRefinement": "Fixed-mode observer text stays on one line to prevent test-panel controls shifting; 300s maximum native interaction budget. Camera HTTP responses and product assets unchanged."
+}

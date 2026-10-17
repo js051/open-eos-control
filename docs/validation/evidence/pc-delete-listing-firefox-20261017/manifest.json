@@ -1,0 +1,54 @@
+[
+  {
+    "file": "baseline/01-after-older-listing.png",
+    "sha256": "9b209065c14857a35f0494a75e303ec5f5fa671f0ea4bea8687618f7fa1acba2"
+  },
+  {
+    "file": "baseline/events.jsonl",
+    "sha256": "e64160bea4a3eab4cebec715dbd90a41997c711a4e2c8452588cff80ed68ddba"
+  },
+  {
+    "file": "baseline/receipt.json",
+    "sha256": "1e181c705a133aa1a3af938d2c364d3df1ee013472c28fb1fb76e1c0ef777443"
+  },
+  {
+    "file": "baseline-fixture.js",
+    "sha256": "03c45bcd0668b62ff76f389f3f7fe4a1e3efe73acde81ed33aef40e774780106"
+  },
+  {
+    "file": "baseline-runner.py",
+    "sha256": "653ffe7bec5124740cb02a76234143eaf6fb16bd2619aceacc9f9162bc6b9239"
+  },
+  {
+    "file": "fixed/01-after-older-listing.png",
+    "sha256": "606463ed6a7879c445f8be4b651ee76caaf4b4bcb020410d2003a07c721be0f2"
+  },
+  {
+    "file": "fixed/02-kept-card.png",
+    "sha256": "e847f1f60f55aa599492a37266e7b78f7ac5b11448db60a298a608742ba242f2"
+  },
+  {
+    "file": "fixed/03-fresh-same-id.png",
+    "sha256": "41a0e15b0e4644cf98f5af2a810d08dd4aa58f53c11128ac6ae4341c4febf016"
+  },
+  {
+    "file": "fixed/events.jsonl",
+    "sha256": "8be30fe5d85ed4f9caa0001fe77e1156d3655d3fb2d93337ab192d3837ae9d25"
+  },
+  {
+    "file": "fixed/receipt.json",
+    "sha256": "d4bdedd7146ae6e267220ed8ed329b734bf4ffba9ea25b4d7968210916907dda"
+  },
+  {
+    "file": "fixture.js",
+    "sha256": "fb718c3c907cd3da7ac63046e9e9b797d02101477ac85dd3fb0f9731dd100187"
+  },
+  {
+    "file": "run.py",
+    "sha256": "4659838bb17e163c38e5bb385429a5937131ec1578774297decc76d1b08b3b4a"
+  },
+  {
+    "file": "source.json",
+    "sha256": "05748fc58c98780d7b7992474edc27215336f641cf4dccb7b2947435f8382f20"
+  }
+]
