@@ -10538,6 +10538,8 @@
     ui.focusFarButton.addEventListener("click", () => driveFocus("FAR"));
     ui.viewfinder.addEventListener("click", tapFocusFromPointer);
     ui.viewfinder.addEventListener("keydown", (event) => {
+      // Native controls inside the preview own their keyboard activation.
+      if (event.target !== ui.viewfinder) return;
       if (!["Enter", " "].includes(event.key) || !ui.viewfinder.classList.contains("tap-focus-enabled")) return;
       event.preventDefault();
       const bounds = ui.viewfinder.getBoundingClientRect();
