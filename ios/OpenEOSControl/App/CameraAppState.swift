@@ -417,6 +417,8 @@ final class CameraAppState: ObservableObject {
     private var liveViewReaderID = UUID()
     private var liveViewRetirementTask: Task<Void, Never>?
     private var liveViewRenderWatchTask: Task<Void, Never>?
+    // Read-only lifecycle evidence for App tests; this is not GPU/display proof.
+    var hasLiveViewRenderWatchTask: Bool { liveViewRenderWatchTask != nil }
     private var liveViewFPSUpdateTask: Task<Void, Never>?
     private var liveViewFPSUpdateRevision: UInt64 = 0
     private var eventTask: Task<Void, Never>?
@@ -2023,6 +2025,7 @@ final class CameraAppState: ObservableObject {
                     self.startCameraFocusInfoLoop(session: session)
                     if self.activeLiveViewSource == .ccapiRTP {
                         self.rtpController.setRenderingEnabled(self.autoRefresh && self.applicationActive)
+                        self.beginLiveViewRenderWatch()
                     } else if self.autoRefresh { self.beginLiveViewLoop(session: session) }
                 }
                 self.beginEventLoop(session: session)
@@ -5248,7 +5251,13 @@ final class CameraAppState: ObservableObject {
                 try await Task.sleep(nanoseconds: 50_000_000)
                 continue
             }
-            guard begin(.mediaLibrary) else { continue }
+            guard begin(.mediaLibrary) else {
+                // Retirement can block admission without owning a busy category.
+                // Yield so its MainActor cleanup (or cancellation/replacement) can
+                // settle; a synchronous retry would prevent that owner from running.
+                try await Task.sleep(nanoseconds: 50_000_000)
+                continue
+            }
             let mediaGeneration = UUID()
             let scope = mediaLibraryScope
             mediaLibraryGeneration = mediaGeneration
