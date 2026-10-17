@@ -54,6 +54,30 @@ class BulbRequests:
         return (getattr(status, "bulb_exposure_active", None) is False
                 and getattr(status, "shutter_release_unconfirmed", None) is False)
 
+    def _require_no_owned_duty(self) -> None:
+        if self._active_owner is not None:
+            raise self._error("BULB_OWNER_BUSY", "Resolve the current owner's Bulb operation with Stop.")
+
+    @contextmanager
+    def mutation(self):
+        """Serialize admission and dispatch of a new camera control with Bulb.
+
+        Provider status can already look idle after a release's status tail
+        failed. Only this guard's terminal receipt retires the owned duty. A
+        check outside the execution lock would allow a queued control to run
+        after a new owner was admitted, so check again while holding that lock.
+        Keep it through provider completion, including exceptions and cleanup.
+        """
+        with self._metadata:
+            self._require_open()
+            self._require_no_owned_duty()
+            revision = self._retirement_revision
+        with self._executing():
+            with self._metadata:
+                self._require_open(revision)
+                self._require_no_owned_duty()
+            yield self.session
+
     def start(self, owner_id: str | None = None) -> CameraStatus | BulbOwnerResult:
         if owner_id is None:
             with self._metadata:

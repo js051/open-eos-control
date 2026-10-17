@@ -18,7 +18,8 @@ const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve()
 function subject({ realApi = false } = {}) {
   let sequence = 0;
   const timers = new Map(), requests = [], feedback = [];
-  const node = () => ({ hidden: false, disabled: false, value: "", dataset: {}, textContent: "", classList: { toggle() {} },
+  const node = () => ({ hidden: false, disabled: false, value: "", dataset: {}, textContent: "", classList: {
+    toggle(name, enabled) { this[name] = enabled; } },
     setAttribute(name, value) { this[name] = value; }, removeAttribute() {}, append() {} });
   const parent = node();
   const ui = new Proxy({}, { get(target, key) { return target[key] ||= { ...node(), parentElement: parent }; } });
@@ -160,8 +161,120 @@ for (const response of [null, {}, { ownerId: "wrong", outcome: "released" }, { o
 
 test("repeated terminal released receipt without status clears only exact current owner", async () => {
   const s = subject(); const start = s.operateShutter(); s.requests[0].resolve(receipt(s, 0)); await start;
+  const startStatus = s.state.status;
   const stop = s.operateShutter(); s.requests[1].resolve(receipt(s, 1, "released", null)); await stop;
   assert.equal(s.state.bulbOwner, null); assert.equal(s.bulbControlLocked(), false);
+  assert.equal(startStatus.bulbExposureActive, true, "The original observation is not rewritten");
+  assert.equal(Object.hasOwn(s.state.status, "bulbExposureActive"), false,
+    "A receipt retires its own stale Start flag without inventing a fresh idle observation");
+  assert.equal(s.feedback.includes("resume"), true);
+  assert.equal(s.feedback.includes("flash"), true); assert.equal(s.feedback.includes("bulbReleaseConfirmed"), true);
+  s.renderCaptureMode(); assert.equal(s.ui.shutterLabel.textContent, "startBulb");
+  const nextStart = s.operateShutter();
+  assert.match(s.requests[2].url, /\/bulb\/start\/owned$/);
+  assert.notEqual(s.requests[2].options.json.ownerId, s.requests[0].options.json.ownerId);
+  s.requests[2].resolve(receipt(s, 2)); await nextStart;
+});
+
+for (const newerStatus of [
+  { mode: "Manual", bulbExposureActive: false, shutterReleaseUnconfirmed: true, marker: "short-control-B" },
+  { mode: "Bulb", bulbExposureActive: true, shutterReleaseUnconfirmed: false, marker: "exposure-B" },
+  { mode: "Manual", marker: "unknown-state-B" },
+]) test(`cached A receipt preserves status observed after lost Stop: ${newerStatus.marker}`, async () => {
+  const s = subject(); const start = s.operateShutter(); s.requests[0].resolve(receipt(s, 0)); await start;
+  const owner = s.state.bulbOwner;
+  const lostStop = s.operateShutter(); s.requests[1].reject(new Error("Synthetic lost release reply")); await lostStop;
+  assert.equal(owner.stopUnconfirmed, true);
+  s.adoptCameraStatus(newerStatus, s.state.session, 0);
+  s.feedback.length = 0;
+  const retry = s.operateShutter(); s.requests[2].resolve(receipt(s, 2, "released", null)); await retry;
+  assert.equal(s.state.bulbOwner, null); assert.equal(owner.released, true);
+  assert.equal(owner.stopUnconfirmed, false);
+  assert.equal(s.state.status, newerStatus, "A's cached receipt is not a newer camera observation");
+  if (newerStatus.marker !== "unknown-state-B") {
+    assert.equal(s.bulbControlLocked(), true); assert.equal(s.feedback.includes("resume"), false);
+    installAvailability(s); s.renderCaptureMode(); s.renderAvailability();
+    assert.equal(s.ui.autofocusButton.disabled, true); assert.equal(s.ui.photoModeButton.disabled, true);
+    assert.equal(s.ui.shutterButton.disabled, false, "Unowned explicit recovery remains usable");
+    assert.equal(s.ui.shutterLabel.textContent, newerStatus.shutterReleaseUnconfirmed ? "retryBulbStop" : "stopBulb");
+  }
+});
+
+test("cached released receipt preserves independent global warning without a held AF owner", async () => {
+  const s = subject(); const start = s.operateShutter(); s.requests[0].resolve(receipt(s, 0)); await start;
+  s.state.shutterReleaseUnconfirmed = true;
+  const independentError = { message: "Synthetic unrelated cleanup failure" };
+  s.state.lastError = independentError;
+  vm.runInContext(productionFunction("setOperationState"), s);
+  assert.equal(s.state.heldAutofocusOwner, undefined);
+  s.feedback.length = 0;
+  const stop = s.operateShutter(); s.requests[1].resolve(receipt(s, 1, "released", null)); await stop;
+  assert.equal(s.state.bulbOwner, null); assert.equal(s.state.shutterReleaseUnconfirmed, true);
+  assert.equal(s.bulbControlLocked(), true); assert.equal(s.feedback.includes("resume"), false);
+  assert.equal(s.state.lastError, independentError);
+  assert.equal(s.ui.operationState.textContent, "bulbReleaseUnconfirmed");
+  assert.equal(s.ui.operationState.classList["error-text"], true);
+  assert.equal(s.feedback.includes("bulbReleaseConfirmed"), false); assert.equal(s.feedback.includes("flash"), false);
+});
+
+for (const newerStatus of [
+  { bulbExposureActive: false, shutterReleaseUnconfirmed: true, marker: "short-control-warning" },
+  { bulbExposureActive: true, shutterReleaseUnconfirmed: false, marker: "another-active-exposure" },
+]) test(`cached receipt preserves B error and warning footer without global success effects: ${newerStatus.marker}`, async () => {
+  const s = subject(); vm.runInContext(productionFunction("setOperationState"), s);
+  const start = s.operateShutter(); s.requests[0].resolve(receipt(s, 0)); await start;
+  const lostStop = s.operateShutter(); s.requests[1].reject(new Error("Synthetic lost Stop reply")); await lostStop;
+  s.adoptCameraStatus(newerStatus, s.state.session, 0);
+  const errorB = { message: "Synthetic later camera-control error" };
+  s.state.lastError = errorB; s.setOperationState("Synthetic B warning", true);
+  s.feedback.length = 0;
+  const retry = s.operateShutter(); s.requests[2].resolve(receipt(s, 2, "released", null)); await retry;
+  assert.equal(s.state.bulbOwner, null); assert.equal(s.bulbControlLocked(), true);
+  assert.equal(s.state.lastError, errorB, "A's receipt cannot dismiss B's error");
+  assert.equal(s.ui.operationState.textContent, "bulbReleaseUnconfirmed");
+  assert.equal(s.ui.operationState.classList["error-text"], true);
+  assert.equal(s.feedback.includes("bulbReleaseConfirmed"), false);
+  assert.equal(s.feedback.includes("flash"), false); assert.equal(s.feedback.includes("resume"), false);
+});
+
+test("cached receipt cannot retire a later adoption of the same status object", async () => {
+  const s = subject(); const start = s.operateShutter(); s.requests[0].resolve(receipt(s, 0)); await start;
+  const observedAgain = s.state.status;
+  s.adoptCameraStatus(observedAgain, s.state.session, 0);
+  const stop = s.operateShutter(); s.requests[1].resolve(receipt(s, 1, "released", null)); await stop;
+  assert.equal(s.state.bulbOwner, null); assert.equal(s.state.status, observedAgain);
+  assert.equal(s.state.status.bulbExposureActive, true); assert.equal(s.bulbControlLocked(), true);
+});
+
+test("supplied dual-false Stop status cannot overwrite an observation adopted during the request", async () => {
+  const s = subject(); const start = s.operateShutter(); s.requests[0].resolve(receipt(s, 0)); await start;
+  const stop = s.operateShutter();
+  const newer = { bulbExposureActive: false, shutterReleaseUnconfirmed: true, marker: "newer-short-control" };
+  s.adoptCameraStatus(newer, s.state.session, 0);
+  s.state.shutterReleaseUnconfirmed = true;
+  s.requests[1].resolve(receipt(s, 1, "released")); await stop;
+  assert.equal(s.state.bulbOwner, null); assert.equal(s.state.status, newer);
+  assert.equal(s.state.shutterReleaseUnconfirmed, true); assert.equal(s.bulbControlLocked(), true);
+});
+
+test("supplied dual-false Stop proof clears existing warning when no newer observation intervenes", async () => {
+  const s = subject(); const start = s.operateShutter(); s.requests[0].resolve(receipt(s, 0)); await start;
+  s.state.shutterReleaseUnconfirmed = true;
+  s.state.lastError = { message: "Synthetic prior Stop uncertainty" };
+  const stop = s.operateShutter();
+  const proof = { bulbExposureActive: false, shutterReleaseUnconfirmed: false, marker: "release-proof" };
+  s.requests[1].resolve(receipt(s, 1, "released", proof)); await stop;
+  assert.equal(s.state.bulbOwner, null); assert.equal(s.state.shutterReleaseUnconfirmed, false);
+  assert.equal(s.state.status.marker, "release-proof"); assert.equal(s.bulbControlLocked(), false);
+  assert.equal(s.state.lastError, null); assert.equal(s.feedback.includes("bulbReleaseConfirmed"), true);
+});
+
+test("supplied release status does not clear a global warning first raised during Stop", async () => {
+  const s = subject(); const start = s.operateShutter(); s.requests[0].resolve(receipt(s, 0)); await start;
+  const stop = s.operateShutter(); s.state.shutterReleaseUnconfirmed = true;
+  s.requests[1].resolve(receipt(s, 1, "released")); await stop;
+  assert.equal(s.state.bulbOwner, null); assert.equal(s.state.shutterReleaseUnconfirmed, true);
+  assert.equal(s.bulbControlLocked(), true);
 });
 
 test("owner completion never clears another interaction's busy reservation", async () => {
@@ -235,9 +348,15 @@ test("cancelled-before-start clears only this owner and preserves unrelated shut
   const s = subject(); const start = s.operateShutter();
   s.state.shutterReleaseUnconfirmed = true;
   s.state.heldAutofocusOwner = { session: s.state.session };
+  const errorB = { message: "Synthetic unrelated AF cleanup failure" };
+  s.state.lastError = errorB;
+  vm.runInContext(productionFunction("setOperationState"), s);
   const stop = s.operateShutter(); s.requests[1].resolve(receipt(s, 1, "cancelled-before-start", null)); await stop;
   assert.equal(s.state.bulbOwner, null); assert.equal(s.state.shutterReleaseUnconfirmed, true);
   assert.ok(s.state.heldAutofocusOwner); assert.equal(s.feedback.includes("bulbReleaseConfirmed"), false);
+  assert.equal(s.state.lastError, errorB);
+  assert.equal(s.ui.operationState.textContent, "bulbCancelledBeforeStart");
+  assert.equal(s.feedback.includes("flash"), false);
   s.requests[0].resolve(receipt(s, 0)); await start;
 });
 

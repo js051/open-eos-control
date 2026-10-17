@@ -4980,6 +4980,7 @@
         : Array.from(globalThis.crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16).padStart(8, "0")).join("")}`,
       startPending: true, stopRequested: false, stopUnconfirmed: false,
       released: false, retired: false, started: false, stopPromise: null, closePromise: null,
+      statusRevision: 0, startStatus: null, startStatusRevision: null,
     };
     state.bulbOwner = owner; // Persist identity and Stop duty before dispatch.
     beginCameraInteraction();
@@ -5001,6 +5002,8 @@
           response.status?.bulbExposureActive !== true) throw new Error(t("bulbReleaseUnconfirmed"));
       owner.started = true;
       adoptCameraStatus(response.status, owner.session, revision);
+      owner.startStatus = state.status;
+      owner.startStatusRevision = owner.statusRevision;
       setOperationState(t("bulbStarted")); showToast(t("bulbStarted"));
     } catch (error) {
       if (owner.released || owner.stopRequested || owner.retired) return;
@@ -5037,6 +5040,9 @@
     const publishable = () => bulbOwnerCurrent(owner) && invocation &&
       state.bulbCommandOwner === invocation && state.refreshGeneration === invocation.generation;
     const revision = state.liveViewStopRevision || 0;
+    const statusAtDispatch = state.status;
+    const statusRevision = owner.statusRevision;
+    const unconfirmedAtDispatch = state.shutterReleaseUnconfirmed;
     owner.stopPromise = (async () => {
       try {
         const response = await bulbOwnerRequest(owner, "stop", { keepalive });
@@ -5052,17 +5058,34 @@
         if (current) state.bulbOwner = null;
         if (publish) {
           if (released) {
-            if (!state.heldAutofocusOwner) state.shutterReleaseUnconfirmed = false;
-            // A repeated terminal receipt may omit status; it still proves this
-            // exact ordered release. Cancellation alone makes no camera claim.
-            adoptCameraStatus({ ...state.status, ...response.status,
-              bulbExposureActive: false, shutterReleaseUnconfirmed: false }, owner.session, revision);
+            // A cached terminal receipt proves only this owner's release. The
+            // server omits old status on repeats; never manufacture idle proof.
+            // Even supplied proof cannot replace an observation adopted while
+            // this Stop was in flight, or clear a newly raised global warning.
+            if (response.status !== undefined && state.status === statusAtDispatch &&
+                owner.statusRevision === statusRevision) {
+              if (!state.heldAutofocusOwner && state.shutterReleaseUnconfirmed === unconfirmedAtDispatch) {
+                state.shutterReleaseUnconfirmed = false;
+              }
+              adoptCameraStatus({ ...state.status, ...response.status }, owner.session, revision);
+            } else if (state.status === owner.startStatus && owner.statusRevision === owner.startStatusRevision) {
+              // Retire only this owner's exact stale Start flag. Absence means
+              // unknown, not a fresh false observation of the whole camera.
+              state.status = { ...state.status };
+              delete state.status.bulbExposureActive;
+            }
           }
-          state.lastError = null;
-          if (!bulbControlLocked()) resumeLivePolling();
-          if (released && owner.started) flashCapture();
-          const message = t(released ? "bulbReleaseConfirmed" : "bulbCancelledBeforeStart");
-          setOperationState(message); showToast(message);
+          const locked = bulbControlLocked();
+          if (!locked) {
+            state.lastError = null;
+            resumeLivePolling();
+            if (released && owner.started) flashCapture();
+          }
+          // Retiring A does not confirm the whole camera is stopped when a
+          // later operation or independent warning still keeps it locked.
+          const message = t(cancelled ? "bulbCancelledBeforeStart"
+            : locked ? "bulbReleaseUnconfirmed" : "bulbReleaseConfirmed");
+          setOperationState(message, locked); showToast(message, locked);
         }
         return true;
       } catch (error) {
@@ -6209,6 +6232,9 @@
     if (!session || state.session !== session) return false;
     state.status = state.recordingRecord?.session === session
       ? { ...status, recording: state.recordingRecord.observation.recording } : status;
+    if (state.bulbOwner?.session === session) {
+      state.bulbOwner.statusRevision = (state.bulbOwner.statusRevision || 0) + 1;
+    }
     // Ordinary false/missing snapshots are not acknowledgements of a Stop.
     // Reads remain relevant across Stop admission. Only Start admission or a
     // confirmed Stop retires older observations for this session.

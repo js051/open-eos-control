@@ -11,7 +11,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager, nullcontext, suppress
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -648,21 +648,24 @@ def create_app(
     @router.post("/session/{session_id}/settings/{key}/outcome")
     def apply_camera_setting_outcome(session_id: str, key: str, payload: SettingUpdate,
                                      response: Response) -> dict[str, object]:
-        response.headers["Cache-Control"] = "no-store"
-        session = manager.get(session_id)
-        writer = getattr(session, "apply_setting_outcome", None)
-        if not callable(writer):
-            raise BridgeError("UNSUPPORTED_SETTING_OUTCOME", "Scoped setting writes are unavailable for this provider.",
-                              status_code=409)
-        return writer(key, payload.value)
+        with manager.camera_mutation(session_id) as session:
+            response.headers["Cache-Control"] = "no-store"
+            writer = getattr(session, "apply_setting_outcome", None)
+            if not callable(writer):
+                raise BridgeError("UNSUPPORTED_SETTING_OUTCOME",
+                                  "Scoped setting writes are unavailable for this provider.",
+                                  status_code=409)
+            return writer(key, payload.value)
 
     @router.post("/session/{session_id}/settings/{key}", response_model=CameraStatus)
     def set_camera_setting(session_id: str, key: str, payload: SettingUpdate) -> CameraStatus:
-        return manager.get(session_id).set_setting(key, payload.value)
+        with manager.camera_mutation(session_id) as session:
+            return session.set_setting(key, payload.value)
 
     @router.post("/session/{session_id}/directories", response_model=DirectoryCreateResult)
     def create_camera_directory(session_id: str, payload: DirectoryCreateRequest) -> DirectoryCreateResult:
-        return DirectoryCreateResult(name=manager.get(session_id).create_directory(payload.name))
+        with manager.camera_mutation(session_id) as session:
+            return DirectoryCreateResult(name=session.create_directory(payload.name))
 
     @router.get("/session/{session_id}/capture-configuration/{operation}")
     def read_capture_configuration(session_id: str, operation: str, response: Response) -> dict[str, object]:
@@ -683,17 +686,19 @@ def create_app(
         field: FileNamingField,
         payload: FileNamingUpdate,
     ) -> FileNamingState:
-        return manager.get(session_id).set_file_naming(field, payload.value)
+        with manager.camera_mutation(session_id) as session:
+            return session.set_file_naming(field, payload.value)
 
     @router.post("/session/{session_id}/maintenance/{operation}/outcome")
     def perform_maintenance_outcome(session_id: str, operation: str, payload: MaintenanceRequest,
                                     response: Response) -> dict[str, object]:
-        response.headers["Cache-Control"] = "no-store"
-        session = manager.get(session_id)
-        performer = getattr(session, "perform_maintenance_outcome", None)
-        if not callable(performer):
-            raise BridgeError("UNSUPPORTED_MAINTENANCE_OUTCOME", "Scoped maintenance is unavailable.", status_code=409)
-        return performer(operation, payload.auto_power_off)
+        with manager.camera_mutation(session_id) as session:
+            response.headers["Cache-Control"] = "no-store"
+            performer = getattr(session, "perform_maintenance_outcome", None)
+            if not callable(performer):
+                raise BridgeError("UNSUPPORTED_MAINTENANCE_OUTCOME", "Scoped maintenance is unavailable.",
+                                  status_code=409)
+            return performer(operation, payload.auto_power_off)
 
     @router.get("/session/{session_id}/maintenance/{operation}")
     def read_maintenance(session_id: str, operation: str, response: Response) -> dict[str, object]:
@@ -735,43 +740,46 @@ def create_app(
     def start_maintenance_live_view(
         session_id: str, payload: LiveViewStartRequest, response: Response,
     ) -> LiveViewState:
-        session = manager.get(session_id)
-        operation = getattr(session, "maintenance_start_live_view", None)
-        if not callable(operation):
-            raise unsupported("MAINTENANCE_CONTROLS", session.engine_name)
-        operation(payload)
-        response.headers["Cache-Control"] = "no-store"
-        return LiveViewState(active=True, requested_fps=getattr(session, "requested_fps", min(payload.fps, 5)),
-                            source=getattr(session, "live_view_source", payload.source),
-                            size=getattr(session, "live_view_size", None),
-                            live_view_stop_unconfirmed=getattr(session, "live_view_stop_unconfirmed", None))
+        with manager.camera_mutation(session_id) as session:
+            operation = getattr(session, "maintenance_start_live_view", None)
+            if not callable(operation):
+                raise unsupported("MAINTENANCE_CONTROLS", session.engine_name)
+            operation(payload)
+            response.headers["Cache-Control"] = "no-store"
+            return LiveViewState(active=True, requested_fps=getattr(session, "requested_fps", min(payload.fps, 5)),
+                                source=getattr(session, "live_view_source", payload.source),
+                                size=getattr(session, "live_view_size", None),
+                                live_view_stop_unconfirmed=getattr(session, "live_view_stop_unconfirmed", None))
 
     @router.post("/session/{session_id}/clock/sync", response_model=CameraStatus)
     def sync_camera_clock(session_id: str) -> CameraStatus:
-        return manager.get(session_id).sync_camera_clock()
+        with manager.camera_mutation(session_id) as session:
+            return session.sync_camera_clock()
 
     @router.post("/session/{session_id}/maintenance/sensor-cleaning", status_code=204)
     def clean_sensor(session_id: str, payload: SensorCleaningRequest) -> Response:
-        manager.get(session_id).clean_sensor(payload.auto_power_off)
-        return Response(status_code=204)
+        with manager.camera_mutation(session_id) as session:
+            session.clean_sensor(payload.auto_power_off)
+            return Response(status_code=204)
 
     @router.post("/session/{session_id}/power/sleep", status_code=204)
     def sleep_camera(session_id: str) -> Response:
-        manager.get(session_id).sleep_camera()
-        return Response(status_code=204)
+        with manager.camera_mutation(session_id) as session:
+            session.sleep_camera()
+            return Response(status_code=204)
 
     @router.post("/session/{session_id}/capture/still", response_model=CameraStatus)
     def capture_still(session_id: str, payload: StillCaptureRequest | None = None) -> CameraStatus:
-        session = manager.get(session_id)
-        if payload is None or payload.af:
-            # Preserve the existing provider call contract, including external EDSDK providers.
-            return session.capture_still()
-        if not isinstance(session, CcapiSession):
-            raise unsupported(
-                CameraFeature.STILL_CAPTURE.value, session.engine_name,
-                "This engine does not support a shutter request without autofocus.",
-            )
-        return session.capture_still(autofocus=False)
+        with manager.camera_mutation(session_id) as session:
+            if payload is None or payload.af:
+                # Preserve the existing provider call contract, including external EDSDK providers.
+                return session.capture_still()
+            if not isinstance(session, CcapiSession):
+                raise unsupported(
+                    CameraFeature.STILL_CAPTURE.value, session.engine_name,
+                    "This engine does not support a shutter request without autofocus.",
+                )
+            return session.capture_still(autofocus=False)
 
     @router.post("/session/{session_id}/bulb/start", response_model=CameraStatus)
     def start_bulb_exposure(session_id: str) -> CameraStatus:
@@ -795,19 +803,21 @@ def create_app(
 
     @router.post("/session/{session_id}/shutter/half-press", response_model=CameraStatus)
     def half_press_shutter(session_id: str) -> CameraStatus:
-        return manager.get(session_id).half_press_shutter()
+        with manager.camera_mutation(session_id) as session:
+            return session.half_press_shutter()
 
     @router.post("/session/{session_id}/focus/auto", response_model=CameraStatus)
     def autofocus(session_id: str) -> CameraStatus:
-        return manager.get(session_id).autofocus()
+        with manager.camera_mutation(session_id) as session:
+            return session.autofocus()
 
     @router.post("/session/{session_id}/focus/auto/start", response_model=HeldAutofocusState)
     def start_autofocus(session_id: str, payload: HeldAutofocusRequest) -> HeldAutofocusState:
-        session = manager.get(session_id)
-        if not isinstance(session, CcapiSession):
-            raise unsupported(CameraFeature.AUTOFOCUS.value, session.engine_name,
-                              "This engine does not support held autofocus.")
-        return session.start_autofocus(payload.owner_id)
+        with manager.camera_mutation(session_id) as session:
+            if not isinstance(session, CcapiSession):
+                raise unsupported(CameraFeature.AUTOFOCUS.value, session.engine_name,
+                                  "This engine does not support held autofocus.")
+            return session.start_autofocus(payload.owner_id)
 
     @router.post("/session/{session_id}/focus/auto/stop", response_model=HeldAutofocusState)
     def stop_autofocus(session_id: str, payload: HeldAutofocusRequest) -> HeldAutofocusState:
@@ -828,16 +838,18 @@ def create_app(
 
     @router.post("/session/{session_id}/recording/{operation}/outcome")
     def perform_recording_outcome(session_id: str, operation: str, response: Response) -> dict[str, object]:
-        response.headers["Cache-Control"] = "no-store"
-        session = manager.get(session_id)
-        performer = getattr(session, "perform_recording_outcome", None)
-        if not callable(performer):
-            raise unsupported("RECORDING_OUTCOME", session.engine_name)
-        return performer(operation)
+        admission = nullcontext(manager.get(session_id)) if operation == "stop" else manager.camera_mutation(session_id)
+        with admission as session:
+            response.headers["Cache-Control"] = "no-store"
+            performer = getattr(session, "perform_recording_outcome", None)
+            if not callable(performer):
+                raise unsupported("RECORDING_OUTCOME", session.engine_name)
+            return performer(operation)
 
     @router.post("/session/{session_id}/recording/start", response_model=CameraStatus)
     def start_recording(session_id: str) -> CameraStatus:
-        return manager.get(session_id).start_recording()
+        with manager.camera_mutation(session_id) as session:
+            return session.start_recording()
 
     @router.post("/session/{session_id}/recording/stop", response_model=CameraStatus)
     def stop_recording(session_id: str) -> CameraStatus:
@@ -845,15 +857,18 @@ def create_app(
 
     @router.post("/session/{session_id}/focus/tap", response_model=FocusResult, response_model_exclude_none=True)
     def tap_focus(session_id: str, payload: TapFocusRequest) -> FocusResult:
-        return manager.get(session_id).tap_focus(payload.x, payload.y)
+        with manager.camera_mutation(session_id) as session:
+            return session.tap_focus(payload.x, payload.y)
 
     @router.post("/session/{session_id}/whitebalance/click", response_model=CameraStatus)
     def click_white_balance(session_id: str, payload: TapFocusRequest) -> CameraStatus:
-        return manager.get(session_id).click_white_balance(payload.x, payload.y)
+        with manager.camera_mutation(session_id) as session:
+            return session.click_white_balance(payload.x, payload.y)
 
     @router.post("/session/{session_id}/focus/drive", response_model=FocusResult, response_model_exclude_none=True)
     def drive_focus(session_id: str, payload: FocusDriveRequest) -> FocusResult:
-        return manager.get(session_id).drive_focus(payload.direction, payload.step)
+        with manager.camera_mutation(session_id) as session:
+            return session.drive_focus(payload.direction, payload.step)
 
     @router.post(
         "/session/{session_id}/liveview/start",
@@ -861,12 +876,12 @@ def create_app(
         response_model_exclude_none=True,
     )
     def start_live_view(session_id: str, payload: LiveViewStartRequest) -> LiveViewState:
-        session = manager.get(session_id)
-        session.start_live_view(payload)
-        requested_fps = getattr(session, "requested_fps", min(payload.fps, 5))
-        source = getattr(session, "live_view_source", payload.source)
-        size = getattr(session, "live_view_size", None)
-        return LiveViewState(active=True, requested_fps=requested_fps, source=source, size=size)
+        with manager.camera_mutation(session_id) as session:
+            session.start_live_view(payload)
+            requested_fps = getattr(session, "requested_fps", min(payload.fps, 5))
+            source = getattr(session, "live_view_source", payload.source)
+            size = getattr(session, "live_view_size", None)
+            return LiveViewState(active=True, requested_fps=requested_fps, source=source, size=size)
 
     @router.post("/session/{session_id}/liveview/stop", response_model=LiveViewState)
     def stop_live_view(session_id: str) -> LiveViewState:
@@ -883,7 +898,8 @@ def create_app(
         session_id: str,
         payload: LiveViewMagnificationRequest,
     ) -> LiveViewMagnificationResult:
-        return manager.get(session_id).set_live_view_magnification(payload.value)
+        with manager.camera_mutation(session_id) as session:
+            return session.set_live_view_magnification(payload.value)
 
     @router.get("/session/{session_id}/liveview/frame")
     def live_view_frame(session_id: str) -> Response:
