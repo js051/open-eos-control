@@ -4475,13 +4475,17 @@
 
   function closeSettingDialog() {
     if (!ui.settingDialog.open) return;
-    const owner = state.settingDialogFocusOwner;
+    const owner = state.settingDialogFocusOwner, editor = state.settingEditor;
     state.settingDialogFocusOwner = null;
-    (state.settingDialogCloseOwners ||= []).push(state.settingEditor);
+    (state.settingDialogCloseOwners ||= []).push(editor);
+    // Retire at dismissal, before a late receipt or saved callback can run.
+    // The native close event is queued and only acknowledges this generation.
+    state.settingEditor += 1;
+    if (state.settingOwner?.editor === editor) cancelSetting();
     ui.settingDialog.close();
     // A successful Apply replaces the exposure strip before closing this dialog.
     // Recover synchronously, never from a queued close event or a later response.
-    if (!owner?.session || owner.session !== state.session || owner.editor !== state.settingEditor ||
+    if (!owner?.session || owner.session !== state.session || owner.editor !== editor || state.settingEditor !== editor + 1 ||
         state.exposureRenderOwner?.session !== owner.session || state.activeView !== "live" ||
         ui.controlView.hidden || ui.settingDialog.open || document.querySelector("dialog[open]")) return;
     const active = document.activeElement;

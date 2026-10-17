@@ -513,3 +513,66 @@ test("disconnect close and delayed close event never return focus to the retired
   await h.ui.settingDialog.dispatch("close");
   assert.equal(h.doc.activeElement, destination); assert.equal(h.focusCalls.length, count + 1);
 });
+
+test("Escape synchronously retires pending Apply before receipt and queued close event", async () => {
+  const h = focusFixture(); let resolve;
+  h.response = new Promise(done => { resolve = done; });
+  await h.open(); const operation = h.apply(); await new Promise(done => setImmediate(done));
+  const record = h.state.settingOwner, editor = h.state.settingEditor;
+  await h.cancel();
+  assert.equal(h.ui.settingDialog.open, false);
+  const dismissed = { editor: h.state.settingEditor, cancelled: record.cancelled,
+    aborted: record.controller.signal.aborted };
+  // Native close is still queued. A non-cooperative transport may settle first.
+  resolve(h.matched()); await operation;
+  assert.equal(h.state.settingDrafts.iso, "200", "dismissal must retain the submitted draft");
+  assert.equal(h.state.capabilities.settings.find(s => s.key === "iso").value, "100");
+  assert.equal(record.writeEvidence, "response-received", "independent late evidence remains historical");
+  assert.deepEqual(dismissed, { editor: editor + 1, cancelled: true, aborted: true });
+  assert.equal(record.cancelled, true); assert.equal(record.controller.signal.aborted, true);
+  assert.equal(h.state.settingEditor, editor + 1);
+  assert.equal(h.state.busy, false); assert.equal(h.state.settingOwner, null);
+  assert.equal(h.requests.length, 1);
+  await h.ui.settingDialog.dispatch("close");
+  assert.equal(h.state.settingEditor, editor + 1, "queued close must not retire twice");
+});
+
+test("Escape invalidates saved modal option and Apply callbacks before native close event", async () => {
+  const h = focusFixture(); await h.open();
+  const buttons = [...h.ui.settingOptions.children], editor = h.state.settingEditor;
+  await h.cancel();
+  await buttons[1].dispatch("click"); await buttons.at(-1).dispatch("click");
+  assert.equal(h.state.settingDrafts.iso, undefined); assert.equal(h.requests.length, 0);
+  assert.equal(h.state.settingEditor, editor + 1);
+});
+
+test("late close after cancelled receipt cannot retire a newly opened active Apply", async () => {
+  const h = focusFixture(); let resolveOld, resolveNew;
+  h.response = new Promise(done => { resolveOld = done; });
+  await h.open(); const oldOperation = h.apply(); await new Promise(done => setImmediate(done));
+  await h.cancel(); resolveOld(h.matched()); await oldOperation;
+  h.response = new Promise(done => { resolveNew = done; });
+  await h.open(); const newOperation = h.apply(); await new Promise(done => setImmediate(done));
+  const current = h.state.settingOwner, editor = h.state.settingEditor;
+  assert.ok(current); assert.equal(current.cancelled, false);
+  await h.ui.settingDialog.dispatch("close");
+  assert.equal(h.state.settingEditor, editor); assert.equal(h.state.settingOwner, current);
+  assert.equal(current.cancelled, false); assert.equal(current.controller.signal.aborted, false);
+  assert.equal(h.ui.settingDialog.open, true);
+  resolveNew(h.matched()); await newOperation;
+  assert.equal(h.state.capabilities.settings.find(s => s.key === "iso").value, "200");
+  assert.equal(h.state.settingDrafts.iso, undefined); assert.equal(h.requests.length, 2);
+});
+
+test("ordinary close retires only its editor without cancelling an independent advanced Apply", async () => {
+  const h = focusFixture(); let resolve;
+  h.response = new Promise(done => { resolve = done; });
+  await h.open(); h.c.editSettingDraft("iso", "200");
+  const operation = h.c.updateSetting(h.state.capabilities.settings.find(s => s.key === "iso"), "200", {});
+  const record = h.state.settingOwner; assert.equal(record.editor, null);
+  h.c.closeSettingDialog();
+  assert.equal(record.cancelled, false); assert.equal(record.controller.signal.aborted, false);
+  resolve(h.matched()); await operation;
+  assert.equal(h.state.capabilities.settings.find(s => s.key === "iso").value, "200");
+  assert.equal(h.state.settingDrafts.iso, undefined); assert.equal(h.requests.length, 1);
+});
