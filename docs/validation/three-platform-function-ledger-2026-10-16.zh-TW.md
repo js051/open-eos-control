@@ -320,3 +320,15 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - G07/#123、G02：[本地預覽最後影格時間](pc-local-frame-timestamp-2026-10-17.zh-TW.md) 的 timer fallback 曾把無新 frame counter／0／unknown 的輪詢當新影格。Production handler 基準2 pass／5 fail，固定3835 modules與15 static通過；只改可觀察影格timestamp，保留render cadence。沒有UVC／HDMI或GPU實機證據。
 - G11/G13：[Android三條精確maintenance GET](../android-maintenance-read-deadline.md) 已將初始read、recovery與restore前fresh read改為有界caller；四個已修真紅與第五個仍未修restore Start真紅明確區分。Read67 distinct，dispatch67／cleanup16／Bulb59回歸與40 source checks另列。普通transport／join／strict Start未變。
 - 新確認的server維護restore排序反例：Stop可超越已admitted但尚未進provider的Start；local-only DELETE204不代表物理Stop。正在另批處理owned restore permit與caller，未先將Start改有界。iOS未同等遷移，原生三端驗收與原89列大目標仍未完成。
+
+## 22:01 UTC 維護恢復的一次性許可與停止責任
+
+- G11/G13：[Bridge restore ownership](../maintenance-restore-ownership.md) 修正已 admitted 的 Start 被 Stop 超越、普通 Stop 後晚 owned Start 再啟動，以及 explicit null token 降成全域 cleanup 的真 API 反例。Session-bound 一次性 permit 凍結原來源，取消先留下不可重送紀錄，Stop 共用 execution lane；cached receipt 不等於目前相機狀態。293 項 production route/manager/provider host 測試（含43所有權/排序/schema）通過。相機 HTTP 為合成，local DELETE 仍不代表物理 Stop。
+- [PC caller](pc-maintenance-restore-permit-2026-10-17.zh-TW.md) 綁同一 permit、明確 token/outcome ACK、較新 warning 與後續 fresh Stop；第二次 cleaning 不繼承舊 token。85 專項、3860 modules、15 static UI；真正雲端 Firefox 已跑正常恢復及第二次取消→明確 Stop→晚 Start 拒絕，三畫面與完整事件保存。沒有真相機／USB接受宣稱。
+- Android 與 iOS 同契約 caller 分別整合驗證；手機完整原生及實機仍是獨立未過 gates。不能因本批一次性許可修正就將原89列標為完成。維護側欄實看另發現文字被按鈕擠壓，後續最小版面修正與可讀性補驗另列。
+
+22:06 UTC 同批 caller 與版面補齊：
+- [Android owned restore](../android-maintenance-restore-token.md)：原請求 token 與 strict ACK、whole-callback deadline、較新狀態發布前／中／後的明確 Stop 重試。新組68（24新控＋44既有workflow），read67／dispatch67／cleanup16／Bulb59，合計277 executions而非277個新案；42 source/resource checks。真15秒Start期限15022ms，實際registered job→Disconnect可收尾。完整Android／Compose／OkHttp／裝置未驗。
+- [iOS caller source migration](ios-maintenance-restore-token-20261017.md)：同一attempt的一次性permit、strict ACK、terminal receipt不清較新warning、下一明確globalStop，以及完成後新warning仍用maintenance strict transport。Missing optional permit保留已確認Stop與清潔，僅Restore封鎖。82 Python source/wiring檢查通過，Swift/Core及App simulator未執行；不能把源碼檢查等同原生通過。
+- [維護側欄與Cancel翻譯](pc-maintenance-layout-2026-10-17.zh-TW.md)：3862 modules；Firefox一般側欄與200%大字可讀性、pending取消標籤已實看。
+- 三端仍未完成：iOS Bridge Bulb還使用legacy無owner Start/Stop，等待Start後才Stop且cached收據／較新警告界線尚需遷移，已確認為下一個可獨立開發缺口；既有原生／真相機／官方依賴限制保留。

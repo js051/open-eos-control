@@ -22,3 +22,7 @@
 - Impact：patch；修正既有 PC 維護資訊可讀性與取消按鈕顯示。
 - 尚未推送、合併或發布；修正後原生瀏覽器驗收待補。
 - 實體相機驗證仍未執行，不作相容性承諾。
+
+## Firefox rendered fit
+
+2026-10-17 22:03–22:05 UTC，真正雲端 Firefox 已以 production source 332121afae99e94820f40c12fe00b31b156895b7 配本地合成 transport 補驗。一般側欄歷史／說明改為全寬文字，恢復按鈕仍可點；pending Cancel 呈現完整英文。200%／CSS 594×381 下狀態文字、取消與恢復按鈕及警語能正常換行，沒有原先被按鈕擠成逐字狹欄。三張畫面與事件見 [證據](evidence/maintenance-layout-fixed-firefox-20261017/)。中文取消字串由host檢查覆蓋，未稱已實看中文。Firefox PID49836於22:05:49停止，server同時關閉；沒有真相機／GPU／native mobile驗證。
