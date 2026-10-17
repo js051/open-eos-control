@@ -332,3 +332,11 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - [iOS caller source migration](ios-maintenance-restore-token-20261017.md)：同一attempt的一次性permit、strict ACK、terminal receipt不清較新warning、下一明確globalStop，以及完成後新warning仍用maintenance strict transport。Missing optional permit保留已確認Stop與清潔，僅Restore封鎖。82 Python source/wiring檢查通過，Swift/Core及App simulator未執行；不能把源碼檢查等同原生通過。
 - [維護側欄與Cancel翻譯](pc-maintenance-layout-2026-10-17.zh-TW.md)：3862 modules；Firefox一般側欄與200%大字可讀性、pending取消標籤已實看。
 - 三端仍未完成：iOS Bridge Bulb還使用legacy無owner Start/Stop，等待Start後才Stop且cached收據／較新警告界線尚需遷移，已確認為下一個可獨立開發缺口；既有原生／真相機／官方依賴限制保留。
+
+
+## 22:20 UTC iOS owned Bulb 與 Android 配置恢復
+
+- G04/#65、G05/#66/#69、G13/#122：[iOS owned Bulb caller](../ios-bridge-owned-bulb.md) 已遷移同一不可變 owner admission、獨立且合併重複 Stop、嚴格 receipt 與較新觀察保護。取消前置 Start 不再阻擋 owned Stop；背景只請求原 owner Stop，沒有自動恢復。Receipt-only 退休不偽造 active=false，原 session DELETE 不當成物理釋放。每個新 owned/maintenance exchange 有15秒期限，但不擴大宣稱所有舊 focus／Live View close 等待已解決。88 supplementary source checks、獨立靜態審查及正常安全 hook；Swift/Core/App 原生測試已編寫但未執行，無原生通過宣稱。
+- G03/G13：[Android capture-configuration recovery](android-capture-recovery-bound-20261017.md) 修正 read-only GET 的 response/body 卡住 registered DIRECTORY job、阻止 Disconnect join 的缺口。原版3項真正 runtime 紅，固定13項通過；四組既有維護回歸16+67+67+68，合計231 executions，非231新案。[精確收據與輸出](evidence/android-capture-recovery-bound-20261017/README.md) 包含真15秒期限、Cancel、同名換session與late callback。保留 mutation／physical release join；僅明確 read-only recovery 使用有界 callback。
+- 整合 iOS／Android 來源與各自驗證 worktree 逐檔相同。沒有重跑未改綠燈充作新進度。完整 Android／Compose／真 OkHttp、Swift／Xcode、實體相機及原89列的平台驗收仍未完成。
+- 下一個已確認原功能缺口：Android Direct CCAPI 一般 still capture 的取消 watcher／whole-call timeout／bounded body 缺失；mandatory manual release 仍須保留原順序。另精確核對 iOS focus 退休等待，不把 owned Bulb 修正擴張成所有 cleanup 完成。

@@ -1,0 +1,35 @@
+JUnit version 4.13.2
+.Runtime counterexample: heldBody=true; registered DIRECTORY job incomplete; Disconnect cannot reach repository; execute=1; enqueue=0
+E.Runtime counterexample: heldBody=false; registered DIRECTORY job incomplete; Disconnect cannot reach repository; execute=1; enqueue=0
+E.E
+Time: 18.678
+There were 3 failures:
+1) heldBodyMustReleaseDisconnect(dev.openeos.control.ui.BaselineCaptureRecoveryTest)
+java.lang.AssertionError: Capture recovery must release registered job while transport is held
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.ui.CaptureRig.assertReleased(CaptureRecoveryTest.kt:63)
+	at dev.openeos.control.ui.CaptureRig.assertReleased$default(CaptureRecoveryTest.kt:55)
+	at dev.openeos.control.ui.CaptureRecoveryTestKt.cancelProbe(CaptureRecoveryTest.kt:82)
+	at dev.openeos.control.ui.CaptureRecoveryTestKt.cancelProbe$default(CaptureRecoveryTest.kt:78)
+	at dev.openeos.control.ui.BaselineCaptureRecoveryTest.heldBodyMustReleaseDisconnect(CaptureRecoveryTest.kt:107)
+2) heldResponseMustReleaseDisconnect(dev.openeos.control.ui.BaselineCaptureRecoveryTest)
+java.lang.AssertionError: Capture recovery must release registered job while transport is held
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.ui.CaptureRig.assertReleased(CaptureRecoveryTest.kt:63)
+	at dev.openeos.control.ui.CaptureRig.assertReleased$default(CaptureRecoveryTest.kt:55)
+	at dev.openeos.control.ui.CaptureRecoveryTestKt.cancelProbe(CaptureRecoveryTest.kt:82)
+	at dev.openeos.control.ui.CaptureRecoveryTestKt.cancelProbe$default(CaptureRecoveryTest.kt:78)
+	at dev.openeos.control.ui.BaselineCaptureRecoveryTest.heldResponseMustReleaseDisconnect(CaptureRecoveryTest.kt:106)
+3) realReadDeadlineMustReleaseRegisteredJob(dev.openeos.control.ui.BaselineCaptureRecoveryTest)
+java.lang.AssertionError: Capture recovery must release registered job while transport is held
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.ui.CaptureRecoveryTestKt.timeoutProbe(CaptureRecoveryTest.kt:100)
+	at dev.openeos.control.ui.CaptureRecoveryTestKt.access$timeoutProbe(CaptureRecoveryTest.kt:1)
+	at dev.openeos.control.ui.BaselineCaptureRecoveryTest.realReadDeadlineMustReleaseRegisteredJob(CaptureRecoveryTest.kt:108)
+
+FAILURES!!!
+Tests run: 3,  Failures: 3
+
