@@ -751,7 +751,7 @@ for (const event of ["pagehide", "beforeunload"]) test(`${event} callback retire
   const connecting = s.connectCamera();
   s.window.addEventListener = (name, handler) => { handlers[name] = handler; };
   for (const name of ["stopRtpAudio", "suspendMaintenanceForLifecycle", "cancelMediaUpload", "stopMediaAutoImport",
-    "releaseHeldAutofocusForLifecycle", "cancelCameraFocusInfo", "cancelMediaDownload", "clearMediaThumbnails",
+    "releaseHeldAutofocusForLifecycle", "releaseBulbForLifecycle", "cancelCameraFocusInfo", "cancelMediaDownload", "clearMediaThumbnails",
     "closeMediaPreview", "closeMediaDetails", "stopLocalVideo"]) s[name] = () => {};
   s.lutPreviewRenderer = null;
   const begin = source.indexOf(`    window.addEventListener("${event}"`);

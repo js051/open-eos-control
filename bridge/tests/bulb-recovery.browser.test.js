@@ -106,7 +106,7 @@ async function run() {
     });
     const requests = [];
     page.on("request", (request) => {
-      if (/\/bulb\/(start|stop)$/.test(request.url())) requests.push(request.url());
+      if (/\/bulb\/(start|stop)(?:\/owned)?$/.test(request.url())) requests.push(request.url());
     });
     await page.goto(origin);
     await page.click("#ccapi-mode-button");
@@ -114,6 +114,36 @@ async function run() {
     await page.click("#connect-button");
     await page.waitForSelector("#control-view:not([hidden])");
     await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Start Bulb exposure");
+
+    // Hold Start before it reaches Bridge. Stop must create a tombstone first,
+    // and this delayed Start may never dispatch a camera press afterward.
+    const ownedStartRoute = /\/bulb\/start\/owned$/;
+    let releaseStart;
+    let observeHeldStart;
+    const startGate = new Promise(resolve => { releaseStart = resolve; });
+    const heldStart = new Promise(resolve => { observeHeldStart = resolve; });
+    const holdStart = async route => { observeHeldStart(); await startGate; await route.continue(); };
+    await page.route(ownedStartRoute, holdStart);
+    await page.click("#shutter-button");
+    await heldStart;
+    assert.equal(await page.getAttribute("#shutter-button", "aria-label"), "Stop Bulb exposure");
+    assert.equal(await page.textContent("#operation-state"), "Bulb start is pending. Stop is available.");
+    await assertActionable(page, "#shutter-button");
+    await assertActionable(page, "#disconnect-button");
+    assert.equal(await page.isDisabled("#autofocus-button"), true);
+    assert.equal(await page.isDisabled("#photo-mode-button"), true);
+    await page.click("#shutter-button");
+    await page.waitForFunction(() => document.querySelector("#operation-state")?.textContent ===
+      "This Bulb request was cancelled before it started.");
+    assert.equal((await cameraState()).commands.length, 0);
+    const lateStart = page.waitForResponse(response => ownedStartRoute.test(response.url()));
+    releaseStart();
+    const cancelledStart = await lateStart;
+    assert.notEqual((await cancelledStart.json()).outcome, "started");
+    await page.unroute(ownedStartRoute, holdStart);
+    assert.equal((await cameraState()).commands.length, 0);
+    const priorOwnedStarts = requests.filter(url => url.endsWith("/bulb/start/owned")).length;
+    const priorOwnedStops = requests.filter(url => url.endsWith("/bulb/stop/owned")).length;
 
     // The camera receives full_press; both the reply and compensating release fail.
     await page.click("#shutter-button");
@@ -137,8 +167,10 @@ async function run() {
     await refreshMode();
     assert.equal(await page.getAttribute("#shutter-button", "aria-label"), "Retry camera stop");
 
+    const firstRetryResponse = page.waitForResponse(response => response.url().endsWith("/bulb/stop/owned"));
     await page.click("#shutter-button");
-    await page.waitForFunction(() => !document.querySelector("#shutter-button").disabled);
+    assert.equal((await firstRetryResponse).status(), 502);
+    await page.waitForFunction(() => !document.querySelector("#bulb-indicator")?.textContent.includes("Waiting for"));
     assert.equal(await page.getAttribute("#shutter-button", "aria-label"), "Retry camera stop");
     assert.equal((await cameraState()).commands.length, 3);
     const results = path.join(root, "test-results");
@@ -150,8 +182,10 @@ async function run() {
     assert.equal(await page.isDisabled("#rail-live-button"), true);
     assert.equal(await page.isVisible("#toast"), false);
     // A real narrow-viewport retry must remain clickable immediately after the next failure.
+    const narrowRetryResponse = page.waitForResponse(response => response.url().endsWith("/bulb/stop/owned"));
     await page.click("#shutter-button");
-    await page.waitForFunction(() => !document.querySelector("#shutter-button").disabled);
+    assert.equal((await narrowRetryResponse).status(), 502);
+    await page.waitForFunction(() => !document.querySelector("#bulb-indicator")?.textContent.includes("Waiting for"));
     assert.equal((await cameraState()).commands.length, 4);
     await assertActionable(page, "#shutter-button");
     assert.equal(await page.isVisible("#toast"), false);
@@ -166,8 +200,8 @@ async function run() {
     assert.equal(await page.isVisible("#bulb-indicator"), false);
     assert.equal(await page.isDisabled("#photo-mode-button"), false);
     assert.equal((await cameraState()).active, false);
-    assert.equal(requests.filter((url) => url.endsWith("/bulb/start")).length, 1);
-    assert.equal(requests.filter((url) => url.endsWith("/bulb/stop")).length, 3);
+    assert.equal(requests.filter((url) => url.endsWith("/bulb/start/owned")).length - priorOwnedStarts, 1);
+    assert.equal(requests.filter((url) => url.endsWith("/bulb/stop/owned")).length - priorOwnedStops, 3);
     assert.equal((await cameraState()).commands.filter(([, , body]) => body.action === "full_press").length, 1);
 
     await page.setViewportSize({ width: 1280, height: 900 });
@@ -176,7 +210,7 @@ async function run() {
     await refreshMode();
     await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Start Bulb exposure");
     await page.click("#shutter-button");
-    await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Stop Bulb exposure");
+    await page.waitForFunction(() => document.querySelector("#operation-state")?.textContent === "Bulb exposure started");
     assert.equal(await page.isVisible("#toast"), false);
     await page.setViewportSize({ width: 390, height: 844 });
     await assertActionable(page, "#shutter-button");
@@ -191,16 +225,23 @@ async function run() {
     // A previous successful Stop leaves the same text in the now-hidden toast. Wait for
     // this operation to publish a visible confirmation, not that stale DOM text.
     assert.equal(await page.isVisible("#toast"), false);
-    const stopResponse = page.waitForResponse((response) => response.url().endsWith("/bulb/stop"));
+    const stopResponse = page.waitForResponse((response) => response.url().endsWith("/bulb/stop/owned"));
     await page.click("#shutter-button");
     assert.equal((await stopResponse).status(), 502);
+    await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Retry camera stop");
+    // A later ordinary idle status cannot settle the saved owner's Stop duty.
+    await configure({ status_failure_after_release: false });
+    await refreshMode();
+    assert.equal(await page.getAttribute("#shutter-button", "aria-label"), "Retry camera stop");
+    assert.equal(await page.isVisible("#toast"), false);
+    await page.click("#shutter-button");
     await page.waitForFunction(() => {
       const toast = document.querySelector("#toast");
       return toast && !toast.hidden && toast.textContent === "Camera stop confirmed";
     });
     assert.equal(await page.isVisible("#bulb-indicator"), false);
     assert.equal(await page.isDisabled("#photo-mode-button"), false);
-    assert.equal((await cameraState()).commands.length, beforeStop + 1);
+    assert.equal((await cameraState()).commands.length, beforeStop + 1, "Retry reads the saved released provider state without another physical release");
     assert.equal((await cameraState()).active, false);
     withdrawBulbCapability = false;
     await configure({ status_failure_after_release: false });
@@ -213,7 +254,7 @@ async function run() {
     await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Retry camera stop");
     await page.click("#disconnect-button");
     await page.waitForSelector("#connection-view:not([hidden])");
-    assert.match(await page.textContent("#connection-error"), /stop the exposure on the camera before reconnecting/);
+    assert.equal(await page.textContent("#connection-error"), "Connection closed locally; the camera stop is unconfirmed. Check the camera before reconnecting.");
     assert.notEqual(await page.textContent("#toast"), "Camera disconnected");
     const beforeReconnect = (await cameraState()).commands.length;
     await page.click("#connect-button");
@@ -225,7 +266,7 @@ async function run() {
     // A new exposure is explicitly requested; the old warning must never obstruct its Stop.
     await configure({ drop_press: false, reject_release: false });
     await page.click("#shutter-button");
-    await page.waitForFunction(() => document.querySelector("#shutter-button")?.getAttribute("aria-label") === "Stop Bulb exposure");
+    await page.waitForFunction(() => document.querySelector("#operation-state")?.textContent === "Bulb exposure started");
     assert.equal((await cameraState()).commands.length, beforeReconnect + 1);
     assert.equal(await page.isVisible("#toast"), false);
     await assertActionable(page, "#shutter-button");

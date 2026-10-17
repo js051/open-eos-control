@@ -100,7 +100,7 @@ function context({ reuseSessionId = false, confirmed = true } = {}) {
     },
   };
   sandbox.renderMediaDeleteHistory = () => {};
-  for (const name of ["renderHeldAutofocus", "cameraFocusInfoEligible", "cancelCameraFocusInfo", "releaseHeldAutofocusForLifecycle", "clearConnectionError", "syncLiveMagnificationFromCapabilities", "startEventLoop",
+  for (const name of ["renderHeldAutofocus", "cameraFocusInfoEligible", "cancelCameraFocusInfo", "releaseHeldAutofocusForLifecycle", "releaseBulbForLifecycle", "clearConnectionError", "syncLiveMagnificationFromCapabilities", "startEventLoop",
     "refreshLatestMedia", "renderHealth", "renderConnectionGuidance", "cancelMediaDownload", "stopLiveLoop", "stopLocalVideo",
     "stopEventLoop", "cancelEventLoop", "cancelMediaUpload", "clearScheduledMediaTransferRender",
     "cancelLatestMediaRefresh", "clearBulbTimer", "renderLiveMagnification", "renderMediaTransfer",

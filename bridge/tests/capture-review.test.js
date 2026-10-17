@@ -60,6 +60,7 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
   const saved = [];
   const sandbox = vm.createContext({
     state, requests, feedback, delays, saved, AbortController, Blob, Response, setTimeout, clearTimeout,
+    crypto: require("node:crypto").webcrypto, renderCaptureMode() {},
     recordingLifecycle: require("../open_eos_bridge/static/recording-lifecycle.js"),
     renderRecordingHistory() {},
     ui: { focusReticle: { hidden: true } },
@@ -115,7 +116,7 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
   sandbox.recordingObservation = async () => sandbox.recordingLifecycle.empty("ccapi");
   const functionNames = ["adoptCameraStatus", "cancelRecordingWait", "recordingTransfer", "publishRecordingObservation", "runRecordingLifecycle", "recoverRecording",
     "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
-    "shutterReleaseUnconfirmed", "bulbControlLocked", "readBulbRecoveryStatus", "operateShutter", "autofocus", "halfPressShutter",
+    "shutterReleaseUnconfirmed", "bulbControlLocked", "readBulbRecoveryStatus", "bulbOwnerCurrent", "bulbStopAvailable", "bulbOwnerRequest", "startOwnedBulb", "stopOwnedBulb", "operateShutter", "autofocus", "halfPressShutter",
     "cancelLatestMediaRefresh", "latestMediaFrom", "refreshLatestMedia",
     "publishLatestMedia", "loadLatestMediaThumbnail", "chooseMediaWritable", "downloadMedia", "cancelMediaDownload", "cancelMediaBatch",
   ];
@@ -1984,49 +1985,52 @@ for (const invalid of ['truncated', 'missing-envelope', 'missing-code', 'missing
     const s = context(); installProductionApi(s); s.isBulbMode = () => true;
     s.fetch = async (url, options) => {
       s.requests.push({ url, method: options.method });
-      if (url.endsWith('/bulb/start')) {
+      if (url.endsWith('/bulb/start/owned')) {
         if (invalid === 'truncated') return new Response('{', { status: 502 });
         return Response.json(invalid === 'missing-envelope' ? {} : { error: {
           ...(invalid === 'missing-code' ? {} : { code: 'SYNTHETIC_REJECTION' }),
           ...(invalid === 'missing-message' ? {} : { message: 'Synthetic rejection' }),
         } }, { status: 502 });
       }
-      return Response.json({ bulbExposureActive: false, shutterReleaseUnconfirmed: false });
+      return Response.json({ ownerId: JSON.parse(options.body).ownerId, outcome: "released",
+        status: { bulbExposureActive: false, shutterReleaseUnconfirmed: false } });
     };
     await s.operateShutter();
     assert.equal(s.state.lastError.code, 'RESPONSE_BODY_UNAVAILABLE');
-    assert.equal(s.state.shutterReleaseUnconfirmed, true, 'An unreadable mutation result cannot prove rejection');
+    assert.equal(s.shutterReleaseUnconfirmed(), true, 'An unreadable mutation result cannot prove rejection');
     assert.equal(s.feedback.includes('resume'), false);
     await s.operateShutter();
-    assert.deepEqual(s.requests.filter(r => r.method === 'POST').map(r => r.url.split('/').slice(-2).join('/')),
-      ['bulb/start', 'bulb/stop'], 'The next action must release, never replay Start');
+    assert.deepEqual(s.requests.filter(r => r.method === 'POST').map(r => r.url.split('/').slice(-3).join('/')),
+      ['bulb/start/owned', 'bulb/stop/owned'], 'The next action must release, never replay Start');
     assert.equal(s.state.shutterReleaseUnconfirmed, false, 'Explicit successful Stop may clear duty');
   });
 }
 
-test('Explicit Bulb Start rejection keeps the existing non-uncertain path', async () => {
+test('Explicit owned Bulb Start rejection stays fail-closed until its terminal Stop receipt', async () => {
   const s = context(); installProductionApi(s); s.isBulbMode = () => true;
   s.fetch = async (url, options) => {
     s.requests.push({ url, method: options.method });
-    if (url.endsWith('/bulb/start')) return Response.json({ error: {
+    if (url.endsWith('/bulb/start/owned')) return Response.json({ error: {
       code: 'UNSUPPORTED_FEATURE', message: 'Synthetic unsupported operation',
     } }, { status: 400 });
     return Response.json({ bulbExposureActive: false, shutterReleaseUnconfirmed: false });
   };
   await s.operateShutter();
-  assert.equal(s.state.shutterReleaseUnconfirmed, false);
-  assert.equal(s.feedback.includes('resume'), true);
+  assert.equal(s.shutterReleaseUnconfirmed(), true);
+  assert.equal(s.feedback.includes('resume'), false);
+  assert.ok(s.state.bulbOwner);
 });
 
 for (const phase of ['fetch', 'body']) for (const retired of [false, true]) {
   test(`Bulb recovery ${phase} stall is bounded with retired=${retired}`, async () => {
     const s = context(); installProductionApi(s); s.isBulbMode = () => true;
+    s.state.status.bulbExposureActive = true;
     const held = deferred(), timers = [], cleared = [];
     s.setTimeout = (callback, milliseconds) => { timers.push({ callback, milliseconds }); return timers.length; };
     s.clearTimeout = id => cleared.push(id);
     s.fetch = async (url, options) => {
       s.requests.push({ url, method: options.method, signal: options.signal });
-      if (url.endsWith('/bulb/start')) throw Error('Synthetic lost Start response');
+      if (url.endsWith('/bulb/stop')) throw Error('Synthetic lost unowned Stop response');
       if (phase === 'fetch') return held.promise;
       return { ok: true, status: 200, json: () => held.promise };
     };

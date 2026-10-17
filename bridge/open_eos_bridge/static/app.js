@@ -391,6 +391,10 @@
       captureComplete: "Photo captured",
       startBulb: "Start Bulb exposure",
       stopBulb: "Stop Bulb exposure",
+      bulbStartPending: "Bulb start is pending. Stop is available.",
+      bulbStopPending: "Waiting for this Bulb request to stop.",
+      bulbCancelledBeforeStart: "This Bulb request was cancelled before it started.",
+      bulbOwnershipUnavailable: "This Bridge cannot confirm ordered Bulb control. Update the Bridge before starting another exposure.",
       bulbStarted: "Bulb exposure started",
       bulbStopped: "Bulb exposure stopped",
       previousShutterWarning: "Recording, shutter, or autofocus may still be active after the previous connection. Check the camera and stop any active control before using it again.",
@@ -1148,6 +1152,10 @@
       captureComplete: "拍攝完成",
       startBulb: "開始 Bulb 長曝光",
       stopBulb: "停止 Bulb 長曝光",
+      bulbStartPending: "正在等待 Bulb 開始結果，仍可按停止。",
+      bulbStopPending: "正在等待這次 Bulb 請求停止。",
+      bulbCancelledBeforeStart: "這次 Bulb 請求已在開始前取消。",
+      bulbOwnershipUnavailable: "此 Bridge 無法確認有序的 Bulb 控制，請先更新 Bridge 再開始另一次曝光。",
       bulbStarted: "Bulb 長曝光已開始",
       bulbStopped: "Bulb 長曝光已停止",
       previousShutterWarning: "上一連線的錄影、快門或自動對焦可能仍在作用。再次操作前，請先檢查相機並停止仍在進行的操作。",
@@ -1887,6 +1895,8 @@
     },
     shutterDisconnectWarning: false,
     shutterReleaseUnconfirmed: false,
+    bulbOwner: null,
+    bulbCommandOwner: null,
     bulbStartedAt: null,
     bulbTimer: null,
     focusStep: "MEDIUM",
@@ -2841,7 +2851,8 @@
   async function refreshSession({ quiet = false, eventGeneration = null } = {}) {
     // A status read admitted inside a command can predate its ACK. Existing
     // event refresh already waits for this boundary; diagnostics must too.
-    if (!state.session || state.maintenanceOwner || state.maintenanceHold?.owner === state.session || state.settingOwner || state.recordingCommandOwner?.session === state.session || state.heldAutofocusOwner) return false;
+    if (!state.session || state.maintenanceOwner || state.maintenanceHold?.owner === state.session || state.settingOwner || state.recordingCommandOwner?.session === state.session || state.heldAutofocusOwner ||
+        (state.bulbOwner?.session === state.session && (state.bulbOwner.startPending || state.bulbOwner.stopPromise || state.bulbOwner.retired))) return false;
     if (state.mediaListingOwner) {
       if (quiet) return false;
       state.mediaListingOwner.cancel({ silent: true });
@@ -2934,6 +2945,7 @@
     const session = state.session;
     const sessionId = session.id;
     const token = state.token;
+    if (state.bulbOwner?.session === session) return disconnectBulbCamera(state.bulbOwner);
     const heldOwner = state.heldAutofocusOwner;
     const hadBulbResponsibility = bulbControlLocked() || Boolean(heldOwner);
     const maintenanceRecord = state.liveViewStopOwner?.maintenanceRecord ||
@@ -2983,6 +2995,12 @@
     // Retire before close: the session itself is cleared later in this function.
     state.mediaPreviewFocusOwner = null;
     state.mediaDetailsFocusOwner = null;
+    if (state.bulbOwner && !state.bulbOwner.released) {
+      state.shutterDisconnectWarning = true;
+      void disconnectBulbCamera(state.bulbOwner, { keepalive: true });
+      state.bulbOwner = null;
+    }
+    state.bulbCommandOwner = null;
     if (typeof cancelRecordingWait === "function") cancelRecordingWait({ retire: true });
     state.liveViewStopOwner?.maintenanceController?.abort();
     state.maintenanceCloseOwner?.maintenanceController?.abort();
@@ -3209,8 +3227,8 @@
       Boolean(state.mediaBatchOwner) || Boolean(state.mediaMutationOwner);
   }
 
-  function cameraInteractionBusy() {
-    return state.busy || Boolean(state.maintenanceOwner) ||
+  function cameraInteractionBusy({ ignoreBulbOwner = false } = {}) {
+    return state.busy || (!ignoreBulbOwner && Boolean(state.bulbOwner?.session === state.session && state.bulbOwner)) || Boolean(state.maintenanceOwner) ||
       Boolean(state.maintenanceHold && state.maintenanceHold.owner === state.session && !state.maintenanceHold.retired) ||
       Boolean(state.heldAutofocusOwner) ||
       mediaTransferActive() || Boolean(state.mediaAutoImportReading);
@@ -3330,11 +3348,13 @@
   }
 
   function shutterReleaseUnconfirmed() {
-    return state.shutterReleaseUnconfirmed || state.status?.shutterReleaseUnconfirmed === true;
+    return state.shutterReleaseUnconfirmed || state.status?.shutterReleaseUnconfirmed === true ||
+      Boolean(state.bulbOwner?.session === state.session && state.bulbOwner?.stopUnconfirmed);
   }
 
   function bulbControlLocked() {
-    return shutterReleaseUnconfirmed() || state.status?.bulbExposureActive === true;
+    return Boolean(state.bulbOwner?.session === state.session && state.bulbOwner) ||
+      shutterReleaseUnconfirmed() || state.status?.bulbExposureActive === true;
   }
 
   function clearBulbTimer() {
@@ -3356,8 +3376,11 @@
   function renderBulbIndicator() {
     const unconfirmed = shutterReleaseUnconfirmed();
     const active = state.status?.bulbExposureActive === true;
-    ui.bulbIndicator.hidden = !active && !unconfirmed;
-    if (unconfirmed) {
+    const owner = state.bulbOwner?.session === state.session ? state.bulbOwner : null;
+    ui.bulbIndicator.hidden = !active && !unconfirmed && !owner;
+    if (owner?.stopPromise) ui.bulbIndicator.textContent = t("bulbStopPending");
+    else if (owner?.startPending && !owner.stopRequested) ui.bulbIndicator.textContent = t("bulbStartPending");
+    else if (unconfirmed) {
       ui.bulbIndicator.textContent = t("bulbReleaseUnconfirmed");
     } else if (active) {
       const startedAt = state.bulbStartedAt || Date.now();
@@ -4909,8 +4932,209 @@
     } finally { clearTimeout(timer); }
   }
 
+  function bulbOwnerCurrent(owner) {
+    return Boolean(owner && !owner.retired && !owner.released &&
+      state.session === owner.session && state.bulbOwner === owner);
+  }
+
+  function bulbStopAvailable() {
+    const owner = state.bulbOwner;
+    if (!bulbOwnerCurrent(owner)) return false;
+    // Bypass only this owner's reservation, never a newer/unrelated busy task.
+    return !state.busy || (state.bulbCommandOwner?.owner === owner &&
+      state.bulbCommandOwner.generation === state.refreshGeneration);
+  }
+
+  async function bulbOwnerRequest(owner, operation, { keepalive = false } = {}) {
+    const controller = new AbortController();
+    let timer;
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(t("bulbReleaseUnconfirmed")));
+        controller.abort();
+      }, 15000);
+    });
+    try {
+      // api() includes fetch AND response-body parsing. Abort is an optimization,
+      // never release proof; Promise.race bounds transports that ignore abort.
+      const base = `/v1/session/${encodeURIComponent(owner.sessionId)}`;
+      return await Promise.race([api(operation === "close" ? base : `${base}/bulb/${operation}/owned`, {
+        method: operation === "close" ? "DELETE" : "POST",
+        json: operation === "close" ? undefined : { ownerId: owner.ownerId },
+        authToken: owner.token, keepalive, signal: controller.signal,
+      }), deadline]);
+    } finally { clearTimeout(timer); }
+  }
+
+  async function startOwnedBulb() {
+    if (!state.session || cameraInteractionBusy() || bulbControlLocked()) return;
+    const owner = {
+      session: state.session, sessionId: state.session.id, token: state.token,
+      ownerId: `pc-bulb-${globalThis.crypto.randomUUID ? globalThis.crypto.randomUUID()
+        : Array.from(globalThis.crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16).padStart(8, "0")).join("")}`,
+      startPending: true, stopRequested: false, stopUnconfirmed: false,
+      released: false, retired: false, started: false, stopPromise: null, closePromise: null,
+    };
+    state.bulbOwner = owner; // Persist identity and Stop duty before dispatch.
+    beginCameraInteraction();
+    const invocation = { owner, generation: state.refreshGeneration };
+    state.bulbCommandOwner = invocation;
+    state.lastError = null;
+    pauseLivePolling();
+    setOperationState(t("bulbStartPending"));
+    renderCaptureMode(); renderSession(); renderAvailability();
+    const revision = state.liveViewStopRevision || 0;
+    try {
+      const response = await bulbOwnerRequest(owner, "start");
+      if (!bulbOwnerCurrent(owner) || owner.stopRequested) return;
+      if (state.bulbCommandOwner !== invocation || state.refreshGeneration !== invocation.generation) {
+        owner.stopUnconfirmed = true;
+        return;
+      }
+      if (response?.ownerId !== owner.ownerId || response.outcome !== "started" ||
+          response.status?.bulbExposureActive !== true) throw new Error(t("bulbReleaseUnconfirmed"));
+      owner.started = true;
+      adoptCameraStatus(response.status, owner.session, revision);
+      setOperationState(t("bulbStarted")); showToast(t("bulbStarted"));
+    } catch (error) {
+      if (owner.released || owner.stopRequested || owner.retired) return;
+      owner.stopUnconfirmed = true;
+      if (bulbOwnerCurrent(owner)) {
+        if (state.bulbCommandOwner !== invocation || state.refreshGeneration !== invocation.generation) return;
+        const normalized = captureError(error);
+        const message = [404, 405].includes(normalized.status) ? t("bulbOwnershipUnavailable") : normalized.message;
+        setOperationState(message, true); showToast(message, true);
+      } else state.shutterDisconnectWarning = true;
+    } finally {
+      owner.startPending = false;
+      if (state.bulbCommandOwner === invocation && state.session === owner.session &&
+          state.refreshGeneration === invocation.generation) {
+        state.bulbCommandOwner = null; state.busy = false;
+      }
+      if (state.session === owner.session && state.bulbOwner === owner) renderSession();
+    }
+  }
+
+  function stopOwnedBulb({ owner = state.bulbOwner, keepalive = false } = {}) {
+    if (!owner || owner.released) return Promise.resolve(true);
+    if (owner.stopPromise) return owner.stopPromise;
+    owner.stopRequested = true;
+    // Owned Stop is safe even before Start reaches the server: the server keeps
+    // a cancellation tombstone. Never await Start and never use legacy Stop here.
+    let invocation = null;
+    if (bulbOwnerCurrent(owner) && bulbStopAvailable()) {
+      beginCameraInteraction();
+      invocation = { owner, generation: state.refreshGeneration };
+      state.bulbCommandOwner = invocation;
+      setOperationState(t("bulbStopPending"));
+    }
+    const publishable = () => bulbOwnerCurrent(owner) && invocation &&
+      state.bulbCommandOwner === invocation && state.refreshGeneration === invocation.generation;
+    const revision = state.liveViewStopRevision || 0;
+    owner.stopPromise = (async () => {
+      try {
+        const response = await bulbOwnerRequest(owner, "stop", { keepalive });
+        const released = response?.outcome === "released";
+        const cancelled = response?.outcome === "cancelled-before-start";
+        if (response?.ownerId !== owner.ownerId || (!released && !cancelled) ||
+            (released && response.status !== undefined && (response.status?.bulbExposureActive !== false ||
+              response.status?.shutterReleaseUnconfirmed !== false))) throw new Error(t("bulbReleaseUnconfirmed"));
+        const current = bulbOwnerCurrent(owner);
+        const publish = publishable();
+        owner.released = true;
+        owner.stopUnconfirmed = false;
+        if (current) state.bulbOwner = null;
+        if (publish) {
+          if (released) {
+            if (!state.heldAutofocusOwner) state.shutterReleaseUnconfirmed = false;
+            // A repeated terminal receipt may omit status; it still proves this
+            // exact ordered release. Cancellation alone makes no camera claim.
+            adoptCameraStatus({ ...state.status, ...response.status,
+              bulbExposureActive: false, shutterReleaseUnconfirmed: false }, owner.session, revision);
+          }
+          state.lastError = null;
+          if (!bulbControlLocked()) resumeLivePolling();
+          if (released && owner.started) flashCapture();
+          const message = t(released ? "bulbReleaseConfirmed" : "bulbCancelledBeforeStart");
+          setOperationState(message); showToast(message);
+        }
+        return true;
+      } catch (error) {
+        owner.stopUnconfirmed = true;
+        if (publishable()) {
+          captureError(error);
+          setOperationState(t("bulbReleaseUnconfirmed"), true);
+        } else if (!bulbOwnerCurrent(owner)) state.shutterDisconnectWarning = true;
+        return false;
+      } finally {
+        owner.stopPromise = null;
+        if (invocation && state.bulbCommandOwner === invocation && state.session === owner.session &&
+            state.refreshGeneration === invocation.generation) {
+          state.bulbCommandOwner = null; state.busy = false;
+        }
+        if (state.session === owner.session) renderSession();
+        else renderAvailability();
+      }
+    })();
+    if (bulbOwnerCurrent(owner)) { renderCaptureMode(); renderSession(); renderAvailability(); }
+    return owner.stopPromise;
+  }
+
+  function disconnectBulbCamera(owner, { keepalive = false } = {}) {
+    if (owner.closePromise) return owner.closePromise;
+    owner.retired = true;
+    const current = () => state.session === owner.session && state.bulbOwner === owner;
+    if (current()) {
+      beginCameraInteraction();
+      state.bulbCommandOwner = { owner, generation: state.refreshGeneration, closing: true };
+      cancelMediaDownload({ silent: true });
+      stopLiveLoop(); stopLocalVideo({ announce: false }); cancelEventLoop(); renderAvailability();
+    }
+    owner.closePromise = (async () => {
+      let failure = null;
+      if (!await stopOwnedBulb({ owner, keepalive })) {
+        state.shutterDisconnectWarning = true;
+        failure = new Error(t("bulbDisconnectWarning"));
+      }
+      try { await bulbOwnerRequest(owner, "close", { keepalive }); }
+      catch (error) { state.shutterDisconnectWarning = true; failure ||= error; }
+      // Saved session/token is closed even after replacement, but its callbacks
+      // can leave only a previous-camera warning, never reset the replacement.
+      if (!current()) { renderAvailability(); return; }
+      state.bulbOwner = null;
+      state.bulbCommandOwner = null;
+      resetSession();
+      if (failure) {
+        ui.connectionError.textContent = t("bulbDisconnectWarning");
+        ui.connectionError.hidden = false;
+        showToast(t("bulbDisconnectWarning"), true);
+      } else showToast(t("disconnected"));
+    })();
+    return owner.closePromise;
+  }
+
+  function releaseBulbForLifecycle({ close = false } = {}) {
+    const owner = state.bulbOwner;
+    if (!owner || owner.session !== state.session) return;
+    if (close) return disconnectBulbCamera(owner, { keepalive: true });
+    if (owner.lifecycleStopRequested) return owner.stopPromise;
+    owner.lifecycleStopRequested = true;
+    return stopOwnedBulb({ owner, keepalive: true });
+  }
+
   async function operateShutter() {
-    if (!state.session || cameraInteractionBusy()) return;
+    if (!state.session) return;
+    // The saved owner is a Stop duty as soon as Start is admitted. Its own
+    // pending Start must never hide the only release control behind busy.
+    if (state.bulbOwner?.session === state.session) {
+      if (bulbStopAvailable()) return stopOwnedBulb();
+      return;
+    }
+    if (cameraInteractionBusy()) return;
+    if (!bulbControlLocked() && state.captureMode === "photo" && !recordingRecoveryActive() && isBulbMode()) {
+      if (featureSupported(FEATURES.BULB_EXPOSURE)) return startOwnedBulb();
+      return;
+    }
     const session = state.session;
     const sessionId = session.id;
     const isPhoto = state.captureMode === "photo" && !recordingRecoveryActive();
@@ -4939,7 +5163,9 @@
     try {
       if (bulb) {
         if (!bulbWasActive) pauseLivePolling();
-        const bulbPath = bulbWasActive ? "/bulb/stop" : "/bulb/start";
+        // Unowned recovery for a short shutter/AF operation or existing camera
+        // state. New Bulb Starts exclusively use the ordered owner protocol.
+        const bulbPath = "/bulb/stop";
         const status = await api(
           `/v1/session/${encodeURIComponent(sessionId)}${bulbPath}`,
           { method: "POST" },
@@ -7474,6 +7700,7 @@
     if (bulbControlLocked() || state.shutterDisconnectWarning) ui.toast.hidden = true;
     const bulbActive = bulbControlLocked();
     const interactionBusy = cameraInteractionBusy();
+    const ownedBulbStop = Boolean(state.bulbOwner && bulbStopAvailable());
     const videoSupported = featureSupported(FEATURES.VIDEO_RECORDING);
     const recording = Boolean(state.status?.recording);
     const stopOnly = recordingRecoveryActive();
@@ -7493,8 +7720,8 @@
       state.healthFailed || state.health?.engines?.[selectedEngine]?.available === false || !connectionReady;
     if (ui.healthRetryButton) ui.healthRetryButton.disabled = state.busy || Boolean(state.scanAttempt) || Boolean(state.healthAttempt);
     if (ui.connectionFixButton) ui.connectionFixButton.disabled = state.busy || Boolean(state.scanAttempt);
-    ui.refreshButton.disabled = !connected || interactionBusy;
-    ui.disconnectButton.disabled = !connected || state.busy;
+    ui.refreshButton.disabled = !connected || cameraInteractionBusy({ ignoreBulbOwner: true });
+    ui.disconnectButton.disabled = !connected || (state.busy && !ownedBulbStop);
     if (ui.modeApplyButton) {
       const setting = state.capabilities?.settings?.find((item) => item.key === "moviemode"), value = state.settingDrafts?.moviemode;
       ui.modeApplyButton.disabled = interactionBusy || bulbActive || recording || stopOnly || !setting ||
@@ -7514,7 +7741,7 @@
     );
     const shutterAFAllowed = bulbActiveStop || state.captureMode !== "photo" || isBulbMode() ||
       state.shutterAutofocus || shutterAFSupported();
-    ui.shutterButton.disabled = interactionBusy || !shutterSupported || !temperatureAllowed || !shutterAFAllowed;
+    ui.shutterButton.disabled = (interactionBusy && !ownedBulbStop) || !shutterSupported || !temperatureAllowed || !shutterAFAllowed;
     ui.shutterAFControl.hidden = !connected || state.captureMode !== "photo" || isBulbMode() || bulbActive ||
       (!shutterAFSupported() && state.shutterAutofocus);
     ui.shutterAFToggle.checked = state.shutterAutofocus;
@@ -10768,6 +10995,7 @@
         stopMediaAutoImport("backgrounded");
         if (typeof cancelMediaMutation === "function") cancelMediaMutation();
         releaseHeldAutofocusForLifecycle();
+        releaseBulbForLifecycle();
         cancelCameraFocusInfo();
       }
       else {
@@ -10785,6 +11013,7 @@
       stopMediaAutoImport("backgrounded");
       if (typeof cancelMediaMutation === "function") cancelMediaMutation();
       releaseHeldAutofocusForLifecycle();
+      releaseBulbForLifecycle({ close: true });
       cancelCameraFocusInfo();
     });
     window.addEventListener("focus", refreshMediaDateZone);
