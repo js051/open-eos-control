@@ -258,3 +258,11 @@
 ## 2026-10-17 G05/G07/G13 PC 鍵盤操作歸屬
 
 [既有 viewfinder 內 zoom/audio 鍵盤路由](pc-viewfinder-keyboard-routing-2026-10-17.zh-TW.md)：修正 Enter／Space 從子控制冒泡時誤送中心 focus/WB。僅 viewfinder 本身為事件 target 才進入其鍵盤動作；原 pointer/owner/能力 gate 不變。基準18案9fail，修正及相鄰focus/magnification共64/64。Firefox實際 zoom Enter／Space各只送magnification，viewfinder Enter仍送focus，四圖與telemetry保存。合成API/JPEG，非實體相機、RTP音訊、screen reader或Windows交付。
+
+## 2026-10-17 G13 PC 對話框名稱與設定焦點
+
+- [八 dialog 有界命名／鍵盤檢查](pc-dialog-name-audit-2026-10-17.zh-TW.md)：唯一未命名的 setting dialog 關聯既有動態 heading；HTML基準1fail/7pass，修正static15/15、setting caller47/47。標題在showModal前依目前setting／語言填入；實際screen reader仍未驗。
+- [設定Apply後焦點恢復](pc-setting-focus-return-2026-10-17.zh-TW.md)：Firefox基準source90174ba0真操作確認Apply後原按鈕已detach，dialog關閉時activeElement為BODY。修正只在同session/editor且沒有新焦點目的地時，優先原有效按鈕或同設定的目前可用按鈕；不從queuedclose／late response搶焦點。新增有界host反例與owner/visibility/cancel控制後69/69，另124相鄰設定測試通過；pendingApply→Escape及media dialog候選未據此宣稱修好。
+- 整合source `0b8dfaf4` 的PC全modules一次完整執行：52組Node runner summaries共3675 tests/pass，fail/cancel/skip均0，另既有direct assert scripts通過；15 static UI tests通過。這是整合回歸，不代替native、Windows包或真相機驗收。
+
+同source Firefox fixed對照已確認Apply後回到目前ISO200按鈕，直接Enter能重開；baseline/fixed各3圖、telemetry與hash已保存。pendingApply Escape與兩個media候選仍獨立待驗，沒有整群升級為PASS。
