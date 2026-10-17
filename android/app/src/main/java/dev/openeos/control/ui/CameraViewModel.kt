@@ -3089,7 +3089,7 @@ class CameraViewModel(
             publishMediaSaveProgress(request, item, CameraMediaTransferProgress(0L, item.sizeBytes))
             withContext(Dispatchers.IO) {
                 val rawOutput = resolver.openOutputStream(destination, "w")
-                    ?: error("Android could not open the selected download destination.")
+                    ?: throw CameraAppException(CameraAppError.DOWNLOAD_DESTINATION_UNAVAILABLE)
                 BufferedOutputStream(rawOutput).use { stream ->
                     repository.downloadMedia(item, stream) { progress -> publishMediaSaveProgress(request, item, progress) }
                 }
@@ -3185,7 +3185,7 @@ class CameraViewModel(
                                         withContext(Dispatchers.IO) {
                                             destination = createMediaDocument(resolver, requireNotNull(destinationTree), item)
                                             val rawOutput = resolver.openOutputStream(requireNotNull(destination), "w")
-                                                ?: error("Android could not open the selected download destination.")
+                                                ?: throw CameraAppException(CameraAppError.DOWNLOAD_DESTINATION_UNAVAILABLE)
                                             BufferedOutputStream(rawOutput).use { output ->
                                                 repository.downloadMedia(item, output) { progress -> publishMediaSaveProgress(request, item, progress) }
                                             }

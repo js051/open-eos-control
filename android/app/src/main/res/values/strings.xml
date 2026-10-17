@@ -476,6 +476,7 @@
     <string name="camera_error_upload_too_large">The selected file exceeds the upload size limit. Choose a smaller file.</string>
     <string name="camera_error_upload_size_invalid">The selected file is empty or its size is outside the upload limit. Choose another file.</string>
     <string name="camera_error_upload_receipt_missing">The upload did not return a completion receipt. Check the camera before retrying.</string>
+    <string name="camera_error_download_destination_unavailable">Android could not open the selected save location. Choose a save location again.</string>
     <string name="media_protection">Protection</string>
     <string name="media_protected">Protected</string>
     <string name="media_unprotected">Unprotected</string>
