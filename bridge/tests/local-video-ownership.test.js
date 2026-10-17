@@ -32,7 +32,7 @@ function harness() {
     cancelLocalVideoFrame: noop, clearMonitoringLayers: noop, captureLocalVideoError: error => error};
   vm.createContext(context);
   vm.runInContext(["refreshLocalVideoInputs", "startLocalVideo", "stopLocalVideo", "handleLocalVideoEnded"].map(extract).join("\n"), context);
-  return {...context, enumerations, messages, renders, stream, listeners};
+  return {...context, context, enumerations, messages, renders, stream, listeners};
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 for (const action of ["stop", "disconnect", "ended", "replacement"]) {
@@ -111,4 +111,120 @@ test("old enumeration completion cannot unlock a replacement start", async () =>
   await replacement;
   assert.equal(replacementStream.stopped, false);
   assert.equal(h.messages.at(-1), "localVideoStarted");
+});
+
+function initializeHarness({health = {authRequired: false, engines: {libgphoto2: {available: true}}}, healthGate = null} = {}) {
+  const h = harness(), calls = [];
+  h.state.session = null;
+  h.state.health = null;
+  Object.assign(h.ui, {ccapiUrlInput: {}, ccapiUsernameInput: {}});
+  Object.assign(h.context, {
+    window: {}, CCAPI_URL_KEY: "synthetic-url", CCAPI_USERNAME_KEY: "synthetic-user",
+    readCameraPreference: (_, fallback = "") => fallback,
+    bindEvents: () => calls.push("bind"), renderMonitoringControls() {}, applyLanguage() {},
+    connectionGuidance: require("../open_eos_bridge/static/connection-guidance.js"),
+    refreshHealth: async () => {
+      calls.push("health");
+      if (healthGate) await healthGate.promise;
+      h.state.health = health;
+      h.state.healthFailed = !health;
+    },
+    scanCameras: async () => { calls.push("scan"); },
+  });
+  vm.runInContext(extract("initialize"), h.context);
+  return {...h, initialize: h.context.initialize, calls};
+}
+
+test("initialize reaches health and initial scan while optional enumeration never settles", async () => {
+  const h = initializeHarness();
+  let finished = false;
+  const pending = h.initialize().then(() => { finished = true; });
+  await tick();
+  assert.deepEqual(h.calls, ["bind", "health", "scan"]);
+  assert.equal(finished, true, "optional input discovery cannot block mandatory startup");
+  assert.equal(h.enumerations.length, 1);
+  assert.equal(h.state.localVideoInputs, undefined);
+  await pending;
+});
+
+test("initialize waits for health before scanning even when optional enumeration succeeds first", async () => {
+  const healthGate = deferred(), h = initializeHarness({healthGate});
+  const pending = h.initialize();
+  await tick();
+  assert.deepEqual(h.calls, ["bind", "health"]);
+  h.enumerations[0].resolve(["synthetic-input"]);
+  await tick();
+  assert.deepEqual(h.state.localVideoInputs, ["synthetic-input"]);
+  assert.deepEqual(h.calls, ["bind", "health"], "device discovery must not trigger camera scanning");
+  healthGate.resolve();
+  await pending;
+  assert.deepEqual(h.calls, ["bind", "health", "scan"]);
+});
+
+test("initialize optional enumeration rejection remains handled after mandatory startup completes", async () => {
+  const h = initializeHarness();
+  const pending = h.initialize();
+  await tick();
+  assert.deepEqual(h.calls, ["bind", "health", "scan"]);
+  h.enumerations[0].reject(new Error("Synthetic device enumeration failure"));
+  await tick();
+  await pending;
+  assert.equal(h.state.localVideoError.code, "synthetic");
+  assert.equal(h.state.healthFailed, false);
+  assert.deepEqual(h.messages, [], "quiet optional failure must not become a startup failure toast");
+  assert.deepEqual(h.calls, ["bind", "health", "scan"]);
+});
+
+for (const outcome of ["success", "failure"]) {
+  test(`initialize late retired optional ${outcome} cannot replace a fresh device result`, async () => {
+    const h = initializeHarness();
+    const pending = h.initialize();
+    await tick();
+    assert.deepEqual(h.calls, ["bind", "health", "scan"]);
+    h.stopLocalVideo({announce: false});
+    const current = h.refreshLocalVideoInputs();
+    h.enumerations[1].resolve(["synthetic-fresh-input"]);
+    await current;
+    if (outcome === "success") h.enumerations[0].resolve(["synthetic-retired-input"]);
+    else h.enumerations[0].reject(new Error("Synthetic retired failure"));
+    await tick();
+    await pending;
+    assert.deepEqual(h.state.localVideoInputs, ["synthetic-fresh-input"]);
+    assert.equal(h.state.localVideoError, undefined);
+    assert.equal(h.renders.length, 1);
+    assert.deepEqual(h.calls, ["bind", "health", "scan"]);
+  });
+}
+
+test("initialize handles failed health without scanning or waiting for optional enumeration", async () => {
+  const h = initializeHarness({health: null});
+  let finished = false;
+  const pending = h.initialize().then(() => { finished = true; });
+  await tick();
+  assert.deepEqual(h.calls, ["bind", "health"]);
+  assert.equal(finished, true);
+  assert.equal(h.state.healthFailed, true);
+  h.enumerations[0].resolve([]);
+  await pending;
+  assert.deepEqual(h.calls, ["bind", "health"]);
+});
+
+test("initialize preserves token-required health gate for the initial scan", async () => {
+  const h = initializeHarness({health: {authRequired: true, engines: {libgphoto2: {available: true}}}});
+  let finished = false;
+  const pending = h.initialize().then(() => { finished = true; });
+  await tick();
+  assert.deepEqual(h.calls, ["bind", "health"]);
+  assert.equal(finished, true);
+  h.enumerations[0].resolve([]);
+  await pending;
+  assert.deepEqual(h.calls, ["bind", "health"]);
+});
+
+test("initialize still reaches health and scan when local video is unavailable", async () => {
+  const h = initializeHarness();
+  h.state.localVideoSupport.available = false;
+  await h.initialize();
+  assert.deepEqual(h.calls, ["bind", "health", "scan"]);
+  assert.equal(h.enumerations.length, 0);
 });

@@ -31,3 +31,5 @@
 G12／116 的一般 shutdown 例外修正另見 [Bridge shutdown receipt](bridge-shutdown-drain-2026-10-17.zh-TW.md)。117 的 Windows standalone 成品／OS 行為、126 的真正 EDSDK provider binding、128 的 iOS UI／可達性均不由本次 PC health read 變更證明；G13 的其他 picker／語言布局／初始化來源也未宣稱全面通過。沒有更動 optional local video 初始化、其他 API 的逾時、session 建立／取消責任或全域自動重試。
 
 本地 implemented；推送、exact-SHA CI、PR ready、main acceptance、發布及實體相機狀態分開處理。
+
+後續另以 [PC initialization readiness](pc-initialization-readiness-2026-10-17.zh-TW.md) 修正可選 local-video 列舉阻擋初次 health 的依賴。該追加變更及其測試數獨立列出，不回填本文件的 104／3626 證據為新來源測試。

@@ -10884,7 +10884,9 @@
     applyLanguage();
     renderLiveState();
     renderAvailability();
-    await refreshLocalVideoInputs();
+    // Optional local input discovery owns its errors/results independently;
+    // it must not delay Bridge readiness or the existing initial-scan gates.
+    void refreshLocalVideoInputs();
     await refreshHealth();
     if (connectionGuidance.availableUsbEngine(state.health) && !state.health.authRequired) await scanCameras();
   }
