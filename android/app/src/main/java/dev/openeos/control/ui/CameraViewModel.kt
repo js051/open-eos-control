@@ -19,6 +19,7 @@ import dev.openeos.control.data.MaintenanceRequest
 import dev.openeos.control.data.MaintenanceClockTarget
 import dev.openeos.control.data.MaintenanceClockEvidence
 import dev.openeos.control.data.MaintenanceCommandEvidence
+import dev.openeos.control.data.MaintenanceRetirementUnconfirmedException
 import dev.openeos.control.R
 import dev.openeos.control.data.CaptureConfigurationOperation
 import dev.openeos.control.data.CaptureConfigurationReadback
@@ -1122,7 +1123,7 @@ class CameraViewModel(
                 if (unconfirmed && cameraSessionGeneration == disconnectGeneration) _uiState.update { it.copy(liveViewDisconnectWarning = true) }
             } catch (failure: MaintenanceRetirementUnconfirmedException) {
                 if (cameraSessionGeneration == disconnectGeneration) _uiState.update { it.copy(
-                    error = if (failure.retirementUnconfirmed) appContext.getString(R.string.maintenance_session_retirement_unconfirmed) else it.error,
+                    error = if (failure.retirementUnconfirmed) CameraAppError.MAINTENANCE_RETIREMENT_UNCONFIRMED.messageToken else it.error,
                     shutterDisconnectWarning = it.shutterDisconnectWarning || failure.physicalReleaseUnconfirmed,
                     liveViewDisconnectWarning = it.liveViewDisconnectWarning || failure.stopUnconfirmed) }
             }
@@ -3427,7 +3428,7 @@ class CameraViewModel(
                     }
                 } ?: MediaUploadMetadata(sourceUri.lastPathSegment?.substringAfterLast('/').orEmpty(), null)
                 val name = metadata.name.trim()
-                check(name.isNotEmpty()) { "Android could not determine the selected media filename." }
+                if (name.isEmpty()) throw CameraAppException(CameraAppError.UPLOAD_FILENAME_UNKNOWN)
                 publish { it.copy(activeMediaUploadName = name,
                     mediaUploadProgress = CameraMediaTransferProgress(0L, metadata.sizeBytes)) }
                 withContext(Dispatchers.IO) {
@@ -3436,7 +3437,7 @@ class CameraViewModel(
                     val cached = File(appContext.cacheDir, "media-upload-${UUID.randomUUID()}.tmp")
                     temporaryFile = cached
                     val rawInput = resolver.openInputStream(sourceUri)
-                        ?: error("Android could not open the selected upload source.")
+                        ?: throw CameraAppException(CameraAppError.UPLOAD_SOURCE_UNAVAILABLE)
                     val resolvedSize = BufferedInputStream(rawInput).use { input ->
                         FileOutputStream(cached).buffered().use { output ->
                             val buffer = ByteArray(MEDIA_UPLOAD_BUFFER_BYTES)
@@ -3448,7 +3449,7 @@ class CameraViewModel(
                                 if (count < 0) break
                                 if (count == 0) continue
                                 copied += count
-                                check(copied <= MAX_MEDIA_UPLOAD_BYTES) { "Selected media exceeds the upload limit." }
+                                if (copied > MAX_MEDIA_UPLOAD_BYTES) throw CameraAppException(CameraAppError.UPLOAD_TOO_LARGE)
                                 coroutineContext.ensureActive()
                                 output.write(buffer, 0, count)
                                 publish { if (attempt.acceptsProgress()) it.copy(mediaUploadProgress =
@@ -3457,7 +3458,7 @@ class CameraViewModel(
                             copied
                         }
                     }
-                    check(resolvedSize in 1L..MAX_MEDIA_UPLOAD_BYTES) { "Selected media size is outside the upload limit." }
+                    if (resolvedSize !in 1L..MAX_MEDIA_UPLOAD_BYTES) throw CameraAppException(CameraAppError.UPLOAD_SIZE_INVALID)
                     coroutineContext.ensureActive()
                     if (!owns()) throw CancellationException("Upload owner changed.")
                     BufferedInputStream(FileInputStream(cached)).use { input ->
@@ -3479,7 +3480,7 @@ class CameraViewModel(
                     }
                 }
                 val receipt = attempt.confirmedResult()
-                check(receipt != null) { "Upload did not return a completion receipt." }
+                if (receipt == null) throw CameraAppException(CameraAppError.UPLOAD_RECEIPT_MISSING)
                 publish { it.copy(lastUploadedMediaName = receipt.item.name,
                     mediaUploadStatus = MediaUploadStatus.CONFIRMED) }
                 // Refresh only the current browsing scope. It cannot confirm or undo this receipt.
@@ -4172,7 +4173,9 @@ class CameraViewModel(
         queueLiveViewReconciliation()
     }
 
-    private fun formatException(exception: Exception): String = buildString {
+    private fun formatException(exception: Exception): String = if (exception is CameraAppException) {
+        exception.error.messageToken
+    } else buildString {
         append(exception.javaClass.simpleName)
         append(": ")
         append(exception.message ?: "Unknown error")
