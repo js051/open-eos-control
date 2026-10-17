@@ -58,9 +58,32 @@ class AndroidAppErrorLanguageSourceTests(unittest.TestCase):
         connection = (UI / "ConnectionRecoveryComponents.kt").read_text()
         self.assertIn("stringResource(connectionRecoveryMessage(recovery))", connection)
 
+    def test_document_and_folder_null_outputs_keep_owned_cleanup_and_feedback(self):
+        source = (UI / "CameraViewModel.kt").read_text()
+        single = source.split("    fun downloadMedia(context:", 1)[1].split("    fun downloadMediaBatch(", 1)[0]
+        batch = source.split("    private fun downloadMediaBatchInternal(", 1)[1].split("\n    fun ", 1)[0]
+        typed = "?: throw CameraAppException(CameraAppError.DOWNLOAD_DESTINATION_UNAVAILABLE)"
+        self.assertEqual(2, source.count(typed))
+        self.assertIn(typed, single)
+        self.assertIn("MediaOutputFinalization(cleanupIncomplete = { deleteIncompleteMediaDocument(resolver, destination) })", single)
+        self.assertIn("else MediaSaveFeedback.Failed(formatException(it))", single)
+        self.assertIn("download.confirm {", single)
+        self.assertIn("withMediaOutputFinalization(", batch)
+        self.assertIn("deleteIncompleteMediaDocument(resolver, it)", batch)
+        self.assertIn("else MediaSaveFeedback.Failed(formatException(exception))", batch)
+        self.assertIn("finalized.confirm()", batch)
+        self.assertIn("!request.owns(mediaSaveRequest, cameraSessionGeneration, _uiState.value.info)", batch)
+
+    def test_per_item_failed_feedback_resolves_the_exact_token_before_localized_wrapper(self):
+        source = (UI / "MediaGalleryComponents.kt").read_text()
+        body = source.split("private fun MediaSaveFeedbackPanel(", 1)[1].split("@Composable", 1)[0]
+        self.assertIn("is MediaSaveFeedback.Failed -> stringResource(R.string.media_save_failed,", body)
+        self.assertIn("cameraAppErrorResource(feedback.message)?.let { stringResource(it) } ?: feedback.message", body)
+        self.assertIn("onClick = onRetry, enabled = retryEnabled", body)
+
     def test_every_app_error_has_english_and_traditional_chinese_resources(self):
         names = set(re.findall(r"R\.string\.(\w+)", (UI / "CameraAppError.kt").read_text()))
-        self.assertEqual(6, len(names))
+        self.assertEqual(7, len(names))
         localized = []
         for folder in ("values", "values-zh-rTW"):
             rows = ET.parse(MAIN / "res" / folder / "strings.xml").getroot().findall("string")

@@ -884,4 +884,5 @@
     <string name="camera_error_upload_too_large">所選檔案超過上傳大小限制。請選擇較小的檔案。</string>
     <string name="camera_error_upload_size_invalid">所選檔案是空的，或大小不在上傳限制內。請選擇其他檔案。</string>
     <string name="camera_error_upload_receipt_missing">上傳未傳回完成收據。重試前請先檢查相機。</string>
+    <string name="camera_error_download_destination_unavailable">Android 無法開啟所選儲存位置。請重新選擇儲存位置。</string>
 </resources>

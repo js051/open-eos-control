@@ -11,6 +11,7 @@ internal enum class CameraAppError(@StringRes val messageResource: Int) {
     UPLOAD_TOO_LARGE(R.string.camera_error_upload_too_large),
     UPLOAD_SIZE_INVALID(R.string.camera_error_upload_size_invalid),
     UPLOAD_RECEIPT_MISSING(R.string.camera_error_upload_receipt_missing),
+    DOWNLOAD_DESTINATION_UNAVAILABLE(R.string.camera_error_download_destination_unavailable),
     ;
 
     // CameraUiState already owns a nullable String error and its clearing/retirement lifecycle.

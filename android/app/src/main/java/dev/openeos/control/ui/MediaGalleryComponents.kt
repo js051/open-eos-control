@@ -687,7 +687,8 @@ private fun MediaSaveFeedbackPanel(
             MediaSaveFeedback.NotStarted -> stringResource(R.string.media_save_not_started)
             is MediaSaveFeedback.Saving -> stringResource(R.string.downloading_media, item.name)
             is MediaSaveFeedback.Saved -> stringResource(R.string.media_saved_location, feedback.location)
-            is MediaSaveFeedback.Failed -> stringResource(R.string.media_save_failed, feedback.message)
+            is MediaSaveFeedback.Failed -> stringResource(R.string.media_save_failed,
+                cameraAppErrorResource(feedback.message)?.let { stringResource(it) } ?: feedback.message)
             is MediaSaveFeedback.IncompleteFile -> stringResource(if (feedback.cancelled)
                 R.string.media_save_cancelled_cleanup_unconfirmed else R.string.media_save_failed_cleanup_unconfirmed)
             MediaSaveFeedback.Cancelled -> stringResource(R.string.media_save_cancelled)
