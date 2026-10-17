@@ -8068,6 +8068,9 @@
       if (!owner.receivedSnapshot) clearMediaThumbnails();
       owner.receivedSnapshot = true;
       state.mediaHasMore = scope === "recent" && items.length > 60;
+      // A snapshot may have been buffered before a confirmed DELETE receipt.
+      // Fence only this listing owner; a later explicit refresh starts fresh.
+      if (owner.confirmedDeletedIds) items = items.filter((item) => !owner.confirmedDeletedIds.has(item.id));
       state.media = scope === "recent" ? items.slice(0, 60) : items;
       state.mediaListingReceived = state.media.length;
       state.mediaLoaded = true;
@@ -10526,6 +10529,10 @@
   function applyConfirmedMediaDelete(owner, result) {
     if (state.session !== owner.session || state.mediaDeleteOwner !== owner || owner.applied.has(result.id)) return;
     owner.applied.add(result.id);
+    const listing = state.mediaListingOwner;
+    if (listing?.session === owner.session) {
+      (listing.confirmedDeletedIds ||= new Set()).add(result.id);
+    }
     state.media = state.media.filter((candidate) => candidate.id !== result.id);
     state.mediaSelection?.consumeIfToken(result.id, result.selectionToken);
     const thumbnailUrl = state.mediaThumbnailUrls.get(result.id);
