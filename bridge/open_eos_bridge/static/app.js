@@ -6000,6 +6000,7 @@
       state.localVideoActive = true;
       state.localVideoFrameTimes = [];
       state.localVideoFrameSamples = [];
+      state.localVideoLastFrameCount = null;
       state.localVideoLastRenderAt = 0;
       state.observedFps = 0;
       state.frameBytes = 0;
@@ -6077,6 +6078,7 @@
     state.localVideoMuted = false;
     state.localVideoFrameTimes = [];
     state.localVideoFrameSamples = [];
+    state.localVideoLastFrameCount = null;
     state.localVideoLastRenderAt = 0;
     state.observedFps = 0;
     state.frameBytes = 0;
@@ -6122,22 +6124,30 @@
   function handleLocalVideoFrame(now, generation, presentedCallback) {
     if (!state.localVideoActive || generation !== state.localVideoGeneration) return;
     state.localVideoFrameHandle = null;
+    let freshFrame = presentedCallback;
     if (presentedCallback) {
       const rolling = localVideo.rollingFps(state.localVideoFrameTimes, now);
       state.localVideoFrameTimes = rolling.timestamps;
       state.observedFps = rolling.fps || null;
     } else {
+      const frameCount = localVideo.presentedFrameCount(ui.localVideo);
+      const previousCount = state.localVideoLastFrameCount;
+      freshFrame = frameCount !== null && frameCount > 0 &&
+        (previousCount == null || frameCount > previousCount);
+      // An unavailable sample clears the FPS window, not the last known counter.
+      if (frameCount !== null) state.localVideoLastFrameCount = frameCount;
       const rolling = localVideo.rollingFrameCount(
         state.localVideoFrameSamples,
         now,
-        localVideo.presentedFrameCount(ui.localVideo),
+        frameCount,
       );
       state.localVideoFrameSamples = rolling.samples;
       state.observedFps = rolling.fps;
     }
+    // Timer polling/rendering is not evidence that the source supplied a frame.
+    if (freshFrame) state.lastFrameAt = new Date().toISOString();
     if (now - state.localVideoLastRenderAt >= LOCAL_VIDEO_RENDER_INTERVAL_MILLIS) {
       state.localVideoLastRenderAt = now;
-      state.lastFrameAt = new Date().toISOString();
       renderMonitoringFrame();
       renderFrameIndicator();
     }

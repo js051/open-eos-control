@@ -1,0 +1,131 @@
+✖ fallback polling cannot refresh lastFrameAt while the native frame count is unchanged (4.971165ms)
+✖ fallback count 0 is not fresh frame evidence (0.738756ms)
+✖ fallback count null is not fresh frame evidence (0.526424ms)
+✖ fallback count undefined is not fresh frame evidence (0.58288ms)
+✖ fallback count NaN is not fresh frame evidence (0.564893ms)
+✔ native presented callback supplies frame evidence even without a fallback count (0.705836ms)
+✔ retired generation cannot publish a frame timestamp (0.665465ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 2
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 93.648841
+
+✖ failing tests:
+
+test at bridge/tests/local-video-frame-freshness.test.js:23:1
+✖ fallback polling cannot refresh lastFrameAt while the native frame count is unchanged (4.971165ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + '1970-01-01T00:00:02.000Z'
+  - '1970-01-01T00:00:01.000Z'
+                       ^
+  
+      at TestContext.<anonymous> (/workspace/shared/eos-parity-recovery-20261013/pc-local-frame-timestamp-20261017/bridge/tests/local-video-frame-freshness.test.js:25:27)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.start (node:internal/test_runner/test:1242:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1970-01-01T00:00:02.000Z',
+    expected: '1970-01-01T00:00:01.000Z',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at bridge/tests/local-video-frame-freshness.test.js:29:3
+✖ fallback count 0 is not fresh frame evidence (0.738756ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + '1970-01-01T00:00:01.000Z'
+  - null
+  
+      at TestContext.<anonymous> (/workspace/shared/eos-parity-recovery-20261013/pc-local-frame-timestamp-20261017/bridge/tests/local-video-frame-freshness.test.js:30:53)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1970-01-01T00:00:01.000Z',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at bridge/tests/local-video-frame-freshness.test.js:29:3
+✖ fallback count null is not fresh frame evidence (0.526424ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + '1970-01-01T00:00:01.000Z'
+  - null
+  
+      at TestContext.<anonymous> (/workspace/shared/eos-parity-recovery-20261013/pc-local-frame-timestamp-20261017/bridge/tests/local-video-frame-freshness.test.js:30:53)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1970-01-01T00:00:01.000Z',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at bridge/tests/local-video-frame-freshness.test.js:29:3
+✖ fallback count undefined is not fresh frame evidence (0.58288ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + '1970-01-01T00:00:01.000Z'
+  - null
+  
+      at TestContext.<anonymous> (/workspace/shared/eos-parity-recovery-20261013/pc-local-frame-timestamp-20261017/bridge/tests/local-video-frame-freshness.test.js:30:53)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1970-01-01T00:00:01.000Z',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at bridge/tests/local-video-frame-freshness.test.js:29:3
+✖ fallback count NaN is not fresh frame evidence (0.564893ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + '1970-01-01T00:00:01.000Z'
+  - null
+  
+      at TestContext.<anonymous> (/workspace/shared/eos-parity-recovery-20261013/pc-local-frame-timestamp-20261017/bridge/tests/local-video-frame-freshness.test.js:30:53)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1970-01-01T00:00:01.000Z',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
