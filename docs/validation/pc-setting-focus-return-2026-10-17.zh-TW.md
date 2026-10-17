@@ -38,4 +38,20 @@ DOM adapter 明確模擬 connected／disabled／hidden／layout 狀態；native 
 
 本地 baseline `0.13.0 Development Preview`；未查遠端 release。Impact：**patch**，修正現有設定成功套用後的鍵盤焦點遺失；沒有版本 bump、push 或 release。
 
-修正後的真 Firefox journey **待父任務驗證**。screen reader／AX／Windows 原生包／實體相機 **NOT_RUN**。Pending Apply→Escape 的 host 測試只證明不強制聚焦 disabled target、不讓遲來 receipt 搶焦點；其實際 browser recovery 仍待 baseline。Details metadata／Preview Download 的 opener replacement 同樣維持具體待驗候選，沒有在本批修正或宣稱已驗收。這不是完整 PC accessibility／三端驗收。
+修正後的真 Firefox journey 已完成下節窄範圍驗證。screen reader／AX／Windows 原生包／實體相機 **NOT_RUN**。Pending Apply→Escape 的 host 測試只證明不強制聚焦 disabled target、不讓遲來 receipt 搶焦點；其實際 browser recovery 仍待 baseline。Details metadata／Preview Download 的 opener replacement 同樣維持具體待驗候選，沒有在本批修正或宣稱已驗收。這不是完整 PC accessibility／三端驗收。
+
+
+## 修正後 Firefox 對照
+
+2026-10-17 18:23–18:24 UTC，受驗 source `0b8dfaf46d2fbc43b56d4659ae1dcfa6b7f03772`，app.js SHA-256 `43799e55ab3ac758a8d4daae80065eb40a0657d2380e27a66aa14fe574f085bf`。沿用既有 cloud Firefox 157.0.1／build 20261005135250／80% zoom、自有測試profile；與基準相同合成 metadata、ISO選項及matched outcome回覆。沒有修改production JS或呼叫真相機。
+
+實際聚焦ISO100按鈕、Enter開啟，選200、Tab到Apply、Enter確認：舊opener已detach，dialog關閉後activeElement為可用的同設定新按鈕ISO200。再按Enter立即重開dialog且目前200被選定；不是fixture代替使用者觸發設定動作。Fixture只提供初始聚焦輔助與telemetry。
+
+- [開啟](evidence/pc-setting-focus-fixed-2026-10-17/opened.png)
+- [Apply後回到ISO200](evidence/pc-setting-focus-fixed-2026-10-17/after-apply.png)
+- [直接Enter重開](evidence/pc-setting-focus-fixed-2026-10-17/reopened.png)
+- [Telemetry](evidence/pc-setting-focus-fixed-2026-10-17/events.jsonl)、[fixture](evidence/pc-setting-focus-fixed-2026-10-17/fixture.js)、[SHA-256](evidence/pc-setting-focus-fixed-2026-10-17/sha256.json)
+
+18:24:25 UTC owned Firefox/server已terminal exit -15，資源交回。這只驗證successfulApply流程；pendingApply→Escape、Details／Preview焦點仍各自待驗，不代替screen reader或平台整體驗收。
+
+同source的整合PC test:modules一次完整執行：52組Node runner summaries，3675 tests/pass，fail/cancel/skip均0；既有direct assert scripts亦通過。Static UI15/15。這是整合回歸，不是新增功能進度或原生通過。
