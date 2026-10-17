@@ -6265,6 +6265,28 @@ public actor CCAPIClient: CameraForegroundMediaReading {
                 body: String(preview)
             )
         }
+        // These physical-control replies acknowledge an entire command. A partial
+        // representation cannot discharge the existing captured release/Stop owner.
+        // Keep media reads and unrelated requests on their existing response contract.
+        if Self.requiresCompleteControlReceipt(method: request.httpMethod ?? "GET", path: request.url?.path ?? ""),
+           response.statusCode == 206 || response.header("content-range") != nil {
+            throw CCAPIError.invalidResponse("Camera control acknowledgement was incomplete.")
+        }
+    }
+
+    static func requiresCompleteControlReceipt(method: String, path: String) -> Bool {
+        switch method {
+        case "POST":
+            return ["/shooting/control/shutterbutton", "/shooting/control/shutterbutton/manual",
+                    "/shooting/control/af", "/shooting/liveview", "/shooting/liveview/rtp"]
+                .contains { path.hasSuffix($0) }
+        case "PUT":
+            return path.hasSuffix("/shooting/control/shutterbutton/manual")
+        case "DELETE":
+            return path.hasSuffix("/shooting/liveview") || path.hasSuffix("/shooting/liveview/multipart")
+        default:
+            return false
+        }
     }
 
     private func URLForPath(_ path: String, cacheKey: Int64) throws -> URL {
