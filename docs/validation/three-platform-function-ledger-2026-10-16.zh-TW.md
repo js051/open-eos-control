@@ -372,3 +372,10 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - 精確production入口萃取同一fixture基線12案在指定assertion真紅，固定12/12；共用requestOk既有still回歸3/3另列。multipart stream只做wiring source guard；8個MockWebServer案已編寫未編譯/執行，真socket15秒未證。PSI語法不是Android type-check。整合Android與受驗89ae6aad逐檔相同，獨立窄審無新增blocker。前置temperature/capability read、RTP SDP與整條Connect/Disconnect總期限不在此claim。
 - G07歷史native失敗已對照較晚診斷：Android fixture VUI的兩個SPS metadata bytes早已修正（17da77a1），swap誤差0、nonlinear max0.416支持fixture診斷；修正後API34/36仍NOT_RUN。iOS extended-sRGB與插值後clamp早已實作，Metal/H264原容差保留，仍需native。沒有新production數學反例就不重跑host綠燈當進度。
 - iOS普通Bridge Live View仍用URLSession每request120秒resource上限，不能將自訂忽略取消transport無界等待當成真URLSession已證缺陷；無owned token的普通Start/Stop維持physical排序。下一最小驗證為真URLSession loopback取消/滴流，現無Swift/Xcode。上述兩個新產品缺口已修，原89列的native/真相機/OS目的地與unsupported項仍未完成。
+
+
+## 23:18 UTC G04/G05/G06 原控制 producer 與釋放責任
+
+- [Android Direct AF／Bulb](android-direct-release-transport-bound-2026-10-17.zh-TW.md)：10個原有held AF、pulse AF／manual fallback、half-press與Bulb press/release呼叫使用bounded single-attempt transport。不是先前已具5秒界線的Android Bridge AF；兩條transport分開。基準12指定真紅＋2相容性綠，固定14/14；LV12與still3既有回歸另列。兩個release owner class逐byte未變，原mutex、NonCancellable cleanup、原operation closure與Simulator保留。9個socket案已寫未跑，PSI僅語法，15秒真socket未驗。
+- [Bridge cooperative control body](bridge-control-body-budget-2026-10-17.zh-TW.md)：真urllib loopback證明socket timeout不能阻止持續滴流累積body。只將8個method/suffix加入既有合作式read1 budget；Start producer完結後才補償Stop，晚Stop保留原owner／未知責任。相同34案基準14紅／20綠→固定34綠，445 distinct窄回歸已含34案；重跑不重複計數。快速錯誤診斷、已收到拒絕status、configuration與redirect規則不變。
+- 整合Android tree與受驗38f96f52、Bridge tree與受驗63c199b5逐檔相同並經獨立窄審。Bridge只證body讀取合作式期限；DNS/open/header、單次blocking read、其他GET/recording/drivefocus及整條Disconnect不在完成claim。原89列平台／真相機／OS驗收仍未完成。
