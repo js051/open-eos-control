@@ -6272,6 +6272,23 @@ public actor CCAPIClient: CameraForegroundMediaReading {
            response.statusCode == 206 || response.header("content-range") != nil {
             throw CCAPIError.invalidResponse("Camera control acknowledgement was incomplete.")
         }
+        // Focus/coordinate commands have no release owner, but may only report
+        // acceptance after a complete acknowledgement. Keep their transport unchanged.
+        if Self.requiresCompleteFocusReceipt(method: request.httpMethod ?? "GET", path: request.url?.path ?? ""),
+           response.statusCode == 206 || response.header("content-range") != nil {
+            throw CCAPIError.invalidResponse("Camera control acknowledgement was incomplete.")
+        }
+    }
+
+    static func requiresCompleteFocusReceipt(method: String, path: String) -> Bool {
+        switch method {
+        case "POST":
+            return path.hasSuffix("/shooting/control/drivefocus") || path.hasSuffix("/shooting/liveview/clickwb")
+        case "PUT":
+            return path.hasSuffix("/shooting/liveview/afframeposition")
+        default:
+            return false
+        }
     }
 
     static func requiresCompleteControlReceipt(method: String, path: String) -> Bool {
