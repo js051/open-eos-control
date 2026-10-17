@@ -398,6 +398,7 @@ final class CameraAppState: ObservableObject {
     private var focusMarkerOwner = UUID()
     private var heldAutofocusOwner: UUID?
     private var heldAutofocusTask: Task<Void, Error>?
+    private var heldAutofocusRetirementID = UUID()
     private var heldAutofocusWatchdog: Task<Void, Never>?
     private var focusInfoOwner = UUID()
     private var focusInfoTask: Task<Void, Never>?
@@ -1154,6 +1155,7 @@ final class CameraAppState: ObservableObject {
         releaseHeldAutofocus()
         heldAutofocusOwner = nil
         heldAutofocusTask = nil
+        heldAutofocusRetirementID = UUID()
         heldAutofocusPressed = false
         sessionGeneration = UUID()
         maintenanceControlsPaused = false
@@ -2309,6 +2311,7 @@ final class CameraAppState: ObservableObject {
         let owner = UUID()
         let generation = sessionGeneration
         heldAutofocusOwner = owner
+        heldAutofocusRetirementID = UUID()
         heldAutofocusPressed = true
         let task = Task { try await session.startHeldAutofocus(owner: owner) }
         heldAutofocusTask = task
@@ -2354,7 +2357,9 @@ final class CameraAppState: ObservableObject {
         start?.cancel()
         Task { [weak self] in
             var failure: Error?
-            if let start, case let .failure(error) = await start.result {
+            // Bridge owner-aware Stop must dispatch while Start is still pending.
+            // Direct CCAPI retains its existing physical ordering and join.
+            if case .ccapi = session, let start, case let .failure(error) = await start.result {
                 if await session.shutterReleaseState().releaseRequired { failure = error }
             }
             if failure == nil {
@@ -2367,6 +2372,31 @@ final class CameraAppState: ObservableObject {
             self.end(.focus, generation: generation)
             self.applyShortControlReleaseState(release, session: session, generation: generation)
             if let failure { self.record(failure) }
+            if case .desktopBridge = session, let start, release.releaseRequired {
+                self.observeRetiredBridgeFocus(start, session: session, generation: generation)
+            }
+        }
+    }
+
+    /// Observe the original Start without holding up release, retry, or Disconnect.
+    /// Its late settlement can clear only the warning this release just published.
+    private func observeRetiredBridgeFocus(_ start: Task<Void, Error>, session: CameraSession, generation: UUID) {
+        let id = UUID()
+        heldAutofocusRetirementID = id
+        let observation = shutterReleaseObservationRevision
+        Task { [weak self] in
+            _ = await start.result
+            guard let self, self.sessionGeneration == generation,
+                  self.heldAutofocusRetirementID == id,
+                  self.shutterReleaseObservationRevision == observation else { return }
+            let release = await session.shutterReleaseState()
+            guard self.sessionGeneration == generation, self.heldAutofocusRetirementID == id,
+                  self.shutterReleaseObservationRevision == observation,
+                  !release.releaseRequired, !release.releaseUnconfirmed,
+                  release.bulbExposureActive == false else { return }
+            self.heldAutofocusRetirementID = UUID()
+            // This is safety state reconciliation only, never an automatic restart.
+            self.applyShutterReleaseState(release, pauseLiveView: false)
         }
     }
 

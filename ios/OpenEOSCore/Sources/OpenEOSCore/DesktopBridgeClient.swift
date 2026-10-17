@@ -210,9 +210,13 @@ public actor DesktopBridgeClient {
         let generation: UUID
         let stopURL: URL
         var unconfirmed = true
+        var stopAcknowledged = false
     }
     private var focusHold: FocusHold?
     private var focusStartTask: Task<Void, Error>?
+    private var focusStartID: UUID?
+    private var focusStopID: UUID?
+    private var focusLifecycleUsed = false
     private var focusStopTask: Task<Void, Error>?
     private var ordinaryMutationCount = 0
     private var sessionID: String?
@@ -457,7 +461,6 @@ public actor DesktopBridgeClient {
         mediaListingStream?.cancel()
         mediaListingStream = nil
         focusStartTask?.cancel()
-        if let start = focusStartTask { _ = await start.result }
         if let hold = focusHold { try? await releaseFocusHold(hold) }
         let ownedAtClose = ownedBulb
         var ownedReleaseFailed = false
@@ -487,7 +490,7 @@ public actor DesktopBridgeClient {
             // Unstructured cleanup does not inherit the caller's cancellation.
             // Still await its result before retiring the session or close waiters.
             let deletion = Task {
-                if ownedAtClose != nil || ownedBulbLifecycleUsed {
+                if ownedAtClose != nil || ownedBulbLifecycleUsed || focusLifecycleUsed {
                     let request = makeRequest(url: try endpoint(["v1", "session", id]), method: "DELETE",
                                               accept: "application/json", timeoutInterval: 15)
                     let transport = transport
@@ -535,8 +538,8 @@ public actor DesktopBridgeClient {
         shutterAutofocusSupported = false
         liveViewMagnifications = []
         focusHold = nil
-        focusStartTask = nil
-        focusStopTask = nil
+        focusStartTask = nil; focusStartID = nil
+        focusStopTask = nil; focusStopID = nil; focusLifecycleUsed = false
         heldAutofocusSupported = false
         focusInfoSupported = false
         completedCloseState = result
@@ -1015,9 +1018,9 @@ public actor DesktopBridgeClient {
         activeMaintenanceAttempt?.cancel()
         mediaListingOwner = nil; mediaListingStream?.cancel(); mediaListingStream = nil
         // Explicit close must retain the safety cleanup acquired after Restore.
-        // Await the original workers, then release only their frozen owner/URL.
+        // AF Stop uses its frozen owner/URL independently of a stalled Start.
+        // Other physical operations retain their existing joins.
         focusStartTask?.cancel()
-        if let start = focusStartTask { _ = await start.result }
         if let hold = focusHold { try? await releaseFocusHold(hold) }
         let ownedAtClose = ownedBulb
         if let owner = ownedAtClose { _ = try? await stopOwnedBulb(owner, allowClosing: true) }
@@ -1081,7 +1084,8 @@ public actor DesktopBridgeClient {
         shutterRelease = nil; ownedBulb = nil; ownedBulbStopTask = nil; ownedBulbStopID = nil
         ownsShutterStatus = false; eventPollingSupported = false
         shutterAutofocusSupported = false; liveViewMagnifications = []
-        focusHold = nil; focusStartTask = nil; focusStopTask = nil
+        focusHold = nil; focusStartTask = nil; focusStartID = nil
+        focusStopTask = nil; focusStopID = nil; focusLifecycleUsed = false
         heldAutofocusSupported = false; focusInfoSupported = false
         lastLiveViewRequest = nil; maintenanceLifecycleOwned = false; maintenanceEventStopRequired = false
         completedCloseState = result; isClosing = false
@@ -1522,13 +1526,24 @@ public actor DesktopBridgeClient {
         focusHold = hold
         ownsShutterStatus = true
         releaseRevision = UUID()
-        let task = Task { try await self.performFocusStart(hold, url: startURL) }
+        let startID = UUID()
+        focusStartID = startID
+        focusLifecycleUsed = true
+        let task = Task { try await self.performFocusStart(hold, url: startURL, id: startID) }
         focusStartTask = task
         try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
 
-    private func performFocusStart(_ hold: FocusHold, url: URL) async throws {
-        defer { if focusHold?.owner == hold.owner || sessionGeneration == hold.generation { focusStartTask = nil } }
+    private func performFocusStart(_ hold: FocusHold, url: URL, id: UUID) async throws {
+        defer {
+            if sessionGeneration == hold.generation, focusStartID == id {
+                focusStartTask = nil; focusStartID = nil
+                if focusHold?.owner == hold.owner, focusHold?.stopAcknowledged == true {
+                    focusHold = nil
+                    releaseRevision = UUID()
+                }
+            }
+        }
         var dispatched = false
         do {
             try Task.checkCancellation()
@@ -1560,21 +1575,25 @@ public actor DesktopBridgeClient {
 
     public func stopHeldAutofocus(owner: UUID) async throws {
         guard let hold = focusHold, hold.owner == owner else { return }
-        if let start = focusStartTask {
-            start.cancel()
-            let result = await start.result
-            if case let .failure(error) = result, focusHold?.owner == owner { throw error }
-        }
-        guard focusHold?.owner == owner, sessionGeneration == hold.generation else { return }
+        // Owner-aware server serialization orders physical Start/Stop. Never join
+        // an ignored-cancellation Start before dispatching the only safe release.
+        focusStartTask?.cancel()
         try await releaseFocusHold(hold)
     }
 
     private func releaseFocusHold(_ hold: FocusHold) async throws {
         guard focusHold?.owner == hold.owner, sessionGeneration == hold.generation else { return }
+        if focusHold?.stopAcknowledged == true { return }
         if let task = focusStopTask { try await task.value; return }
+        let id = UUID()
+        focusStopID = id
         let task = Task.detached(priority: .userInitiated) { try await self.performFocusStop(hold) }
         focusStopTask = task
-        defer { if sessionGeneration == hold.generation { focusStopTask = nil } }
+        defer {
+            if sessionGeneration == hold.generation, focusStopID == id {
+                focusStopTask = nil; focusStopID = nil
+            }
+        }
         try await task.value
     }
 
@@ -1582,13 +1601,24 @@ public actor DesktopBridgeClient {
         guard focusHold?.owner == hold.owner, sessionGeneration == hold.generation else { return }
         focusHold?.unconfirmed = true
         releaseRevision = UUID()
-        let body = try await requestJSON(url: hold.stopURL, method: "POST", payload: ["ownerId": hold.owner.uuidString], shutterOperation: true)
+        var request = makeRequest(url: hold.stopURL, method: "POST", accept: "application/json",
+                                  timeoutInterval: 15)
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["ownerId": hold.owner.uuidString])
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        let transport = transport, frozenRequest = request
+        let response = try await BridgeBoundedExchange.run {
+            try await transport.sendMaintenance(frozenRequest)
+        }
+        let body = try Self.maintenanceBody(response, method: "POST")
         guard focusHold?.owner == hold.owner, sessionGeneration == hold.generation else { return }
         guard body["ownerId"] as? String == hold.owner.uuidString,
               Self.strictBool(body["active"]) == false, Self.strictBool(body["stopUnconfirmed"]) == false else {
             throw DesktopBridgeError.shutterReleaseUnconfirmed
         }
-        focusHold = nil
+        // A live session must not cycle owners while an old Start remains in
+        // transport: the server's bounded tombstone history is not an unlimited fence.
+        if focusStartTask != nil { focusHold?.stopAcknowledged = true }
+        else { focusHold = nil }
         releaseRevision = UUID()
     }
 
