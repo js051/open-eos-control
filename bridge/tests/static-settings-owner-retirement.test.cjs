@@ -19,7 +19,7 @@ function element(tagName = "div") {
     contains(node) { return this === node || this.children.some(child => child.contains(node)); },
     matches(selector) { return selector === 'input[type="text"]' && this.tagName === "input" && this.type === "text"; },
     addEventListener(type, callback) { (listeners[type] ||= []).push(callback); },
-    async dispatch(type) { for (const callback of listeners[type] || []) await callback({ target: this }); },
+    async dispatch(type, event = {}) { for (const callback of listeners[type] || []) await callback({ target: this, ...event }); },
     querySelectorAll(selector) {
       const all = this.children.flatMap(child => [child, ...child.querySelectorAll("*")]);
       if (selector === "*") return all;
@@ -309,4 +309,207 @@ test("delayed old modal close event cannot retire replacement owner's active edi
   assert.equal(h.state.settingEditor, currentEditor, "old close event must retain its original editor identity");
   await h.ui.settingOptions.children[1].dispatch("click"); await h.ui.settingOptions.children.at(-1).dispatch("click");
   assert.equal(h.requests.length, 1); assert.equal(h.requests[0].options.payload.value, "two");
+});
+
+// Focus adapters preserve connection/disabled/visibility state and the observed
+// native-close BODY fallback. They do not implement browser focus navigation.
+function focusFixture() {
+  const h = fixture(), doc = h.c.document, focusCalls = [];
+  function connected(node, value) {
+    node.isConnected = value;
+    for (const child of node.children) connected(child, value);
+  }
+  function decorate(node) {
+    node.isConnected = false;
+    node.closest = () => {
+      for (let current = node; current; current = current.parentElement) {
+        if (current.hidden || current.inert) return current;
+      }
+      return null;
+    };
+    node.getClientRects = () => node.isConnected && node.layoutVisible !== false && !node.closest() ? [{}] : [];
+    node.focus = options => {
+      if (!node.isConnected || node.disabled || !node.getClientRects().length) return;
+      focusCalls.push({ node, options }); doc.activeElement = node;
+    };
+    const append = node.append, replace = node.replaceChildren, query = node.querySelectorAll;
+    node.append = (...nodes) => {
+      append.call(node, ...nodes);
+      for (const child of nodes) { child.parentElement = node; connected(child, node.isConnected); }
+    };
+    node.replaceChildren = (...nodes) => {
+      for (const child of node.children) { connected(child, false); child.parentElement = null; }
+      replace.call(node);
+      node.append(...nodes);
+    };
+    node.querySelectorAll = selector => selector === "button[data-setting-key]"
+      ? query.call(node, "*").filter(child => child.tagName === "button" && child.dataset.settingKey)
+      : query.call(node, selector);
+    return node;
+  }
+  const create = tag => decorate(element(tag));
+  doc.createElement = create;
+  doc.body = create("body"); connected(doc.body, true); doc.activeElement = doc.body;
+  for (const name of ["controlView", "exposureStrip", "settingDialog", "settingOptions", "settingDialogClose"]) {
+    h.ui[name] = create(name.includes("Dialog") ? "dialog" : "div");
+  }
+  h.ui.controlView.append(h.ui.exposureStrip); doc.body.append(h.ui.controlView, h.ui.settingDialog);
+  h.ui.settingDialog.append(h.ui.settingDialogClose, h.ui.settingOptions);
+  let savedOpener;
+  h.ui.settingDialog.showModal = () => {
+    savedOpener = doc.activeElement; h.ui.settingDialog.open = true; h.ui.settingDialogClose.focus();
+  };
+  h.ui.settingDialog.close = () => {
+    h.ui.settingDialog.open = false;
+    // Native-close adapter matches the independently observed Firefox baseline.
+    doc.activeElement = savedOpener?.isConnected && !savedOpener.disabled && savedOpener.getClientRects().length
+      ? savedOpener : doc.body;
+    h.afterNativeClose?.();
+  };
+  doc.querySelector = selector => {
+    assert.equal(selector, "dialog[open]");
+    return h.otherDialog || (h.ui.settingDialog.open ? h.ui.settingDialog : null);
+  };
+  doc.querySelectorAll = selector => {
+    assert.equal(selector, "#exposure-strip .exposure-control");
+    return h.ui.exposureStrip.children;
+  };
+  h.state.activeView = "live";
+  h.c.CORE_SETTINGS.push("iso");
+  h.state.capabilities.settings.push({ key: "iso", label: "ISO", inputKind: "choice", value: "100", values: ["100", "200"] });
+  for (const name of ["renderCaptureMode", "renderPreviewInput", "renderLiveSource", "renderFps", "renderTapAction",
+    "renderTemperatureStatus", "syncBulbTimer", "renderDiagnostics", "renderRecordingHistory"]) h.c[name] = () => {};
+  const availabilityStart = source.indexOf('    document.querySelectorAll("#exposure-strip .exposure-control")');
+  const availability = source.slice(availabilityStart, source.indexOf("\n    });", availabilityStart) + 8);
+  h.c.renderAvailability = () => vm.runInContext(`{ const interactionBusy = state.busy, bulbActive = false; ${availability} }`, h.c);
+  for (const name of ["renderExposure", "renderSession"]) vm.runInContext(production(name), h.c);
+  h.c.renderSession(); bindProductionDialogClose(h);
+  const cancelStart = source.indexOf('    ui.settingDialog.addEventListener("cancel",');
+  vm.runInContext(source.slice(cancelStart, source.indexOf("\n    });", cancelStart) + 8), h.c);
+  h.cancel = async () => {
+    let prevented = false;
+    await h.ui.settingDialog.dispatch("cancel", { preventDefault() { prevented = true; } });
+    assert.equal(prevented, true, "production Escape handler closes through the owner-aware helper");
+  };
+  h.matched = () => ({ status: 200, body: { version: 1, engine: "ccapi", key: "iso", requestedValue: "200",
+    writeEvidence: "response-received", readbackEvidence: "matched",
+    setting: { key: "iso", label: "ISO", inputKind: "choice", value: "200", values: ["100", "200"] } } });
+  h.c.captureConfiguration.transfer = async (url, options) => {
+    h.requests.push({ url, options });
+    if (h.response) return h.response;
+    return h.matched();
+  };
+  h.open = async () => {
+    const opener = h.ui.exposureStrip.children[0]; opener.focus(); await opener.dispatch("click"); return opener;
+  };
+  h.apply = async () => {
+    await h.ui.settingOptions.children[1].dispatch("click");
+    const apply = h.ui.settingOptions.children.at(-1); apply.focus(); return apply.dispatch("click");
+  };
+  return Object.assign(h, { doc, focusCalls, create });
+}
+
+test("matched Apply restores focus to the current same-key exposure control after real renderSession", async () => {
+  const h = focusFixture(), opener = await h.open();
+  await h.apply();
+  assert.equal(h.requests.length, 1); assert.equal(h.ui.settingDialog.open, false);
+  assert.equal(opener.isConnected, false);
+  const replacement = h.ui.exposureStrip.children[0];
+  assert.notEqual(replacement, opener); assert.equal(replacement.disabled, false);
+  assert.equal(h.doc.activeElement, replacement);
+  assert.equal(h.focusCalls.at(-1).options.preventScroll, true);
+});
+test("ordinary close preserves the connected original native return target", async () => {
+  const h = focusFixture(), opener = await h.open(), count = h.focusCalls.length;
+  h.c.closeSettingDialog();
+  assert.equal(h.doc.activeElement, opener); assert.equal(h.focusCalls.length, count);
+});
+test("rerendered same-owner opener is replaced on ordinary close", async () => {
+  const h = focusFixture(), opener = await h.open();
+  h.c.renderSession(); h.c.closeSettingDialog();
+  assert.equal(opener.isConnected, false); assert.equal(h.doc.activeElement, h.ui.exposureStrip.children[0]);
+});
+for (const unavailable of ["disabled", "hidden", "inert", "layout-hidden", "missing"]) {
+  test(`close does not force focus onto an unavailable replacement (${unavailable})`, async () => {
+    const h = focusFixture(); await h.open(); h.c.renderSession();
+    const replacement = h.ui.exposureStrip.children[0];
+    if (unavailable === "missing") h.ui.exposureStrip.replaceChildren();
+    else if (unavailable === "layout-hidden") replacement.layoutVisible = false;
+    else replacement[unavailable] = true;
+    const count = h.focusCalls.length; h.c.closeSettingDialog();
+    assert.equal(h.doc.activeElement, h.doc.body); assert.equal(h.focusCalls.length, count);
+  });
+}
+for (const replacement of ["same-id-session", "different-session", "editor", "view", "hidden-control", "render-owner"]) {
+  test(`close cannot restore a retired setting focus owner (${replacement})`, async () => {
+    const h = focusFixture(); await h.open(); h.c.renderSession();
+    if (replacement === "same-id-session") h.state.session = { ...h.state.session };
+    if (replacement === "different-session") h.state.session = { id: "camera-b", engine: "ccapi" };
+    if (replacement === "editor") h.state.settingEditor++;
+    if (replacement === "view") h.state.activeView = "media";
+    if (replacement === "hidden-control") h.ui.controlView.hidden = true;
+    if (replacement === "render-owner") h.state.exposureRenderOwner = { session: { ...h.state.session } };
+    const count = h.focusCalls.length; h.c.closeSettingDialog();
+    assert.equal(h.doc.activeElement, h.doc.body); assert.equal(h.focusCalls.length, count);
+  });
+}
+for (const newerFocus of ["control", "dialog", "editor"]) {
+  test(`close does not steal a newer focus destination (${newerFocus})`, async () => {
+    const h = focusFixture(); await h.open(); h.c.renderSession();
+    const destination = h.create("button"); h.doc.body.append(destination);
+    h.afterNativeClose = () => {
+      if (newerFocus === "dialog") h.otherDialog = { open: true };
+      if (newerFocus === "editor") h.c.openSettingDialog(h.state.capabilities.settings.find(s => s.key === "iso"));
+      else destination.focus();
+    };
+    h.c.closeSettingDialog();
+    assert.equal(h.doc.activeElement, newerFocus === "editor" ? h.ui.settingDialogClose : destination);
+  });
+}
+test("queued old close event cannot focus or retire a newly opened same-session editor", async () => {
+  const h = focusFixture(); await h.open(); h.c.renderSession(); h.c.closeSettingDialog();
+  await h.open(); const editor = h.state.settingEditor, count = h.focusCalls.length;
+  await h.ui.settingDialog.dispatch("close");
+  assert.equal(h.state.settingEditor, editor); assert.equal(h.ui.settingDialog.open, true);
+  assert.equal(h.doc.activeElement, h.ui.settingDialogClose); assert.equal(h.focusCalls.length, count);
+});
+test("pending Apply Escape rejects disabled opener; late matched outcome never restores focus", async () => {
+  const h = focusFixture(); let resolve;
+  h.response = new Promise(done => { resolve = done; });
+  const opener = await h.open();
+  const operation = h.apply(); await new Promise(done => setImmediate(done));
+  assert.equal(opener.disabled, true);
+  await h.cancel(); await h.ui.settingDialog.dispatch("close");
+  assert.equal(h.doc.activeElement, h.doc.body);
+  const destination = h.create("button"); h.doc.body.append(destination); destination.focus();
+  const count = h.focusCalls.length; resolve(h.matched()); await operation;
+  assert.equal(h.doc.activeElement, destination); assert.equal(h.focusCalls.length, count);
+  assert.equal(h.requests.length, 1);
+});
+test("late matched receipt cannot close or focus a same-ID replacement connection editor", async () => {
+  const h = focusFixture(); let resolve;
+  h.response = new Promise(done => { resolve = done; });
+  await h.open(); const operation = h.apply(); await new Promise(done => setImmediate(done));
+  h.c.resetSession(); h.install("camera-a"); h.ui.controlView.hidden = false;
+  h.state.capabilities.settings.push({ key: "iso", label: "ISO", inputKind: "choice", value: "100", values: ["100", "200"] });
+  h.c.renderSession(); await h.open();
+  const editor = h.state.settingEditor, count = h.focusCalls.length;
+  resolve(h.matched()); await operation; await h.ui.settingDialog.dispatch("close");
+  assert.equal(h.state.settingEditor, editor); assert.equal(h.ui.settingDialog.open, true);
+  assert.equal(h.doc.activeElement, h.ui.settingDialogClose); assert.equal(h.focusCalls.length, count);
+  assert.equal(h.requests.length, 1);
+});
+test("unmatched receipt leaves the editor open without a return-focus action", async () => {
+  const h = focusFixture(); h.response = { status: 503, body: {} };
+  await h.open(); await h.apply();
+  assert.equal(h.ui.settingDialog.open, true);
+  assert.equal(h.doc.activeElement, h.ui.settingOptions.children.at(-1));
+  assert.equal(h.requests.length, 1);
+});
+test("disconnect close and delayed close event never return focus to the retired connection", async () => {
+  const h = focusFixture(); await h.open(); const count = h.focusCalls.length;
+  h.c.resetSession();
+  const destination = h.create("button"); h.doc.body.append(destination); destination.focus();
+  await h.ui.settingDialog.dispatch("close");
+  assert.equal(h.doc.activeElement, destination); assert.equal(h.focusCalls.length, count + 1);
 });

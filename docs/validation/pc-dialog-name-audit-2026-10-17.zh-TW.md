@@ -39,16 +39,16 @@
 
 八個 dialog 都有已接線的原生 close button；未發現應用程式停用它們的程式碼，也沒有 dialog Tab 攔截器。除 Setting 外，其餘依賴原生 cancel/Escape。這些是已查來源行為，不是跨瀏覽器驗收完成。
 
-### 仍待 browser baseline 的具體焦點候選
+### 具體焦點路徑與後續 browser baseline
 
-1. **Setting 成功 Apply**：`updateSetting` finally → `renderSession` → `renderExposure.replaceChildren()`，在 Apply callback 接著 `closeSettingDialog()` 前，先移除原 exposure opener。**pending Apply 時 Escape/Close** 的變體，opener 已被 `renderAvailability` disabled。close handlers 沒有選擇替代焦點。
+1. **Setting 成功 Apply**：`updateSetting` finally → `renderSession` → `renderExposure.replaceChildren()`，在 Apply callback 接著 `closeSettingDialog()` 前，先移除原 exposure opener。後續真 Firefox baseline 已確認關閉後焦點落到 BODY；窄修正與詳細證據見[設定焦點回復驗證](pc-setting-focus-return-2026-10-17.zh-TW.md)。**pending Apply 時 Escape/Close** 的變體仍是 browser 候選，opener 已被 `renderAvailability` disabled；本輪沒有新增其他 fallback 目標。
 2. **Details metadata 成功**：卡片 Manage → `openMediaDetails` → metadata 回覆 → `renderMedia` → `mediaList.replaceChildren()`；dialog 仍開啟，原 Manage opener 已被移除。
 3. **Preview Download**：卡片 Preview → Download → `downloadMedia` 開始時同步 `renderMedia()`；在首個 await 前就替換 thumbnail opener，即使之後 picker 取消／失敗也成立。
 
-以上只確認 opener 失效的可達順序與缺少 app fallback；沒有聲稱實際 activeElement 或下一個 Tab 落點。[HTML dialog close algorithm](https://html.spec.whatwg.org/multipage/interactive-elements.html#close-the-dialog) 會嘗試聚焦保存的原元素；[APG](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) 對已移除 opener 建議回到合理工作流程元素。仍需在 production UI 加合成 HTTP 回應的真瀏覽器先取得 baseline，再決定是否修正。現有 host `showModal/close` 只是 open flag，且 settings fixture stub `renderSession`，不能代替此證據。
+Details／Preview 與 pending Apply Escape 只確認 opener 失效的可達順序與缺少 app fallback；沒有聲稱其實際 activeElement 或下一個 Tab 落點。[HTML dialog close algorithm](https://html.spec.whatwg.org/multipage/interactive-elements.html#close-the-dialog) 會嘗試聚焦保存的原元素；[APG](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) 對已移除 opener 建議回到合理工作流程元素。這些候選仍需在 production UI 加合成 HTTP 回應的真瀏覽器先取得 baseline，再決定是否修正。原 host `showModal/close` 只是 open flag，且 settings fixture stub `renderSession`；新 focus cases 有另外執行真正 renderSession 的 adapter，但仍不能代替 browser 證據。
 
 另外，Setting pending Apply 時選項按鈕沒有同步刷新 disabled 樣式，但 click handler 的 busy guard 會拒絕操作，沒有多送相機 write 的來源證據；本批未把它擴大為新的修正。
 
 ## Release assessment
 
-本地版本基準 `0.13.0 Development Preview`；本輪未查遠端 release。Impact：**patch**，修正既有對話框可存取名稱。沒有版本 bump、push 或 release。名稱修正的 focused checks 通過；PR ready／native acceptance 仍須各自證據，實體相機 **NOT_RUN**，此變更不增加相機相容性聲明。焦點候選尚未 browser-reproduced，不在本批宣稱已解決。
+本地版本基準 `0.13.0 Development Preview`；本輪未查遠端 release。Impact：**patch**，修正既有對話框可存取名稱。沒有版本 bump、push 或 release。名稱修正的 focused checks 通過；PR ready／native acceptance 仍須各自證據，實體相機 **NOT_RUN**，此變更不增加相機相容性聲明。Setting 成功 Apply 的後續 source fix／host 證據另列；其餘焦點候選不在本批宣稱已解決。
