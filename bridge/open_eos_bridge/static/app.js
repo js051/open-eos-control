@@ -1792,6 +1792,7 @@
     settingOwner: null,
     settingEditor: 0,
     settingDialogCloseOwners: [],
+    settingDialogFocusOwner: null,
     exposureRenderOwner: null,
     advancedSettingsOwner: null,
     settingObservationRevision: 0,
@@ -3030,6 +3031,7 @@
     state.settingDraftRevisions = {};
     state.settingConsumedDrafts = {};
     state.settingEditor += 1;
+    state.settingDialogFocusOwner = null;
     state.advancedSettingsOwner = null;
     state.exposureRenderOwner = null;
     ui.advancedSettings?.replaceChildren();
@@ -3451,7 +3453,7 @@
       value.textContent = setting ? settingValueLabel(setting, currentSettingValue(setting)) : "-";
       button.append(label, value);
       if (setting) button.addEventListener("click", () => {
-        if (currentOwner() && !cameraInteractionBusy()) openSettingDialog(setting);
+        if (currentOwner() && !cameraInteractionBusy()) openSettingDialog(setting, button);
       });
       ui.exposureStrip.append(button);
     });
@@ -4445,8 +4447,23 @@
 
   function closeSettingDialog() {
     if (!ui.settingDialog.open) return;
+    const owner = state.settingDialogFocusOwner;
+    state.settingDialogFocusOwner = null;
     (state.settingDialogCloseOwners ||= []).push(state.settingEditor);
     ui.settingDialog.close();
+    // A successful Apply replaces the exposure strip before closing this dialog.
+    // Recover synchronously, never from a queued close event or a later response.
+    if (!owner?.session || owner.session !== state.session || owner.editor !== state.settingEditor ||
+        state.exposureRenderOwner?.session !== owner.session || state.activeView !== "live" ||
+        ui.controlView.hidden || ui.settingDialog.open || document.querySelector("dialog[open]")) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== owner.opener && !ui.settingDialog.contains(active)) return;
+    const available = (button) => button?.isConnected && !button.disabled &&
+      !button.closest("[hidden], [inert]") && button.getClientRects().length > 0;
+    const target = available(owner.opener) ? owner.opener :
+      [...ui.exposureStrip.querySelectorAll("button[data-setting-key]")]
+        .find((button) => button.dataset.settingKey === owner.key && available(button));
+    if (target && target !== active) target.focus({ preventScroll: true });
   }
 
   function handleSettingDialogClosed() {
@@ -4457,8 +4474,9 @@
     if (state.settingOwner?.editor === retiredEditor) cancelSetting();
   }
 
-  function openSettingDialog(setting) {
+  function openSettingDialog(setting, opener = document.activeElement) {
     const editor = ++state.settingEditor;
+    state.settingDialogFocusOwner = { session: state.session, editor, key: setting.key, opener };
     ui.settingDialogGroup.textContent = CORE_SETTINGS.includes(setting.key) ? t("exposure") : t("cameraSetting");
     ui.settingDialogTitle.textContent = settingLabel(setting);
     ui.settingOptions.replaceChildren();
