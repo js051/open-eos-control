@@ -1978,3 +1978,42 @@ for (const language of ["en", "zh-TW"]) {
     assert.ok(journey.includes('state.record_start_count === 1'));
   });
 }
+
+for (const invalid of ['truncated', 'missing-envelope', 'missing-code', 'missing-message']) {
+  test(`Bulb Start ${invalid} 502 retains Stop duty despite cached idle status`, async () => {
+    const s = context(); installProductionApi(s); s.isBulbMode = () => true;
+    s.fetch = async (url, options) => {
+      s.requests.push({ url, method: options.method });
+      if (url.endsWith('/bulb/start')) {
+        if (invalid === 'truncated') return new Response('{', { status: 502 });
+        return Response.json(invalid === 'missing-envelope' ? {} : { error: {
+          ...(invalid === 'missing-code' ? {} : { code: 'SYNTHETIC_REJECTION' }),
+          ...(invalid === 'missing-message' ? {} : { message: 'Synthetic rejection' }),
+        } }, { status: 502 });
+      }
+      return Response.json({ bulbExposureActive: false, shutterReleaseUnconfirmed: false });
+    };
+    await s.operateShutter();
+    assert.equal(s.state.lastError.code, 'RESPONSE_BODY_UNAVAILABLE');
+    assert.equal(s.state.shutterReleaseUnconfirmed, true, 'An unreadable mutation result cannot prove rejection');
+    assert.equal(s.feedback.includes('resume'), false);
+    await s.operateShutter();
+    assert.deepEqual(s.requests.filter(r => r.method === 'POST').map(r => r.url.split('/').slice(-2).join('/')),
+      ['bulb/start', 'bulb/stop'], 'The next action must release, never replay Start');
+    assert.equal(s.state.shutterReleaseUnconfirmed, false, 'Explicit successful Stop may clear duty');
+  });
+}
+
+test('Explicit Bulb Start rejection keeps the existing non-uncertain path', async () => {
+  const s = context(); installProductionApi(s); s.isBulbMode = () => true;
+  s.fetch = async (url, options) => {
+    s.requests.push({ url, method: options.method });
+    if (url.endsWith('/bulb/start')) return Response.json({ error: {
+      code: 'UNSUPPORTED_FEATURE', message: 'Synthetic unsupported operation',
+    } }, { status: 400 });
+    return Response.json({ bulbExposureActive: false, shutterReleaseUnconfirmed: false });
+  };
+  await s.operateShutter();
+  assert.equal(s.state.shutterReleaseUnconfirmed, false);
+  assert.equal(s.feedback.includes('resume'), true);
+});
