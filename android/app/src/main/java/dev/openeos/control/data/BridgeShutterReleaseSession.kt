@@ -1,5 +1,6 @@
 package dev.openeos.control.data
 
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
@@ -13,24 +14,29 @@ internal class BridgeShutterReleaseSession(val id: String) {
         private set
     @Volatile var closed = false
         private set
-    @Volatile var revision = 0L
-        private set
+    private val revisionCounter = AtomicLong()
+    val revision: Long get() = revisionCounter.get()
+    // Revision validation and owned observations share one short metadata lock.
+    val bulb = BridgeBulbRequestSession(onTransition = ::invalidateObservations, monitor = this)
     private var confirmedStart = false
     @Volatile private var releaseRequired = false
-    val hasReleaseResponsibility: Boolean get() = releaseRequired
+    val hasReleaseResponsibility: Boolean get() = releaseRequired || bulb.hasReleaseResponsibility
+    val hasUnownedReleaseResponsibility: Boolean get() = releaseRequired
     val hasConfirmedStart: Boolean get() = synchronized(this) { confirmedStart }
 
     @Synchronized fun invalidateObservations() {
-        if (!closed) revision += 1
+        if (!closed) revisionCounter.incrementAndGet()
     }
 
     @Synchronized fun observe(status: CameraStatus, expectedRevision: Long): Boolean {
         if (closed || revision != expectedRevision) return false
+        bulb.observe(status)
+        if (bulb.hasReleaseResponsibility) return true
         if (status.shutterReleaseUnconfirmed == true) markUnconfirmed()
         else if (status.bulbExposureActive == true && !releaseRequired) {
             releaseRequired = true
             confirmedStart = true
-            revision += 1
+            revisionCounter.incrementAndGet()
         }
         return true
     }
@@ -40,7 +46,7 @@ internal class BridgeShutterReleaseSession(val id: String) {
         val changed = !unconfirmed || !releaseRequired
         unconfirmed = true
         releaseRequired = true
-        if (changed) revision += 1
+        if (changed) revisionCounter.incrementAndGet()
     }
 
     fun decorate(status: CameraStatus): CameraStatus = if (unconfirmed) {
@@ -66,7 +72,7 @@ internal class BridgeShutterReleaseSession(val id: String) {
             synchronized(this) {
                 confirmedStart = true
                 unconfirmed = false
-                revision += 1
+                revisionCounter.incrementAndGet()
             }
             status
         } catch (exception: CancellationException) {
@@ -109,16 +115,17 @@ internal class BridgeShutterReleaseSession(val id: String) {
         releaseRequired = false
         confirmedStart = false
         unconfirmed = false
-        revision += 1
+        revisionCounter.incrementAndGet()
         return status.copy(shutterReleaseUnconfirmed = false)
     }
 
     @Synchronized fun close() {
         closed = true
+        bulb.close()
         releaseRequired = false
         confirmedStart = false
         unconfirmed = false
-        revision += 1
+        revisionCounter.incrementAndGet()
     }
 
     private fun CameraStatus.provesRelease() =

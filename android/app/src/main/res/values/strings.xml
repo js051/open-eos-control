@@ -1131,4 +1131,8 @@
     <string name="cube_lut_picker_recovery">Waiting for an earlier file picker. Finish or cancel it to choose again. If it is gone, remove this app from Recent apps and reopen. The earlier selection will not be imported.</string>
     <string name="connection_retirement_pending">The previous connection is still closing. You can edit settings; an explicit retry waits for cleanup.</string>
     <string name="connection_retirement_unconfirmed">Previous connection cleanup is unconfirmed. Close the previous camera or desktop bridge session, then restart this app before connecting again. No automatic retry was sent.</string>
+    <string name="bridge_bulb_start_pending">Bulb Start is pending. Stop is available now; keep this connection until Stop is acknowledged.</string>
+    <string name="bridge_bulb_stop_pending">Stopping this Bulb request. Waiting for its release acknowledgement.</string>
+    <string name="bridge_bulb_release_required">This Bulb request is not confirmed released. Retry Stop; if it fails, check and stop the camera itself.</string>
+    <string name="bridge_bulb_ownership_unavailable">This Bridge cannot acknowledge safe Bulb request ownership. Update Bridge. Do not start another exposure; retry Stop or check the camera before disconnecting.</string>
 </resources>

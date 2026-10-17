@@ -32,6 +32,8 @@ import dev.openeos.control.data.acceptsShootingSettingValue
 import dev.openeos.control.data.CameraCapabilities
 import dev.openeos.control.data.AutofocusReleaseException
 import dev.openeos.control.data.ShutterReleaseException
+import dev.openeos.control.data.BridgeBulbAccess
+import dev.openeos.control.data.DesktopBridgeException
 import dev.openeos.control.data.CaptureStatusReadbackException
 import dev.openeos.control.data.RecordingStatusReadbackException
 import dev.openeos.control.data.RecordingCommandUnconfirmedException
@@ -87,6 +89,7 @@ import dev.openeos.control.data.NativeLiveViewAudioStatus
 import dev.openeos.control.data.NativeLiveViewSession
 import dev.openeos.control.data.UsbPtpDiagnosticScanner
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.withTimeoutOrNull
@@ -306,6 +309,12 @@ class CameraViewModel(
         }
     }
     private var httpMediaPreviewRead: HttpMediaPreviewRead? = null
+    private class BridgeBulbUiOwner(val access: BridgeBulbAccess, val generation: Long, val connection: CameraInfo?) {
+        var command = 0L
+        var startJob: Job? = null
+        var stopJob: Job? = null
+    }
+    private var bridgeBulbUiOwner: BridgeBulbUiOwner? = null
     private var disconnectJob: Job? = null
     private var observedConnectionRetirementRevision = 0L
     private val liveViewReconciliationJobs = mutableSetOf<Job>()
@@ -1074,6 +1083,7 @@ class CameraViewModel(
         activeShootingSettingAttempt?.cancel()
         maintenanceAttempts.values.toList().forEach(MaintenanceAttempt::retire)
         mediaDeleteControl?.cancel()
+        val ownedBulbJobs = retireOwnedBridgeBulbJobs()
         mediaUploadAttempt?.cancel()
         cameraSessionGeneration += 1
         val disconnectGeneration = cameraSessionGeneration
@@ -1114,7 +1124,7 @@ class CameraViewModel(
         }
         val job = viewModelScope.launch(NonCancellable, start = CoroutineStart.LAZY) {
             previousDisconnect?.join()
-            operationJobs.forEach { it.join() }
+            operationJobs.filterNot { it in ownedBulbJobs }.forEach { it.join() }
             uploadJob?.join()
             uploadCleanupJob?.join()
             focusJob?.join()
@@ -1216,6 +1226,7 @@ class CameraViewModel(
         if (!foreground) activeMaintenanceAttempt?.let { cancelMaintenance(it.id) }
         if (!foreground) stopForegroundImport(ForegroundImportStopReason.BACKGROUND)
         if (!foreground) stopHeldAutofocus()
+        if (!foreground && _uiState.value.bridgeBulbStopRequired) stopOwnedBridgeBulb()
         if (appInForeground == foreground) return
         appInForeground = foreground
         if (!foreground) setRtpAudioEnabled(false)
@@ -1889,6 +1900,12 @@ class CameraViewModel(
     }
 
     fun toggleBulbExposure() {
+        val state = _uiState.value
+        if (state.bridgeBulbStopRequired) { stopOwnedBridgeBulb(); return }
+        if (state.transport == CameraTransport.DESKTOP_BRIDGE && !state.previewMode && !state.bulbExposureActive) {
+            startOwnedBridgeBulb()
+            return
+        }
         // A safety stop never waits for local Gallery cleanup before reaching the camera.
         if (_uiState.value.bulbExposureActive && foregroundImportOwner?.operation?.isActive == true) {
             stopForegroundImport(ForegroundImportStopReason.USER)
@@ -1941,7 +1958,134 @@ class CameraViewModel(
 
     }
 
+    private fun ownsBridgeBulb(owner: BridgeBulbUiOwner, command: Long = owner.command): Boolean =
+        bridgeBulbUiOwner === owner && owner.command == command &&
+            owner.generation == cameraSessionGeneration && _uiState.value.info === owner.connection
+
+    private fun startOwnedBridgeBulb() {
+        val state = _uiState.value
+        if (!state.connected || state.isBusy(CameraOperation.CAPTURE) || !state.bulbMode ||
+            !state.supports(CameraFeature.BULB_EXPOSURE)) return
+        // Reserve before launch/pause: a Stop from the very next UI event owns this same request.
+        val access = try { repository.prepareBridgeBulb() ?: return } catch (error: Exception) {
+            _uiState.update { it.copy(error = CameraAppError.BRIDGE_BULB_RELEASE_REQUIRED.messageToken, errorOperation = CameraOperation.CAPTURE) }
+            return
+        }
+        val owner = BridgeBulbUiOwner(access, cameraSessionGeneration, state.info)
+        bridgeBulbUiOwner = owner
+        val command = owner.command
+        cameraStateRevision += 1
+        _uiState.update { it.copy(bridgeBulbStopRequired = true, bridgeBulbStartPending = true,
+            bridgeBulbStopPending = false, bridgeBulbUnconfirmed = false,
+            pendingOperations = it.pendingOperations + CameraOperation.CAPTURE,
+            captureFeedback = null, error = CameraAppError.BRIDGE_BULB_START_PENDING.messageToken, errorOperation = null, hudVisible = true) }
+        lateinit var job: Job
+        job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                pauseLiveViewForBulb()
+                val response = access.start()
+                coroutineContext.ensureActive()
+                if (!ownsBridgeBulb(owner, command)) return@launch
+                _uiState.update {
+                    val display = if (it.status === state.status) response else it.status
+                    it.copy(status = display, error = it.error.takeUnless { message -> message == CameraAppError.BRIDGE_BULB_START_PENDING.messageToken },
+                        bulbStartedAtMillis = if (display?.bulbExposureActive == true) SystemClock.elapsedRealtime() else null)
+                }
+            } catch (error: TimeoutCancellationException) {
+                if (ownsBridgeBulb(owner, command)) publishOwnedBulbFailure(error)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (ownsBridgeBulb(owner, command)) publishOwnedBulbFailure(error)
+            } finally {
+                if (ownsBridgeBulb(owner, command)) _uiState.update { it.copy(bridgeBulbStartPending = false,
+                    pendingOperations = it.pendingOperations - CameraOperation.CAPTURE) }
+                if (cameraOperationJobs[CameraOperation.CAPTURE] === job) cameraOperationJobs.remove(CameraOperation.CAPTURE)
+                if (owner.startJob === job) owner.startJob = null
+            }
+        }
+        owner.startJob = job
+        cameraOperationJobs[CameraOperation.CAPTURE] = job
+        job.start()
+    }
+
+    private fun retireOwnedBridgeBulbJobs(): Set<Job> {
+        val owner = bridgeBulbUiOwner?.takeIf { ownsBridgeBulb(it) } ?: return emptySet()
+        owner.command += 1
+        owner.access.retire()
+        return listOfNotNull(owner.startJob, owner.stopJob).toSet()
+    }
+
+    private fun publishOwnedBulbFailure(error: Exception) {
+        val unavailable = generateSequence<Throwable>(error) { it.cause }.any {
+            it is DesktopBridgeException && it.statusCode in setOf(404, 405)
+        }
+        val reason = if (unavailable) CameraAppError.BRIDGE_BULB_OWNERSHIP_UNAVAILABLE else CameraAppError.BRIDGE_BULB_RELEASE_REQUIRED
+        _uiState.update { it.copy(bridgeBulbUnconfirmed = true, captureFeedback = null,
+            error = reason.messageToken, errorOperation = CameraOperation.SHUTTER_RELEASE, hudVisible = true) }
+    }
+
+    private fun stopOwnedBridgeBulb() {
+        val owner = bridgeBulbUiOwner ?: return
+        if (!ownsBridgeBulb(owner) || owner.stopJob?.isActive == true) return
+        owner.command += 1
+        val command = owner.command
+        val statusBeforeStop = _uiState.value.status
+        owner.startJob?.cancel() // Local cancellation is never release evidence.
+        cameraStateRevision += 1
+        _uiState.update { it.copy(bridgeBulbStartPending = false, bridgeBulbStopPending = true,
+            pendingOperations = it.pendingOperations - CameraOperation.CAPTURE + CameraOperation.SHUTTER_RELEASE,
+            captureFeedback = null, error = CameraAppError.BRIDGE_BULB_STOP_PENDING.messageToken, errorOperation = null) }
+        lateinit var job: Job
+        job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                val response = owner.access.stop()
+                coroutineContext.ensureActive()
+                if (!ownsBridgeBulb(owner, command)) return@launch
+                check(!owner.access.releaseRequired()) { "Bridge has not acknowledged this Bulb owner." }
+                _uiState.update {
+                    // The client sanitizes its own stale Start snapshot on a cached receipt.
+                    // A newer UI observation is independent and must survive this older command.
+                    val display = if (it.status === statusBeforeStop) response ?: it.status else it.status
+                    it.copy(status = display, bridgeBulbStopRequired = false,
+                        bridgeBulbUnconfirmed = false, bulbStartedAtMillis = null,
+                        error = it.error.takeUnless { message -> message == CameraAppError.BRIDGE_BULB_STOP_PENDING.messageToken },
+                        shutterReleaseUnconfirmed = it.shutterReleaseUnconfirmed || display?.shutterReleaseUnconfirmed == true)
+                }
+                // A terminal receipt without status is not a fresh physical-stop observation.
+                val current = _uiState.value
+                if (!current.shutterReleaseUnconfirmed && current.status === response &&
+                    response?.bulbExposureActive == false && response.shutterReleaseUnconfirmed == false &&
+                    owner.access.hasFreshReleaseObservation()) resumeLiveViewAfterBulb()
+            } catch (error: TimeoutCancellationException) {
+                if (ownsBridgeBulb(owner, command)) {
+                    if (owner.access.releaseRequired()) publishOwnedBulbFailure(error)
+                    else _uiState.update { it.copy(error = formatException(error), errorOperation = CameraOperation.LIVE_VIEW) }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (ownsBridgeBulb(owner, command)) {
+                    if (owner.access.releaseRequired()) publishOwnedBulbFailure(error)
+                    else _uiState.update { it.copy(error = formatException(error), errorOperation = CameraOperation.LIVE_VIEW) }
+                }
+            } finally {
+                if (ownsBridgeBulb(owner, command)) {
+                    _uiState.update { it.copy(bridgeBulbStopPending = false,
+                        pendingOperations = it.pendingOperations - CameraOperation.SHUTTER_RELEASE) }
+                    if (!owner.access.releaseRequired()) bridgeBulbUiOwner = null
+                }
+                if (cameraOperationJobs[CameraOperation.SHUTTER_RELEASE] === job) cameraOperationJobs.remove(CameraOperation.SHUTTER_RELEASE)
+                if (owner.stopJob === job) owner.stopJob = null
+            }
+        }
+        owner.stopJob = job
+        cameraOperationJobs[CameraOperation.SHUTTER_RELEASE] = job
+        job.start()
+    }
+
     fun retryShutterRelease() {
+        if (_uiState.value.bridgeBulbStopRequired) { stopOwnedBridgeBulb(); return }
         val state = _uiState.value
         if (!state.connected || state.previewMode || !state.shutterReleaseUnconfirmed) return
         val generation = cameraSessionGeneration
@@ -1981,7 +2125,7 @@ class CameraViewModel(
 
     private fun adoptShutterReleaseStatus(status: CameraStatus) {
         _uiState.update { it.adoptLiveViewStopWarning(status) }
-        if (status.shutterReleaseUnconfirmed == true) markShutterReleaseUnconfirmed()
+        if (status.shutterReleaseUnconfirmed == true && !_uiState.value.bridgeBulbStopRequired) markShutterReleaseUnconfirmed()
     }
 
     fun startHeldAutofocus() {
@@ -4388,7 +4532,7 @@ class CameraViewModel(
     }
 
     private suspend fun resumeLiveViewAfterBulb() {
-        if (_uiState.value.shutterReleaseUnconfirmed) return
+        if (_uiState.value.shutterReleaseUnconfirmed || _uiState.value.bridgeBulbStopRequired) return
         reconcileLiveView()
         repository.setNativeLiveViewRenderingEnabled(appInForeground && _uiState.value.liveViewAutoRefresh)
         if (!appInForeground || !_uiState.value.liveViewAutoRefresh) return
@@ -4405,6 +4549,7 @@ class CameraViewModel(
         activeShootingSettingAttempt?.cancel()
         maintenanceAttempts.values.toList().forEach(MaintenanceAttempt::retire)
         mediaDeleteControl?.cancel()
+        val ownedBulbJobs = retireOwnedBridgeBulbJobs()
         mediaUploadAttempt?.cancel()
         cameraSessionGeneration += 1
         val operationJobs = cameraOperationJobs.values.toList() + liveViewReconciliationJobs.toList() + listOfNotNull(foregroundImport)
@@ -4432,7 +4577,7 @@ class CameraViewModel(
         viewModelScope.launch(NonCancellable + Dispatchers.IO) {
             handoffCleanup?.join()
             teardown?.join()
-            operationJobs.forEach { it.join() }
+            operationJobs.filterNot { it in ownedBulbJobs }.forEach { it.join() }
             uploadJob?.join()
             uploadCleanupJob?.join()
             focusJob?.join()
@@ -4449,6 +4594,10 @@ class CameraViewModel(
         autofocusHoldState = AutofocusHoldState.IDLE,
         shutterAutofocus = true,
         shutterReleaseUnconfirmed = false,
+        bridgeBulbStopRequired = false,
+        bridgeBulbStartPending = false,
+        bridgeBulbStopPending = false,
+        bridgeBulbUnconfirmed = false,
         liveViewStopUnconfirmed = false,
         liveViewStopPending = false,
         liveViewStreamFailed = false,

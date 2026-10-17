@@ -5,6 +5,10 @@ import dev.openeos.control.R
 
 /** App-authored failures keep their identity until the current UI locale renders them. */
 internal enum class CameraAppError(@StringRes val messageResource: Int) {
+    BRIDGE_BULB_START_PENDING(R.string.bridge_bulb_start_pending),
+    BRIDGE_BULB_STOP_PENDING(R.string.bridge_bulb_stop_pending),
+    BRIDGE_BULB_RELEASE_REQUIRED(R.string.bridge_bulb_release_required),
+    BRIDGE_BULB_OWNERSHIP_UNAVAILABLE(R.string.bridge_bulb_ownership_unavailable),
     MAINTENANCE_RETIREMENT_UNCONFIRMED(R.string.maintenance_session_retirement_unconfirmed),
     UPLOAD_FILENAME_UNKNOWN(R.string.camera_error_upload_filename_unknown),
     UPLOAD_SOURCE_UNAVAILABLE(R.string.camera_error_upload_source_unavailable),

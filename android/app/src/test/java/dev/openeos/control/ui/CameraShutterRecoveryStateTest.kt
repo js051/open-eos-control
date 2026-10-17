@@ -7,6 +7,23 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraShutterRecoveryStateTest {
+    @Test fun ownedBridgeStartKeepsOnlyStatusAndSavedStopAvailable() {
+        for (active in listOf(false, true)) {
+            val state = CameraUiState().withOfflinePreview().let { it.copy(
+                status = it.status!!.copy(bulbExposureActive = active),
+                bridgeBulbStopRequired = true, bridgeBulbStartPending = !active,
+                pendingOperations = if (active) emptySet() else setOf(CameraOperation.CAPTURE),
+            ) }
+            for (operation in CameraOperation.entries) {
+                assertEquals(operation !in setOf(CameraOperation.STATUS, CameraOperation.SHUTTER_RELEASE), state.isBusy(operation))
+            }
+            assertTrue(state.busy)
+            assertTrue(state.needsShutterDisconnectWarning())
+            assertSame(state, state.dismissVisibleCameraMessage())
+            assertTrue(state.copy(bridgeBulbStopPending = true).isBusy(CameraOperation.SHUTTER_RELEASE))
+        }
+    }
+
     @Test fun retiringFocusPreservesPreviousCameraWarningWithoutLiveView() {
         val state = CameraUiState()
         assertFalse(state.needsShutterDisconnectWarning())

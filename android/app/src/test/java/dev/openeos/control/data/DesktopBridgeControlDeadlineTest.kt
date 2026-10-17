@@ -31,7 +31,9 @@ import java.util.concurrent.atomic.AtomicReference
  * diagnoses cancellation responsiveness; it does not propose a production camera deadline.
  */
 class DesktopBridgeControlDeadlineTest {
-    @Test fun defaultTransportHasTenSecondIdleReadButNoWholeCallDeadline() {
+    // These GET-proof tests deliberately cover only unowned short-control recovery.
+    // Owned Bulb deadlines and terminal receipts are tested separately.
+    @Test fun inheritedBaseTransportHasTenSecondIdleReadButNoWholeCallDeadline() {
         val defaults = OkHttpClient()
         assertEquals("Current production idle-read policy", 10_000, defaults.readTimeoutMillis)
         assertEquals("The inherited production transport has no total call deadline", 0, defaults.callTimeoutMillis)
@@ -72,7 +74,7 @@ class DesktopBridgeControlDeadlineTest {
         Peer().use { peer ->
             val client = peer.client()
             client.initialize()
-            client.startBulbExposure()
+            peer.primeUnownedShutterRecovery(client)
             val stop = launch(Dispatchers.IO) { runCatching { client.stopBulbExposure() } }
             var closing: Job? = null
             try {
@@ -129,13 +131,13 @@ class DesktopBridgeControlDeadlineTest {
             peer.paceStatus = false
             val client = peer.client()
             client.initialize()
-            client.startBulbExposure()
+            peer.primeUnownedShutterRecovery(client)
             val status = client.stopBulbExposure()
             assertEquals(false, status.bulbExposureActive)
             assertEquals(false, status.shutterReleaseUnconfirmed)
             assertEquals(RECOVERY_BUDGET_MILLIS, peer.statusTimeoutMillis())
             client.captureStill()
-            assertEquals(1, peer.count("POST", "bulb/start"))
+            assertEquals(1, peer.count("POST", "shutter/half-press"))
             assertEquals(1, peer.count("POST", "bulb/stop"))
             assertEquals(1, peer.count("POST", "capture/still"))
             assertFalse("Finishing the cancellation watcher must not cancel completed calls", peer.anyCallCancelled())
@@ -146,7 +148,7 @@ class DesktopBridgeControlDeadlineTest {
         Peer().use { peer ->
             val client = peer.client()
             client.initialize()
-            client.startBulbExposure()
+            peer.primeUnownedShutterRecovery(client)
             val failure = AtomicReference<Throwable?>()
             val stop = launch(Dispatchers.IO) {
                 failure.set(runCatching { client.stopBulbExposure() }.exceptionOrNull())
@@ -158,7 +160,7 @@ class DesktopBridgeControlDeadlineTest {
                 assertTrue("Expiry is unresolved release, never success", failure.get() is ShutterReleaseException)
                 assertTrue(runCatching { client.startBulbExposure() }.exceptionOrNull() is ShutterReleaseException)
                 assertTrue(runCatching { client.captureStill() }.exceptionOrNull() is ShutterReleaseException)
-                assertEquals(1, peer.count("POST", "bulb/start"))
+                assertEquals(1, peer.count("POST", "shutter/half-press"))
                 assertEquals(0, peer.count("POST", "capture/still"))
                 assertEquals(1, peer.count("POST", "bulb/stop"))
                 peer.failStop = false
@@ -167,7 +169,7 @@ class DesktopBridgeControlDeadlineTest {
                 client.captureStill()
                 assertEquals(2, peer.count("POST", "bulb/stop"))
                 assertEquals(1, peer.count("GET", "status"))
-                assertEquals(1, peer.count("POST", "bulb/start"))
+                assertEquals(1, peer.count("POST", "shutter/half-press"))
                 assertEquals(1, peer.count("POST", "capture/still"))
             } finally {
                 stop.cancel()
@@ -181,7 +183,7 @@ class DesktopBridgeControlDeadlineTest {
         Peer(callTimeoutMillis = 300).use { peer ->
             val client = peer.client()
             client.initialize()
-            client.startBulbExposure()
+            peer.primeUnownedShutterRecovery(client)
             val failure = AtomicReference<Throwable?>()
             val stop = launch(Dispatchers.IO) {
                 failure.set(runCatching { client.stopBulbExposure() }.exceptionOrNull())
@@ -222,12 +224,12 @@ class DesktopBridgeControlDeadlineTest {
         }
     }
 
-    @Test fun cancelledCloseWithOutstandingBulbStillAttemptsBoundedDelete() = runBlocking<Unit> {
+    @Test fun cancelledCloseWithUnownedShortControlStillAttemptsBoundedDelete() = runBlocking<Unit> {
         Peer().use { peer ->
             peer.paceDelete = true
             val client = peer.client()
             client.initialize()
-            client.startBulbExposure()
+            peer.primeUnownedShutterRecovery(client)
             val failure = AtomicReference<Throwable?>()
             val closing = launch(Dispatchers.IO) {
                 failure.set(runCatching { client.close() }.exceptionOrNull())
@@ -235,12 +237,12 @@ class DesktopBridgeControlDeadlineTest {
             try {
                 assertTrue(peer.awaitDeleteBody())
                 closing.cancel()
-                assertTrue("Unresolved Bulb cleanup must have a total deadline despite paced bytes",
+                assertTrue("Unresolved short-control cleanup must have a total deadline despite paced bytes",
                     closing.finishesWithinObservation(RECOVERY_BUDGET_MILLIS + OBSERVATION_MILLIS))
                 assertEquals(RECOVERY_BUDGET_MILLIS, peer.deleteTimeoutMillis())
                 assertTrue("Cleanup must report expiry rather than a camera release ACK", failure.get() is IOException)
                 assertTrue(peer.deleteCallCancelled())
-                assertEquals("Cleanup must not replay the Bulb mutation", 0, peer.count("POST", "bulb/stop"))
+                assertEquals("Cleanup must not invent an owned Bulb mutation", 0, peer.count("POST", "bulb/stop"))
                 client.initialize()
                 peer.paceDelete = false
                 client.close()
@@ -258,7 +260,7 @@ class DesktopBridgeControlDeadlineTest {
             peer.paceStop = true
             val client = peer.client()
             client.initialize()
-            client.startBulbExposure()
+            peer.primeUnownedShutterRecovery(client)
             val stop = launch(Dispatchers.IO) { runCatching { client.stopBulbExposure() } }
             try {
                 assertTrue(peer.awaitStopBody())
@@ -314,7 +316,7 @@ class DesktopBridgeControlDeadlineTest {
                     return when {
                         path == "/health" -> json("""{"service":"open-eos-control-bridge"}""")
                         path == "/v1/session" -> json("""{"id":"synthetic-deadline"}""").setResponseCode(201)
-                        path.endsWith("/bulb/start") -> json("""{"connected":true,"bulbExposureActive":true,"shutterReleaseUnconfirmed":false}""")
+                        path.endsWith("/shutter/half-press") -> json("""{"error":{"code":"SHUTTER_RELEASE_UNCONFIRMED","message":"Synthetic short-control uncertainty"}}""").setResponseCode(502)
                         path.endsWith("/bulb/stop") -> if (failStop) {
                             json("""{"error":{"code":"CCAPI_UNREACHABLE","message":"Synthetic completed stop failure"}}""")
                                 .setResponseCode(502)
@@ -335,6 +337,9 @@ class DesktopBridgeControlDeadlineTest {
         }
 
         fun client() = DesktopBridgeClient(server.url("/").toString(), httpClient = http)
+        suspend fun primeUnownedShutterRecovery(client: DesktopBridgeClient) {
+            assertTrue(runCatching { client.halfPressShutter() }.exceptionOrNull() is ShutterReleaseException)
+        }
         fun count(method: String, suffix: String) = requests.count {
             it == "$method /v1/session/synthetic-deadline/$suffix"
         }

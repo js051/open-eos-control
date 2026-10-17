@@ -91,6 +91,10 @@ data class CameraUiState(
     val autofocusHoldState: AutofocusHoldState = AutofocusHoldState.IDLE,
     val shutterAutofocus: Boolean = true,
     val shutterReleaseUnconfirmed: Boolean = false,
+    val bridgeBulbStopRequired: Boolean = false,
+    val bridgeBulbStartPending: Boolean = false,
+    val bridgeBulbStopPending: Boolean = false,
+    val bridgeBulbUnconfirmed: Boolean = false,
     val shutterDisconnectWarning: Boolean = false,
     val liveViewStopUnconfirmed: Boolean = false,
     val liveViewStopPending: Boolean = false,
@@ -220,7 +224,7 @@ data class CameraUiState(
         capabilities?.matrix?.supports(feature) ?: false
 
     val busy: Boolean
-        get() = pendingOperations.isNotEmpty() || bulbExposureActive || shutterReleaseUnconfirmed || maintenanceSuspended
+        get() = pendingOperations.isNotEmpty() || bulbExposureActive || shutterReleaseUnconfirmed || bridgeBulbStopRequired || maintenanceSuspended
 
     val needsLiveViewStopRecovery: Boolean
         get() = liveViewStopUnconfirmed || status?.liveViewStopUnconfirmed == true
@@ -252,7 +256,11 @@ data class CameraUiState(
         get() = status?.temperature?.movieRecordingAllowed != false
 
     fun isBusy(operation: CameraOperation): Boolean =
-        operation in pendingOperations ||
+        if (bridgeBulbStopRequired) when (operation) {
+            CameraOperation.SHUTTER_RELEASE -> bridgeBulbStopPending
+            CameraOperation.STATUS -> operation in pendingOperations
+            else -> true
+        } else operation in pendingOperations ||
             (connectionRetirementUnconfirmed && operation in setOf(CameraOperation.CONNECT, CameraOperation.BRIDGE)) ||
             (operation == CameraOperation.BRIDGE && (connectionTeardownPending || CameraOperation.CONNECT in pendingOperations)) ||
             (operation == CameraOperation.CAPTURE && (CameraOperation.RECORDING in pendingOperations || recordingStopAvailable) && !bulbExposureActive) ||
@@ -312,7 +320,7 @@ internal fun CameraUiState.adoptLiveViewStopWarning(status: CameraStatus): Camer
     if (status.liveViewStopUnconfirmed == true) copy(liveViewStopUnconfirmed = true) else this
 
 internal fun CameraUiState.dismissVisibleCameraMessage(): CameraUiState = when {
-    shutterReleaseUnconfirmed || needsLiveViewStopRecovery || pendingRecordingCommand != null || connectionRetirementUnconfirmed -> this
+    bridgeBulbStopRequired || shutterReleaseUnconfirmed || needsLiveViewStopRecovery || pendingRecordingCommand != null || connectionRetirementUnconfirmed -> this
     error != null || connectionRecovery != null -> copy(error = null, errorOperation = null, connectionRecovery = null)
     recordingStartNotConfirmed -> copy(recordingStartNotConfirmed = false)
     recordingDisconnectWarning -> copy(recordingDisconnectWarning = false)
@@ -339,7 +347,7 @@ internal fun CameraUiState.canStartHeldAutofocus(): Boolean = connected && !prev
     !isBusy(CameraOperation.LIVE_VIEW) && HELD_AF_INTERLOCK_OPERATIONS.none { isBusy(it) }
 
 internal fun CameraUiState.needsShutterDisconnectWarning(): Boolean =
-    shutterDisconnectWarning || shutterReleaseUnconfirmed || bulbExposureActive ||
+    shutterDisconnectWarning || shutterReleaseUnconfirmed || bridgeBulbStopRequired || bulbExposureActive ||
         autofocusHoldState != AutofocusHoldState.IDLE ||
         pendingOperations.any { it in setOf(CameraOperation.CAPTURE, CameraOperation.SHUTTER_RELEASE, CameraOperation.FOCUS) }
 

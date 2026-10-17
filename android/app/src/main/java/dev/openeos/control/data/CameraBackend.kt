@@ -67,6 +67,8 @@ interface CameraControlBackend {
     // True includes an unconfirmed remote start/stop; it does not establish a running preview.
     val liveViewStopRequired: Boolean
         get() = false
+    val bridgeBulbCleanupRequired: Boolean
+        get() = false
 
     val maintenanceStopOwned: Boolean
         get() = false
@@ -128,6 +130,7 @@ interface CameraControlBackend {
         check(autofocus) { "This backend does not support capture without autofocus." }
         return captureStill()
     }
+    fun prepareBridgeBulb(): BridgeBulbAccess? = null
     suspend fun startBulbExposure(): CameraStatus = unsupported(CameraFeature.BULB_EXPOSURE)
     suspend fun stopBulbExposure(): CameraStatus = unsupported(CameraFeature.BULB_EXPOSURE)
     suspend fun retryShutterRelease(): Unit = unsupported(CameraFeature.STILL_CAPTURE)
@@ -495,6 +498,10 @@ class DesktopBridgeCameraBackend(
     override suspend fun captureStill(): CameraStatus = client.captureStill()
 
     override suspend fun captureStill(autofocus: Boolean): CameraStatus = client.captureStill(autofocus)
+
+    override val bridgeBulbCleanupRequired: Boolean get() = client.ownedBulbCleanupRequired
+
+    override fun prepareBridgeBulb(): BridgeBulbAccess = client.prepareOwnedBulb()
 
     override suspend fun startBulbExposure(): CameraStatus = client.startBulbExposure()
 

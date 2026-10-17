@@ -11,6 +11,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
@@ -26,17 +27,17 @@ class DesktopBridgeShutterRecoveryTest {
             val client = peer.client()
             client.initialize()
             assertTrue(runCatching { client.startBulbExposure() }.exceptionOrNull() is ShutterReleaseException)
-            assertEquals(1, peer.count("bulb/start"))
+            assertEquals(1, peer.count("bulb/start/owned"))
             assertTrue(runCatching { client.captureStill() }.exceptionOrNull() is ShutterReleaseException)
             assertEquals(0, peer.count("capture/still"))
             // Even an idle status is not proof that a possibly received start was released.
             client.status()
             assertTrue(runCatching { client.startBulbExposure() }.exceptionOrNull() is ShutterReleaseException)
-            assertEquals(1, peer.count("bulb/start"))
+            assertEquals(1, peer.count("bulb/start/owned"))
             client.stopBulbExposure()
             assertFalse(CameraFeature.BULB_EXPOSURE in client.observedFeatureSnapshot())
             client.captureStill()
-            assertEquals(1, peer.count("bulb/stop"))
+            assertEquals(1, peer.count("bulb/stop/owned"))
             assertEquals(1, peer.count("capture/still"))
         }
     }
@@ -52,12 +53,14 @@ class DesktopBridgeShutterRecoveryTest {
         }
     }
 
-    @Test fun stopFailureCanRecoverOnlyFromFreshSameSessionDoubleFalseProof() = runBlocking<Unit> {
+    @Test fun unownedShortControlStopCanRecoverFromFreshSameSessionDoubleFalseProof() = runBlocking<Unit> {
         Peer().use { peer ->
             val client = peer.client()
             client.initialize()
-            client.startBulbExposure()
-            peer.stop = { peer.error("CCAPI_UNREACHABLE") } // Camera release ACK preceded a failed status tail.
+            peer.capture = { peer.unconfirmed() }
+            assertTrue(runCatching { client.captureStill() }.exceptionOrNull() is ShutterReleaseException)
+            peer.capture = { peer.status(false, false) }
+            peer.legacyStop = { peer.error("CCAPI_UNREACHABLE") } // Unowned short-control status-tail recovery.
             val stopped = client.stopBulbExposure()
             assertEquals(false, stopped.bulbExposureActive)
             assertEquals(1, peer.count("bulb/stop"))
@@ -81,17 +84,20 @@ class DesktopBridgeShutterRecoveryTest {
         }
     }
 
-    @Test fun knownSuccessfulLegacyStartStopRemainsCompatible() = runBlocking<Unit> {
+    @Test fun oldBridgeOwned404NeverFallsBackToUnownedStartStopOrStatusProof() = runBlocking<Unit> {
         Peer().use { peer ->
-            peer.start = { peer.status(true, null) }
-            peer.stop = { peer.status(false, null) }
-            val client = peer.client()
-            client.initialize()
-            assertEquals(true, client.startBulbExposure().bulbExposureActive)
-            assertEquals(false, client.stopBulbExposure().bulbExposureActive)
-            assertTrue(CameraFeature.BULB_EXPOSURE in client.observedFeatureSnapshot())
-            client.captureStill()
-            assertEquals(1, peer.count("capture/still"))
+            peer.start = { peer.json("{}").setResponseCode(404) }
+            peer.stop = { peer.json("{}").setResponseCode(404) }
+            val client = peer.client(); client.initialize()
+            assertTrue(runCatching { client.startBulbExposure() }.exceptionOrNull() is ShutterReleaseException)
+            assertTrue(runCatching { client.stopBulbExposure() }.exceptionOrNull() is ShutterReleaseException)
+            assertEquals(1, peer.count("bulb/start/owned"))
+            assertEquals(1, peer.count("bulb/stop/owned"))
+            assertEquals(0, peer.count("bulb/start"))
+            assertEquals(0, peer.count("bulb/stop"))
+            assertEquals(0, peer.count("status"))
+            assertEquals(1, peer.ownedOwnerIds.distinct().size)
+            assertTrue(runCatching { client.captureStill() }.exceptionOrNull() is ShutterReleaseException)
         }
     }
 
@@ -125,9 +131,9 @@ class DesktopBridgeShutterRecoveryTest {
             peer.start = { peer.unconfirmed() }
             runCatching { repository.startBulbExposure() }
             repository.retryShutterRelease()
-            assertEquals(1, peer.count("bulb/start"))
-            assertEquals(1, peer.count("bulb/stop"))
-            assertTrue(peer.requests.filter { it.endsWith("bulb/stop") }.all { "/synthetic-session-1/" in it })
+            assertEquals(1, peer.count("bulb/start/owned"))
+            assertEquals(1, peer.count("bulb/stop/owned"))
+            assertTrue(peer.requests.filter { it.endsWith("bulb/stop/owned") }.all { "/synthetic-session-1/" in it })
             repository.disconnect()
         }
     }
@@ -138,7 +144,7 @@ class DesktopBridgeShutterRecoveryTest {
             val client = peer.client()
             client.initialize()
             runCatching { client.startBulbExposure() }
-            assertEquals("No automatic replay after HTTP $code", 1, peer.count("bulb/start"))
+            assertEquals("No automatic replay after HTTP $code", 1, peer.count("bulb/start/owned"))
         }
     }
 
@@ -151,13 +157,13 @@ class DesktopBridgeShutterRecoveryTest {
             peer.status = { peer.status(null, true) }
             repeat(2) { attempt ->
                 assertTrue(runCatching { client.stopBulbExposure() }.exceptionOrNull() is ShutterReleaseException)
-                assertEquals(attempt + 1, peer.count("bulb/stop"))
+                assertEquals(attempt + 1, peer.count("bulb/stop/owned"))
             }
-            peer.stop = { peer.status(false, false) }
+            peer.stop = { ownerId -> peer.receipt(ownerId, "released", false) }
             client.retryShutterRelease()
             client.retryShutterRelease()
-            assertEquals(3, peer.count("bulb/stop"))
-            assertEquals(1, peer.count("bulb/start"))
+            assertEquals(3, peer.count("bulb/stop/owned"))
+            assertEquals(1, peer.count("bulb/start/owned"))
         }
     }
 
@@ -167,11 +173,14 @@ class DesktopBridgeShutterRecoveryTest {
             val client = peer.client()
             client.initialize()
             assertTrue(runCatching { client.startBulbExposure() }.exceptionOrNull() is ShutterReleaseException)
-            assertEquals(true, client.status().shutterReleaseUnconfirmed)
-            assertNull(client.status().bulbExposureActive)
+            assertTrue(client.ownedBulbCleanupRequired)
+            // Ordinary GET stays an observation; dedicated owned duty retains the recovery obligation.
+            client.status()
+            assertTrue(runCatching { client.startBulbExposure() }.exceptionOrNull() is ShutterReleaseException)
             client.retryShutterRelease()
+            assertFalse(client.ownedBulbCleanupRequired)
             assertEquals(false, client.status().shutterReleaseUnconfirmed)
-            assertEquals(1, peer.count("bulb/start"))
+            assertEquals(1, peer.count("bulb/start/owned"))
         }
     }
 
@@ -233,7 +242,8 @@ class DesktopBridgeShutterRecoveryTest {
             peer.sessionNumber = 2
             client.initialize()
             client.retryShutterRelease()
-            assertEquals(0, peer.count("bulb/stop"))
+            assertEquals(1, peer.count("bulb/stop/owned"))
+            assertTrue(peer.requests.filter { it.endsWith("/bulb/stop/owned") }.all { "/synthetic-session-1/" in it })
             client.captureStill()
             assertTrue(peer.requests.contains("POST /v1/session/synthetic-session-2/capture/still"))
             assertTrue(peer.requests.contains("DELETE /v1/session/synthetic-session-1"))
@@ -260,7 +270,7 @@ class DesktopBridgeShutterRecoveryTest {
                 reading.join()
                 client.captureStill()
                 client.retryShutterRelease()
-                assertEquals(0, peer.count("bulb/stop"))
+                assertEquals(0, peer.count("bulb/stop/owned"))
             } finally { respond.countDown(); reading.cancel(); reading.join() }
         }
     }
@@ -269,10 +279,10 @@ class DesktopBridgeShutterRecoveryTest {
         Peer().use { peer ->
             val received = CountDownLatch(1)
             val respond = CountDownLatch(1)
-            peer.start = {
+            peer.start = { ownerId ->
                 received.countDown()
                 check(respond.await(2, TimeUnit.SECONDS))
-                peer.status(true, false)
+                peer.receipt(ownerId, "started", true)
             }
             val client = peer.client()
             client.initialize()
@@ -284,8 +294,8 @@ class DesktopBridgeShutterRecoveryTest {
                 assertTrue(withTimeoutOrNull(2_000) { starting.join(); true } ?: false)
                 assertTrue(starting.isCancelled)
                 client.retryShutterRelease()
-                assertEquals(1, peer.count("bulb/start"))
-                assertEquals(1, peer.count("bulb/stop"))
+                assertEquals(1, peer.count("bulb/start/owned"))
+                assertEquals(1, peer.count("bulb/stop/owned"))
             } finally { respond.countDown(); starting.cancel(); starting.join() }
         }
     }
@@ -296,7 +306,7 @@ class DesktopBridgeShutterRecoveryTest {
             val client = peer.client()
             client.initialize()
             assertTrue(runCatching { client.startBulbExposure() }.exceptionOrNull() is ShutterReleaseException)
-            assertEquals(1, peer.count("bulb/start"))
+            assertEquals(1, peer.count("bulb/start/owned"))
             assertEquals(0, peer.count("redirected-start"))
         }
     }
@@ -327,10 +337,10 @@ class DesktopBridgeShutterRecoveryTest {
             }
             val client = peer.client()
             client.initialize()
-            client.startBulbExposure()
             val setting = launch(Dispatchers.IO) { failure.set(runCatching { client.setSetting("iso", "800") }.exceptionOrNull()) }
             try {
                 assertTrue(withContext(Dispatchers.IO) { received.await(2, TimeUnit.SECONDS) })
+                client.startBulbExposure()
                 client.stopBulbExposure()
                 respond.countDown()
                 setting.join()
@@ -346,8 +356,10 @@ class DesktopBridgeShutterRecoveryTest {
         val server = MockWebServer()
         val requests = CopyOnWriteArrayList<String>()
         val statusCacheDirectives = CopyOnWriteArrayList<String>()
-        var start: () -> MockResponse = { status(true, false) }
-        var stop: () -> MockResponse = { status(false, false) }
+        val ownedOwnerIds = CopyOnWriteArrayList<String>()
+        var start: (String) -> MockResponse = { receipt(it, "started", true) }
+        var stop: (String) -> MockResponse = { receipt(it, "released", false) }
+        var legacyStop: () -> MockResponse = { status(false, false) }
         var status: () -> MockResponse = { status(false, false) }
         var capture: () -> MockResponse = { status(false, false) }
         var setting: () -> MockResponse = { status(false, false) }
@@ -367,8 +379,9 @@ class DesktopBridgeShutterRecoveryTest {
                             statusCacheDirectives += request.getHeader("Cache-Control").orEmpty()
                             status()
                         }
-                        path.endsWith("/bulb/start") -> start()
-                        path.endsWith("/bulb/stop") -> stop()
+                        path.endsWith("/bulb/start/owned") -> start(readOwner(request))
+                        path.endsWith("/bulb/stop/owned") -> stop(readOwner(request))
+                        path.endsWith("/bulb/stop") -> legacyStop()
                         path.endsWith("/capture/still") -> capture()
                         path.endsWith("/settings/iso") -> setting()
                         path.endsWith("/liveview/stop") -> json("""{"active":false,"liveViewStopUnconfirmed":false}""")
@@ -387,6 +400,15 @@ class DesktopBridgeShutterRecoveryTest {
         fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
         fun status(active: Boolean?, unconfirmed: Boolean?) = json("""{"connected":true,"mode":"Bulb","bulbExposureActive":$active${unconfirmed?.let { ",\"shutterReleaseUnconfirmed\":$it" }.orEmpty()}}""")
         fun error(code: String, status: Int = 502) = json("""{"error":{"code":"$code","message":"Synthetic failure"}}""").setResponseCode(status)
+        fun receipt(ownerId: String, outcome: String, active: Boolean) = json(JSONObject()
+            .put("ownerId", ownerId).put("outcome", outcome)
+            .put("status", JSONObject().put("connected", true).put("mode", "Bulb")
+                .put("bulbExposureActive", active).put("shutterReleaseUnconfirmed", false)).toString())
+        private fun readOwner(request: RecordedRequest): String {
+            val payload = JSONObject(request.body.clone().readUtf8())
+            check(payload.length() == 1 && payload.opt("ownerId") is String)
+            return payload.getString("ownerId").also { check(it.isNotBlank()); ownedOwnerIds += it }
+        }
         fun unconfirmed() = error("SHUTTER_RELEASE_UNCONFIRMED")
         override fun close() = server.shutdown()
     }
