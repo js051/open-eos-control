@@ -23,6 +23,10 @@ final class MaintenanceControlTests: XCTestCase {
             let payload = try JSONSerialization.jsonObject(with: start.body!) as! [String: Any]
             if direct { XCTAssertEqual(payload["liveviewsize"] as? String, "small") }
             else {
+                XCTAssertEqual(payload["restoreToken"] as? String, "synthetic_restore_permit_1")
+                let prepared = try JSONSerialization.jsonObject(with: controls[0].body!) as! [String: Any]
+                XCTAssertEqual(prepared["prepareRestore"] as? Bool, true)
+                XCTAssertNil(prepared["restoreToken"])
                 XCTAssertEqual(payload["source"] as? String, "CCAPI_JPEG_POLLING")
                 XCTAssertEqual(payload["size"] as? String, "SMALL")
                 XCTAssertEqual(payload["fps"] as? Int, 4)
@@ -99,6 +103,7 @@ final class MaintenanceControlTests: XCTestCase {
             do { try await task.value; XCTFail("Cancelled Stop cannot admit maintenance") } catch {}
             let state = await client.stopState(), controls = await peer.controls()
             XCTAssertTrue(state.stopRequired); XCTAssertTrue(state.stopUnconfirmed)
+            XCTAssertNil(attempt.maintenanceRestoreToken, "Cancelled prepare never captures a permit")
             XCTAssertEqual(attempt.snapshot.stopEvidence, .unknown)
             XCTAssertEqual(attempt.snapshot.commandEvidence, .notSent)
             XCTAssertEqual(controls.map(\.action), ["stop"])
@@ -107,6 +112,10 @@ final class MaintenanceControlTests: XCTestCase {
             let retried = await peer.controls()
             XCTAssertEqual(retried.map(\.action), ["stop", "stop"])
             XCTAssertTrue(retried.allSatisfy(\.strict), "Explicit recovery retains the maintenance transport")
+            if !direct {
+                let payload = try JSONSerialization.jsonObject(with: retried.last!.body!) as! [String: Any]
+                XCTAssertTrue(payload.isEmpty, "Lost prepare response requires global cleanup")
+            }
         }
     }
 
@@ -335,6 +344,198 @@ final class MaintenanceControlTests: XCTestCase {
         XCTAssertEqual(controls.map(\.action), ["stop", "start"])
     }
 
+    func testBridgeMissingOrInvalidOptionalPermitPreservesStopAndCleaningButBlocksRestore() async throws {
+        for fault in ["missing", "null", "malformed"] {
+            let peer = MaintenanceControlPeer(direct: false), client = try await makeClient(peer, direct: false)
+            try await client.start(); await peer.faultPrepare(fault)
+            let attempt = CameraMaintenanceAttempt(operation: .sensorCleaning)
+            try await client.perform(attempt)
+            XCTAssertEqual(attempt.snapshot.stopEvidence, .confirmed)
+            XCTAssertEqual(attempt.snapshot.commandEvidence, .responded)
+            XCTAssertNil(attempt.maintenanceRestoreToken)
+            try await client.observe(attempt); attempt.restore(.pending)
+            do { try await client.restore(attempt); XCTFail("No Start without a valid permit") }
+            catch let error as DesktopBridgeError {
+                guard case let .invalidResponse(message) = error else { return XCTFail("Affirmative Stop is not an unconfirmed Stop error") }
+                XCTAssertTrue(message.contains("restore permission"))
+                XCTAssertTrue(message.contains("Keep monitoring stopped and reconnect"))
+            }
+            let controls = await peer.controls(), state = await client.stopState()
+            XCTAssertEqual(controls.map(\.action), ["stop"])
+            XCTAssertFalse(state.stopRequired); XCTAssertFalse(state.stopUnconfirmed)
+        }
+    }
+
+    func testBridgeRestoreRejectsMissingMalformedWrongTokenAndOutcomeWithoutReplay() async throws {
+        for fault in ["missing", "null", "malformed", "wrong-token", "wrong-outcome", "missing-outcome", "null-outcome", "partial-state", "timeout"] {
+            let peer = MaintenanceControlPeer(direct: false), client = try await makeClient(peer, direct: false)
+            try await client.start()
+            let attempt = CameraMaintenanceAttempt(operation: .sensorCleaning)
+            try await client.perform(attempt); try await client.observe(attempt); attempt.restore(.pending)
+            await peer.faultStart(fault)
+            do { try await client.restore(attempt); XCTFail("Exact token, outcome and strict state are required") } catch {}
+            let pending = await client.stopState()
+            XCTAssertTrue(pending.stopRequired); XCTAssertTrue(pending.stopUnconfirmed)
+            try await client.retryStop()
+            do { try await client.restore(attempt); XCTFail("Consumed attempt cannot resend Start") } catch {}
+            let controls = await peer.controls()
+            XCTAssertEqual(controls.map(\.action), ["stop", "start", "stop"])
+            let cleanup = try JSONSerialization.jsonObject(with: controls[2].body!) as! [String: Any]
+            XCTAssertEqual(cleanup["restoreToken"] as? String, "synthetic_restore_permit_1")
+            XCTAssertNil(cleanup["prepareRestore"])
+        }
+    }
+
+    func testBridgeOwnedCleanupRejectsInvalidTokenOutcomeAndPartialState() async throws {
+        for fault in ["missing", "null", "malformed", "wrong-token", "wrong-outcome", "missing-outcome", "null-outcome", "partial-state"] {
+            let peer = MaintenanceControlPeer(direct: false), client = try await makeClient(peer, direct: false)
+            try await client.start()
+            let attempt = CameraMaintenanceAttempt(operation: .sensorCleaning)
+            try await client.perform(attempt); try await client.observe(attempt); attempt.restore(.pending)
+            try await client.restore(attempt); await peer.faultOwnedStop(fault)
+            do { try await client.retryStop(); XCTFail("Invalid owned cleanup cannot discharge responsibility") } catch {}
+            let state = await client.stopState()
+            XCTAssertTrue(state.stopRequired); XCTAssertTrue(state.stopUnconfirmed)
+            await peer.faultOwnedStop("receipt")
+            try await client.retryStop()
+            let recovered = await client.stopState()
+            XCTAssertFalse(recovered.stopRequired)
+        }
+    }
+
+    func testBridgeIdleAndPowerOffDoNotPreparePermit() async throws {
+        for wasLive in [false, true] {
+            let peer = MaintenanceControlPeer(direct: false), client = try await makeClient(peer, direct: false)
+            if wasLive { try await client.start() }
+            let attempt = CameraMaintenanceAttempt(operation: .sensorCleaning, autoPowerOff: wasLive)
+            // The synthetic outcome has fixed autoPowerOff:false; only Stop wire intent is under test.
+            do { try await client.perform(attempt) } catch {}
+            let controls = await peer.controls()
+            XCTAssertEqual(controls.count, wasLive ? 1 : 0)
+            if let first = controls.first {
+                let payload = try JSONSerialization.jsonObject(with: first.body!) as! [String: Any]
+                XCTAssertTrue(payload.isEmpty)
+            }
+            XCTAssertNil(attempt.maintenanceRestoreToken)
+        }
+    }
+
+    func testBridgeTerminalReceiptPreservesNewWarningBeforeOrDuringRetryThenUsesFreshGlobalStop() async throws {
+        for terminal in ["receipt", "cancelled"] {
+            for duringRetry in [false, true] {
+                let peer = MaintenanceControlPeer(direct: false), client = try await makeClient(peer, direct: false)
+                try await client.start()
+                let attempt = CameraMaintenanceAttempt(operation: .sensorCleaning)
+                try await client.perform(attempt); try await client.observe(attempt); attempt.restore(.pending)
+                await peer.fail("start", status: 503)
+                do { try await client.restore(attempt) } catch {}
+                await peer.faultOwnedStop(terminal)
+                if duringRetry { await peer.hold("stop") }
+                if !duringRetry {
+                    await peer.reportWarning()
+                    if case let .bridge(bridge) = client { _ = try await bridge.status() }
+                }
+                let retry = Task { try await client.retryStop() }
+                if duringRetry {
+                    try await wait { await peer.waiting }
+                    await peer.reportWarning()
+                    if case let .bridge(bridge) = client { _ = try await bridge.status() }
+                    await peer.release()
+                }
+                do { try await retry.value; XCTFail("Old receipt cannot clear a new warning") } catch {}
+                let pending = await client.stopState()
+                XCTAssertTrue(pending.stopRequired); XCTAssertTrue(pending.stopUnconfirmed)
+                try await client.retryStop()
+                let controls = await peer.controls()
+                let last = try JSONSerialization.jsonObject(with: controls.last!.body!) as! [String: Any]
+                XCTAssertTrue(last.isEmpty, "Next explicit Stop must leave terminal token behind")
+                let recovered = await client.stopState()
+                XCTAssertFalse(recovered.stopRequired); XCTAssertFalse(recovered.stopUnconfirmed)
+            }
+        }
+    }
+
+    func testBridgeStatusWarningOutsideMaintenanceKeepsOrdinaryCleanup() async throws {
+        let peer = MaintenanceControlPeer(direct: false), client = try await makeClient(peer, direct: false)
+        await peer.reportWarning()
+        if case let .bridge(bridge) = client { _ = try await bridge.status() }
+        try await client.retryStop()
+        let controls = await peer.controls(), trace = await peer.requests()
+        XCTAssertTrue(controls.isEmpty)
+        XCTAssertTrue(trace.contains("ordinary POST /v1/session/synthetic/liveview/stop"))
+        let recovered = await client.stopState()
+        XCTAssertFalse(recovered.stopRequired); XCTAssertFalse(recovered.stopUnconfirmed)
+    }
+
+    func testBridgeNewStatusWarningAfterTerminalCleanupRetainsStrictMaintenanceTransport() async throws {
+        let peer = MaintenanceControlPeer(direct: false), client = try await makeClient(peer, direct: false)
+        try await client.start()
+        let attempt = CameraMaintenanceAttempt(operation: .sensorCleaning)
+        try await client.perform(attempt); try await client.observe(attempt); attempt.restore(.pending)
+        await peer.faultStart("timeout")
+        do { try await client.restore(attempt) } catch {}
+        await peer.faultOwnedStop("cancelled")
+        try await client.retryStop()
+        let discharged = await client.stopState()
+        XCTAssertFalse(discharged.stopRequired); XCTAssertFalse(discharged.stopUnconfirmed)
+        await peer.reportWarning()
+        if case let .bridge(bridge) = client { _ = try await bridge.status() }
+        let warning = await client.stopState()
+        XCTAssertTrue(warning.stopRequired); XCTAssertTrue(warning.stopUnconfirmed)
+        try await client.retryStop()
+        let controls = await peer.controls()
+        XCTAssertEqual(controls.map(\.action), ["stop", "start", "stop", "stop"])
+        let cleanup = try XCTUnwrap(controls.last)
+        XCTAssertTrue(cleanup.strict); XCTAssertEqual(cleanup.timeout, 15)
+        XCTAssertTrue(cleanup.path.hasSuffix("/maintenance/control/liveview/stop"))
+        let payload = try JSONSerialization.jsonObject(with: cleanup.body!) as! [String: Any]
+        XCTAssertTrue(payload.isEmpty, "A later warning requires fresh global maintenance Stop")
+        let recovered = await client.stopState()
+        XCTAssertFalse(recovered.stopRequired); XCTAssertFalse(recovered.stopUnconfirmed)
+    }
+
+    func testBridgePhysicalOwnedStopWithWarningDuringAwaitSelectsGlobalOnNextRetry() async throws {
+        let peer = MaintenanceControlPeer(direct: false), client = try await makeClient(peer, direct: false)
+        try await client.start()
+        let attempt = CameraMaintenanceAttempt(operation: .sensorCleaning)
+        try await client.perform(attempt); try await client.observe(attempt); attempt.restore(.pending)
+        try await client.restore(attempt); await peer.hold("stop")
+        let retry = Task { try await client.retryStop() }
+        try await wait { await peer.waiting }
+        await peer.reportWarning()
+        if case let .bridge(bridge) = client { _ = try await bridge.status() }
+        await peer.release()
+        do { try await retry.value; XCTFail("Late fresh Stop cannot erase a newer warning") } catch {}
+        try await client.retryStop()
+        let controls = await peer.controls()
+        XCTAssertEqual(controls.map(\.action), ["stop", "start", "stop", "stop"])
+        let payload = try JSONSerialization.jsonObject(with: controls.last!.body!) as! [String: Any]
+        XCTAssertTrue(payload.isEmpty)
+    }
+
+    func testBridgeTerminalReceiptClearsOnlyOriginalFailedStartAndSecondJourneyGetsNewPermit() async throws {
+        let peer = MaintenanceControlPeer(direct: false), client = try await makeClient(peer, direct: false)
+        try await client.start()
+        for index in 1...2 {
+            let attempt = CameraMaintenanceAttempt(operation: .sensorCleaning)
+            try await client.perform(attempt); try await client.observe(attempt); attempt.restore(.pending)
+            XCTAssertEqual(attempt.maintenanceRestoreToken, "synthetic_restore_permit_\(index)")
+            try await client.restore(attempt)
+            XCTAssertNil(attempt.maintenanceRestoreToken)
+        }
+        await peer.faultOwnedStop("receipt")
+        try await client.retryStop()
+        let recovered = await client.stopState()
+        XCTAssertFalse(recovered.stopRequired); XCTAssertFalse(recovered.stopUnconfirmed)
+        let controls = await peer.controls()
+        XCTAssertEqual(controls.map(\.action), ["stop", "start", "stop", "start", "stop"])
+        for index in [0, 2] {
+            let payload = try JSONSerialization.jsonObject(with: controls[index].body!) as! [String: Any]
+            XCTAssertEqual(payload["prepareRestore"] as? Bool, true)
+            XCTAssertNil(payload["restoreToken"])
+        }
+    }
+
     private func makeClient(_ peer: MaintenanceControlPeer, direct: Bool) async throws -> MaintenanceControlClient {
         if direct {
             let client = try CCAPIClient(baseURL: "http://192.0.2.1:8080", mode: .camera, transport: peer)
@@ -414,6 +615,14 @@ private actor MaintenanceControlPeer: CameraHTTPTransport {
     private var trace: [String] = []
     private var sleepAbility = true
     private var omitStartStopProof = false
+    private var permitCounter = 0
+    private var prepareFault: String?
+    private var startFault: String?
+    private var ownedStopFault: String?
+    func faultPrepare(_ fault: String) { prepareFault = fault }
+    func faultStart(_ fault: String) { startFault = fault }
+    func faultOwnedStop(_ fault: String) { ownedStopFault = fault }
+
     private var log: [Control] = []
     var waiting: Bool { gate != nil }
     init(direct: Bool, multipleFrameEndpoints: Bool = false) {
@@ -460,6 +669,7 @@ private actor MaintenanceControlPeer: CameraHTTPTransport {
                 held = nil; await withCheckedContinuation { gate = $0 }
                 log[index].cancelledAfterGate = Task.isCancelled
             }
+            if action == "start", startFault == "timeout" { throw URLError(.timedOut) }
             if let failure, failure.0 == action {
                 self.failure = nil
                 return CameraHTTPResponse(statusCode: failure.1, headers: ["location": "/never-follow", "www-authenticate": "Basic realm=fixture"], body: Data())
@@ -522,7 +732,35 @@ private actor MaintenanceControlPeer: CameraHTTPTransport {
             object = ["version": 1, "engine": "ccapi", "operation": "sensor-cleaning", "observationEvidence": "reachable", "clockObservation": NSNull()]
         } else if path.hasSuffix("/functions/sensorcleaning") { object = [:] }
         else { throw URLError(.unsupportedURL) }
+        if !direct, strict, let action {
+            let payload = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+            if payload["prepareRestore"] as? Bool == true {
+                permitCounter += 1
+                object["restoreToken"] = "synthetic_restore_permit_\(permitCounter)"
+                applyFault(prepareFault, to: &object)
+            } else if let token = payload["restoreToken"] as? String {
+                object["restoreToken"] = token
+                object["restoreOutcome"] = action == "start" ? "started" : "stopped"
+                if action == "stop", ownedStopFault == "receipt" || ownedStopFault == "cancelled" {
+                    object = ["restoreToken": token, "restoreOutcome": ownedStopFault == "cancelled" ? "cancelled-before-start" : "stopped"]
+                } else { applyFault(action == "start" ? startFault : ownedStopFault, to: &object) }
+            }
+        }
         if strict, action == "start", omitStartStopProof { object.removeValue(forKey: "liveViewStopUnconfirmed") }
         return CameraHTTPResponse(statusCode: status, body: status == 204 ? Data() : try JSONSerialization.data(withJSONObject: object))
     }
+    private func applyFault(_ fault: String?, to object: inout [String: Any]) {
+        switch fault {
+        case "missing": object.removeValue(forKey: "restoreToken")
+        case "null": object["restoreToken"] = NSNull()
+        case "malformed": object["restoreToken"] = "bad/token"
+        case "wrong-token": object["restoreToken"] = "different_valid_permit_0001"
+        case "wrong-outcome": object["restoreOutcome"] = "started-again"
+        case "missing-outcome": object.removeValue(forKey: "restoreOutcome")
+        case "null-outcome": object["restoreOutcome"] = NSNull()
+        case "partial-state": object.removeValue(forKey: "active")
+        default: break
+        }
+    }
+
 }

@@ -251,11 +251,28 @@ private actor LifecycleContinuationPeer: CameraHTTPTransport {
             return await withCheckedContinuation { eventGate = $0 }
         }
         if path.hasSuffix("/media") { listReads += 1; return json(["items": []]) }
-        if path.hasSuffix("/liveview/start") { actions.append("start"); return json(["active": true]) }
+        if path.hasSuffix("/liveview/start") {
+            actions.append("start")
+            if path.contains("/maintenance/control/") {
+                let payload = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+                return json(["active": true, "liveViewStopUnconfirmed": false,
+                    "source": "CCAPI_JPEG_POLLING", "restoreToken": payload["restoreToken"] ?? NSNull(),
+                    "restoreOutcome": "started"])
+            }
+            return json(["active": true])
+        }
         if path.hasSuffix("/liveview/stop") {
             actions.append("stop")
             if holdStop { holdStop = false; await withCheckedContinuation { stopGate = $0 } }
-            return json(["active": false, "liveViewStopUnconfirmed": false])
+            var response: [String: Any] = ["active": false, "liveViewStopUnconfirmed": false]
+            if path.contains("/maintenance/control/") {
+                let payload = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+                if payload["prepareRestore"] as? Bool == true { response["restoreToken"] = "synthetic_restore_permit_0001" }
+                if let token = payload["restoreToken"] as? String {
+                    response["restoreToken"] = token; response["restoreOutcome"] = "stopped"
+                }
+            }
+            return json(response)
         }
         throw URLError(.unsupportedURL)
     }
