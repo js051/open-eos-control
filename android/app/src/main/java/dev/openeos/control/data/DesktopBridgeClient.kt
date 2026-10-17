@@ -813,8 +813,62 @@ class DesktopBridgeClient(
         when (val value = opt(key)) { JSONObject.NULL -> null; is JSONObject -> value.toMaintenanceMap(); else -> value }
     }
 
+    private fun isMaintenanceCleanupRequest(request: Request, owner: BridgeShutterReleaseSession): Boolean {
+        val path = request.url.encodedPath
+        return (request.method == "POST" && path == endpoint("v1", "session", owner.id, "maintenance", "control", "liveview", "stop").encodedPath) ||
+            (request.method == "DELETE" && path in setOf(
+                endpoint("v1", "session", owner.id, "maintenance", "control", "events").encodedPath,
+                endpoint("v1", "session", owner.id, "maintenance", "control", "session").encodedPath))
+    }
+
+    /** Only cleanup uses this detached body reader; late callbacks cannot publish maintenance state. */
+    private suspend fun maintenanceCleanupJson(request: Request, owner: BridgeShutterReleaseSession,
+        evidence: MaintenanceEvidence?, expected: Int, empty: Boolean, accept: ((JSONObject) -> Unit)?) {
+        currentCoroutineContext()[MaintenanceIoContext]?.requireActive?.invoke()
+        currentCoroutineContext().ensureActive(); requireCurrentSession(owner)
+        val call = newBridgeCall(request, true)
+        val maximum = TimeUnit.SECONDS.toNanos(15)
+        if (call.timeout().timeoutNanos() == 0L || call.timeout().timeoutNanos() > maximum) {
+            call.timeout().timeout(maximum, TimeUnit.NANOSECONDS)
+        }
+        val watchers = maintenanceCancellationWatchers { call.cancel() }
+        try {
+            currentCoroutineContext().ensureActive(); requireCurrentSession(owner); evidence?.beforeDispatch()
+            val text = awaitBridgeBulbCallback<String> { complete ->
+                call.enqueue(object : Callback {
+                    override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                    override fun onResponse(call: Call, response: Response) {
+                        complete(runCatching {
+                            response.use {
+                                requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                                    response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                                check(response.code == expected)
+                                val body = response.body?.let { value -> value.byteStream().use {
+                                    readShootingSettingResponseText(it, value.contentLength())
+                                } }.orEmpty()
+                                if (empty) requireMaintenanceEmptyResponse(response.code, response.headers("Content-Length"),
+                                    response.headers("Transfer-Encoding"), body)
+                                body
+                            }
+                        })
+                    }
+                })
+                val cancel: () -> Unit = { call.cancel() }
+                cancel
+            }
+            currentCoroutineContext().ensureActive()
+            currentCoroutineContext()[MaintenanceIoContext]?.requireActive?.invoke()
+            requireCurrentSession(owner)
+            if (accept != null) accept(JSONObject(text))
+        } finally { watchers.forEach { it.cancel() } }
+    }
+
     private suspend fun maintenanceJson(request: Request, owner: BridgeShutterReleaseSession,
         evidence: MaintenanceEvidence? = null, expected: Int = 200, empty: Boolean = false, accept: ((JSONObject) -> Unit)? = null) = withContext(Dispatchers.IO) {
+        if (isMaintenanceCleanupRequest(request, owner)) {
+            maintenanceCleanupJson(request, owner, evidence, expected, empty, accept)
+            return@withContext
+        }
         currentCoroutineContext()[MaintenanceIoContext]?.requireActive?.invoke()
         val call = newBridgeCall(request, true)
         val watchers = maintenanceCancellationWatchers { call.cancel() }

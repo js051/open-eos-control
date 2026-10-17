@@ -61,13 +61,13 @@ legacy preview I/O for that retirement. A release failure remains the primary
 exception if DELETE also fails, preserving the previous-camera safety warning.
 A replacement session cannot inherit the old command or its completion.
 
-The pre-existing maintenance-owned retirement branch remains a recorded G11/G13
-follow-up inspection path. After a
-session has entered maintenance, it still uses the strict maintenance Stop and
-retirement routes. Owned Bulb Stop itself is bounded there, but its existing
-blocking `maintenanceJson` cleanup has not been converted or demonstrated to
-return when I/O ignores cancellation. The ordinary owned Stop + DELETE deadline
-claim does not extend to that branch. Existing held-AF cleanup is also unchanged.
+After a session has entered maintenance, it still uses the strict maintenance
+Stop and retirement routes. The original owned-Bulb batch did not establish a
+deadline for that branch's blocking `maintenanceJson` cleanup. The separate
+[maintenance cleanup repair](android-maintenance-cleanup-deadline.md) addresses
+the three exact strict cleanup routes without changing general maintenance
+dispatch/read/restore or existing held-AF cleanup. The ordinary owned Stop +
+DELETE evidence below does not by itself validate that separate branch.
 
 ## Host evidence
 
