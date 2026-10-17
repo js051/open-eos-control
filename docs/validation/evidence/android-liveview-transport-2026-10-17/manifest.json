@@ -1,0 +1,36 @@
+[
+  {
+    "file": "baseline-receipt.json",
+    "sha256": "da43e16816995f76e5e6adef3a295e39a4d4cd5f39b0ea1640b1f2ff5164fb67",
+    "original_receipt_sha256": "e4a7044929b8aacae585a921ffcadec90f5652677746f55667b704bd306ed753"
+  },
+  {
+    "file": "baseline-junit.txt",
+    "sha256": "caf13f17ce8cf256acdcd9c13893d526ce0e3e10564f15daf397b63b42f62a1e",
+    "original_output_sha256": "0c166f662965f1a9531dbcfdde8f9c0d2690e05c8cb76ead82e09f1d0787e5f9"
+  },
+  {
+    "file": "current-receipt.json",
+    "sha256": "7665fd2de86af705f68c1a2da55cf015490a45a16e9a700017f36cc3106272a4",
+    "original_receipt_sha256": "92d7421bf9948afc53470ab27d1984b7f2ddf055851dfd2bf0f4671f4bfa8f0d"
+  },
+  {
+    "file": "current-junit.txt",
+    "sha256": "ae6ebc2c140435046efd5b11743980f3eef645e21dbe05626ed40800b7261150",
+    "original_output_sha256": "1c6c655dddf9220ed210b3fc22688a63db6a6e8cf039e7b9592bf00b5a5c6bac"
+  },
+  {
+    "file": "still-regression-receipt.json",
+    "sha256": "71d170b55237512ef911ebe4974c64151b8755abd661247f33b9e0e1fa4e42d5",
+    "original_receipt_sha256": "695d4403fc6e85ce0f32ef37564f9be31473bd95b993615b03a22ca78fff6146"
+  },
+  {
+    "file": "still-regression-junit.txt",
+    "sha256": "e58719db4e58e0f0be50518da03438a3f746bfafca35fca196fe88b35ce7ce60",
+    "original_output_sha256": "2aa8ac550986e30c2f9576a43b7cd311a58dbc22b0444bbf84433405842131d5"
+  },
+  {
+    "file": "syntax.txt",
+    "sha256": "9828eaa274d31dbdd13a3e07e1fc02fb70482041e8ded94e3947a9c1a69e0926"
+  }
+]

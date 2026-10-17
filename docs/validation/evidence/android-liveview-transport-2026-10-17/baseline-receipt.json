@@ -1,0 +1,123 @@
+{
+  "phase": "baseline",
+  "ref": "4163aad87ca88a3c3bc78ffd486d1d550b0f8838",
+  "source_sha256": [
+    {
+      "file": "android/app/src/main/java/dev/openeos/control/data/ShootingSettingJson.kt",
+      "sha256": "c2c0967a4fd4589e198bd7913a1425d09b881c5cbd17784f91c8ea4cc3ad2930"
+    },
+    {
+      "file": "android/app/src/main/java/dev/openeos/control/data/StrictMediaJson.kt",
+      "sha256": "9ea850d244a64b2a2776062d75bb07ac4709a1fe33cecdc326f86c56cd8bf169"
+    },
+    {
+      "file": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+      "sha256": "ba558d232b95ada600acaf1abf191a52bfcc7a8352acf0d6c33a9bb6a144bc65"
+    }
+  ],
+  "extracted_methods_sha256": [
+    {
+      "file": "START",
+      "sha256": "32351435d4a9b241d8262507351ce138f158a257b1381f43d88b30fa59a7c7d0"
+    },
+    {
+      "file": "STOP",
+      "sha256": "df67df732ae02ab28cd32b685c787106caabd15418d7707247c11829d3839e66"
+    },
+    {
+      "file": "STOP_OWNED",
+      "sha256": "4fa9f2140a7c9253305b83e1f95f89bc686a1b49e1b970d34aa5e98bdf6961c0"
+    },
+    {
+      "file": "CLEANUP",
+      "sha256": "ddd015c3f26592f1997f2362a42cd779aed8292271df7def835c9b52d4c226bc"
+    },
+    {
+      "file": "JPEG",
+      "sha256": "6c6357a9e6d97a7145c7e6a8927d59d6692b0ba590e51c2b60e70b0a25ba8608"
+    },
+    {
+      "file": "CCAPI_START",
+      "sha256": "fdf9f15b3013e4f74ab64c5d3b043bc429a5aca8e18b780a6ff9be1b71317195"
+    },
+    {
+      "file": "CCAPI_STOP",
+      "sha256": "867eee42424f7e996121bf62bffdfaa3e4e9509e10a0407671a7c72c66a097ec"
+    },
+    {
+      "file": "RTP",
+      "sha256": "dc55f47580632bbacd1795cbc0f1040c4c05d94312fde9e678cf0900f54cda60"
+    },
+    {
+      "file": "POST",
+      "sha256": "472d61e21a0e7a55670385a3789ccffed0c156f206eceb370d28ca746c1e201f"
+    },
+    {
+      "file": "DELETE",
+      "sha256": "fff0e42162ddda9535a29461712e6bf5b5cef0c9743617c429a410ad33dbc1a0"
+    },
+    {
+      "file": "REQUEST_OK",
+      "sha256": "e4a575c9a3a8b09b15bd7616d2c89e683283f5e69f865cfb1bb21245f5800053"
+    }
+  ],
+  "source_guards": [],
+  "fixture_sha256": [
+    {
+      "file": "HostClient.kt",
+      "sha256": "3f78c601a1e2b1e1779258ec94416035d6a39452e9d3d30d8deb5c8fde33659c"
+    },
+    {
+      "file": "LiveViewTransportTest.kt",
+      "sha256": "51c84bc532607e1aaaea4f3969fb788ec2fe454b56f3e3eb28478b94d1e342bd"
+    }
+  ],
+  "verified_tools": [
+    {
+      "file": "kotlin-compiler-embeddable-2.2.21.jar",
+      "sha256": "9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295"
+    },
+    {
+      "file": "kotlin-stdlib-2.2.21.jar",
+      "sha256": "6558a3d233da56a20934b32159f9db5f86ed5816ef098f78a2c223dc6abb79dd"
+    },
+    {
+      "file": "kotlin-script-runtime-2.2.21.jar",
+      "sha256": "2b1519b427b514d1536c1b425674b03fe914af637924028e9959c6625442df51"
+    },
+    {
+      "file": "kotlin-reflect-1.6.10.jar",
+      "sha256": "3277ac102ae17aad10a55abec75ff5696c8d109790396434b496e75087854203"
+    },
+    {
+      "file": "kotlin-daemon-embeddable-2.2.21.jar",
+      "sha256": "91c0673c22e44b054ae0314d323860ebe1f3aff3f0ebc74fff82c4733dde09be"
+    },
+    {
+      "file": "kotlinx-coroutines-core-jvm-1.8.0.jar",
+      "sha256": "9860906a1937490bf5f3b06d2f0e10ef451e65b95b269f22daf68a3d1f5065c5"
+    },
+    {
+      "file": "kotlinx-coroutines-core-jvm-1.9.0.jar",
+      "sha256": "ad89c2892235e670f222d819cb3d81188143cb19a05b59df9889ae4269f5c70a"
+    },
+    {
+      "file": "annotations-23.0.0.jar",
+      "sha256": "7b0f19724082cbfcbc66e5abea2b9bc92cf08a1ea11e191933ed43801eb3cd05"
+    },
+    {
+      "file": "junit-4.13.2.jar",
+      "sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3"
+    },
+    {
+      "file": "hamcrest-core-1.3.jar",
+      "sha256": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+    }
+  ],
+  "compile_exit": 0,
+  "boundary": "Exact production startLiveView, JPEG/RTP entries, original Stop ownership, postOk/deleteOk/requestOk and bounded readers; synthetic Call/Response/InputStream and frame/RTP collaborators. Multipart wiring statically checked. No real OkHttp, socket, Android or device execution.",
+  "jvm_heap_limit_mb": 256,
+  "active_processor_count": 1,
+  "junit_exit": 1,
+  "expected_result_verified": true
+}
