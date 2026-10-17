@@ -8,6 +8,7 @@ from .bulb import BulbRequests
 from .engine import CameraEngineSession, NetworkCameraEngine
 from .engine_registry import LocalEngineRegistry
 from .errors import BridgeError
+from .maintenance_live_view import MaintenanceLiveViewRequests
 from .models import BulbOwnerResult, CameraDescriptor, CameraStatus, EngineName, SessionCreated, SessionCreateRequest
 
 
@@ -21,6 +22,7 @@ class SessionManager:
         self.network_engine = network_engine
         self._sessions: dict[str, CameraEngineSession] = {}
         self._bulb_requests: dict[str, BulbRequests] = {}
+        self._maintenance_live_view: dict[str, MaintenanceLiveViewRequests] = {}
         self._camera_sessions: dict[str, str] = {}
         self._lock = threading.RLock()
         self._open_lock = threading.Lock()
@@ -127,6 +129,21 @@ class SessionManager:
                 guard = self._bulb_requests[session_id] = BulbRequests(session)
             return guard
 
+    def maintenance_live_view(self, session_id: str) -> MaintenanceLiveViewRequests:
+        with self._lock:
+            camera = self._bulb_requests_for(session_id)
+            controls = self._maintenance_live_view.get(session_id)
+            if controls is None or controls.session is not camera.session:
+                if controls is not None:
+                    controls.retire()
+                controls = self._maintenance_live_view[session_id] = MaintenanceLiveViewRequests(camera)
+            return controls
+
+    def _retire_controls(self, session_id: str) -> None:
+        controls = self._maintenance_live_view.get(session_id)
+        if controls is not None:
+            controls.retire()
+
     def start_bulb_exposure(self, session_id: str, owner_id: str | None = None) -> CameraStatus | BulbOwnerResult:
         return self._bulb_requests_for(session_id).start(owner_id)
 
@@ -146,6 +163,8 @@ class SessionManager:
                 if not self.is_current(session_id, guard.session):
                     raise BridgeError("SESSION_NOT_FOUND", "Camera session was not found.", status_code=404)
                 guard.retire()
+                self._retire_controls(session_id)
+                self._maintenance_live_view.pop(session_id, None)
                 session = self._sessions.pop(session_id)
                 self._bulb_requests.pop(session_id, None)
             try:
@@ -169,27 +188,34 @@ class SessionManager:
                     raise BridgeError("UNSUPPORTED_MAINTENANCE_RETIRE", "Local-only retirement is unavailable.",
                                       status_code=409, engine=session.engine_name)
                 guard.retire()
+                self._retire_controls(session_id)
             try:
                 guard.finish_retirement(retire)
             except BaseException:
                 with self._lock:
                     if self.is_current(session_id, session):
                         guard.resume_after_failed_retirement()
+                        controls = self._maintenance_live_view.get(session_id)
+                        if controls is not None:
+                            controls.resume_after_failed_retirement()
                 raise
             with self._lock:
                 if self.is_current(session_id, session):
                     self._sessions.pop(session_id, None)
                     self._bulb_requests.pop(session_id, None)
+                    self._maintenance_live_view.pop(session_id, None)
                     self._camera_sessions.pop(f"{session.engine_name}:{session.camera.id}", None)
 
     def close_all(self) -> None:
         with self._lock:
             sessions = [(identifier, session, self._bulb_requests_for(identifier))
                         for identifier, session in self._sessions.items()]
-            for _, _, guard in sessions:
+            for identifier, _, guard in sessions:
                 guard.retire()
+                self._retire_controls(identifier)
             self._sessions.clear()
             self._bulb_requests.clear()
+            self._maintenance_live_view.clear()
         failure = None
         for identifier, session, guard in sessions:
             try:

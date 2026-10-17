@@ -456,6 +456,40 @@ class LiveViewState(ApiModel):
     size: str | None = None
 
 
+class MaintenanceLiveViewStopRequest(ApiModel):
+    prepare_restore: bool = Field(default=False, strict=True)
+    restore_token: str | None = Field(default=None, min_length=24, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+
+    @model_validator(mode="after")
+    def exclusive_restore_intent(self):
+        if "restore_token" in self.model_fields_set and self.restore_token is None:
+            raise ValueError("An explicitly supplied restore token cannot be null.")
+        if self.prepare_restore and self.restore_token is not None:
+            raise ValueError("Prepare and cleanup cannot share one request.")
+        return self
+
+
+class MaintenanceLiveViewStartRequest(LiveViewStartRequest):
+    restore_token: str | None = Field(default=None, min_length=24, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+
+    @model_validator(mode="after")
+    def supplied_token_is_not_null(self):
+        if "restore_token" in self.model_fields_set and self.restore_token is None:
+            raise ValueError("An explicitly supplied restore token cannot be null.")
+        return self
+
+
+class MaintenanceLiveViewState(ApiModel):
+    # Receipt-only replies omit state: they never clear a newer camera warning.
+    active: bool | None = None
+    live_view_stop_unconfirmed: bool | None = None
+    requested_fps: int | None = None
+    source: str | None = None
+    size: str | None = None
+    restore_token: str | None = None
+    restore_outcome: Literal["started", "stopped", "cancelled-before-start"] | None = None
+
+
 class LiveViewMagnificationRequest(ApiModel):
     value: Literal[1, 5, 10]
 

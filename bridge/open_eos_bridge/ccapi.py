@@ -1154,6 +1154,8 @@ class CcapiSession:
         self._maintenance_control_active = False
         self._maintenance_stop_owned = False
         self._maintenance_restore_request: LiveViewStartRequest | None = None
+        self._maintenance_restore_owner: str | None = None
+        self._maintenance_restore_dispatch: str | None = None
         self._rejected_live_view_sizes: set[str] = set()
         self._active_live_view_size: str | None = None
         self._live_view_magnification: tuple[int, list[int]] | None = None
@@ -2305,30 +2307,55 @@ class CcapiSession:
         finally:
             self._lock.release()
 
-    def maintenance_stop_live_view(self) -> None:
+    def _maintenance_stop_live_view(self, *, legacy_restore: bool) -> LiveViewStartRequest | None:
         with self._maintenance_controls():
+            frozen = None
             if self._active_live_view_source and self._live_view_active:
-                self._maintenance_restore_request = LiveViewStartRequest(
-                    fps=self._requested_fps, source=self._active_live_view_source,
-                    size=self._active_live_view_size or "MEDIUM")
+                frozen = LiveViewStartRequest(fps=self._requested_fps, source=self._active_live_view_source,
+                                              size=self._active_live_view_size or "MEDIUM")
+            # Never leave an earlier source reusable after a second/global Stop.
+            self._maintenance_restore_request = None
             self._maintenance_stop_owned = True
             self._stop_live_view_locked()
+            if legacy_restore:
+                self._maintenance_restore_request = frozen
+            return frozen
+
+    def maintenance_stop_live_view(self) -> LiveViewStartRequest | None:
+        return self._maintenance_stop_live_view(legacy_restore=True)
+
+    def maintenance_stop_owned_live_view(self, restore_token: str | None = None) -> LiveViewStartRequest | bool | None:
+        with self._maintenance_controls():
+            if restore_token is not None and self._maintenance_restore_owner != restore_token:
+                return False
+            frozen = self._maintenance_stop_live_view(legacy_restore=False)
+            return frozen if restore_token is None else True
+
+    def _maintenance_start_frozen_live_view(self, frozen: LiveViewStartRequest | None) -> None:
+        if self._live_view_stop_unconfirmed:
+            raise self._live_view_stop_error()
+        if frozen is None or frozen.source == "AUTO":
+            raise BridgeError("MAINTENANCE_RESTORE_UNAVAILABLE", "No frozen prior Live View source.", status_code=409)
+        if self._recording is True or self._bulb_exposure_active:
+            raise BridgeError("CAMERA_BUSY", "Stop recording or Bulb before restoration.", status_code=409)
+        self._maintenance_stop_owned = True
+        self.start_live_view(frozen)
 
     def maintenance_start_live_view(self, request: LiveViewStartRequest) -> None:
         with self._maintenance_controls():
             frozen = self._maintenance_restore_request
-            if self._live_view_stop_unconfirmed:
-                raise self._live_view_stop_error()
-            if frozen is None or frozen.source == "AUTO":
-                raise BridgeError("MAINTENANCE_RESTORE_UNAVAILABLE", "No frozen prior Live View source.",
-                                  status_code=409)
-            if self._recording is True or self._bulb_exposure_active:
-                raise BridgeError("CAMERA_BUSY", "Stop recording or Bulb before restoration.", status_code=409)
-            # Request fields are transport-compatible, but cannot replace the original source/size/FPS.
-            del request
-            self._maintenance_stop_owned = True
-            self.start_live_view(frozen)
+            # Consume before dispatch, including an ambiguous response or exception.
             self._maintenance_restore_request = None
+            del request  # Compatibility payload cannot replace the frozen source.
+            self._maintenance_start_frozen_live_view(frozen)
+
+    def maintenance_start_owned_live_view(self, frozen: LiveViewStartRequest, restore_token: str) -> None:
+        with self._maintenance_controls():
+            self._maintenance_restore_dispatch = restore_token
+            try:
+                self._maintenance_start_frozen_live_view(frozen)
+            finally:
+                self._maintenance_restore_dispatch = None
 
     def perform_maintenance_outcome(self, operation: str, auto_power_off: bool) -> dict[str, object]:
         require_intent(operation, auto_power_off)
@@ -2949,6 +2976,7 @@ class CcapiSession:
                     engine=self.engine_name,
                 )
             self._require_shutter_release_confirmed()
+            self._maintenance_restore_owner = self._maintenance_restore_dispatch
             self._ensure_initialized()
             self._refresh_temperature_status()
             self._require_temperature_allows_live_view()
@@ -3292,6 +3320,7 @@ class CcapiSession:
                 raise
             raise failure from error
         self._pending_live_view_stop = None
+        self._maintenance_restore_owner = None
         self._maintenance_stop_owned = False
         self._live_view_stop_unconfirmed = False
         self._active_multipart_operations = None
