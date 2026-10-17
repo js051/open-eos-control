@@ -10,7 +10,11 @@ function extract(name) {
   const match = new RegExp(`^  (?:async )?function ${name}\\(`, "m").exec(source);
   assert.ok(match, name);
   const end = source.indexOf("\n  }", match.index);
-  return source.slice(match.index, end + 4);
+  const dialogDependencies = ["openMediaPreview", "openMediaDetails", "renderMediaPreviewNavigation",
+    "renderMediaDetails", "closeMediaPreview", "closeMediaDetails"].includes(name)
+    ? ["mediaDialogFocusTarget", "beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"]
+      .map(extract).join("\n") + "\n" : "";
+  return dialogDependencies + source.slice(match.index, end + 4);
 }
 const item = (id, captureTime, kind = "image") => ({ id, name: id, captureTime, kind, previewAvailable: true });
 function fixture() {

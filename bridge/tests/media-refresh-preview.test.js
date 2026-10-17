@@ -17,7 +17,11 @@ function extract(name) {
   assert.ok(match, `Missing production function ${name}`);
   const end = source.indexOf("\n  }", match.index);
   assert.notEqual(end, -1, `Missing end of production function ${name}`);
-  return source.slice(match.index, end + 4);
+  const dialogDependencies = ["openMediaPreview", "openMediaDetails", "renderMediaPreviewNavigation",
+    "renderMediaDetails", "closeMediaPreview", "closeMediaDetails"].includes(name)
+    ? ["mediaDialogFocusTarget", "beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"]
+      .map(extract).join("\n") + "\n" : "";
+  return dialogDependencies + source.slice(match.index, end + 4);
 }
 
 function deferred() {
@@ -61,6 +65,7 @@ function fixture(t, { dated = false } = {}) {
     if (!target[key]) target[key] = {
       hidden: false, disabled: false, open: false, textContent: "", value: "", dataset: {},
       style: { removeProperty() {} }, classList: { remove() {} },
+      contains() { return false; },
       showModal() { this.open = true; }, close() { this.open = false; },
       replaceChildren(...children) { this.children = children; },
       setAttribute(name, value) { this[name] = value; },
@@ -85,6 +90,7 @@ function fixture(t, { dated = false } = {}) {
   let objectUrls = 0;
   ui.mediaPreviewImage.decode = () => { decodeCalls += 1; return decode.promise; };
   const s = vm.createContext({
+    document: { activeElement: null, body: {}, querySelector: () => null },
     state, ui, requests, listings, previews, playbacks, originals, ticketDeletes, savedBlobs,
     events, feedback, renders, releasedUrls, delays,
     AbortController, Blob, Set, Map, Intl, Date, mediaLibrary, mediaTransfer,
@@ -623,4 +629,23 @@ test("unknown and conflicting media remain visible without opening a photo or vi
   assert.equal(s.previews.length, 0);
   assert.equal(s.playbacks.length, 0);
   assert.equal(s.decodeCalls(), 0);
+});
+
+test("production Preview download renderer parks the focused disabled action on Close", async (t) => {
+  const s = fixture(t);
+  const close = s.ui.mediaPreviewClose;
+  Object.assign(close, { tagName: "BUTTON", isConnected: true, hidden: false,
+    closest: () => null, getClientRects: () => [1], focus() { s.document.activeElement = close; } });
+  const preview = s.openMediaPreview(LATEST);
+  s.ui.mediaPreviewDialog.contains = node => node === s.ui.mediaPreviewDownload || node === close;
+  s.document.activeElement = s.ui.mediaPreviewDownload;
+  const download = s.downloadMedia(LATEST);
+  assert.equal(s.ui.mediaPreviewDialog.open, true);
+  assert.equal(s.ui.mediaPreviewDownload.disabled, true);
+  assert.equal(s.document.activeElement, close);
+  await eventually(() => s.originals.length === 1, "original download");
+  s.originals[0].resolve(new Response("synthetic original", { headers: { "Content-Type": "image/jpeg" } }));
+  await download;
+  assert.equal(s.document.activeElement, close, "completion does not steal focus back to Download");
+  s.closeMediaPreview(); s.previews[0].resolve(imageBlob()); await preview;
 });

@@ -19,7 +19,10 @@ function productionFunction(name) {
   assert.notEqual(start, -1, `Missing production function ${name}`);
   const end = source.slice(start + 1).search(/\n  (?:async )?function /);
   assert.notEqual(end, -1, `Cannot locate end of production function ${name}`);
-  return source.slice(start, start + 1 + end);
+  const dependencies = ["renderMediaDetails", "renderMediaPreviewNavigation", "openMediaDetails", "openMediaPreview",
+    "closeMediaDetails", "closeMediaPreview"].includes(name)
+    ? ["mediaDialogFocusTarget", "beginMediaDialogFocus", "restoreMediaDialogFocus", "setMediaDialogActionDisabled"].map(productionFunction).join("\n") + "\n" : "";
+  return dependencies + source.slice(start, start + 1 + end);
 }
 
 function element(tagName = "div") {
