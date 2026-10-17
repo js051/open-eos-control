@@ -1002,9 +1002,23 @@ def create_app(
             upload = getattr(session, "upload_media", None)
             if not callable(upload):
                 raise unsupported(CameraFeature.MEDIA_UPLOAD.value, session.engine_name)
+
+            def upload_current(filename, source, size, media_type, cancelled):
+                # Body staging does not admit a camera write. Bind dispatch and
+                # its terminal cleanup to the same retirement guard as controls.
+                with manager.camera_mutation(session_id) as current:
+                    if current is not session:
+                        raise BridgeError("SESSION_NOT_FOUND", "Camera session was not found.", status_code=404)
+                    if cancelled is not None and cancelled.is_set():
+                        raise BridgeError(
+                            "UPLOAD_CANCELLED", "The media upload was cancelled before camera dispatch.",
+                            status_code=409, feature=CameraFeature.MEDIA_UPLOAD.value, engine=session.engine_name,
+                        )
+                    return upload(filename, source, size, media_type, cancelled)
+
             return await _run_media_upload(
                 request,
-                upload,
+                upload_current,
                 safe_filename,
                 temporary_path,
                 size_bytes,
