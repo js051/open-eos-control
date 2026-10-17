@@ -1,0 +1,9 @@
+{"at":1792259988279,"commands":[],"focused":"","tapEnabled":false,"zoomDisabled":true,"zoomHidden":true,"zoomLabel":"\n              \n              --\n            "}
+{"at":1792260015173,"commands":[],"focused":"","tapEnabled":false,"zoomDisabled":true,"zoomHidden":false,"zoomLabel":"5x"}
+{"at":1792260035591,"commands":[],"focused":"","tapEnabled":true,"zoomDisabled":false,"zoomHidden":false,"zoomLabel":"5x"}
+{"at":1792260047844,"commands":[],"focused":"live-magnification-button","tapEnabled":true,"zoomDisabled":false,"zoomHidden":false,"zoomLabel":"5x"}
+{"at":1792260048057,"commands":[{"command":"magnification","value":5}],"focused":"","tapEnabled":true,"zoomDisabled":false,"zoomHidden":false,"zoomLabel":"10x"}
+{"at":1792260063072,"commands":[{"command":"magnification","value":5}],"focused":"live-magnification-button","tapEnabled":true,"zoomDisabled":false,"zoomHidden":false,"zoomLabel":"10x"}
+{"at":1792260063476,"commands":[{"command":"magnification","value":5},{"command":"magnification","value":10}],"focused":"","tapEnabled":true,"zoomDisabled":false,"zoomHidden":false,"zoomLabel":"1x"}
+{"at":1792260076291,"commands":[{"command":"magnification","value":5},{"command":"magnification","value":10}],"focused":"viewfinder","tapEnabled":true,"zoomDisabled":false,"zoomHidden":false,"zoomLabel":"1x"}
+{"at":1792260076691,"commands":[{"command":"magnification","value":5},{"command":"magnification","value":10},{"command":"focus/tap","body":"{\"x\":0.5,\"y\":0.4996701701957221}"}],"focused":"","tapEnabled":true,"zoomDisabled":false,"zoomHidden":false,"zoomLabel":"1x"}
