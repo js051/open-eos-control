@@ -205,3 +205,7 @@
 ## 2026-10-17 iOS G03/G06/G08 續查反例
 
 基底 `20251fcd` 的既有 iOS caller 續查找到兩個可實作缺口：[event admission／maintenance RTP watcher](ios-lifecycle-continuation-2026-10-17.zh-TW.md)。原列 #41/#73 的 content event 在 Live View retirement 擋住 admission 時同步空轉；#55/#81 的 sensor-cleaning Restore 遺漏重新註冊 RTP render watcher。兩者均已有窄修正與已撰寫的原生 regression；本地只執行 source／contract guards，Swift/Xcode/XCTest/GPU 仍 NOT_RUN。新文件列出 G01–G10 查核及各群 residual blockers，不把原89列改寫為全通過，也不把未實作 transport 改稱僅待測試。
+
+## 2026-10-17 Android G08/G09/G10 原畫面 owner
+
+[媒體 callback 原連線 gate](android-media-callback-owner-2026-10-17.zh-TW.md) 修正原列 #73/#75/#76/#77/#78 相關 gallery、preview、transfer、upload/cancel caller：舊畫面不再於重連後替新相機取得操作 owner，已儲存 Gallery JPEG 的獨立交付不受影響。既有離線 Kotlin 工具直接編譯 production 純 gate／metadata helper，以及 byte-exact callback binding＋shape adapters，22/22；完整 Compose/Gradle/native/真機仍 NOT_RUN。與 iOS lifecycle 兩項修正整合後，134 source guards 通過；source guards 不代表原生 runtime 通過。
