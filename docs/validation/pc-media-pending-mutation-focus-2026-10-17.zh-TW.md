@@ -1,6 +1,6 @@
 # 媒體 metadata pending 關窗後鍵盤接續
 
-原 G08/G13 #56/#122，基準 dev `ee86003d48bcccaf6eb00c1b1bbef487b71d9e03`。不新增 metadata 能力或改 mutation 收據語意。
+原 G10/G13 #56/#122，基準 dev `ee86003d48bcccaf6eb00c1b1bbef487b71d9e03`。不新增 metadata 能力或改 mutation 收據語意。
 
 ## Firefox 基準
 

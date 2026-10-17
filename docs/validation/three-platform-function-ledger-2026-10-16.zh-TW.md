@@ -296,7 +296,13 @@ G03/#42/#43、G13/#122：[pending Apply 焦點](pc-setting-pending-focus-2026-10
 
 ## 20:53 UTC metadata 鍵盤與 Android owned Bulb 增量
 
-- G08/#56、G13/#122：[PC metadata pending 關窗](pc-media-pending-mutation-focus-2026-10-17.zh-TW.md) 已以真正 Firefox 重現 BODY／Enter 失效並驗證修正。只在同 owner／session／generation 的晚收據 settlement 回目前同 ID/manage，保留新焦點、新dialog與收據語意。3812 modules、15 static UI；合成相機 transport，非真機。
+- G10/#56、G13/#122：[PC metadata pending 關窗](pc-media-pending-mutation-focus-2026-10-17.zh-TW.md) 已以真正 Firefox 重現 BODY／Enter 失效並驗證修正。只在同 owner／session／generation 的晚收據 settlement 回目前同 ID/manage，保留新焦點、新dialog與收據語意。3812 modules、15 static UI；合成相機 transport，非真機。
 - G04/#65、G05/#66/#69、G13/#122：[Android Bridge owned Bulb](../android-bridge-owned-bulb.md) 補同步 owner admission、pending Stop、coalescing、cached receipt／較新狀態保護，以及15秒 caller deadline、retirement與 bounded ordinary DELETE。59項 production-host runtime、40項 source/resource checks；[host receipt](evidence/android-bridge-owned-bulb-2026-10-17/receipt.json)。完整 Android／Compose／實際 OkHttp／MockWebServer與裝置未驗；舊 Bridge 404/405 提示升級，沒有危險 legacy Start fallback。
 - 原 G11/G13 maintenance-owned retirement 的舊 blocking transport 尚待下一段反例與修正，普通 owned Stop＋DELETE 的 deadline 不擴張宣稱涵蓋它。iOS caller 尚未同等修正，全部89列未完成。
 - 整合時 bridge tree 與已驗 PC source、android及host fixture tree 與已驗 Android source逐一比對相同；未以重跑未變綠燈充當新進度。
+
+## 21:05 UTC Android maintenance cleanup deadline
+
+G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) 的 caller 已改用有界 callback 等待，保留精確 saved session、strict Stop／events DELETE／session DELETE 契約及原 error priority。基準4/4確實紅，包含未主動cancel、真15秒已觸發而body仍卡住；固定16/16、前批owned Bulb59/59、40 source/resource checks通過。真15秒證據不等於transport producer實際停止。
+
+仍未宣稱整個maintenance Disconnect有界：ViewModel先join一般maintenance dispatch/read/restore的caller鏈，以及physical AF cleanup另有邊界；下一段先驗證精確入口反例。完整Android／Compose／實際OkHttp／裝置與iOS同等修正仍未完成。另校正前段metadata #56分類為原G10。
