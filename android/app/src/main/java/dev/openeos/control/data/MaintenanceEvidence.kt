@@ -68,6 +68,26 @@ class MaintenanceEvidence(val request: MaintenanceRequest, private val requireOw
         update(value.copy(command = MaintenanceCommandEvidence.UNKNOWN))
     }
     @Synchronized fun responseReceived() { check(value.command != MaintenanceCommandEvidence.NOT_SENT); update(value.copy(command = MaintenanceCommandEvidence.RESPONSE_RECEIVED)) }
+    /** Bridge outcome is one original response, not a recovery read or a current-owner observation. */
+    @Synchronized internal fun bridgeResponseReceived(reference: MaintenanceClockReference? = null,
+        observation: MaintenanceClockObservation? = null) {
+        check(value.command != MaintenanceCommandEvidence.NOT_SENT)
+        if (value.command == MaintenanceCommandEvidence.RESPONSE_RECEIVED) return
+        if (request.action != MaintenanceAction.CLOCK_SYNC) {
+            update(value.copy(command = MaintenanceCommandEvidence.RESPONSE_RECEIVED)); return
+        }
+        require(reference == null || validMaintenanceClockReference(reference))
+        require(observation == null || (reference != null && validMaintenanceClockObservation(observation)))
+        val originalClock = when {
+            reference == null || observation == null -> MaintenanceClockEvidence.UNAVAILABLE
+            maintenanceClockMatches(reference, observation) -> MaintenanceClockEvidence.MATCHED
+            else -> MaintenanceClockEvidence.MISMATCH
+        }
+        update(value.copy(command = MaintenanceCommandEvidence.RESPONSE_RECEIVED,
+            clockReference = reference, observedClock = observation, clockRead = originalClock,
+            availability = if (value.availability != MaintenanceAvailability.NOT_READ) value.availability
+                else if (observation != null) MaintenanceAvailability.REACHABLE else MaintenanceAvailability.UNAVAILABLE))
+    }
     @Synchronized fun reference(reference: MaintenanceClockReference) {
         check(value.clockReference == null); require(validMaintenanceClockReference(reference))
         update(value.copy(clockReference = reference))
@@ -86,6 +106,9 @@ class MaintenanceEvidence(val request: MaintenanceRequest, private val requireOw
     @Synchronized fun initialUnavailable() {
         if (value.clockRead == MaintenanceClockEvidence.NOT_READ) update(value.copy(clockRead = MaintenanceClockEvidence.UNAVAILABLE))
         update(value.copy(availability = MaintenanceAvailability.UNAVAILABLE))
+    }
+    @Synchronized fun initialUnavailableIfNotRead() {
+        if (value.availability == MaintenanceAvailability.NOT_READ) initialUnavailable()
     }
     @Synchronized fun recovery(readback: MaintenanceReadback) {
         require(request.clock != null || readback.clock == null)
@@ -149,17 +172,16 @@ internal fun applyMaintenanceBridgeOutcome(evidence: MaintenanceEvidence, engine
     if (status != 200 || body["version"] !is Int || body["version"] != 1 || engine == null || body["engine"] != engine ||
         body["operation"] != request.action.wireName || body["autoPowerOff"] != request.autoPowerOff ||
         body["responseEvidence"] != "response-received") return false
-    evidence.responseReceived()
-    if (request.action != MaintenanceAction.CLOCK_SYNC) return true
+    if (request.action != MaintenanceAction.CLOCK_SYNC) {
+        evidence.bridgeResponseReceived(); return true
+    }
     @Suppress("UNCHECKED_CAST")
     val reference = maintenanceClockReference(body["clockReference"] as? Map<String, Any?>)
     @Suppress("UNCHECKED_CAST")
     val observation = maintenanceClockObservation(body["clockObservation"] as? Map<String, Any?>)
-    if (reference != null) evidence.reference(reference)
     val expected = if (reference != null && observation != null && maintenanceClockMatches(reference, observation)) "matched" else "mismatch"
-    if (reference != null && observation != null && body["clockReadEvidence"] == expected) {
-        evidence.initialRead(MaintenanceReadback(observation))
-    } else evidence.initialUnavailable()
+    evidence.bridgeResponseReceived(reference,
+        observation.takeIf { reference != null && body["clockReadEvidence"] == expected })
     return true
 }
 internal fun maintenanceBridgeReadback(engine: String?, request: MaintenanceRequest, body: Map<String, Any?>): MaintenanceReadback? {

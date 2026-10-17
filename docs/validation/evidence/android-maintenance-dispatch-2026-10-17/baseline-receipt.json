@@ -1,0 +1,92 @@
+{
+  "at": "2026-10-17T21:15:09.036355+00:00",
+  "phase": "baseline",
+  "ref": "1ca763aa62a6a5fed229b03b3cb3dacf500b32f6",
+  "source_sha256": [
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/BridgeShutterReleaseSession.kt",
+      "sha256": "81b62c61e6245e8546df2d84eb8b6995f991f57b55787a104d3ac9f399d6c752"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/ShutterReleaseSession.kt",
+      "sha256": "b1e1708555c7938c94f13bd9c8cb90f5fb0e37a993d9153c479a3df144363749"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/BridgeBulbRequestSession.kt",
+      "sha256": "77082b0492cda953e6cba413785e130e1d9abee52c6cc0e4810dba313a88cd77"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/BridgeBulbDeadline.kt",
+      "sha256": "b14c921a10fa2bbeb606f14acb718e511a7a9d888772c5895ed2c381bcd160d3"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/MaintenanceEvidence.kt",
+      "sha256": "2d93c0aea5b0b8e6f1a7ac97be39a43bdb3c460947a7beea507f94f241e0a7ab"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/ShootingSettingJson.kt",
+      "sha256": "c2c0967a4fd4589e198bd7913a1425d09b881c5cbd17784f91c8ea4cc3ad2930"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/StrictMediaJson.kt",
+      "sha256": "9ea850d244a64b2a2776062d75bb07ac4709a1fe33cecdc326f86c56cd8bf169"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/ui/MaintenanceWorkflow.kt",
+      "sha256": "87ae9aaddbb9e2b109948bb673f7a19cbdd2664e516f2b8c7cad40374bba69fa"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt",
+      "sha256": "954980dc5aefa0c855a1b190ba73e1b560eeaac87c989c001a609c9a8173162b"
+    },
+    {
+      "source_file": "android/app/src/main/java/dev/openeos/control/ui/CameraViewModel.kt",
+      "sha256": "19eeabaf936931b03fcbbdef10c86d37e2193fd200d530cdeac9d83694904d20"
+    }
+  ],
+  "extracted_methods_sha256": {
+    "suspend fun retireMaintenanceLocally()": "14c947d121eaa6ce63250b3560909466de4a968f7594b9279cb21090151f2f7b",
+    "suspend fun stopEventPolling()": "c00581d22355cce549c4174b78ca799a44b6868e36809e8439f60486d6caccc2",
+    "fun maintenanceAccess(": "c6b130077b62f8c6623bc424a596ef9772dad0a46195985dd96bacfa7f961f45",
+    "private fun JSONObject.toMaintenanceMap()": "1019860b1a9fc795eb1ed952106602c72373a3cdc558069b71a72bf87b1dd32f",
+    "suspend fun startLiveView(request:": "cebaf190011a577713a235ac86f29ce7756df38ab0d336ccbd1edbf0583c6eb7",
+    "private suspend fun postJson(": "9474ea71720d0aabd7d5d35e60f5be3c50ffaae5520da5cf36ac866433c321c5",
+    "private suspend fun requestJson(": "25756bdcc6bdf6bff3cca3ef4fb8c144482ccf7fb53d625bb423df2852242793",
+    "private fun requireCurrentSession(": "e9316b76e6f9a790a6e800f3f3fb75d903ed3186b960a74df8cec2c6103d6967",
+    "fun submitMaintenance(draft: MaintenanceDraft) {": "c8e8e1342dc5a5e99f30c13bda24c12384ab67eaf3f6f1abe8bc15c779363eb1",
+    "fun disconnect() {": "ce4ac0867c5481c754e935b448e83194f07aa094d6551988956f3e907b5dac0a",
+    "private fun launchCameraOperation(": "f49e909203b534b30212dd7129df91bf2fdb6b7a71fd693ecb8c9337de5f5a80"
+  },
+  "fixture_sha256": {
+    "HostClient.kt": "6d0261b313e479d408066ac3a59fd01696b967b26094dacc02ff70a48ca139c3",
+    "HostViewModel.kt": "9634d8f8bc4ae6f55a4ba27fb14c5b9483474581939f0af4b8ed10f257bf16b7",
+    "JsonException.kt": "92261fdd06afa0f4cff49d32fe0d7a560c61b63c6e0e2f28272cf33a2d467e25",
+    "MaintenanceDispatchTest.kt": "e3858b5c0156062bdc84d8dbbeb7cd3a9c73125273b0ae511f45fe198fd4b1bf"
+  },
+  "verified_tools": {
+    "kotlin-compiler-embeddable-2.2.21.jar": "9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295",
+    "kotlin-stdlib-2.2.21.jar": "6558a3d233da56a20934b32159f9db5f86ed5816ef098f78a2c223dc6abb79dd",
+    "kotlin-script-runtime-2.2.21.jar": "2b1519b427b514d1536c1b425674b03fe914af637924028e9959c6625442df51",
+    "kotlin-reflect-1.6.10.jar": "3277ac102ae17aad10a55abec75ff5696c8d109790396434b496e75087854203",
+    "kotlin-daemon-embeddable-2.2.21.jar": "91c0673c22e44b054ae0314d323860ebe1f3aff3f0ebc74fff82c4733dde09be",
+    "kotlinx-coroutines-core-jvm-1.8.0.jar": "9860906a1937490bf5f3b06d2f0e10ef451e65b95b269f22daf68a3d1f5065c5",
+    "kotlinx-coroutines-core-jvm-1.9.0.jar": "ad89c2892235e670f222d819cb3d81188143cb19a05b59df9889ae4269f5c70a",
+    "annotations-23.0.0.jar": "7b0f19724082cbfcbc66e5abea2b9bc92cf08a1ea11e191933ed43801eb3cd05",
+    "junit-4.13.2.jar": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3",
+    "hamcrest-core-1.3.jar": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+  },
+  "compile_exit": 0,
+  "jvm_heap_limit_mb": 256,
+  "active_processor_count": 1,
+  "boundary": "Entire production MaintenanceWorkflow and MaintenanceEvidence, BridgeShutterReleaseSession, ShutterReleaseSession, BridgeBulbRequestSession, BridgeBulbDeadline, ShootingSettingJson and StrictMediaJson; byte-exact CameraViewModel submitMaintenance/cancelMaintenance/publishMaintenanceStopWarning, full launchCameraOperation registered-job lifetime and disconnect join; byte-exact DesktopBridgeClient maintenance close/local retirement, maintenanceAccess, maintenanceJson and cleanup helpers, live-view Start/Stop, postJson, requestJson, stopEventPolling, exact-owner helpers. Explicit synthetic HTTP Call/Response/InputStream, typed-registry JSON, model, focus and unrelated transport adapters. No Android/OkHttp/Compose/device execution.",
+  "test_classes": [
+    "dev.openeos.control.ui.BaselineMaintenanceDispatchTest"
+  ],
+  "junit_exit": 1,
+  "expected_runtime_red_cases_verified": true,
+  "publication_note": "Compact publication of the original runtime receipt. source_sha256 is represented as source_file/sha256 records with every original key and digest preserved. JUnit text only has trailing empty lines removed and one final LF; no test result text changed. Raw receipt, compiler log, JUnit log and generated sources remain in the local evidence directory.",
+  "junit_text_sha256": {
+    "raw": "95a9a359e67ab3f223c29c01dbf3312c8fd5d70c76d674a7c0eb4bd699cd401b",
+    "published": "3eef20afe4ce0ea65936256da6c7b55b0b8d81eb51e0a8c650787918fea60582"
+  }
+}

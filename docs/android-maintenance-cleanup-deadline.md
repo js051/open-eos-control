@@ -45,7 +45,13 @@ release are unchanged. A wait in one of those paths can prevent reaching these
 cleanup routes. Therefore this repair must not be described as proving that every
 Android maintenance disconnect returns within a fixed deadline.
 
-### Next caller-boundary counterexample to test
+### Follow-on caller-boundary repair
+
+The following counterexample describes the cleanup-only baseline. It was later
+confirmed by exact production runtime tests and repaired separately in
+[Android Bridge maintenance dispatch and Disconnect](android-maintenance-dispatch-deadline.md).
+That repair leaves the cleanup order and job join intact; general readback and
+preview restoration remain separate boundaries.
 
 A concrete existing entry is `CameraViewModel.submitMaintenance` with
 `MaintenanceAction.SENSOR_CLEANING`, no active preview/events, and a valid frozen
@@ -61,8 +67,8 @@ retires the attempt and cancels its registered job, but joins that non-Bulb job
 before `repository.disconnect`. Assert that repository close has not been entered
 while the body remains blocked, and release the latch only in test cleanup.
 Repeat against the command's real default timeout if a deadline claim is needed.
-This caller chain is source-confirmed; the complete chained ViewModel counterexample
-has not been executed in this cleanup batch. Readback and explicit restore use
+This caller chain was source-confirmed but had not been executed in this cleanup
+batch; the linked follow-on contains its runtime evidence. Readback and explicit restore use
 the same unconverted transport, but do not need to be mixed into the first probe.
 
 ## Validation

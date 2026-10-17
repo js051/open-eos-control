@@ -791,7 +791,7 @@ class DesktopBridgeClient(
             require(frozen == request); requireCurrentSession(owner)
             val httpRequest = Request.Builder().url(outcome).post(JSONObject().put("autoPowerOff", request.autoPowerOff)
                 .toString().toRequestBody(jsonMediaType)).build()
-            maintenanceJson(httpRequest, owner, evidence) { body ->
+            maintenanceDispatchJson(httpRequest, owner, evidence) { body ->
                 check(applyMaintenanceBridgeOutcome(evidence, engine, 200, body.toMaintenanceMap())) {
                     "Bridge maintenance outcome did not match the frozen request."
                 }
@@ -811,6 +811,56 @@ class DesktopBridgeClient(
 
     private fun JSONObject.toMaintenanceMap(): Map<String, Any?> = keys().asSequence().associateWith { key ->
         when (val value = opt(key)) { JSONObject.NULL -> null; is JSONObject -> value.toMaintenanceMap(); else -> value }
+    }
+
+    /** A late complete command response belongs only to the captured original attempt's evidence. */
+    private suspend fun maintenanceDispatchJson(request: Request, owner: BridgeShutterReleaseSession,
+        evidence: MaintenanceEvidence, accept: (JSONObject) -> Unit) {
+        check(request.method == "POST" && request.url.encodedPath == endpoint("v1", "session", owner.id,
+            "maintenance", evidence.request.action.wireName, "outcome").encodedPath)
+        val caller = currentCoroutineContext()
+        caller[MaintenanceIoContext]?.requireActive?.invoke()
+        caller.ensureActive(); requireCurrentSession(owner)
+        val call = newBridgeCall(request, true)
+        val maximum = TimeUnit.SECONDS.toNanos(15)
+        if (call.timeout().timeoutNanos() == 0L || call.timeout().timeoutNanos() > maximum) {
+            call.timeout().timeout(maximum, TimeUnit.NANOSECONDS)
+        }
+        val watchers = maintenanceCancellationWatchers { call.cancel() }
+        val callbackClaimed = AtomicBoolean(false)
+        try {
+            awaitBridgeBulbCallback<Unit> { complete ->
+                caller.ensureActive(); requireCurrentSession(owner)
+                caller[MaintenanceIoContext]?.requireActive?.invoke()
+                evidence.beforeDispatch()
+                call.enqueue(object : Callback {
+                    override fun onFailure(call: Call, error: IOException) {
+                        if (callbackClaimed.compareAndSet(false, true)) complete(Result.failure(error))
+                    }
+                    override fun onResponse(call: Call, response: Response) {
+                        if (!callbackClaimed.compareAndSet(false, true)) { response.close(); return }
+                        complete(runCatching {
+                            response.use {
+                                requireShootingSettingHttpResponse(response.code, response.headers("Content-Range"),
+                                    response.headers("Content-Length"), response.headers("Transfer-Encoding"))
+                                check(response.code == 200)
+                                val text = response.body?.let { body -> body.byteStream().use {
+                                    readShootingSettingResponseText(it, body.contentLength())
+                                } }.orEmpty()
+                                // Keep original response proof even after the bounded waiter has retired.
+                                // accept captures only this request, engine and evidence; it starts no new I/O.
+                                accept(JSONObject(text))
+                            }
+                        })
+                    }
+                })
+                val cancel: () -> Unit = { call.cancel() }
+                cancel
+            }
+            currentCoroutineContext().ensureActive()
+            caller[MaintenanceIoContext]?.requireActive?.invoke()
+            requireCurrentSession(owner)
+        } finally { watchers.forEach { it.cancel() } }
     }
 
     private fun isMaintenanceCleanupRequest(request: Request, owner: BridgeShutterReleaseSession): Boolean {
