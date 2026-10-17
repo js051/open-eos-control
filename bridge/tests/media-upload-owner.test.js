@@ -478,3 +478,50 @@ for (const operation of ["mutation", "delete", "auto-import"]) {
     assert.equal(c.calls.lists, 1);
   });
 }
+
+for (const uploadState of ["active", "cancelled", "no-preview"]) {
+  test(`upload completion refresh preserves explicit preview: ${uploadState}`, async () => {
+    const c = fixture({ lateResponse: true }), preview = deferred(), listing = deferred();
+    const pendingUpload = c.choose();
+    if (uploadState === "cancelled") c.context.cancelMediaUpload();
+    c.state.mediaScope = "recent";
+    c.state.mediaListingOwner = null;
+    let closes = 0, listingRequests = 0;
+    Object.assign(c.context, {
+      mediaIsVideo: () => false, mediaLibrary: { isPhoto: () => true },
+      beginMediaDialogFocus() {},
+      clearMediaPreview() { c.state.mediaPreviewGeneration = (c.state.mediaPreviewGeneration || 0) + 1; },
+      renderMediaPreviewNavigation() {}, renderMediaSummary() {}, renderMedia() {}, clearMediaThumbnails() {},
+      closeMediaPreview() { closes += 1; c.ui.mediaPreviewDialog.open = false; },
+      api(url) { if (url.endsWith("/preview")) return preview.promise; listingRequests += 1; return listing.promise; },
+      sleep: () => Promise.resolve(), captureError: error => error,
+      MAX_MEDIA_PREVIEW_BYTES: 1024, URL: { createObjectURL: () => "blob:synthetic-preview" },
+      resetMediaPreviewTransform() {},
+    });
+    c.ui.mediaPreviewDialog.open = false;
+    c.ui.mediaPreviewDialog.showModal = () => { c.ui.mediaPreviewDialog.open = true; };
+    c.ui.mediaPreviewImage.decode = async () => {};
+    vm.runInContext(["mediaTransferActive", "cameraInteractionBusy", "openMediaPreview", "refreshMedia", "refreshMediaWhenCurrent"]
+      .map(extract).join("\n"), c.context);
+    const item = { id: "synthetic-preview", name: "NEXT.JPG", previewAvailable: true };
+    const review = uploadState === "no-preview" ? null : c.context.openMediaPreview(item);
+    const generation = c.state.mediaPreviewGeneration;
+    pendingUpload.reply(); await tick(); await tick();
+    assert.equal(c.state.mediaUpload, null, "Read-only review must not fence upload settlement");
+    assert.equal(c.state.mediaUploadResult.outcome, "confirmed");
+    assert.equal(listingRequests, 1, "The completion refresh still runs with or without review");
+    if (review) assert.equal(closes, 0, "An optional upload refresh must never close explicit review");
+    // A new listing that omits the previewed item still cannot retire its owner.
+    listing.resolve({ items: [] }); await tick(); await tick();
+    if (review) {
+      assert.equal(c.ui.mediaPreviewDialog.open, true);
+      assert.equal(c.state.mediaPreviewItem, item);
+      assert.equal(c.state.mediaPreviewGeneration, generation);
+      preview.resolve({ type: "image/jpeg", size: 3 }); await review;
+      assert.equal(c.ui.mediaPreviewImage.src, "blob:synthetic-preview");
+      assert.equal(c.ui.mediaPreviewImage.hidden, false);
+    } else assert.equal(c.ui.mediaPreviewDialog.open, false);
+    assert.equal(c.state.mediaListingOwner, null);
+    assert.equal(c.state.mediaUpload, null);
+  });
+}
