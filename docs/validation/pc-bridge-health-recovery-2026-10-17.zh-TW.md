@@ -22,7 +22,7 @@
 - 完成後共 7 個新增 cases，覆蓋永不完成的 fetch、明確新 retry、舊成功／失敗對新 pending／completed read 的隔離、body 卡住，以及同步 abort rejection 不可蓋掉 timeout。
 - `node bridge/tests/connection-guidance.test.js`：**104 pass／0 fail／0 cancelled／0 skipped**，包含 97 個既有 cases。既有 production API case 原本自行載入 ApiError，本次共用 harness 改為先載入該類別，因此移除該 case 重複宣告；原 API 狀態與取消斷言完整保留。
 - 兩個變更產品 JS 的 `node --check`、`git diff --check` 通過。既有 test:modules 已包含此測試檔，不增加重複註冊。
-- 本 worker 沒有重跑已綠的完整模組矩陣；沒有安裝、下載或操作真相機。browser／Windows／Android／iOS native 證據仍需由相應 exact source 的驗證另記，不能以合成 DOM 代稱。
+- 整合前因新增 health caller 的 timer/render dependencies，執行一次完整 `npm --prefix bridge run test:modules`：3626 pass／0 fail／0 cancelled／0 skipped（51個Node runner summaries），另含既有direct-assert scripts；exit0。受驗來源 `ab3cc26f`，整合後Bridge source diff為空。沒有安裝、下載或操作真相機。browser／Windows／Android／iOS native 證據仍需由相應 exact source 的驗證另記，不能以合成 DOM 代稱。
 
 ## 範圍與 Release assessment
 
