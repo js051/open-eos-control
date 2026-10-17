@@ -1,0 +1,33 @@
+JUnit version 4.13.2
+.E.E.E.E
+Time: 16.524
+There were 4 failures:
+1) cancelledSessionDeleteMustReturnWhileExecuteIgnoresCancel(dev.openeos.control.data.BaselineMaintenanceCleanupTest)
+java.lang.AssertionError: Exact production close must return after caller cancellation while its transport/body still ignores cancel
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.data.MaintenanceCleanupTestKt.cancelledCleanupProbe(MaintenanceCleanupTest.kt:47)
+	at dev.openeos.control.data.MaintenanceCleanupTestKt.access$cancelledCleanupProbe(MaintenanceCleanupTest.kt:1)
+	at dev.openeos.control.data.BaselineMaintenanceCleanupTest.cancelledSessionDeleteMustReturnWhileExecuteIgnoresCancel(MaintenanceCleanupTest.kt:81)
+2) realFifteenSecondStopDeadlineMustReturnWhileBodyIgnoresCancel(dev.openeos.control.data.BaselineMaintenanceCleanupTest)
+java.lang.AssertionError: After the real 15-second Stop timeout, exact production close must return before the ignored-cancel body finishes
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.data.BaselineMaintenanceCleanupTest.realFifteenSecondStopDeadlineMustReturnWhileBodyIgnoresCancel(MaintenanceCleanupTest.kt:76)
+3) cancelledStrictStopMustReturnWhileExecuteIgnoresCancel(dev.openeos.control.data.BaselineMaintenanceCleanupTest)
+java.lang.AssertionError: Exact production close must return after caller cancellation while its transport/body still ignores cancel
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.data.MaintenanceCleanupTestKt.cancelledCleanupProbe(MaintenanceCleanupTest.kt:47)
+	at dev.openeos.control.data.MaintenanceCleanupTestKt.access$cancelledCleanupProbe(MaintenanceCleanupTest.kt:1)
+	at dev.openeos.control.data.BaselineMaintenanceCleanupTest.cancelledStrictStopMustReturnWhileExecuteIgnoresCancel(MaintenanceCleanupTest.kt:80)
+4) cancelledBodyReadMustReturnWhileBodyIgnoresCancel(dev.openeos.control.data.BaselineMaintenanceCleanupTest)
+java.lang.AssertionError: Exact production close must return after caller cancellation while its transport/body still ignores cancel
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.data.MaintenanceCleanupTestKt.cancelledCleanupProbe(MaintenanceCleanupTest.kt:47)
+	at dev.openeos.control.data.MaintenanceCleanupTestKt.access$cancelledCleanupProbe(MaintenanceCleanupTest.kt:1)
+	at dev.openeos.control.data.BaselineMaintenanceCleanupTest.cancelledBodyReadMustReturnWhileBodyIgnoresCancel(MaintenanceCleanupTest.kt:82)
+
+FAILURES!!!
+Tests run: 4,  Failures: 4
