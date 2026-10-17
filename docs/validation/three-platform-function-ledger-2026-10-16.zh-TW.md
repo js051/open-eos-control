@@ -350,3 +350,10 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - 上述仍是原功能恢復與三端對齊增量，不是原89列全過。另在核對Android held-AF mutex／registered job／Disconnect的精確同類等待，不能將本批still capture修正擴張成所有focus cleanup已完成。
 
 22:31 UTC Android held-AF精確複核：Start與NonCancellable Stop原本皆經recoveryRead=true，設有min(existing,5秒)完整Call timeout，涵蓋response與body；三層join/mutex是現有安全順序。尚無足以支持ownership重寫的實際production反例，未因iOS差異就強行改Android。既有native取消/Stop測試仍未在本環境執行，保留平台驗證缺口。
+
+
+## 22:53 UTC G08/G10 已確認刪除與晚清單
+
+- [PC listing receipt fence](pc-delete-listing-receipt-2026-10-17.md)：Refresh 在 DELETE pending 期間取得的舊清單，曾在 204 後還原已刪項目。精確 production 基準 3 案紅，固定 3867 node:test 與15 static 通過；只在同 session 的當前 listing owner 記錄已確認 ID，保留 raw overflow 與其他項目。
+- 真 Firefox 基準最終 DOM 收據重現還原，固定版畫面／收據只留 KEEP；後續新 Refresh 同 ID 正常返回。基準最後畫面因 owned-process deadline 未捕捉，未拿較早 screenshot 冒充最終畫面。
+- Android／iOS 來源核對已有 operation/listing admission 與退休規則排除此重疊，沒有無證據重寫；兩端原生、真卡片／相機仍未驗。此為既有媒體功能修正，原89列平台驗收未完成。
