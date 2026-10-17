@@ -1147,6 +1147,14 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
         case .close, .stopEvents, .shutterRelease, .frame:
             break
         }
+        if request.url!.path.contains("/maintenance/control/liveview/") {
+            let payload = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+            if payload["prepareRestore"] as? Bool == true { object["restoreToken"] = "synthetic_restore_permit_0001" }
+            if let token = payload["restoreToken"] as? String {
+                object["restoreToken"] = token; object["restoreOutcome"] = wire == .liveViewStart ? "started" : "stopped"
+                object["liveViewStopUnconfirmed"] = false
+            }
+        }
         if let gate = plan.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
         if let error = plan.error { throw URLError(error) }
         if wire == .frame {

@@ -218,10 +218,14 @@ public actor DesktopBridgeClient {
         let request: URLRequest
         var acceptsLegacyStop = false
         var maintenanceOwned = false
+        var restoreToken: String?
+        var restoreWarningRevision: UUID?
     }
     private var liveViewStop: LiveViewStopObligation?
     private var liveViewStopUnconfirmed = false
     private var liveViewRevision = UUID()
+    // Only a newly observed camera warning advances this revision, never retry failures.
+    private var liveViewWarningRevision = UUID()
     private var liveViewMaintenanceID: UUID?
     private var maintenanceLiveViewControlID: UUID?
     private var lastLiveViewRequest: LiveViewRequest?
@@ -894,7 +898,8 @@ public actor DesktopBridgeClient {
                 }
                 try Task.checkCancellation()
                 guard generation == sessionGeneration, !isClosing else { throw DesktopBridgeError.sessionChanged }
-                try await stopMaintenanceLiveView(attempt, generation: generation)
+                try await stopMaintenanceLiveView(attempt, generation: generation,
+                    prepareRestore: intent.operation == .sensorCleaning && !intent.autoPowerOff && attempt.liveViewRestoreRequest != nil)
                 try attempt.checkActive()
                 attempt.stop(needsStop ? .confirmed : .notRequired)
             } catch { attempt.stop(.unknown); throw error }
@@ -1031,7 +1036,7 @@ public actor DesktopBridgeClient {
     /// Dedicated control routes seal the Bridge-to-camera hop as well. Ordinary
     /// Stop helpers are deliberately not joined: their detached work is not owned
     /// by this cancellable maintenance action.
-    private func stopMaintenanceLiveView(_ attempt: CameraMaintenanceAttempt, generation: UUID, allowClosing: Bool = false) async throws {
+    private func stopMaintenanceLiveView(_ attempt: CameraMaintenanceAttempt, generation: UUID, allowClosing: Bool = false, prepareRestore: Bool = false) async throws {
         try attempt.checkActive()
         guard generation == sessionGeneration, (!isClosing || allowClosing), maintenanceLiveViewControlID == nil,
               liveViewStartTask == nil, liveViewStopTask == nil, liveViewReleaseTask == nil else {
@@ -1039,11 +1044,17 @@ public actor DesktopBridgeClient {
         }
         guard var stop = liveViewStop else { return }
         guard stop.generation == generation else { throw DesktopBridgeError.sessionChanged }
-        stop.maintenanceOwned = true; liveViewStop = stop
+        stop.maintenanceOwned = true
+        // A second journey must prepare a new permit, never replay its previous Start owner.
+        // If prepare is lost, explicit cleanup must be global to revoke the unknown permit.
+        if prepareRestore { stop.restoreToken = nil; stop.restoreWarningRevision = nil }
+        liveViewStop = stop
         let id = UUID(), revision = liveViewRevision
         let url = try sessionEndpoint(["maintenance", "control", "liveview", "stop"])
         var request = makeRequest(url: url, method: "POST", accept: "application/json", timeoutInterval: 15)
-        request.httpBody = Data("{}".utf8)
+        let payload: [String: Any] = prepareRestore ? ["prepareRestore": true]
+            : stop.restoreToken.map { ["restoreToken": $0] } ?? [:]
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         maintenanceLiveViewControlID = id
         defer { if maintenanceLiveViewControlID == id { maintenanceLiveViewControlID = nil } }
@@ -1052,10 +1063,45 @@ public actor DesktopBridgeClient {
             let body = try Self.maintenanceBody(response, method: "POST")
             try attempt.checkActive()
             guard generation == sessionGeneration, (!isClosing || allowClosing), maintenanceLiveViewControlID == id,
-                  liveViewStop?.id == stop.id, liveViewRevision == revision,
-                  Self.strictBool(body["active"]) == false,
+                  liveViewStop?.id == stop.id else { throw DesktopBridgeError.liveViewStopUnconfirmed }
+            if let token = stop.restoreToken {
+                guard body["restoreToken"] as? String == token,
+                      let outcome = body["restoreOutcome"] as? String,
+                      ["stopped", "cancelled-before-start"].contains(outcome) else {
+                    throw DesktopBridgeError.liveViewStopUnconfirmed
+                }
+                let receiptOnly = body["active"] == nil && body["liveViewStopUnconfirmed"] == nil
+                if receiptOnly {
+                    // A terminal receipt discharges this Start only, not fresh camera evidence.
+                    if stop.restoreWarningRevision != liveViewWarningRevision || liveViewRevision != revision {
+                        var fresh = try makeLiveViewStop()
+                        fresh.maintenanceOwned = true
+                        liveViewStop = fresh; liveViewStopUnconfirmed = true; liveViewRevision = UUID()
+                        throw DesktopBridgeError.liveViewStopUnconfirmed
+                    }
+                    liveViewStop = nil; liveViewStopUnconfirmed = false; liveViewRevision = UUID()
+                    return
+                }
+                guard outcome == "stopped" else { throw DesktopBridgeError.liveViewStopUnconfirmed }
+            }
+            guard Self.strictBool(body["active"]) == false,
                   Self.strictBool(body["liveViewStopUnconfirmed"]) == false else {
                 throw DesktopBridgeError.liveViewStopUnconfirmed
+            }
+            guard liveViewRevision == revision else {
+                if stop.restoreToken != nil {
+                    // The physical owned Stop completed, but its response lost warning ownership.
+                    // Do not spend another explicit retry replaying its now-terminal receipt.
+                    var fresh = try makeLiveViewStop()
+                    fresh.maintenanceOwned = true
+                    liveViewStop = fresh; liveViewStopUnconfirmed = true; liveViewRevision = UUID()
+                }
+                throw DesktopBridgeError.liveViewStopUnconfirmed
+            }
+            if prepareRestore {
+                // The additive permit gates Restore, not affirmative physical Stop or
+                // the maintenance command on an older Bridge without permit support.
+                try attempt.captureMaintenanceRestoreToken(Self.validMaintenanceRestoreToken(body["restoreToken"]))
             }
             liveViewStop = nil; liveViewStopUnconfirmed = false; liveViewRevision = UUID()
         } catch {
@@ -1067,6 +1113,13 @@ public actor DesktopBridgeClient {
         }
     }
 
+    private static func validMaintenanceRestoreToken(_ value: Any?) -> String? {
+        guard let token = value as? String, (24...64).contains(token.utf8.count),
+              token.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0)
+                  || (48...57).contains($0) || $0 == 45 || $0 == 95 }) else { return nil }
+        return token
+    }
+
     public func restoreMaintenanceLiveView(_ attempt: CameraMaintenanceAttempt) async throws {
         try attempt.bindOwner(sessionGeneration)
         try attempt.validateRestore()
@@ -1076,16 +1129,22 @@ public actor DesktopBridgeClient {
               liveViewMaintenanceID == nil, maintenanceLiveViewControlID == nil,
               liveViewStartTask == nil, liveViewStopTask == nil, liveViewReleaseTask == nil,
               liveViewStop == nil, !liveViewStopUnconfirmed else { throw DesktopBridgeError.liveViewStopUnconfirmed }
+        guard let restoreToken = attempt.maintenanceRestoreToken else {
+            throw DesktopBridgeError.invalidResponse("Live View restore permission is unavailable or already used. Keep monitoring stopped and reconnect; update Bridge if it does not support restore permissions.")
+        }
         let url = try sessionEndpoint(["maintenance", "control", "liveview", "start"])
         try validateMutation(url: url, method: "POST")
         var request = makeRequest(url: url, method: "POST", accept: "application/json", timeoutInterval: 15)
         // Server restores its same-session actual source/size/FPS captured before
         // maintenance Stop. This payload never authorizes AUTO renegotiation.
         request.httpBody = try JSONSerialization.data(withJSONObject: ["fps": frozen.fps,
-            "size": frozen.size.rawValue.uppercased(), "source": Self.bridgeValue(frozen.source)])
+            "size": frozen.size.rawValue.uppercased(), "source": Self.bridgeValue(frozen.source),
+            "restoreToken": restoreToken])
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         var stop = try makeLiveViewStop()
         stop.maintenanceOwned = true
+        stop.restoreToken = restoreToken
+        stop.restoreWarningRevision = liveViewWarningRevision
         let id = UUID(), generation = sessionGeneration
         liveViewMaintenanceID = id; maintenanceLiveViewControlID = id
         ordinaryMutationCount += 1
@@ -1095,6 +1154,7 @@ public actor DesktopBridgeClient {
             if maintenanceLiveViewControlID == id { maintenanceLiveViewControlID = nil }
         }
         try requireMaintenanceMutationSafety(attempt)
+        try attempt.consumeMaintenanceRestoreToken(restoreToken)
         liveViewStop = stop; liveViewRevision = UUID()
         let revision = liveViewRevision
         do {
@@ -1103,6 +1163,8 @@ public actor DesktopBridgeClient {
             try requireMaintenanceMutationSafety(attempt)
             guard generation == sessionGeneration, !isClosing, maintenanceLiveViewControlID == id,
                   liveViewStop?.id == stop.id, liveViewRevision == revision, !liveViewStopUnconfirmed,
+                  body["restoreToken"] as? String == restoreToken,
+                  body["restoreOutcome"] as? String == "started",
                   Self.strictBool(body["active"]) == true,
                   Self.strictBool(body["liveViewStopUnconfirmed"]) == false,
                   let rawSource = body["source"] as? String,
@@ -2594,7 +2656,14 @@ public actor DesktopBridgeClient {
         }
         if scopedToSession, liveViewStatusRevision == liveViewRevision,
            Self.strictBool(object["liveViewStopUnconfirmed"]) == true {
-            if liveViewStop == nil { liveViewStop = try makeLiveViewStop() }
+            liveViewWarningRevision = UUID()
+            if liveViewStop == nil {
+                var warning = try makeLiveViewStop()
+                // A terminal receipt may retire the prior Start while this maintenance
+                // lifecycle still owns recovery. Keep new warning cleanup bounded/strict.
+                warning.maintenanceOwned = maintenanceLifecycleOwned
+                liveViewStop = warning
+            }
             liveViewStopUnconfirmed = true
             liveViewStop?.acceptsLegacyStop = false
             liveViewRevision = UUID()

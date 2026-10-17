@@ -317,7 +317,7 @@ private actor AppLiveViewPeer: CameraHTTPTransport {
             if holdFrame { holdFrame = false; await withCheckedContinuation { gate = $0 } }
             return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: frameData)
         }
-        let body: [String: Any]
+        var body: [String: Any]
         var status = 200
         if path == "/health" { body = ["ok": true, "service": "open-eos-control-bridge", "version": "0.13.0"] }
         else if path == "/v1/session" { body = ["id": owner, "engine": "ccapi"] }
@@ -353,6 +353,14 @@ private actor AppLiveViewPeer: CameraHTTPTransport {
                 "autoPowerOff": payload["autoPowerOff"]!, "responseEvidence": "response-received", "clockReadEvidence": "not-applicable",
                 "clockReference": NSNull(), "clockObservation": NSNull()]
         } else { throw URLError(.unsupportedURL) }
+        if path.contains("/maintenance/control/liveview/"), status == 200 {
+            let payload = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+            if payload["prepareRestore"] as? Bool == true { body["restoreToken"] = "synthetic_restore_permit_0001" }
+            if let token = payload["restoreToken"] as? String {
+                body["restoreToken"] = token; body["restoreOutcome"] = path.hasSuffix("/start") ? "started" : "stopped"
+                body["liveViewStopUnconfirmed"] = false
+            }
+        }
         return CameraHTTPResponse(statusCode: status, headers: ["content-type": "application/json"],
             body: try JSONSerialization.data(withJSONObject: body))
     }

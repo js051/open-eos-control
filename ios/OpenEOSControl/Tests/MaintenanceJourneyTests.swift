@@ -333,6 +333,11 @@ private actor MaintenanceAppPeer: CameraHTTPTransport {
             if heldControl == suffix { heldControl = nil; await withCheckedContinuation { gate = $0 } }
             body = ["active": suffix.hasSuffix("/start"), "liveViewStopUnconfirmed": false,
                     "source": "CCAPI_JPEG_POLLING", "size": "MEDIUM", "requestedFps": 6]
+            let payload = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+            if payload["prepareRestore"] as? Bool == true { body["restoreToken"] = "synthetic_restore_permit_0001" }
+            if let token = payload["restoreToken"] as? String {
+                body["restoreToken"] = token; body["restoreOutcome"] = suffix.hasSuffix("/start") ? "started" : "stopped"
+            }
         } else if suffix.hasPrefix("maintenance/") {
             let operation = String(suffix.split(separator: "/")[1])
             let sample: [String: Any] = ["epochSeconds": 1_700_000_000, "utcOffsetMinutes": 480, "daylightSaving": false]

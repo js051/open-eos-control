@@ -92,6 +92,8 @@ public final class CameraMaintenanceAttempt: @unchecked Sendable {
     private var owner: UUID?
     private var restoreRequest: LiveViewRequest?
     private var restoreIncludesSize = true
+    // Bridge session-local permit; direct CCAPI never reads or writes this value.
+    private var bridgeRestoreToken: String?
     private var mutationSafetyRevoked = false
     public init(operation: CameraMaintenanceOperation, autoPowerOff: Bool = false) {
         outcome = CameraMaintenanceOutcome(operation: operation, autoPowerOff: autoPowerOff)
@@ -105,6 +107,17 @@ public final class CameraMaintenanceAttempt: @unchecked Sendable {
     func configureLiveViewRestoreRequest(_ request: LiveViewRequest?, includesSize: Bool = true) {
         lock.lock(); defer { lock.unlock() }
         if outcome.commandEvidence == .notSent { restoreRequest = request; restoreIncludesSize = includesSize }
+    }
+    var maintenanceRestoreToken: String? { lock.lock(); defer { lock.unlock() }; return bridgeRestoreToken }
+    func captureMaintenanceRestoreToken(_ token: String?) throws {
+        lock.lock(); defer { lock.unlock() }
+        guard !cancelled, outcome.commandEvidence == .notSent else { throw CancellationError() }
+        bridgeRestoreToken = token
+    }
+    func consumeMaintenanceRestoreToken(_ token: String) throws {
+        lock.lock(); defer { lock.unlock() }
+        guard !cancelled, !mutationSafetyRevoked, bridgeRestoreToken == token else { throw CancellationError() }
+        bridgeRestoreToken = nil
     }
     func bindOwner(_ value: UUID) throws {
         lock.lock(); defer { lock.unlock() }
