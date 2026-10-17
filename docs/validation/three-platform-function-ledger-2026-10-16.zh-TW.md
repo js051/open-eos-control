@@ -308,3 +308,9 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 仍未宣稱整個maintenance Disconnect有界：ViewModel先join一般maintenance dispatch/read/restore的caller鏈，以及physical AF cleanup另有邊界；下一段先驗證精確入口反例。完整Android／Compose／實際OkHttp／裝置與iOS同等修正仍未完成。另校正前段metadata #56分類為原G10。
 
 21:08 UTC G10/#78＋G08/#75：[上傳晚收據／預覽接續](pc-upload-preview-continuation-2026-10-17.zh-TW.md) 真Firefox與原生picker補驗：cancel unknown→明確Preview→late201 confirmed＋空listing不關預覽，僅一個write。合成network邊界清楚分列，非新增功能或真機上傳證據。
+
+## 21:25 UTC G07/G13 LUT 與 G11/G13 maintenance dispatch
+
+- G07/#62、G13/#122：[LUT 鍵盤接續](pc-monitor-lut-keyboard-2026-10-17.zh-TW.md) 真 Firefox baseline 重現 Remove 隱藏後 BODY 焦點；固定版保留 Load 焦點，下一次 Enter 原生 picker 實際開啟。完整 modules 3823、static 15、focused 58 通過；取消與 settlement 分支僅 host 覆蓋，未宣稱 GPU 色彩或三端驗收。
+- G11/G13：[maintenance dispatch deadline](../android-maintenance-dispatch-deadline.md) 精確 submitMaintenance→operation job→dispatch→Disconnect join 基準兩案真紅，包括真 15 秒 body 仍阻塞。固定 62＋5＋前 cleanup 16＋前 Bulb 59＝142 host runtime、40 source checks 通過。保留原 join、receipt/history、較新 recovery 與 replacement session；晚 callback 只更新捕捉的原 evidence。
+- bridge 與已驗 PC source、android 與已驗 Android source 整合後 tree 相同，沒有以未變更回歸重跑充數。一般 maintenance read／preview restore、其他 operation join、physical AF 與 iOS caller 仍需獨立精確審核；完整 Android／Compose／實際 OkHttp socket／裝置未驗。原 89 列的大目標仍未完成。
