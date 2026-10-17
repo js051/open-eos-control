@@ -222,3 +222,7 @@
 
 - [原列 #116 Bridge shutdown](bridge-shutdown-drain-2026-10-17.zh-TW.md)：普通 OS/provider/子程序 timeout 不再跳過後續 session close，最後保留第一個原始錯誤；BaseException 中斷不改。基準7 fail/4 pass，修正與相鄰host測試共39 pass；包含production SubprocessByteStream、後續CcapiSession合成transport與ASGI lifespan，非物理相機release。
 - [原列 #122 health recovery](pc-bridge-health-recovery-2026-10-17.zh-TW.md)：health fetch/body卡住時15秒deadline退回可明確重試；舊回覆不能覆寫新attempt。104個connection guidance host cases通過，包括7新反例與97既有case；全域API不改。Windows standalone、真正EDSDK、mobile native、OS picker與真機驗收界線保留。
+
+## 2026-10-17 G13 初始化可選視訊列舉
+
+[原列 #122/#123 初始化 readiness](pc-initialization-readiness-2026-10-17.zh-TW.md)：可選 enumerateDevices 不再擋住必要 Bridge health／既有 initial scan。仍先等 health 並遵守能力／token gate，保留 local-video 原有晚回覆 owner 與錯誤處理。新production initialize harness在基準7 fail/1 pass，修正後含既有preview案例16/16；這不把前一筆3626完整模組結果追溯成此新source全量通過。Browser合成恢復旅程另外記錄，native／真輸入未驗。
