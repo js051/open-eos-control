@@ -1,0 +1,6 @@
+{
+  "browserHead": "244da0169de76b591530db8df61efa12a9133806",
+  "appJsSha256": "f1806207933b70ef4b896bf7c11b3a22d9b01c5f399aac442ba4465147964b5e",
+  "scope": "Real cloud Firefox UI with synthetic fetch endpoints; no physical camera",
+  "guard": "Short-run existing profile, start free disk >3.9GiB; stop <3.85GiB, MemAvailable <1GiB,15min; actual run95s"
+}

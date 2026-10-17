@@ -272,3 +272,11 @@
 - G08/G09/G10/G13，原#56/#73/#75/#76/#122：[媒體dialog焦點](pc-media-dialog-focus-2026-10-17.zh-TW.md)。真Firefox基準Details metadata、Preview Download重繪後關窗焦點掉BODY；第一輪修正實測仍失敗而未交付，補native close保留內部焦點時序後，最終`abbcde3b`五畫面證實Escape回同ID同角色卡片且Enter重開，下載503仍留Close。
 - G09/G10，原#76/#78/#79：[新媒體操作隔離舊upload completion](pc-single-download-owner-2026-10-17.zh-TW.md)。單檔下載、metadata mutation、delete、foreground import成功admission才退休舊publication；保留原receipt，拒絕admission不改原語意。可選upload completion refresh保留使用者已開preview，不新增delete全域鎖。
 - 最終產品source `abbcde3bd247db8ee277fafe8f34edc2564168b6`：完整PC modules3729/3729（53組node:test報告＋其他direct scripts）、staticUI15/15；54新增回歸。Firefox19:18:45 terminal。其餘native／Windows／真相機／外部儲存／全部89列仍依原界線，沒有新APK、iOS包或Windows installer，沒有三端全通過或release宣稱。
+
+## 19:49 UTC Bulb 停止責任的增量
+
+- G04／#65：libgphoto2 已確證 Press Full lost ACK＋cleanup失敗後Stop不重送release，改為保存原immutable release、unknown停止責任、明確Stop／close重試；新增27案基準24 fail／3 pass→27 pass。詳見 [gphoto停止責任](gphoto-bulb-stop-ownership-2026-10-17.zh-TW.md)。
+- G04／#65、G13／#122：PC malformed502未知結果保留stop-only；只讀恢復15秒界限不再永久卡busy。新增9案，真Firefox前三個有界旅程通過，第四張是pending Start仍無可按Stop的失敗基準，詳見 [PC回應恢復](pc-bulb-response-recovery-2026-10-17.zh-TW.md)。
+- Pending Start的HTTP順序仍需owner cancellation契約；另已發現gphoto半按／獨立AF cleanup缺少saved retry責任，尚未由本批修正。這些是具體仍可開發的原功能缺口，不能寫成只待native驗收。
+- G13完整四區metadata在Firefox200%／CSS594×381實看：dialog bottom361、Download/Delete bottom354，末端按鈕完整；未確認裁切，未為候選修改CSS。證據保留本地，不重複計為功能交付。
+- 仍無mobile native、真相機或新installer證據；原89列平台缺口不因host增量改為全過。
