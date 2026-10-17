@@ -114,3 +114,21 @@ for (const kind of ["Preview", "Details"]) {
     c.context[`closeMedia${kind}`](); assert.equal(c.document.activeElement, original);
   });
 }
+
+for (const kind of ["Preview", "Details"]) {
+  test(`${kind}: native close retaining focus inside the just-closed dialog restores the current card`, () => {
+    const c = fixture(), original = c.button(), replacement = c.button();
+    c.open(kind, original); original.isConnected = false; c.cards([replacement]);
+    // Firefox can retain the active Close element synchronously after close().
+    c.ui[`media${kind}Dialog`].close = function () { this.open = false; };
+    c.context[`closeMedia${kind}`]();
+    assert.equal(c.document.activeElement, replacement);
+  });
+  test(`${kind}: native close focusing a different dialog cannot authorize restoration`, () => {
+    const c = fixture(), original = c.button(); c.open(kind, original);
+    const other = c.button("other-dialog");
+    c.ui[`media${kind}Dialog`].close = function () { this.open = false; other.focus(); };
+    c.context[`closeMedia${kind}`]();
+    assert.equal(c.document.activeElement, other);
+  });
+}

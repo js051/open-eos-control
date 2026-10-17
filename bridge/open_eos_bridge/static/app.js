@@ -9460,12 +9460,14 @@
     };
   }
 
-  function restoreMediaDialogFocus(owner, eligible) {
+  function restoreMediaDialogFocus(owner, eligible, closedDialog) {
     if (!eligible || !owner || owner.session !== state.session ||
         state.mediaPreviewFocusOwner || state.mediaDetailsFocusOwner ||
         document.querySelector("dialog[open]")) return;
-    // Native close may already restore the original; never override another focus choice.
-    if (document.activeElement !== document.body && document.activeElement !== owner.original) return;
+    // Firefox may retain Close as activeElement synchronously after native close().
+    // Only the exact retired dialog can supply that focus; never override a newer choice.
+    const retainedDialogFocus = closedDialog && !closedDialog.open && closedDialog.contains(document.activeElement);
+    if (document.activeElement !== document.body && document.activeElement !== owner.original && !retainedDialogFocus) return;
     const cardInvoker = Boolean(owner.itemId && owner.role);
     const currentCards = cardInvoker && state.activeView === "media" &&
       state.mediaRenderOwner?.session === state.session && state.media.some(item => item.id === owner.itemId)
@@ -9505,7 +9507,7 @@
     state.mediaDetailsFocusOwner = null;
     if (dialog?.open) dialog.close();
     clearMediaDetails();
-    if (restoreFocus && owner) restoreMediaDialogFocus(owner, eligible);
+    if (restoreFocus && owner) restoreMediaDialogFocus(owner, eligible, dialog);
   }
 
   async function openMediaDetails(item, inheritedFocus = null) {
@@ -9561,7 +9563,7 @@
     state.mediaPreviewFocusOwner = null;
     if (dialog?.open) dialog.close();
     clearMediaPreview();
-    if (restoreFocus && owner) restoreMediaDialogFocus(owner, eligible);
+    if (restoreFocus && owner) restoreMediaDialogFocus(owner, eligible, dialog);
   }
 
   async function openMediaPreview(item) {
