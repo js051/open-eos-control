@@ -208,7 +208,7 @@ for (const method of ["sleepCamera", "cleanSensor"]) {
 }
 test("non-poweroff cleaning holds preview until an explicit fresh-read restore", async () => {
   const f = fixture(); const operation = f.cleanSensor({}, false);
-  f.pending[0].resolve({ active: false, liveViewStopUnconfirmed: false }); await turns();
+  f.pending[0].resolve({ active: false, liveViewStopUnconfirmed: false, restoreToken: RESTORE_TOKEN }); await turns();
   assert.match(f.requests[1].url, /maintenance\/sensor-cleaning\/outcome$/);
   f.pending[1].resolve({ version: 1, engine: "ccapi", operation: "sensor-cleaning", autoPowerOff: false,
     responseEvidence: "response-received", clockReference: null, clockObservation: null, clockReadEvidence: "not-applicable" });
@@ -221,7 +221,7 @@ test("non-poweroff cleaning holds preview until an explicit fresh-read restore",
   assert.match(f.requests[3].url, /maintenance\/control\/liveview\/start$/);
   assert.equal(f.requests[3].options.payload.fps, 15);
   assert.equal(f.requests[3].options.payload.source, "CCAPI_RTP");
-  f.pending[3].resolve({ active: true, liveViewStopUnconfirmed: false }); assert.equal(await restore, true);
+  f.pending[3].resolve({ active: true, liveViewStopUnconfirmed: false, restoreToken: RESTORE_TOKEN, restoreOutcome: "started" }); assert.equal(await restore, true);
   assert.equal(f.state.liveActive, true);
 });
 for (const reply of [null, {}, [], { active: false }, { active: "true" }]) {
@@ -372,12 +372,12 @@ test("active Start reply with explicit stop warning never publishes preview or s
 
 test("cancel after restore Start dispatch retains stop responsibility and cannot publish late preview", async () => {
   const f=fixture(),action=f.cleanSensor({},false);
-  f.pending[0].resolve({active:false,liveViewStopUnconfirmed:false});await turns();
+  f.pending[0].resolve({active:false,liveViewStopUnconfirmed:false,restoreToken:RESTORE_TOKEN});await turns();
   f.pending[1].resolve({version:1,engine:'ccapi',operation:'sensor-cleaning',autoPowerOff:false,responseEvidence:'response-received',clockReference:null,clockObservation:null,clockReadEvidence:'not-applicable'});await action;
   const record=f.state.maintenanceHistory[0],restore=f.restoreMaintenance(record);
   f.pending[2].resolve({version:1,engine:'ccapi',operation:'sensor-cleaning',observationEvidence:'reachable',clockObservation:null});await turns();
   assert.match(f.requests[3].url,/liveview\/start$/);f.cancelMaintenance();
-  f.pending[3].resolve({active:true});assert.equal(await restore,false);
+  f.pending[3].resolve({active:true,liveViewStopUnconfirmed:false,restoreToken:RESTORE_TOKEN,restoreOutcome:"started"});assert.equal(await restore,false);
   assert.equal(f.state.liveActive,false);assert.equal(f.liveViewStopRequired(),true);
   assert.equal(f.state.liveViewStopOwner.stopUnconfirmed,true);assert.equal(record.restoreEvidence,'unknown');
   assert.equal(f.state.maintenanceHold,record);assert.equal(f.requests.length,4);
@@ -428,11 +428,12 @@ test('same-owner newer Stop warning cannot be cleared by late strict Stop proof'
 });
 test('same-owner newer Stop warning prevents late maintenance Restore Start publication', async () => {
   const { f, record } = maintenanceHeldFixture(); f.state.liveViewStopOwner = null;
+  record.restoreToken = RESTORE_TOKEN;
   const invocation = { record, mode: 'restore', restoreAdmitted: true, cancelled: false, controller: new AbortController() };
   f.state.maintenanceOwner = invocation;
   const start = f.startLiveView({ maintenanceRestore: invocation });
   f.adoptCameraStatus({ liveViewStopUnconfirmed: true }, f.state.session, f.state.liveViewStopRevision);
-  f.pending[0].resolve({ active: true, liveViewStopUnconfirmed: false }); await start;
+  f.pending[0].resolve({ active: true, liveViewStopUnconfirmed: false, restoreToken: RESTORE_TOKEN, restoreOutcome: "started" }); await start;
   assert.equal(f.state.liveActive, false); assert.equal(f.state.liveViewStopOwner.stopUnconfirmed, true);
   assert.equal(f.state.liveViewStopOwner.maintenanceRecord, record);
 });
@@ -534,3 +535,119 @@ test("repeated Stop inherits pending Start before any source Stop can dispatch",
   f.pending[1].resolve({ active: false, liveViewStopUnconfirmed: false });
   assert.equal(await stopC, true); assert.equal(f.liveViewStopRequired(), false);
 });
+
+const RESTORE_TOKEN = "synthetic_restore_owner_000001";
+test("maintenance initial Stop explicitly prepares a restore permit only for retained cleaning preview", async () => {
+  const f = fixture(); const action = f.cleanSensor({}, false);
+  const payload = f.requests[0].options.payload;
+  f.pending[0].reject(new Error("synthetic stop failed")); await action;
+  assert.equal(payload?.prepareRestore, true);
+});
+test("restore without a valid saved permit never dispatches Start", async () => {
+  const { f, record } = maintenanceHeldFixture(); f.state.liveViewStopOwner = null;
+  const invocation = {record, mode: "restore", restoreAdmitted: true, cancelled: false, controller: new AbortController()};
+  f.state.maintenanceOwner = invocation;
+  const start = f.startLiveView({maintenanceRestore: invocation});
+  if (f.pending[0]) f.pending[0].resolve({active: true, liveViewStopUnconfirmed: false});
+  await start;
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.state.liveActive, false);
+});
+test("owned maintenance cleanup Stop sends the original immutable restore permit", async () => {
+  const { f, record } = maintenanceHeldFixture(); record.restoreToken = RESTORE_TOKEN;
+  f.state.liveViewStopOwner.restoreToken = RESTORE_TOKEN;
+  const stop = f.stopLiveView();
+  const payload = f.requests[0].options.payload;
+  f.pending[0].resolve({active: false, liveViewStopUnconfirmed: false, restoreToken: RESTORE_TOKEN, restoreOutcome: "stopped"});
+  await stop;
+  assert.equal(payload?.restoreToken, RESTORE_TOKEN);
+});
+for (const outcome of ["stopped", "cancelled-before-start"]) {
+  test(`matching ${outcome} receipt clears only the pending owned restore`, async () => {
+    const {f, record} = maintenanceHeldFixture(); record.restoreToken = RESTORE_TOKEN;
+    f.state.liveViewStopOwner.restoreToken = RESTORE_TOKEN;
+    const stop = f.stopLiveView();
+    f.pending[0].resolve({restoreToken: RESTORE_TOKEN, restoreOutcome: outcome});
+    assert.equal(await stop, true); assert.equal(f.liveViewStopRequired(), false);
+    assert.equal(f.state.liveActive, false);
+  });
+  test(`cached ${outcome} receipt cannot clear a newer warning; explicit retry uses fresh Stop`, async () => {
+    const {f, record} = maintenanceHeldFixture(); record.restoreToken = RESTORE_TOKEN;
+    f.state.liveViewStopOwner.restoreToken = RESTORE_TOKEN;
+    f.adoptCameraStatus({liveViewStopUnconfirmed: true}, f.state.session, f.state.liveViewStopRevision || 0);
+    const stop = f.stopLiveView();
+    f.pending[0].resolve({restoreToken: RESTORE_TOKEN, restoreOutcome: outcome});
+    assert.equal(await stop, false); assert.equal(f.liveViewStopRequired(), true);
+    assert.equal(f.state.status.liveViewStopUnconfirmed, true);
+    const retry = f.stopLiveView(); assert.equal(f.requests[1].options.payload, undefined);
+    f.pending[1].resolve({active: false, liveViewStopUnconfirmed: false});
+    assert.equal(await retry, true); assert.equal(f.state.status.liveViewStopUnconfirmed, false);
+  });
+}
+for (const reply of [
+  {restoreToken: "b".repeat(32), restoreOutcome: "stopped"},
+  {restoreToken: RESTORE_TOKEN, restoreOutcome: "started"},
+  {restoreToken: RESTORE_TOKEN, restoreOutcome: "cancelled-before-start", active: false, liveViewStopUnconfirmed: false},
+  {active: false, liveViewStopUnconfirmed: false},
+]) test(`owned restore Stop rejects mismatched or ambiguous proof ${JSON.stringify(reply)}`, async () => {
+  const {f} = maintenanceHeldFixture(); f.state.liveViewStopOwner.restoreToken = RESTORE_TOKEN;
+  const stop = f.stopLiveView(); f.pending[0].resolve(reply);
+  assert.equal(await stop, false); assert.equal(f.liveViewStopRequired(), true);
+});
+test("Stop retains the admitted token even if the record changes while Start is pending", async () => {
+  const {f, record} = maintenanceHeldFixture(); f.state.liveViewStopOwner = null; record.restoreToken = RESTORE_TOKEN;
+  const invocation = {record, mode: "restore", restoreAdmitted: true, cancelled: false, controller: new AbortController()};
+  f.state.maintenanceOwner = invocation;
+  const start = f.startLiveView({maintenanceRestore: invocation});
+  assert.equal(f.requests[0].options.payload.restoreToken, RESTORE_TOKEN);
+  record.restoreToken = "c".repeat(32);
+  const stop = f.stopLiveView(); assert.equal(f.requests[1].options.payload.restoreToken, RESTORE_TOKEN);
+  f.pending[1].resolve({restoreToken: RESTORE_TOKEN, restoreOutcome: "stopped"});
+  assert.equal(await stop, true);
+  f.pending[0].resolve({active: true, liveViewStopUnconfirmed: false, restoreToken: RESTORE_TOKEN, restoreOutcome: "started"});
+  await start; assert.equal(f.state.liveActive, false); assert.equal(f.liveViewStopRequired(), false);
+});
+for (const token of [null, "", "short", "a".repeat(65), "!".repeat(24), [RESTORE_TOKEN], {value: RESTORE_TOKEN}]) {
+  test(`invalid saved restore permit cannot dispatch ${JSON.stringify(token)}`, async () => {
+    const {f, record} = maintenanceHeldFixture(); f.state.liveViewStopOwner = null; record.restoreToken = token;
+    const invocation = {record, mode: "restore", restoreAdmitted: true, cancelled: false, controller: new AbortController()};
+    f.state.maintenanceOwner = invocation;
+    await f.startLiveView({maintenanceRestore: invocation});
+    assert.equal(f.requests.length, 0); assert.equal(f.state.liveActive, false);
+  });
+}
+for (const operation of ["sensor-cleaning", "sleep"]) test(`a new ${operation} action cannot inherit a prior restored permit`, async () => {
+  const {f, record} = maintenanceHeldFixture(); record.restoreToken = RESTORE_TOKEN;
+  f.state.liveActive = true; f.state.activeLiveSource = "CCAPI_RTP";
+  f.state.liveViewStopOwner.restoreToken = RESTORE_TOKEN;
+  f.state.liveViewStopOwner.confirmedStart = true; f.state.liveViewStopOwner.stopUnconfirmed = false;
+  const next = {owner: f.state.session, token: record.token, operation, autoPowerOff: false, wasLive: true};
+  const invocation = {record: next, mode: "action", cancelled: false, controller: new AbortController()};
+  f.state.maintenanceOwner = invocation;
+  const stop = f.stopLiveView({maintenanceInvocation: invocation});
+  assert.equal(f.requests[0].options.payload?.restoreToken, undefined);
+  assert.equal(f.requests[0].options.payload?.prepareRestore, operation === "sensor-cleaning" ? true : undefined);
+  const nextToken = "synthetic_next_restore_000001";
+  f.pending[0].resolve({active: false, liveViewStopUnconfirmed: false, ...(operation === "sensor-cleaning" ? {restoreToken: nextToken} : {})});
+  assert.equal(await stop, true); assert.equal(record.restoreToken, RESTORE_TOKEN);
+  assert.equal(next.restoreToken, operation === "sensor-cleaning" ? nextToken : undefined);
+});
+test("warning arriving during owned Stop requires fresh state on the very next explicit retry", async () => {
+  const {f} = maintenanceHeldFixture(); f.state.liveViewStopOwner.restoreToken = RESTORE_TOKEN;
+  const stop = f.stopLiveView();
+  f.adoptCameraStatus({liveViewStopUnconfirmed: true}, f.state.session, f.state.liveViewStopRevision || 0);
+  f.pending[0].resolve({restoreToken: RESTORE_TOKEN, restoreOutcome: "stopped"});
+  assert.equal(await stop, false);
+  const retry = f.stopLiveView(); assert.equal(f.requests[1].options.payload, undefined);
+  f.pending[1].resolve({active: false, liveViewStopUnconfirmed: false}); assert.equal(await retry, true);
+});
+for (const [operation, autoPowerOff, wasLive] of [["sleep", false, true], ["sensor-cleaning", true, true], ["sensor-cleaning", false, false]]) {
+  test(`initial ${operation} autoPowerOff=${autoPowerOff} wasLive=${wasLive} does not prepare an unrelated restore`, async () => {
+    const f = fixture(); f.state.liveActive = wasLive;
+    if (!wasLive) f.state.liveViewStopOwner = {session: f.state.session, stopUnconfirmed: true};
+    const action = f.runMaintenance(operation, autoPowerOff);
+    const payload = f.requests[0].options.payload;
+    f.pending[0].reject(new Error("synthetic stop failure")); await action;
+    assert.equal(payload?.prepareRestore, undefined); assert.equal(payload?.restoreToken, undefined);
+  });
+}
