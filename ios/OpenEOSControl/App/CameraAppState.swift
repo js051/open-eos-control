@@ -407,6 +407,16 @@ final class CameraAppState: ObservableObject {
     private var sessionGeneration = UUID()
     private var shutterReleaseObservationRevision: UInt64 = 0
     private var disconnectTask: Task<Void, Never>?
+    private struct BridgeBulbOwnership {
+        let id: UUID
+        let generation: UUID
+        let client: DesktopBridgeClient
+        let admission: Task<DesktopBridgeBulbOwner, Error>
+    }
+    private var bridgeBulbOwnership: BridgeBulbOwnership?
+    private var bridgeBulbStopTask: Task<Void, Never>?
+    private var bridgeBulbStopID: UUID?
+    private var bridgeBulbStopAllowsResume = false
     private var pendingBulbStartID: UUID?
     private var pendingBulbStartTask: Task<CameraStatus, Error>?
     private var applicationActive = true
@@ -1165,6 +1175,10 @@ final class CameraAppState: ObservableObject {
         pendingBulbStartTask?.cancel()
         pendingBulbStartTask = nil
         pendingBulbStartID = nil
+        bridgeBulbOwnership = nil
+        bridgeBulbStopTask = nil // Old captured-client cleanup continues independently.
+        bridgeBulbStopID = nil
+        bridgeBulbStopAllowsResume = false
         operationRevision &+= 1
         shutterReleaseState = .idle
         liveViewStopState = .idle
@@ -1380,6 +1394,9 @@ final class CameraAppState: ObservableObject {
         applicationActive = active
         rtpController.setApplicationActive(active)
         if !active {
+            if let owner = bridgeBulbOwnership, let session {
+                _ = beginOwnedBridgeBulbStop(owner, session: session, allowResume: false)
+            }
             cancelConnection()
             foregroundFolderSelection = nil
             releaseHeldAutofocus()
@@ -2095,12 +2112,29 @@ final class CameraAppState: ObservableObject {
             return
         }
         guard let session else { return }
+        // Publish the UI owner before admission can suspend on the client actor.
+        // Stop may await this short admission, but never the network Start task.
+        let bridgeOwner: BridgeBulbOwnership?
+        if case let .desktopBridge(client) = session {
+            bridgeOwner = BridgeBulbOwnership(id: startID, generation: generation,
+                client: client, admission: Task { try await client.prepareOwnedBulb() })
+        } else { bridgeOwner = nil }
+        bridgeBulbOwnership = bridgeOwner
         // The request may reach the camera even if its acknowledgement never reaches us.
         shutterReleaseState = CameraShutterReleaseState(
             releaseRequired: true, releaseUnconfirmed: true, bulbExposureActive: nil
         )
         pauseLiveViewForBulb()
-        let startTask = Task { try await session.startBulbExposure() }
+        let startTask = Task {
+            if let bridgeOwner {
+                let token = try await bridgeOwner.admission.value
+                try Task.checkCancellation()
+                guard generation == sessionGeneration, pendingBulbStartID == startID,
+                      bridgeBulbOwnership?.id == startID else { throw CancellationError() }
+                return try await bridgeOwner.client.startOwnedBulb(token)
+            }
+            return try await session.startBulbExposure()
+        }
         pendingBulbStartTask = startTask
         do {
             let status = try await withTaskCancellationHandler {
@@ -2109,15 +2143,26 @@ final class CameraAppState: ObservableObject {
                 startTask.cancel()
             }
             let release = await session.shutterReleaseState()
-            guard generation == sessionGeneration, pendingBulbStartID == startID else { return }
+            guard generation == sessionGeneration, pendingBulbStartID == startID,
+                  bridgeOwner == nil || bridgeBulbOwnership?.id == startID else { return }
             applyShutterReleaseState(release)
             updateStatus(status.withShutterReleaseState(release))
             lastError = nil
         } catch {
+            let admissionFailed: Bool
+            if let bridgeOwner, case .failure = await bridgeOwner.admission.result { admissionFailed = true }
+            else { admissionFailed = false }
             let release = await session.shutterReleaseState()
-            guard generation == sessionGeneration, pendingBulbStartID == startID else { return }
+            guard generation == sessionGeneration, pendingBulbStartID == startID,
+                  bridgeOwner == nil || bridgeBulbOwnership?.id == startID else { return }
+            if admissionFailed { bridgeBulbOwnership = nil }
             applyShutterReleaseState(release)
-            if !release.releaseRequired {
+            let freshRelease: Bool
+            if let bridgeOwner { freshRelease = await bridgeOwner.client.ownedBulbReleaseHasFreshStatus }
+            else { freshRelease = true }
+            guard generation == sessionGeneration, pendingBulbStartID == startID else { return }
+            if !release.releaseRequired, freshRelease {
+                bridgeBulbOwnership = nil
                 resumeLiveViewAfterBulb(session: session, generation: generation)
             }
             record(error)
@@ -2128,6 +2173,10 @@ final class CameraAppState: ObservableObject {
         guard canRetryShutterRelease else { return }
         let completedKnownExposure = bulbExposureActive && !shutterReleaseUnconfirmed
         let generation = sessionGeneration
+        if let owner = bridgeBulbOwnership, owner.generation == generation, let session {
+            await beginOwnedBridgeBulbStop(owner, session: session, allowResume: true).value
+            return
+        }
         let pendingStart = pendingBulbStartTask
         pendingBulbStartTask = nil
         pendingBulbStartID = nil
@@ -2141,14 +2190,25 @@ final class CameraAppState: ObservableObject {
         }
         guard let session else { return }
         pauseLiveViewForBulb()
+        let observation = shutterReleaseObservationRevision
         do {
-            try await session.retryShutterRelease(cancelling: pendingStart)
-            guard generation == sessionGeneration else { return }
-            // A release ACK is authoritative, even if the subsequent status GET fails.
-            applyShutterReleaseState(.idle)
-            if completedKnownExposure { showShutterFlash() }
-            lastError = nil
-            resumeLiveViewAfterBulb(session: session, generation: generation)
+            let canPublishStatus = try await session.retryShutterRelease(cancelling: pendingStart)
+            let release = await session.shutterReleaseState()
+            guard generation == sessionGeneration, observation == shutterReleaseObservationRevision else { return }
+            guard canPublishStatus else {
+                // Core may own a request admitted outside this UI continuation.
+                // Its terminal receipt is not fresh status for the fallback either.
+                shutterReleaseState = release
+                bulbStartedAt = release.bulbExposureActive == true ? bulbStartedAt : nil
+                return
+            }
+            // An ordinary release ACK is authoritative even if the next GET fails.
+            applyShutterReleaseState(release)
+            if !release.releaseRequired {
+                if completedKnownExposure { showShutterFlash() }
+                lastError = nil
+                resumeLiveViewAfterBulb(session: session, generation: generation)
+            }
             do {
                 let status = try await session.status()
                 guard generation == sessionGeneration else { return }
@@ -2163,6 +2223,75 @@ final class CameraAppState: ObservableObject {
             applyShutterReleaseState(release)
             record(error)
         }
+    }
+
+    /// Background and explicit Stop share one UI operation and Core's same-owner
+    /// release. Neither waits for the network Start or closes the connection.
+    private func beginOwnedBridgeBulbStop(_ owner: BridgeBulbOwnership, session: CameraSession,
+                                         allowResume: Bool) -> Task<Void, Never> {
+        if !allowResume { bridgeBulbStopAllowsResume = false }
+        if let task = bridgeBulbStopTask { return task }
+        let generation = owner.generation
+        let id = UUID()
+        let completedKnownExposure = bulbExposureActive && !shutterReleaseUnconfirmed
+        bridgeBulbStopID = id
+        bridgeBulbStopAllowsResume = allowResume
+        pendingBulbStartTask?.cancel()
+        pendingBulbStartTask = nil
+        pendingBulbStartID = nil
+        busyOperations.insert(.capture)
+        operationRevision &+= 1
+        pauseLiveViewForBulb()
+        let task = Task {
+            defer {
+                if generation == sessionGeneration, bridgeBulbStopID == id {
+                    bridgeBulbStopTask = nil
+                    bridgeBulbStopID = nil
+                    bridgeBulbStopAllowsResume = false
+                    end(.capture, generation: generation)
+                }
+            }
+            let observation = shutterReleaseObservationRevision
+            do {
+                let token = try await owner.admission.value
+                let freshStatus = try await owner.client.stopOwnedBulb(token)
+                let hasFreshStatus = await owner.client.ownedBulbReleaseHasFreshStatus
+                let release = await owner.client.shutterReleaseState()
+                guard generation == sessionGeneration, bridgeBulbOwnership?.id == owner.id else { return }
+                // A terminal receipt carries no fresh camera state. In particular,
+                // it cannot erase a later warning or restart Live View.
+                guard let freshStatus, hasFreshStatus else {
+                    bridgeBulbOwnership = nil
+                    guard observation == shutterReleaseObservationRevision else { return }
+                    shutterReleaseState = release
+                    bulbStartedAt = release.bulbExposureActive == true ? bulbStartedAt : nil
+                    return
+                }
+                bridgeBulbOwnership = nil
+                guard observation == shutterReleaseObservationRevision else { return }
+                applyShutterReleaseState(release)
+                updateStatus(freshStatus.withShutterReleaseState(release))
+                if !release.releaseRequired {
+                    if completedKnownExposure { showShutterFlash() }
+                    lastError = nil
+                    if bridgeBulbStopAllowsResume {
+                        resumeLiveViewAfterBulb(session: session, generation: generation)
+                    }
+                }
+            } catch {
+                let admissionFailed: Bool
+                if case .failure = await owner.admission.result { admissionFailed = true }
+                else { admissionFailed = false }
+                let release = await owner.client.shutterReleaseState()
+                guard generation == sessionGeneration, bridgeBulbOwnership?.id == owner.id,
+                      observation == shutterReleaseObservationRevision else { return }
+                if admissionFailed { bridgeBulbOwnership = nil }
+                applyShutterReleaseState(release)
+                record(error)
+            }
+        }
+        bridgeBulbStopTask = task
+        return task
     }
 
     var canStartHeldAutofocus: Bool {

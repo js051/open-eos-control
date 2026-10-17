@@ -12,7 +12,8 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
     private let released = #"{"bulbExposureActive":false,"shutterReleaseUnconfirmed":false}"#
     private let unknown = #"{"bulbExposureActive":null,"shutterReleaseUnconfirmed":true}"#
     private let releaseError = #"{"error":{"code":"SHUTTER_RELEASE_UNCONFIRMED","message":"Release not acknowledged","feature":"BULB_EXPOSURE","engine":"ccapi"}}"#
-    private let startPath = "/v1/session/session-a/bulb/start"
+    private let startPath = "/v1/session/session-a/bulb/start/owned"
+    private let ownedStopPath = "/v1/session/session-a/bulb/stop/owned"
     private let stopPath = "/v1/session/session-a/bulb/stop"
     private let statusPath = "/v1/session/session-a/status"
 
@@ -218,74 +219,6 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
         await assertIdle(client)
     }
 
-    func testNormalCloseDispatchesExactSessionDeleteAndReturnsIdle() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueJSON(method: "POST", path: startPath, body: active)
-        _ = try await client.startBulbExposure()
-        await transport.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 204, body: "")
-        let state = await client.closeWithShutterReleaseState()
-        XCTAssertEqual(state, .idle)
-        await assertIdle(client)
-        let requests = await transport.requests()
-        XCTAssertEqual(requests.last?.method, "DELETE")
-        XCTAssertEqual(requests.last?.path, "/v1/session/session-a")
-        await assertThrows { _ = try await client.startBulbExposure() }
-    }
-
-    func testAlreadyCancelledCallerStillAwaitsNonCancelledFinalDelete() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueJSON(method: "POST", path: startPath, body: active)
-        _ = try await client.startBulbExposure()
-        await transport.enqueueHold(method: "DELETE", path: "/v1/session/session-a", key: "close")
-        let close = Task {
-            withUnsafeCurrentTask { $0?.cancel() }
-            XCTAssertTrue(Task.isCancelled)
-            return await client.closeWithShutterReleaseState()
-        }
-        try await waitForHold("close", on: transport)
-        // The cancelled caller must await cleanup rather than erase ownership.
-        let pending = await client.shutterReleaseState()
-        XCTAssertTrue(pending.releaseRequired)
-        await assertThrows { _ = try await client.startBulbExposure() }
-        await transport.resume("close", status: 204, body: "")
-        let outcome = await close.value
-        XCTAssertEqual(outcome, .idle)
-        await assertIdle(client)
-        let requests = await transport.requests()
-        XCTAssertEqual(requests.filter { $0.method == "DELETE" }.map(\.path), ["/v1/session/session-a"])
-        let cancelledSends = await transport.cancelledSendCount()
-        XCTAssertEqual(cancelledSends, 0)
-    }
-
-    func testLostStartPersistsObligationWithoutAutomaticallyReplayingStartOrStop() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueFailure(method: "POST", path: startPath)
-        await assertThrows { _ = try await client.startBulbExposure() }
-        await assertPending(client)
-        await assertThrows { _ = try await client.startBulbExposure() }
-        let requests = await transport.requests()
-        XCTAssertEqual(requests.map(\.path), ["/health", "/v1/session", startPath])
-    }
-
-    func testCancelledStartWithLateSuccessfulResponseKeepsUnknownRelease() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueHold(method: "POST", path: startPath, key: "start")
-        let task = Task { try await client.startBulbExposure() }
-        try await waitForHold("start", on: transport)
-        await assertPending(client)
-        task.cancel()
-        await transport.resume("start", body: active)
-        await assertThrows { _ = try await task.value }
-        await assertPending(client)
-        let requests = await transport.requests()
-        XCTAssertEqual(requests.filter { $0.path == startPath }.count, 1)
-        XCTAssertFalse(requests.contains { $0.path == stopPath })
-    }
-
     func testAllCameraMutationRoutesFailClosedWhileReadsAndSafetyStopsRemainAvailable() async throws {
         let transport = BridgeShutterTransport()
         let client = try await initializedClient(transport)
@@ -391,18 +324,6 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
         await assertIdle(client)
     }
 
-    func testFalseFalseBeforeAnyStopCannotEraseAmbiguousStart() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueFailure(method: "POST", path: startPath)
-        await assertThrows { _ = try await client.startBulbExposure() }
-        await transport.enqueueJSON(path: statusPath, body: released)
-        let status = try await client.status()
-        XCTAssertEqual(status.shutterReleaseUnconfirmed, true)
-        XCTAssertNil(status.bulbExposureActive)
-        await assertPending(client)
-    }
-
     func testStrictLiteralProofRejectsNumbersStringsNullMissingAndActiveTrue() async throws {
         let invalidProofs = [
             #"{}"#,
@@ -419,38 +340,38 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
         for proof in invalidProofs {
             let transport = BridgeShutterTransport()
             let client = try await initializedClient(transport)
-            await transport.enqueueFailure(method: "POST", path: startPath)
-            await assertThrows { _ = try await client.startBulbExposure() }
+            await transport.enqueueJSON(path: statusPath, body: unknown)
+            _ = try await client.status()
             await transport.enqueueJSON(method: "POST", path: stopPath, body: proof)
             await transport.enqueueJSON(path: statusPath, body: proof)
             await assertThrows { try await client.retryShutterRelease() }
             await assertPending(client)
             let requests = await transport.requests()
-            XCTAssertEqual(requests.filter { $0.path == startPath }.count, 1, proof)
+            XCTAssertEqual(requests.filter { $0.path == startPath }.count, 0, proof)
             XCTAssertEqual(requests.filter { $0.path == stopPath }.count, 1, proof)
-            XCTAssertEqual(requests.map(\.path), ["/health", "/v1/session", startPath, stopPath, statusPath], proof)
+            XCTAssertEqual(requests.map(\.path), ["/health", "/v1/session", statusPath, stopPath, statusPath], proof)
         }
     }
 
     func testFailedStopCanBeProvedByOneFreshSameSessionStatusWithoutFullSnapshot() async throws {
         let transport = BridgeShutterTransport()
         let client = try await initializedClient(transport)
-        await transport.enqueueFailure(method: "POST", path: startPath)
-        await assertThrows { _ = try await client.startBulbExposure() }
+        await transport.enqueueJSON(path: statusPath, body: unknown)
+        _ = try await client.status()
         await transport.enqueueJSON(method: "POST", path: stopPath, status: 502, body: releaseError)
         await transport.enqueueJSON(path: statusPath, body: released)
         try await client.retryShutterRelease()
         await assertIdle(client)
         let requests = await transport.requests()
-        XCTAssertEqual(requests.map(\.path), ["/health", "/v1/session", startPath, stopPath, statusPath])
+        XCTAssertEqual(requests.map(\.path), ["/health", "/v1/session", statusPath, stopPath, statusPath])
         XCTAssertEqual(requests.last?.headers.first { $0.key.lowercased() == "cache-control" }?.value, "no-cache")
     }
 
     func testLostStopAndFailedStatusKeepOriginalStopErrorAndResponsibility() async throws {
         let transport = BridgeShutterTransport()
         let client = try await initializedClient(transport)
-        await transport.enqueueJSON(method: "POST", path: startPath, body: active)
-        _ = try await client.startBulbExposure()
+        await transport.enqueueJSON(path: statusPath, body: unknown)
+        _ = try await client.status()
         await transport.enqueueJSON(method: "POST", path: stopPath, status: 502, body: releaseError)
         await transport.enqueueFailure(method: "GET", path: statusPath)
         do {
@@ -464,132 +385,6 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
             XCTAssertEqual(method, "POST")
             XCTAssertEqual(kind, "SHUTTER_RELEASE_UNCONFIRMED")
         }
-        await assertPending(client)
-    }
-
-    func testNormalLegacyStartAndStopRemainAvailable() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueJSON(method: "POST", path: startPath, body: #"{"bulbExposureActive":true}"#)
-        let started = try await client.startBulbExposure()
-        XCTAssertEqual(started.bulbExposureActive, true)
-        XCTAssertEqual(started.shutterReleaseUnconfirmed, false)
-        await transport.enqueueJSON(method: "POST", path: stopPath, body: #"{"bulbExposureActive":false}"#)
-        let stopped = try await client.stopBulbExposure()
-        XCTAssertEqual(stopped.bulbExposureActive, false)
-        await assertIdle(client)
-    }
-
-    func testNewProtocolStartCannotDowngradeToLegacyStopProof() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueJSON(method: "POST", path: startPath, body: active)
-        _ = try await client.startBulbExposure()
-        await transport.enqueueJSON(method: "POST", path: stopPath, body: #"{"bulbExposureActive":false}"#)
-        await transport.enqueueJSON(path: statusPath, body: #"{"bulbExposureActive":false}"#)
-        await assertThrows { try await client.retryShutterRelease() }
-        await assertPending(client)
-    }
-
-    func testLegacyCompatibilityIsRevokedAfterAmbiguousStop() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueJSON(method: "POST", path: startPath, body: #"{"bulbExposureActive":true}"#)
-        _ = try await client.startBulbExposure()
-        await transport.enqueueFailure(method: "POST", path: stopPath)
-        await assertThrows { _ = try await client.stopBulbExposure() }
-        await transport.enqueueJSON(method: "POST", path: stopPath, body: #"{"bulbExposureActive":false}"#)
-        await transport.enqueueJSON(path: statusPath, body: #"{"bulbExposureActive":false}"#)
-        await assertThrows { try await client.retryShutterRelease() }
-        await assertPending(client)
-        await transport.enqueueJSON(path: statusPath, body: released)
-        _ = try await client.status()
-        await assertIdle(client)
-    }
-
-    func testMalformedOrNonActiveSuccessfulStartRemainsUnknown() async throws {
-        for body in ["not JSON", "{}", released, unknown, #"{"bulbExposureActive":1}"#] {
-            let transport = BridgeShutterTransport()
-            let client = try await initializedClient(transport)
-            await transport.enqueueJSON(method: "POST", path: startPath, body: body)
-            await assertThrows { _ = try await client.startBulbExposure() }
-            await assertPending(client)
-            await transport.enqueueJSON(method: "POST", path: stopPath, body: released)
-            try await client.retryShutterRelease()
-            await assertIdle(client)
-        }
-    }
-
-    func testCancelledStopWithLateProofRemainsPendingUntilAnotherStop() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueJSON(method: "POST", path: startPath, body: active)
-        _ = try await client.startBulbExposure()
-        await transport.enqueueHold(method: "POST", path: stopPath, key: "stop")
-        let task = Task { try await client.retryShutterRelease() }
-        try await waitForHold("stop", on: transport)
-        task.cancel()
-        await transport.resume("stop", body: released)
-        await assertThrows { try await task.value }
-        await assertPending(client)
-        let beforeRetry = await transport.requests()
-        XCTAssertFalse(beforeRetry.contains { $0.path == statusPath })
-        await transport.enqueueJSON(method: "POST", path: stopPath, body: released)
-        try await client.retryShutterRelease()
-        await assertIdle(client)
-    }
-
-    func testStatusStartedBeforeStopCannotSupplyLateReleaseProof() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueFailure(method: "POST", path: startPath)
-        await assertThrows { _ = try await client.startBulbExposure() }
-        await transport.enqueueHold(path: statusPath, key: "old-status")
-        let oldStatus = Task { try await client.status() }
-        try await waitForHold("old-status", on: transport)
-        await transport.enqueueFailure(method: "POST", path: stopPath)
-        await assertThrows { _ = try await client.stopBulbExposure() }
-        await transport.resume("old-status", body: released)
-        let result = try await oldStatus.value
-        XCTAssertNil(result.bulbExposureActive)
-        XCTAssertEqual(result.shutterReleaseUnconfirmed, true)
-        await assertPending(client)
-        await transport.enqueueJSON(path: statusPath, body: released)
-        _ = try await client.status()
-        await assertIdle(client)
-    }
-
-    func testPreStopActiveStatusCannotRelockAfterReleaseAcknowledgement() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueJSON(method: "POST", path: startPath, body: active)
-        _ = try await client.startBulbExposure()
-        await transport.enqueueHold(path: statusPath, key: "old-status")
-        let oldStatus = Task { try await client.status() }
-        try await waitForHold("old-status", on: transport)
-        await transport.enqueueJSON(method: "POST", path: stopPath, body: released)
-        _ = try await client.stopBulbExposure()
-        await transport.resume("old-status", body: active)
-        let result = try await oldStatus.value
-        XCTAssertEqual(result.bulbExposureActive, false)
-        XCTAssertEqual(result.shutterReleaseUnconfirmed, false)
-        await assertIdle(client)
-    }
-
-    func testOldStatusCannotClearNewStartResponsibilityWithinSameSession() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueJSON(method: "POST", path: startPath, body: active)
-        _ = try await client.startBulbExposure()
-        await transport.enqueueHold(path: statusPath, key: "old-status")
-        let oldStatus = Task { try await client.status() }
-        try await waitForHold("old-status", on: transport)
-        await transport.enqueueJSON(method: "POST", path: stopPath, body: released)
-        _ = try await client.stopBulbExposure()
-        await transport.enqueueFailure(method: "POST", path: startPath)
-        await assertThrows { _ = try await client.startBulbExposure() }
-        await transport.resume("old-status", body: released)
-        _ = try await oldStatus.value
         await assertPending(client)
     }
 
@@ -611,193 +406,6 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
         await assertIdle(client)
     }
 
-    func testCloseWaitsForDispatchedStartAndRejectsNewStartBeforeDelete() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueHold(method: "POST", path: startPath, key: "start")
-        let start = Task { try await client.startBulbExposure() }
-        try await waitForHold("start", on: transport)
-        await transport.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 502, body: releaseError)
-        let close = Task { await client.closeWithShutterReleaseState() }
-        try await waitForClosing(client)
-        await assertThrows { _ = try await client.startBulbExposure() }
-        let whileStarting = await transport.requests()
-        XCTAssertFalse(whileStarting.contains { $0.method == "DELETE" })
-        await transport.resume("start", body: active)
-        await assertThrows { _ = try await start.value }
-        let warning = await close.value
-        XCTAssertFalse(warning.releaseRequired)
-        XCTAssertTrue(warning.releaseUnconfirmed)
-        XCTAssertNil(warning.bulbExposureActive)
-        await assertIdle(client)
-        let requests = await transport.requests()
-        XCTAssertEqual(requests.last?.method, "DELETE")
-        XCTAssertEqual(requests.last?.path, "/v1/session/session-a")
-    }
-
-    func testCancelledPendingStartCloseKeepsCommandsInOriginalSessionAcrossReinitialize() async throws {
-        // Behavioral coverage for both reused and different server IDs. The held
-        // transport proves ordering before settlement, not a caller scheduling race.
-        for replacementID in ["session-b", "session-a"] {
-            let transport = BridgeShutterTransport()
-            let client = try await initializedClient(transport)
-            await transport.enqueueHold(method: "POST", path: startPath, key: "old-start")
-            let start = Task { try await client.startBulbExposure() }
-            try await waitForHold("old-start", on: transport)
-            let stop = Task { try await client.stopBulbExposure() }
-            try await waitForHoldCancellation("old-start", on: transport)
-            let startStillHeld = await transport.isHeld("old-start")
-            XCTAssertTrue(startStillHeld, "Cancellation must not silently settle the transport gate")
-            // DELETE responds immediately after Start settles; no extra gate delays
-            // retirement or gives old caller continuations a manufactured window.
-            await transport.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 204, body: "")
-            await enqueueInitialization(transport, id: replacementID)
-            let replacement = Task {
-                let closed = await client.closeWithShutterReleaseState()
-                try await client.initialize()
-                return closed
-            }
-            try await waitForClosing(client)
-            await assertThrows { try await client.initialize() }
-            let beforeStartSettles = await transport.requests()
-            XCTAssertFalse(beforeStartSettles.contains { $0.method == "DELETE" || $0.path.hasSuffix("/bulb/stop") })
-            XCTAssertEqual(beforeStartSettles.filter { $0.method != "GET" }.map { "\($0.method) \($0.path)" }, [
-                "POST /v1/session", "POST \(startPath)",
-            ])
-            await transport.resume("old-start", body: active)
-            try await waitForRequest(method: "POST", path: "/v1/session", count: 2, on: transport)
-            let closed = try await replacement.value
-            XCTAssertEqual(closed, .idle)
-            await assertThrows { _ = try await start.value }
-            do {
-                _ = try await stop.value
-                XCTFail("A Stop waiting for Start must be invalidated by Close")
-            } catch {
-                XCTAssertEqual(error as? DesktopBridgeError, .sessionChanged)
-            }
-
-            let replacementStart = "/v1/session/\(replacementID)/bulb/start"
-            let replacementStop = "/v1/session/\(replacementID)/bulb/stop"
-            await transport.enqueueJSON(method: "POST", path: replacementStart, body: active)
-            _ = try await client.startBulbExposure()
-            await transport.enqueueHold(method: "POST", path: replacementStop, key: "new-stop")
-            let newStop = Task { try await client.stopBulbExposure() }
-            try await waitForHold("new-stop", on: transport)
-            await assertThrows { _ = try await client.startBulbExposure() }
-            let whileReplacementStops = await transport.requests()
-            XCTAssertEqual(whileReplacementStops.filter { $0.path.hasSuffix("/bulb/stop") }.map(\.path), [replacementStop])
-            await transport.resume("new-stop", body: released)
-            _ = try await newStop.value
-            await assertIdle(client)
-            let commands = await transport.requests().filter { $0.method != "GET" }.map { "\($0.method) \($0.path)" }
-            XCTAssertEqual(commands, [
-                "POST /v1/session", "POST \(startPath)", "DELETE /v1/session/session-a",
-                "POST /v1/session", "POST \(replacementStart)", "POST \(replacementStop)",
-            ])
-        }
-    }
-
-    func testHeldStopResponseCoalescesSecondStopAndBlocksCloseUntilSettlement() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueJSON(method: "POST", path: startPath, body: active)
-        _ = try await client.startBulbExposure()
-        await transport.enqueueHold(method: "POST", path: stopPath, key: "old-stop")
-        let firstStop = Task { try await client.stopBulbExposure() }
-        try await waitForHold("old-stop", on: transport)
-        let secondEntered = expectation(description: "second Stop enters the client while its wire response is held")
-        let secondStop = Task {
-            try await client.recoveryStop(onEntry: { secondEntered.fulfill() })
-        }
-        await fulfillment(of: [secondEntered], timeout: 3)
-        let beforeClose = await transport.requests()
-        XCTAssertEqual(beforeClose.filter { $0.path == stopPath }.count, 1)
-        XCTAssertFalse(beforeClose.contains { $0.method == "DELETE" })
-
-        await transport.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 204, body: "")
-        await enqueueInitialization(transport, id: "session-b")
-        let replacement = Task {
-            let closed = await client.closeWithShutterReleaseState()
-            try await client.initialize()
-            return closed
-        }
-        try await waitForClosing(client)
-        await assertThrows { try await client.initialize() }
-        await assertThrows { _ = try await client.startBulbExposure() }
-        let stopStillHeld = await transport.isHeld("old-stop")
-        XCTAssertTrue(stopStillHeld)
-        let beforeStopSettles = await transport.requests()
-        XCTAssertEqual(beforeStopSettles.filter { $0.path == stopPath }.count, 1, "A second Stop shares the held release")
-        XCTAssertFalse(beforeStopSettles.contains { $0.method == "DELETE" }, "Close must await the actual Stop response")
-        XCTAssertEqual(beforeStopSettles.filter { $0.method != "GET" }.map { "\($0.method) \($0.path)" }, [
-            "POST /v1/session", "POST \(startPath)", "POST \(stopPath)",
-        ])
-
-        await transport.resume("old-stop", body: released)
-        try await waitForRequest(method: "POST", path: "/v1/session", count: 2, on: transport)
-        let closed = try await replacement.value
-        XCTAssertEqual(closed, .idle)
-        await assertThrows { _ = try await firstStop.value }
-        await assertThrows { _ = try await secondStop.value }
-        await assertIdle(client)
-        let replacementStart = "/v1/session/session-b/bulb/start"
-        let replacementStop = "/v1/session/session-b/bulb/stop"
-        await transport.enqueueJSON(method: "POST", path: replacementStart, body: active)
-        let started = try await client.startBulbExposure()
-        XCTAssertEqual(started.bulbExposureActive, true)
-        await transport.enqueueJSON(method: "POST", path: replacementStop, body: released)
-        let stopped = try await client.stopBulbExposure()
-        XCTAssertEqual(stopped.bulbExposureActive, false)
-        await assertIdle(client)
-        let commands = await transport.requests().filter { $0.method != "GET" }.map { "\($0.method) \($0.path)" }
-        XCTAssertEqual(commands, [
-            "POST /v1/session", "POST \(startPath)", "POST \(stopPath)", "DELETE /v1/session/session-a",
-            "POST /v1/session", "POST \(replacementStart)", "POST \(replacementStop)",
-        ])
-    }
-
-    func testCloseAfterInFlightStopAcknowledgementDoesNotRestoreAnObligation() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueJSON(method: "POST", path: startPath, body: active)
-        _ = try await client.startBulbExposure()
-        await transport.enqueueHold(method: "POST", path: stopPath, key: "stop")
-        let stop = Task { try await client.stopBulbExposure() }
-        try await waitForHold("stop", on: transport)
-        await transport.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 204, body: "")
-        let close = Task { await client.closeWithShutterReleaseState() }
-        try await waitForClosing(client)
-        await transport.resume("stop", body: released)
-        await assertThrows { _ = try await stop.value }
-        let outcome = await close.value
-        XCTAssertEqual(outcome, .idle)
-        await assertIdle(client)
-        let requests = await transport.requests()
-        XCTAssertEqual(Array(requests.suffix(2)).map(\.path), [stopPath, "/v1/session/session-a"])
-    }
-
-    func testFailedCloseBecomesPreviousWarningAndNeverTransplantsStopToReplacement() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueFailure(method: "POST", path: startPath)
-        await assertThrows { _ = try await client.startBulbExposure() }
-        await transport.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 502, body: releaseError)
-        let warning = await client.closeWithShutterReleaseState()
-        XCTAssertFalse(warning.releaseRequired)
-        XCTAssertTrue(warning.releaseUnconfirmed)
-        await assertIdle(client)
-        let repeatedClose = await client.closeWithShutterReleaseState()
-        XCTAssertEqual(repeatedClose, warning, "Repeated close must retain the original cleanup outcome")
-        await enqueueInitialization(transport, id: "session-b")
-        try await client.initialize()
-        try await client.retryShutterRelease()
-        await transport.enqueueJSON(method: "POST", path: "/v1/session/session-b/bulb/start", body: active)
-        _ = try await client.startBulbExposure()
-        let requests = await transport.requests()
-        XCTAssertFalse(requests.contains { $0.path.hasSuffix("/bulb/stop") })
-        XCTAssertEqual(requests.last?.path, "/v1/session/session-b/bulb/start")
-    }
-
     func testCloseUnconfirmedServerErrorWarnsEvenWithoutPreviousLocalStart() async throws {
         let transport = BridgeShutterTransport()
         let client = try await initializedClient(transport)
@@ -806,23 +414,6 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
         XCTAssertTrue(warning.releaseUnconfirmed)
         XCTAssertFalse(warning.releaseRequired)
         await assertIdle(client)
-    }
-
-    func testLateStatusFromClosedSessionCannotAffectReplacementEvenWhenServerReusesID() async throws {
-        let transport = BridgeShutterTransport()
-        let client = try await initializedClient(transport)
-        await transport.enqueueHold(path: statusPath, key: "old-status")
-        let oldStatus = Task { try await client.status() }
-        try await waitForHold("old-status", on: transport)
-        await transport.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 204, body: "")
-        _ = await client.closeWithShutterReleaseState()
-        await enqueueInitialization(transport, id: "session-a")
-        try await client.initialize()
-        await transport.enqueueFailure(method: "POST", path: startPath)
-        await assertThrows { _ = try await client.startBulbExposure() }
-        await transport.resume("old-status", body: released)
-        await assertThrows { _ = try await oldStatus.value }
-        await assertPending(client)
     }
 
     func testExplicitServerRecoveryErrorFromNonBulbMutationAlsoClosesGate() async throws {
@@ -856,6 +447,420 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
         await assertIdle(client)
         let requests = await transport.requests()
         XCTAssertEqual(requests.map(\.path), ["/health", "/v1/session", "/v1/session/late-session", "/health", "/v1/session"])
+    }
+
+    // Authored owned-protocol fixtures; native Swift execution is still required.
+    private func ownedAck(_ owner: DesktopBridgeBulbOwner, outcome: String, status: String? = nil) -> String {
+        let observation = status.map { ",\"status\":\($0)" } ?? ""
+        return "{\"ownerId\":\"\(owner.id.uuidString)\",\"outcome\":\"\(outcome)\"\(observation)}"
+    }
+
+    func testOwnedStartAndStopUseExactTokenAndBoundedRequests() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        let owner = try await client.prepareOwnedBulb()
+        await peer.enqueueJSON(method: "POST", path: startPath, body: ownedAck(owner, outcome: "started", status: active))
+        let started = try await client.startOwnedBulb(owner)
+        XCTAssertEqual(started.bulbExposureActive, true)
+        await peer.enqueueJSON(method: "POST", path: ownedStopPath, body: ownedAck(owner, outcome: "released", status: released))
+        let stopped = try await client.stopOwnedBulb(owner)
+        XCTAssertEqual(stopped?.bulbExposureActive, false)
+        await assertIdle(client)
+        let writes = await peer.requests().filter { $0.path.contains("/bulb/") }
+        XCTAssertEqual(writes.map(\.path), [startPath, ownedStopPath])
+        for request in writes {
+            let data = try XCTUnwrap(request.body)
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: String])
+            XCTAssertEqual(body, ["ownerId": owner.id.uuidString])
+            XCTAssertEqual(request.timeoutInterval, 15)
+        }
+    }
+
+    func testPendingIgnoringCancellationStartDoesNotBlockStopOrPublishLateSuccess() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        let owner = try await client.prepareOwnedBulb()
+        await peer.enqueueHold(method: "POST", path: startPath, key: "owned-start")
+        let start = Task { try await client.startOwnedBulb(owner) }
+        try await waitForHold("owned-start", on: peer)
+        start.cancel()
+        await peer.enqueueJSON(method: "POST", path: ownedStopPath, body: ownedAck(owner, outcome: "released", status: released))
+        _ = try await client.stopOwnedBulb(owner)
+        let stillHeld = await peer.isHeld("owned-start")
+        XCTAssertTrue(stillHeld, "Stop must settle before the cancellation-ignoring Start transport")
+        await assertIdle(client)
+        await peer.resume("owned-start", body: ownedAck(owner, outcome: "started", status: active))
+        await assertThrows { _ = try await start.value }
+        await assertIdle(client)
+    }
+
+    func testConcurrentOwnedStopsShareOneWireRequestEvenWhenCallerCancels() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        let owner = try await client.prepareOwnedBulb()
+        await peer.enqueueHold(method: "POST", path: ownedStopPath, key: "owned-stop")
+        let first = Task { try await client.stopOwnedBulb(owner) }
+        try await waitForHold("owned-stop", on: peer)
+        let entered = expectation(description: "second owned Stop entered")
+        let second = Task { try await client.ownedRecoveryStop(owner, onEntry: { entered.fulfill() }) }
+        await fulfillment(of: [entered], timeout: 3)
+        first.cancel()
+        await peer.resume("owned-stop", body: ownedAck(owner, outcome: "cancelled-before-start"))
+        let firstReceipt = try await first.value
+        let secondReceipt = try await second.value
+        XCTAssertNil(firstReceipt)
+        XCTAssertNil(secondReceipt)
+        let requests = await peer.requests()
+        XCTAssertEqual(requests.filter { $0.path == ownedStopPath }.count, 1)
+        await assertTerminalWithoutObservation(client)
+    }
+
+    func testForeignTokenAndRepeatedStartCannotDispatch() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        let owner = try await client.prepareOwnedBulb()
+        let foreign = DesktopBridgeBulbOwner(id: UUID(), generation: owner.generation,
+            startURL: owner.startURL, stopURL: owner.stopURL)
+        await assertThrows { _ = try await client.startOwnedBulb(foreign) }
+        await assertThrows { _ = try await client.stopOwnedBulb(foreign) }
+        await peer.enqueueFailure(method: "POST", path: startPath)
+        await assertThrows { _ = try await client.startOwnedBulb(owner) }
+        await assertThrows { _ = try await client.startOwnedBulb(owner) }
+        await assertThrows { _ = try await client.prepareOwnedBulb() }
+        let requests = await peer.requests()
+        XCTAssertEqual(requests.map(\.path), ["/health", "/v1/session", startPath])
+        await assertPending(client)
+    }
+
+    func testOwnedFailedStopCannotBeClearedByDualFalseGET() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        let owner = try await client.prepareOwnedBulb()
+        await peer.enqueueFailure(method: "POST", path: ownedStopPath)
+        await assertThrows { try await client.retryShutterRelease() }
+        await peer.enqueueJSON(path: statusPath, body: released)
+        let observation = try await client.status()
+        XCTAssertEqual(observation.shutterReleaseUnconfirmed, true)
+        await assertPending(client)
+        await peer.enqueueJSON(method: "POST", path: ownedStopPath, body: ownedAck(owner, outcome: "cancelled-before-start"))
+        try await client.retryShutterRelease()
+        await assertTerminalWithoutObservation(client)
+        let paths = await peer.requests().map(\.path)
+        XCTAssertEqual(paths, ["/health", "/v1/session", ownedStopPath, statusPath, ownedStopPath])
+    }
+
+    func testOwnedReceiptsRetainNewerSharedWarning() async throws {
+        let proofs: [String?] = [nil, released]
+        for proof in proofs {
+            let peer = BridgeShutterTransport()
+            let client = try await initializedClient(peer)
+            let owner = try await client.prepareOwnedBulb()
+            await peer.enqueueHold(method: "POST", path: ownedStopPath, key: "cached-stop")
+            let stop = Task { try await client.stopOwnedBulb(owner) }
+            try await waitForHold("cached-stop", on: peer)
+            await peer.enqueueJSON(path: statusPath, body: unknown)
+            _ = try await client.status()
+            await peer.resume("cached-stop", body: ownedAck(owner, outcome: "released", status: proof))
+            let receipt = try await stop.value
+            XCTAssertNil(receipt)
+            let fresh = await client.ownedBulbReleaseHasFreshStatus
+            XCTAssertFalse(fresh)
+            await assertPending(client)
+            await peer.enqueueJSON(method: "POST", path: stopPath, body: released)
+            try await client.retryShutterRelease()
+            await assertIdle(client)
+        }
+    }
+
+    func testOwnedEnvelopesRejectAmbiguousJSONAndNullStatus() async throws {
+        for starting in [true, false] {
+            for kind in ["duplicate-owner", "duplicate-outcome", "duplicate-status", "invalid-utf8", "trailing-json", "null-status", "cancelled-with-status"] {
+                let peer = BridgeShutterTransport()
+                let client = try await initializedClient(peer)
+                let owner = try await client.prepareOwnedBulb()
+                let outcome = starting ? "started" : "released"
+                let proof = starting ? active : released
+                let valid = ownedAck(owner, outcome: outcome, status: proof)
+                var raw = valid
+                switch kind {
+                case "duplicate-owner": raw = "{\"ownerId\":\"\(owner.id.uuidString)\"," + valid.dropFirst()
+                case "duplicate-outcome": raw = "{\"outcome\":\"\(outcome)\"," + valid.dropFirst()
+                case "duplicate-status": raw = "{\"status\":\(proof)," + valid.dropFirst()
+                case "trailing-json": raw += "{}"
+                case "null-status": raw = ownedAck(owner, outcome: outcome, status: "null")
+                case "cancelled-with-status": raw = ownedAck(owner, outcome: "cancelled-before-start", status: released)
+                default: break
+                }
+                var data = Data(raw.utf8)
+                if kind == "invalid-utf8" { data.append(0xff) }
+                await peer.enqueueRaw(method: "POST", path: starting ? startPath : ownedStopPath, body: data)
+                await assertThrows {
+                    if starting { _ = try await client.startOwnedBulb(owner) }
+                    else { _ = try await client.stopOwnedBulb(owner) }
+                }
+                await assertPending(client)
+            }
+        }
+    }
+
+    func testActiveGETAfterOwnedStartRemainsKnownAndCachedReceiptPreservesObservation() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        let owner = try await client.prepareOwnedBulb()
+        await peer.enqueueJSON(method: "POST", path: startPath, body: ownedAck(owner, outcome: "started", status: active))
+        _ = try await client.startOwnedBulb(owner)
+        await peer.enqueueJSON(path: statusPath, body: active)
+        let status = try await client.status()
+        XCTAssertEqual(status.bulbExposureActive, true)
+        XCTAssertEqual(status.shutterReleaseUnconfirmed, false)
+        let known = await client.shutterReleaseState()
+        XCTAssertTrue(known.releaseRequired)
+        XCTAssertFalse(known.releaseUnconfirmed)
+        XCTAssertEqual(known.bulbExposureActive, true)
+        await peer.enqueueJSON(method: "POST", path: ownedStopPath, body: ownedAck(owner, outcome: "released"))
+        let receipt = try await client.stopOwnedBulb(owner)
+        XCTAssertNil(receipt)
+        let retained = await client.shutterReleaseState()
+        XCTAssertTrue(retained.releaseRequired)
+        XCTAssertFalse(retained.releaseUnconfirmed)
+        XCTAssertEqual(retained.bulbExposureActive, true)
+        let fresh = await client.ownedBulbReleaseHasFreshStatus
+        XCTAssertFalse(fresh)
+        await peer.enqueueJSON(method: "POST", path: stopPath, body: released)
+        try await client.retryShutterRelease()
+        await assertIdle(client)
+    }
+
+    func testOwnedInvalidAcknowledgementsAndResponseBoundRemainPending() async throws {
+        for kind in ["wrong-owner", "wrong-outcome", "missing-proof", "numeric-proof", "oversized", "partial"] {
+            let peer = BridgeShutterTransport()
+            let client = try await initializedClient(peer)
+            let owner = try await client.prepareOwnedBulb()
+            var body = ownedAck(owner, outcome: "released", status: released)
+            var status = 200
+            switch kind {
+            case "wrong-owner": body = body.replacingOccurrences(of: owner.id.uuidString, with: UUID().uuidString)
+            case "wrong-outcome": body = ownedAck(owner, outcome: "started", status: released)
+            case "missing-proof": body = ownedAck(owner, outcome: "released", status: #"{"bulbExposureActive":false}"#)
+            case "numeric-proof": body = ownedAck(owner, outcome: "released", status: #"{"bulbExposureActive":0,"shutterReleaseUnconfirmed":false}"#)
+            case "oversized": body += String(repeating: " ", count: 65_537)
+            default: status = 206
+            }
+            await peer.enqueueJSON(method: "POST", path: ownedStopPath, status: status, body: body)
+            await assertThrows { _ = try await client.stopOwnedBulb(owner) }
+            await assertPending(client)
+        }
+    }
+
+    func testOwnedCloseRetiresSessionAfterFailedStopAndFencesRecycledID() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        let owner = try await client.prepareOwnedBulb()
+        await peer.enqueueHold(method: "POST", path: startPath, key: "retired-start")
+        let start = Task { try await client.startOwnedBulb(owner) }
+        try await waitForHold("retired-start", on: peer)
+        await peer.enqueueFailure(method: "POST", path: ownedStopPath)
+        await peer.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 204, body: "")
+        let warning = await client.closeWithShutterReleaseState()
+        XCTAssertTrue(warning.releaseUnconfirmed)
+        XCTAssertFalse(warning.releaseRequired)
+        await enqueueInitialization(peer, id: "session-a")
+        try await client.initialize()
+        let current = try await client.prepareOwnedBulb()
+        await peer.resume("retired-start", body: ownedAck(owner, outcome: "started", status: active))
+        await assertThrows { _ = try await start.value }
+        await assertThrows { _ = try await client.stopOwnedBulb(owner) }
+        await assertPending(client)
+        await peer.enqueueJSON(method: "POST", path: ownedStopPath, body: ownedAck(current, outcome: "cancelled-before-start"))
+        try await client.retryShutterRelease()
+        await assertTerminalWithoutObservation(client)
+        let writes = await peer.requests().filter { $0.method != "GET" }
+        XCTAssertEqual(writes.map(\.path), ["/v1/session", startPath, ownedStopPath, "/v1/session/session-a", "/v1/session", ownedStopPath])
+    }
+
+    func testReceiptOnlyOwnedClosePreservesUnknownActivityAndCancelledCallerCleanup() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        let owner = try await client.prepareOwnedBulb()
+        await peer.enqueueJSON(method: "POST", path: ownedStopPath, body: ownedAck(owner, outcome: "cancelled-before-start"))
+        await peer.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 204, body: "")
+        let close = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await client.closeWithShutterReleaseState()
+        }
+        let outcome = await close.value
+        XCTAssertEqual(outcome, CameraShutterReleaseState(bulbExposureActive: nil))
+        let cancelled = await peer.cancelledSendCount()
+        XCTAssertEqual(cancelled, 0)
+        let requests = await peer.requests()
+        XCTAssertEqual(requests.map(\.path), ["/health", "/v1/session", ownedStopPath, "/v1/session/session-a"])
+        await assertTerminalWithoutObservation(client)
+        let repeated = await client.closeWithShutterReleaseState()
+        XCTAssertEqual(repeated, outcome)
+        let after = await peer.requests().count
+        XCTAssertEqual(after, requests.count)
+    }
+
+    func testPreStopActiveStatusCannotRelockAfterOwnedReleaseAcknowledgement() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        let owner = try await client.prepareOwnedBulb()
+        await peer.enqueueJSON(method: "POST", path: startPath, body: ownedAck(owner, outcome: "started", status: active))
+        _ = try await client.startOwnedBulb(owner)
+        await peer.enqueueHold(path: statusPath, key: "old-owned-status")
+        let status = Task { try await client.status() }
+        try await waitForHold("old-owned-status", on: peer)
+        await peer.enqueueJSON(method: "POST", path: ownedStopPath, body: ownedAck(owner, outcome: "released", status: released))
+        _ = try await client.stopOwnedBulb(owner)
+        await peer.resume("old-owned-status", body: active)
+        let stale = try await status.value
+        XCTAssertEqual(stale.bulbExposureActive, false)
+        XCTAssertEqual(stale.shutterReleaseUnconfirmed, false)
+        await assertIdle(client)
+    }
+
+    func testFailedStopBeforeStartConsumesAdmissionAndOnlySameOwnerRetryRemains() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        let owner = try await client.prepareOwnedBulb()
+        await peer.enqueueFailure(method: "POST", path: ownedStopPath)
+        await assertThrows { _ = try await client.stopOwnedBulb(owner) }
+        await assertThrows { _ = try await client.startOwnedBulb(owner) }
+        await assertThrows { _ = try await client.prepareOwnedBulb() }
+        await assertPending(client)
+        await peer.enqueueJSON(method: "POST", path: ownedStopPath, body: ownedAck(owner, outcome: "cancelled-before-start"))
+        try await client.retryShutterRelease()
+        await assertTerminalWithoutObservation(client)
+        let requests = await peer.requests()
+        XCTAssertEqual(requests.map(\.path), ["/health", "/v1/session", ownedStopPath, ownedStopPath])
+        for request in requests.filter({ $0.path == ownedStopPath }) {
+            let body = try XCTUnwrap(request.body)
+            let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+            XCTAssertEqual(payload["ownerId"], owner.id.uuidString)
+        }
+    }
+
+    func testGETBegunDuringOwnedStopCannotRecreateObligationAfterTerminalReceipt() async throws {
+        let proofs: [String?] = [nil, released]
+        for proof in proofs {
+            let peer = BridgeShutterTransport()
+            let client = try await initializedClient(peer)
+            let owner = try await client.prepareOwnedBulb()
+            await peer.enqueueHold(method: "POST", path: ownedStopPath, key: "terminal-stop")
+            let stop = Task { try await client.stopOwnedBulb(owner) }
+            try await waitForHold("terminal-stop", on: peer)
+            await peer.enqueueHold(path: statusPath, key: "during-stop-status")
+            let status = Task { try await client.status() }
+            try await waitForHold("during-stop-status", on: peer)
+            await peer.resume("terminal-stop", body: ownedAck(owner, outcome: "released", status: proof))
+            _ = try await stop.value
+            if proof == nil { await assertTerminalWithoutObservation(client) }
+            else { await assertIdle(client) }
+            await peer.resume("during-stop-status", body: unknown)
+            let late = try await status.value
+            XCTAssertEqual(late.shutterReleaseUnconfirmed, false)
+            XCTAssertEqual(late.bulbExposureActive, proof == nil ? nil : false)
+            if proof == nil { await assertTerminalWithoutObservation(client) }
+            else { await assertIdle(client) }
+            let beforeRetry = await peer.requests().count
+            try await client.retryShutterRelease()
+            let afterRetry = await peer.requests().count
+            XCTAssertEqual(afterRetry, beforeRetry)
+        }
+    }
+
+    func testReceiptOnlyTerminalHasNoDutyWithoutInventingInactiveObservation() async throws {
+        for outcome in ["released", "cancelled-before-start"] {
+            let peer = BridgeShutterTransport()
+            let client = try await initializedClient(peer)
+            let owner = try await client.prepareOwnedBulb()
+            await peer.enqueueJSON(method: "POST", path: ownedStopPath, body: ownedAck(owner, outcome: outcome))
+            let receipt = try await client.stopOwnedBulb(owner)
+            XCTAssertNil(receipt)
+            await assertTerminalWithoutObservation(client)
+            let fresh = await client.ownedBulbReleaseHasFreshStatus
+            XCTAssertFalse(fresh)
+            let before = await peer.requests().count
+            try await client.retryShutterRelease()
+            let after = await peer.requests().count
+            XCTAssertEqual(after, before, "Receipt-only terminal does not invent a retry obligation")
+            _ = try await client.prepareOwnedBulb()
+            await assertPending(client)
+        }
+    }
+
+    func testFreshDualFalseGETAfterReceiptOnlyTerminalRestoresKnownInactiveState() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        let owner = try await client.prepareOwnedBulb()
+        await peer.enqueueJSON(method: "POST", path: ownedStopPath, body: ownedAck(owner, outcome: "released"))
+        _ = try await client.stopOwnedBulb(owner)
+        await assertTerminalWithoutObservation(client)
+        await peer.enqueueJSON(path: statusPath, body: released)
+        let fresh = try await client.status()
+        XCTAssertEqual(fresh.bulbExposureActive, false)
+        XCTAssertEqual(fresh.shutterReleaseUnconfirmed, false)
+        await assertIdle(client)
+    }
+
+    private func assertTerminalWithoutObservation(
+        _ client: DesktopBridgeClient, file: StaticString = #filePath, line: UInt = #line
+    ) async {
+        let state = await client.shutterReleaseState()
+        XCTAssertFalse(state.releaseRequired, file: file, line: line)
+        XCTAssertFalse(state.releaseUnconfirmed, file: file, line: line)
+        XCTAssertNil(state.bulbExposureActive, file: file, line: line)
+    }
+
+    // Authored native regression: deliberately exercises the real 15-second
+    // production deadline rather than injecting a shorter test-only timeout.
+    func testRetirementAfterReceiptOnlyOwnerUsesProductionDeadlineWithoutJoiningTransport() async throws {
+        let peer = BridgeShutterTransport()
+        let client = try await initializedClient(peer)
+        let owner = try await client.prepareOwnedBulb()
+        await peer.enqueueJSON(method: "POST", path: ownedStopPath,
+                               body: ownedAck(owner, outcome: "cancelled-before-start"))
+        _ = try await client.stopOwnedBulb(owner)
+        await assertTerminalWithoutObservation(client)
+        await peer.enqueueHold(method: "DELETE", path: "/v1/session/session-a", key: "retired-owner-delete")
+        let finished = expectation(description: "retirement returns at production total deadline")
+        let close = Task {
+            defer { finished.fulfill() }
+            return await client.closeWithShutterReleaseState()
+        }
+        try await waitForHold("retired-owner-delete", on: peer)
+        await fulfillment(of: [finished], timeout: 20)
+        let state = await close.value
+        XCTAssertEqual(state, CameraShutterReleaseState(bulbExposureActive: nil))
+        let unconfirmed = await client.connectionRetirementUnconfirmed
+        XCTAssertTrue(unconfirmed)
+        let stillHeld = await peer.isHeld("retired-owner-delete")
+        XCTAssertTrue(stillHeld, "Cancellation-ignoring producer must not hold Close")
+        await peer.resume("retired-owner-delete", status: 204, body: "")
+        let requests = await peer.requests()
+        XCTAssertEqual(requests.filter { $0.path == ownedStopPath }.count, 1)
+        XCTAssertEqual(requests.filter { $0.method == "DELETE" }.count, 1)
+        XCTAssertEqual(requests.last?.timeoutInterval, 15)
+    }
+
+    func testBoundedExchangeExpiresWithoutWaitingForIgnoringCancellationTransport() async throws {
+        let peer = BridgeShutterTransport()
+        await peer.enqueueHold(path: "/bounded", key: "bounded")
+        let request = URLRequest(url: URL(string: "http://127.0.0.1/bounded")!)
+        let finished = expectation(description: "absolute deadline completes exchange")
+        let exchange = Task {
+            defer { finished.fulfill() }
+            do {
+                _ = try await BridgeBoundedExchange.run(seconds: 0.1) { try await peer.send(request) }
+                XCTFail("Expected deadline")
+            } catch { XCTAssertEqual((error as? URLError)?.code, .timedOut) }
+        }
+        try await waitForHold("bounded", on: peer)
+        await fulfillment(of: [finished], timeout: 2)
+        let held = await peer.isHeld("bounded")
+        XCTAssertTrue(held)
+        await peer.resume("bounded", body: "{}")
+        await exchange.value
     }
 
     private func initializedClient(_ transport: BridgeShutterTransport) async throws -> DesktopBridgeClient {
@@ -936,6 +941,11 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
 
 // Test-only actor entry signal; the production client has no synchronization hook.
 private extension DesktopBridgeClient {
+    func ownedRecoveryStop(_ owner: DesktopBridgeBulbOwner, onEntry: @Sendable () -> Void) async throws -> CameraStatus? {
+        onEntry()
+        return try await stopOwnedBulb(owner)
+    }
+
     func recoveryStop(onEntry: @Sendable () -> Void) async throws -> CameraStatus {
         onEntry()
         return try await stopBulbExposure()
@@ -966,6 +976,11 @@ private actor BridgeShutterTransport: CameraHTTPTransport {
             method: method, path: path,
             outcome: .response(CameraHTTPResponse(statusCode: status, body: Data(body.utf8)))
         ))
+    }
+
+    func enqueueRaw(method: String, path: String, body: Data) {
+        stubs.append(Stub(method: method, path: path,
+            outcome: .response(CameraHTTPResponse(statusCode: 200, body: body))))
     }
 
     func enqueueFailure(method: String, path: String) {

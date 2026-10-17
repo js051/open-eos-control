@@ -185,6 +185,16 @@ public actor DesktopBridgeClient {
     private var isClosing = false
     private var closeWaiters: [CheckedContinuation<CameraShutterReleaseState, Never>] = []
     private var completedCloseState = CameraShutterReleaseState.idle
+    private var ownedBulb: DesktopBridgeBulbOwner?
+    private var ownedBulbActive = false
+    private var ownedBulbUnconfirmed = true
+    private var ownedBulbStartDispatched = false
+    private var ownedBulbTerminalWithoutStatus = false
+    private var ownedBulbLifecycleUsed = false
+    private var ownedBulbStopTask: Task<CameraStatus?, Error>?
+    private var ownedBulbStopID: UUID?
+    public private(set) var ownedBulbReleaseHasFreshStatus = false
+    public var hasOwnedBulb: Bool { ownedBulb != nil }
     private var bulbOperationInFlight = false
     private var bulbStartTask: Task<CameraStatus, Error>?
     private var bulbStopTask: Task<CameraStatus, Error>?
@@ -304,7 +314,7 @@ public actor DesktopBridgeClient {
         try Task.checkCancellation()
         guard !isClosing, !connectionRetirementUnconfirmed else { throw DesktopBridgeError.sessionChanged }
         guard sessionID == nil else { return }
-        guard bulbStartTask == nil, bulbStopTask == nil, !bulbOperationInFlight else {
+        guard ownedBulb == nil, ownedBulbStopTask == nil, bulbStartTask == nil, bulbStopTask == nil, !bulbOperationInFlight else {
             throw DesktopBridgeError.sessionChanged
         }
         guard initializationToken == nil else { throw DesktopBridgeError.sessionChanged }
@@ -385,7 +395,9 @@ public actor DesktopBridgeClient {
         completedCloseState = .idle
         releaseRevision = UUID()
         shutterRelease = nil
+        ownedBulb = nil; ownedBulbStopTask = nil; ownedBulbStopID = nil
         ownsShutterStatus = false
+        ownedBulbTerminalWithoutStatus = false; ownedBulbLifecycleUsed = false
         sessionID = id
         sessionEngine = created.engine
         captureConfigurationSessionEngine = created.rawEngine
@@ -407,11 +419,18 @@ public actor DesktopBridgeClient {
     }
 
     public func shutterReleaseState() -> CameraShutterReleaseState {
+        if ownedBulb != nil {
+            return CameraShutterReleaseState(releaseRequired: true,
+                releaseUnconfirmed: ownedBulbUnconfirmed || shutterRelease?.unconfirmed == true,
+                bulbExposureActive: ownedBulbUnconfirmed ? nil : ownedBulbActive)
+        }
         if let focusHold {
             return CameraShutterReleaseState(releaseRequired: true, releaseUnconfirmed: focusHold.unconfirmed,
                 bulbExposureActive: false)
         }
-        guard let shutterRelease else { return .idle }
+        guard let shutterRelease else {
+            return ownedBulbTerminalWithoutStatus ? CameraShutterReleaseState(bulbExposureActive: nil) : .idle
+        }
         return CameraShutterReleaseState(
             releaseRequired: true,
             releaseUnconfirmed: shutterRelease.unconfirmed,
@@ -430,41 +449,71 @@ public actor DesktopBridgeClient {
         initializationCancelled = true
         guard let id = sessionID else { return completedCloseState }
         isClosing = true
-        if maintenanceLifecycleOwned { return await finishMaintenanceClose() }
+        if maintenanceLifecycleOwned {
+            // Retirement must still dispatch when the closing caller is cancelled.
+            return await Task { await self.finishMaintenanceClose() }.value
+        }
         mediaListingOwner = nil
         mediaListingStream?.cancel()
         mediaListingStream = nil
         focusStartTask?.cancel()
         if let start = focusStartTask { _ = await start.result }
         if let hold = focusHold { try? await releaseFocusHold(hold) }
-        // Cancel only our pending Start. A transport may ignore cancellation,
-        // so settlement must still precede the original session's DELETE.
-        // Stop can be reserved while it awaits Start, before it sets the wire
-        // operation flag. Retire both owned tasks before DELETE or reinitialize.
+        let ownedAtClose = ownedBulb
+        var ownedReleaseFailed = false
+        if let owner = ownedAtClose {
+            do { _ = try await stopOwnedBulb(owner, allowClosing: true) }
+            catch { ownedReleaseFailed = true }
+        }
+        // Legacy/direct recovery retains its existing ordering. Owned Start is
+        // independent: its late response is fenced by the immutable owner.
+        // These legacy reservations are separate from owned Bulb workers.
         let pendingStart = bulbStartTask
         let pendingStop = bulbStopTask
         pendingStart?.cancel()
         if let pendingStart { _ = await pendingStart.result }
         if let pendingStop { _ = await pendingStop.result }
-        if let start = liveViewStartTask {
-            start.cancel()
-            _ = await start.result
+        if ownedAtClose == nil {
+            if let start = liveViewStartTask { start.cancel(); _ = await start.result }
+            if let stop = liveViewStopTask { _ = await stop.result }
+            try? await releasePendingLiveView()
+            await stopEventPolling()
+        } else {
+            liveViewStartTask?.cancel()
         }
-        if let stop = liveViewStopTask { _ = await stop.result }
-        try? await releasePendingLiveView()
-        await stopEventPolling()
-        var result = CameraShutterReleaseState(releaseUnconfirmed: focusHold != nil, bulbExposureActive: focusHold == nil ? false : nil)
+        var result = CameraShutterReleaseState(releaseUnconfirmed: ownedReleaseFailed || shutterRelease != nil || focusHold != nil,
+            bulbExposureActive: ownedReleaseFailed || shutterRelease != nil || focusHold != nil || ownedBulbTerminalWithoutStatus ? nil : false)
         do {
             // Unstructured cleanup does not inherit the caller's cancellation.
             // Still await its result before retiring the session or close waiters.
             let deletion = Task {
-                try await requestOK(endpoint(["v1", "session", id]), method: "DELETE", connectionRetirement: true)
+                if ownedAtClose != nil || ownedBulbLifecycleUsed {
+                    let request = makeRequest(url: try endpoint(["v1", "session", id]), method: "DELETE",
+                                              accept: "application/json", timeoutInterval: 15)
+                    let transport = transport
+                    let response = try await BridgeBoundedExchange.run { try await transport.sendConnectionLifecycle(request) }
+                    try CameraHTTPResponseIntegrity.validate(response, requestMethod: "DELETE")
+                    guard response.header("content-range") == nil, response.statusCode != 206 else {
+                        throw DesktopBridgeError.invalidResponse("Bridge session retirement requires a complete response.")
+                    }
+                    if !(200..<300).contains(response.statusCode) {
+                        let error = Self.httpError(response: response, method: "DELETE", url: request.url!,
+                                                   preservingProtocolStrings: true)
+                        preserveConnectionRetirementSafetyWarning(error)
+                        throw error
+                    }
+                    guard response.statusCode == 204, response.body.isEmpty else {
+                        throw DesktopBridgeError.invalidResponse("Bridge session retirement was not confirmed.")
+                    }
+                } else {
+                    try await requestOK(endpoint(["v1", "session", id]), method: "DELETE", connectionRetirement: true)
+                }
             }
             try await deletion.value
         } catch {
             connectionRetirementUnconfirmed = true
             if liveViewStop != nil || Self.isLiveViewStopError(error) { liveViewStopUnconfirmed = true }
-            if shutterRelease != nil || focusHold != nil || Self.isShutterReleaseError(error) {
+            if ownedReleaseFailed || shutterRelease != nil || focusHold != nil || Self.isShutterReleaseError(error) {
                 // DELETE can remove the server session even when cleanup fails.
                 // The caller presents this as a previous-connection warning only.
                 result = CameraShutterReleaseState(
@@ -480,6 +529,7 @@ public actor DesktopBridgeClient {
         sessionGeneration = UUID()
         releaseRevision = UUID()
         shutterRelease = nil
+        ownedBulb = nil; ownedBulbStopTask = nil; ownedBulbStopID = nil
         ownsShutterStatus = false
         eventPollingSupported = false
         shutterAutofocusSupported = false
@@ -954,7 +1004,7 @@ public actor DesktopBridgeClient {
     private func requireMaintenanceMutationSafety(_ attempt: CameraMaintenanceAttempt) throws {
         try attempt.checkMutationSafety()
         guard maintenanceRecordingObservation != true, recordingCommandEvidence == nil,
-              shutterRelease == nil, focusHold == nil, !bulbOperationInFlight,
+              ownedBulb == nil, shutterRelease == nil, focusHold == nil, !bulbOperationInFlight,
               bulbStartTask == nil, bulbStopTask == nil else {
             throw DesktopBridgeError.invalidResponse("Recording or shutter recovery blocks camera maintenance.")
         }
@@ -969,11 +1019,13 @@ public actor DesktopBridgeClient {
         focusStartTask?.cancel()
         if let start = focusStartTask { _ = await start.result }
         if let hold = focusHold { try? await releaseFocusHold(hold) }
+        let ownedAtClose = ownedBulb
+        if let owner = ownedAtClose { _ = try? await stopOwnedBulb(owner, allowClosing: true) }
         let pendingStart = bulbStartTask, pendingStop = bulbStopTask
         pendingStart?.cancel()
         if let pendingStart { _ = await pendingStart.result }
         if let pendingStop { _ = await pendingStop.result }
-        if let release = shutterRelease {
+        if ownedAtClose == nil, let release = shutterRelease {
             do {
                 let body = try await requestJSON(url: release.stopURL, method: "POST", payload: [:],
                                                  timeoutInterval: 15, shutterOperation: true)
@@ -983,16 +1035,19 @@ public actor DesktopBridgeClient {
                 shutterRelease = nil; releaseRevision = UUID()
             } catch { markShutterReleaseUnconfirmed(stopCompleted: true) }
         }
-        if let start = liveViewStartTask { start.cancel(); _ = await start.result }
-        if let stop = liveViewStopTask { _ = await stop.result }
+        if ownedAtClose == nil {
+            if let start = liveViewStartTask { start.cancel(); _ = await start.result }
+            if let stop = liveViewStopTask { _ = await stop.result }
+        } else { liveViewStartTask?.cancel() }
         // A failed physical release must not be bypassed by Live View/event Stop.
-        let releaseSafe = shutterRelease == nil && focusHold == nil
+        let releaseSafe = ownedBulb == nil && shutterRelease == nil && focusHold == nil
         let cleanup = CameraMaintenanceAttempt(operation: .sensorCleaning)
         if releaseSafe, maintenanceEventStopRequired {
             do {
                 let request = makeRequest(url: try sessionEndpoint(["maintenance", "control", "events"]),
                     method: "DELETE", accept: "application/json", timeoutInterval: 15)
-                let response = try await transport.sendMaintenance(request)
+                let transport = transport
+            let response = try await BridgeBoundedExchange.run { try await transport.sendMaintenance(request) }
                 try CameraHTTPResponseIntegrity.validate(response, requestMethod: "DELETE")
                 guard response.statusCode == 204, response.body.isEmpty, response.header("content-range") == nil else {
                     throw DesktopBridgeError.invalidResponse("Event stop was not confirmed before retirement.")
@@ -1009,20 +1064,22 @@ public actor DesktopBridgeClient {
         do {
             let request = makeRequest(url: try sessionEndpoint(["maintenance", "control", "session"]),
                 method: "DELETE", accept: "application/json", timeoutInterval: 15)
-            let response = try await transport.sendMaintenance(request)
+            let transport = transport
+            let response = try await BridgeBoundedExchange.run { try await transport.sendMaintenance(request) }
             try CameraHTTPResponseIntegrity.validate(response, requestMethod: "DELETE")
             guard response.statusCode == 204, response.body.isEmpty, response.header("content-range") == nil else {
                 throw DesktopBridgeError.invalidResponse("Bridge session retirement was not confirmed.")
             }
         } catch { maintenanceRetirementUnconfirmed = true }
         if liveViewStop != nil || maintenanceEventStopRequired { liveViewStopUnconfirmed = true }
-        let unconfirmed = shutterRelease != nil || focusHold != nil
+        let unconfirmed = ownedBulb != nil || shutterRelease != nil || focusHold != nil
         let result = CameraShutterReleaseState(releaseRequired: false, releaseUnconfirmed: unconfirmed,
-                                               bulbExposureActive: unconfirmed ? nil : false)
+                                               bulbExposureActive: unconfirmed || ownedBulbTerminalWithoutStatus ? nil : false)
         liveViewStop = nil; liveViewRevision = UUID()
         sessionID = nil; sessionEngine = nil; captureConfigurationSessionEngine = nil
         sessionGeneration = UUID(); releaseRevision = UUID()
-        shutterRelease = nil; ownsShutterStatus = false; eventPollingSupported = false
+        shutterRelease = nil; ownedBulb = nil; ownedBulbStopTask = nil; ownedBulbStopID = nil
+        ownsShutterStatus = false; eventPollingSupported = false
         shutterAutofocusSupported = false; liveViewMagnifications = []
         focusHold = nil; focusStartTask = nil; focusStopTask = nil
         heldAutofocusSupported = false; focusInfoSupported = false
@@ -1059,7 +1116,11 @@ public actor DesktopBridgeClient {
         maintenanceLiveViewControlID = id
         defer { if maintenanceLiveViewControlID == id { maintenanceLiveViewControlID = nil } }
         do {
-            let response = try await transport.sendMaintenance(request)
+            let response: CameraHTTPResponse
+            if allowClosing {
+                let transport = transport, frozenRequest = request
+                response = try await BridgeBoundedExchange.run { try await transport.sendMaintenance(frozenRequest) }
+            } else { response = try await transport.sendMaintenance(request) }
             let body = try Self.maintenanceBody(response, method: "POST")
             try attempt.checkActive()
             guard generation == sessionGeneration, (!isClosing || allowClosing), maintenanceLiveViewControlID == id,
@@ -1204,61 +1265,137 @@ public actor DesktopBridgeClient {
         return parseStatus(body)
     }
 
-    public func startBulbExposure() async throws -> CameraStatus {
-        try Task.checkCancellation()
-        guard !isClosing else { throw DesktopBridgeError.sessionChanged }
-        guard shutterRelease == nil, focusHold == nil, !bulbOperationInFlight, bulbStopTask == nil else {
+    /// Admission happens synchronously, before the UI launches its Start task.
+    public func prepareOwnedBulb() throws -> DesktopBridgeBulbOwner {
+        guard !isClosing, ownedBulb == nil, shutterRelease == nil, focusHold == nil,
+              !bulbOperationInFlight, bulbStopTask == nil, ordinaryMutationCount == 0 else {
             throw DesktopBridgeError.shutterReleaseUnconfirmed
         }
-        let startURL = try sessionEndpoint(["bulb", "start"])
-        let stopURL = try sessionEndpoint(["bulb", "stop"])
-        let generation = sessionGeneration
-        shutterRelease = ShutterReleaseObligation(stopURL: stopURL)
-        ownsShutterStatus = true
+        let owner = DesktopBridgeBulbOwner(id: UUID(), generation: sessionGeneration,
+            startURL: try sessionEndpoint(["bulb", "start", "owned"]),
+            stopURL: try sessionEndpoint(["bulb", "stop", "owned"]))
+        ownedBulb = owner; ownedBulbActive = false; ownedBulbUnconfirmed = true
+        ownsShutterStatus = true; ownedBulbLifecycleUsed = true
+        ownedBulbStartDispatched = false; ownedBulbReleaseHasFreshStatus = false
+        ownedBulbTerminalWithoutStatus = false
         releaseRevision = UUID()
-        bulbOperationInFlight = true
-        let task = Task { try await self.performBulbStart(url: startURL, generation: generation) }
-        bulbStartTask = task
-        return try await withTaskCancellationHandler {
-            try await task.value
-        } onCancel: {
-            task.cancel()
-        }
+        return owner
     }
 
-    private func performBulbStart(url: URL, generation: UUID) async throws -> CameraStatus {
-        defer {
-            bulbStartTask = nil
-            finishBulbOperation()
-        }
+    public func startBulbExposure() async throws -> CameraStatus {
+        try await startOwnedBulb(prepareOwnedBulb())
+    }
+
+    public func startOwnedBulb(_ owner: DesktopBridgeBulbOwner) async throws -> CameraStatus {
+        guard !isClosing, ownedBulb == owner, owner.generation == sessionGeneration,
+              !ownedBulbStartDispatched else { throw DesktopBridgeError.sessionChanged }
+        ownedBulbStartDispatched = true
+        let revision = releaseRevision
         do {
-            try Task.checkCancellation()
-            guard !isClosing, sessionGeneration == generation else { throw DesktopBridgeError.sessionChanged }
-            let body = try await requestJSON(
-                url: url, method: "POST", payload: [:], shutterOperation: true
-            )
-            try Task.checkCancellation()
-            guard sessionGeneration == generation else { throw DesktopBridgeError.sessionChanged }
-            // A successful HTTP exchange alone is not proof of an observed start.
-            // Legacy compatibility is confined to an acknowledged, literal true.
-            guard Self.strictBool(body["bulbExposureActive"]) == true,
-                  body["shutterReleaseUnconfirmed"] == nil
-                    || Self.strictBool(body["shutterReleaseUnconfirmed"]) == false else {
+            let body = try await ownedBulbExchange(owner, starting: true)
+            guard !isClosing, ownedBulb == owner, owner.generation == sessionGeneration else {
+                throw DesktopBridgeError.sessionChanged
+            }
+            guard body.string("ownerId") == owner.id.uuidString,
+                  body.string("outcome") == "started", let status = body["status"] as? BridgeJSON,
+                  Self.strictBool(status["bulbExposureActive"]) == true,
+                  Self.strictBool(status["shutterReleaseUnconfirmed"]) == false else {
                 throw DesktopBridgeError.shutterReleaseUnconfirmed
             }
-            shutterRelease?.unconfirmed = false
-            shutterRelease?.active = true
-            shutterRelease?.acceptsLegacyStop = body["shutterReleaseUnconfirmed"] == nil
-            releaseRevision = UUID()
-            guard !isClosing else { throw DesktopBridgeError.sessionChanged }
-            return parseStatus(body)
+            // A Stop or newer observation outranks a late Start response.
+            guard revision == releaseRevision, ownedBulbStopTask == nil else {
+                throw DesktopBridgeError.shutterReleaseUnconfirmed
+            }
+            ownedBulbActive = true; ownedBulbUnconfirmed = false
+            return parseStatus(status)
         } catch {
-            if sessionGeneration == generation { markShutterReleaseUnconfirmed(stopCompleted: false) }
+            if ownedBulb == owner, revision == releaseRevision { ownedBulbUnconfirmed = true }
             throw error
         }
     }
 
+    public func stopOwnedBulb(_ owner: DesktopBridgeBulbOwner) async throws -> CameraStatus? {
+        try await stopOwnedBulb(owner, allowClosing: false)
+    }
+
+    private func stopOwnedBulb(_ owner: DesktopBridgeBulbOwner, allowClosing: Bool) async throws -> CameraStatus? {
+        guard (!isClosing || allowClosing), ownedBulb == owner,
+              owner.generation == sessionGeneration else { throw DesktopBridgeError.sessionChanged }
+        if let task = ownedBulbStopTask {
+            let status = try await task.value
+            guard owner.generation == sessionGeneration, !isClosing || allowClosing else {
+                throw DesktopBridgeError.sessionChanged
+            }
+            return status
+        }
+        let id = UUID()
+        // Stop consumes local Start admission even if its response is lost.
+        ownedBulbStartDispatched = true
+        ownedBulbStopID = id; ownedBulbUnconfirmed = true
+        ownedBulbReleaseHasFreshStatus = false; releaseRevision = UUID()
+        let revision = releaseRevision
+        let task = Task<CameraStatus?, Error> {
+            defer {
+                if self.ownedBulbStopID == id {
+                    self.ownedBulbStopTask = nil; self.ownedBulbStopID = nil
+                }
+            }
+            let body = try await self.ownedBulbExchange(owner, starting: false)
+            guard self.ownedBulb == owner, owner.generation == self.sessionGeneration else {
+                throw DesktopBridgeError.sessionChanged
+            }
+            guard body.string("ownerId") == owner.id.uuidString,
+                  ["released", "cancelled-before-start"].contains(body.string("outcome") ?? "") else {
+                throw DesktopBridgeError.shutterReleaseUnconfirmed
+            }
+            let status = body["status"] as? BridgeJSON
+            if body["status"] != nil, status == nil {
+                throw DesktopBridgeError.shutterReleaseUnconfirmed
+            }
+            if status != nil, body.string("outcome") != "released" {
+                throw DesktopBridgeError.shutterReleaseUnconfirmed
+            }
+            if let status, !Self.provesShutterReleased(status) {
+                throw DesktopBridgeError.shutterReleaseUnconfirmed
+            }
+            self.ownedBulb = nil
+            self.ownedBulbTerminalWithoutStatus = status == nil
+            if status != nil, revision == self.releaseRevision { self.shutterRelease = nil }
+            self.ownedBulbReleaseHasFreshStatus = status != nil && revision == self.releaseRevision
+                && self.shutterRelease == nil && self.focusHold == nil
+            self.releaseRevision = UUID() // Fence reads begun before this terminal receipt.
+            // Cached receipts remove only this owner; they carry no camera observation.
+            guard self.ownedBulbReleaseHasFreshStatus, let status else { return nil }
+            return self.parseStatus(status)
+        }
+        ownedBulbStopTask = task
+        let status = try await task.value
+        guard owner.generation == sessionGeneration, !isClosing || allowClosing else {
+            throw DesktopBridgeError.sessionChanged
+        }
+        return status
+    }
+
+    private func ownedBulbExchange(_ owner: DesktopBridgeBulbOwner, starting: Bool) async throws -> BridgeJSON {
+        let url = starting ? owner.startURL : owner.stopURL
+        try validateMutation(url: url, method: "POST", shutterOperation: true)
+        var request = makeRequest(url: url, method: "POST", accept: "application/json", timeoutInterval: 15)
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["ownerId": owner.id.uuidString])
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        let transport = transport, frozenRequest = request
+        let response = try await BridgeBoundedExchange.run {
+            try await transport.sendMaintenance(frozenRequest)
+        }
+        return try Self.maintenanceBody(response, method: "POST")
+    }
+
     public func stopBulbExposure() async throws -> CameraStatus {
+        if let owner = ownedBulb {
+            guard let status = try await stopOwnedBulb(owner) else {
+                throw DesktopBridgeError.shutterReleaseUnconfirmed
+            }
+            return status
+        }
         try Task.checkCancellation()
         guard !isClosing else { throw DesktopBridgeError.sessionChanged }
         let generation = sessionGeneration
@@ -1335,6 +1472,7 @@ public actor DesktopBridgeClient {
                 throw DesktopBridgeError.shutterReleaseUnconfirmed
             }
             shutterRelease = nil
+            ownedBulbTerminalWithoutStatus = false
             releaseRevision = UUID()
             guard !isClosing else { throw DesktopBridgeError.sessionChanged }
             return parseStatus(body)
@@ -1346,6 +1484,7 @@ public actor DesktopBridgeClient {
 
     public func retryShutterRelease() async throws {
         if let hold = focusHold { try await stopHeldAutofocus(owner: hold.owner); return }
+        if let owner = ownedBulb { _ = try await stopOwnedBulb(owner); return }
         guard shutterRelease != nil else { return }
         let generation = sessionGeneration
         do {
@@ -1373,7 +1512,7 @@ public actor DesktopBridgeClient {
     public func startHeldAutofocus(owner: UUID) async throws {
         try Task.checkCancellation()
         guard heldAutofocusSupported, !isClosing, focusHold == nil, focusStartTask == nil, focusStopTask == nil,
-              shutterRelease == nil, !bulbOperationInFlight, bulbStopTask == nil,
+              ownedBulb == nil, shutterRelease == nil, !bulbOperationInFlight, bulbStopTask == nil,
               ordinaryMutationCount == 0, liveViewStartTask == nil, liveViewMaintenanceID == nil else {
             throw DesktopBridgeError.invalidResponse("Held autofocus is unavailable or another release is pending.")
         }
@@ -2330,7 +2469,7 @@ public actor DesktopBridgeClient {
             lens: lens,
             temperature: body.string("temperature").flatMap(CameraTemperatureStatus.init(rawValue:))
         )
-        return ownsShutterStatus || focusHold != nil ? status.withShutterReleaseState(shutterReleaseState()) : status
+        return ownedBulb != nil || ownsShutterStatus || focusHold != nil ? status.withShutterReleaseState(shutterReleaseState()) : status
     }
 
     private func finishBulbOperation() {
@@ -2367,9 +2506,12 @@ public actor DesktopBridgeClient {
     private func observeShutterStatus(_ body: BridgeJSON, canConfirmRelease: Bool) throws {
         let unconfirmed = Self.strictBool(body["shutterReleaseUnconfirmed"])
         let active = Self.strictBool(body["bulbExposureActive"])
+        if Self.provesShutterReleased(body) { ownedBulbTerminalWithoutStatus = false }
         if unconfirmed == true {
+            ownedBulbReleaseHasFreshStatus = false
             try adoptShutterRelease(unconfirmed: true, acceptsLegacyStop: false)
         } else if shutterRelease == nil, active == true {
+            ownedBulbReleaseHasFreshStatus = false
             let malformedFlag = body["shutterReleaseUnconfirmed"] != nil && unconfirmed == nil
             try adoptShutterRelease(
                 unconfirmed: malformedFlag,
@@ -2425,7 +2567,7 @@ public actor DesktopBridgeClient {
         guard sessionID != nil else { return false }
         if method == "DELETE", url == (try sessionEndpoint(["events"])) { return true }
         guard method == "POST" else { return false }
-        for path in [["bulb", "stop"], ["recording", "stop"], ["recording", "stop", "outcome"], ["liveview", "stop"], ["focus", "auto", "stop"]] {
+        for path in [["bulb", "stop"], ["bulb", "stop", "owned"], ["recording", "stop"], ["recording", "stop", "outcome"], ["liveview", "stop"], ["focus", "auto", "stop"]] {
             if url == (try sessionEndpoint(path)) { return true }
         }
         return false
@@ -2435,7 +2577,7 @@ public actor DesktopBridgeClient {
         guard !["GET", "HEAD", "OPTIONS"].contains(method) else { return }
         let recovery = try isRecoveryMutation(url: url, method: method)
         guard !isClosing || recovery else { throw DesktopBridgeError.sessionChanged }
-        guard (shutterRelease == nil && focusHold == nil) || shutterOperation || recovery else {
+        guard (ownedBulb == nil && shutterRelease == nil && focusHold == nil) || shutterOperation || recovery else {
             throw DesktopBridgeError.shutterReleaseUnconfirmed
         }
     }

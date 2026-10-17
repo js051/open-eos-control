@@ -504,12 +504,12 @@ final class DesktopBridgeClientTests: XCTestCase {
         await enqueueStatus(method: "POST", path: "/v1/session/session_123/capture/still", on: transport)
         await transport.enqueueJSON(
             method: "POST",
-            path: "/v1/session/session_123/bulb/start",
+            path: "/v1/session/session_123/bulb/start/owned",
             body: status.replacingOccurrences(of: #""recording":false"#, with: #""recording":false,"bulbExposureActive":true"#)
         )
         await transport.enqueueJSON(
             method: "POST",
-            path: "/v1/session/session_123/bulb/stop",
+            path: "/v1/session/session_123/bulb/stop/owned",
             body: status.replacingOccurrences(of: #""recording":false"#, with: #""recording":false,"bulbExposureActive":false"#)
         )
         await enqueueStatus(method: "POST", path: "/v1/session/session_123/focus/auto", on: transport)
@@ -602,7 +602,7 @@ final class DesktopBridgeClientTests: XCTestCase {
             token: "bridge-secret",
             cameraID: "gphoto2:dXNi",
             cameraEngine: "edsdk",
-            transport: transport
+            transport: OwnedContractFixtureTransport(base: transport)
         )
         let snapshot = try await client.connectSnapshot()
 
@@ -740,8 +740,8 @@ final class DesktopBridgeClientTests: XCTestCase {
         XCTAssertEqual(sessionJSON["cameraId"] as? String, "gphoto2:dXNi")
         XCTAssertEqual(sessionJSON["engine"] as? String, "edsdk")
         XCTAssertEqual(sessionJSON["profileHint"] as? String, "Canon EOS R6 Mark III")
-        XCTAssertTrue(requests.contains { $0.path.hasSuffix("/bulb/start") })
-        XCTAssertTrue(requests.contains { $0.path.hasSuffix("/bulb/stop") })
+        XCTAssertTrue(requests.contains { $0.path.hasSuffix("/bulb/start/owned") })
+        XCTAssertTrue(requests.contains { $0.path.hasSuffix("/bulb/stop/owned") })
         XCTAssertTrue(requests.contains { $0.path.hasSuffix("/clock/sync") && $0.method == "POST" })
         let cleaningRequest = try XCTUnwrap(
             requests.first { $0.path.hasSuffix("/maintenance/sensor-cleaning") && $0.method == "POST" }
@@ -958,5 +958,28 @@ final class DesktopBridgeClientTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
         return await transport.requests()
+    }
+}
+
+/// Echoes the wire owner around the existing full-status contract fixture.
+private struct OwnedContractFixtureTransport: CameraHTTPTransport {
+    let base: MockCameraHTTPTransport
+    func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        let response = try await base.send(request)
+        guard request.url?.path.hasSuffix("/owned") == true else { return response }
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: String])
+        let owner = try XCTUnwrap(payload["ownerId"])
+        var status = try XCTUnwrap(JSONSerialization.jsonObject(with: response.body) as? [String: Any])
+        status["shutterReleaseUnconfirmed"] = false
+        let started = request.url?.path.hasSuffix("/start/owned") == true
+        let data = try JSONSerialization.data(withJSONObject: ["ownerId": owner,
+            "outcome": started ? "started" : "released", "status": status])
+        return CameraHTTPResponse(statusCode: response.statusCode, headers: response.headers, body: data)
+    }
+    func openStream(_ request: URLRequest) async throws -> CameraHTTPStreamResponse { try await base.openStream(request) }
+    func download(_ request: URLRequest) async throws -> CameraHTTPDownloadResponse { try await base.download(request) }
+    func upload(_ request: URLRequest, from fileURL: URL,
+                progress: @escaping CameraMediaProgressHandler) async throws -> CameraHTTPUploadResponse {
+        try await base.upload(request, from: fileURL, progress: progress)
     }
 }
