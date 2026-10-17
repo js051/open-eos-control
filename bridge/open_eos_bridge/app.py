@@ -69,6 +69,9 @@ from .models import (
     LiveViewMagnificationResult,
     LiveViewStartRequest,
     LiveViewState,
+    MaintenanceLiveViewStartRequest,
+    MaintenanceLiveViewState,
+    MaintenanceLiveViewStopRequest,
     MaintenanceRequest,
     MediaArchiveUpdate,
     MediaItem,
@@ -724,32 +727,23 @@ def create_app(
         operation()
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
-    @router.post("/session/{session_id}/maintenance/control/liveview/stop", response_model=LiveViewState)
-    def stop_maintenance_live_view(session_id: str, response: Response) -> LiveViewState:
-        session = manager.get(session_id)
-        operation = getattr(session, "maintenance_stop_live_view", None)
-        if not callable(operation):
-            raise unsupported("MAINTENANCE_CONTROLS", session.engine_name)
-        operation()
+    @router.post("/session/{session_id}/maintenance/control/liveview/stop", response_model=MaintenanceLiveViewState,
+                 response_model_exclude_none=True)
+    def stop_maintenance_live_view(session_id: str, response: Response,
+                                   payload: MaintenanceLiveViewStopRequest | None = None) -> MaintenanceLiveViewState:
         response.headers["Cache-Control"] = "no-store"
-        return LiveViewState(active=False, live_view_stop_unconfirmed=
-            getattr(session, "live_view_stop_unconfirmed", None))
+        payload = payload or MaintenanceLiveViewStopRequest()
+        return manager.maintenance_live_view(session_id).stop(
+            prepare_restore=payload.prepare_restore, restore_token=payload.restore_token)
 
-    @router.post("/session/{session_id}/maintenance/control/liveview/start", response_model=LiveViewState,
+    @router.post("/session/{session_id}/maintenance/control/liveview/start", response_model=MaintenanceLiveViewState,
                  response_model_exclude_none=True)
     def start_maintenance_live_view(
-        session_id: str, payload: LiveViewStartRequest, response: Response,
-    ) -> LiveViewState:
-        with manager.camera_mutation(session_id) as session:
-            operation = getattr(session, "maintenance_start_live_view", None)
-            if not callable(operation):
-                raise unsupported("MAINTENANCE_CONTROLS", session.engine_name)
-            operation(payload)
-            response.headers["Cache-Control"] = "no-store"
-            return LiveViewState(active=True, requested_fps=getattr(session, "requested_fps", min(payload.fps, 5)),
-                                source=getattr(session, "live_view_source", payload.source),
-                                size=getattr(session, "live_view_size", None),
-                                live_view_stop_unconfirmed=getattr(session, "live_view_stop_unconfirmed", None))
+        session_id: str, payload: MaintenanceLiveViewStartRequest, response: Response,
+    ) -> MaintenanceLiveViewState:
+        response.headers["Cache-Control"] = "no-store"
+        request = LiveViewStartRequest(fps=payload.fps, source=payload.source, size=payload.size)
+        return manager.maintenance_live_view(session_id).start(request, payload.restore_token)
 
     @router.post("/session/{session_id}/clock/sync", response_model=CameraStatus)
     def sync_camera_clock(session_id: str) -> CameraStatus:
@@ -885,10 +879,7 @@ def create_app(
 
     @router.post("/session/{session_id}/liveview/stop", response_model=LiveViewState)
     def stop_live_view(session_id: str) -> LiveViewState:
-        session = manager.get(session_id)
-        session.stop_live_view()
-        return LiveViewState(active=False, live_view_stop_unconfirmed=
-            getattr(session, "live_view_stop_unconfirmed", None))
+        return manager.maintenance_live_view(session_id).stop_ordinary()
 
     @router.post(
         "/session/{session_id}/liveview/magnification",

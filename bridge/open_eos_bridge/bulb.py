@@ -78,6 +78,17 @@ class BulbRequests:
                 self._require_no_owned_duty()
             yield self.session
 
+    @contextmanager
+    def cleanup(self):
+        """Order a saved Stop with dispatch without blocking it on owned Bulb duty."""
+        with self._metadata:
+            self._require_open()
+            revision = self._retirement_revision
+        with self._executing():
+            with self._metadata:
+                self._require_open(revision)
+            yield self.session
+
     def start(self, owner_id: str | None = None) -> CameraStatus | BulbOwnerResult:
         if owner_id is None:
             with self._metadata:
