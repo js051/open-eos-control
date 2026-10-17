@@ -111,6 +111,7 @@
       connectionBridgeAccess: "The Bridge denied access. Check whether you opened its local page and whether its access settings allow this connection.",
       connectionBridgeEndpoint: "This Bridge API endpoint was not found. Check that this page and the running Bridge belong to the same installation, then check Bridge again.",
       connectionBridgeCheckFailed: "Bridge check failed. Follow the guidance below, then check again.",
+      connectionBridgeTimeout: "The Bridge check timed out. Keep the Bridge running, then choose Check Bridge again.",
       connectionBridgeNetwork: "This page could not reach the Bridge. Keep the Bridge running and check the computer connection, then check Bridge again. The browser did not identify the exact cause.",
       connectionCameraAuth: "The camera rejected CCAPI authentication. Check its CCAPI username, password, and authentication settings, then retry Connect.",
       connectionCameraEndpoint: "The camera’s CCAPI discovery endpoints were not found. Check CCAPI support, enable it on the camera, and verify its address and port before retrying.",
@@ -906,6 +907,7 @@
       connectionBridgeAccess: "Bridge 拒絕存取。請確認是否開啟本機的 Bridge 頁面，以及其存取設定是否允許此連線。",
       connectionBridgeEndpoint: "找不到此 Bridge API 端點。請確認此頁面與執行中的 Bridge 來自同一份安裝，再重新檢查 Bridge。",
       connectionBridgeCheckFailed: "Bridge 檢查失敗。請依下方說明處理後，再重新檢查。",
+      connectionBridgeTimeout: "Bridge 檢查逾時。請確認 Bridge 仍在執行，再選擇「重新檢查 Bridge」。",
       connectionBridgeNetwork: "此頁面無法連上 Bridge。請保持 Bridge 執行並檢查電腦連線，再重新檢查 Bridge。瀏覽器未提供確切原因。",
       connectionCameraAuth: "相機拒絕了 CCAPI 驗證。請檢查相機的 CCAPI 帳號、密碼與驗證設定，再重試連線。",
       connectionCameraEndpoint: "找不到相機的 CCAPI 探索端點。請確認相機支援並已啟用 CCAPI，核對位址與連接埠後再重試。",
@@ -2546,11 +2548,21 @@
 
   async function refreshHealth() {
     if (state.healthAttempt || state.busy || state.scanAttempt) return;
-    const attempt = {};
+    const attempt = { controller: new AbortController() };
     state.healthAttempt = attempt;
     renderConnectionGuidance();
+    renderAvailability();
+    let timer;
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        // Retire the whole read even if fetch/body consumption ignores abort.
+        // Publish the timeout before abort can surface a generic AbortError.
+        reject(new ApiError(t("connectionBridgeTimeout"), { code: "BRIDGE_HEALTH_TIMEOUT" }));
+        attempt.controller.abort();
+      }, 15000);
+    });
     try {
-      const health = await api("/health");
+      const health = await Promise.race([api("/health", { signal: attempt.controller.signal }), deadline]);
       if (state.healthAttempt !== attempt) return;
       state.health = health;
       state.healthFailed = false;
@@ -2562,6 +2574,7 @@
       state.healthFailed = true;
       showConnectionError(error);
     } finally {
+      clearTimeout(timer);
       if (state.healthAttempt === attempt) {
         state.healthAttempt = null;
         renderHealth();
