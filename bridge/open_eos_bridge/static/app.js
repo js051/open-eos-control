@@ -8155,6 +8155,7 @@
     try { roster = mediaMutations.freezeRoster(entries); }
     catch (error) { showToast(t(error instanceof RangeError ? "mediaMutationLimit" : "mediaMutationInvalid"), true); return; }
     if (!roster.length) return;
+    state.refreshGeneration += 1;
     const owner = { session: state.session, controller: new AbortController() };
     const batch = { operation: requested, queue: { results: roster.map((entry) => ({ ...entry, status: "queued" })) } };
     state.mediaListingOwner?.cancel({ silent: true });
@@ -8703,6 +8704,7 @@
     if (!mediaAutoImport || !mediaAutoImportEligible() || document.visibilityState !== "visible" ||
         state.mediaAutoImportOwner || mediaAutoImportManualBusy(null)) return;
     if (typeof window.showDirectoryPicker !== "function" || typeof globalThis.crypto?.randomUUID !== "function") return;
+    state.refreshGeneration += 1;
     const owner = { session: state.session, controller: new AbortController(), cancelled: false,
       choosing: true, running: false, timer: null, policy: null, destination: null, nextFileIndex: 0,
       view: { destinationName: "", destination: null, snapshot: { phase: "choosing", reason: null, completed: 0, pendingCount: 0, knownCount: 0, results: [] } } };
@@ -10170,6 +10172,7 @@
     // The confirmation is single-use and bound to this exact connection object.
     if (!mediaDelete.admission({ openingOwner: session, currentOwner: state.session,
       confirmed: true, consumed: false, busy: cameraInteractionBusy() || Boolean(state.mediaDeleteOwner) }).allowed) return;
+    state.refreshGeneration += 1;
     const owner = { session, controller: new AbortController(), applied: new Set() };
     const batch = { session, ownerDescription: mediaDeleteOwnerDescription(session), createdAt: Date.now(), results: rows.map((row) => ({ ...row, status: "not-started" })) };
     state.mediaDeleteOwner = owner;
