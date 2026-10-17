@@ -237,7 +237,7 @@ private fun createMediaDocument(
         ?: URLConnection.guessContentTypeFromName(filename)
         ?: "application/octet-stream"
     return DocumentsContract.createDocument(resolver, parent, contentType, filename)
-        ?: error("Android could not create $filename in the selected folder.")
+        ?: throw CameraAppException(CameraAppError.DOWNLOAD_DOCUMENT_CREATE_FAILED)
 }
 
 internal fun mergeRecentMedia(
@@ -2917,7 +2917,7 @@ class CameraViewModel(
                         val feedback = when {
                             receipt.published -> MediaSaveFeedback.Saved(owner.location)
                             failure is CancellationException -> MediaSaveFeedback.Cancelled
-                            else -> MediaSaveFeedback.Failed("Automatic JPEG import did not publish this original.")
+                            else -> MediaSaveFeedback.Failed(CameraAppError.AUTOMATIC_JPEG_NOT_PUBLISHED.messageToken)
                         }
                         publishMediaSave(request, item, feedback)
                         if (receipt.published) updateMediaSave(request) {

@@ -131,18 +131,18 @@ internal class CameraMediaGalleryStore(
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val destination = resolver.insert(collection, values)
-            ?: error("Android could not create the gallery destination.")
+            ?: throw CameraAppException(CameraAppError.GALLERY_CREATE_FAILED)
         onCreated(destination)
         // Manual saves without an observer and unrelated RAW/video keep their streaming cost.
         val digest = if (mimeType == "image/jpeg" && (onPublished != null || requireAutomaticJpeg)) MessageDigest.getInstance("SHA-256") else null
         val raw = openOutput(destination)
-            ?: error("Android could not open the gallery destination.")
+            ?: throw CameraAppException(CameraAppError.GALLERY_OUTPUT_UNAVAILABLE)
         val counted = CountingMediaOutput(BufferedOutputStream(raw), digest,
             if (requireAutomaticJpeg) AutomaticJpegEnvelope.MAX_BYTES else Long.MAX_VALUE)
         val result = counted.use { download(it) }
-        check(counted.bytes > 0 && result.bytesTransferred == counted.bytes) { "Incomplete media download." }
+        if (counted.bytes <= 0 || result.bytesTransferred != counted.bytes) throw CameraAppException(CameraAppError.DOWNLOAD_INCOMPLETE)
         listOfNotNull(item.sizeBytes, result.item.sizeBytes).forEach { expected ->
-            check(expected == counted.bytes) { "Media download length does not match the original." }
+            if (expected != counted.bytes) throw CameraAppException(CameraAppError.DOWNLOAD_LENGTH_MISMATCH)
         }
         // Build evidence before the irreversible boundary. A failed close or validation never
         // reaches either observer, and no Gallery read or suspend-return owns the registration.
@@ -173,7 +173,7 @@ internal class CameraMediaGalleryStore(
         val published = ContentValues().apply {
             put(MediaStore.MediaColumns.IS_PENDING, 0)
         }
-        check(publishOutput(destination, published) == 1) { "Android could not publish the downloaded media." }
+        if (publishOutput(destination, published) != 1) throw CameraAppException(CameraAppError.GALLERY_PUBLISH_FAILED)
         // No suspension between publication and ownership: prompt cancellation on the return
         // from IO must not delete a successfully published original or lose its receipt.
         finalization.confirm {
