@@ -1,0 +1,6 @@
+.codex/evidence/control-partial-ack-20261017/android-red/HostClient.kt:186:69: warning: condition is always 'false'.
+            if (enforceAdvertisedOperations && operation == null && manualOperation == null) {
+                                                                    ^^^^^^^^^^^^^^^^^^^^^^^
+.codex/evidence/control-partial-ack-20261017/android-red/HostClient.kt:244:48: warning: condition is always 'false'.
+            if (enforceAdvertisedOperations && operation == null) {
+                                               ^^^^^^^^^^^^^^^^^

@@ -1,0 +1,342 @@
+{
+  "baseline": "fd29c906071e15e219a680c5d1e3287ef385b06c",
+  "sealed_at_utc": "2026-10-17T23:35:40.107193+00:00",
+  "status": "implemented; local validation only; parent review/integration required",
+  "policy": "Original physical-control successful ACK only: reject HTTP 206 or any Content-Range presence, including empty; preserve other existing status/body rules and HTTP rejection types.",
+  "python": {
+    "red": {
+      "exit": 1,
+      "production_source_sha256": "23f2cece6fb81e85884ad014f7dac5342920295c51d2c4113f05e74a44e18830",
+      "tests_sha256": "ba252914c1913b69d87ee74bdc8de4c7d1361447d16f788217fd676814fb5815",
+      "summary": "30 failed, 56 passed, 1 warning in 1.04s",
+      "test_files": [
+        "bridge/tests/test_ccapi_control_partial_ack.py"
+      ]
+    },
+    "green": {
+      "exit": 0,
+      "production_source_sha256": "d25ca857b1a0e473e2db0d3408954beb4e1ca164a595b185af6589c65259342d",
+      "tests_sha256": "ba252914c1913b69d87ee74bdc8de4c7d1361447d16f788217fd676814fb5815",
+      "summary": "86 passed, 1 warning in 0.87s",
+      "test_files": [
+        "bridge/tests/test_ccapi_control_partial_ack.py"
+      ]
+    },
+    "regression": {
+      "exit": 0,
+      "production_source_sha256": "d25ca857b1a0e473e2db0d3408954beb4e1ca164a595b185af6589c65259342d",
+      "tests_sha256": "ba252914c1913b69d87ee74bdc8de4c7d1361447d16f788217fd676814fb5815",
+      "summary": "466 passed, 2 warnings in 44.66s",
+      "test_files": [
+        "bridge/tests/test_ccapi_control_partial_ack.py",
+        "bridge/tests/test_ccapi_bulb_recovery.py",
+        "bridge/tests/test_focus_contract.py",
+        "bridge/tests/test_ccapi_live_view_recovery.py",
+        "bridge/tests/test_shutter_autofocus.py",
+        "bridge/tests/test_shooting_settings.py",
+        "bridge/tests/test_recording_lifecycle.py",
+        "bridge/tests/test_bulb_request_ownership.py"
+      ]
+    }
+  },
+  "android_host": {
+    "baseline": {
+      "compiled": true,
+      "tests": 13,
+      "expected_failures": 9,
+      "compatibility_pass": 4
+    },
+    "current": {
+      "tests_passed": 13
+    },
+    "regressions": {
+      "direct_release": 14,
+      "live_view": 12,
+      "still": 3
+    },
+    "boundary": "Exact held AF/Bulb entry and owner code with synthetic Call/Response/InputStream/discovery/status. Still/Live View flag tests use exact requestOk; separate existing entry/wiring regressions pass. No real OkHttp execution."
+  },
+  "native": {
+    "authored_new_mockwebserver_test_methods": 4,
+    "real_okhttp": "NOT_RUN",
+    "android_full_type_check": "NOT_RUN",
+    "android_native_build": "NOT_RUN",
+    "physical_camera": "NOT_RUN",
+    "exact_sha_ci": "NOT_RUN",
+    "reason": "Existing verified cache lacks OkHttp/Okio/MockWebServer; no installation/network/native-build authorization."
+  },
+  "psi": {
+    "files": 2,
+    "errors": 0,
+    "boundary": "Syntax only; not Android type checking or execution."
+  },
+  "source_sha256": [
+    {
+      "filename": "bridge/open_eos_bridge/ccapi.py",
+      "sha256": "d25ca857b1a0e473e2db0d3408954beb4e1ca164a595b185af6589c65259342d"
+    },
+    {
+      "filename": "bridge/open_eos_bridge/bulb.py",
+      "sha256": "9f6929c27de9140e52d991bccb6d7ad20a663c86de7dcb011aef0b5ee1da96fe"
+    },
+    {
+      "filename": "bridge/tests/test_ccapi_control_partial_ack.py",
+      "sha256": "ba252914c1913b69d87ee74bdc8de4c7d1361447d16f788217fd676814fb5815"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+      "sha256": "d752d4ffa43d5cf7fee09b2563a0ae3837c939f27ce33b4b3a26d20d3ad68d87"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/HeldAutofocusSession.kt",
+      "sha256": "02f1636c21ab46fc3f9dd8ebc1be66a9cfd7d7fa861f6f806d7d4911f22b7dff"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/ShutterReleaseSession.kt",
+      "sha256": "b1e1708555c7938c94f13bd9c8cb90f5fb0e37a993d9153c479a3df144363749"
+    },
+    {
+      "filename": "android/app/src/test/java/dev/openeos/control/data/CcapiDirectReleaseTransportTest.kt",
+      "sha256": "972e271a523c89c20652635d73105b06d1d9f3b88eaea0616394d1c387437365"
+    },
+    {
+      "filename": "scripts/validation/run_android_control_partial_ack_host.py",
+      "sha256": "26e5b51e9b1318b20485613957ed889b2942000fc1c206db4ced9b3554e73401"
+    },
+    {
+      "filename": "scripts/validation/fixtures/android-control-partial-ack-host/HostClient.kt",
+      "sha256": "c1c430bbb8145e857fc45d2076bb24c84a3d2c3aa5c8fac01520d9d76d2c3e29"
+    },
+    {
+      "filename": "scripts/validation/fixtures/android-control-partial-ack-host/PartialControlAckTest.kt",
+      "sha256": "72dc1471f51e2533b3d008e1a4a7c892f91316485b8bedbae9f8c43ed5e44a30"
+    }
+  ],
+  "reproduce": {
+    "python": "PYTHONPATH=bridge python -m pytest bridge/tests/test_ccapi_control_partial_ack.py -o addopts= -q",
+    "android": "python scripts/validation/run_android_control_partial_ack_host.py --jars <verified-cache> --out <evidence> --phase current",
+    "baseline": "Same test fixtures against fd29c906; Android --phase baseline --ref fd29c906. Bridge archive includes bridge plus contracts support fixtures."
+  },
+  "artifact_sha256": {
+    "python-red.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "6b6cbfcff8b85d059e8fc42e03c18b1ccaae51455fdf1c8b95c03f6be9454fc8"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "72026620ae758293dce7679f5f9d9856bc67bae8cf9a61d5f95e962249dfe5c6"
+      }
+    ],
+    "python-green.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "dd2771d2ad1782ff334c6ede58587e2e3062e9df9a31c4a58a96af97eb346a55"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "811e367a89ce9c7f33b2c5525756a0bbb373bce82b5cce7367212f153d652612"
+      }
+    ],
+    "python-regression.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "5772421a410a7daefa1af8aea02e4f6b9971fdc29c768d69499cfa2be8128459"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "a436f2a0569026e4ffa33448fbf83d60d8c1ad27129fa729b0ce6ec98f6bfc36"
+      }
+    ],
+    "python-receipt.json": [
+      {
+        "filename": "original_sha256",
+        "sha256": "3ea72a60d7752251d86985303f5a9670d2d29c4c9afba1148442fce2790ecb2a"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "6e707550142b2c4ea9586805460c212c223db6510d786c7f54ae36ff302cf1e2"
+      }
+    ],
+    "ruff.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+      }
+    ],
+    "psi/syntax.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "8a136457fff632743d91f31a121f0591f881620b43492d4327c489a6bfb7defa"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "8a136457fff632743d91f31a121f0591f881620b43492d4327c489a6bfb7defa"
+      }
+    ],
+    "psi/receipt.json": [
+      {
+        "filename": "original_sha256",
+        "sha256": "3b7a7425c067f101e2e925b6095d698deb6c4a5c57211be96dbfb2331eccf1a5"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "8e4ff0e1535748bb0e0534048cc91d3815be8cc3d7aa956c2057bae6082651e0"
+      }
+    ],
+    "android-red/receipt.json": [
+      {
+        "filename": "original_sha256",
+        "sha256": "e2f12dd9f07b3d8344fcdde687add2085db805f2f0970d86f94cd55c022b1133"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "52b3cdf0b8b139d0db312f164a3ba0edbaa62078a4eb26eed001cff302e198b4"
+      }
+    ],
+    "android-red/junit.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "d8d45a0a73242cb31a2b48eb87fbc2b93dbc3cc65a14cccd4abbf575ecb7e55f"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "31c75817fc7ceff506559d11a5656e1b8f4a010cf1aecf12f33ccff92014e48b"
+      }
+    ],
+    "android-red/compile.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "51a33e679ca820cfd8a8e8e5a45c4e9ebec932a0dd47605b38c5c149bbd8ab74"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "51a33e679ca820cfd8a8e8e5a45c4e9ebec932a0dd47605b38c5c149bbd8ab74"
+      }
+    ],
+    "android-green/receipt.json": [
+      {
+        "filename": "original_sha256",
+        "sha256": "fd1a50220d665ebfdcb6d1b7af682cca139140bb13f8ab52db9fcd896f91681f"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "5383875ebbce2fff63c1e2d50f107b300e216a384d2e03a4f69bcecba3d5c5e6"
+      }
+    ],
+    "android-green/junit.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "0800cbd456a9f78ee39a946b2ad13fcd329c25e5e8afb778a999a5a03eecc4c3"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "44976c6afa1087332c43325eee7f40af0b5a9f0daac0fe103770f7bec26f600b"
+      }
+    ],
+    "android-green/compile.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "55ffe281af19697ec9981df3fdc00652f2a40e09dc996759b00060bf28cd03a3"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "55ffe281af19697ec9981df3fdc00652f2a40e09dc996759b00060bf28cd03a3"
+      }
+    ],
+    "android-direct-release/receipt.json": [
+      {
+        "filename": "original_sha256",
+        "sha256": "79dae18fc1a880eb837fa2da6e71fb0876d852dbe7f3719fd5d1d9c9db4c8b79"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "e2476353a116aa97166e1595184faa668949f3d99ae1990818f40b2cd5e43d01"
+      }
+    ],
+    "android-direct-release/junit.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "a60fd6a1634dcbcbe3614273caa19e52d428943b08faca1aab01f31f3a1ff7df"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "f7d8faa31c306e983f2cd79a6876858078d2c28ff2f4cfce7d91c2fcb578d644"
+      }
+    ],
+    "android-direct-release/compile.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "a807fbf15877a2725192d9f4e13e5234fc3c4d9ace0538d43d37af9d57fd6a7e"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "a807fbf15877a2725192d9f4e13e5234fc3c4d9ace0538d43d37af9d57fd6a7e"
+      }
+    ],
+    "android-liveview/receipt.json": [
+      {
+        "filename": "original_sha256",
+        "sha256": "0f412ff17d7f1804f276f0c789c81c49ee3ed49ad2412e623401700c49578bd1"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "4c8377de5637f68101a37d476c00a83b9ecefd864800c065ec21489c42a8fa23"
+      }
+    ],
+    "android-liveview/junit.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "c1d1ad7ce271736a343f241deb1ceaf7ce35843321990f61a9e40610c8626f1a"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "8d4870fa6b7740c67d1653a5f204c529ad03a99987596cb527c2827c4530b648"
+      }
+    ],
+    "android-liveview/compile.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "a7ab9769fa8779597bd4567a763d60f61fec60116f915f9a780673a1aef2c549"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "a7ab9769fa8779597bd4567a763d60f61fec60116f915f9a780673a1aef2c549"
+      }
+    ],
+    "android-still/receipt.json": [
+      {
+        "filename": "original_sha256",
+        "sha256": "46121974c94f3d223f7187aefc9c50d138048c5e5600592ffd30875c2181a0b1"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "936f975f5a97fb502cd0f8b3e0ca192e8871d30cdf7443a66139cd4e3d2847ab"
+      }
+    ],
+    "android-still/junit.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "8a0b938debdb80032f4dff7250233c7879a008d6fff118a68f9c98d717e5895c"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "4eaad961b385e84ed036454dd2080bda712554dd20d701df1bb6869302f0a2a9"
+      }
+    ],
+    "android-still/compile.log": [
+      {
+        "filename": "original_sha256",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "filename": "delivered_sha256",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      }
+    ]
+  }
+}

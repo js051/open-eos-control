@@ -5120,6 +5120,16 @@ class CcapiSession:
     ) -> None:
         response = self._request(method, path, payload, timeout=timeout,
                                  max_bytes=65536 if self._maintenance_control_active else MAX_JSON_BYTES)
+        # A partial representation cannot acknowledge an original physical control.
+        # Keep legacy success bodies/statuses and media range reads unchanged.
+        control_resource = any(method == control_method and path.split("?", 1)[0].endswith(suffix)
+                               for control_method, suffix in _CONTROL_BODY_ROUTES)
+        if control_resource and (response.status == 206
+                                 or any(name.casefold() == "content-range" for name in response.headers)):
+            raise BridgeError(
+                "INVALID_CCAPI_RESPONSE", "Partial response is not a complete control acknowledgement.",
+                status_code=502, engine=self.engine_name,
+            )
         if self._maintenance_control_active and expected_status is None:
             expected_status = (204 if path.endswith(("/event/polling", "/shooting/liveview",
                                                     "/shooting/liveview/rtp")) else 200)
