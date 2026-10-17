@@ -283,6 +283,33 @@ final class MaintenanceControlTests: XCTestCase {
         }
     }
 
+    func testCancelledMaintenanceCloseStillDispatchesOwnedStopAndStrictRetirement() async throws {
+        for releaseFails in [false, true] {
+            let peer = MaintenanceControlPeer(direct: false)
+            let client = try await makeClient(peer, direct: false)
+            try await client.start()
+            let attempt = CameraMaintenanceAttempt(operation: .sensorCleaning)
+            try await client.perform(attempt); try await client.observe(attempt); attempt.restore(.pending)
+            try await client.restore(attempt)
+            try await client.acquireRelease(autofocus: false)
+            if releaseFails { await peer.failRelease() }
+            let before = await peer.requests().count
+            let close = Task {
+                withUnsafeCurrentTask { $0?.cancel() }
+                return await client.closeState()
+            }
+            let state = await close.value
+            XCTAssertEqual(state.releaseUnconfirmed, releaseFails)
+            XCTAssertFalse(state.releaseRequired)
+            let trace = await peer.requests()
+            let closing = Array(trace.dropFirst(before))
+            XCTAssertEqual(closing.first, "strict POST /v1/session/synthetic/bulb/stop/owned")
+            XCTAssertEqual(closing.last, "strict DELETE /v1/session/synthetic/maintenance/control/session")
+            XCTAssertTrue(closing.allSatisfy { $0.hasPrefix("strict ") })
+            XCTAssertFalse(closing.contains("ordinary DELETE /v1/session/synthetic"))
+        }
+    }
+
     func testLocalRetirementFailureDoesNotBecomeStopProofOrTriggerFallback() async throws {
         let peer = MaintenanceControlPeer(direct: false)
         let client = try DesktopBridgeClient(baseURL: "http://192.0.2.1:18181", transport: peer)
@@ -313,7 +340,7 @@ final class MaintenanceControlTests: XCTestCase {
                     let trace = await peer.requests(), closing = Array(trace.dropFirst(before.count))
                     let expected = direct
                         ? "strict " + (autofocus ? "POST /ccapi/ver100/shooting/control/af" : "PUT /ccapi/ver100/shooting/control/shutterbutton/manual")
-                        : "strict POST /v1/session/synthetic/" + (autofocus ? "focus/auto/stop" : "bulb/stop")
+                        : "strict POST /v1/session/synthetic/" + (autofocus ? "focus/auto/stop" : "bulb/stop/owned")
                     XCTAssertEqual(closing.first, expected, "Release must precede LV Stop/local retirement")
                     XCTAssertTrue(closing.allSatisfy { $0.hasPrefix("strict ") })
                     XCTAssertEqual(closing.filter { $0 == expected }.count, 1)
@@ -700,6 +727,14 @@ private actor MaintenanceControlPeer: CameraHTTPTransport {
             if start { releaseOutstanding = true }
             else if !releaseFails { releaseOutstanding = false }
             object = ["ownerId": payload["ownerId"]!, "active": releaseOutstanding, "stopUnconfirmed": !start && releaseFails]
+            if !start && releaseFails { status = 503 }
+        } else if path.hasSuffix("/bulb/start/owned") || path.hasSuffix("/bulb/stop/owned") {
+            let payload = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+            let start = path.hasSuffix("/start/owned")
+            if start { releaseOutstanding = true }
+            else if !releaseFails { releaseOutstanding = false }
+            object = ["ownerId": payload["ownerId"]!, "outcome": start ? "started" : "released",
+                      "status": ["bulbExposureActive": releaseOutstanding, "shutterReleaseUnconfirmed": !start && releaseFails]]
             if !start && releaseFails { status = 503 }
         } else if path.hasSuffix("/bulb/start") || path.hasSuffix("/bulb/stop") {
             let start = path.hasSuffix("/start")

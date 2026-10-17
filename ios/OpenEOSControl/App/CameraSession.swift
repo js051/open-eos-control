@@ -61,26 +61,30 @@ enum CameraSession: Sendable {
         }
     }
 
-    func retryShutterRelease(cancelling pendingStart: Task<CameraStatus, Error>? = nil) async throws {
-        // Also owns the interval before the Start reaches its client actor. A Stop
-        // there must cancel that task before it can dispatch a later full_press.
-        let interruptedStart: Result<CameraStatus, Error>?
-        if let pendingStart {
-            pendingStart.cancel()
-            interruptedStart = await pendingStart.result
-        } else {
-            interruptedStart = nil
-        }
+    @discardableResult
+    func retryShutterRelease(cancelling pendingStart: Task<CameraStatus, Error>? = nil) async throws -> Bool {
         switch self {
         case let .ccapi(client):
-            // Direct Start already attempts its owned release when cancelled.
-            // Surface lost proof from that attempt instead of silently retrying.
+            // Direct CCAPI retains its cancellation/compensation ordering.
+            let interruptedStart: Result<CameraStatus, Error>?
+            if let pendingStart {
+                pendingStart.cancel()
+                interruptedStart = await pendingStart.result
+            } else { interruptedStart = nil }
             if let interruptedStart, case let .failure(error) = interruptedStart {
                 let release = await client.shutterReleaseState()
                 if release.releaseRequired { throw error }
             }
             try await client.retryShutterRelease()
-        case let .desktopBridge(client): try await client.retryShutterRelease()
+            return true
+        case let .desktopBridge(client):
+            // Owned Bulb uses its captured token in CameraAppState. This path is
+            // still needed for unowned status recovery and held/short autofocus.
+            pendingStart?.cancel()
+            let wasOwned = await client.hasOwnedBulb
+            try await client.retryShutterRelease()
+            if wasOwned { return await client.ownedBulbReleaseHasFreshStatus }
+            return true
         }
     }
 

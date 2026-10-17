@@ -11,6 +11,10 @@ actor BridgeShutterRecoveryFixture: CameraHTTPTransport {
     }
     private let initiallyUnknown: Bool
     private let pendingStart: Bool
+    private let ignoreStartCancellation: Bool
+    private let terminalStopReceipt: Bool
+    private var startGate: CheckedContinuation<Void, Never>?
+    private var ownedIDs: [String: String] = [:]
     private var failFirstClose: Bool
     private var failFirstStop: Bool
     private var nextID = 0
@@ -20,13 +24,18 @@ actor BridgeShutterRecoveryFixture: CameraHTTPTransport {
     private(set) var cancelledStartCount = 0
     private(set) var startCount = 0
 
-    init(unknown: Bool, failFirstClose: Bool = false, pendingStart: Bool = false, failFirstStop: Bool = false) {
+    init(unknown: Bool, failFirstClose: Bool = false, pendingStart: Bool = false, failFirstStop: Bool = false,
+         ignoreStartCancellation: Bool = false, terminalStopReceipt: Bool = false) {
         initiallyUnknown = unknown
+        self.ignoreStartCancellation = ignoreStartCancellation
+        self.terminalStopReceipt = terminalStopReceipt
         self.failFirstClose = failFirstClose
         self.pendingStart = pendingStart
         self.failFirstStop = failFirstStop
     }
 
+    func releaseStart() { startGate?.resume(); startGate = nil }
+    func startIsWaiting() -> Bool { startGate != nil }
     func mutations() -> [String] { requestLog.filter { !$0.hasPrefix("GET ") } }
 
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
@@ -59,9 +68,17 @@ actor BridgeShutterRecoveryFixture: CameraHTTPTransport {
                 return response(#"{"profile":{"modelName":"Shutter recovery fixture","family":"UNKNOWN","priority":"RESEARCH"},"supported":["BULB_EXPOSURE"],"settings":[],"liveView":{"sources":[],"sizes":[]}}"#)
             }
             return response(#"{"profile":{"modelName":"Shutter recovery fixture","family":"UNKNOWN","priority":"RESEARCH"},"supported":[],"settings":[],"liveView":{"sources":[],"sizes":[]}}"#)
-        case ("POST", "bulb/start") where pendingStart:
+        case ("POST", "bulb/start/owned") where pendingStart:
+            guard let data = request.httpBody,
+                  let body = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let owner = body["ownerId"] as? String else { throw URLError(.badServerResponse) }
+            ownedIDs[id] = owner
             startCount += 1
             sessions[id] = State(unknown: true, active: true)
+            if ignoreStartCancellation {
+                await withCheckedContinuation { startGate = $0 }
+                return response(#"{"ownerId":"\#(owner)","outcome":"started","status":\#(statusJSON(State(unknown: false, active: true)))}"#)
+            }
             do {
                 // No reply is released by the test. Deliberate Stop/Disconnect must
                 // cancel the same owned task which is suspended in this transport.
@@ -71,6 +88,22 @@ actor BridgeShutterRecoveryFixture: CameraHTTPTransport {
                 throw error
             }
             throw URLError(.timedOut)
+        case ("POST", "bulb/stop/owned"):
+            guard let data = request.httpBody,
+                  let body = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let owner = body["ownerId"] as? String,
+                  ownedIDs[id] == nil || ownedIDs[id] == owner else { throw URLError(.badServerResponse) }
+            stopCount += 1
+            if failFirstStop {
+                failFirstStop = false
+                throw URLError(.networkConnectionLost)
+            }
+            let released = State(unknown: false, active: false)
+            sessions[id] = released
+            if terminalStopReceipt {
+                return response(#"{"ownerId":"\#(owner)","outcome":"released"}"#)
+            }
+            return response(#"{"ownerId":"\#(owner)","outcome":"released","status":\#(statusJSON(released))}"#)
         case ("POST", "bulb/stop"):
             stopCount += 1
             if failFirstStop {
@@ -93,7 +126,7 @@ actor BridgeShutterRecoveryFixture: CameraHTTPTransport {
                 return response(#"{"error":{"code":"SHUTTER_RELEASE_UNCONFIRMED","message":"Fixture cleanup release was not confirmed"}}"#, status: 502)
             }
             NSLog("[OEC_SHUTTER_FIXTURE] session-delete-confirmed %@", id)
-            return response(#"{"ok":true}"#)
+            return response("", status: 204)
         default:
             // Wrong methods, old IDs and unrequested capture commands must fail.
             throw URLError(.unsupportedURL)

@@ -108,13 +108,13 @@ final class URLSessionPendingBulbStopTests: XCTestCase {
         XCTAssertTrue(peer.errors().isEmpty, peer.errors().joined(separator: "\n"))
     }
 
-    func testExplicitStopCancelsPendingBridgeStartAndLostReleaseAllowsRetry() async throws {
+    func testExplicitOwnedStopBypassesPendingBridgeStartAndLostReleaseAllowsRetry() async throws {
         for loseRelease in [false, true] {
             try await checkBridge(close: false, loseRelease: loseRelease)
         }
     }
 
-    func testConcurrentClosesCancelPendingBridgeStartAndShareOriginalSessionDelete() async throws {
+    func testConcurrentClosesReleaseOwnedBridgeBeforeOriginalSessionDelete() async throws {
         for loseRelease in [false, true] {
             try await checkBridge(close: true, loseRelease: loseRelease)
         }
@@ -147,9 +147,12 @@ final class URLSessionPendingBulbStopTests: XCTestCase {
         defer { second.cancel() }
         await fulfillment(of: [entered], timeout: 2)
         peer.completeRelease()
-        await fulfillment(of: [start.finished, first.finished, second.finished], timeout: 3)
+        await fulfillment(of: [first.finished, second.finished], timeout: 3)
+        XCTAssertFalse(start.isFinished, "Owned Stop/Close must complete independently of pending Start")
+        XCTAssertTrue(transport.startOutcomes().isEmpty)
+        start.cancel()
+        await fulfillment(of: [start.finished], timeout: 3)
         XCTAssertThrowsError(try start.value())
-        XCTAssertEqual(transport.startOutcomes(), [.cancelled])
         if close {
             let expected = CameraShutterReleaseState(
                 releaseRequired: false, releaseUnconfirmed: loseRelease,
@@ -174,8 +177,12 @@ final class URLSessionPendingBulbStopTests: XCTestCase {
             XCTAssertEqual(try second.value(), .idle)
         }
         let mutations = peer.requests().filter(\.isMutation).map { "\($0.method) \($0.path)" }
-        let cleanup = close ? "DELETE /v1/session/pending-fixture" : "POST /v1/session/pending-fixture/bulb/stop"
-        XCTAssertEqual(mutations, ["POST /v1/session", "POST /v1/session/pending-fixture/bulb/start", cleanup] + (!close && loseRelease ? [cleanup] : []))
+        let cleanup = "POST /v1/session/pending-fixture/bulb/stop/owned"
+        let tail = close ? ["DELETE /v1/session/pending-fixture"] : loseRelease ? [cleanup] : []
+        XCTAssertEqual(mutations, ["POST /v1/session", "POST /v1/session/pending-fixture/bulb/start/owned", cleanup] + tail)
+        let owners = peer.requests().filter { $0.path.hasSuffix("/owned") }.compactMap(\.ownerID)
+        XCTAssertFalse(owners.isEmpty)
+        XCTAssertEqual(Set(owners).count, 1, "Every cleanup must retain the exact Start owner")
         XCTAssertFalse(peer.completionWasOpened)
         XCTAssertTrue(peer.errors().isEmpty, peer.errors().joined(separator: "\n"))
     }
@@ -201,7 +208,7 @@ final class URLSessionPendingBulbStopTests: XCTestCase {
             await fulfillment(of: [start.finished], timeout: 3)
             XCTAssertEqual(try start.value().bulbExposureActive, true)
             XCTAssertEqual(transport.startOutcomes(), [.response])
-            XCTAssertFalse(peer.requests().contains { $0.action == "release" || $0.path.hasSuffix("/bulb/stop") })
+            XCTAssertFalse(peer.requests().contains { $0.action == "release" || $0.path.hasSuffix("/bulb/stop/owned") })
             let stop = PendingBulbWireJob("explicit Stop after acknowledged Start succeeds") {
                 if let direct { try await direct.retryShutterRelease() }
                 else { try await bridge.retryShutterRelease() }
@@ -256,10 +263,24 @@ private struct PendingBulbWireTransport: CameraHTTPTransport {
     func startOutcomes() -> [PendingBulbStartOutcome] { recorder.snapshot() }
 
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        try await recordingStartOutcome(request) { try await underlying.send(request) }
+    }
+
+    func sendMaintenance(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        try await recordingStartOutcome(request) { try await underlying.sendMaintenance(request) }
+    }
+
+    func sendConnectionLifecycle(_ request: URLRequest) async throws -> CameraHTTPResponse {
+        try await recordingStartOutcome(request) { try await underlying.sendConnectionLifecycle(request) }
+    }
+
+    private func recordingStartOutcome(
+        _ request: URLRequest, operation: () async throws -> CameraHTTPResponse
+    ) async throws -> CameraHTTPResponse {
         let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
-        let isStart = request.url?.path.hasSuffix("/bulb/start") == true || body?["action"] as? String == "full_press"
+        let isStart = request.url?.path.hasSuffix("/bulb/start/owned") == true || body?["action"] as? String == "full_press"
         do {
-            let response = try await underlying.send(request)
+            let response = try await operation()
             if isStart { recorder.append(.response) }
             return response
         } catch {
@@ -376,6 +397,7 @@ private struct PendingBulbWireRequest: Sendable {
     let path: String
     let body: Data
     var isMutation: Bool { method != "GET" }
+    var ownerID: String? { payload?["ownerId"] as? String }
     var action: String? { payload?["action"] as? String }
     var autofocus: Bool? { payload?["af"] as? Bool }
     private var payload: [String: Any]? {
@@ -409,7 +431,6 @@ private final class PendingBulbWirePeer: @unchecked Sendable {
     private static let maximumHold: TimeInterval = 8
     private static let paddingBytes = 256
     private static let directStartBody = Data("{}".utf8)
-    private static let bridgeStartBody = Data(#"{"bulbExposureActive":true,"shutterReleaseUnconfirmed":false}"#.utf8)
 
     init(endpoint: PendingBulbWireEndpoint? = nil, failedReleases: Int = 0) throws {
         self.failedReleases = failedReleases
@@ -541,11 +562,15 @@ private final class PendingBulbWirePeer: @unchecked Sendable {
                     try sendHTTP(200, Data(#"{"ok":true,"service":"open-eos-control-bridge"}"#.utf8), socket)
                 case ("POST", "/v1/session"):
                     try sendHTTP(201, Data(#"{"id":"pending-fixture","engine":"ccapi"}"#.utf8), socket)
-                case ("POST", "/v1/session/pending-fixture/bulb/start"):
-                    try dripBody(Self.bridgeStartBody, socket)
-                case ("POST", "/v1/session/pending-fixture/bulb/stop"),
-                     ("DELETE", "/v1/session/pending-fixture"):
-                    try releaseResponse(socket, bridge: true)
+                case ("POST", "/v1/session/pending-fixture/bulb/start/owned"):
+                    let owner = try XCTUnwrap(request.ownerID)
+                    let body = try JSONSerialization.data(withJSONObject: ["ownerId": owner, "outcome": "started",
+                        "status": ["bulbExposureActive": true, "shutterReleaseUnconfirmed": false]])
+                    try dripBody(body, socket)
+                case ("POST", "/v1/session/pending-fixture/bulb/stop/owned"):
+                    try releaseResponse(socket, bridge: true, ownerID: XCTUnwrap(request.ownerID))
+                case ("DELETE", "/v1/session/pending-fixture"):
+                    try sendHTTP(204, Data(), socket)
                 case ("GET", "/v1/session/pending-fixture/status"):
                     try sendHTTP(200, Data(#"{"bulbExposureActive":null,"shutterReleaseUnconfirmed":true}"#.utf8), socket)
                 default:
@@ -590,7 +615,7 @@ private final class PendingBulbWirePeer: @unchecked Sendable {
         }
     }
 
-    private func releaseResponse(_ socket: Int32, bridge: Bool) throws {
+    private func releaseResponse(_ socket: Int32, bridge: Bool, ownerID: String? = nil) throws {
         condition.lock()
         releaseCount += 1
         let attempt = releaseCount
@@ -605,7 +630,10 @@ private final class PendingBulbWirePeer: @unchecked Sendable {
         if attempt <= failedReleases {
             try sendHTTP(503, Data(#"{"error":{"code":"SHUTTER_RELEASE_UNCONFIRMED","message":"Fixture release was not confirmed"}}"#.utf8), socket)
         } else if bridge {
-            try sendHTTP(200, Data(#"{"bulbExposureActive":false,"shutterReleaseUnconfirmed":false}"#.utf8), socket)
+            let owner = try XCTUnwrap(ownerID)
+            let body = try JSONSerialization.data(withJSONObject: ["ownerId": owner, "outcome": "released",
+                "status": ["bulbExposureActive": false, "shutterReleaseUnconfirmed": false]])
+            try sendHTTP(200, body, socket)
         } else {
             try sendHTTP(204, Data(), socket)
         }
