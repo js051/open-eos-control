@@ -291,6 +291,7 @@
       "maintenanceRestore": "Control restoration",
       "maintenancePreviousSession": "Previous connection",
       "maintenanceRestoreAction": "Restore controls / monitoring",
+      "maintenanceRestoreTokenRequired": "This Bridge did not provide a safe restore permit. Keep monitoring stopped and reconnect before restarting it.",
       "maintenanceRestoreConfirm": "Read the camera again, then restore controls and only the monitoring that was previously active? This does not prove cleaning finished.",
       "maintenanceReviewOutcome": "Review the retained command response and observation evidence.",
       "maintenanceEvidenceBoundary": "A response or reachable camera does not prove sleep or cleaning completed. Read-only recovery never repeats an action or restarts monitoring.",
@@ -1091,6 +1092,7 @@
       "maintenanceRestore": "控制恢復",
       "maintenancePreviousSession": "先前連線",
       "maintenanceRestoreAction": "恢復控制／監看",
+      "maintenanceRestoreTokenRequired": "此 Bridge 未提供安全的恢復許可。請保持監看停止，重新連線後再啟動。",
       "maintenanceRestoreConfirm": "重新讀取相機後，恢復控制與原本啟用的監看？這不代表清潔已完成。",
       "maintenanceReviewOutcome": "請查看保留的命令回應與觀察證據。",
       "maintenanceEvidenceBoundary": "收到回應或相機仍可讀取，不代表休眠或清潔完成。唯讀恢復不重送動作，也不重啟監看。",
@@ -3999,17 +4001,20 @@
   async function maintenanceControlRequest(invocation, path, { method = "POST", payload } = {}) {
     if (!maintenancePublishable(invocation)) throw new Error("Maintenance action is no longer current");
     const route = path.replace(/\/(liveview\/(?:start|stop)|events)$/, "/maintenance/control/$1");
+    if (method === "POST" && route.endsWith("/maintenance/control/liveview/stop") &&
+        invocation.mode === "action" && invocation.record.operation === "sensor-cleaning" &&
+        !invocation.record.autoPowerOff && invocation.record.wasLive) payload = { prepareRestore: true };
     const response = await captureConfiguration.transfer(route, { method, payload, token: invocation.record.token,
       signal: invocation.controller.signal, strictSettings: true, strictIntegerTokens: true, emptyResponseStatus: method === "DELETE" ? 204 : null });
     if (response.status !== (method === "DELETE" ? 204 : 200)) throw new Error("Maintenance control response unavailable");
     return response.body;
   }
 
-  async function maintenanceOwnedControl(owner, path, { method = "POST" } = {}) {
+  async function maintenanceOwnedControl(owner, path, { method = "POST", payload } = {}) {
     const record = owner.maintenanceRecord;
     if (!record || record.owner !== state.session || owner.session !== state.session || record.retired ||
         owner.maintenanceController?.signal.aborted) throw new Error("Maintenance owner is no longer current");
-    const response = await captureConfiguration.transfer(path, { method, token: record.token,
+    const response = await captureConfiguration.transfer(path, { method, payload, token: record.token,
       signal: owner.maintenanceController.signal, strictSettings: true, strictIntegerTokens: true,
       emptyResponseStatus: method === "DELETE" ? 204 : null });
     if (response.status !== (method === "DELETE" ? 204 : 200)) throw new Error("Maintenance control response unavailable");
@@ -6322,9 +6327,18 @@
       localPreviewSelected() || !state.session || liveViewStopRequired() || (cameraInteractionBusy() && !restoring) || bulbControlLocked() ||
       !featureSupported(FEATURES.LIVE_VIEW)
     ) return;
+    if (restoring && (typeof maintenanceRestore.record.restoreToken !== "string" ||
+        !/^[A-Za-z0-9_-]{24,64}$/.test(maintenanceRestore.record.restoreToken))) {
+      setOperationState(t("maintenanceRestoreTokenRequired"), true);
+      showToast(t("maintenanceRestoreTokenRequired"), true);
+      return;
+    }
     const session = state.session;
     const owner = { session, token: state.token };
-    if (restoring) { owner.stopUnconfirmed = true; owner.maintenanceRecord = maintenanceRestore.record; }
+    if (restoring) {
+      owner.stopUnconfirmed = true; owner.maintenanceRecord = maintenanceRestore.record;
+      owner.restoreToken = maintenanceRestore.record.restoreToken;
+    }
     state.liveViewStopRevision = (state.liveViewStopRevision || 0) + 1;
     state.liveViewStopOwner = owner;
     const owns = () => state.session === session && state.liveViewStopOwner === owner;
@@ -6336,7 +6350,7 @@
     const capabilities = liveCapabilities();
     try {
       const path = `/v1/session/${encodeURIComponent(session.id)}/liveview/start`;
-      const payload = restoring ? { ...maintenanceRestore.record.resume } : { fps: clampFps(state.requestedFps),
+      const payload = restoring ? { ...maintenanceRestore.record.resume, restoreToken: owner.restoreToken } : { fps: clampFps(state.requestedFps),
         size: capabilities.defaultSize || capabilities.sizes?.[0] || "MEDIUM", source: state.liveSource || "AUTO" };
       const response = restoring ? await maintenanceControlRequest(maintenanceRestore, path, { payload }) :
         await liveViewControlRequest(owner, path, { json: payload, timeoutMs: 60000 });
@@ -6347,6 +6361,9 @@
       }
       if (!response || typeof response !== "object" || Array.isArray(response) || response.active !== true ||
           response.liveViewStopUnconfirmed === true || (restoring && response.liveViewStopUnconfirmed !== false)) {
+        throw new Error(t("liveViewStopUnconfirmed"));
+      }
+      if (restoring && (response.restoreToken !== owner.restoreToken || response.restoreOutcome !== "started")) {
         throw new Error(t("liveViewStopUnconfirmed"));
       }
       if (restoring) owner.stopUnconfirmed = false;
@@ -6395,7 +6412,14 @@
     // is itself still waiting and has not sent its own request yet.
     owner.predecessorPromise = previous?.controlController ? previous.controlPromise : previous?.predecessorPromise;
     owner.maintenanceRecord = maintenanceInvocation?.record || maintenanceRecord || previous?.maintenanceRecord || null;
-    if (owner.maintenanceRecord) owner.legacyStop = false;
+    if (owner.maintenanceRecord) {
+      owner.legacyStop = false;
+      const sameMaintenanceOwner = previous?.maintenanceRecord === owner.maintenanceRecord;
+      owner.restoreToken = sameMaintenanceOwner ? previous?.restoreToken || null : null;
+      owner.maintenanceWarningRevision = sameMaintenanceOwner ? previous?.maintenanceWarningRevision || 0 : 0;
+      owner.forceFreshMaintenanceStop = sameMaintenanceOwner && previous?.forceFreshMaintenanceStop === true;
+    }
+    const ownedRestoreStop = Boolean(owner.restoreToken && !owner.forceFreshMaintenanceStop);
     let maintenanceTimer = null;
     if (remote && owner.maintenanceRecord && !maintenanceInvocation) {
       owner.maintenanceController = new AbortController();
@@ -6429,22 +6453,46 @@
       const path = `/v1/session/${encodeURIComponent(session.id)}/liveview/stop`;
       const response = maintenanceInvocation ? await maintenanceControlRequest(maintenanceInvocation, path) :
         owner.maintenanceRecord ? await maintenanceOwnedControl(owner,
-          `/v1/session/${encodeURIComponent(session.id)}/maintenance/control/liveview/stop`) :
+          `/v1/session/${encodeURIComponent(session.id)}/maintenance/control/liveview/stop`,
+          { payload: ownedRestoreStop ? { restoreToken: owner.restoreToken } : undefined }) :
           await liveViewControlRequest(owner, path);
       if (!owns()) return false;
+      const terminalRestoreReceipt = ownedRestoreStop && response?.restoreToken === owner.restoreToken &&
+        ["stopped", "cancelled-before-start"].includes(response.restoreOutcome);
       if (owner.maintenanceRecord && (owner.maintenanceWarningRevision || 0) !== maintenanceWarningRevision) {
+        // This receipt retires only its original permit. The next explicit Stop
+        // must obtain fresh state for the newer warning rather than replay it.
+        if (terminalRestoreReceipt) owner.forceFreshMaintenanceStop = true;
         throw new Error(t("liveViewStopUnconfirmed"));
       }
       if (owner.maintenanceController?.signal.aborted || (maintenanceInvocation && !maintenancePublishable(maintenanceInvocation))) {
         owner.stopUnconfirmed = true; return false;
       }
-      if (response?.active !== false || !(response.liveViewStopUnconfirmed === false ||
-          (!owner.maintenanceRecord && owner.legacyStop && !owner.stopUnconfirmed && response.liveViewStopUnconfirmed == null))) {
+      const receiptOnly = terminalRestoreReceipt &&
+        response.active === undefined && response.liveViewStopUnconfirmed === undefined;
+      if (receiptOnly && (owner.maintenanceWarningRevision || 0) > 0) {
+        owner.forceFreshMaintenanceStop = true;
         throw new Error(t("liveViewStopUnconfirmed"));
+      }
+      if (ownedRestoreStop && (response?.restoreToken !== owner.restoreToken ||
+          !["stopped", "cancelled-before-start"].includes(response?.restoreOutcome))) {
+        throw new Error(t("liveViewStopUnconfirmed"));
+      }
+      if (ownedRestoreStop && !receiptOnly && response?.restoreOutcome !== "stopped") {
+        throw new Error(t("liveViewStopUnconfirmed"));
+      }
+      if (!receiptOnly && (response?.active !== false || !(response.liveViewStopUnconfirmed === false ||
+          (!owner.maintenanceRecord && owner.legacyStop && !owner.stopUnconfirmed && response.liveViewStopUnconfirmed == null)))) {
+        throw new Error(t("liveViewStopUnconfirmed"));
+      }
+      if (maintenanceInvocation?.mode === "action" && maintenanceInvocation.record.wasLive &&
+          maintenanceInvocation.record.operation === "sensor-cleaning" && !maintenanceInvocation.record.autoPowerOff) {
+        maintenanceInvocation.record.restoreToken = typeof response.restoreToken === "string" &&
+          /^[A-Za-z0-9_-]{24,64}$/.test(response.restoreToken) ? response.restoreToken : null;
       }
       state.liveViewStopOwner = null;
       state.liveViewStopRevision = (state.liveViewStopRevision || 0) + 1;
-      if (state.status) adoptCameraStatus({ ...state.status, liveViewStopUnconfirmed: false }, session, state.liveViewStopRevision);
+      if (state.status && !receiptOnly) adoptCameraStatus({ ...state.status, liveViewStopUnconfirmed: false }, session, state.liveViewStopRevision);
       stopped = true;
       if (!preserveError) setOperationState(t("liveViewStopped"));
       if (announce && !preserveError) showToast(t("liveViewStopped"));
