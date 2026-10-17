@@ -217,3 +217,8 @@
 ## 2026-10-17 Android G08/G11 USB 清單完成
 
 [原列 #73/#90 USB 媒體列舉](android-usb-listing-completion-2026-10-17.zh-TW.md)：修復 directory handle 吃掉 Recent 的媒體預算，以及部分必要 ObjectInfo 失敗卻將剩餘清單或 host item 宣告成功。基準 byte-exact production declaration 的6案有3個預期失敗；修正後13/13 host JUnit通過，包含取消優先、host預填、全卡、optional rating未知。4 source guards／2 Kotlin PSI語法通過；6完整backend protocol新增測試尚未執行，完整Android compile/native/真USB仍NOT_RUN。已審查窄production差異，不更改D/E能力或宣稱原89列完成。
+
+## 2026-10-17 G12/G13 shutdown 與初始化恢復
+
+- [原列 #116 Bridge shutdown](bridge-shutdown-drain-2026-10-17.zh-TW.md)：普通 OS/provider/子程序 timeout 不再跳過後續 session close，最後保留第一個原始錯誤；BaseException 中斷不改。基準7 fail/4 pass，修正與相鄰host測試共39 pass；包含production SubprocessByteStream、後續CcapiSession合成transport與ASGI lifespan，非物理相機release。
+- [原列 #122 health recovery](pc-bridge-health-recovery-2026-10-17.zh-TW.md)：health fetch/body卡住時15秒deadline退回可明確重試；舊回覆不能覆寫新attempt。104個connection guidance host cases通過，包括7新反例與97既有case；全域API不改。Windows standalone、真正EDSDK、mobile native、OS picker與真機驗收界線保留。
