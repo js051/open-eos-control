@@ -6,6 +6,7 @@ import UIKit
 @MainActor
 struct HeldAutofocusButton: UIViewRepresentable {
     @ObservedObject var camera: CameraAppState
+    @EnvironmentObject private var language: AppLanguageStore
 
     func makeCoordinator() -> Coordinator { Coordinator(camera: camera) }
 
@@ -27,9 +28,9 @@ struct HeldAutofocusButton: UIViewRepresentable {
         button.isEnabled = camera.canStartHeldAutofocus || camera.heldAutofocusPressed || context.coordinator.owner != nil
         button.isSelected = camera.heldAutofocusPressed
         button.tintColor = camera.heldAutofocusPressed ? .systemYellow : .white
-        button.accessibilityLabel = NSLocalizedString("held_autofocus", comment: "")
-        button.accessibilityValue = NSLocalizedString(camera.heldAutofocusPressed ? "held_autofocus_active" : "held_autofocus_released", comment: "")
-        button.accessibilityHint = NSLocalizedString("held_autofocus_hint", comment: "")
+        button.accessibilityLabel = language.string("held_autofocus")
+        button.accessibilityValue = language.string(camera.heldAutofocusPressed ? "held_autofocus_active" : "held_autofocus_released")
+        button.accessibilityHint = language.string("held_autofocus_hint")
     }
 
     static func dismantleUIView(_ uiView: AccessibleFocusButton, coordinator: Coordinator) { coordinator.releaseHold() }

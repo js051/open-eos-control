@@ -230,3 +230,5 @@
 ## 2026-10-17 G13 iOS 選定語言與錯誤恢復
 
 [原列 #128 選定語言恢復文案](ios-recovery-language-2026-10-17.zh-TW.md)：修正 app 選 English／繁中但 state app 自有錯誤與 REC evidence 仍走系統 bundle 的 source mismatch。五個 App entrypoints 共用既有 live language store；新發出的 app 訊息與 REC 模板／嵌套值依所選語言，原始 device/server 診斷、既有錯誤 owner、connection/history 不改。143 source guards、4 source-path checks 及兩個基準 static negative controls通過；五個已撰寫 XCTest 尚未編譯／執行。#36/#127 的 connection 初始化／取消／重試本輪未確認新缺口；混合語言原生 UI、VoiceOver／大字／鍵盤／OS picker 與真機仍未驗，不把 G13 或原89列改成全部完成。
+
+同日續查原列 #128／#67 的既有 iOS accessibility caller：AF-ON label/value/hint、倍率按鈕與 camera-reported focus 狀態改用同一 selected-language store；touch/cancel/release、coordinator 與幾何不變。後續 source guards147/147、source paths4/4、兩個前一提交 static negative controls通過；兩個新增 hosted UIKit/resource XCTest 均 NOT_RUN。細節與原生 scene／VoiceOver 邊界見同文件後續節。

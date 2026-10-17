@@ -14,6 +14,7 @@ struct LiveViewSurface: View {
 
 private struct LiveViewSurfaceContent: View {
     @EnvironmentObject private var camera: CameraAppState
+    @EnvironmentObject private var language: AppLanguageStore
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var nativeMonitor: IOSRTPPixelMonitor
     @ObservedObject var nativeVideo: IOSNativeVideoPresentation
@@ -228,10 +229,7 @@ private struct LiveViewSurfaceContent: View {
                     .buttonStyle(.plain)
                     .disabled(camera.isBusy(.liveView))
                     .accessibilityLabel(
-                        String(
-                            format: NSLocalizedString("live_view_magnify_to", comment: ""),
-                            target.rawValue
-                        )
+                        language.format("live_view_magnify_to", target.rawValue)
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                     .padding(12)
@@ -647,6 +645,7 @@ private struct FocusMarkerView: View {
 }
 
 private struct CameraReportedFocusOverlay: View {
+    @EnvironmentObject private var language: AppLanguageStore
     let info: CameraFocusInfo
     let sampledAt: Date
 
@@ -674,7 +673,7 @@ private struct CameraReportedFocusOverlay: View {
                     }
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(info.frames.map { NSLocalizedString("camera_focus_" + $0.status.rawValue.lowercased(), comment: "") }.reduce(into: [String]()) { values, value in
+                .accessibilityLabel(info.frames.map { language.string("camera_focus_" + $0.status.rawValue.lowercased()) }.reduce(into: [String]()) { values, value in
                     if !values.contains(value) { values.append(value) }
                 }.joined(separator: ", "))
                 .accessibilityIdentifier("camera-reported-focus-frames")
