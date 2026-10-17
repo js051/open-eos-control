@@ -3,10 +3,11 @@ from __future__ import annotations
 import secrets
 import threading
 
+from .bulb import BulbRequests
 from .engine import CameraEngineSession, NetworkCameraEngine
 from .engine_registry import LocalEngineRegistry
 from .errors import BridgeError
-from .models import CameraDescriptor, EngineName, SessionCreated, SessionCreateRequest
+from .models import BulbOwnerResult, CameraDescriptor, CameraStatus, EngineName, SessionCreated, SessionCreateRequest
 
 
 class SessionManager:
@@ -18,6 +19,7 @@ class SessionManager:
         self.local_engines = local_engines
         self.network_engine = network_engine
         self._sessions: dict[str, CameraEngineSession] = {}
+        self._bulb_requests: dict[str, BulbRequests] = {}
         self._camera_sessions: dict[str, str] = {}
         self._lock = threading.RLock()
         self._open_lock = threading.Lock()
@@ -81,6 +83,7 @@ class SessionManager:
                 )
             session_id = secrets.token_urlsafe(18)
             self._sessions[session_id] = session
+            self._bulb_requests[session_id] = BulbRequests(session)
             self._camera_sessions[camera_key] = session_id
         return SessionCreated(id=session_id, engine=session.engine_name, camera=session.camera)
 
@@ -113,42 +116,86 @@ class SessionManager:
         with self._lock:
             return self._sessions.get(session_id) is session
 
-    def delete(self, session_id: str) -> None:
-        with self._lock:
-            session = self._sessions.pop(session_id, None)
-        if session is None:
-            raise BridgeError("SESSION_NOT_FOUND", "Camera session was not found.", status_code=404)
-        try:
-            session.close()
-        finally:
-            # Do not let a new session register while this session's final release is in flight.
-            with self._lock:
-                self._camera_sessions.pop(f"{session.engine_name}:{session.camera.id}", None)
-
-    def retire_maintenance(self, session_id: str) -> None:
-        # Keep registration while retirement is in flight, so a replacement cannot race it.
+    def _bulb_requests_for(self, session_id: str) -> BulbRequests:
         with self._lock:
             session = self.get(session_id)
-            retire = getattr(session, "maintenance_retire", None)
-            if not callable(retire):
-                raise BridgeError("UNSUPPORTED_MAINTENANCE_RETIRE", "Local-only retirement is unavailable.",
-                                  status_code=409, engine=session.engine_name)
-            retire()
-            self._sessions.pop(session_id, None)
-            self._camera_sessions.pop(f"{session.engine_name}:{session.camera.id}", None)
+            guard = self._bulb_requests.get(session_id)
+            if guard is None or guard.session is not session:
+                if guard is not None:
+                    guard.retire()
+                guard = self._bulb_requests[session_id] = BulbRequests(session)
+            return guard
+
+    def start_bulb_exposure(self, session_id: str, owner_id: str | None = None) -> CameraStatus | BulbOwnerResult:
+        return self._bulb_requests_for(session_id).start(owner_id)
+
+    def stop_bulb_exposure(self, session_id: str, owner_id: str | None = None) -> CameraStatus | BulbOwnerResult:
+        return self._bulb_requests_for(session_id).stop(owner_id)
+
+    def delete(self, session_id: str) -> None:
+        guard = self._bulb_requests_for(session_id)
+        with guard.retirement_lock:
+            with self._lock:
+                if not self.is_current(session_id, guard.session):
+                    raise BridgeError("SESSION_NOT_FOUND", "Camera session was not found.", status_code=404)
+                guard.retire()
+                session = self._sessions.pop(session_id)
+                self._bulb_requests.pop(session_id, None)
+            try:
+                guard.finish_retirement(session.close)
+            finally:
+                # Keep the camera reserved until this exact session's final cleanup ends.
+                with self._lock:
+                    self._camera_sessions.pop(f"{session.engine_name}:{session.camera.id}", None)
+
+    def retire_maintenance(self, session_id: str) -> None:
+        guard = self._bulb_requests_for(session_id)
+        with guard.retirement_lock:
+            # Keep registration while local retirement is in flight. Unlike close,
+            # a refused retirement may leave a camera Stop obligation to resolve.
+            with self._lock:
+                if not self.is_current(session_id, guard.session):
+                    raise BridgeError("SESSION_NOT_FOUND", "Camera session was not found.", status_code=404)
+                session = guard.session
+                retire = getattr(session, "maintenance_retire", None)
+                if not callable(retire):
+                    raise BridgeError("UNSUPPORTED_MAINTENANCE_RETIRE", "Local-only retirement is unavailable.",
+                                      status_code=409, engine=session.engine_name)
+                guard.retire()
+            try:
+                guard.finish_retirement(retire)
+            except BaseException:
+                with self._lock:
+                    if self.is_current(session_id, session):
+                        guard.resume_after_failed_retirement()
+                raise
+            with self._lock:
+                if self.is_current(session_id, session):
+                    self._sessions.pop(session_id, None)
+                    self._bulb_requests.pop(session_id, None)
+                    self._camera_sessions.pop(f"{session.engine_name}:{session.camera.id}", None)
 
     def close_all(self) -> None:
         with self._lock:
-            sessions = list(self._sessions.values())
+            sessions = [(identifier, session, self._bulb_requests_for(identifier))
+                        for identifier, session in self._sessions.items()]
+            for _, _, guard in sessions:
+                guard.retire()
             self._sessions.clear()
-            self._camera_sessions.clear()
+            self._bulb_requests.clear()
         failure = None
-        for session in sessions:
+        for identifier, session, guard in sessions:
             try:
-                session.close()
+                with guard.retirement_lock:
+                    guard.finish_retirement(session.close)
             except Exception as error:
                 # Provider and subprocess cleanup can raise ordinary OS errors.
                 # Drain every session, then preserve the first reported failure.
                 failure = failure or error
+            finally:
+                with self._lock:
+                    key = f"{session.engine_name}:{session.camera.id}"
+                    if self._camera_sessions.get(key) == identifier:
+                        self._camera_sessions.pop(key, None)
         if failure is not None:
             raise failure
