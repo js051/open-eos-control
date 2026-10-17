@@ -1,0 +1,12 @@
+commit 085be20307477b041b7fbbe9c04ada72a28bc267
+Author:     Codex <codex@openai.com>
+AuthorDate: Sun Oct 18 07:02:53 2026 +0800
+Commit:     Codex <codex@openai.com>
+CommitDate: Sun Oct 18 07:02:53 2026 +0800
+
+    fix(bridge): 阻擋退休連線的待上傳寫入
+
+ bridge/open_eos_bridge/app.py                      |  16 +-
+ bridge/tests/test_upload_session_retirement.py     | 270 +++++++++++++++++++++
+ .../bridge-upload-retirement-2026-10-17.md         |  42 ++++
+ 3 files changed, 327 insertions(+), 1 deletion(-)

@@ -1,0 +1,108 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____ test_staged_body_cannot_dispatch_after_session_retirement[draining] ______
+
+retirement = 'draining'
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-35/test_staged_body_cannot_dispat0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fcb31332720>
+
+    @pytest.mark.parametrize("retirement", ["draining", "closed", "replacement", "reused-id"])
+    def test_staged_body_cannot_dispatch_after_session_retirement(retirement, tmp_path, monkeypatch):
+        if retirement == "reused-id":
+            monkeypatch.setattr("open_eos_bridge.sessions.secrets.token_urlsafe", lambda _: "synthetic-session")
+        runner = FakeRunner()
+        app, manager, identifier, session = application(runner, tmp_path)
+        retired = threading.Event()
+        guard = manager._bulb_requests_for(identifier)
+        finish_retirement = guard.finish_retirement
+    
+        def finish(operation):
+            retired.set()  # Registration was removed; provider cleanup may still be queued.
+            finish_retirement(operation)
+    
+        monkeypatch.setattr(guard, "finish_retirement", finish)
+    
+        async def exercise():
+            receiving, complete_body = asyncio.Event(), asyncio.Event()
+    
+            async def body():
+                receiving.set()
+                await complete_body.wait()
+                yield b"new!"
+    
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://synthetic") as client:
+                upload = asyncio.create_task(client.post(
+                    f"/v1/session/{identifier}/media?filename=SYNTHETIC.JPG", headers=UPLOAD_HEADERS, content=body(),
+                ))
+                await asyncio.wait_for(receiving.wait(), 3)
+                admission = manager.camera_mutation(identifier) if retirement == "draining" else nullcontext()
+                with admission:
+                    deleting = asyncio.create_task(client.delete(f"/v1/session/{identifier}", headers=AUTH))
+                    await reached(retired)
+                    assert not manager.is_current(identifier, session)
+                    if retirement == "draining":
+                        assert not session._closed and not deleting.done()
+                    else:
+                        assert (await asyncio.wait_for(deleting, 3)).status_code == 204
+                        assert session._closed
+                        if retirement in {"replacement", "reused-id"}:
+                            replacement = manager.create(SessionCreateRequest())
+                            assert (replacement.id == identifier) == (retirement == "reused-id")
+                    complete_body.set()
+                    response = await asyncio.wait_for(upload, 3)
+                    assert response.status_code == 404
+                    assert response.json()["error"]["code"] == "SESSION_NOT_FOUND"
+                    assert not any("--upload-file" in command for command in runner.commands)
+                assert (await asyncio.wait_for(deleting, 3)).status_code == 204
+    
+        try:
+>           asyncio.run(exercise())
+
+bridge/tests/test_upload_session_retirement.py:103: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    async def exercise():
+        receiving, complete_body = asyncio.Event(), asyncio.Event()
+    
+        async def body():
+            receiving.set()
+            await complete_body.wait()
+            yield b"new!"
+    
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://synthetic") as client:
+            upload = asyncio.create_task(client.post(
+                f"/v1/session/{identifier}/media?filename=SYNTHETIC.JPG", headers=UPLOAD_HEADERS, content=body(),
+            ))
+            await asyncio.wait_for(receiving.wait(), 3)
+            admission = manager.camera_mutation(identifier) if retirement == "draining" else nullcontext()
+            with admission:
+                deleting = asyncio.create_task(client.delete(f"/v1/session/{identifier}", headers=AUTH))
+                await reached(retired)
+                assert not manager.is_current(identifier, session)
+                if retirement == "draining":
+                    assert not session._closed and not deleting.done()
+                else:
+                    assert (await asyncio.wait_for(deleting, 3)).status_code == 204
+                    assert session._closed
+                    if retirement in {"replacement", "reused-id"}:
+                        replacement = manager.create(SessionCreateRequest())
+                        assert (replacement.id == identifier) == (retirement == "reused-id")
+                complete_body.set()
+                response = await asyncio.wait_for(upload, 3)
+>               assert response.status_code == 404
+E               assert 201 == 404
+E                +  where 201 = <Response [201 Created]>.status_code
+
+bridge/tests/test_upload_session_retirement.py:97: AssertionError
+=========================== short test summary info ============================
+FAILED bridge/tests/test_upload_session_retirement.py::test_staged_body_cannot_dispatch_after_session_retirement[draining]

@@ -29,7 +29,7 @@ The new `bridge/tests/test_upload_session_retirement.py` uses the real ASGI endp
 7. Already-admitted, committed upload finishes readback and returns its exact receipt before close, with payload available through provider completion.
 8. The same committed-upload boundary with HTTP task cancellation: worker drain and readback still finish before close, payload stays available, and only the original write occurs.
 
-The first case fails on the unchanged baseline with HTTP 201 instead of retirement rejection. After the correction, all eight new cases pass. The focused regression passes **217 distinct tests**, including those eight, covering existing upload validation/outcomes, API, gPhoto2, Bulb admission/ownership and session shutdown tests. An independent final run of the eight new cases also passes; those repeated cases are not added to 217. One existing Starlette TestClient deprecation warning remains. Results and source hashes are retained with the local validation evidence; this is synthetic software evidence, not physical-camera validation.
+The first case fails on the unchanged baseline with HTTP 201 instead of retirement rejection. After the correction, all eight new cases pass. The focused regression passes **217 distinct tests**, including those eight, covering existing upload validation/outcomes, API, gPhoto2, Bulb admission/ownership and session shutdown tests. An independent final run of the eight new cases also passes; those repeated cases are not added to 217. One existing Starlette TestClient deprecation warning remains. Results and source hashes are retained in [the validation evidence](evidence/bridge-upload-retirement-20261017/upload-retirement-source-sha256.txt); this is synthetic software evidence, not physical-camera validation.
 
 Ruff and `git diff --check` pass. The repository's normal staged secret-scan hook is required for the local commit; no hook, safety check or acceptance gate is bypassed.
 
@@ -40,3 +40,5 @@ Ruff and `git diff --check` pass. The repository's normal staged secret-scan hoo
 - No version change, push, CI dispatch, merge, tag, release or installation is included.
 - Exact-SHA CI and normal integration/release acceptance remain required before the corresponding delivery states can be claimed.
 - Camera/firmware compatibility and physical disconnect/cancellation reliability remain unvalidated here.
+
+Integration review: exact app/test tree equals source commit `085be20307477b041b7fbbe9c04ada72a28bc267`; the dispatch guard, queued-retirement check, cancellation and committed-write drain were independently inspected before integration.
