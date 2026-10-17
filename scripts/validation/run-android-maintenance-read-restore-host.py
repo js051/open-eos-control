@@ -49,6 +49,12 @@ def main():
         data = (repo / path).read_bytes() if ref == "WORKTREE" else subprocess.check_output(["git", "show", ref + ":" + path], cwd=repo)
         hashes[path] = digest(data)
         target = output / "MaintenanceWorkflowTest.kt"; target.write_bytes(data); files.append(target)
+    # requestJson includes the narrow capture recovery helper; retain its production route enum.
+    capture = source("CaptureConfigurationEvidence.kt")
+    target = output / "CaptureConfigurationOperation.kt"
+    target.write_text("package dev.openeos.control.data\n" + between(capture,
+        "enum class CaptureConfigurationOperation(", "enum class CaptureConfigurationWriteEvidence"))
+    files.append(target)
     client = source("DesktopBridgeClient.kt")
     methods = between(client, "    suspend fun retireMaintenanceLocally()", "    suspend fun closeConnectionAttempt()")
     methods += between(client, "    suspend fun stopEventPolling()", "    suspend fun capabilities()")

@@ -42,6 +42,12 @@ def main():
         extracts[begin.strip()] = digest(value.encode()); return value
     for name in ("BridgeShutterReleaseSession.kt", "ShutterReleaseSession.kt", "BridgeBulbRequestSession.kt", "BridgeBulbDeadline.kt", "MaintenanceEvidence.kt", "ShootingSettingJson.kt", "StrictMediaJson.kt"):
         target = output / name; target.write_text(source(name)); files.append(target)
+    # requestJson includes the narrow capture recovery helper; retain its production route enum.
+    capture = source("CaptureConfigurationEvidence.kt")
+    target = output / "CaptureConfigurationOperation.kt"
+    target.write_text("package dev.openeos.control.data\n" + between(capture,
+        "enum class CaptureConfigurationOperation(", "enum class CaptureConfigurationWriteEvidence"))
+    files.append(target)
     client = source("DesktopBridgeClient.kt")
     methods = between(client, "    suspend fun retireMaintenanceLocally()", "    suspend fun closeConnectionAttempt()")
     methods += between(client, "    suspend fun stopEventPolling()", "    suspend fun capabilities()")
