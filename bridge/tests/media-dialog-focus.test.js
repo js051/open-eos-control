@@ -32,7 +32,7 @@ function fixture() {
   const context = vm.createContext({ state, ui, document,
     clearMediaPreview() {}, clearMediaDetails() {} });
   vm.runInContext(["mediaDialogFocusTarget", "beginMediaDialogFocus", "restoreMediaDialogFocus",
-    "setMediaDialogActionDisabled", "closeMediaPreview", "closeMediaDetails"].map(extract).join("\n"), context);
+    "setMediaDialogActionDisabled", "closeMediaPreview", "closeMediaDetails", "restoreMediaMutationFocus"].map(extract).join("\n"), context);
   function open(kind, original) {
     const owner = { session: state.session, original, itemId: original.dataset.mediaId, role: original.dataset.mediaAction };
     cards = [original];
@@ -130,5 +130,48 @@ for (const kind of ["Preview", "Details"]) {
     c.ui[`media${kind}Dialog`].close = function () { this.open = false; other.focus(); };
     c.context[`closeMedia${kind}`]();
     assert.equal(c.document.activeElement, other);
+  });
+}
+
+for (const reason of ["current", "session", "editor", "generation", "new-focus", "new-dialog", "view", "deleted"]) {
+  test(`pending Details mutation settlement restores only current owner: ${reason}`, () => {
+    const c = fixture(), original = c.button(), busyCard = c.button(), settledCard = c.button();
+    c.state.mediaDetailsGeneration = 2; c.state.refreshGeneration = 4;
+    c.context.clearMediaDetails = () => { c.state.mediaDetailsGeneration++; };
+    const mutation = { session: c.state.session };
+    c.state.mediaMutationOwner = mutation;
+    c.state.mediaMutation = { queue: { results: [{ id: "a" }] } };
+    c.open("Details", original); original.isConnected = false; busyCard.disabled = true; c.cards([busyCard]);
+    c.context.closeMediaDetails();
+    assert.equal(c.document.activeElement, c.document.body);
+    c.cards([settledCard]); c.state.mediaMutationOwner = null;
+    if (reason === "session") c.state.session = { id: "same-id" };
+    if (reason === "editor") c.state.mediaDetailsGeneration++;
+    if (reason === "generation") c.state.refreshGeneration++;
+    if (reason === "new-focus") c.button("outside").focus();
+    if (reason === "new-dialog") c.document.querySelector = () => ({ open: true });
+    if (reason === "view") c.state.activeView = "live";
+    if (reason === "deleted") c.state.media = [];
+    c.context.restoreMediaMutationFocus?.(mutation);
+    assert.equal(c.document.activeElement === settledCard, reason === "current");
+    assert.equal(mutation.dismissedFocus, undefined);
+    c.document.activeElement = c.document.body;
+    c.context.restoreMediaMutationFocus?.(mutation);
+    assert.equal(c.document.activeElement, c.document.body, "return target consumed once");
+  });
+}
+
+for (const reason of ["no-restore", "unrelated-item", "different-session", "new-dialog-owner"]) {
+  test(`pending mutation does not acquire unrelated focus: ${reason}`, () => {
+    const c = fixture(), original = c.button();
+    c.state.mediaDetailsGeneration = 2; c.state.refreshGeneration = 4;
+    const mutation = { session: c.state.session };
+    c.state.mediaMutationOwner = mutation;
+    c.state.mediaMutation = { queue: { results: [{ id: reason === "unrelated-item" ? "b" : "a" }] } };
+    c.open("Details", original);
+    if (reason === "different-session") mutation.session = { id: "same-id" };
+    if (reason === "new-dialog-owner") c.button("outside").focus();
+    c.context.closeMediaDetails(reason !== "no-restore");
+    assert.equal(mutation.dismissedFocus, undefined);
   });
 }
