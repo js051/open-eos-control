@@ -89,6 +89,21 @@ class CameraUploadOutcomeJourneyTest {
             assertArrayEquals(ByteArray(12) { 7 }, source.file.readBytes())
         }
     }
+    @Test fun emptyOwnedPickerSourcePublishesLocalizableAppFailureWithoutSending() {
+        val source = source("EMPTY.JPG", 0L)
+        source.file.writeBytes(byteArrayOf())
+        compose.runOnIdle {
+            val id = requireNotNull(viewModel.beginMediaPicker(CameraMediaPickerKind.UPLOAD))
+            viewModel.completeMediaPicker(context(source), CameraMediaPickerKind.UPLOAD, id, source.uri)
+        }
+        awaitFinished()
+        assertEquals(MediaUploadStatus.NOT_SENT, viewModel.uiState.value.mediaUploadStatus)
+        assertEquals(CameraAppError.UPLOAD_SIZE_INVALID.messageToken, viewModel.uiState.value.error)
+        assertEquals(CameraAppError.UPLOAD_SIZE_INVALID.messageResource,
+            cameraAppErrorResource(requireNotNull(viewModel.uiState.value.error)))
+        assertTrue(cameraA.mutations.none { it == "POST /ccapi/media" })
+        assertNull(viewModel.uiState.value.lastUploadedMediaName)
+    }
     @Test fun cancelledDispatchedUploadStaysUnknownAfterFreshMatchingInventory() {
         val gate = cameraA.gate()
         cameraA.intercept = { request -> when {

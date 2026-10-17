@@ -471,6 +471,11 @@
     <string name="media_batch_failed_items">Failed: %1$s</string>
     <string name="camera_error_timeout">The camera did not respond in time. Keep it awake and retry.</string>
     <string name="camera_error_connection_interrupted">The camera connection was interrupted. Reconnect and retry.</string>
+    <string name="camera_error_upload_filename_unknown">Android could not determine the selected file name. Choose another file.</string>
+    <string name="camera_error_upload_source_unavailable">Android could not open the selected file. Choose the file again.</string>
+    <string name="camera_error_upload_too_large">The selected file exceeds the upload size limit. Choose a smaller file.</string>
+    <string name="camera_error_upload_size_invalid">The selected file is empty or its size is outside the upload limit. Choose another file.</string>
+    <string name="camera_error_upload_receipt_missing">The upload did not return a completion receipt. Check the camera before retrying.</string>
     <string name="media_protection">Protection</string>
     <string name="media_protected">Protected</string>
     <string name="media_unprotected">Unprotected</string>
