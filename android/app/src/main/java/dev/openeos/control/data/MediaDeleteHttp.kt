@@ -55,7 +55,7 @@ internal suspend fun executeMediaDeleteHttp(client: OkHttpClient, request: Reque
                     check(count <= 65_536) { "Deletion response exceeded its evidence limit." }
                 }
             }
-            val framingValid = response.code != 204 || (count == 0 &&
+            val framingValid = response.code != 204 || (response.header("Content-Range") == null && count == 0 &&
                 response.headers.values("Content-Length").all { it == "0" } && response.header("Transfer-Encoding") == null)
             val outcome = mediaDeleteHttpOutcome(response.code, framingValid = framingValid, bodyBytes = count)
             if (outcome == MediaDeleteOutcome.CONFIRMED) {
