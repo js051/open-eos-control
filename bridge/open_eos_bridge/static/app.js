@@ -7375,6 +7375,9 @@
   }
 
   function renderMonitoringControls() {
+    const focused = document.activeElement;
+    const lutFocusMayRetire = Boolean(ui.monitoringDialog.open &&
+      (focused === ui.monitorLutRemove || focused === ui.monitorLutCancel) && !focused.hidden);
     const settings = state.monitorSettings;
     ui.monitorHistogramToggle.checked = settings.histogramVisible;
     ui.monitorWaveformToggle.checked = settings.waveformVisible;
@@ -7409,6 +7412,16 @@
     ui.monitorFrameGuideSelect.value = settings.frameGuide;
     ui.monitorSafeAreaToggle.checked = settings.safeAreaVisible;
     ui.monitorDesqueezeSelect.value = String(settings.desqueeze);
+    // Hiding the keyboard's current remove/cancel button otherwise drops focus
+    // to BODY. Keep continuation within this still-open monitoring dialog only.
+    const load = ui.monitorLutLoad;
+    if (lutFocusMayRetire && focused.hidden && ui.monitoringDialog.open &&
+        (document.activeElement === focused || document.activeElement === document.body) &&
+        !document.querySelector("dialog[open]:not(#monitoring-dialog)") &&
+        load.isConnected && !load.hidden && !load.disabled &&
+        ui.monitoringDialog.contains(load) && load.getClientRects().length) {
+      load.focus({ preventScroll: true });
+    }
   }
 
   function openMonitoringDialog() {
