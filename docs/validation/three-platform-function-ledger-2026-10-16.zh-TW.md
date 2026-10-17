@@ -232,3 +232,16 @@
 [原列 #128 選定語言恢復文案](ios-recovery-language-2026-10-17.zh-TW.md)：修正 app 選 English／繁中但 state app 自有錯誤與 REC evidence 仍走系統 bundle 的 source mismatch。五個 App entrypoints 共用既有 live language store；新發出的 app 訊息與 REC 模板／嵌套值依所選語言，原始 device/server 診斷、既有錯誤 owner、connection/history 不改。143 source guards、4 source-path checks 及兩個基準 static negative controls通過；五個已撰寫 XCTest 尚未編譯／執行。#36/#127 的 connection 初始化／取消／重試本輪未確認新缺口；混合語言原生 UI、VoiceOver／大字／鍵盤／OS picker 與真機仍未驗，不把 G13 或原89列改成全部完成。
 
 同日續查原列 #128／#67 的既有 iOS accessibility caller：AF-ON label/value/hint、倍率按鈕與 camera-reported focus 狀態改用同一 selected-language store；touch/cancel/release、coordinator 與幾何不變。後續 source guards147/147、source paths4/4、兩個前一提交 static negative controls通過；兩個新增 hosted UIKit/resource XCTest 均 NOT_RUN。細節與原生 scene／VoiceOver 邊界見同文件後續節。
+
+## 2026-10-17 G13 browser 恢復旅程
+
+[PC初始化／health Firefox證據](health-recovery-firefox-2026-10-17.zh-TW.md)：固定source `90aa16db`。可選裝置列舉永不完成仍開始health；15秒timeout後實際Check again成功；舊health晚回不覆蓋新結果。三圖、fixture及telemetry封存；不代替真網路、相機、mobile native或Windows成品驗收。
+
+## 2026-10-17 Android G03/G10/G13 app 錯誤語言
+
+- [退役警告與上傳驗證](android-app-error-language-2026-10-17.zh-TW.md)：原列 #55/#78/#128 修復 disconnect 既有缺失 import／越域 appContext 編譯缺陷；app 自有維護與上傳錯誤改用精確型別 token，於畫面依選定語言解析。原始 provider／相機診斷保留。production helper／抽出 declaration host 10/10、實際上傳驗證 6/6、source 14/14、語法 6/6；原生 Compose／完整編譯仍 NOT_RUN。
+- [文件與資料夾儲存失敗](android-download-error-language-2026-10-17.zh-TW.md)：原列 #76 的 null output stream 錯誤在總覽與每檔失敗提示均遵守選定語言；cleanup、收據、owner 與明確重試不改。基準 4 fail／6 pass，修正 host 10/10、source 7/7、語法 4/4；新增 instrumentation 尚未執行，實際 SAF/provider 仍未驗。
+
+## 2026-10-17 官方公開依賴隔離快取核對
+
+在已授權且停止 writer 的共用工具快取／公開材料目錄，精確核對原八項座標，找到並以官方 Maven Central 來源收據／hash 核實 mockwebserver 4.12.0 的 jar、pom、module，已複製到 EOS 隔離快取，未重新下載。其餘七項 Media3 exoplayer／extractor／ui 1.8.1、coil-compose 2.7.0、kotlinx-coroutines-test 1.9.0、kotlinx-serialization-core-jvm 1.7.3、org.json 20240303 在該限定範圍仍缺；不能據此執行或宣稱完整 Android 依賴閉合。工具二進位與其他專案資料未上傳。這是 blocker 的縮小，非產品功能完成或原生驗收。

@@ -1,0 +1,7 @@
+{
+  "events.jsonl": "d0ef874ff787a39dcffdc0d2b7458b5d17571ae277f4e958210d163b6dbd52ed",
+  "fixture.js": "79b3ade1161d9172f53206fdcf10d396de07bd803e4c3c2f450c56b00ccc785d",
+  "health-retried.png": "2c230221c54f98f6a9fdb0b4999668c28dfe3257d602895e8bb0a90276259440",
+  "health-stale-released.png": "5ed0393a3bcbc66665ed4d18be3d0a543a6137be37589fb1f3ce386acaba140d",
+  "health-timeout.png": "9c5a91d307cf956f9198958970e818ff655fa6fe1a2506489f21763470b9a7ab"
+}
