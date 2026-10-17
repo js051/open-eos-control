@@ -28,6 +28,8 @@
 - **126／G12**：`edsdk_loader.py` 載入 separately-installed provider entry point；`edsdk_contract.py`／`edsdk.py` 只有中立契約與邊界驗證。真 Canon EDSDK binding 仍是原帳本的 D/E，不因 shutdown 測試變成已實作。
 - **128／G13**：iOS UI／可達性不是本次 PC／Bridge source audit 範圍，未操作 Xcode 或裝置；不得把本輪 host 證據延伸成 iOS 驗收。
 
+後續同批已另外實作上述 122／G13 的 health read deadline／明確重試修正，詳見 [PC Bridge health recovery](pc-bridge-health-recovery-2026-10-17.zh-TW.md)。它是獨立 commit／證據，不改本文件的 shutdown 測試數或其他平台界線。
+
 ## Release assessment
 
 - 本地 `CHANGELOG.md` 最新記錄與 source version 為 Development Preview **0.13.0**；本次離線工作未重新查詢遠端最新 release，發布基線仍須交付端核實。

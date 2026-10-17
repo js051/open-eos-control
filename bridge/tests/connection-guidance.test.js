@@ -41,8 +41,11 @@ function context() {
     healthFailed: false, scanState: "idle", scanAttempt: null, connectionFailure: null, cameras: [],
     session: null, busy: false, operatorConfirmedFeatures: new Set(), localVideoSupport: { available: false },
     shutterDisconnectWarning: true, captureMode: "photo", shutterAutofocus: true, previewInput: "CAMERA" };
-  const requests = [], errors = [];
-  const sandbox = vm.createContext({ state, ui, requests, errors, URL, AbortController, Headers, Error,
+  const requests = [], errors = [], timers = new Map();
+  let nextTimer = 0;
+  const sandbox = vm.createContext({ state, ui, requests, errors, timers, URL, AbortController, Headers, Error,
+    setTimeout(callback, delay) { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; },
+    clearTimeout(id) { timers.delete(id); },
     window: { location: { href: "http://bridge.invalid/" } }, connectionGuidance: guidance, document: { createElement: element, querySelector: element, querySelectorAll: () => [] },
     mediaTransfer: { isAbortError: (error) => error?.name === "AbortError" },
     FEATURES: new Proxy({}, { get: (_, name) => name }),
@@ -58,6 +61,8 @@ function context() {
     setOperationState() {}, writeCameraPreference() {}, renderSession() {}, startEventLoop() {},
     refreshLatestMedia() {}, showToast() {}, CCAPI_URL_KEY: "test-url", CCAPI_USERNAME_KEY: "test-user",
   });
+  vm.runInContext(source.slice(source.indexOf("  class ApiError extends Error {"),
+    source.indexOf("  function resolvedLanguage()")), sandbox);
   vm.runInContext(["adoptCameraStatus", "showConnectionError", "clearConnectionError", "renderConnectionGuidance", "correctConnection",
     "renderHealth", "validCcapiUrl", "renderConnectionMode", "selectConnectionMode", "renderCameras",
     "recordingRecoveryActive", "refreshHealth", "cancelCameraScan", "scanCameras", "connectionRetirementBlocked", "renderConnectionCleanup", "recordConnectionCleanupWarning", "cancelCameraConnection", "retireConnectionAttempt", "connectCamera", "liveViewStopRequired", "maintenanceStopRetryAvailable", "renderAvailability"]
@@ -251,6 +256,111 @@ test("health failure requires explicit retry and clears only its connection guid
   assert.equal(s.state.shutterDisconnectWarning, true);
 });
 
+function expireHealthDeadline(s) {
+  assert.equal(s.timers.size, 1, "the admitted health read must have one bounded deadline");
+  const [id, timer] = [...s.timers][0];
+  assert.equal(timer.delay, 15000);
+  s.timers.delete(id);
+  timer.callback();
+}
+
+function useProductionApi(s, fetch) {
+  s.fetch = (url, options) => { s.requests.push({ url, options }); return fetch(url, options); };
+  vm.runInContext(productionFunction("api"), s);
+}
+
+const readyHealth = () => ({ authRequired: false, engines: { libgphoto2: { available: true } } });
+const healthResponse = health => ({ ok: true, status: 200, json: async () => health });
+
+test("never-settling health fetch times out and permits a fresh explicit retry", async () => {
+  const s = context();
+  useProductionApi(s, () => new Promise(() => {}));
+  const first = s.refreshHealth();
+  assert.equal(s.ui.healthRetryButton.disabled, true);
+  assert.equal(s.ui.scanButton.disabled, true);
+  assert.equal(s.ui.connectButton.disabled, true);
+  await s.refreshHealth();
+  assert.equal(s.requests.length, 1, "pending reads are not duplicated");
+  expireHealthDeadline(s);
+  await first;
+  assert.equal(s.requests[0].options.signal.aborted, true);
+  assert.equal(s.state.healthAttempt, null);
+  assert.equal(s.state.healthFailed, true);
+  assert.equal(s.ui.healthRetryButton.disabled, false);
+  assert.equal(s.ui.connectionError.textContent, "connectionBridgeTimeout");
+  assert.equal(s.errors[0].code, "BRIDGE_HEALTH_TIMEOUT");
+  assert.equal(s.timers.size, 0);
+  assert.equal(s.requests.length, 1, "timeout must not automatically retry");
+  const health = readyHealth();
+  useProductionApi(s, async () => healthResponse(health));
+  await s.refreshHealth();
+  assert.equal(s.requests.length, 2);
+  assert.equal(s.state.health, health);
+  assert.equal(s.state.healthFailed, false);
+  assert.equal(s.ui.connectionError.hidden, true);
+  assert.equal(s.timers.size, 0);
+});
+
+for (const outcome of ["success", "failure"]) {
+  for (const phase of ["pending", "completed"]) {
+  test(`late timed-out health ${outcome} cannot overwrite or unlock a ${phase} newer read`, async () => {
+    const s = context(), old = deferred(), fresh = deferred();
+    let count = 0;
+    useProductionApi(s, () => ++count === 1 ? old.promise : fresh.promise);
+    const first = s.refreshHealth();
+    expireHealthDeadline(s);
+    await first;
+    const second = s.refreshHealth();
+    const owner = s.state.healthAttempt;
+    const errorsBefore = s.errors.slice();
+    const health = readyHealth();
+    if (phase === "completed") { fresh.resolve(healthResponse(health)); await second; }
+    if (outcome === "success") old.resolve(healthResponse({ authRequired: true, engines: {} }));
+    else old.reject(new Error("Synthetic old network failure"));
+    await new Promise(setImmediate);
+    assert.equal(s.state.healthAttempt, phase === "pending" ? owner : null);
+    assert.equal(s.ui.healthRetryButton.disabled, phase === "pending");
+    assert.deepEqual(s.errors, errorsBefore);
+    assert.equal(s.state.health, phase === "pending" ? null : health);
+    assert.equal(s.timers.size, phase === "pending" ? 1 : 0, "old completion must not change the fresh deadline");
+    if (phase === "pending") { fresh.resolve(healthResponse(health)); await second; }
+    assert.equal(s.state.health, health);
+    assert.equal(s.state.healthFailed, false);
+    assert.equal(s.state.healthAttempt, null);
+    assert.equal(s.timers.size, 0);
+  });
+  }
+}
+
+test("health response body stalls are bounded by the same deadline", async () => {
+  const s = context(), body = deferred();
+  useProductionApi(s, async () => ({ ok: true, status: 200, json: () => body.promise }));
+  const pending = s.refreshHealth();
+  await new Promise(setImmediate);
+  expireHealthDeadline(s);
+  await pending;
+  assert.equal(s.state.healthFailed, true);
+  assert.equal(s.ui.connectionError.textContent, "connectionBridgeTimeout");
+  body.resolve(readyHealth());
+  await new Promise(setImmediate);
+  assert.equal(s.state.health, null);
+  assert.equal(s.state.healthFailed, true);
+});
+
+test("timeout feedback wins over synchronous AbortError from the aborted request", async () => {
+  const s = context();
+  useProductionApi(s, (_, { signal }) => new Promise((_, reject) => {
+    signal.addEventListener("abort", () => reject(Object.assign(new Error("Synthetic abort"), { name: "AbortError" })));
+  }));
+  const pending = s.refreshHealth();
+  expireHealthDeadline(s);
+  await pending;
+  assert.equal(s.errors.length, 1);
+  assert.equal(s.errors[0].code, "BRIDGE_HEALTH_TIMEOUT");
+  assert.equal(s.state.healthFailed, true);
+  assert.equal(s.ui.healthRetryButton.disabled, false);
+});
+
 test("guidance has unique English and Traditional Chinese copy and accessible inline controls", () => {
   const languageStart = source.indexOf('    "zh-TW": {');
   const languageSources = [source.slice(source.indexOf("    en: {"), languageStart),
@@ -268,8 +378,7 @@ test("guidance has unique English and Traditional Chinese copy and accessible in
 
 test("production API retains actual status and optional reason, and propagates body-read cancellation", async () => {
   const s = context();
-  vm.runInContext(source.slice(source.indexOf("  class ApiError extends Error"),
-    source.indexOf("  function resolvedLanguage")) + productionFunction("api"), s);
+  vm.runInContext(productionFunction("api"), s);
   for (const status of [502, 401, 503]) {
     s.fetch = async () => ({ ok: false, status, statusText: "Synthetic",
       json: async () => ({ error: { code: "CCAPI_DISCOVERY_FAILED", message: "forged 401",

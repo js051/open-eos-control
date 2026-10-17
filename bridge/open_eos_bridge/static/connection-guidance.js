@@ -37,6 +37,7 @@
     if (error?.status === 401) return ["connectionBridgeAuth", "token"];
     if (error?.status === 403) return ["connectionBridgeAccess", "bridge"];
     if (error?.status === 404) return ["connectionBridgeEndpoint", "bridge"];
+    if (error?.status === 0 && error?.code === "BRIDGE_HEALTH_TIMEOUT") return ["connectionBridgeTimeout", "bridge"];
     if (error?.status === 0 && error?.code === "NETWORK_ERROR") return ["connectionBridgeNetwork", "bridge"];
     if (error?.status === 502 && error?.code === "CCAPI_DISCOVERY_FAILED" && error?.engine === "ccapi") {
       const reason = error.connectionReason;
