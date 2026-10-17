@@ -40,7 +40,7 @@ function element() {
   const item = {
     hidden: false, disabled: false, value: "", textContent: "", title: "", dataset: {},
     classList: {toggle: noop, add: noop, remove: noop},
-    setAttribute(name, value) { this[name] = value; }, removeAttribute: noop, append: noop,
+    setAttribute(name, value) { this[name] = value; }, removeAttribute: noop, append: noop, replaceChildren: noop,
     querySelector: () => element(),
   };
   item.parentElement = item;
