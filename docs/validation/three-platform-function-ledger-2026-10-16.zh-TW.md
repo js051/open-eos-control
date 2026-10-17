@@ -266,3 +266,9 @@
 - 整合source `0b8dfaf4` 的PC全modules一次完整執行：52組Node runner summaries共3675 tests/pass，fail/cancel/skip均0，另既有direct assert scripts通過；15 static UI tests通過。這是整合回歸，不代替native、Windows包或真相機驗收。
 
 同source Firefox fixed對照已確認Apply後回到目前ISO200按鈕，直接Enter能重開；baseline/fixed各3圖、telemetry與hash已保存。pendingApply Escape與兩個media候選仍獨立待驗，沒有整群升級為PASS。
+
+## 2026-10-17 19:18 UTC 媒體鍵盤與遲來回覆增量
+
+- G08/G09/G10/G13，原#56/#73/#75/#76/#122：[媒體dialog焦點](pc-media-dialog-focus-2026-10-17.zh-TW.md)。真Firefox基準Details metadata、Preview Download重繪後關窗焦點掉BODY；第一輪修正實測仍失敗而未交付，補native close保留內部焦點時序後，最終`abbcde3b`五畫面證實Escape回同ID同角色卡片且Enter重開，下載503仍留Close。
+- G09/G10，原#76/#78/#79：[新媒體操作隔離舊upload completion](pc-single-download-owner-2026-10-17.zh-TW.md)。單檔下載、metadata mutation、delete、foreground import成功admission才退休舊publication；保留原receipt，拒絕admission不改原語意。可選upload completion refresh保留使用者已開preview，不新增delete全域鎖。
+- 最終產品source `abbcde3bd247db8ee277fafe8f34edc2564168b6`：完整PC modules3729/3729（53組node:test報告＋其他direct scripts）、staticUI15/15；54新增回歸。Firefox19:18:45 terminal。其餘native／Windows／真相機／外部儲存／全部89列仍依原界線，沒有新APK、iOS包或Windows installer，沒有三端全通過或release宣稱。
