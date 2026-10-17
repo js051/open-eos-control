@@ -163,7 +163,7 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
         XCTAssertEqual(after, before, "Old AF status must not invent a bulb stop")
     }
 
-    func testHeldAFLateCancelledStartCompensatesBeforeCloseAndReusedSession() async throws {
+    func testHeldAFStartStaysHeldThroughCloseAndCannotClearReusedSessionTask() async throws {
         let peer = BridgeShutterTransport()
         let client = try await initializedClient(peer)
         try await enableFocus(client, peer)
@@ -175,25 +175,161 @@ final class DesktopBridgeShutterRecoveryTests: XCTestCase {
         await peer.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 204, body: "")
         let close = Task { await client.closeWithShutterReleaseState() }
         try await waitForHoldCancellation("focus-start", on: peer)
-        await peer.resume("focus-start", body: focusAck(old, active: true))
-        await assertThrows { try await start.value }
+        try await waitForRequest(method: "DELETE", path: "/v1/session/session-a", count: 1, on: peer)
         let closed = await close.value
-        XCTAssertEqual(closed, .idle)
+        XCTAssertTrue(closed.releaseUnconfirmed, "Unsettled Start remains a previous-connection warning")
+        XCTAssertFalse(closed.releaseRequired)
+        let stillHeld = await peer.isHeld("focus-start")
+        XCTAssertTrue(stillHeld, "Retirement must finish before ignored-cancellation Start settles")
         // The server may recycle a session ID: local generation still owns every response.
         await enqueueInitialization(peer, id: "session-a")
         try await client.initialize()
         try await enableFocus(client, peer)
         let current = UUID()
-        await peer.enqueueJSON(method: "POST", path: focusStartPath, body: focusAck(current, active: true))
-        try await client.startHeldAutofocus(owner: current)
+        await peer.enqueueHold(method: "POST", path: focusStartPath, key: "new-focus-start")
+        let newStart = Task { try await client.startHeldAutofocus(owner: current) }
+        try await waitForHold("new-focus-start", on: peer)
+        await peer.resume("focus-start", body: focusAck(old, active: true))
+        await assertThrows { try await start.value }
         try await client.stopHeldAutofocus(owner: old)
         let held = await client.shutterReleaseState()
         XCTAssertTrue(held.releaseRequired)
         await peer.enqueueJSON(method: "POST", path: focusStopPath, body: focusAck(current, active: false))
         try await client.stopHeldAutofocus(owner: current)
+        let stillReserved = await client.shutterReleaseState()
+        XCTAssertTrue(stillReserved.releaseRequired, "Old callback must not clear the new Start reservation")
+        await assertThrows { _ = try await client.autofocus() }
+        await peer.resume("new-focus-start", body: focusAck(current, active: true))
+        await assertThrows { try await newStart.value }
         await assertIdle(client)
         let cancelled = await peer.cancelledSendCount()
         XCTAssertEqual(cancelled, 0, "Compensating stop does not inherit caller cancellation")
+    }
+
+    func testHeldAFPendingStartStopACKRetainsLiveMutationReservation() async throws {
+        let peer = BridgeShutterTransport(), owner = UUID()
+        let client = try await initializedClient(peer)
+        try await enableFocus(client, peer)
+        await peer.enqueueHold(method: "POST", path: focusStartPath, key: "pending-start")
+        let start = Task { try await client.startHeldAutofocus(owner: owner) }
+        try await waitForHold("pending-start", on: peer)
+        await peer.enqueueJSON(method: "POST", path: focusStopPath, body: focusAck(owner, active: false))
+        try await client.stopHeldAutofocus(owner: owner)
+        let pending = await client.shutterReleaseState()
+        XCTAssertTrue(pending.releaseRequired)
+        XCTAssertTrue(pending.releaseUnconfirmed)
+        let before = await peer.requests().count
+        await assertThrows { _ = try await client.autofocus() }
+        await assertThrows { _ = try await client.startBulbExposure() }
+        await assertThrows { try await client.startHeldAutofocus(owner: UUID()) }
+        try await client.stopHeldAutofocus(owner: owner)
+        let after = await peer.requests().count
+        XCTAssertEqual(before, after, "No repeated owner or mutation may evict an unresolved Start tombstone")
+        await peer.resume("pending-start", body: focusAck(owner, active: true))
+        await assertThrows { try await start.value }
+        await assertIdle(client)
+    }
+
+    func testHeldAF409IsNotProofAndOnlyOwnerMatchedRetryClearsWarning() async throws {
+        let peer = BridgeShutterTransport(), owner = UUID()
+        let client = try await initializedClient(peer)
+        try await enableFocus(client, peer)
+        await peer.enqueueJSON(method: "POST", path: focusStartPath, body: focusAck(owner, active: true))
+        try await client.startHeldAutofocus(owner: owner)
+        await peer.enqueueJSON(method: "POST", path: focusStopPath, status: 409, body: focusAck(owner, active: false))
+        await assertThrows { try await client.stopHeldAutofocus(owner: owner) }
+        let pending = await client.shutterReleaseState()
+        XCTAssertTrue(pending.releaseRequired && pending.releaseUnconfirmed)
+        await assertThrows { _ = try await client.autofocus() }
+        await peer.enqueueJSON(method: "POST", path: focusStopPath, body: focusAck(owner, active: false))
+        try await client.retryShutterRelease()
+        await assertIdle(client)
+    }
+
+    func testHeldAFStopTimeoutRetiresWhileBothTransportRepliesRemainHeld() async throws {
+        let peer = BridgeShutterTransport(), owner = UUID()
+        let client = try await initializedClient(peer)
+        try await enableFocus(client, peer)
+        await peer.enqueueHold(method: "POST", path: focusStartPath, key: "never-start")
+        let start = Task { try await client.startHeldAutofocus(owner: owner) }
+        try await waitForHold("never-start", on: peer)
+        await peer.enqueueHold(method: "POST", path: focusStopPath, key: "never-stop")
+        await peer.enqueueJSON(method: "DELETE", path: "/v1/session/session-a", status: 204, body: "")
+        let stop = Task { try await client.stopHeldAutofocus(owner: owner) }
+        try await waitForHold("never-stop", on: peer)
+        let retired = expectation(description: "Bounded AF cleanup retires without transport settlement")
+        let close = Task {
+            let result = await client.closeWithShutterReleaseState()
+            retired.fulfill()
+            return result
+        }
+        try await waitForHold("never-stop", on: peer)
+        await fulfillment(of: [retired], timeout: 20)
+        let startHeld = await peer.isHeld("never-start"), stopHeld = await peer.isHeld("never-stop")
+        XCTAssertTrue(startHeld && stopHeld)
+        // Release only after asserting bounded retirement, also draining on regression.
+        await peer.resume("never-stop", body: focusAck(owner, active: false))
+        await peer.resume("never-start", body: focusAck(owner, active: true))
+        let closed = await close.value
+        XCTAssertTrue(closed.releaseUnconfirmed)
+        XCTAssertFalse(closed.releaseRequired)
+        await assertThrows { try await start.value }
+        await assertThrows { try await stop.value }
+        let writes = await peer.requests().filter { $0.path == focusStopPath }
+        XCTAssertEqual(writes.count, 1, "Close and Start compensation coalesce the same owner")
+    }
+
+    func testHeldAFMaintenanceCloseRetiresWithStartStillHeldAnd409Warning() async throws {
+        let peer = BridgeShutterTransport(), owner = UUID()
+        let client = try await initializedClient(peer)
+        // A failed outcome still owns the strict maintenance retirement route.
+        await peer.enqueueJSON(method: "POST", path: "/v1/session/session-a/maintenance/sensor-cleaning/outcome", body: "{}")
+        await assertThrows { try await client.performMaintenance(CameraMaintenanceAttempt(operation: .sensorCleaning)) }
+        try await enableFocus(client, peer)
+        await peer.enqueueHold(method: "POST", path: focusStartPath, key: "maintenance-focus")
+        let start = Task { try await client.startHeldAutofocus(owner: owner) }
+        try await waitForHold("maintenance-focus", on: peer)
+        await peer.enqueueJSON(method: "POST", path: focusStopPath, status: 409, body: focusAck(owner, active: false))
+        let retirement = "/v1/session/session-a/maintenance/control/session"
+        await peer.enqueueJSON(method: "DELETE", path: retirement, status: 204, body: "")
+        let close = Task { await client.closeWithShutterReleaseState() }
+        try await waitForRequest(method: "DELETE", path: retirement, count: 1, on: peer)
+        let result = await close.value
+        XCTAssertTrue(result.releaseUnconfirmed)
+        XCTAssertFalse(result.releaseRequired)
+        let stillHeld = await peer.isHeld("maintenance-focus")
+        XCTAssertTrue(stillHeld)
+        await peer.resume("maintenance-focus", body: focusAck(owner, active: true))
+        await assertThrows { try await start.value }
+        let trace = await peer.requests()
+        XCTAssertFalse(trace.contains { $0.method == "DELETE" && $0.path == "/v1/session/session-a" })
+        XCTAssertEqual(trace.filter { $0.path == focusStopPath }.count, 1)
+    }
+
+    func testHeldAFConfirmedReleaseStillUsesBoundedOriginalRetirement() async throws {
+        let peer = BridgeShutterTransport(), owner = UUID()
+        let client = try await initializedClient(peer)
+        try await enableFocus(client, peer)
+        await peer.enqueueJSON(method: "POST", path: focusStartPath, body: focusAck(owner, active: true))
+        try await client.startHeldAutofocus(owner: owner)
+        await peer.enqueueJSON(method: "POST", path: focusStopPath, body: focusAck(owner, active: false))
+        try await client.stopHeldAutofocus(owner: owner)
+        await peer.enqueueHold(method: "DELETE", path: "/v1/session/session-a", key: "focus-retirement")
+        let retired = expectation(description: "AF-used session retirement has total deadline")
+        let close = Task {
+            defer { retired.fulfill() }
+            return await client.closeWithShutterReleaseState()
+        }
+        try await waitForHold("focus-retirement", on: peer)
+        await fulfillment(of: [retired], timeout: 20)
+        let stillHeld = await peer.isHeld("focus-retirement")
+        XCTAssertTrue(stillHeld)
+        let warning = await client.connectionRetirementUnconfirmed
+        XCTAssertTrue(warning)
+        await peer.resume("focus-retirement", status: 204, body: "")
+        _ = await close.value
+        let retainedWarning = await client.connectionRetirementUnconfirmed
+        XCTAssertTrue(retainedWarning, "Late data-only 204 cannot clear retired warning")
     }
 
     private var focusStartPath: String { "/v1/session/session-a/focus/auto/start" }
