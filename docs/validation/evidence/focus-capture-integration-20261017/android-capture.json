@@ -1,0 +1,127 @@
+{
+  "phase": "current",
+  "ref": "WORKTREE",
+  "sources": [
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/CaptureConfigurationEvidence.kt",
+      "sha256": "e2a15c16b8fedbd6857e46d7ff59b7e0af32992fd86b9f22003890ebca02cd41"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/CaptureConfigurationJson.kt",
+      "sha256": "c18d6b7bc578d707b989848c5aa22365a750f0b32be56e80f1abe0804192e2e3"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/ShootingSettingJson.kt",
+      "sha256": "c2c0967a4fd4589e198bd7913a1425d09b881c5cbd17784f91c8ea4cc3ad2930"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/StrictMediaJson.kt",
+      "sha256": "9ea850d244a64b2a2776062d75bb07ac4709a1fe33cecdc326f86c56cd8bf169"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+      "sha256": "6a167f932ca33544ec308d107c75396799933ec767c48b23745b5f3d5249c3cf"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/CameraModels.kt",
+      "sha256": "e43dbbabe7062ce0debeddca8ed39efa1f8ef0d4caa5ecea7b22de7f3ed24b70"
+    }
+  ],
+  "extracts": [
+    {
+      "name": "CREATE",
+      "sha256": "ba76af394c7af7442d2f72236125c4e240003ecf2d2e112f57e916b628215a24"
+    },
+    {
+      "name": "NAMING",
+      "sha256": "c72da21be0812101473d28a03012399e52ea5c537f18f729517993183f15b8d4"
+    },
+    {
+      "name": "POST",
+      "sha256": "ae10b842eb5189a8e11fe0b6bc2c70d3d47e82bdf1d7d3ef413fe2c1c99ec2b0"
+    },
+    {
+      "name": "PUT",
+      "sha256": "063d32a9948ad579e022332b36117dfd6039a9a411c567961e3ceb6ab4497afe"
+    },
+    {
+      "name": "REQUEST_JSON",
+      "sha256": "2685c913d65ca506b29efe96b165ecab5e9893e49548893b63e221d8f696955f"
+    },
+    {
+      "name": "CONSTANTS",
+      "sha256": "56512347155845fe815be5365777f369e8a9371ce9855aca863b72686c5ca3de"
+    },
+    {
+      "name": "VALUE",
+      "sha256": "46230b22e540daa02e429ff4054094ea48777ec4c9c1f6ff535441a6be1313ce"
+    },
+    {
+      "name": "MODELS",
+      "sha256": "de5950c2a1b05505ce72f4888e84b33d4f1ee1115bad074523554c3ffcf142d3"
+    }
+  ],
+  "fixtures": [
+    {
+      "filename": "CaptureConfigReceiptTest.kt",
+      "sha256": "f3018ba783d4f90e5879f444d7c8c5012308712a1a7f5addf5bf274f328942bc"
+    },
+    {
+      "filename": "HostClient.kt",
+      "sha256": "4e075442ec03cf45d3cb3300606a83188975552e167e6a1e623f5e52bd016722"
+    }
+  ],
+  "tools": [
+    {
+      "filename": "kotlin-compiler-embeddable-2.2.21.jar",
+      "sha256": "9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295"
+    },
+    {
+      "filename": "kotlin-stdlib-2.2.21.jar",
+      "sha256": "6558a3d233da56a20934b32159f9db5f86ed5816ef098f78a2c223dc6abb79dd"
+    },
+    {
+      "filename": "kotlin-script-runtime-2.2.21.jar",
+      "sha256": "2b1519b427b514d1536c1b425674b03fe914af637924028e9959c6625442df51"
+    },
+    {
+      "filename": "kotlin-reflect-1.6.10.jar",
+      "sha256": "3277ac102ae17aad10a55abec75ff5696c8d109790396434b496e75087854203"
+    },
+    {
+      "filename": "kotlin-daemon-embeddable-2.2.21.jar",
+      "sha256": "91c0673c22e44b054ae0314d323860ebe1f3aff3f0ebc74fff82c4733dde09be"
+    },
+    {
+      "filename": "kotlinx-coroutines-core-jvm-1.8.0.jar",
+      "sha256": "9860906a1937490bf5f3b06d2f0e10ef451e65b95b269f22daf68a3d1f5065c5"
+    },
+    {
+      "filename": "kotlinx-coroutines-core-jvm-1.9.0.jar",
+      "sha256": "ad89c2892235e670f222d819cb3d81188143cb19a05b59df9889ae4269f5c70a"
+    },
+    {
+      "filename": "annotations-23.0.0.jar",
+      "sha256": "7b0f19724082cbfcbc66e5abea2b9bc92cf08a1ea11e191933ed43801eb3cd05"
+    },
+    {
+      "filename": "junit-4.13.2.jar",
+      "sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3"
+    },
+    {
+      "filename": "hamcrest-core-1.3.jar",
+      "sha256": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+    }
+  ],
+  "compile_exit": 0,
+  "boundary": "Byte-exact production createDirectory/setFileNaming/postJson/putJson/requestJson, directory/naming definitions, value accessor; full production CaptureConfigurationEvidence/Json, ShootingSettingJson, StrictMediaJson and naming model. HTTP Call/Response/InputStream, operation discovery, readback loading and typed JSON decoding are synthetic. No real OkHttp, socket, Android, UI or device execution.",
+  "jvm_heap_limit_mb": 256,
+  "active_processor_count": 1,
+  "junit_exit": 0,
+  "expected_result_verified": true,
+  "source_snapshot_unchanged": true,
+  "runner": {
+    "filename": "scripts/validation/run_android_capture_config_receipt_host.py",
+    "sha256": "5a33a0cd653e987af5b69cbed366ecdba0ca71be46b0273f2f3c5f676d2c3ba8"
+  }
+}

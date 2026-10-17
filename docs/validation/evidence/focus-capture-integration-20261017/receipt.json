@@ -1,0 +1,35 @@
+{
+  "integration_source_commit": "d2d58939",
+  "bridge_focused": {
+    "passed": 73,
+    "exit_code": 0,
+    "files": [
+      "test_capture_configuration_partial_ack.py",
+      "test_capture_configuration.py",
+      "test_ccapi_focus_ack_receipts.py"
+    ]
+  },
+  "android_capture": {
+    "passed": 12,
+    "exit_code": 0
+  },
+  "android_focus": {
+    "passed": 13,
+    "exit_code": 0
+  },
+  "sources": [
+    {
+      "filename": "bridge/open_eos_bridge/ccapi.py",
+      "sha256": "428f0202535c41fe6abfad8895e706872157bd74a2af6c41f5c48ebc75b56d0b"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+      "sha256": "6a167f932ca33544ec308d107c75396799933ec767c48b23745b5f3d5249c3cf"
+    },
+    {
+      "filename": "ios/OpenEOSCore/Sources/OpenEOSCore/CCAPIClient.swift",
+      "sha256": "e23b725be9e7c172b2e3365c26a21a250fa192f0813f8b18e2216add9113550f"
+    }
+  ],
+  "limits": "Integration host checks only; no native, real HTTP socket, physical camera or OS acceptance."
+}
