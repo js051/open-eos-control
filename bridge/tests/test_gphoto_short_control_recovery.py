@@ -6,6 +6,7 @@ import pytest
 from open_eos_bridge.errors import BridgeError
 from open_eos_bridge.gphoto2 import GPhoto2Engine
 from open_eos_bridge.models import CameraFeature
+
 from .fakes import FakeRunner
 
 CASES = [
@@ -68,7 +69,8 @@ def test_lost_press_failed_cleanup_retains_correct_retry(short):
     stopped = session.stop_bulb_exposure()
     assert stopped.shutter_release_unconfirmed is False
     assert runner.active is False
-    assert runner.writes() == [f'{runner.start_path}={runner.start_value}'] + [f'{runner.stop_path}={runner.stop_value}'] * 2
+    assert runner.writes() == ([f'{runner.start_path}={runner.start_value}']
+                               + [f'{runner.stop_path}={runner.stop_value}'] * 2)
     assert CameraFeature.BULB_EXPOSURE not in session._observed
     assert feature not in session._observed
 
@@ -171,7 +173,8 @@ def test_uncertain_short_control_blocks_new_writes(short, next_action):
 
 def test_normal_control_can_repeat_without_stale_release(short):
     session, runner, operate, feature = short
-    operate(); operate()
+    operate()
+    operate()
     assert len(runner.writes()) == 4
     assert runner.active is False
     assert feature in session._observed
@@ -197,9 +200,10 @@ def test_stop_status_tail_failure_does_not_replay_acknowledged_release(short):
     with pytest.raises(BridgeError):
         operate()
     runner.reject_release = False
-    with patch.object(session, 'status', side_effect=BridgeError('SYNTHETIC_READ_FAILED', 'Synthetic read failed.')):
-        with pytest.raises(BridgeError):
-            session.stop_bulb_exposure()
+    with (patch.object(session, 'status',
+                       side_effect=BridgeError('SYNTHETIC_READ_FAILED', 'Synthetic read failed.')),
+          pytest.raises(BridgeError)):
+        session.stop_bulb_exposure()
     before = len(runner.writes())
     assert session.stop_bulb_exposure().shutter_release_unconfirmed is False
     assert len(runner.writes()) == before
@@ -218,6 +222,7 @@ def test_hold_failure_still_releases_before_propagating(short):
 @pytest.mark.parametrize('disconnect', [False, True])
 def test_asgi_short_control_retry_and_replacement_isolation(short, disconnect, tmp_path):
     from fastapi.testclient import TestClient
+
     from open_eos_bridge.app import create_app
     _, runner, _, feature = short
     runner.lose_press = runner.reject_release = True
