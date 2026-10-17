@@ -1,0 +1,21 @@
+{
+  "source_revision": "25a67ff9fcf4519451d83e13f44356971bc1fdac plus committed production delta",
+  "native_test_declarations": {
+    "count": 9,
+    "unique": true
+  },
+  "native_mockwebserver_tests": "NOT_RUN: cached OkHttp, Okio and MockWebServer dependencies absent; no download authorized",
+  "android_typecheck_build": "NOT_RUN",
+  "exact_sha_ci": "NOT_RUN",
+  "physical_camera": "NOT_RUN",
+  "files": [
+    {
+      "file": "scripts/validation/run-android-direct-release-transport-host.py",
+      "sha256": "5397c430760213968aac9cabeceba1c25970ed7f81f8c25db58f67e744d32e06"
+    },
+    {
+      "file": "android/app/src/test/java/dev/openeos/control/data/CcapiDirectReleaseTransportTest.kt",
+      "sha256": "0d0bee7396b6cdf8e8c4f1e84d1591b93124d6e1337b8e4ba1ede6a720ded0f1"
+    }
+  ]
+}

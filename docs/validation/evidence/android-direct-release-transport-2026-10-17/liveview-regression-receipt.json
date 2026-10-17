@@ -1,0 +1,127 @@
+{
+  "phase": "current",
+  "ref": "WORKTREE",
+  "source_sha256": [
+    {
+      "file": "android/app/src/main/java/dev/openeos/control/data/ShootingSettingJson.kt",
+      "sha256": "c2c0967a4fd4589e198bd7913a1425d09b881c5cbd17784f91c8ea4cc3ad2930"
+    },
+    {
+      "file": "android/app/src/main/java/dev/openeos/control/data/StrictMediaJson.kt",
+      "sha256": "9ea850d244a64b2a2776062d75bb07ac4709a1fe33cecdc326f86c56cd8bf169"
+    },
+    {
+      "file": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+      "sha256": "2e969f98d9a565dd16d2ca0e8d1a3a0f7ca5a394695668f23c0ff1d23412b891"
+    }
+  ],
+  "extracted_methods_sha256": [
+    {
+      "file": "START",
+      "sha256": "32351435d4a9b241d8262507351ce138f158a257b1381f43d88b30fa59a7c7d0"
+    },
+    {
+      "file": "STOP",
+      "sha256": "df67df732ae02ab28cd32b685c787106caabd15418d7707247c11829d3839e66"
+    },
+    {
+      "file": "STOP_OWNED",
+      "sha256": "4fa9f2140a7c9253305b83e1f95f89bc686a1b49e1b970d34aa5e98bdf6961c0"
+    },
+    {
+      "file": "CLEANUP",
+      "sha256": "ddd015c3f26592f1997f2362a42cd779aed8292271df7def835c9b52d4c226bc"
+    },
+    {
+      "file": "JPEG",
+      "sha256": "6c6357a9e6d97a7145c7e6a8927d59d6692b0ba590e51c2b60e70b0a25ba8608"
+    },
+    {
+      "file": "CCAPI_START",
+      "sha256": "2a985571f84a3c0e48e1f98a7fa09440c040da34a0689d6123221aee6cd8a952"
+    },
+    {
+      "file": "CCAPI_STOP",
+      "sha256": "58d525967351d1c248a3b2952fac3fb9e0d5be99784d465034bc673f9fd8ba0d"
+    },
+    {
+      "file": "RTP",
+      "sha256": "591303905b3a273cb2d8c6e25bb6bf8b8e62284a53dfad3e3e5465d4e7bfe34b"
+    },
+    {
+      "file": "POST",
+      "sha256": "210a5bca426aa97de2aa475bc86d438e08aaee187a1d3e07a73670cf7a8cff75"
+    },
+    {
+      "file": "DELETE",
+      "sha256": "1a9d9408dbeae5bedc796138e74ed181cd20227b4f1a711e67633f5133344bd6"
+    },
+    {
+      "file": "REQUEST_OK",
+      "sha256": "a63d75a51cd36e902a1298eb5bf0dd08a275d88b4405b902be86ec2fc737f9bc"
+    }
+  ],
+  "source_guards": [
+    "strict client caps callTimeout at 15 seconds and disables retries/redirects",
+    "multipart closeStream DELETE opts in in both maintenance and ordinary branches; start/stop remain wired to shared controls",
+    "production call factory routes strict mutation to the capped client and wraps its body as one-shot"
+  ],
+  "fixture_sha256": [
+    {
+      "file": "HostClient.kt",
+      "sha256": "3f78c601a1e2b1e1779258ec94416035d6a39452e9d3d30d8deb5c8fde33659c"
+    },
+    {
+      "file": "LiveViewTransportTest.kt",
+      "sha256": "51c84bc532607e1aaaea4f3969fb788ec2fe454b56f3e3eb28478b94d1e342bd"
+    }
+  ],
+  "verified_tools": [
+    {
+      "file": "kotlin-compiler-embeddable-2.2.21.jar",
+      "sha256": "9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295"
+    },
+    {
+      "file": "kotlin-stdlib-2.2.21.jar",
+      "sha256": "6558a3d233da56a20934b32159f9db5f86ed5816ef098f78a2c223dc6abb79dd"
+    },
+    {
+      "file": "kotlin-script-runtime-2.2.21.jar",
+      "sha256": "2b1519b427b514d1536c1b425674b03fe914af637924028e9959c6625442df51"
+    },
+    {
+      "file": "kotlin-reflect-1.6.10.jar",
+      "sha256": "3277ac102ae17aad10a55abec75ff5696c8d109790396434b496e75087854203"
+    },
+    {
+      "file": "kotlin-daemon-embeddable-2.2.21.jar",
+      "sha256": "91c0673c22e44b054ae0314d323860ebe1f3aff3f0ebc74fff82c4733dde09be"
+    },
+    {
+      "file": "kotlinx-coroutines-core-jvm-1.8.0.jar",
+      "sha256": "9860906a1937490bf5f3b06d2f0e10ef451e65b95b269f22daf68a3d1f5065c5"
+    },
+    {
+      "file": "kotlinx-coroutines-core-jvm-1.9.0.jar",
+      "sha256": "ad89c2892235e670f222d819cb3d81188143cb19a05b59df9889ae4269f5c70a"
+    },
+    {
+      "file": "annotations-23.0.0.jar",
+      "sha256": "7b0f19724082cbfcbc66e5abea2b9bc92cf08a1ea11e191933ed43801eb3cd05"
+    },
+    {
+      "file": "junit-4.13.2.jar",
+      "sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3"
+    },
+    {
+      "file": "hamcrest-core-1.3.jar",
+      "sha256": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+    }
+  ],
+  "compile_exit": 0,
+  "boundary": "Exact production startLiveView, JPEG/RTP entries, original Stop ownership, postOk/deleteOk/requestOk and bounded readers; synthetic Call/Response/InputStream and frame/RTP collaborators. Multipart wiring statically checked. No real OkHttp, socket, Android or device execution.",
+  "jvm_heap_limit_mb": 256,
+  "active_processor_count": 1,
+  "junit_exit": 0,
+  "expected_result_verified": true
+}
