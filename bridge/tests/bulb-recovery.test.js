@@ -33,7 +33,7 @@ function context(status = {}) {
     videoModeButton: element(), recordIndicator: element(),
   };
   const sandbox = vm.createContext({
-    state, ui, requests, feedback,
+    state, ui, requests, feedback, AbortController, setTimeout, clearTimeout,
     FEATURES: { BULB_EXPOSURE: "BULB_EXPOSURE", VIDEO_RECORDING: "VIDEO_RECORDING" },
     featureSupported: () => true,
     isBulbMode: () => state.status.mode === "Bulb",
@@ -54,7 +54,7 @@ function context(status = {}) {
     },
   });
   vm.runInContext([
-    "adoptCameraStatus", "recordingRecoveryActive", "shutterReleaseUnconfirmed", "bulbControlLocked", "renderCaptureMode", "operateShutter",
+    "adoptCameraStatus", "recordingRecoveryActive", "shutterReleaseUnconfirmed", "bulbControlLocked", "renderCaptureMode", "readBulbRecoveryStatus", "operateShutter",
   ].map(productionFunction).join("\n"), sandbox);
   return sandbox;
 }
