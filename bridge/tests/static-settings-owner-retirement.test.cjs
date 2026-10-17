@@ -66,6 +66,20 @@ function fixture() {
 function controls(h, key) {
   return h.all().filter(n => n.dataset.settingKey === key);
 }
+test("setting dialog fills the associated title before each native open", () => {
+  const h = fixture(), observed = [];
+  // Exercise the production title resolver and open caller; showModal is a DOM adapter,
+  // not an accessibility-tree or browser focus simulation.
+  h.c.messages = { en: { metering: "Metering mode" }, zh: { metering: "測光模式" } };
+  let language = "en";
+  h.c.resolvedLanguage = () => language;
+  vm.runInContext(production("settingLabel"), h.c);
+  h.ui.settingDialog.showModal = () => { observed.push(h.ui.settingDialogTitle.textContent); };
+  h.c.openSettingDialog(choiceSetting());
+  language = "zh";
+  h.c.openSettingDialog(choiceSetting());
+  assert.deepEqual(observed, ["Metering mode", "測光模式"]);
+});
 for (const sameId of [false, true]) {
   const suffix = sameId ? "same session ID, new owner" : "different session ID";
   test(`reset closes an open setting dialog (${suffix})`, () => {
