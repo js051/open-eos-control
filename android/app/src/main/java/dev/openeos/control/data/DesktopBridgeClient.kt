@@ -871,8 +871,13 @@ class DesktopBridgeClient(
                 endpoint("v1", "session", owner.id, "maintenance", "control", "session").encodedPath))
     }
 
-    /** Only cleanup uses this detached body reader; late callbacks cannot publish maintenance state. */
-    private suspend fun maintenanceCleanupJson(request: Request, owner: BridgeShutterReleaseSession,
+    private fun isMaintenanceReadRequest(request: Request, owner: BridgeShutterReleaseSession): Boolean =
+        request.method == "GET" && MaintenanceAction.entries.any { action ->
+            request.url.encodedPath == endpoint("v1", "session", owner.id, "maintenance", action.wireName).encodedPath
+        }
+
+    /** Exact reads and cleanup only; late body callbacks cannot publish maintenance state. */
+    private suspend fun maintenanceReadOrCleanupJson(request: Request, owner: BridgeShutterReleaseSession,
         evidence: MaintenanceEvidence?, expected: Int, empty: Boolean, accept: ((JSONObject) -> Unit)?) {
         currentCoroutineContext()[MaintenanceIoContext]?.requireActive?.invoke()
         currentCoroutineContext().ensureActive(); requireCurrentSession(owner)
@@ -915,8 +920,8 @@ class DesktopBridgeClient(
 
     private suspend fun maintenanceJson(request: Request, owner: BridgeShutterReleaseSession,
         evidence: MaintenanceEvidence? = null, expected: Int = 200, empty: Boolean = false, accept: ((JSONObject) -> Unit)? = null) = withContext(Dispatchers.IO) {
-        if (isMaintenanceCleanupRequest(request, owner)) {
-            maintenanceCleanupJson(request, owner, evidence, expected, empty, accept)
+        if (isMaintenanceCleanupRequest(request, owner) || isMaintenanceReadRequest(request, owner)) {
+            maintenanceReadOrCleanupJson(request, owner, evidence, expected, empty, accept)
             return@withContext
         }
         currentCoroutineContext()[MaintenanceIoContext]?.requireActive?.invoke()

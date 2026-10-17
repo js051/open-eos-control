@@ -227,10 +227,11 @@ class FixedMaintenanceCleanupTest {
         }
     }
 
+    // Exact maintenance action GET roots now use bounded reads; the outcome child remains outside that allowlist.
     @Test(timeout=5000) fun routeSelectorUsesExactMethodOwnerAndCleanupPath() = runBlocking {
         val root = "/v1/session/synthetic-session/maintenance/"
         val controls = listOf("GET" to (root + "control/session"), "POST" to (root + "control/events"),
-            "POST" to (root + "sensor-cleaning"), "GET" to (root + "sleep"),
+            "POST" to (root + "sensor-cleaning"), "GET" to (root + "sleep/outcome"),
             "POST" to (root + "control/liveview/start"),
             "DELETE" to "/v1/session/other-synthetic-session/maintenance/control/session",
             "DELETE" to (root + "control/session/extra"))

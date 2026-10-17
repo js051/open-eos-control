@@ -117,6 +117,11 @@ preview restoration can still block on their existing transport; unrelated
 registered jobs and physical-control cleanup are still separate boundaries.
 No global "all Disconnect paths are bounded" claim is made.
 
+Follow-on scope: [maintenance read deadlines](android-maintenance-read-deadline.md)
+adds only the three exact Bridge read routes. Strict restoration Start remains a
+separate blocking and remote-ordering boundary; the dispatch evidence above is
+unchanged.
+
 ## Release assessment
 
 Impact: `patch`, repairing an existing Android Bridge maintenance workflow.
