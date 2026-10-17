@@ -226,3 +226,7 @@
 ## 2026-10-17 G13 初始化可選視訊列舉
 
 [原列 #122/#123 初始化 readiness](pc-initialization-readiness-2026-10-17.zh-TW.md)：可選 enumerateDevices 不再擋住必要 Bridge health／既有 initial scan。仍先等 health 並遵守能力／token gate，保留 local-video 原有晚回覆 owner 與錯誤處理。新production initialize harness在基準7 fail/1 pass，修正後含既有preview案例16/16；這不把前一筆3626完整模組結果追溯成此新source全量通過。Browser合成恢復旅程另外記錄，native／真輸入未驗。
+
+## 2026-10-17 G13 iOS 選定語言與錯誤恢復
+
+[原列 #128 選定語言恢復文案](ios-recovery-language-2026-10-17.zh-TW.md)：修正 app 選 English／繁中但 state app 自有錯誤與 REC evidence 仍走系統 bundle 的 source mismatch。五個 App entrypoints 共用既有 live language store；新發出的 app 訊息與 REC 模板／嵌套值依所選語言，原始 device/server 診斷、既有錯誤 owner、connection/history 不改。143 source guards、4 source-path checks 及兩個基準 static negative controls通過；五個已撰寫 XCTest 尚未編譯／執行。#36/#127 的 connection 初始化／取消／重試本輪未確認新缺口；混合語言原生 UI、VoiceOver／大字／鍵盤／OS picker 與真機仍未驗，不把 G13 或原89列改成全部完成。

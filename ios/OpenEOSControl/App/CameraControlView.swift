@@ -470,14 +470,14 @@ private struct CaptureBar: View {
 
             if let outcome = camera.recordingOutcomes.last {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(String(format: NSLocalizedString("recording_original_response", comment: ""),
-                        NSLocalizedString(outcome.starting ? "start_recording" : "stop_recording", comment: ""),
-                        NSLocalizedString("recording_response_" + outcome.responseEvidence.rawValue, comment: "")))
+                    Text(language.format("recording_original_response",
+                        language.string(outcome.starting ? "start_recording" : "stop_recording"),
+                        language.string("recording_response_" + outcome.responseEvidence.rawValue)))
                         .accessibilityIdentifier("recording-original-response")
-                    Text(String(format: NSLocalizedString("recording_current_observation", comment: ""),
-                        NSLocalizedString(camera.recordingObservation.observedRecording.map {
+                    Text(language.format("recording_current_observation",
+                        language.string(camera.recordingObservation.observedRecording.map {
                             $0 ? "recording_observed_active" : "recording_observed_stopped"
-                        } ?? "recording_observed_unavailable", comment: "")))
+                        } ?? "recording_observed_unavailable")))
                         .accessibilityIdentifier("recording-current-observation")
                 }
                 .font(.caption2)

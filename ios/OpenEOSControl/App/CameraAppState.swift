@@ -337,6 +337,7 @@ final class CameraAppState: ObservableObject {
     @Published private(set) var busyOperations = Set<CameraOperation>()
 
     private let defaults: UserDefaults
+    private let language: AppLanguageStore
     @Published private(set) var mediaLibrarySessionID = UUID()
     @Published private(set) var mediaDateRange: MediaDateRange?
     // All gallery derivations use this captured (not autoupdating) zone. Range
@@ -574,6 +575,7 @@ final class CameraAppState: ObservableObject {
 
     init(
         defaults: UserDefaults = .standard,
+        language: AppLanguageStore? = nil,
         sessionFactory: (@MainActor () throws -> CameraSession)? = nil,
         bridgeCameraDiscovery: (@Sendable (String, String) async throws -> [DesktopBridgeCamera])? = nil,
         cubeLutLoader: (@Sendable (URL) async throws -> CubeLut)? = nil,
@@ -592,6 +594,7 @@ final class CameraAppState: ObservableObject {
         mediaDeleteAfterResponse: (@MainActor () async -> Void)? = nil
     ) {
         self.defaults = defaults
+        self.language = language ?? AppLanguageStore(defaults: defaults)
         self.mediaMetadataBeforeItem = mediaMetadataBeforeItem
         self.mediaDeleteBeforeItem = mediaDeleteBeforeItem
         self.mediaDeleteBeforeDispatch = mediaDeleteBeforeDispatch
@@ -1603,7 +1606,7 @@ final class CameraAppState: ObservableObject {
                       self.applicationActive, self.autoRefresh, self.activeLiveViewSource == .ccapiRTP,
                       !self.maintenanceControlsPaused, !self.shutterReleaseRequired || self.heldAutofocusPressed else { return }
                 if self.rtpController.videoProgressFailure() != nil {
-                    self.retireLiveView(reason: NSLocalizedString("live_view_render_stalled", comment: ""))
+                    self.retireLiveView(reason: self.language.string("live_view_render_stalled"))
                     return
                 }
             }
@@ -1614,7 +1617,7 @@ final class CameraAppState: ObservableObject {
         guard captureMode == .photo, !bulbMode, !recordingStopRequired,
               supports(.stillCapture), stillCaptureTemperatureAllowed else { return }
         guard shutterAutofocusAllowed else {
-            lastError = NSLocalizedString("shutter_af_unavailable", comment: "")
+            lastError = language.string("shutter_af_unavailable")
             return
         }
         guard begin(.capture) else { return }
@@ -1646,7 +1649,7 @@ final class CameraAppState: ObservableObject {
             guard generation == sessionGeneration else { return }
             // The command was acknowledged; keep this capture's existing read-only owner.
             // A status-read failure does not establish an exposure or justify replaying the shutter command.
-            lastError = NSLocalizedString("capture_status_readback_failed", comment: "")
+            lastError = language.string("capture_status_readback_failed")
             if let review = pendingCaptureReview {
                 startLatestMediaRefresh(session: session, review: review)
             }
@@ -1853,7 +1856,7 @@ final class CameraAppState: ObservableObject {
         let complete = current.outcome.writeEvidence == .acknowledged
             && [CameraCaptureConfigurationReadbackEvidence.matched, .refreshed].contains(current.outcome.readbackEvidence)
         if !cancelled, captureConfigurationCurrentID == record.id {
-            lastError = failed && !complete ? NSLocalizedString(current.statusKey, comment: "") : nil
+            lastError = failed && !complete ? language.string(current.statusKey) : nil
         }
     }
 
@@ -2060,7 +2063,7 @@ final class CameraAppState: ObservableObject {
             && attempt.snapshot.commandEvidence == .responded && attempt.snapshot.clockReadEvidence != .matched
         let unavailableRead = attempt.snapshot.observationEvidence == .unavailable
         lastError = failure != nil || incompleteClock || unavailableRead
-            ? NSLocalizedString("maintenance_partial_failure", comment: "") : nil
+            ? language.string("maintenance_partial_failure") : nil
         // Sleep/auto-off never disconnect implicitly or claim physical completion.
         // Monitoring stays paused until an explicit same-owner restore or reconnect.
     }
@@ -2437,7 +2440,7 @@ final class CameraAppState: ObservableObject {
         recordingStopDuty = CameraRecordingPolicy.stopRequired(previous: previousDuty, starting: outcome.starting,
             response: response, observation: observation)
         guard response != .notSent && response != .rejected || observation.observedRecording != nil else {
-            if !cancelled, response == .rejected { lastError = NSLocalizedString("recording_command_rejected", comment: "") }
+            if !cancelled, response == .rejected { lastError = language.string("recording_command_rejected") }
             return
         }
         recordingObservation = observation
@@ -2453,7 +2456,7 @@ final class CameraAppState: ObservableObject {
             captureMode = .video
             captureReviewState = .idle
         } else if outcome.starting, observation.observedRecording == false {
-            lastError = NSLocalizedString("recording_start_not_confirmed", comment: "")
+            lastError = language.string("recording_start_not_confirmed")
         }
         if !cancelled, !outcome.starting { completeOwnedRecordingReview(observation, session: session) }
     }
@@ -2478,7 +2481,7 @@ final class CameraAppState: ObservableObject {
         recordingStopDuty = recording
         recordingReadbackRecovery = nil
         recordingCommandRecovery = nil
-        if recovery.starting, !recording { lastError = NSLocalizedString("recording_start_not_confirmed", comment: "") }
+        if recovery.starting, !recording { lastError = language.string("recording_start_not_confirmed") }
         if !recovery.starting { completeOwnedRecordingReview(observation, session: session) }
     }
 
@@ -2790,7 +2793,7 @@ final class CameraAppState: ObservableObject {
         }
         if shootingSettingCurrentID == record.id {
             let complete = current.outcome.writeEvidence == .responded && current.outcome.readbackEvidence == .matched
-            lastError = failed && !complete ? NSLocalizedString(current.readbackKey, comment: "") : nil
+            lastError = failed && !complete ? language.string(current.readbackKey) : nil
         }
         return !recovering && CameraShootingSettingPolicy.canConsumeDraft(sameOwner: sameOwner,
             sameAttempt: sameAttempt, sameDraftRevision: true, responded: current.outcome.writeEvidence == .responded,
@@ -4935,10 +4938,7 @@ final class CameraAppState: ObservableObject {
     }
 
     private func publishCubeLutImportError(_ error: Error) {
-        let message = String(
-            format: NSLocalizedString("lut_import_failed", comment: ""),
-            error.localizedDescription
-        )
+        let message = language.format("lut_import_failed", error.localizedDescription)
         let canMirror = lastError == nil || cubeLutImportErrorOwner == lastErrorOwner
             || cubeLutRenderErrorOwner == lastErrorOwner
         cubeLutImportError = message
@@ -4963,7 +4963,7 @@ final class CameraAppState: ObservableObject {
     }
 
     func reportCubeLutRenderFailure() {
-        lastError = NSLocalizedString("lut_render_failed", comment: "")
+        lastError = language.string("lut_render_failed")
         cubeLutRenderErrorOwner = lastErrorOwner
     }
 
