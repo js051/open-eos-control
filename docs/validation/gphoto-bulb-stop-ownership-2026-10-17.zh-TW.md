@@ -35,3 +35,7 @@
 狀態為 implemented；未執行此提交的 CI、原生 libgphoto2／實體 USB 相機驗收，未合併 main、未發布。沒有新增相機命令或推定機型相容性。
 
 本次僅補 libgphoto2 Bulb 的既有停止責任。PC 尚未完成的 pending Start deadline／HTTP 到達順序問題，以及獨立 AF／半按的釋放責任，不以此測試宣稱已解決；手機呼叫 Bridge 可收到同一既有狀態欄位與錯誤碼，但未進行 native 手機操作驗收。
+
+### 後續共同來源重驗
+
+整合產品384d7e7b已用最終27案＋上述全套相鄰測試重驗411 passed，另加static UI15案，總426 passed／既有warning1項。PC完整module3738 passed，真Firefox只覆蓋PC caller回應恢復，不冒充gphoto CLI實機；詳見 [共同來源紀錄](pc-bulb-response-recovery-2026-10-17.zh-TW.md)。
