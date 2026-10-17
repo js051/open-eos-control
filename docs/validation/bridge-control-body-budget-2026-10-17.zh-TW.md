@@ -62,3 +62,7 @@ PYTHONPATH=bridge python -m pytest bridge/tests/test_ccapi_control_body_budget.p
 普通 GET（含 JPEG frame、focus telemetry、RTP SDP）、multipart stream／錯誤 body、其他控制如 recording／drivefocus，均未被本次分類擴張。既有 configuration 讀取保持原範圍。這些未改路徑仍可能影響整個 lifecycle；不能將本修正宣稱為 G04／G05／G06 全部有界或完整完成。
 
 測試只使用合成 loopback camera peer 與較短 fixture timeout；正式15秒配置、真相機／弱網／OS／三端原生尚未實測。實作與本地自動化驗證不等於 PR ready、main accepted 或 preview released；本批不推送、不合併、不發版。
+
+## Release assessment
+
+影響為patch：既有控制回應滴流的正確性與停止等待修正。未改版本；目前僅dev整合，完整exact-SHA/native/實機驗收仍缺。整合Bridge tree與受驗63c199b5相同，經獨立窄審，未重跑未改測試充當新增進度。
