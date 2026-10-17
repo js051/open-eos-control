@@ -13,3 +13,7 @@ production HTML/JS＋合成 CCAPI-capable Bridge metadata endpoint：Details 按
 ## Host 驗證
 
 新增 pending 路徑基準 40 pass／1 fail（實際焦點未還回）；修正後包含不同 session/editor/generation/focus/dialog/view/刪除項目的隔離，以及不恢復／無關項目／不同session／外部焦點不取得 return target。相關兩組67/67，static UI15/15。完整 modules 與固定版 Firefox另記；不代表 Android/iOS、screen reader 或真相機完成。
+
+## 固定版第一次實看與可見性補正
+
+20:46 固定版 `08dc3ac8` 已回同 ID/manage 且 Enter 重開評分3；但新結果面板把卡片推出視窗，既有 preventScroll 讓焦點不可見。僅本條 deferred mutation return 允許瀏覽器隨 focus 顯示卡片；一般dialog關閉規則不變。新增選項控制基準45 pass/1 fail，修正後相關68/68。最終視覺對照另記，不把第一次圖片宣稱完全可見。
