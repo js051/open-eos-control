@@ -28,3 +28,16 @@
 真瀏覽器 Enter／Space 的原生 click 順序、焦點與 zoom／audio 操作仍待 browser 驗收；實體相機對焦／白平衡／放大／音訊仍未驗證。父任務可用 production UI 與合成 HTTP 回覆補上 browser evidence，不需要改 production 內部狀態或操作相機。
 
 其他 read-only 觀察：`setting-dialog` 有 `setting-dialog-title` heading，但目前沒有其他 dialogs 採用的 `aria-labelledby`。本次未讀取瀏覽器 accessibility tree，未把其實際 accessible-name 行為當作已驗證結果，也未修改該獨立標籤問題。本次不是完整 PC keyboard／dialog／accessibility 驗收。
+
+
+## 2026-10-17 Firefox 實際鍵盤增量
+
+受驗 source `523da07990b9e856a633070e8f3273527d0eb3ac`，production app.js SHA-256 `c682e9ca6c97bee7bd3d006cbb4024567e70155db43a9129d565391b7a6964c1`。既有 cloud Firefox 157.0.1／build 20261005135250，80% zoom，使用 EOS 自有 profile。Production HTML/JS 未改；loopback fixture 模擬 camera metadata、能力、Canvas JPEG 與 API 回應，沒有真相機或外部 Bridge。
+
+1. 實際連線與 Start Live View 後，tap enabled=true、zoom enabled=true。
+2. fixture 按鈕只把焦點放到真正 zoom button，再由桌面輸入 Enter：只送 magnification=5；重新聚焦後 Space：只送 magnification=10。兩次都沒有 focus/tap 或 whitebalance/click。
+3. 焦點放到真正 viewfinder 後，桌面 Enter 才送 focus/tap；座標為 x=0.5、y≈0.49967（實際內容幾何）。這不是相機完成光學對焦的證明。
+
+[Ready](evidence/pc-keyboard-firefox-2026-10-17/ready.png)、[zoom Enter](evidence/pc-keyboard-firefox-2026-10-17/zoom-enter.png)、[zoom Space](evidence/pc-keyboard-firefox-2026-10-17/zoom-space.png)、[viewfinder Enter](evidence/pc-keyboard-firefox-2026-10-17/viewfinder-enter.png)、[request telemetry](evidence/pc-keyboard-firefox-2026-10-17/events.jsonl)、[synthetic fixture](evidence/pc-keyboard-firefox-2026-10-17/fixture.js)、[SHA-256](evidence/pc-keyboard-firefox-2026-10-17/sha256.json)。
+
+18:01:33 UTC owned Firefox/server terminal exit -15，桌面與重型驗證時段已交回。此旅程不包含 RTP audio 真播放、white-balance 真操作、Windows包、native mobile、screen reader 或物理相機；audio/white-balance 分支本輪只有明示 host evidence。不能提升為三端全部驗收。

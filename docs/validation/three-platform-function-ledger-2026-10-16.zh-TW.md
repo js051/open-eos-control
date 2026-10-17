@@ -253,3 +253,8 @@
 ## 2026-10-17 G06/G13 JPEG decode 診斷與語言
 
 [原列 #57/#58 的 Android null-decode 錯誤](android-liveview-decode-language-2026-10-17.zh-TW.md)：以單一 canonical typed payload 保留 byte count 與 nullable content type，並於畫面依目前語言格式化；診斷內容含 SocketTimeoutException 也不會誤取代成 timeout 原因。原始 provider/cause、owner/attempt、取消、retirement/Stop/顯式重啟不變。基準 4 fail／6 controls pass；實際 helper 與抽出 production caller／banner 加合成 adapters 共16/16。新增4 source guards、相鄰7 guards與6 syntax checks通過；3 instrumentation案例NOT_RUN。整合後 decode/format/retire/banner 與 Gallery/error helper 對照受驗來源逐字一致，兩批合計14個 source guards通過。沒有因此聲稱 native decoder、實體Stop或原89列完成。
+
+
+## 2026-10-17 G05/G07/G13 PC 鍵盤操作歸屬
+
+[既有 viewfinder 內 zoom/audio 鍵盤路由](pc-viewfinder-keyboard-routing-2026-10-17.zh-TW.md)：修正 Enter／Space 從子控制冒泡時誤送中心 focus/WB。僅 viewfinder 本身為事件 target 才進入其鍵盤動作；原 pointer/owner/能力 gate 不變。基準18案9fail，修正及相鄰focus/magnification共64/64。Firefox實際 zoom Enter／Space各只送magnification，viewfinder Enter仍送focus，四圖與telemetry保存。合成API/JPEG，非實體相機、RTP音訊、screen reader或Windows交付。
