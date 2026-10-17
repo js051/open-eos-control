@@ -1,0 +1,3 @@
+........                                                                 [100%]
+- generated xml file: /workspace/shared/eos-parity-recovery-20261013/platform-lifecycle-integration-20261017/.codex/worktrees/bridge-upload-retirement-20261017/.codex/validation/upload-retirement-focused.xml -
+8 passed in 1.41s

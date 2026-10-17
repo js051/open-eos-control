@@ -357,3 +357,10 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - [PC listing receipt fence](pc-delete-listing-receipt-2026-10-17.md)：Refresh 在 DELETE pending 期間取得的舊清單，曾在 204 後還原已刪項目。精確 production 基準 3 案紅，固定 3867 node:test 與15 static 通過；只在同 session 的當前 listing owner 記錄已確認 ID，保留 raw overflow 與其他項目。
 - 真 Firefox 基準最終 DOM 收據重現還原，固定版畫面／收據只留 KEEP；後續新 Refresh 同 ID 正常返回。基準最後畫面因 owned-process deadline 未捕捉，未拿較早 screenshot 冒充最終畫面。
 - Android／iOS 來源核對已有 operation/listing admission 與退休規則排除此重疊，沒有無證據重寫；兩端原生、真卡片／相機仍未驗。此為既有媒體功能修正，原89列平台驗收未完成。
+
+
+## 23:03 UTC G10/#78 上傳退休 admission
+
+- [Bridge upload retirement](bridge-upload-retirement-2026-10-17.md)：真 ASGI endpoint／SessionManager／GPhoto2Session 加合成 FakeRunner 重現 body staging 尚未完成時 Disconnect 已退休 registry、仍在 drain 先前 control，body 接續後卻 dispatch 一次 upload 並回201。並非已完成close後寫入新session；原provider closed檢查原本已能拒絕該控制案。
+- 最小修正讓同步 upload worker 於正式dispatch前進入原 camera_mutation guard，持有至provider終態；guard內核對原物件與取消。排隊後退休、重用文字ID、HTTP取消、已commit upload的readback/drain/staging壽命皆保留。原碼真紅；217 distinct pytest通過（含8新案），額外8案重跑不重複加計，Ruff與正常secret hook通過。
+- 整合app/test tree與受驗085be203相同並經獨立窄審；沒有新upload能力，實際相機／USB／三端原生仍未驗。

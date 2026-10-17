@@ -1,0 +1,7 @@
+7:02AM INF 0 commits scanned.
+7:02AM INF scanned ~17112 bytes (17.11 KB) in 262ms
+7:02AM INF no leaks found
+[fix/bridge-upload-retirement-20261017 085be203] fix(bridge): 阻擋退休連線的待上傳寫入
+ 3 files changed, 327 insertions(+), 1 deletion(-)
+ create mode 100644 bridge/tests/test_upload_session_retirement.py
+ create mode 100644 docs/validation/bridge-upload-retirement-2026-10-17.md
