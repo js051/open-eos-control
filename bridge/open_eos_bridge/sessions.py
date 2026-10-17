@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 import threading
+from contextlib import contextmanager
 
 from .bulb import BulbRequests
 from .engine import CameraEngineSession, NetworkCameraEngine
@@ -131,6 +132,12 @@ class SessionManager:
 
     def stop_bulb_exposure(self, session_id: str, owner_id: str | None = None) -> CameraStatus | BulbOwnerResult:
         return self._bulb_requests_for(session_id).stop(owner_id)
+
+    @contextmanager
+    def camera_mutation(self, session_id: str):
+        """Bind a new camera control to this exact session and Bulb admission."""
+        with self._bulb_requests_for(session_id).mutation() as session:
+            yield session
 
     def delete(self, session_id: str) -> None:
         guard = self._bulb_requests_for(session_id)
