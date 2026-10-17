@@ -408,3 +408,73 @@ for (const destinationOutcome of ["picker-cancelled", "history-admission-failed"
     });
   }
 }
+
+function laterMediaOperationFixture(operation, { refuse = false } = {}) {
+  const c = fixture({ lateResponse: true }), gate = deferred();
+  const pendingUpload = c.choose(), uploadOwner = c.state.mediaUploadOwner;
+  c.context.cancelMediaUpload();
+  const uploadSnapshot = c.state.mediaUploadResult;
+  c.state.session.engine = "ccapi";
+  const item = { id: "ccapi:synthetic", name: "NEXT.JPG", rating: 0, protected: false, writable: true };
+  c.state.media = [item];
+  Object.assign(c.context, {
+    window: { confirm: () => !refuse, showDirectoryPicker: () => gate.promise,
+      location: { origin: "https://example.invalid" }, clearTimeout() {} },
+    document: { visibilityState: "visible" }, crypto: { randomUUID: () => "synthetic" },
+    renderMedia() {}, renderMediaDetails() {}, renderMediaPreviewNavigation() {},
+    renderMediaMutation() {}, renderMediaDeleteHistory() {}, renderMediaAutoImport() {},
+    mediaMutations: require("../open_eos_bridge/static/media-mutations.js"),
+    mediaDelete: require("../open_eos_bridge/static/media-delete.js"),
+    mediaAutoImport: require("../open_eos_bridge/static/media-auto-import.js"),
+    mediaTransfer: require("../open_eos_bridge/static/media-transfer.js"),
+    api: () => gate.promise, sendMediaDelete: () => gate.promise,
+    recordingRecoveryActive: () => false, bulbControlLocked: () => false,
+  });
+  vm.runInContext(["mediaTransferActive", "cameraInteractionBusy", "ownsMediaMutation", "runMediaMutation",
+    "mediaDeleteRows", "mediaDeleteOwnerDescription", "mediaDeleteConfirmation", "runMediaDelete",
+    "mediaAutoImportEligible", "mediaAutoImportManualBusy", "ownsMediaAutoImport",
+    "finishMediaAutoImportOwner", "scheduleMediaAutoImport", "startMediaAutoImport"].map(extract).join("\n"), c.context);
+  let work;
+  const ownerKey = { mutation: "mediaMutationOwner", delete: "mediaDeleteOwner", "auto-import": "mediaAutoImportOwner" }[operation];
+  if (operation === "mutation") work = c.context.runMediaMutation(refuse ? [] : [{ id: item.id, item, loaded: true }],
+    c.context.mediaMutations.operation("rating", 3));
+  if (operation === "delete") work = c.context.runMediaDelete([{ item, loaded: true }]);
+  if (operation === "auto-import") {
+    if (refuse) c.state.session.engine = "simulator";
+    work = c.context.startMediaAutoImport();
+  }
+  return { ...c, gate, work, pendingUpload, uploadOwner, uploadSnapshot, ownerKey };
+}
+
+for (const operation of ["mutation", "delete", "auto-import"]) {
+  for (const receiptTiming of ["operation-active", "operation-settled"]) {
+    test(`admitted ${operation} fences cancelled upload receipt: ${receiptTiming}`, async () => {
+      const c = laterMediaOperationFixture(operation);
+      assert.ok(c.state[c.ownerKey], "The newer production operation was admitted");
+      const settle = async () => {
+        c.gate.reject(new Error("Synthetic operation failure"));
+        await c.work;
+        assert.equal(c.state[c.ownerKey], null);
+      };
+      if (receiptTiming === "operation-settled") await settle();
+      const observed = { operations: c.calls.operations.length, toasts: c.calls.toasts.length,
+        lists: c.calls.lists, renders: c.calls.renders };
+      c.pendingUpload.reply(); await tick(); await tick();
+      assert.equal(mediaUpload.outcome(c.uploadOwner), "confirmed");
+      assert.equal(c.state.mediaUploadResult, c.uploadSnapshot);
+      assert.deepEqual({ operations: c.calls.operations.length, toasts: c.calls.toasts.length,
+        lists: c.calls.lists, renders: c.calls.renders }, observed,
+      "Older upload evidence must not publish across an admitted media interaction");
+      if (receiptTiming === "operation-active") await settle();
+    });
+  }
+  test(`refused ${operation} does not retire cancelled upload's late receipt`, async () => {
+    const c = laterMediaOperationFixture(operation, { refuse: true });
+    await c.work;
+    assert.ok(!c.state[c.ownerKey]);
+    c.pendingUpload.reply(); await tick(); await tick();
+    assert.equal(mediaUpload.outcome(c.uploadOwner), "confirmed");
+    assert.equal(c.state.mediaUploadResult.outcome, "confirmed");
+    assert.equal(c.calls.lists, 1);
+  });
+}
