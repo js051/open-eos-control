@@ -387,3 +387,18 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - Bridge同一86案基準30紅／56綠→固定86綠；466 distinct回歸已包含新案。Android精確production入口host同一13案基準9紅／4綠→固定13綠，既有release14、LV12、still3回歸另列。Android四個新MockWebServer測試已寫未跑，host不等於真OkHttp或完整type-check。
 - [iOS同一收據gate](ios-partial-control-receipt-20261017.md) 以相同8組method／suffix保護原AF、Bulb、JPEG／RTP Stop。保留原捕捉的method／path／payload與未知責任；完整原Stop成功才釋放。獨立來源複審無blocker；96 supplementary source checks已含5新項，12個native XCTest methods已寫但編譯／執行NOT_RUN，不宣稱iOS runtime紅綠。
 - 三端本批仍是原功能恢復契約增量；原89列的原生、實體相機、OS目的地、安裝／分發與unsupported provider缺口未因host或來源檢查變為通過。
+
+
+## 23:47 UTC G05 drive focus／tap AF／click WB 成功提示
+
+- [Bridge／Android focus ACK](focus-ack-receipts-2026-10-17.zh-TW.md)：三個原有method/path收到206或Content-Range曾回報accepted／新增observed feature，實際PC函式因而顯示成功提示。相同API fixture的9個不完整回覆在修正後拒絕，原PC錯誤流程不再畫accepted／success reticle；9個完整成功與3個503控制保留，單次mutation不重送。未修改PC來源。
+- Bridge新38案基準9紅／29綠→固定38綠；相關353回歸包含新案，PC113回歸另列。Android精確public-entry host同13案基準9紅→固定13綠，既有13／14／12／3回歸另列。21個parameterized MockWebServer案例已寫未跑；host假transport／geometry與PC函式抽取不等於native／Firefox／實體光學驗收。
+- [iOS focus receipt](ios-focus-control-receipt-20261017.md) 同樣分離三組收據判定；100 supplementary source checks已含4新項，原生XCTest已寫但編譯與執行NOT_RUN。三端均保留原座標／snapshot owner、完整ACK相容性、非2xx分類及原body deadline／retry政策；沒有把focus路徑加入八條transport期限路由。
+- 整合Android／Bridge tree與受驗efa19a3d、iOS tree與受驗e35501f逐檔相同，獨立窄審無blocker。原89列原生／相機／OS驗收繼續保留未完成狀態。
+
+
+## 23:49 UTC G03/G13 拍攝資料夾與檔名收據
+
+- [Capture configuration receipts](capture-config-receipts-20261017.zh-TW.md)：真API證實206／Content-Range曾將未建立的五字元suffix回報為成功；檔名讀回不符原本會拒絕完成，但誤標stage=acknowledged。Bridge／Android只在原capture ACK前加入完整性gate，保留原未知寫入恢復、非2xx與嚴格JSON、suffix／讀回／選取語義，不重送mutation。iOS原有完整性判定已涵蓋，未改。
+- Bridge同一新15案基準6紅／9綠；與既有capture案35綠，較廣545回歸已含新案。Android同12案基準6個runtime紅→固定12綠；原owner／取消fence與readback mismatch保持。兩個完整Kotlin檔PSI零語法錯誤，三個MockWebServer測試已寫未跑；不是完整type-check或原生通過。
+- 九行產品diff經兩方窄審。整合focus與capture兩批不同hunk後，Bridge focused73案通過；另用最終合併來源核對Android capture12／focus13入口host皆通過，[合併收據](evidence/focus-capture-integration-20261017/)另存。這是合併驗證，不重複計為新功能。原89列平台驗收仍未完成。
