@@ -9984,7 +9984,7 @@
     // absence, partial results, or a collision can neither create nor erase it.
     if (outcome === "confirmed" && !transfer.refreshed && !transfer.silent) {
       transfer.refreshed = true;
-      try { await refreshMedia(); } catch (_) { /* The confirmed receipt remains authoritative. */ }
+      try { await refreshMedia({ preservePreview: true }); } catch (_) { /* The confirmed receipt remains authoritative. */ }
       if (!ownsMediaUpload(owner)) return;
       renderMediaUploadOutcome();
     }
