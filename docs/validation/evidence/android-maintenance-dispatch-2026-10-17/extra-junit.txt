@@ -1,0 +1,6 @@
+JUnit version 4.13.2
+.....Strict dispatch rejection matrix: 15 actual maintenanceAccess.dispatch cases passed
+
+Time: 0.134
+
+OK (5 tests)

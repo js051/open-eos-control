@@ -52,8 +52,7 @@ class MaintenanceAttempt(val draft: MaintenanceDraft, private val access: Mainte
                 evidence.snapshot().availability == MaintenanceAvailability.NOT_READ) readOnce(initial = true)
         } catch (failure: Exception) {
             if (failure is CancellationException && failure !is TimeoutCancellationException) cancel()
-            if (evidence.snapshot().command != MaintenanceCommandEvidence.NOT_SENT &&
-                evidence.snapshot().availability == MaintenanceAvailability.NOT_READ) evidence.initialUnavailable()
+            if (evidence.snapshot().command != MaintenanceCommandEvidence.NOT_SENT) evidence.initialUnavailableIfNotRead()
         } finally { synchronized(this) { occupied = false }; update { it.copy(running = false) } }
     }
     private suspend fun maintenancePhase(block: suspend () -> Unit) {
