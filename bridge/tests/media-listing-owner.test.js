@@ -101,7 +101,7 @@ function fixture() {
     "renderMediaDateFilter", "renderMediaRatingFilter", "renderMediaFolderFilter", "mediaFolderChoiceLabel", "mediaDisplayTimeZone",
     "displayedMedia", "mediaDateGroup", "formatMediaTime", "mediaIsVideo", "renderMediaThumbnail", "observeMediaThumbnail", "loadMediaThumbnail",
     "updateVisibleMediaThumbnail", "clearMediaThumbnails", "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
-    "openMediaDetails", "clearMediaDetails", "mediaMetadataSupported", "replaceMediaItem", "startEventLoop", "cancelEventLoop", "refreshSession", "adoptCameraStatus"];
+    "applyConfirmedMediaDelete", "openMediaDetails", "clearMediaDetails", "mediaMetadataSupported", "replaceMediaItem", "startEventLoop", "cancelEventLoop", "refreshSession", "adoptCameraStatus"];
   vm.runInContext("let mediaThumbnailObserver = null;\n" + names.map(extract).join("\n"), context);
   context.closeMediaPreview = () => { ui.mediaPreviewDialog.open = false; };
   state.eventGeneration = 0;
@@ -355,4 +355,80 @@ test("production API bounds an oversized HTTP error body before generic JSON par
   assert.equal(calls, 1);
   assert.equal(cancelled, true);
   assert.equal(c.state.mediaLoadStatus, "FAILED");
+});
+
+
+function deleting(c) {
+  const owner = { session: c.state.session, applied: new Set() };
+  c.state.mediaDeleteOwner = owner;
+  c.state.mediaDeleteHistory = [{ session: owner.session, results: [{ id: OLD.id, status: "confirmed" }] }];
+  return owner;
+}
+
+test("confirmed delete fences buffered snapshots of the exact active listing, preserving unrelated rows and selection", async () => {
+  const c = fixture(), deletion = deleting(c);
+  c.state.mediaSelection.setSelected(OLD.id, true);
+  const history = c.state.mediaDeleteHistory;
+  const promise = c.refreshMedia({ preservePreview: true }), gate = c.listings[0];
+  gate.start(); gate.snapshot([OLD, NEW]); await settle();
+  c.state.mediaSelection.setSelected(NEW.id, true);
+  const token = c.state.mediaSelection.token(OLD.id);
+  c.applyConfirmedMediaDelete(deletion, { ...OLD, selectionToken: token });
+  assert.deepEqual(Array.from(c.state.media, row => row.id), [NEW.id]);
+  gate.snapshot([OLD, NEW, item("synthetic-third")]); await settle();
+  assert.deepEqual(Array.from(c.state.media, row => row.id), [NEW.id, "synthetic-third"]);
+  gate.complete(); assert.equal(await promise, true);
+  assert.equal(c.state.mediaSelection.has(NEW.id), true);
+  assert.equal(c.state.mediaSelection.has(OLD.id), false);
+  assert.equal(c.state.mediaDeleteHistory, history);
+  assert.equal(c.state.refreshGeneration, 0, "Receipt must not invalidate other owners globally");
+});
+
+test("confirmed delete fences a delayed legacy JSON listing even before its first snapshot", async () => {
+  const c = fixture(), deletion = deleting(c); let reply;
+  c.fetch = () => new Promise(resolve => { reply = resolve; });
+  const promise = c.refreshMedia();
+  c.applyConfirmedMediaDelete(deletion, OLD);
+  reply(Response.json({ items: [OLD, NEW] }));
+  assert.equal(await promise, true);
+  assert.deepEqual(Array.from(c.state.media, row => row.id), [NEW.id]);
+});
+
+test("only confirmed IDs are fenced and a fresh listing after receipt can publish that ID", async () => {
+  const c = fixture(), deletion = deleting(c);
+  let promise = c.refreshMedia(), gate = c.listings[0];
+  gate.start(); gate.snapshot([OLD, NEW]); await settle();
+  c.applyConfirmedMediaDelete(deletion, OLD);
+  // An uncertain or failed deletion has no confirmed-delete callback.
+  gate.snapshot([OLD, NEW]); await settle(); gate.complete(); await promise;
+  assert.deepEqual(Array.from(c.state.media, row => row.id), [NEW.id]);
+  promise = c.refreshMedia(); gate = c.listings[1];
+  gate.start(); gate.snapshot([OLD, NEW]); await settle(); gate.complete(); await promise;
+  assert.deepEqual(Array.from(c.state.media, row => row.id), [OLD.id, NEW.id]);
+});
+
+test("retired delete owner and same-ID replacement session do not fence the current listing", async () => {
+  for (const replacement of ["delete-owner", "session"]) {
+    const c = fixture(), deletion = deleting(c);
+    if (replacement === "delete-owner") c.state.mediaDeleteOwner = { session: c.state.session, applied: new Set() };
+    else c.state.session = { ...c.state.session };
+    const promise = c.refreshMedia(), gate = c.listings[0];
+    c.applyConfirmedMediaDelete(deletion, OLD);
+    gate.start(); gate.snapshot([OLD, NEW]); await settle(); gate.complete(); await promise;
+    assert.deepEqual(Array.from(c.state.media, row => row.id), [OLD.id, NEW.id]);
+    assert.equal(deletion.applied.size, 0);
+  }
+});
+
+
+test("recent listing keeps raw overflow evidence while filtering a confirmed deleted ID", async () => {
+  const c = fixture(), deletion = deleting(c);
+  c.state.mediaScope = "recent";
+  const rows = [OLD, ...Array.from({ length: 60 }, (_, n) => item(`synthetic-overflow-${n}`))];
+  const promise = c.refreshMedia(), gate = c.listings[0];
+  c.applyConfirmedMediaDelete(deletion, OLD);
+  gate.start(); gate.snapshot(rows); await settle(); gate.complete(); await promise;
+  assert.equal(c.state.media.length, 60);
+  assert.equal(c.state.mediaHasMore, true, "A receipt cannot disprove the source's overflow evidence");
+  assert.equal(c.state.media.some(row => row.id === OLD.id), false);
 });
