@@ -16,4 +16,10 @@ Firefox `4faea09a` 在 pending Apply→Escape→late matched stream 後，ISO仍
 
 production caller＋合成DOM新增8案：焦點基準79 pass/1 fail；加回覆文案反例後80 pass/1 fail；最終81/81。保留舊測試中使用者已轉移focus的control，以及新session/editor/generation/dialog/view/hidden六類隔離。
 
-新增GUI對照另行記錄；host不代替Firefox、screen reader、native或真相機結果。
+## 20:32 UTC Firefox 固定版對照
+
+產品 source `3987b5f32b0f8c18e55712ffdacb87be78c1173b`，與完整 modules 3799/3799、static UI 15/15 測試的 bridge tree 相同（`ff1d8b08f3af0fdf19e43a2064174dea1ae83416`）。
+
+既有雲端 Firefox、production HTML/JS、合成 stream receipt：pending ISO200 Apply 時當前 ISO100；Escape 後釋放 matched stream，當前值仍100，焦點回目前 BUTTON/iso，文案為「Cancelled waiting; camera result may still arrive」。直接 Enter 重開 dialog，200 draft 保留。3 張圖、事件、source/hash、runtime 收據保存在 [evidence](evidence/pc-setting-pending-focus-2026-10-17/assessment.json)。20:32:37 terminal、owned Firefox exit -15。
+
+這是修正前 BODY／不能重開的同路徑對照；不代表 screen reader、native 或真相機結果。
