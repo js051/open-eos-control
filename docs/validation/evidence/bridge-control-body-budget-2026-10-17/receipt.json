@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-17",
+  "baselineCommit": "25a67ff9fcf4519451d83e13f44356971bc1fdac",
+  "scope": "Existing Bridge CCAPI shutter, manual shutter/Bulb, AF, Live View/RTP and multipart stop control response bodies",
+  "baseline": {
+    "tests": 34,
+    "failed": 14,
+    "passed": 20,
+    "elapsedSeconds": 5.15,
+    "productionSource": "baseline commit ccapi.py loaded as open_eos_bridge.ccapi; final unmodified test module"
+  },
+  "fixedFocused": {
+    "tests": 34,
+    "passed": 34,
+    "elapsedSeconds": 2.35
+  },
+  "regression": {
+    "distinctTests": 445,
+    "passed": 445,
+    "failed": 0,
+    "elapsedSeconds": 45.94,
+    "includesNewTests": 34,
+    "warnings": [
+      "Existing Starlette/httpx deprecation",
+      "Existing duplicate OpenAPI operation ID"
+    ],
+    "files": [
+      "test_ccapi.py",
+      "test_ccapi_control_body_budget.py",
+      "test_capture_configuration.py",
+      "test_ccapi_bulb_recovery.py",
+      "test_ccapi_live_view_recovery.py",
+      "test_focus_contract.py",
+      "test_maintenance_lifecycle.py",
+      "test_bulb_request_ownership.py",
+      "test_bulb_cross_control_ownership.py"
+    ]
+  },
+  "focusedRepeatRuns": {
+    "runs": 3,
+    "testsPerRun": 34,
+    "allPassed": true,
+    "countedAsAdditionalDistinctTests": false
+  },
+  "lint": "ruff check passed on changed production and test files",
+  "fixture": {
+    "transport": "real urllib over local loopback HTTP",
+    "timeoutSeconds": 0.1,
+    "dripIntervalSeconds": 0.015,
+    "bodyBytes": 40
+  },
+  "initialProbe": {
+    "timeoutSeconds": 0.08,
+    "dripIntervalSeconds": 0.02,
+    "bodyBytes": 30,
+    "controlElapsedSeconds": [
+      0.588,
+      0.586,
+      0.587,
+      0.586
+    ],
+    "configurationControlElapsedSeconds": [
+      0.082,
+      0.002
+    ]
+  },
+  "notProven": [
+    "Whole-request, Stop or Disconnect hard deadline",
+    "DNS, open, redirect processing, headers, single blocking read or chunk framing interruption",
+    "Production 15-second timing",
+    "Unchanged GET, stream and other control paths",
+    "Physical camera, weak-network, native platform and OS validation"
+  ],
+  "deliveryState": "implemented locally; not pushed, merged or released",
+  "sources": [
+    {
+      "path": "bridge/open_eos_bridge/ccapi.py",
+      "sha256": "23f2cece6fb81e85884ad014f7dac5342920295c51d2c4113f05e74a44e18830"
+    },
+    {
+      "path": "bridge/tests/test_ccapi_control_body_budget.py",
+      "sha256": "842931db2a7654673153e5d8d8e7b1010c1809841d003e34aa16e615711ed182"
+    }
+  ]
+}

@@ -801,6 +801,40 @@ class _CcapiDownloadBody:
             self._owner.release()
 
 
+# Existing physical control operations only. This does not opt them into strict
+# configuration framing or change their legacy redirect policy.
+_CONTROL_BODY_ROUTES = (
+    ("POST", "/shooting/control/shutterbutton"),
+    ("PUT", "/shooting/control/shutterbutton/manual"),
+    ("POST", "/shooting/control/shutterbutton/manual"),
+    ("POST", "/shooting/control/af"),
+    ("POST", "/shooting/liveview"),
+    ("DELETE", "/shooting/liveview"),
+    ("POST", "/shooting/liveview/rtp"),
+    ("DELETE", "/shooting/liveview/multipart"),
+)
+
+
+def _read_ccapi_body_with_deadline(body: BinaryIO, limit: int, deadline: float) -> bytes:
+    # Cooperative budget between single buffered reads. DNS, open, headers and
+    # any one blocking read cannot be forcibly cancelled here. Late bytes are
+    # rejected before publishing success; callers still join the same producer.
+    chunks = []
+    total = 0
+    reader = getattr(body, "read1", body.read)
+    while total < limit:
+        if time.monotonic() >= deadline:
+            raise TimeoutError("CCAPI response body deadline elapsed")
+        chunk = reader(min(4096, limit - total))
+        if time.monotonic() >= deadline:
+            raise TimeoutError("CCAPI response body deadline elapsed")
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
+
+
 class UrllibCcapiTransport:
     def __init__(self, username: str = "", password: str = "") -> None:
         self._authorization: str | None = None
@@ -827,7 +861,11 @@ class UrllibCcapiTransport:
             or "/shooting/settings" in resource_path
             or any(resource_path.endswith(suffix) for suffix, _ in FILE_NAMING_ENDPOINTS.values())
         )
-        deadline = time.monotonic() + timeout if configuration_resource else None
+        control_resource = any(
+            method == control_method and resource_path.endswith(suffix)
+            for control_method, suffix in _CONTROL_BODY_ROUTES
+        )
+        deadline = time.monotonic() + timeout if configuration_resource or control_resource else None
         response = self._open(
             method, url, body=body, headers=headers, timeout=timeout,
             follow_redirects=method != "DELETE" and not configuration_resource, strict_control=strict_control,
@@ -840,29 +878,15 @@ class UrllibCcapiTransport:
                 payload = b""
                 if not configuration_resource:
                     with suppress(OSError, HTTPException):
-                        payload = response.body.read(min(max_bytes, MAX_ERROR_BYTES))
+                        limit = min(max_bytes, MAX_ERROR_BYTES)
+                        payload = (response.body.read(limit) if deadline is None else
+                                   _read_ccapi_body_with_deadline(response.body, limit, deadline))
                 return CcapiResponse(response.status, response.headers, payload)
             try:
                 if deadline is None:
                     payload = response.body.read(max_bytes + 1)
                 else:
-                    # Cooperative wall budget between single buffered reads. urllib
-                    # DNS/header setup and a blocking socket read cannot be forcibly
-                    # cancelled here; reject late bytes instead of publishing them.
-                    chunks = []
-                    total = 0
-                    reader = getattr(response.body, "read1", response.body.read)
-                    while total <= max_bytes:
-                        if time.monotonic() >= deadline:
-                            raise TimeoutError("Configuration response deadline elapsed")
-                        chunk = reader(min(4096, max_bytes + 1 - total))
-                        if time.monotonic() >= deadline:
-                            raise TimeoutError("Configuration response deadline elapsed")
-                        if not chunk:
-                            break
-                        chunks.append(chunk)
-                        total += len(chunk)
-                    payload = b"".join(chunks)
+                    payload = _read_ccapi_body_with_deadline(response.body, max_bytes + 1, deadline)
             except (OSError, HTTPException) as error:
                 raise BridgeError(
                     "CCAPI_UNREACHABLE",
