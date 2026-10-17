@@ -21,3 +21,7 @@
 包含兩種控制的lost press、cleanup失敗、lost stop ACK、能力descriptor變動、close／API DELETE、replacement隔離、事件暫停、相鄰寫入gate、hold例外、status tail及正常明確重試。相鄰既有Bulb／gphoto／REC／maintenance／shutdown／API連同新增案例，共441 passed，既有Starlette deprecation warning一項。
 
 使用既有驗證環境，未安裝／升級依賴。未跑原生gphoto CLI、真機／USB、Android／iOS UI；沒有真AF停止或機型相容性宣稱。PC pending Start的owned-request順序修正另批進行，本文件不宣稱涵蓋它。
+
+## 整合前中斷語義複審
+
+複審發現首版共用helper若只捕捉Exception，會弱化舊finally在KeyboardInterrupt時仍嘗試停止的行為。補4個press／hold中斷案例，首版5691c709基準4 failed；改為保存並重拋原BaseException，但先嘗試原release，34個最終案例全過。這是交付前修正回歸，沒有把首版當成已接受產品。相鄰441案是首版；最終4案屬此後增量。
