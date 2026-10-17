@@ -115,7 +115,7 @@ function context({ loaded = [OLD_A, OLD_B], latest = OLD_A } = {}) {
   sandbox.recordingObservation = async () => sandbox.recordingLifecycle.empty("ccapi");
   const functionNames = ["adoptCameraStatus", "cancelRecordingWait", "recordingTransfer", "publishRecordingObservation", "runRecordingLifecycle", "recoverRecording",
     "mediaTransferActive", "cameraInteractionBusy", "beginCameraInteraction",
-    "shutterReleaseUnconfirmed", "bulbControlLocked", "operateShutter", "autofocus", "halfPressShutter",
+    "shutterReleaseUnconfirmed", "bulbControlLocked", "readBulbRecoveryStatus", "operateShutter", "autofocus", "halfPressShutter",
     "cancelLatestMediaRefresh", "latestMediaFrom", "refreshLatestMedia",
     "publishLatestMedia", "loadLatestMediaThumbnail", "chooseMediaWritable", "downloadMedia", "cancelMediaDownload", "cancelMediaBatch",
   ];
@@ -2017,3 +2017,40 @@ test('Explicit Bulb Start rejection keeps the existing non-uncertain path', asyn
   assert.equal(s.state.shutterReleaseUnconfirmed, false);
   assert.equal(s.feedback.includes('resume'), true);
 });
+
+for (const phase of ['fetch', 'body']) for (const retired of [false, true]) {
+  test(`Bulb recovery ${phase} stall is bounded with retired=${retired}`, async () => {
+    const s = context(); installProductionApi(s); s.isBulbMode = () => true;
+    const held = deferred(), timers = [], cleared = [];
+    s.setTimeout = (callback, milliseconds) => { timers.push({ callback, milliseconds }); return timers.length; };
+    s.clearTimeout = id => cleared.push(id);
+    s.fetch = async (url, options) => {
+      s.requests.push({ url, method: options.method, signal: options.signal });
+      if (url.endsWith('/bulb/start')) throw Error('Synthetic lost Start response');
+      if (phase === 'fetch') return held.promise;
+      return { ok: true, status: 200, json: () => held.promise };
+    };
+    const pending = s.operateShutter();
+    await eventually(() => s.requests.some(r => r.url.endsWith('/status')), 'recovery request');
+    try {
+      assert.equal(timers.length, 1, 'Recovery must not indefinitely hide Stop behind busy');
+      assert.equal(timers[0].milliseconds, 15000);
+      if (retired) {
+        s.state.session = { id: 'synthetic-replacement' };
+        s.state.busy = true; s.state.shutterReleaseUnconfirmed = false;
+      }
+      timers[0].callback();
+      await pending;
+      assert.equal(s.state.busy, retired);
+      assert.equal(s.state.shutterReleaseUnconfirmed, !retired);
+      assert.equal(s.requests.find(r => r.url.endsWith('/status')).signal.aborted, true);
+      assert.equal(cleared.length, 1);
+      assert.equal(s.feedback.includes('resume'), false);
+    } finally {
+      const idle = { bulbExposureActive: false, shutterReleaseUnconfirmed: false };
+      held.resolve(phase === 'fetch' ? Response.json(idle) : idle);
+      await pending;
+    }
+    assert.equal(s.state.shutterReleaseUnconfirmed, !retired, 'Late read completion cannot erase or transfer the warning');
+  });
+}

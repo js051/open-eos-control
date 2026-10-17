@@ -4890,6 +4890,25 @@
     return Boolean(state.recordingRecovery && state.recordingRecovery.session === state.session);
   }
 
+  async function readBulbRecoveryStatus(sessionId) {
+    const controller = new AbortController();
+    let timer;
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(t("bulbReleaseUnconfirmed")));
+        controller.abort();
+      }, 15000);
+    });
+    try {
+      // A stalled read must not indefinitely hide an explicit Stop behind busy.
+      // This deadline never cancels/reorders a Start or proves camera release.
+      return await Promise.race([
+        api(`/v1/session/${encodeURIComponent(sessionId)}/status`, { signal: controller.signal }),
+        deadline,
+      ]);
+    } finally { clearTimeout(timer); }
+  }
+
   async function operateShutter() {
     if (!state.session || cameraInteractionBusy()) return;
     const session = state.session;
@@ -5015,7 +5034,7 @@
         state.shutterReleaseUnconfirmed ||= uncertain;
         try {
           const liveViewRecoveryRevision = state.liveViewStopRevision || 0;
-          const status = await api(`/v1/session/${encodeURIComponent(sessionId)}/status`);
+          const status = await readBulbRecoveryStatus(sessionId);
           if (state.session !== session) return;
           adoptCameraStatus(status, session, liveViewRecoveryRevision);
           if (
