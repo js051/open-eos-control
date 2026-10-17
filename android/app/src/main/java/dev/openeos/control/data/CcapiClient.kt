@@ -4761,6 +4761,13 @@ class CcapiClient(
                     message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body",
                 )
             }
+            if (stillCapture || liveViewControl || releaseControl) {
+                // A partial representation cannot acknowledge the original physical control.
+                // Header presence includes an empty value; legacy complete bodies remain valid.
+                check(response.code != 206 && response.headers("Content-Range").isEmpty()) {
+                    "Partial response is not a complete control acknowledgement."
+                }
+            }
             if (expectedStatusCode != null && response.code != expectedStatusCode) {
                 throw CcapiHttpException(
                     statusCode = response.code,

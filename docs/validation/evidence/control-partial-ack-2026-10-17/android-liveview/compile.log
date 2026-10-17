@@ -1,0 +1,3 @@
+.codex/evidence/control-partial-ack-20261017/android-liveview/HostClient.kt:171:17: warning: 'when' is exhaustive so 'else' is redundant here.
+                else -> error("${request.source.label} is not available through the CCAPI network backend.")
+                ^^^^

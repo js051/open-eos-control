@@ -155,6 +155,74 @@ class CcapiDirectReleaseTransportTest {
         }
     }
 
+    @Test fun partialAfStopReceiptsKeepOriginalStopUntilCompleteRetry() = runBlocking {
+        for (partial in partialResponses()) Scenario().use { s ->
+            s.client.initialize()
+            s.stopResponse = { MockResponse().setResponseCode(503).setBody("busy") }
+            assertTrue(runCatching { s.client.holdAutofocus {} }.exceptionOrNull() is AutofocusReleaseException)
+            s.stopResponse = partial
+            assertTrue(runCatching { s.client.retryAutofocusStop() }.exceptionOrNull() is AutofocusReleaseException)
+            val before = s.events.toList()
+            assertTrue(runCatching { s.client.holdAutofocus {} }.isFailure)
+            assertEquals(before, s.events.toList())
+            s.stopResponse = { MockResponse().setResponseCode(204) }
+            s.client.retryAutofocusStop(); s.client.retryAutofocusStop()
+            assertEquals(listOf("POST:af:start", "POST:af:stop", "POST:af:stop", "POST:af:stop"), s.events.toList())
+            s.client.holdAutofocus {}
+            assertEquals(6, s.events.size)
+        }
+    }
+
+    @Test fun partialBulbReceiptsKeepOriginalPutReleaseUntilCompleteRetry() = runBlocking {
+        for (partial in partialResponses()) Scenario(manualMethod = "PUT").use { s ->
+            s.client.initialize(); s.client.startBulbExposure()
+            s.stopResponse = { MockResponse().setResponseCode(503).setBody("busy") }
+            assertTrue(runCatching { s.client.stopBulbExposure() }.exceptionOrNull() is ShutterReleaseException)
+            s.stopResponse = partial
+            assertTrue(runCatching { s.client.retryShutterRelease() }.exceptionOrNull() is ShutterReleaseException)
+            val before = s.events.toList()
+            assertTrue(runCatching { s.client.startBulbExposure() }.isFailure)
+            assertEquals(before, s.events.toList())
+            s.stopResponse = { MockResponse().setResponseCode(204) }
+            s.client.retryShutterRelease(); s.client.retryShutterRelease()
+            assertEquals(listOf("PUT:manual:full_press", "PUT:manual:release", "PUT:manual:release", "PUT:manual:release"), s.events.toList())
+            s.client.startBulbExposure(); s.client.stopBulbExposure()
+            assertEquals(6, s.events.size)
+        }
+    }
+
+    @Test fun partialStartsCannotPublishHeldStateButStillRelease() = runBlocking {
+        for (partial in partialResponses()) Scenario().use { s ->
+            s.client.initialize(); s.startResponse = partial
+            var held = false
+            assertTrue(runCatching { s.client.holdAutofocus { held = true } }.isFailure)
+            assertFalse(held)
+            assertTrue(runCatching { s.client.startBulbExposure() }.isFailure)
+            s.client.retryAutofocusStop(); s.client.retryShutterRelease()
+            assertEquals(listOf("POST:af:start", "POST:af:stop", "POST:manual:full_press", "POST:manual:release"), s.events.toList())
+        }
+    }
+
+    @Test fun completeControlAckKeepsLegacyBodyCompatibility() = runBlocking {
+        val successes: List<() -> MockResponse> = listOf(
+            { MockResponse().setBody("{}") }, { MockResponse().setResponseCode(204) },
+            { MockResponse().setBody("") }, { MockResponse().setHeader("Content-Type", "text/plain").setBody("Accepted") },
+            { MockResponse().setResponseCode(202).setBody("Accepted") },
+        )
+        for (success in successes) Scenario().use { s ->
+            s.client.initialize(); s.startResponse = success; s.stopResponse = success
+            s.client.holdAutofocus {}; s.client.startBulbExposure(); s.client.stopBulbExposure()
+            s.client.retryAutofocusStop(); s.client.retryShutterRelease()
+            assertEquals(4, s.events.size)
+        }
+    }
+
+    private fun partialResponses(): List<() -> MockResponse> = listOf(
+        { MockResponse().setResponseCode(206).setBody("{}") },
+        { MockResponse().setHeader("Content-Range", "bytes 0-1/4").setBody("{}") },
+        { MockResponse().setHeader("cOnTeNt-RaNgE", "").setBody("{}") },
+    )
+
     private class Scenario(http: OkHttpClient? = null, nativeAf: Boolean = true, manualMethod: String = "POST") : AutoCloseable {
         val server = MockWebServer()
         val events = CopyOnWriteArrayList<String>()

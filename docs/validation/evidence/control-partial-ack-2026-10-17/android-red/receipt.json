@@ -1,0 +1,103 @@
+{
+  "phase": "baseline",
+  "ref": "fd29c906071e15e219a680c5d1e3287ef385b06c",
+  "source_sha256": [
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/HeldAutofocusSession.kt",
+      "sha256": "02f1636c21ab46fc3f9dd8ebc1be66a9cfd7d7fa861f6f806d7d4911f22b7dff"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/ShutterReleaseSession.kt",
+      "sha256": "b1e1708555c7938c94f13bd9c8cb90f5fb0e37a993d9153c479a3df144363749"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/ShootingSettingJson.kt",
+      "sha256": "c2c0967a4fd4589e198bd7913a1425d09b881c5cbd17784f91c8ea4cc3ad2930"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/StrictMediaJson.kt",
+      "sha256": "9ea850d244a64b2a2776062d75bb07ac4709a1fe33cecdc326f86c56cd8bf169"
+    },
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+      "sha256": "2e969f98d9a565dd16d2ca0e8d1a3a0f7ca5a394695668f23c0ff1d23412b891"
+    }
+  ],
+  "extracted_methods_sha256": [
+    {
+      "filename": "BULB",
+      "sha256": "a526365a370d0862aeb7bf62451b879e985979182121101aa56c0cf2ee9f829a"
+    },
+    {
+      "filename": "AF",
+      "sha256": "2e547ebafcee7eb83537a9713611d750113e361e4d143568a8941a04864e6ffa"
+    },
+    {
+      "filename": "COMMAND",
+      "sha256": "4d8ed4b40e05e72e8f6dcae3eb349c7afe6fe1d98e9dbb5ffa094067247053e4"
+    },
+    {
+      "filename": "REQUEST_OK",
+      "sha256": "a63d75a51cd36e902a1298eb5bf0dd08a275d88b4405b902be86ec2fc737f9bc"
+    }
+  ],
+  "source_guards": [],
+  "fixture_sha256": [
+    {
+      "filename": "HostClient.kt",
+      "sha256": "c1c430bbb8145e857fc45d2076bb24c84a3d2c3aa5c8fac01520d9d76d2c3e29"
+    },
+    {
+      "filename": "PartialControlAckTest.kt",
+      "sha256": "72dc1471f51e2533b3d008e1a4a7c892f91316485b8bedbae9f8c43ed5e44a30"
+    }
+  ],
+  "verified_tools": [
+    {
+      "filename": "kotlin-compiler-embeddable-2.2.21.jar",
+      "sha256": "9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295"
+    },
+    {
+      "filename": "kotlin-stdlib-2.2.21.jar",
+      "sha256": "6558a3d233da56a20934b32159f9db5f86ed5816ef098f78a2c223dc6abb79dd"
+    },
+    {
+      "filename": "kotlin-script-runtime-2.2.21.jar",
+      "sha256": "2b1519b427b514d1536c1b425674b03fe914af637924028e9959c6625442df51"
+    },
+    {
+      "filename": "kotlin-reflect-1.6.10.jar",
+      "sha256": "3277ac102ae17aad10a55abec75ff5696c8d109790396434b496e75087854203"
+    },
+    {
+      "filename": "kotlin-daemon-embeddable-2.2.21.jar",
+      "sha256": "91c0673c22e44b054ae0314d323860ebe1f3aff3f0ebc74fff82c4733dde09be"
+    },
+    {
+      "filename": "kotlinx-coroutines-core-jvm-1.8.0.jar",
+      "sha256": "9860906a1937490bf5f3b06d2f0e10ef451e65b95b269f22daf68a3d1f5065c5"
+    },
+    {
+      "filename": "kotlinx-coroutines-core-jvm-1.9.0.jar",
+      "sha256": "ad89c2892235e670f222d819cb3d81188143cb19a05b59df9889ae4269f5c70a"
+    },
+    {
+      "filename": "annotations-23.0.0.jar",
+      "sha256": "7b0f19724082cbfcbc66e5abea2b9bc92cf08a1ea11e191933ed43801eb3cd05"
+    },
+    {
+      "filename": "junit-4.13.2.jar",
+      "sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3"
+    },
+    {
+      "filename": "hamcrest-core-1.3.jar",
+      "sha256": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+    }
+  ],
+  "compile_exit": 0,
+  "boundary": "Exact production held AF and Bulb entries, commandOk/requestOk, complete release owners and bounded readers. Live View, still and unrelated controls invoke the exact requestOk through fixture flags; those public entries are not executed by this runner. Call/Response/InputStream, discovery and status are synthetic. Separate source guards do not establish real OkHttp, socket, Android or device execution.",
+  "jvm_heap_limit_mb": 256,
+  "active_processor_count": 1,
+  "junit_exit": 1,
+  "expected_result_verified": true
+}

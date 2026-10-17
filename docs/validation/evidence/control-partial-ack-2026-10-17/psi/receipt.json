@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "files": [
+    {
+      "filename": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+      "sha256": "d752d4ffa43d5cf7fee09b2563a0ae3837c939f27ce33b4b3a26d20d3ad68d87"
+    },
+    {
+      "filename": "android/app/src/test/java/dev/openeos/control/data/CcapiDirectReleaseTransportTest.kt",
+      "sha256": "972e271a523c89c20652635d73105b06d1d9f3b88eaea0616394d1c387437365"
+    }
+  ],
+  "boundary": "Kotlin PSI syntax only; no Android type check or real OkHttp execution."
+}

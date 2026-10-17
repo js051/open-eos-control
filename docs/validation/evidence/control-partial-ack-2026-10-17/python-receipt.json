@@ -1,0 +1,36 @@
+{
+  "red": {
+    "exit": 1,
+    "production_source_sha256": "23f2cece6fb81e85884ad014f7dac5342920295c51d2c4113f05e74a44e18830",
+    "tests_sha256": "ba252914c1913b69d87ee74bdc8de4c7d1361447d16f788217fd676814fb5815",
+    "summary": "30 failed, 56 passed, 1 warning in 1.04s",
+    "test_files": [
+      "bridge/tests/test_ccapi_control_partial_ack.py"
+    ]
+  },
+  "green": {
+    "exit": 0,
+    "production_source_sha256": "d25ca857b1a0e473e2db0d3408954beb4e1ca164a595b185af6589c65259342d",
+    "tests_sha256": "ba252914c1913b69d87ee74bdc8de4c7d1361447d16f788217fd676814fb5815",
+    "summary": "86 passed, 1 warning in 0.87s",
+    "test_files": [
+      "bridge/tests/test_ccapi_control_partial_ack.py"
+    ]
+  },
+  "regression": {
+    "exit": 0,
+    "production_source_sha256": "d25ca857b1a0e473e2db0d3408954beb4e1ca164a595b185af6589c65259342d",
+    "tests_sha256": "ba252914c1913b69d87ee74bdc8de4c7d1361447d16f788217fd676814fb5815",
+    "summary": "466 passed, 2 warnings in 44.66s",
+    "test_files": [
+      "bridge/tests/test_ccapi_control_partial_ack.py",
+      "bridge/tests/test_ccapi_bulb_recovery.py",
+      "bridge/tests/test_focus_contract.py",
+      "bridge/tests/test_ccapi_live_view_recovery.py",
+      "bridge/tests/test_shutter_autofocus.py",
+      "bridge/tests/test_shooting_settings.py",
+      "bridge/tests/test_recording_lifecycle.py",
+      "bridge/tests/test_bulb_request_ownership.py"
+    ]
+  }
+}
