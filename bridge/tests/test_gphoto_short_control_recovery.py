@@ -248,3 +248,21 @@ def test_asgi_short_control_retry_and_replacement_isolation(short, disconnect, t
             assert stopped.status_code == 200
             assert stopped.json()['shutterReleaseUnconfirmed'] is False
             assert runner.active is False
+
+
+@pytest.mark.parametrize('phase', ['press', 'hold'])
+def test_interrupt_still_attempts_saved_release_and_preserves_interrupt(short, phase):
+    session, runner, operate, _ = short
+    if phase == 'press':
+        original = session._set_config_value
+        def interrupted(*args, **kwargs):
+            original(*args, **kwargs)
+            raise KeyboardInterrupt('Synthetic interrupted press')
+        session._set_config_value = interrupted
+    else:
+        session._sleep = lambda _: (_ for _ in ()).throw(KeyboardInterrupt('Synthetic interrupted hold'))
+    with pytest.raises(KeyboardInterrupt):
+        operate()
+    assert runner.active is False
+    assert len(runner.writes()) == 2
+    assert session.status().shutter_release_unconfirmed is False

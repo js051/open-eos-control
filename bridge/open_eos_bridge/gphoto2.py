@@ -2179,11 +2179,11 @@ class GPhoto2Session:
         # Save the validated exact Stop before the first command may reach the camera.
         self._short_control_release = (release_path, release_value, feature)
         self._shutter_release_unconfirmed = True
-        primary: Exception | None = None
+        primary: BaseException | None = None
         try:
             self._set_config_value(config, press_value, refresh=False)
             self._sleep(0.35)
-        except Exception as error:
+        except BaseException as error:
             primary = error
         try:
             self._release_short_control_locked()
