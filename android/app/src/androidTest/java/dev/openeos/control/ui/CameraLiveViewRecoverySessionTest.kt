@@ -44,6 +44,7 @@ class CameraLiveViewRecoverySessionTest {
     private val failStart = AtomicBoolean(true)
     private val failStop = AtomicBoolean(true)
     private val failFrames = AtomicBoolean(false)
+    private val undecodableFrames = AtomicBoolean(false)
     private val writes = CopyOnWriteArrayList<String>()
     private val blockNextStart = AtomicBoolean(false)
     private val startEntered = CountDownLatch(1)
@@ -92,7 +93,11 @@ class CameraLiveViewRecoverySessionTest {
                     path.endsWith("/shooting/settings") -> json("{}")
                     path.endsWith("/shooting/liveview/flip") ->
                         MockResponse().setHeader("Content-Type", "image/jpeg")
-                            .setBody(Buffer().write(if (failFrames.get()) byteArrayOf(1, 2, 3) else jpeg))
+                            .setBody(Buffer().write(when {
+                                failFrames.get() -> byteArrayOf(1, 2, 3)
+                                undecodableFrames.get() -> byteArrayOf(-1, -40, -1, -39) // SOI/EOI only.
+                                else -> jpeg
+                            }))
                     else -> MockResponse().setResponseCode(404)
                 }
             }
@@ -243,6 +248,34 @@ class CameraLiveViewRecoverySessionTest {
         compose.waitUntil(TIMEOUT) { !repository.isLiveViewStopRequired() && !viewModel.uiState.value.busy }
         assertEquals(starts, writes.count { it == "start" })
         assertFalse(viewModel.uiState.value.liveViewAutoRefresh)
+    }
+
+    @Test fun androidDecodeFailureRetainsTypedDetailsAndRequiresExplicitRestart() {
+        recoverHealthyPreview()
+        val starts = writes.count { it == "start" }
+        val stops = writes.count { it == "stop" }
+        // Pass the wire reader's JPEG marker framing, then fail the actual Android bitmap decoder.
+        undecodableFrames.set(true)
+        compose.waitUntil(TIMEOUT) {
+            viewModel.uiState.value.liveViewStreamFailed && !viewModel.uiState.value.busy &&
+                !repository.isLiveViewStopRequired()
+        }
+        compose.runOnIdle {
+            val state = viewModel.uiState.value
+            assertEquals(LiveViewDecodeFailure(4, "image/jpeg"), liveViewDecodeFailure(state.error.orEmpty()))
+            assertEquals(CameraOperation.LIVE_VIEW, state.errorOperation)
+            assertFalse(state.liveViewAutoRefresh)
+            assertNull(state.liveViewBitmap)
+            assertNull(state.liveViewDiagnostics.lastFrameAtMillis)
+        }
+        assertEquals(starts, writes.count { it == "start" })
+        assertEquals(stops + 1, writes.count { it == "stop" })
+        undecodableFrames.set(false)
+        compose.runOnIdle { viewModel.setLiveViewAutoRefresh(true) }
+        compose.waitUntil(TIMEOUT) { viewModel.uiState.value.liveViewBitmap != null && !viewModel.uiState.value.busy }
+        assertEquals(starts + 1, writes.count { it == "start" })
+        assertFalse(viewModel.uiState.value.liveViewStreamFailed)
+        assertNull(viewModel.uiState.value.error)
     }
 
     @Test fun backgroundClearsPixelsImmediatelyAndForegroundCreatesAFreshSourceAttempt() {

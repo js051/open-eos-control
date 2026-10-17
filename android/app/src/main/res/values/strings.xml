@@ -469,6 +469,8 @@
     <string name="media_batch_partial">Completed %1$d of %2$d items; %3$d failed and can be retried.</string>
     <string name="media_batch_download_stopped">Download stopped: %1$d confirmed, %2$d failed, %3$d not started. Check the destination before explicitly continuing or selecting another download.</string>
     <string name="media_batch_failed_items">Failed: %1$s</string>
+    <string name="camera_error_live_view_decode_failed">Android could not decode the received Live View frame (%1$d bytes, %2$s).</string>
+    <string name="camera_error_live_view_content_type_unknown">unknown content type</string>
     <string name="camera_error_timeout">The camera did not respond in time. Keep it awake and retry.</string>
     <string name="camera_error_connection_interrupted">The camera connection was interrupted. Reconnect and retry.</string>
     <string name="camera_error_upload_filename_unknown">Android could not determine the selected file name. Choose another file.</string>
