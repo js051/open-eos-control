@@ -1,0 +1,1338 @@
+{
+  "baseline": "27e6e3cbba2faaaebe48923124608f47dee5410d",
+  "scope": "Three original focus command receipts, Bridge and Android; no transport flag changes.",
+  "sources": [
+    {
+      "file": "bridge/open_eos_bridge/ccapi.py",
+      "sha256": "0ed895fb8ac64ee5304462404b3c89515053b586a080143aebbac87a879eb35c"
+    },
+    {
+      "file": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+      "sha256": "9fa6a4475b34dfb112103628772ff6bd3b03d2765e281c7c5ad5bceb905f1a59"
+    },
+    {
+      "file": "bridge/open_eos_bridge/static/app.js",
+      "sha256": "79d6b9ad96b7f7fc9d3c2761353b09ccb91e54994796ff3f049566141c32c524"
+    },
+    {
+      "file": "bridge/tests/test_ccapi_focus_ack_receipts.py",
+      "sha256": "6039988c9cf579a5c61dbfc4a92d19c80985d92c7bc11ea68263e57d4be5414a"
+    },
+    {
+      "file": "android/app/src/test/java/dev/openeos/control/data/CcapiFocusAckReceiptTest.kt",
+      "sha256": "ac1661d80ad8588fde7f57f33406b643ab778da5929cfa77924b2766e9c86380"
+    },
+    {
+      "file": "scripts/validation/run_focus_ack_api.py",
+      "sha256": "70259484cabdedf92fec92af667886c1d068045764281090f591a816db11ed7e"
+    },
+    {
+      "file": "scripts/validation/run_focus_ack_pc_feedback.mjs",
+      "sha256": "008112987d9436a11a089b4f2a596d6c8ab3d37ac22def8ca223bec13f3fc755"
+    },
+    {
+      "file": "scripts/validation/run_android_focus_ack_host.py",
+      "sha256": "3d371d4cae1289f1a0c906122e4a9d5dcb1385b596c9ba8e3187759792d7b1b1"
+    },
+    {
+      "file": "scripts/validation/fixtures/android-focus-ack-host/HostClient.kt",
+      "sha256": "f6433b8f903610ecdc5b898389c2bd74f172943bb4875ae2e372a10e6087bf79"
+    },
+    {
+      "file": "scripts/validation/fixtures/android-focus-ack-host/FocusAckTest.kt",
+      "sha256": "6a0fbdf3c55f74feba99e77b23898dc7ed7c0f8d8bd8937af205852a92600a1d"
+    }
+  ],
+  "checks": {
+    "bridge_focused_baseline": {
+      "tests": 38,
+      "expected_failures": 9,
+      "passed": 29
+    },
+    "bridge_focused_current": {
+      "tests": 38,
+      "passed": 38
+    },
+    "bridge_regressions": {
+      "tests": 353,
+      "passed": 353
+    },
+    "pc_regressions": {
+      "tests": 113,
+      "passed": 113
+    },
+    "android_focus_baseline": {
+      "tests": 13,
+      "expected_failures": 9
+    },
+    "android_focus_current": {
+      "tests": 13,
+      "passed": 13
+    },
+    "android_generic_ack_regression": {
+      "tests": 13,
+      "passed": 13
+    },
+    "android_release_regression": {
+      "tests": 14,
+      "passed": 14
+    },
+    "android_liveview_regression": {
+      "tests": 12,
+      "passed": 12
+    },
+    "android_still_regression": {
+      "tests": 3,
+      "passed": 3
+    },
+    "ruff": "PASS",
+    "diff_check": "PASS",
+    "independent_production_review": "PASS: separate three-pair receipt gates; no blocking finding"
+  },
+  "jvm_heap_limit_mb": 256,
+  "active_processor_count": 1,
+  "limits": {
+    "api": "Real API/session/urllib, synthetic discovery/status/frame and raw response provider; no camera network.",
+    "pc": "Exact unchanged app.js functions with synthetic DOM, API adapter, timer/render; not browser E2E.",
+    "android_host": "Exact public entries and requestOk; synthetic transport, discovery, geometry and status.",
+    "android_native_mockwebserver_21_cases": "AUTHORED_NOT_RUN",
+    "android_gradle_full_native_suite": "NOT_RUN",
+    "physical_devices": "NOT_RUN",
+    "push_merge_release": "NOT_RUN"
+  },
+  "api_pc_cases": [
+    {
+      "control": "drive",
+      "variant": "partial_206",
+      "wire_status": 206,
+      "range_present": false,
+      "synthetic_mutation_applied": false,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/control/drivefocus",
+          {
+            "value": "near2"
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "partial_206",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "focusDriveAccepted",
+            "error": false
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "partial_206",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "INVALID_CCAPI_RESPONSE",
+            "error": true
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "drive",
+      "variant": "ranged_200",
+      "wire_status": 200,
+      "range_present": true,
+      "synthetic_mutation_applied": false,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/control/drivefocus",
+          {
+            "value": "near2"
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "ranged_200",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "focusDriveAccepted",
+            "error": false
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "ranged_200",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "INVALID_CCAPI_RESPONSE",
+            "error": true
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "drive",
+      "variant": "empty_range_200",
+      "wire_status": 200,
+      "range_present": true,
+      "synthetic_mutation_applied": false,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/control/drivefocus",
+          {
+            "value": "near2"
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "empty_range_200",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "focusDriveAccepted",
+            "error": false
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "empty_range_200",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "INVALID_CCAPI_RESPONSE",
+            "error": true
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "drive",
+      "variant": "valid_json_200",
+      "wire_status": 200,
+      "range_present": false,
+      "synthetic_mutation_applied": true,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/control/drivefocus",
+          {
+            "value": "near2"
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "valid_json_200",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "focusDriveAccepted",
+            "error": false
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "valid_json_200",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "focusDriveAccepted",
+            "error": false
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "drive",
+      "variant": "valid_empty_204",
+      "wire_status": 204,
+      "range_present": false,
+      "synthetic_mutation_applied": true,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/control/drivefocus",
+          {
+            "value": "near2"
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "valid_empty_204",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "focusDriveAccepted",
+            "error": false
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "valid_empty_204",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "focusDriveAccepted",
+            "error": false
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "drive",
+      "variant": "valid_plain_200",
+      "wire_status": 200,
+      "range_present": false,
+      "synthetic_mutation_applied": true,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/control/drivefocus",
+          {
+            "value": "near2"
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "valid_plain_200",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "focusDriveAccepted",
+            "error": false
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "valid_plain_200",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "focusDriveAccepted",
+            "error": false
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "drive",
+      "variant": "rejected_503",
+      "wire_status": 503,
+      "range_present": false,
+      "synthetic_mutation_applied": false,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/control/drivefocus",
+          {
+            "value": "near2"
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "rejected_503",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "CCAPI_HTTP_ERROR",
+            "error": true
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "drive",
+          "variant": "rejected_503",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "CCAPI_HTTP_ERROR",
+            "error": true
+          },
+          "reticle": "",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "tap",
+      "variant": "partial_206",
+      "wire_status": 206,
+      "range_present": false,
+      "synthetic_mutation_applied": false,
+      "original_commands": [
+        [
+          "PUT",
+          "/ccapi/ver100/shooting/liveview/afframeposition",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "partial_206",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "focusAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle accepted",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "partial_206",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "INVALID_CCAPI_RESPONSE",
+            "error": true
+          },
+          "reticle": "focus-reticle failure",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "tap",
+      "variant": "ranged_200",
+      "wire_status": 200,
+      "range_present": true,
+      "synthetic_mutation_applied": false,
+      "original_commands": [
+        [
+          "PUT",
+          "/ccapi/ver100/shooting/liveview/afframeposition",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "ranged_200",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "focusAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle accepted",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "ranged_200",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "INVALID_CCAPI_RESPONSE",
+            "error": true
+          },
+          "reticle": "focus-reticle failure",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "tap",
+      "variant": "empty_range_200",
+      "wire_status": 200,
+      "range_present": true,
+      "synthetic_mutation_applied": false,
+      "original_commands": [
+        [
+          "PUT",
+          "/ccapi/ver100/shooting/liveview/afframeposition",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "empty_range_200",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "focusAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle accepted",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "empty_range_200",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "INVALID_CCAPI_RESPONSE",
+            "error": true
+          },
+          "reticle": "focus-reticle failure",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "tap",
+      "variant": "valid_json_200",
+      "wire_status": 200,
+      "range_present": false,
+      "synthetic_mutation_applied": true,
+      "original_commands": [
+        [
+          "PUT",
+          "/ccapi/ver100/shooting/liveview/afframeposition",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "valid_json_200",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "focusAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle accepted",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "valid_json_200",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "focusAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle accepted",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "tap",
+      "variant": "valid_empty_204",
+      "wire_status": 204,
+      "range_present": false,
+      "synthetic_mutation_applied": true,
+      "original_commands": [
+        [
+          "PUT",
+          "/ccapi/ver100/shooting/liveview/afframeposition",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "valid_empty_204",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "focusAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle accepted",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "valid_empty_204",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "focusAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle accepted",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "tap",
+      "variant": "valid_plain_200",
+      "wire_status": 200,
+      "range_present": false,
+      "synthetic_mutation_applied": true,
+      "original_commands": [
+        [
+          "PUT",
+          "/ccapi/ver100/shooting/liveview/afframeposition",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "valid_plain_200",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "focusAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle accepted",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "valid_plain_200",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "focusAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle accepted",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "tap",
+      "variant": "rejected_503",
+      "wire_status": 503,
+      "range_present": false,
+      "synthetic_mutation_applied": false,
+      "original_commands": [
+        [
+          "PUT",
+          "/ccapi/ver100/shooting/liveview/afframeposition",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "rejected_503",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "CCAPI_HTTP_ERROR",
+            "error": true
+          },
+          "reticle": "focus-reticle failure",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "tap",
+          "variant": "rejected_503",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "CCAPI_HTTP_ERROR",
+            "error": true
+          },
+          "reticle": "focus-reticle failure",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "white_balance",
+      "variant": "partial_206",
+      "wire_status": 206,
+      "range_present": false,
+      "synthetic_mutation_applied": false,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/liveview/clickwb",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "partial_206",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "clickWhiteBalanceAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle success",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "partial_206",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "INVALID_CCAPI_RESPONSE",
+            "error": true
+          },
+          "reticle": "focus-reticle failure",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "white_balance",
+      "variant": "ranged_200",
+      "wire_status": 200,
+      "range_present": true,
+      "synthetic_mutation_applied": false,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/liveview/clickwb",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "ranged_200",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "clickWhiteBalanceAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle success",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "ranged_200",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "INVALID_CCAPI_RESPONSE",
+            "error": true
+          },
+          "reticle": "focus-reticle failure",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "white_balance",
+      "variant": "empty_range_200",
+      "wire_status": 200,
+      "range_present": true,
+      "synthetic_mutation_applied": false,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/liveview/clickwb",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "empty_range_200",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "clickWhiteBalanceAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle success",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "empty_range_200",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "INVALID_CCAPI_RESPONSE",
+            "error": true
+          },
+          "reticle": "focus-reticle failure",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "white_balance",
+      "variant": "valid_json_200",
+      "wire_status": 200,
+      "range_present": false,
+      "synthetic_mutation_applied": true,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/liveview/clickwb",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "valid_json_200",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "clickWhiteBalanceAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle success",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "valid_json_200",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "clickWhiteBalanceAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle success",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "white_balance",
+      "variant": "valid_empty_204",
+      "wire_status": 204,
+      "range_present": false,
+      "synthetic_mutation_applied": true,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/liveview/clickwb",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "valid_empty_204",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "clickWhiteBalanceAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle success",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "valid_empty_204",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "clickWhiteBalanceAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle success",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "white_balance",
+      "variant": "valid_plain_200",
+      "wire_status": 200,
+      "range_present": false,
+      "synthetic_mutation_applied": true,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/liveview/clickwb",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "valid_plain_200",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "clickWhiteBalanceAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle success",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 200,
+        "observed": true,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "valid_plain_200",
+          "synthetic_mutation_applied": true,
+          "feedback": {
+            "text": "clickWhiteBalanceAccepted",
+            "error": false
+          },
+          "reticle": "focus-reticle success",
+          "api_calls": 1
+        }
+      }
+    },
+    {
+      "control": "white_balance",
+      "variant": "rejected_503",
+      "wire_status": 503,
+      "range_present": false,
+      "synthetic_mutation_applied": false,
+      "original_commands": [
+        [
+          "POST",
+          "/ccapi/ver100/shooting/liveview/clickwb",
+          {
+            "positionx": 2500,
+            "positiony": 2600
+          }
+        ]
+      ],
+      "baseline": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "rejected_503",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "CCAPI_HTTP_ERROR",
+            "error": true
+          },
+          "reticle": "focus-reticle failure",
+          "api_calls": 1
+        }
+      },
+      "current": {
+        "api_status": 502,
+        "observed": false,
+        "mutation_calls": 1,
+        "pc": {
+          "control": "white_balance",
+          "variant": "rejected_503",
+          "synthetic_mutation_applied": false,
+          "feedback": {
+            "text": "CCAPI_HTTP_ERROR",
+            "error": true
+          },
+          "reticle": "focus-reticle failure",
+          "api_calls": 1
+        }
+      }
+    }
+  ],
+  "android_extracts": [
+    {
+      "phase": "red",
+      "expected_result_verified": true,
+      "source_guards": [],
+      "methods": [
+        {
+          "file": "DRIVE",
+          "sha256": "da117476fdb1cd6228650f89f0adcff3d860c0e8b4d4065c7372643e282cc1ae"
+        },
+        {
+          "file": "COORDINATES",
+          "sha256": "7658ce1823e0f48e2f2b930bde2dd10391f66bc927997467798899a6e92e44d3"
+        },
+        {
+          "file": "COMMAND",
+          "sha256": "d18bc70065feb02be0e2da5a7438adbf55e65e20549392061891de6bf18897a7"
+        },
+        {
+          "file": "REQUEST_OK",
+          "sha256": "9be5858d34bf3faf1c6b2e0d9f5793c670f0ad14d8ee8d08201f47733d084d26"
+        }
+      ],
+      "tools": [
+        {
+          "file": "kotlin-compiler-embeddable-2.2.21.jar",
+          "sha256": "9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295"
+        },
+        {
+          "file": "kotlin-stdlib-2.2.21.jar",
+          "sha256": "6558a3d233da56a20934b32159f9db5f86ed5816ef098f78a2c223dc6abb79dd"
+        },
+        {
+          "file": "kotlin-script-runtime-2.2.21.jar",
+          "sha256": "2b1519b427b514d1536c1b425674b03fe914af637924028e9959c6625442df51"
+        },
+        {
+          "file": "kotlin-reflect-1.6.10.jar",
+          "sha256": "3277ac102ae17aad10a55abec75ff5696c8d109790396434b496e75087854203"
+        },
+        {
+          "file": "kotlin-daemon-embeddable-2.2.21.jar",
+          "sha256": "91c0673c22e44b054ae0314d323860ebe1f3aff3f0ebc74fff82c4733dde09be"
+        },
+        {
+          "file": "kotlinx-coroutines-core-jvm-1.8.0.jar",
+          "sha256": "9860906a1937490bf5f3b06d2f0e10ef451e65b95b269f22daf68a3d1f5065c5"
+        },
+        {
+          "file": "kotlinx-coroutines-core-jvm-1.9.0.jar",
+          "sha256": "ad89c2892235e670f222d819cb3d81188143cb19a05b59df9889ae4269f5c70a"
+        },
+        {
+          "file": "annotations-23.0.0.jar",
+          "sha256": "7b0f19724082cbfcbc66e5abea2b9bc92cf08a1ea11e191933ed43801eb3cd05"
+        },
+        {
+          "file": "junit-4.13.2.jar",
+          "sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3"
+        },
+        {
+          "file": "hamcrest-core-1.3.jar",
+          "sha256": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+        }
+      ]
+    },
+    {
+      "phase": "green",
+      "expected_result_verified": true,
+      "source_guards": [
+        "all three public entries and commandOk are byte-for-byte identical to baseline",
+        "removing only the independent receipt predicate restores the original requestOk method"
+      ],
+      "methods": [
+        {
+          "file": "DRIVE",
+          "sha256": "da117476fdb1cd6228650f89f0adcff3d860c0e8b4d4065c7372643e282cc1ae"
+        },
+        {
+          "file": "COORDINATES",
+          "sha256": "7658ce1823e0f48e2f2b930bde2dd10391f66bc927997467798899a6e92e44d3"
+        },
+        {
+          "file": "COMMAND",
+          "sha256": "d18bc70065feb02be0e2da5a7438adbf55e65e20549392061891de6bf18897a7"
+        },
+        {
+          "file": "REQUEST_OK",
+          "sha256": "7944a974e769497ef7cfb7c8d6dc1dc42388662a2d6085f9562660b775b7a6d9"
+        }
+      ],
+      "tools": [
+        {
+          "file": "kotlin-compiler-embeddable-2.2.21.jar",
+          "sha256": "9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295"
+        },
+        {
+          "file": "kotlin-stdlib-2.2.21.jar",
+          "sha256": "6558a3d233da56a20934b32159f9db5f86ed5816ef098f78a2c223dc6abb79dd"
+        },
+        {
+          "file": "kotlin-script-runtime-2.2.21.jar",
+          "sha256": "2b1519b427b514d1536c1b425674b03fe914af637924028e9959c6625442df51"
+        },
+        {
+          "file": "kotlin-reflect-1.6.10.jar",
+          "sha256": "3277ac102ae17aad10a55abec75ff5696c8d109790396434b496e75087854203"
+        },
+        {
+          "file": "kotlin-daemon-embeddable-2.2.21.jar",
+          "sha256": "91c0673c22e44b054ae0314d323860ebe1f3aff3f0ebc74fff82c4733dde09be"
+        },
+        {
+          "file": "kotlinx-coroutines-core-jvm-1.8.0.jar",
+          "sha256": "9860906a1937490bf5f3b06d2f0e10ef451e65b95b269f22daf68a3d1f5065c5"
+        },
+        {
+          "file": "kotlinx-coroutines-core-jvm-1.9.0.jar",
+          "sha256": "ad89c2892235e670f222d819cb3d81188143cb19a05b59df9889ae4269f5c70a"
+        },
+        {
+          "file": "annotations-23.0.0.jar",
+          "sha256": "7b0f19724082cbfcbc66e5abea2b9bc92cf08a1ea11e191933ed43801eb3cd05"
+        },
+        {
+          "file": "junit-4.13.2.jar",
+          "sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3"
+        },
+        {
+          "file": "hamcrest-core-1.3.jar",
+          "sha256": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+        }
+      ]
+    }
+  ],
+  "pc_extracts": [
+    {
+      "file": "driveFocus",
+      "sha256": "28d15a388f004baf2b3dcbc230e5b010417e10309a2f6ce6b473060b63a0dcb0"
+    },
+    {
+      "file": "tapFocus",
+      "sha256": "103e0539515f0739a9f2e7bf450731cfd8f69db54b5605a372593225240dd641"
+    }
+  ],
+  "local_evidence": [
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/android-green.log",
+      "sha256": "e0a075335e0c2ac15668de648bb413fc44f9282e9a95ed408c719e30e35c70fb"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/android-red.log",
+      "sha256": "9caa192ad13c732d50fe353480c797039c04501cb5543bc558b24b8a918a2b20"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/bridge-green.log",
+      "sha256": "8ea06ac7b3cd0e10cf2d9ee577ee5bc0ac0de29fbfbbc73f0931a7c0ccc54875"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/bridge-red.log",
+      "sha256": "59ab26fdb75cf8ec1d6c4fe16e2d7c57a8a543cea435852362e33c473d6ce559"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/bridge-regression.log",
+      "sha256": "e4722c808799d33e5c4a62e3407dcda39bc8c2b2da17c23695511930f066abd1"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/pc-regression.log",
+      "sha256": "7f992cb25704f00f282ea49b6246e89da1cddfd94686e3c2d5479d2a6a6c6b2b"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/precommit-scan.log",
+      "sha256": "369a98a19945a8b08d99f117989f3e6df776b583ebb55b578bfa67600584d2ca"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/ruff.log",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/run-android-direct-release-transport-host.log",
+      "sha256": "0051c0845608ab86af0cd05d385c4703b5086189c8f55221c548a414d6f977ad"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/run-android-liveview-transport-host.log",
+      "sha256": "92b907e710ec4568cf11013ce02ed17a26d7bff5098e86f0eb7559c163a498d2"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/run-android-still-transport-host.log",
+      "sha256": "b3e45b11072a3da5f5d7d2cc3a2a7405f4f9648bb1df9889eec2d311f4b9bff0"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/run_android_control_partial_ack_host.log",
+      "sha256": "5b688aeba3191829c22940472df4cb8a4709debb438b72c91f2e2109329ca440"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/api-green.jsonl",
+      "sha256": "fc98be8ed1bc84cbdc5fe19dee77c439ec25b94695ef56e3b796d02178a185b1"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/api-red.jsonl",
+      "sha256": "781a926710380922f2eb2ae2554fcdd31d283af7eedd375fb37d91ab117648d2"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/pc-green.jsonl",
+      "sha256": "571ae331cab5e5b07d5141c7551818d7e540937cc926fa4459e43b8b5f9de9ed"
+    },
+    {
+      "file": ".codex/evidence/focus-ack-receipts-20261017/pc-red.jsonl",
+      "sha256": "7a8f11639de4648f04b555b27db1c8d768a49cba9b5860fddba51a8d21149f64"
+    }
+  ]
+}

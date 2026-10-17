@@ -814,6 +814,14 @@ _CONTROL_BODY_ROUTES = (
     ("DELETE", "/shooting/liveview/multipart"),
 )
 
+# Receipt integrity only: these focus operations keep their existing body,
+# deadline, redirect and retry policy rather than joining _CONTROL_BODY_ROUTES.
+_FOCUS_CONTROL_ACK_ROUTES = (
+    ("POST", "/shooting/control/drivefocus"),
+    ("PUT", "/shooting/liveview/afframeposition"),
+    ("POST", "/shooting/liveview/clickwb"),
+)
+
 
 def _read_ccapi_body_with_deadline(body: BinaryIO, limit: int, deadline: float) -> bytes:
     # Cooperative budget between single buffered reads. DNS, open, headers and
@@ -5123,7 +5131,7 @@ class CcapiSession:
         # A partial representation cannot acknowledge an original physical control.
         # Keep legacy success bodies/statuses and media range reads unchanged.
         control_resource = any(method == control_method and path.split("?", 1)[0].endswith(suffix)
-                               for control_method, suffix in _CONTROL_BODY_ROUTES)
+                               for control_method, suffix in _CONTROL_BODY_ROUTES + _FOCUS_CONTROL_ACK_ROUTES)
         if control_resource and (response.status == 206
                                  or any(name.casefold() == "content-range" for name in response.headers)):
             raise BridgeError(

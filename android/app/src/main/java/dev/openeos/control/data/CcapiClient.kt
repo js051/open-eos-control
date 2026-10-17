@@ -4761,7 +4761,16 @@ class CcapiClient(
                     message = "Camera request failed: ${request.method} ${request.url} returned HTTP ${response.code}\nBody: $body",
                 )
             }
-            if (stillCapture || liveViewControl || releaseControl) {
+            // Focus receipt integrity is independent of bounded-body/strict-client flags.
+            // Preserve the three commands' existing timeout, JSON and retry behavior.
+            val focusPath = request.url.toString().substringBefore('?')
+            val focusControl = when (request.method) {
+                "POST" -> focusPath.endsWith("/shooting/control/drivefocus") ||
+                    focusPath.endsWith("/shooting/liveview/clickwb")
+                "PUT" -> focusPath.endsWith("/shooting/liveview/afframeposition")
+                else -> false
+            }
+            if (stillCapture || liveViewControl || releaseControl || focusControl) {
                 // A partial representation cannot acknowledge the original physical control.
                 // Header presence includes an empty value; legacy complete bodies remain valid.
                 check(response.code != 206 && response.headers("Content-Range").isEmpty()) {
