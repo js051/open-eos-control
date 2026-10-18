@@ -1599,7 +1599,7 @@ class CcapiClient(
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
-            if (evidence.unresolved && (exception is IOException || exception is JSONException)) {
+            if (evidence.responseEvidence() == RecordingResponseEvidence.UNKNOWN) {
                 throw RecordingCommandUnconfirmedException(command, exception)
             }
             throw exception
@@ -2453,6 +2453,9 @@ class CcapiClient(
         start: suspend () -> Unit,
     ) {
         check(pendingLiveViewStop == null) { "Live View must be stopped before starting again." }
+        // A confirmed cleanup retires the prior source's geometry. Each admitted
+        // AUTO fallback needs a fresh owner before its first frame can be read.
+        liveViewGeometry.reset()
         liveViewStartAttempt += 1
         firstLiveViewFrame = null
         pendingLiveViewStop = stop

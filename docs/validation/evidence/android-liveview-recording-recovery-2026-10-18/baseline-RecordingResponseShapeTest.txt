@@ -1,0 +1,19 @@
+JUnit version 4.13.2
+.E..
+Time: 6.808
+There was 1 failure:
+1) bridgeRecResponsesAndStatusReadsRequireBooleanRecordingWithoutCoercion(dev.openeos.control.data.RecordingResponseShapeTest)
+java.lang.IllegalStateException: Desktop Bridge session retirement was not acknowledged.
+	at dev.openeos.control.data.DesktopBridgeClient$requestOk$2.invokeSuspend(DesktopBridgeClient.kt:2441)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.internal.LimitedDispatcher$Worker.run(LimitedDispatcher.kt:113)
+	at kotlinx.coroutines.scheduling.TaskImpl.run(Tasks.kt:89)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:589)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:823)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:720)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:707)
+
+FAILURES!!!
+Tests run: 3,  Failures: 1
+

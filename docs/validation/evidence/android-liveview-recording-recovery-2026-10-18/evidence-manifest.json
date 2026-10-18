@@ -1,0 +1,237 @@
+[
+  {
+    "file": "baseline-CcapiMultipartLiveViewSessionTest.txt",
+    "raw_sha256": "6923f3a8c09234770e4109e5d5a776d3004182fa5f41a41434bf3b8cd66da304",
+    "normalized_sha256": "6923f3a8c09234770e4109e5d5a776d3004182fa5f41a41434bf3b8cd66da304"
+  },
+  {
+    "file": "baseline-CcapiFocusReleaseRecoveryTest.txt",
+    "raw_sha256": "c0ef75c845881ef54e8043c02031b54f851182eaee6fdcb0fd4e91caebd7a2e2",
+    "normalized_sha256": "c0ef75c845881ef54e8043c02031b54f851182eaee6fdcb0fd4e91caebd7a2e2"
+  },
+  {
+    "file": "baseline-OriginalMediaDownloadIntegrityTest.txt",
+    "raw_sha256": "0eeba5f1bb961ab6afa2c9dac7023da111950041475e93adf9b27b317fa1f376",
+    "normalized_sha256": "0eeba5f1bb961ab6afa2c9dac7023da111950041475e93adf9b27b317fa1f376"
+  },
+  {
+    "file": "baseline-DesktopBridgeLiveViewRecoveryTest.txt",
+    "raw_sha256": "e7aed9b11edc0d18278705b4b9886af8a867f3548098fe300405e89b0f224546",
+    "normalized_sha256": "e7aed9b11edc0d18278705b4b9886af8a867f3548098fe300405e89b0f224546"
+  },
+  {
+    "file": "baseline-BridgeMediaListingTest.txt",
+    "raw_sha256": "5932cc09c264acffb2137abb4602a3aa894ce1f45706d303c3b33d3531c5e542",
+    "normalized_sha256": "5932cc09c264acffb2137abb4602a3aa894ce1f45706d303c3b33d3531c5e542"
+  },
+  {
+    "file": "baseline-DesktopBridgeClientTest.txt",
+    "raw_sha256": "c7e61cb04d0eeec832f8c073d56cac78c068176fb54675ac4049108dbdb5ca00",
+    "normalized_sha256": "c7e61cb04d0eeec832f8c073d56cac78c068176fb54675ac4049108dbdb5ca00"
+  },
+  {
+    "file": "baseline-DesktopBridgeShutterRecoveryTest.txt",
+    "raw_sha256": "49bed113148c633aee0a561fb6bbe7efa52ba5f8d5fdd113a999787209dc295e",
+    "normalized_sha256": "49bed113148c633aee0a561fb6bbe7efa52ba5f8d5fdd113a999787209dc295e"
+  },
+  {
+    "file": "baseline-RecordingResponseShapeTest.txt",
+    "raw_sha256": "11dd2479c9b1a38111d106a95df7c193c2c523fe5515a7783bc237a457a78309",
+    "normalized_sha256": "11dd2479c9b1a38111d106a95df7c193c2c523fe5515a7783bc237a457a78309"
+  },
+  {
+    "file": "baseline-ConnectionFailureProtocolTest.txt",
+    "raw_sha256": "1403dd62af5e266662e66c18a666a2dc33e8dd63725a9bf7f08e32a04e820f0d",
+    "normalized_sha256": "1403dd62af5e266662e66c18a666a2dc33e8dd63725a9bf7f08e32a04e820f0d"
+  },
+  {
+    "file": "baseline-MediaMetadataTransportTest.txt",
+    "raw_sha256": "35c72645216a115591ae1d1d73cc660f6ab1e8df7b4063cef9d1ddeeb25ac064",
+    "normalized_sha256": "35c72645216a115591ae1d1d73cc660f6ab1e8df7b4063cef9d1ddeeb25ac064"
+  },
+  {
+    "file": "baseline-CcapiLiveViewCompletionTest.txt",
+    "raw_sha256": "1d9576dd63c4a4ae0c6fbc4f255a951b45ef46640eed8c48d0a96b89f1434f4d",
+    "normalized_sha256": "1d9576dd63c4a4ae0c6fbc4f255a951b45ef46640eed8c48d0a96b89f1434f4d"
+  },
+  {
+    "file": "baseline-CameraRepositoryTest.txt",
+    "raw_sha256": "ba5dca9cd0a07e4487da755aa994fd4689401e7f0f78ab36eceec0e66970500c",
+    "normalized_sha256": "ba5dca9cd0a07e4487da755aa994fd4689401e7f0f78ab36eceec0e66970500c"
+  },
+  {
+    "file": "baseline-DesktopBridgeControlDeadlineTest.txt",
+    "raw_sha256": "76d495f2c85aebfc9fdf6638df94be36471ab80f8a1415f9427103fb0751c791",
+    "normalized_sha256": "76d495f2c85aebfc9fdf6638df94be36471ab80f8a1415f9427103fb0751c791"
+  },
+  {
+    "file": "baseline-RecordingLifecycleBridgeTest.txt",
+    "raw_sha256": "0e2a458ae122543d7bee801dd5559549a5e1be223655585dabd2e59fa71cfa59",
+    "normalized_sha256": "0e2a458ae122543d7bee801dd5559549a5e1be223655585dabd2e59fa71cfa59"
+  },
+  {
+    "file": "baseline-DesktopBridgeFocusParityTest.txt",
+    "raw_sha256": "ad109a4060c2b77344501a0f8bd010c5de14d04a9d753a30c3339fca31fb021c",
+    "normalized_sha256": "ad109a4060c2b77344501a0f8bd010c5de14d04a9d753a30c3339fca31fb021c"
+  },
+  {
+    "file": "baseline-CcapiLiveViewJourneyTest.txt",
+    "raw_sha256": "1de38b2be5225dfaa72b4c6410735d3241d35a00a98a42d4b8f74bd8a2c1b907",
+    "normalized_sha256": "1de38b2be5225dfaa72b4c6410735d3241d35a00a98a42d4b8f74bd8a2c1b907"
+  },
+  {
+    "file": "baseline-CcapiShutterAutofocusTest.txt",
+    "raw_sha256": "724bb117126c7adf7130ae745a2ee9fd1e7afabaa9d2f56660f6b01865b4a4f5",
+    "normalized_sha256": "724bb117126c7adf7130ae745a2ee9fd1e7afabaa9d2f56660f6b01865b4a4f5"
+  },
+  {
+    "file": "baseline-CameraMediaStreamingTest.txt",
+    "raw_sha256": "843d9687cbb7f6b34d6b07e9bdec2542563217bf8afe023f562048aade36970e",
+    "normalized_sha256": "843d9687cbb7f6b34d6b07e9bdec2542563217bf8afe023f562048aade36970e"
+  },
+  {
+    "file": "baseline-ShootingSettingTransportTest.txt",
+    "raw_sha256": "ff78f768fb48b6241330862d712d5d33b8dde8c3bd2ff5d133cbf6e8b8429707",
+    "normalized_sha256": "ff78f768fb48b6241330862d712d5d33b8dde8c3bd2ff5d133cbf6e8b8429707"
+  },
+  {
+    "file": "baseline-CcapiMediaImageCancellationTest.txt",
+    "raw_sha256": "d74a19e2c2b17239f1751446a4b776a62155997a6e1a0453ee2cbe9fd8b76fa2",
+    "normalized_sha256": "d74a19e2c2b17239f1751446a4b776a62155997a6e1a0453ee2cbe9fd8b76fa2"
+  },
+  {
+    "file": "baseline-DesktopBridgeShutterAutofocusTest.txt",
+    "raw_sha256": "d9ac07b5c2b8059c1f051e1ea8be8dc5a90fb3fe786fc1601a1d325e46dce3b3",
+    "normalized_sha256": "d9ac07b5c2b8059c1f051e1ea8be8dc5a90fb3fe786fc1601a1d325e46dce3b3"
+  },
+  {
+    "file": "baseline-CcapiClientTest.txt",
+    "raw_sha256": "011b7789a1e65c33497ad71f8ec5e8d75155df920a7d9066e74dfd3397a5496c",
+    "normalized_sha256": "011b7789a1e65c33497ad71f8ec5e8d75155df920a7d9066e74dfd3397a5496c"
+  },
+  {
+    "file": "baseline-CcapiControlRecoveryTest.txt",
+    "raw_sha256": "3642a8dab32e8d2466ec628d7e1777a7b4e8fe97b57974895e328ec6db64e7ce",
+    "normalized_sha256": "3642a8dab32e8d2466ec628d7e1777a7b4e8fe97b57974895e328ec6db64e7ce"
+  },
+  {
+    "file": "baseline-RecordingStatusReadbackTest.txt",
+    "raw_sha256": "cfea953b8d647cf36124e5f031da1d6f98088ba8a9712d5b12c7d558c117e9bc",
+    "normalized_sha256": "cfea953b8d647cf36124e5f031da1d6f98088ba8a9712d5b12c7d558c117e9bc"
+  },
+  {
+    "file": "baseline-DesktopBridgeMediaImageCancellationTest.txt",
+    "raw_sha256": "29d454f58107068456c3f3ba3711d5a3fe92638553ca944a5c434a69269c6577",
+    "normalized_sha256": "29d454f58107068456c3f3ba3711d5a3fe92638553ca944a5c434a69269c6577"
+  },
+  {
+    "file": "baseline-CameraMediaRatingJsonTest.txt",
+    "raw_sha256": "e1c9a01ede6244774cd67eae0b9a97db22dfaee65a21d297a79da0511120f6ae",
+    "normalized_sha256": "e1c9a01ede6244774cd67eae0b9a97db22dfaee65a21d297a79da0511120f6ae"
+  },
+  {
+    "file": "baseline-CameraFocusInfoClientTest.txt",
+    "raw_sha256": "9c579f1042751da5a3c8296b246a3827fcd8fb2a6742e0ead572fe4221822242",
+    "normalized_sha256": "9c579f1042751da5a3c8296b246a3827fcd8fb2a6742e0ead572fe4221822242"
+  },
+  {
+    "file": "baseline-RecordingRequestAdmissionTest.txt",
+    "raw_sha256": "5457d685c09cab37ccbf24fff1ff723c5af9142fce84fcbf0d0cd9065e965306",
+    "normalized_sha256": "5457d685c09cab37ccbf24fff1ff723c5af9142fce84fcbf0d0cd9065e965306"
+  },
+  {
+    "file": "baseline-DesktopBridgeConnectionCancellationTest.txt",
+    "raw_sha256": "170c860a095db314d09f04c63e6268d2bd0fafaf89f9b9e410bf91ca03507977",
+    "normalized_sha256": "170c860a095db314d09f04c63e6268d2bd0fafaf89f9b9e410bf91ca03507977"
+  },
+  {
+    "file": "baseline-CcapiMediaInventoryTest.txt",
+    "raw_sha256": "0f026e3fa7d3daca7a960178ba62e398f9ba433df034eb9bea3314cee4caf16d",
+    "normalized_sha256": "0f026e3fa7d3daca7a960178ba62e398f9ba433df034eb9bea3314cee4caf16d"
+  },
+  {
+    "file": "baseline-CcapiHeldAutofocusTest.txt",
+    "raw_sha256": "261f7c1b8898c5c907fa39886b08d2e24de0966e0d8f2767013d30bfbcfd29cf",
+    "normalized_sha256": "261f7c1b8898c5c907fa39886b08d2e24de0966e0d8f2767013d30bfbcfd29cf"
+  },
+  {
+    "file": "next-network-results.json",
+    "raw_sha256": "b62053aba12f49fb99b2d6773022fdbae7a2033fe69633c765230edab963fde8",
+    "normalized_sha256": "b62053aba12f49fb99b2d6773022fdbae7a2033fe69633c765230edab963fde8"
+  },
+  {
+    "file": "next-source-manifest.json",
+    "raw_sha256": "b31429539687d995b4c4bf32b6530f873b544aeb0833f3c7e4f446e7a5e6d555",
+    "normalized_sha256": "636ecae15b33a495767630950b8b7cbf9b07c20a7b34e97bd7f09afb9d68508b"
+  },
+  {
+    "file": "baseline-next-compile.txt",
+    "raw_sha256": "7ad7d73d3d7c8bf42d8bdfeb65549d74dda35dd05d8d3d1d8a9691803eb4202a",
+    "normalized_sha256": "7ad7d73d3d7c8bf42d8bdfeb65549d74dda35dd05d8d3d1d8a9691803eb4202a"
+  },
+  {
+    "file": "baseline-next-compile-command.json",
+    "raw_sha256": "500c0f84b5fee006b12346bd499538d0f2050dfce60e44f9991515e71ab62c4c",
+    "normalized_sha256": "a8a6e6d8f6d0bc45bd8054f072f7f1621187e5816158773dcf9a6e7279fda992"
+  },
+  {
+    "file": "final-slice-test.txt",
+    "raw_sha256": "874d5a3c74de25db9b2ef5675bc22cea470b4c7096de2e19d946fc399819f419",
+    "normalized_sha256": "874d5a3c74de25db9b2ef5675bc22cea470b4c7096de2e19d946fc399819f419"
+  },
+  {
+    "file": "final-slice-manifest.json",
+    "raw_sha256": "076e00c564dd38db102ae4ac26a95512a60c03a1c54042d52c36b0a49cf3ab49",
+    "normalized_sha256": "10d548b91a5d614eff9a0286698d3703b47e73cbbabb296131154167369edff8"
+  },
+  {
+    "file": "next-compile.txt",
+    "raw_sha256": "da741df049364462bdb218284e1f985b658ade22dfbe00ef19845b7f81e75c1c",
+    "normalized_sha256": "da741df049364462bdb218284e1f985b658ade22dfbe00ef19845b7f81e75c1c"
+  },
+  {
+    "file": "next-compile-command.json",
+    "raw_sha256": "500c0f84b5fee006b12346bd499538d0f2050dfce60e44f9991515e71ab62c4c",
+    "normalized_sha256": "a8a6e6d8f6d0bc45bd8054f072f7f1621187e5816158773dcf9a6e7279fda992"
+  },
+  {
+    "file": "next-runtime-classpath.txt",
+    "raw_sha256": "2f0604951387dfbb26dce1755c942ad0f0e1dce6e24e106bcbb5b35f58e3c44f",
+    "normalized_sha256": "68f991448b1a8e48cd5328337d3141319e4f441ec66995f71ec347abfe40105a"
+  },
+  {
+    "file": "next-source-files.json",
+    "raw_sha256": "5539a6552a4ccc2aef1cd882a31437938807f7b169185da6c2ce29d2a0a04ea7",
+    "normalized_sha256": "5539a6552a4ccc2aef1cd882a31437938807f7b169185da6c2ce29d2a0a04ea7"
+  },
+  {
+    "file": "production-candidate-test.txt",
+    "raw_sha256": "6a12166c55d191fe8920a591087f9b856d4d151c7f5e1511dd4f84dfff1de399",
+    "normalized_sha256": "6a12166c55d191fe8920a591087f9b856d4d151c7f5e1511dd4f84dfff1de399"
+  },
+  {
+    "file": "fixture-candidate-test.txt",
+    "raw_sha256": "7410a8522e60de02563fea82392f5d55bf167bd170f6f44b8c33d727f3e187cf",
+    "normalized_sha256": "7410a8522e60de02563fea82392f5d55bf167bd170f6f44b8c33d727f3e187cf"
+  },
+  {
+    "file": "recording-candidate-test.txt",
+    "raw_sha256": "f0e525e1c6d81f44576aef90094be7da5cdbd4c199ab59c075d2e4c6b0b2cc8e",
+    "normalized_sha256": "f0e525e1c6d81f44576aef90094be7da5cdbd4c199ab59c075d2e4c6b0b2cc8e"
+  },
+  {
+    "file": "retirement-candidate-test.txt",
+    "raw_sha256": "05feb815a1ffd24ca593a3d952e041ea728745cfa30c31db0317adca4be92aec",
+    "normalized_sha256": "05feb815a1ffd24ca593a3d952e041ea728745cfa30c31db0317adca4be92aec"
+  },
+  {
+    "file": "CcapiClientTest-real-clock.txt",
+    "raw_sha256": "de3219d0b89c596767ea0b9b1cf462a50188cd40a38663e49ebfd4269582b1e9",
+    "normalized_sha256": "de3219d0b89c596767ea0b9b1cf462a50188cd40a38663e49ebfd4269582b1e9"
+  },
+  {
+    "file": "DesktopBridgeClientTest-real-clock.txt",
+    "raw_sha256": "d8f9be3663ca3a9cc0d6cca8974dca18f5fe2ccd4c0a11d1bdfd79de0c584ea3",
+    "normalized_sha256": "d8f9be3663ca3a9cc0d6cca8974dca18f5fe2ccd4c0a11d1bdfd79de0c584ea3"
+  }
+]

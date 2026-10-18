@@ -28,12 +28,24 @@ class CameraFocusInfoClientTest {
         server.takeRequest()
     }
 
+    private suspend fun startLiveViewWithFirstFrame() {
+        server.enqueue(MockResponse().setBody("{}"))
+        // A Start ACK alone is not readiness. Supply the first advertised JPEG as well.
+        val jpeg = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 1, 0xff.toByte(), 0xd9.toByte())
+        server.enqueue(MockResponse().setHeader("Content-Type", "image/jpeg").setBody(Buffer().write(jpeg)))
+        client.startLiveView(LiveViewRequest(source = LiveViewSource.CCAPI_JPEG_POLLING))
+        val start = server.takeRequest()
+        assertEquals("POST", start.method)
+        assertEquals("/ccapi/ver110/shooting/liveview", start.path)
+        val frame = server.takeRequest()
+        assertEquals("GET", frame.method)
+        assertTrue(frame.path!!.startsWith("/ccapi/ver110/shooting/liveview/flip?"))
+    }
+
     @Test fun readsOnlyAdvertisedInfoPacketWhileLiveViewIsActive() = runBlocking {
         initialize()
         assertNull(client.liveViewFocusInfo())
-        server.enqueue(MockResponse().setBody("{}"))
-        client.startLiveView(LiveViewRequest(source = LiveViewSource.CCAPI_JPEG_POLLING))
-        server.takeRequest()
+        startLiveViewWithFirstFrame()
         server.enqueue(MockResponse().setHeader("Content-Type", "application/octet-stream")
             .setBody(Buffer().write(focusInfoPacket(focusInfoJson()))))
         assertEquals(CameraFocusStatus.FOCUSED, client.liveViewFocusInfo()!!.frames.single().status)
@@ -44,23 +56,19 @@ class CameraFocusInfoClientTest {
         client.stopLiveView()
         server.takeRequest()
         assertNull(client.liveViewFocusInfo())
-        assertEquals(4, server.requestCount)
+        assertEquals(5, server.requestCount)
     }
 
     @Test fun doesNotProbeMissingDetailedEndpoint() = runBlocking {
         initialize(advertise = false)
-        server.enqueue(MockResponse().setBody("{}"))
-        client.startLiveView(LiveViewRequest(source = LiveViewSource.CCAPI_JPEG_POLLING))
-        server.takeRequest()
+        startLiveViewWithFirstFrame()
         assertNull(client.liveViewFocusInfo())
-        assertEquals(2, server.requestCount)
+        assertEquals(3, server.requestCount)
     }
 
     @Test fun rejectedOrMalformedMetadataCannotProduceFocusSuccess() = runBlocking {
         initialize()
-        server.enqueue(MockResponse().setBody("{}"))
-        client.startLiveView(LiveViewRequest(source = LiveViewSource.CCAPI_JPEG_POLLING))
-        server.takeRequest()
+        startLiveViewWithFirstFrame()
         for (response in listOf(MockResponse().setResponseCode(503), MockResponse().setBody("not metadata"))) {
             server.enqueue(response)
             assertTrue(runCatching { client.liveViewFocusInfo() }.isFailure)

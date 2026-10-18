@@ -24,13 +24,17 @@ class RecordingRequestAdmissionTest {
         for (transport in listOf("direct-json", "direct-ok", "bridge-json")) {
             val server = MockWebServer()
             server.dispatcher = object : Dispatcher() {
-                override fun dispatch(request: RecordedRequest): MockResponse = MockResponse()
-                    .setHeader("Content-Type", "application/json").setBody(when (request.path) {
-                        "/ccapi" -> """{"ver110":[{"path":"/shooting/control/recbutton","post":true}]}"""
-                        "/health" -> """{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}"""
-                        "/v1/session" -> """{"id":"synthetic-admission","engine":"ccapi"}"""
-                        else -> "{}"
-                    })
+                override fun dispatch(request: RecordedRequest): MockResponse =
+                    if (request.method == "DELETE" && request.path == "/v1/session/synthetic-admission") {
+                        MockResponse().setResponseCode(204)
+                    } else {
+                        MockResponse().setHeader("Content-Type", "application/json").setBody(when (request.path) {
+                            "/ccapi" -> """{"ver110":[{"path":"/shooting/control/recbutton","post":true}]}"""
+                            "/health" -> """{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}"""
+                            "/v1/session" -> """{"id":"synthetic-admission","engine":"ccapi"}"""
+                            else -> "{}"
+                        })
+                    }
             }
             server.start()
             val http = OkHttpClient.Builder().retryOnConnectionFailure(false).callTimeout(2, TimeUnit.SECONDS).build()

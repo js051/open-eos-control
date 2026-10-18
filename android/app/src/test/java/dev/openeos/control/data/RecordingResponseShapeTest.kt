@@ -33,6 +33,7 @@ class RecordingResponseShapeTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = when {
                 request.path == "/health" -> json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                request.method == "DELETE" && request.path == "/v1/session/synthetic-shape" -> MockResponse().setResponseCode(204)
                 request.path == "/v1/session" -> json("""{"id":"synthetic-shape","engine":"ccapi"}""")
                 request.path.orEmpty().contains("/recording/") -> {
                     val action = request.path!!.substringAfterLast('/')
