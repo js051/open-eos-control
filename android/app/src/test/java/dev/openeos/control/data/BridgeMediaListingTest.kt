@@ -275,8 +275,12 @@ class BridgeMediaListingTest {
                 }
                 else -> "{\"id\":\"session\",\"engine\":\"ccapi\"}".toResponseBody(JSON)
             }
-            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
-                .header("Content-Type", body.contentType().toString()).body(body).build()
+            val retirement = request.method == "DELETE" && request.url.encodedPath == "/v1/session/session"
+            // Session retirement is an empty 204, not the session-creation response.
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
+                .code(if (retirement) 204 else 200).message(if (retirement) "No Content" else "OK")
+                .header("Content-Type", body.contentType().toString())
+                .body(if (retirement) "".toResponseBody(JSON) else body).build()
         }.build()
         fun client() = DesktopBridgeClient("http://127.0.0.1:18181", httpClient = http, token = "synthetic-token")
         override fun close() { gates.forEach { it.release() }; http.dispatcher.executorService.shutdownNow(); http.connectionPool.evictAll() }

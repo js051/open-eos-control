@@ -31,6 +31,7 @@ class RecordingStatusReadbackTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = when {
                 request.path == "/health" -> json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                request.method == "DELETE" && request.path == "/v1/session/synthetic-recording" -> MockResponse().setResponseCode(204)
                 request.path == "/v1/session" -> json("""{"id":"synthetic-recording","engine":"ccapi"}""")
                 request.path.orEmpty().contains("/recording/") -> {
                     actions += request.path!!.substringAfterLast('/')
@@ -195,6 +196,7 @@ class RecordingStatusReadbackTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = when {
                 request.path == "/health" -> json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                request.method == "DELETE" && request.path == "/v1/session/synthetic-recording" -> MockResponse().setResponseCode(204)
                 request.path == "/v1/session" -> json("""{"id":"synthetic-recording","engine":"ccapi"}""")
                 request.path.orEmpty().contains("/recording/") -> {
                     actions += request.path!!.substringAfterLast('/')
@@ -235,6 +237,7 @@ class RecordingStatusReadbackTest {
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse = when {
                     request.path == "/health" -> json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                    request.method == "DELETE" && request.path == "/v1/session/synthetic-recording" -> MockResponse().setResponseCode(204)
                     request.path == "/v1/session" -> json("""{"id":"synthetic-recording","engine":"ccapi"}""")
                     request.path.orEmpty().contains("/recording/") || request.path.orEmpty().startsWith("/ccapi/record/") -> {
                         actions += request.path!!
@@ -282,6 +285,7 @@ class RecordingStatusReadbackTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = when {
                 request.path == "/health" -> json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                request.method == "DELETE" && request.path == "/v1/session/synthetic-recording" -> MockResponse().setResponseCode(204)
                 request.path == "/v1/session" -> json("""{"id":"synthetic-recording","engine":"ccapi"}""")
                 request.path.orEmpty().contains("/recording/") -> {
                     val action = request.path!!.substringAfterLast('/')
@@ -323,6 +327,7 @@ class RecordingStatusReadbackTest {
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse = when {
                     request.path == "/health" -> json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                    request.method == "DELETE" && request.path == "/v1/session/synthetic-recording" -> MockResponse().setResponseCode(204)
                     request.path == "/v1/session" -> json("""{"id":"synthetic-recording","engine":"ccapi"}""")
                     request.path.orEmpty().contains("/recording/") -> {
                         received.set(request)
@@ -373,6 +378,7 @@ class RecordingStatusReadbackTest {
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse = when {
                     request.path == "/health" -> json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                    request.method == "DELETE" && request.path == "/v1/session/synthetic-recording" -> MockResponse().setResponseCode(204)
                     request.path == "/v1/session" -> json("""{"id":"synthetic-recording","engine":"ccapi"}""")
                     request.path.orEmpty().contains("/recording/") -> {
                         received.set(request)

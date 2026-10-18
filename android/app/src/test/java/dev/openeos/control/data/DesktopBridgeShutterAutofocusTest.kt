@@ -27,6 +27,7 @@ class DesktopBridgeShutterAutofocusTest {
                 val path = request.requestUrl!!.encodedPath
                 return when {
                     path == "/health" -> json("""{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}""")
+                    request.method == "DELETE" && request.path == "/v1/session/af-session" -> MockResponse().setResponseCode(204)
                     path == "/v1/session" -> json("""{"id":"af-session","engine":"ccapi"}""")
                     path.endsWith("/capabilities") -> json(JSONObject()
                         .put("supported", org.json.JSONArray().put("STILL_CAPTURE"))

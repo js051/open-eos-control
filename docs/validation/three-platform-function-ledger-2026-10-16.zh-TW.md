@@ -447,3 +447,7 @@ EDSDK 回傳錯誤 session 後 close 失敗，現保留精確 rejected owner，�
 ## 2026-10-18 08:47 Android 原始協定 JVM 補證
 
 [恢復與真執行紀錄](android-protocol-jvm-recovery-2026-10-18.zh-TW.md)：完整原 Kotlin 檔編譯與 72 個不同原 JUnit 案例通過，包含 USB observed folders、真 OkHttp Direct Release／Focus／Live View／DELETE。Live View fixture 的 localhost 雙位址造成 2 個 retry／cleanup 失敗，明確綁同一 IPv4 origin 後 8/8通過；產品 strict transport／timeout／owner 不變。這取代相關 authored-only 測試的未執行狀態，不取代完整 Android Gradle／裝置／相機驗收。
+
+### 2026-10-18 09:09 UTC Android 原始網路契約恢復
+
+[詳細證據](android-liveview-recording-recovery-2026-10-18.zh-TW.md)：31 類 baseline 500 項有 56 fail；據此修復 AUTO Live View fallback geometry owner 與 REC malformed-success unknown 分類。完整 106 檔重新編譯及最終 61 項通過。兩大網路類剩餘失敗另行保留，未計為全套綠燈；Android native／真機、Apple-only build／真機門檻不變。

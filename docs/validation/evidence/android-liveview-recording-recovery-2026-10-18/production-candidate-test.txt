@@ -1,0 +1,8 @@
+JUnit version 4.13.2
+.............Oct 18, 2026 5:00:32 PM okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+WARNING: MockWebServer[36655] connection from /127.0.0.1 didn't make a request
+............
+Time: 27.191
+
+OK (25 tests)
+
