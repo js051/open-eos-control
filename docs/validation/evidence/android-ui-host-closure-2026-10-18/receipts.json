@@ -1,0 +1,104 @@
+[
+  {
+    "coordinate": "androidx.lifecycle:lifecycle-runtime-compose-android:2.8.7",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-runtime-compose-android/2.8.7/lifecycle-runtime-compose-android-2.8.7.aar",
+    "file": "lifecycle-runtime-compose-android-2.8.7.aar",
+    "variant_name": "lifecycle-runtime-compose-release.aar",
+    "bytes": 58286,
+    "sha256": "80bf0a8fe9a79b93a318832bc36900f3ab8bd5931ff9ca0ecd3087100e1f07d8",
+    "sha1": "5851a3aee97f0a9157a97beafd457304629b60a1",
+    "utc": "2026-10-18T10:05:29.788864+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "lifecycle-runtime-compose-android-2.8.7-classes.jar",
+      "sha256": "7b8e83af9e4141109eacc45aac8a6a9a64bd4acc78fdd3d037eec5bcdbea1d17"
+    },
+    "module_sha256": "c024a16694c8b5c41ec8ef0ede2365eb612f8a3da25017fdf2ff343029f33902",
+    "verified_utc": "2026-10-18T10:06:46.007079+00:00"
+  },
+  {
+    "coordinate": "io.coil-kt:coil:2.7.0",
+    "url": "https://repo.maven.apache.org/maven2/io/coil-kt/coil/2.7.0/coil-2.7.0.aar",
+    "file": "coil-2.7.0.aar",
+    "variant_name": "coil-2.7.0.aar",
+    "bytes": 7258,
+    "sha256": "6e8e46eb813c7290c5ae9954d43f3ffa022c0500096ed4585801a38262b3f851",
+    "sha1": "0a80e1925dbd1377fbd54f36fc651ebc33a2a71f",
+    "utc": "2026-10-18T10:05:37.584450+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "coil-2.7.0-classes.jar",
+      "sha256": "8f6625c57a11bc2fe2e62a714c5654dc9364d59377beb0b1b391501911509262"
+    },
+    "module_sha256": "878522fd1f929f661dfc4459e937bf74b5142cba32c16028f7bcd165af6f2702",
+    "verified_utc": "2026-10-18T10:06:50.063701+00:00"
+  },
+  {
+    "coordinate": "io.coil-kt:coil-base:2.7.0",
+    "url": "https://repo.maven.apache.org/maven2/io/coil-kt/coil-base/2.7.0/coil-base-2.7.0.aar",
+    "file": "coil-base-2.7.0.aar",
+    "variant_name": "coil-base-2.7.0.aar",
+    "bytes": 428279,
+    "sha256": "f45c1e118038266734321f54c3b84ce2d52b491bb00481134724ac33d3d5e2b2",
+    "sha1": "d55574edf778066fc4932c4daa776cf0c644d942",
+    "utc": "2026-10-18T10:05:46.173682+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "coil-base-2.7.0-classes.jar",
+      "sha256": "f353434ffaa95c735f5afdbc0850d34abbe980fca59c4e29b66695d0188dd0f7"
+    },
+    "module_sha256": "40c132500be5d17439761617e56b78eb208fce131929866a6af43f6a8a10c69d",
+    "verified_utc": "2026-10-18T10:06:59.714145+00:00"
+  },
+  {
+    "coordinate": "io.coil-kt:coil-compose:2.7.0",
+    "url": "https://repo.maven.apache.org/maven2/io/coil-kt/coil-compose/2.7.0/coil-compose-2.7.0.aar",
+    "file": "coil-compose-2.7.0.aar",
+    "variant_name": "coil-compose-2.7.0.aar",
+    "bytes": 17808,
+    "sha256": "8d2ead07c9c9a08696be52a03e689a4afe57d57610e7bf9f05fd88893ee76935",
+    "sha1": "b156bbac23b27d1806d5102381184d7d26faecec",
+    "utc": "2026-10-18T10:05:52.610866+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "coil-compose-2.7.0-classes.jar",
+      "sha256": "fcbd42a2ce47bb412c631c0be0a801ab03cfd1414573378b7b5fa6c0cf9b58df"
+    },
+    "module_sha256": "31c695b55db1626b49ef593cd071d38577fd91072b3c592df7b23c4389a2ac36",
+    "verified_utc": "2026-10-18T10:07:03.630118+00:00"
+  },
+  {
+    "coordinate": "io.coil-kt:coil-compose-base:2.7.0",
+    "url": "https://repo.maven.apache.org/maven2/io/coil-kt/coil-compose-base/2.7.0/coil-compose-base-2.7.0.aar",
+    "file": "coil-compose-base-2.7.0.aar",
+    "variant_name": "coil-compose-base-2.7.0.aar",
+    "bytes": 103078,
+    "sha256": "2885960db57beb8a7d521810386f48b98b2c21c0350bfd9d9e80d812d25b2eb1",
+    "sha1": "a8c9199fb207db0174df9a717a2fadb14cc12265",
+    "utc": "2026-10-18T10:06:00.090601+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "coil-compose-base-2.7.0-classes.jar",
+      "sha256": "b5576bcfbbb1408c8b15a317aaa7ba1b2c9edfc6e7e208660cbb69ff2631e8bd"
+    },
+    "module_sha256": "b4b4a315e2516e49e807e60cea8da1e7a75f8ae80488b7e0ade7ddca4f086276",
+    "verified_utc": "2026-10-18T10:07:07.018164+00:00"
+  },
+  {
+    "coordinate": "com.composables:icons-lucide-android:2.2.1",
+    "url": "https://repo.maven.apache.org/maven2/com/composables/icons-lucide-android/2.2.1/icons-lucide-android-2.2.1.aar",
+    "file": "icons-lucide-android-2.2.1.aar",
+    "variant_name": "icons-lucide-android-2.2.1.aar",
+    "bytes": 695342,
+    "sha256": "2379a5abb9c8df3280acbbb323582006fb71ed9c111461ad0c866e3df126a848",
+    "sha1": "305acd90a2d0398a94cb41f869fa6ca2aba655ca",
+    "utc": "2026-10-18T10:06:08.549351+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "icons-lucide-android-2.2.1-classes.jar",
+      "sha256": "8739c76e681f900923b900c9df0ef75cf421d39cabb54650c4b9ad19b6a76d85"
+    },
+    "module_sha256": "8d0bdc90b2cdd7155185a1fd04a17206f50c4481049accd4a462474d1c61240c",
+    "verified_utc": "2026-10-18T10:07:10.545860+00:00"
+  }
+]

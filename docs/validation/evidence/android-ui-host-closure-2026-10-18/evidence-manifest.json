@@ -1,0 +1,298 @@
+[
+  {
+    "path": "results.json",
+    "originalSha256": "ba51f1a51bb9e080c3d37bf30ab9a5420685138909153c2528b41f1a0beeb1ca"
+  },
+  {
+    "path": "compile.txt",
+    "originalSha256": "5158802288495230f9471c17c3036106b433b51d7459e952ec892e1df94d30df"
+  },
+  {
+    "path": "fixture-complete-compile.txt",
+    "originalSha256": "51b258c64fa71e50f16a59bf8690881476b391653c8e40a8949d3cf7c202212b"
+  },
+  {
+    "path": "fixture-complete-command.json",
+    "originalSha256": "d0de58ba0a40bdcc3301a466e1601b37eb39e1620e0d3a8afdba05716ed231e7"
+  },
+  {
+    "path": "fixture-manifest.json",
+    "originalSha256": "965d493beed5ec94a2237e91490329d691eaa774f0b588cb371dd882edc9288a"
+  },
+  {
+    "path": "android-tests-compile.txt",
+    "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "android-tests-command.json",
+    "originalSha256": "a81c5a59fe540f9600a9c0e38b9fa3940a29a435156e0ba13a59ebfc103803b3"
+  },
+  {
+    "path": "android-tests-run.txt",
+    "originalSha256": "38c37378d61204e2f898a294d8d82139a4a7f934b601176df00050cb30f77d1f"
+  },
+  {
+    "path": "CameraMediaPlaybackCacheTest-android-all.txt",
+    "originalSha256": "c39b48d503093215f5e6fd6a8dd67c7f33587ad80ec8a72d7c90166301c861f2"
+  },
+  {
+    "path": "DownloadHistoryTransferTest-android-all.txt",
+    "originalSha256": "9f191247f7bfc44e647ea7fab8a1010d2a7882c4e134893316d9ac3ef85f1366"
+  },
+  {
+    "path": "labels-compile.txt",
+    "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "labels-test.txt",
+    "originalSha256": "4be93b2ba44f19f529325a3e2083fabd11b4406c574a90e37e4ac83eaf49a5ad"
+  },
+  {
+    "path": "labels-command.json",
+    "originalSha256": "d32fee12d4ad810a657fd2781012b012bf3d993e0d539e2a2efd252c7cdce825"
+  },
+  {
+    "path": "language-compile.txt",
+    "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "language-test.txt",
+    "originalSha256": "3b4a43da729e4e7d95fbcfe572e31c220120366dc10eccb357e6348576db29bb"
+  },
+  {
+    "path": "language-command.json",
+    "originalSha256": "12f4df936e57feaf72c294dab9de58249e9dff7d46f3b6698d7edd01516be551"
+  },
+  {
+    "path": "MediaFolderFilterTest.txt",
+    "originalSha256": "e044ef19e77367eda10be1a5c35b5733765972ee3a8b73d7b6f8e2bef2cbd4c3"
+  },
+  {
+    "path": "LiveViewGeometryTest.txt",
+    "originalSha256": "614295f7d82122c3cf8fc8a5b37f583fe0664bc07dbadc87c4dec5a8a8b122c4"
+  },
+  {
+    "path": "NativeFrameSamplingGateTest.txt",
+    "originalSha256": "8f4be494fd3f7fb39e67605ac233e73adf28307cdcabce91bc5854f88c0d5d1f"
+  },
+  {
+    "path": "SavedJpegHandoffControllerTest.txt",
+    "originalSha256": "df8cfa35dd516fde607bf8b1b75d937b25bd7ff0c90e8bf35fcce011631d5f8a"
+  },
+  {
+    "path": "MediaTypeContractTest.txt",
+    "originalSha256": "592b62840739710f66867f7a2f4977d3b78841346b783d389cadaebe9d7441ba"
+  },
+  {
+    "path": "CameraCapturePreviewListingTest.txt",
+    "originalSha256": "f839c1a74766f47c098a6bec7884358bd519483da40d50105813d4b60c45af1f"
+  },
+  {
+    "path": "CameraImportHandoffTest.txt",
+    "originalSha256": "832729c4a8ffe9aaae34b2ad94b0ad44dda6b1c63cee0e6ee8720cc8509d3cb3"
+  },
+  {
+    "path": "LiveViewLutNumericContractTest.txt",
+    "originalSha256": "296c395584aaa86129a11d2cbb3e02fe6c0c9db4d6824625085e0c13785f7ea4"
+  },
+  {
+    "path": "CameraMediaPlaybackCacheTest.txt",
+    "originalSha256": "e2acb7d538bbb107d2a893e3e5560edb8f119ca93b712033e38e248a73fdd3e1"
+  },
+  {
+    "path": "StringResourcesTest.txt",
+    "originalSha256": "31434d545d8642af8784de1d764dfe5d6fbfb585f326ab3b9bbce58693be9260"
+  },
+  {
+    "path": "MediaOutputFinalizationTest.txt",
+    "originalSha256": "1fafa1df33480cb46b221680f59e9df5fc0a821e29c3e8bbbe5a704d2c925823"
+  },
+  {
+    "path": "MediaDateReviewContractTest.txt",
+    "originalSha256": "f4a42c9a3e8b70c7743bba672cb2b92848a7f68765433510c79575609943df9b"
+  },
+  {
+    "path": "MediaDateRangeTest.txt",
+    "originalSha256": "0b61648335e002293c06e595f6655dc984d010b30b22d2a24fa8fa461ceb4579"
+  },
+  {
+    "path": "ShootingSettingSharedContractTest.txt",
+    "originalSha256": "684112a4a983ad61b03b851760c6fc857f1d21de3c0897116a9826277e77157f"
+  },
+  {
+    "path": "CubeLutImporterTest.txt",
+    "originalSha256": "8516c47964e85294e8d5ca0231cc8bb4e8ce809a412259616f74ad0842f20b96"
+  },
+  {
+    "path": "LiveViewMonitoringTest.txt",
+    "originalSha256": "17d6d57ad7cfd963b54615f0261510b94255c0d45d1426d009237d660b212ed9"
+  },
+  {
+    "path": "CaptureReviewEvidenceTest.txt",
+    "originalSha256": "ebfb56e7a4c5f8a82fef2e915b2fcbedf939069a778187c427cfc85641b61cf2"
+  },
+  {
+    "path": "MediaMutationEligibilityTest.txt",
+    "originalSha256": "43ddbd256a90d41ba0e131366b35c06cfbbe5ac9b017a4084f377e86fe15a089"
+  },
+  {
+    "path": "MediaDeleteBatchTest.txt",
+    "originalSha256": "6e91171f5427fdf2b5b45b3bbbc921e1b4e529623298d2b8b02d3c4c472d6873"
+  },
+  {
+    "path": "CameraImportHandoffOwnerTest.txt",
+    "originalSha256": "4309605a232607732a69a8344d13fecd0744e99a52ed6c879510f62930eb268f"
+  },
+  {
+    "path": "MediaRatingFilterStateTest.txt",
+    "originalSha256": "c04159e9990af7cd765b2227e7cce95a05a12b7cae72a612b3febc74b05f0be9"
+  },
+  {
+    "path": "LiveViewDecodeFailureTest.txt",
+    "originalSha256": "fd1991b33b83e0288a725e58645f771929f99562cf1334d3d17c73d39e37be9e"
+  },
+  {
+    "path": "ForegroundJpegImportPolicyTest.txt",
+    "originalSha256": "6e756765cf52929c69caba4537abfbe779d79c036b3584c39106de81757cb1b0"
+  },
+  {
+    "path": "CaptureConfigurationSharedContractTest.txt",
+    "originalSha256": "b36e964448ef71d6044476f27613cdc55c2d2c8ea9bd8321e837e84bba019ceb"
+  },
+  {
+    "path": "DownloadContinuationDraftTest.txt",
+    "originalSha256": "a866b525127da3c3f06d3ac7aafac2dd7aa785146f7375a4290afd1d7db97d0a"
+  },
+  {
+    "path": "ForegroundJpegImportRunnerTest.txt",
+    "originalSha256": "eef98d5d668f552342f8f8e9a170fb2d5e70724a3048d925d460d9151a351357"
+  },
+  {
+    "path": "CameraMediaPickerRequestsTest.txt",
+    "originalSha256": "a2ac6cafbb2361b53558772f9fbf65435f83cd71b944ab0d1442d9a679aa78a0"
+  },
+  {
+    "path": "MediaDeliveryOutcomeContractTest.txt",
+    "originalSha256": "c49eca9f69bcf18bbcf8cdaa43248a3069c2f5c4d0552dde44ece918b1a04596"
+  },
+  {
+    "path": "CameraAppErrorTest.txt",
+    "originalSha256": "238d8becfe2e80a777a43c1ad519504d7a2455ca5e4d0fad70141e474c682450"
+  },
+  {
+    "path": "SavedJpegStagingTest.txt",
+    "originalSha256": "baa478d71121d7fbbe04cdaad2e7016773d300ca4859e59e313a94cc1df36b66"
+  },
+  {
+    "path": "MediaScreenActionGateTest.txt",
+    "originalSha256": "4d80bd1fa932883f96640928c434de53e44ab71e4e9590896a6f69bd66ebfda8"
+  },
+  {
+    "path": "MaintenanceWorkflowTest.txt",
+    "originalSha256": "629d6e50b4e37975265d68c46ca7e6a530e0efe4b0215e4747c146ba52b055dc"
+  },
+  {
+    "path": "DownloadHistoryTransferTest.txt",
+    "originalSha256": "35ca694b6f0cf5a7a5ecda109828ef4c5cad442ed6b912aea9af1195d118ffc9"
+  },
+  {
+    "path": "MediaReviewSelectionTest.txt",
+    "originalSha256": "c4da110f16adf725a271797d128f99f4f2224265cfe6f83cf99b90e05ce0f381"
+  },
+  {
+    "path": "MediaDeleteSelectionTest.txt",
+    "originalSha256": "a4ff31808e957eec4e43bf0f10096c4810717d495c1d76feb5ce388e0625dc81"
+  },
+  {
+    "path": "ShootingSettingJsonTest.txt",
+    "originalSha256": "4be93b2ba44f19f529325a3e2083fabd11b4406c574a90e37e4ac83eaf49a5ad"
+  },
+  {
+    "path": "MediaDeleteSharedContractTest.txt",
+    "originalSha256": "721ac56fa0041c268575d5bfd873d9e950f7361aeee086d459bfd95f4724497b"
+  },
+  {
+    "path": "CaptureConfigurationWorkflowTest.txt",
+    "originalSha256": "56e3b8a9401a40b889fbe9640e0d603394ac42fad54183c443b09831f6c0bf4f"
+  },
+  {
+    "path": "MediaDownloadBatchPolicyTest.txt",
+    "originalSha256": "0c19774f900b0b5e89d876326e026b63518e04a6cc686aa3565513997ae622d1"
+  },
+  {
+    "path": "CameraUiStateTest.txt",
+    "originalSha256": "604313dddc275f0411c76ffb3fba6e698acd151c9dca5adb583c8c9691278996"
+  },
+  {
+    "path": "MediaMetadataBatchTest.txt",
+    "originalSha256": "c6a7a9e162d75acf739b92d3a8b74d3d5f6e9550f4dba304cc6c56c148c15975"
+  },
+  {
+    "path": "OfflinePreviewTest.txt",
+    "originalSha256": "4ef2cde85d186dcb4518090043716b92b36253f6b882bd59e68f5834576d3a4d"
+  },
+  {
+    "path": "PlannedMediaDownloadBatchTest.txt",
+    "originalSha256": "954a84d53dac79305a6cde52b579a9067f0333e6f3e1d4a930edb534ca66ee73"
+  },
+  {
+    "path": "ShootingSettingWorkflowTest.txt",
+    "originalSha256": "a284454515127f81c73fbcecfb338db320005cbc4c83523936c43ba4d1993a07"
+  },
+  {
+    "path": "CaptureConfigurationJsonBoundaryTest.txt",
+    "originalSha256": "4dc875d9c4833730a79840a225db6ed75d112f5b993210ba518db77b8e23e85a"
+  },
+  {
+    "path": "MediaSaveRequestTest.txt",
+    "originalSha256": "b747b4da86a819e4c9695ab7afe5ff850f92caaa61db47aa567821a7138a722e"
+  },
+  {
+    "path": "MaintenanceSharedContractTest.txt",
+    "originalSha256": "8e26b4a66f0f03a6e34ceaee718f4bdeee901d735f61201090178581173c15e5"
+  },
+  {
+    "path": "DeliveredJpegStoreTest.txt",
+    "originalSha256": "bc419e6aa774be5033e765660aea3abc06fe2b2fd53e82d5986e5a911da25d5d"
+  },
+  {
+    "path": "MediaDateRangeStateTest.txt",
+    "originalSha256": "ea45b6b7fe63a9b0032f42cc4545a0b325e94ba4cf71109155f22ea877674ae9"
+  },
+  {
+    "path": "CameraMediaGalleryStoreTest.txt",
+    "originalSha256": "415e71a7f78d8b61849ea2ffad3e1f362aaf4b1f8ce260435dfdfacd54419954"
+  },
+  {
+    "path": "MediaMutationContractTest.txt",
+    "originalSha256": "a8685913badcecd9e1f3a07d5f9bdeffb0d08f9806cf78ad0d975f8890a2d1aa"
+  },
+  {
+    "path": "AndroidManifestTest.txt",
+    "originalSha256": "72d3a0d6a0562a3a2f9ea9b787dfe82b056a512dbc7adccb6d525a8f3b0e894d"
+  },
+  {
+    "path": "CaptureReviewEvidenceContractTest.txt",
+    "originalSha256": "e23a69496608dbe3c59fb944089c2c5771d3cec21a47d7547c5a8694e029a32c"
+  },
+  {
+    "path": "MaintenanceJsonTest.txt",
+    "originalSha256": "341b6e5b14fd4e0c1ce9bd764b36195962d646d08933347cac12b9b3a36be90a"
+  },
+  {
+    "path": "CaptureConfigurationExactValueTest.txt",
+    "originalSha256": "59102fba469566978212b75be7ddebbb4b2499fbbf372834f1d98073a507d6da"
+  },
+  {
+    "path": "DiagnosticsTest.txt",
+    "originalSha256": "df13a81c7a45c6883783371104616ea9256596e71f43a647ad1aa4a2752b65f4"
+  },
+  {
+    "path": "MediaRatingFilterTest.txt",
+    "originalSha256": "85a7a8cb51fd2acbe50c2662c99cc9e40a2e04180962d5a9347348351baa5408"
+  },
+  {
+    "path": "MediaUploadContractTest.txt",
+    "originalSha256": "dffed73a94e7187c0f9830a53e01863a939de454df0a1dbe91335ca858d1c053"
+  }
+]

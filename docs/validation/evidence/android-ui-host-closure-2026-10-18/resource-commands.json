@@ -1,0 +1,31 @@
+[
+  [
+    "<SHARED_OFFICIAL_TOOLS>/sdk/build-tools/34.0.0/aapt2",
+    "compile",
+    "--dir",
+    "<EOS_WORKSPACE>/android-recovery/viewmodel-materials/camera-components-closure/lucide-resources/res",
+    "-o",
+    "<EOS_WORKSPACE>/android-recovery/viewmodel-materials/camera-components-closure/lucide-resources.zip"
+  ],
+  [
+    "<SHARED_OFFICIAL_TOOLS>/sdk/build-tools/34.0.0/aapt2",
+    "link",
+    "--static-lib",
+    "--merge-only",
+    "-I",
+    "<SHARED_OFFICIAL_TOOLS>/sdk/platforms/android-35/android.jar",
+    "--manifest",
+    "<EOS_WORKSPACE>/android-recovery/viewmodel-materials/camera-components-closure/lucide-resources/AndroidManifest.xml",
+    "--java",
+    "<EOS_WORKSPACE>/android-recovery/viewmodel-materials/camera-components-closure/generated",
+    "-o",
+    "<EOS_WORKSPACE>/android-recovery/viewmodel-materials/camera-components-closure/lucide-resources.ap_",
+    "<EOS_WORKSPACE>/android-recovery/viewmodel-materials/camera-components-closure/lucide-resources.zip"
+  ],
+  [
+    "<SHARED_OFFICIAL_TOOLS>/tools/jdk-17.0.20.1+1/bin/javac",
+    "-d",
+    "<EOS_WORKSPACE>/android-recovery/viewmodel-materials/camera-components-closure/generated-classes",
+    "<EOS_WORKSPACE>/android-recovery/viewmodel-materials/camera-components-closure/generated/com/composables/icons/lucide/R.java"
+  ]
+]

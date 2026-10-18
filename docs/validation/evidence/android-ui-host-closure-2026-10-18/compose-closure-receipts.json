@@ -1,0 +1,172 @@
+[
+  {
+    "coordinate": "androidx.compose.animation:animation-android:1.7.6",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/compose/animation/animation-android/1.7.6/animation-android-1.7.6.aar",
+    "file": "animation-android-1.7.6.aar",
+    "variant_name": "animation-release.aar",
+    "bytes": 1478224,
+    "sha256": "01f349d54cf9ec41cd0adf5d8c2a869c2c245b8dbb6be5a57e7ebe3d68d31791",
+    "sha1": "9341480b1a3691ae5cf25e3bc011f440bf180803",
+    "utc": "2026-10-18T10:00:34.858029+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "animation-android-1.7.6-classes.jar",
+      "sha256": "1d695f326f63c1dbc59080ef3e49cd1b449873ecf629e30f095e495a957a3bad"
+    },
+    "module_sha256": "bcf31caf7038d7e31f59069a1297e69363c1be70a34916f35967111f095925c0",
+    "verified_utc": "2026-10-18T10:02:28.039154+00:00"
+  },
+  {
+    "coordinate": "androidx.compose.animation:animation-core-android:1.7.6",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/compose/animation/animation-core-android/1.7.6/animation-core-android-1.7.6.aar",
+    "file": "animation-core-android-1.7.6.aar",
+    "variant_name": "animation-core-release.aar",
+    "bytes": 1473987,
+    "sha256": "9722d4fccd4a9e95910baa16652563ba92a5829f9d6e09194850447e3cd9983a",
+    "sha1": "20531684a1e98ea78069aba642e4bdc644826538",
+    "utc": "2026-10-18T10:00:42.349973+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "animation-core-android-1.7.6-classes.jar",
+      "sha256": "afc740a456b01d5879605982a4c1223c5aacbe02c1db67a1bedd85e56b18b89a"
+    },
+    "module_sha256": "8db36b35a40474ba8f41d835019fc4a10953dcc2eb8d25191521239c80020071",
+    "verified_utc": "2026-10-18T10:02:31.643352+00:00"
+  },
+  {
+    "coordinate": "androidx.compose.foundation:foundation-android:1.7.6",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/compose/foundation/foundation-android/1.7.6/foundation-android-1.7.6.aar",
+    "file": "foundation-android-1.7.6.aar",
+    "variant_name": "foundation-release.aar",
+    "bytes": 4843523,
+    "sha256": "5ccb96bab040a70f7fdd577faaad75343261c006d42fcc5723a38f50a82f597c",
+    "sha1": "a8d820c38cbfea353ef8766fc96b7c6918c23e87",
+    "utc": "2026-10-18T10:00:48.930982+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "foundation-android-1.7.6-classes.jar",
+      "sha256": "91909bdd0c60559c526733a36b1468dd1ed0cac3be876c7a056c23c1e077890f"
+    },
+    "module_sha256": "118b5cf9f3427135062406dd9d7bca69ef984f06f595e76f94f8362dafa33c3b",
+    "verified_utc": "2026-10-18T10:02:42.817539+00:00"
+  },
+  {
+    "coordinate": "androidx.compose.foundation:foundation-layout-android:1.7.6",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/compose/foundation/foundation-layout-android/1.7.6/foundation-layout-android-1.7.6.aar",
+    "file": "foundation-layout-android-1.7.6.aar",
+    "variant_name": "foundation-layout-release.aar",
+    "bytes": 645951,
+    "sha256": "296e14e2b37f7ba09e4185637f71409199bced21d5a070fe26f6dc6b26d588b6",
+    "sha1": "5070b561ed137298ca0567eed09ac8d303549185",
+    "utc": "2026-10-18T10:00:57.347917+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "foundation-layout-android-1.7.6-classes.jar",
+      "sha256": "911b9031843265c3bdd6b840decd6a7e6d2edc86712c511c66bb9dfddd15dfdb"
+    },
+    "module_sha256": "d1e2508ec5ce0901c31e6a69655892991f4ae35a32aa65b3066b216733c9af1f",
+    "verified_utc": "2026-10-18T10:02:47.264128+00:00"
+  },
+  {
+    "coordinate": "androidx.compose.material3:material3-android:1.3.1",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/compose/material3/material3-android/1.3.1/material3-android-1.3.1.aar",
+    "file": "material3-android-1.3.1.aar",
+    "variant_name": "material3-release.aar",
+    "bytes": 4965333,
+    "sha256": "752473d4ea271f822858c313ec0d857ab05249021906f3005b30f2b1fcd0dcc0",
+    "sha1": "98016d623b96c25adbc6498aabf07507de258a62",
+    "utc": "2026-10-18T10:01:05.596516+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "material3-android-1.3.1-classes.jar",
+      "sha256": "c0b099abe90c54853f27ba4deea7006b4fa8da481c80934ec4c4ba111163ce06"
+    },
+    "module_sha256": "28281afd279ec875a12736769cf80acfc6c1b4d24f8604a10323d2ff3d2c8e38",
+    "verified_utc": "2026-10-18T10:02:52.523630+00:00"
+  },
+  {
+    "coordinate": "androidx.compose.runtime:runtime-saveable-android:1.7.6",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime-saveable-android/1.7.6/runtime-saveable-android-1.7.6.aar",
+    "file": "runtime-saveable-android-1.7.6.aar",
+    "variant_name": "runtime-saveable-release.aar",
+    "bytes": 1116233,
+    "sha256": "802c98303c250a91b89d6b703c3eab73bff6cd220a85fdd10e17ca126f954879",
+    "sha1": "9fcb67c0ad7fa69d4dc19e2ebac3516f23896b1b",
+    "utc": "2026-10-18T10:01:13.407610+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "runtime-saveable-android-1.7.6-classes.jar",
+      "sha256": "a9dcfc34048f704781525e07a4e4caaadfbc4810becb8f2816ebc21a68874211"
+    },
+    "module_sha256": "2d921a9e05a6933df61197927af90e6e2ac2bc2015687373831a13b0c029dae8",
+    "verified_utc": "2026-10-18T10:02:56.190026+00:00"
+  },
+  {
+    "coordinate": "androidx.compose.ui:ui-geometry-android:1.7.6",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-geometry-android/1.7.6/ui-geometry-android-1.7.6.aar",
+    "file": "ui-geometry-android-1.7.6.aar",
+    "variant_name": "ui-geometry-release.aar",
+    "bytes": 40423,
+    "sha256": "63eb3d049a8c819e3805d51ce15b9203249ce960ecfd53251126592047bc2ff0",
+    "sha1": "8144834bd81e6e69d897ebf0411ecb04d13a7aa9",
+    "utc": "2026-10-18T10:01:20.899679+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "ui-geometry-android-1.7.6-classes.jar",
+      "sha256": "0625c05354bbdb66e6097acefea4adc2f24e9d4f424a475323b10f9b827e4b03"
+    },
+    "module_sha256": "836c4dbddeffac5e0c97b49aa1f464396583242025becd1570f007e1dd2fe950",
+    "verified_utc": "2026-10-18T10:02:59.611439+00:00"
+  },
+  {
+    "coordinate": "androidx.compose.ui:ui-graphics-android:1.7.6",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-graphics-android/1.7.6/ui-graphics-android-1.7.6.aar",
+    "file": "ui-graphics-android-1.7.6.aar",
+    "variant_name": "ui-graphics-release.aar",
+    "bytes": 1636819,
+    "sha256": "00c96a2e54b03bc0b72b8fc4327bd2a75b689c689aa01295d870141eb9ddddd0",
+    "sha1": "150850a5fa820d8d57f71ea7c69b28b98f641ffc",
+    "utc": "2026-10-18T10:01:30.575031+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "ui-graphics-android-1.7.6-classes.jar",
+      "sha256": "c8e4fa4920ecc5cbce4df60967f11ff7f9803b52ad2bb3e0dda6af1e7b1136e7"
+    },
+    "module_sha256": "0ea16cdfe6f918da72758eeee93a7379c243f3d0e8e979975ac6aa647a26583f",
+    "verified_utc": "2026-10-18T10:03:03.838512+00:00"
+  },
+  {
+    "coordinate": "androidx.compose.ui:ui-text-android:1.7.6",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-text-android/1.7.6/ui-text-android-1.7.6.aar",
+    "file": "ui-text-android-1.7.6.aar",
+    "variant_name": "ui-text-release.aar",
+    "bytes": 839919,
+    "sha256": "d2291842f1c3e8e70c4cb5c962c0754e463e023fef906f3437c209a096c09ec7",
+    "sha1": "a180631cb396954bed7aa72e0728f9bb7dd06d5a",
+    "utc": "2026-10-18T10:01:38.808948+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "ui-text-android-1.7.6-classes.jar",
+      "sha256": "99c8f97a161a92bed95c3b950efc7bb4e6a49c9775752571c5a1390de9d7ccea"
+    },
+    "module_sha256": "b256b43d34fb60aadb2e2107d138acc73fd21f205368ad42a7161378f52e2694",
+    "verified_utc": "2026-10-18T10:03:07.000217+00:00"
+  },
+  {
+    "coordinate": "androidx.compose.ui:ui-unit-android:1.7.6",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-unit-android/1.7.6/ui-unit-android-1.7.6.aar",
+    "file": "ui-unit-android-1.7.6.aar",
+    "variant_name": "ui-unit-release.aar",
+    "bytes": 90115,
+    "sha256": "9ed6214fdd4da272b0b2582c428f8c3dce5ce6a186c47daaf9fc01aec226a199",
+    "sha1": "731cce47c8f596076fda91092c8b2629ad22794b",
+    "utc": "2026-10-18T10:01:45.568891+00:00",
+    "status": "VERIFIED",
+    "classes": {
+      "file": "ui-unit-android-1.7.6-classes.jar",
+      "sha256": "0982f87811ca9fe258b0fbb6c8e9c95d118a444ed2fa20579e022308597455b8"
+    },
+    "module_sha256": "e5c3f0e8b6ab05b915454cf889d185136448354989ec7bfd8f7db4c02d5c88bc",
+    "verified_utc": "2026-10-18T10:03:10.312330+00:00"
+  }
+]

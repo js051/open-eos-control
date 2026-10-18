@@ -1,0 +1,1808 @@
+=== MediaFolderFilterTest ===
+JUnit version 4.13.2
+........
+Time: 0.137
+
+OK (8 tests)
+
+
+=== LiveViewGeometryTest ===
+JUnit version 4.13.2
+.....
+Time: 0.022
+
+OK (5 tests)
+
+
+=== NativeFrameSamplingGateTest ===
+JUnit version 4.13.2
+........
+Time: 0.006
+
+OK (8 tests)
+
+
+=== SavedJpegHandoffControllerTest ===
+JUnit version 4.13.2
+......
+Time: 0.249
+
+OK (6 tests)
+
+
+=== MediaTypeContractTest ===
+JUnit version 4.13.2
+..........
+Time: 0.232
+
+OK (10 tests)
+
+
+=== CameraCapturePreviewListingTest ===
+JUnit version 4.13.2
+...........
+Time: 7.875
+
+OK (11 tests)
+
+
+=== CameraImportHandoffTest ===
+JUnit version 4.13.2
+..
+Time: 0.13
+
+OK (2 tests)
+
+
+=== LiveViewLutNumericContractTest ===
+JUnit version 4.13.2
+.....
+Time: 0.2
+
+OK (5 tests)
+
+
+=== CameraMediaPlaybackCacheTest ===
+JUnit version 4.13.2
+..E...
+Time: 0.255
+There was 1 failure:
+1) classifiesStorageFailureThroughWrappedErrno(dev.openeos.control.ui.CameraMediaPlaybackCacheTest)
+java.lang.RuntimeException: Stub!
+	at android.system.ErrnoException.<init>(ErrnoException.java:36)
+	at dev.openeos.control.ui.CameraMediaPlaybackCacheTest.classifiesStorageFailureThroughWrappedErrno(CameraMediaPlaybackCacheTest.kt:59)
+
+FAILURES!!!
+Tests run: 5,  Failures: 1
+
+
+=== StringResourcesTest ===
+JUnit version 4.13.2
+...
+Time: 0.252
+
+OK (3 tests)
+
+
+=== MediaOutputFinalizationTest ===
+JUnit version 4.13.2
+........
+Time: 0.271
+
+OK (8 tests)
+
+
+=== MediaDateReviewContractTest ===
+JUnit version 4.13.2
+..........
+Time: 0.28
+
+OK (10 tests)
+
+
+=== MediaDateRangeTest ===
+JUnit version 4.13.2
+.........
+Time: 0.193
+
+OK (9 tests)
+
+
+=== ShootingSettingSharedContractTest ===
+JUnit version 4.13.2
+...
+Time: 0.144
+
+OK (3 tests)
+
+
+=== CubeLutImporterTest ===
+JUnit version 4.13.2
+..................
+Time: 0.138
+
+OK (18 tests)
+
+
+=== LiveViewMonitoringTest ===
+JUnit version 4.13.2
+..........
+Time: 0.055
+
+OK (10 tests)
+
+
+=== CaptureReviewEvidenceTest ===
+JUnit version 4.13.2
+.....
+Time: 0.104
+
+OK (5 tests)
+
+
+=== MediaMutationEligibilityTest ===
+JUnit version 4.13.2
+..
+Time: 0.151
+
+OK (2 tests)
+
+
+=== MediaDeleteBatchTest ===
+JUnit version 4.13.2
+..........
+Time: 0.116
+
+OK (10 tests)
+
+
+=== CameraImportHandoffOwnerTest ===
+JUnit version 4.13.2
+........
+Time: 0.233
+
+OK (8 tests)
+
+
+=== MediaRatingFilterStateTest ===
+JUnit version 4.13.2
+.....
+Time: 0.073
+
+OK (5 tests)
+
+
+=== LiveViewDecodeFailureTest ===
+JUnit version 4.13.2
+......
+Time: 0.048
+
+OK (6 tests)
+
+
+=== ForegroundJpegImportPolicyTest ===
+JUnit version 4.13.2
+....................
+Time: 0.055
+
+OK (20 tests)
+
+
+=== CaptureConfigurationSharedContractTest ===
+JUnit version 4.13.2
+....
+Time: 0.215
+
+OK (4 tests)
+
+
+=== DownloadContinuationDraftTest ===
+JUnit version 4.13.2
+.....
+Time: 0.048
+
+OK (5 tests)
+
+
+=== ForegroundJpegImportRunnerTest ===
+JUnit version 4.13.2
+.................
+Time: 0.251
+
+OK (17 tests)
+
+
+=== CameraMediaPickerRequestsTest ===
+JUnit version 4.13.2
+..........
+Time: 0.046
+
+OK (10 tests)
+
+
+=== MediaDeliveryOutcomeContractTest ===
+JUnit version 4.13.2
+.....
+Time: 0.166
+
+OK (5 tests)
+
+
+=== CameraAppErrorTest ===
+JUnit version 4.13.2
+....
+Time: 0.037
+
+OK (4 tests)
+
+
+=== SavedJpegStagingTest ===
+JUnit version 4.13.2
+.........
+Time: 0.178
+
+OK (9 tests)
+
+
+=== MediaScreenActionGateTest ===
+JUnit version 4.13.2
+......
+Time: 0.013
+
+OK (6 tests)
+
+
+=== MaintenanceWorkflowTest ===
+JUnit version 4.13.2
+............................................
+Time: 0.267
+
+OK (44 tests)
+
+
+=== DownloadHistoryTransferTest ===
+JUnit version 4.13.2
+.......java.net.ProtocolException: unexpected end of stream
+	at okhttp3.internal.http1.Http1ExchangeCodec$FixedLengthSource.read(Http1ExchangeCodec.kt:379)
+	at okhttp3.internal.connection.Exchange$ResponseBodySource.read(Exchange.kt:281)
+	at okio.RealBufferedSource.request(RealBufferedSource.kt:209)
+	at okio.PeekSource.read(PeekSource.kt:50)
+	at okio.RealBufferedSource.request(RealBufferedSource.kt:209)
+	at okhttp3.Response.peekBody(Response.kt:197)
+	at dev.openeos.control.data.CcapiClient$requestMediaFile$2.invokeSuspend(CcapiClient.kt:3876)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.internal.LimitedDispatcher$Worker.run(LimitedDispatcher.kt:113)
+	at kotlinx.coroutines.scheduling.TaskImpl.run(Tasks.kt:89)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:589)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:823)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:720)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:707)
+.....E......
+Time: 0.62
+There was 1 failure:
+1) historyFactoryFailureLeavesViewModelUsableWithoutCreatingFallbackFiles(dev.openeos.control.ui.DownloadHistoryTransferTest)
+java.lang.RuntimeException: Stub!
+	at android.content.Context.<init>(Context.java:23)
+	at android.content.ContextWrapper.<init>(ContextWrapper.java:23)
+	at dev.openeos.control.ui.DownloadHistoryTransferTest$historyFactoryFailureLeavesViewModelUsableWithoutCreatingFallbackFiles$1$context$1.<init>(DownloadHistoryTransferTest.kt:650)
+	at dev.openeos.control.ui.DownloadHistoryTransferTest$historyFactoryFailureLeavesViewModelUsableWithoutCreatingFallbackFiles$1.invokeSuspend(DownloadHistoryTransferTest.kt:650)
+	at dev.openeos.control.ui.DownloadHistoryTransferTest$historyFactoryFailureLeavesViewModelUsableWithoutCreatingFallbackFiles$1.invoke(DownloadHistoryTransferTest.kt)
+	at dev.openeos.control.ui.DownloadHistoryTransferTest$historyFactoryFailureLeavesViewModelUsableWithoutCreatingFallbackFiles$1.invoke(DownloadHistoryTransferTest.kt)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$1.invokeSuspend(TestBuilders.kt:318)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.test.TestDispatcher.processEvent$kotlinx_coroutines_test(TestDispatcher.kt:24)
+	at kotlinx.coroutines.test.TestCoroutineScheduler.tryRunNextTaskUnless$kotlinx_coroutines_test(TestCoroutineScheduler.kt:99)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$workRunner$1.invokeSuspend(TestBuilders.kt:327)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersJvmKt.createTestResult(TestBuildersJvm.kt:10)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:310)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:168)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0$default(TestBuilders.kt:160)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0$default(Unknown Source)
+	at dev.openeos.control.ui.DownloadHistoryTransferTest.historyFactoryFailureLeavesViewModelUsableWithoutCreatingFallbackFiles(DownloadHistoryTransferTest.kt:648)
+
+FAILURES!!!
+Tests run: 18,  Failures: 1
+
+
+=== MediaReviewSelectionTest ===
+JUnit version 4.13.2
+......
+Time: 0.081
+
+OK (6 tests)
+
+
+=== MediaDeleteSelectionTest ===
+JUnit version 4.13.2
+......
+Time: 0.06
+
+OK (6 tests)
+
+
+=== ShootingSettingJsonTest ===
+JUnit version 4.13.2
+...
+Time: 0.049
+
+OK (3 tests)
+
+
+=== MediaDeleteSharedContractTest ===
+JUnit version 4.13.2
+.......
+Time: 0.278
+
+OK (7 tests)
+
+
+=== CaptureConfigurationWorkflowTest ===
+JUnit version 4.13.2
+.......................
+Time: 0.177
+
+OK (23 tests)
+
+
+=== MediaDownloadBatchPolicyTest ===
+JUnit version 4.13.2
+.java.io.IOException: Synthetic original failure
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$cleanFailureStopsDownloadWithoutCallingRemainingRows$1$result$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:22)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$cleanFailureStopsDownloadWithoutCallingRemainingRows$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$cleanFailureStopsDownloadWithoutCallingRemainingRows$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$cleanFailureStopsDownloadWithoutCallingRemainingRows$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:20)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest.cleanFailureStopsDownloadWithoutCallingRemainingRows(MediaDownloadBatchPolicyTest.kt:18)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+..java.io.IOException: Synthetic second item failed
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$earlierCompletionSurvivesFailureAndUntouchedRowsAreNotFailures$1$result$2.invokeSuspend(MediaDownloadBatchPolicyTest.kt:55)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$earlierCompletionSurvivesFailureAndUntouchedRowsAreNotFailures$1$result$2.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$earlierCompletionSurvivesFailureAndUntouchedRowsAreNotFailures$1$result$2.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$earlierCompletionSurvivesFailureAndUntouchedRowsAreNotFailures$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:53)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest.earlierCompletionSurvivesFailureAndUntouchedRowsAreNotFailures(MediaDownloadBatchPolicyTest.kt:50)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+..java.io.IOException: Synthetic non-download failure
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:99)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:97)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest.nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy(MediaDownloadBatchPolicyTest.kt:94)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+java.io.IOException: Synthetic non-download failure
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:99)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:97)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest.nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy(MediaDownloadBatchPolicyTest.kt:94)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+java.io.IOException: Synthetic non-download failure
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:99)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:97)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest.nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy(MediaDownloadBatchPolicyTest.kt:94)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+java.io.IOException: Synthetic non-download failure
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:99)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:97)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest.nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy(MediaDownloadBatchPolicyTest.kt:94)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+java.io.IOException: Synthetic non-download failure
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:99)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:97)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest.nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy(MediaDownloadBatchPolicyTest.kt:94)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+java.io.IOException: Synthetic non-download failure
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:99)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:97)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest.nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy(MediaDownloadBatchPolicyTest.kt:94)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+java.io.IOException: Synthetic non-download failure
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:99)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:97)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest.nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy(MediaDownloadBatchPolicyTest.kt:94)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+java.io.IOException: Synthetic non-download failure
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:99)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1$result$1.invoke(MediaDownloadBatchPolicyTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:97)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest.nonDownloadBatchesKeepTheirExistingContinueOnFailurePolicy(MediaDownloadBatchPolicyTest.kt:94)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+.java.io.IOException: Synthetic read interrupted
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$failedCleanupStopsDownloadBeforeAnotherOutputIsCreated$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:34)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.MediaDownloadBatchPolicyTest.failedCleanupStopsDownloadBeforeAnotherOutputIsCreated(MediaDownloadBatchPolicyTest.kt:30)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+	Suppressed: dev.openeos.control.ui.IncompleteMediaCleanupException: The incomplete media output could not be removed.
+		at dev.openeos.control.ui.MediaOutputFinalization$protect$2.invokeSuspend(MediaOutputFinalization.kt:74)
+		at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+		at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+		at kotlinx.coroutines.internal.LimitedDispatcher$Worker.run(LimitedDispatcher.kt:113)
+		at kotlinx.coroutines.scheduling.TaskImpl.run(Tasks.kt:89)
+		at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:589)
+		at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:823)
+		at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:720)
+		at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:707)
+	Caused by: java.io.IOException: Synthetic cleanup refused
+		at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$failedCleanupStopsDownloadBeforeAnotherOutputIsCreated$1$result$1$1.invokeSuspend(MediaDownloadBatchPolicyTest.kt:38)
+		at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$failedCleanupStopsDownloadBeforeAnotherOutputIsCreated$1$result$1$1.invoke(MediaDownloadBatchPolicyTest.kt)
+		at dev.openeos.control.ui.MediaDownloadBatchPolicyTest$failedCleanupStopsDownloadBeforeAnotherOutputIsCreated$1$result$1$1.invoke(MediaDownloadBatchPolicyTest.kt)
+		at dev.openeos.control.ui.MediaOutputFinalization$protect$2.invokeSuspend(MediaOutputFinalization.kt:70)
+		... 8 more
+
+Time: 0.124
+
+OK (6 tests)
+
+
+=== CameraUiStateTest ===
+JUnit version 4.13.2
+...............
+Time: 0.364
+
+OK (15 tests)
+
+
+=== MediaMetadataBatchTest ===
+JUnit version 4.13.2
+..............
+Time: 0.119
+
+OK (14 tests)
+
+
+=== OfflinePreviewTest ===
+JUnit version 4.13.2
+.
+Time: 0.053
+
+OK (1 test)
+
+
+=== PlannedMediaDownloadBatchTest ===
+JUnit version 4.13.2
+...dev.openeos.control.ui.MediaWorklistAdmissionException: Synthetic worklist row admission failed
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:603)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:601)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$1.invokeSuspend(TestBuilders.kt:318)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.test.TestDispatcher.processEvent$kotlinx_coroutines_test(TestDispatcher.kt:24)
+	at kotlinx.coroutines.test.TestCoroutineScheduler.tryRunNextTaskUnless$kotlinx_coroutines_test(TestCoroutineScheduler.kt:99)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$workRunner$1.invokeSuspend(TestBuilders.kt:327)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersJvmKt.createTestResult(TestBuildersJvm.kt:10)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:310)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:168)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0$default(TestBuilders.kt:160)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0$default(Unknown Source)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest.typedAdmissionFailureDoesNotChangeNonDownloadOperationControls(PlannedMediaDownloadBatchTest.kt:597)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+dev.openeos.control.ui.MediaWorklistAdmissionException: Synthetic worklist row admission failed
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:603)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:601)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$1.invokeSuspend(TestBuilders.kt:318)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.test.TestDispatcher.processEvent$kotlinx_coroutines_test(TestDispatcher.kt:24)
+	at kotlinx.coroutines.test.TestCoroutineScheduler.tryRunNextTaskUnless$kotlinx_coroutines_test(TestCoroutineScheduler.kt:99)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$workRunner$1.invokeSuspend(TestBuilders.kt:327)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersJvmKt.createTestResult(TestBuildersJvm.kt:10)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:310)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:168)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0$default(TestBuilders.kt:160)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0$default(Unknown Source)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest.typedAdmissionFailureDoesNotChangeNonDownloadOperationControls(PlannedMediaDownloadBatchTest.kt:597)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+dev.openeos.control.ui.MediaWorklistAdmissionException: Synthetic worklist row admission failed
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:603)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:601)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$1.invokeSuspend(TestBuilders.kt:318)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.test.TestDispatcher.processEvent$kotlinx_coroutines_test(TestDispatcher.kt:24)
+	at kotlinx.coroutines.test.TestCoroutineScheduler.tryRunNextTaskUnless$kotlinx_coroutines_test(TestCoroutineScheduler.kt:99)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$workRunner$1.invokeSuspend(TestBuilders.kt:327)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersJvmKt.createTestResult(TestBuildersJvm.kt:10)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:310)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:168)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0$default(TestBuilders.kt:160)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0$default(Unknown Source)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest.typedAdmissionFailureDoesNotChangeNonDownloadOperationControls(PlannedMediaDownloadBatchTest.kt:597)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+dev.openeos.control.ui.MediaWorklistAdmissionException: Synthetic worklist row admission failed
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:603)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:601)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$1.invokeSuspend(TestBuilders.kt:318)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.test.TestDispatcher.processEvent$kotlinx_coroutines_test(TestDispatcher.kt:24)
+	at kotlinx.coroutines.test.TestCoroutineScheduler.tryRunNextTaskUnless$kotlinx_coroutines_test(TestCoroutineScheduler.kt:99)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$workRunner$1.invokeSuspend(TestBuilders.kt:327)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersJvmKt.createTestResult(TestBuildersJvm.kt:10)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:310)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:168)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0$default(TestBuilders.kt:160)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0$default(Unknown Source)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest.typedAdmissionFailureDoesNotChangeNonDownloadOperationControls(PlannedMediaDownloadBatchTest.kt:597)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+dev.openeos.control.ui.MediaWorklistAdmissionException: Synthetic worklist row admission failed
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:603)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:601)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$1.invokeSuspend(TestBuilders.kt:318)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.test.TestDispatcher.processEvent$kotlinx_coroutines_test(TestDispatcher.kt:24)
+	at kotlinx.coroutines.test.TestCoroutineScheduler.tryRunNextTaskUnless$kotlinx_coroutines_test(TestCoroutineScheduler.kt:99)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$workRunner$1.invokeSuspend(TestBuilders.kt:327)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersJvmKt.createTestResult(TestBuildersJvm.kt:10)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:310)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:168)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0$default(TestBuilders.kt:160)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0$default(Unknown Source)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest.typedAdmissionFailureDoesNotChangeNonDownloadOperationControls(PlannedMediaDownloadBatchTest.kt:597)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+dev.openeos.control.ui.MediaWorklistAdmissionException: Synthetic worklist row admission failed
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:603)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:601)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$1.invokeSuspend(TestBuilders.kt:318)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.test.TestDispatcher.processEvent$kotlinx_coroutines_test(TestDispatcher.kt:24)
+	at kotlinx.coroutines.test.TestCoroutineScheduler.tryRunNextTaskUnless$kotlinx_coroutines_test(TestCoroutineScheduler.kt:99)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$workRunner$1.invokeSuspend(TestBuilders.kt:327)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersJvmKt.createTestResult(TestBuildersJvm.kt:10)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:310)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:168)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0$default(TestBuilders.kt:160)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0$default(Unknown Source)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest.typedAdmissionFailureDoesNotChangeNonDownloadOperationControls(PlannedMediaDownloadBatchTest.kt:597)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+dev.openeos.control.ui.MediaWorklistAdmissionException: Synthetic worklist row admission failed
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:603)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:601)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$1.invokeSuspend(TestBuilders.kt:318)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.test.TestDispatcher.processEvent$kotlinx_coroutines_test(TestDispatcher.kt:24)
+	at kotlinx.coroutines.test.TestCoroutineScheduler.tryRunNextTaskUnless$kotlinx_coroutines_test(TestCoroutineScheduler.kt:99)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$workRunner$1.invokeSuspend(TestBuilders.kt:327)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersJvmKt.createTestResult(TestBuildersJvm.kt:10)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:310)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:168)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0$default(TestBuilders.kt:160)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0$default(Unknown Source)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest.typedAdmissionFailureDoesNotChangeNonDownloadOperationControls(PlannedMediaDownloadBatchTest.kt:597)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+dev.openeos.control.ui.MediaWorklistAdmissionException: Synthetic worklist row admission failed
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:603)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:601)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$typedAdmissionFailureDoesNotChangeNonDownloadOperationControls$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$1.invokeSuspend(TestBuilders.kt:318)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.test.TestDispatcher.processEvent$kotlinx_coroutines_test(TestDispatcher.kt:24)
+	at kotlinx.coroutines.test.TestCoroutineScheduler.tryRunNextTaskUnless$kotlinx_coroutines_test(TestCoroutineScheduler.kt:99)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$workRunner$1.invokeSuspend(TestBuilders.kt:327)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersJvmKt.createTestResult(TestBuildersJvm.kt:10)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:310)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:168)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0$default(TestBuilders.kt:160)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0$default(Unknown Source)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest.typedAdmissionFailureDoesNotChangeNonDownloadOperationControls(PlannedMediaDownloadBatchTest.kt:597)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+.........java.io.IOException: Synthetic original read interrupted
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow$1$result$1$1$1$2.invokeSuspend(PlannedMediaDownloadBatchTest.kt:500)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow$1$result$1$1$1$2.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow$1$result$1$1$1$2.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.MediaOutputFinalization.protect(MediaOutputFinalization.kt:62)
+	at dev.openeos.control.ui.MediaOutputFinalizationKt.withMediaOutputFinalization(MediaOutputFinalization.kt:96)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow$1$result$1$1$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:493)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow$1$result$1$1$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow$1$result$1$1$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.retryMediaRead(CameraViewModel.kt:209)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow$1$result$1$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:491)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow$1$result$1$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow$1$result$1$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatch$transfer$5.invokeSuspend(DownloadHistoryTransfer.kt:166)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatch$transfer$5.invoke(DownloadHistoryTransfer.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatch$transfer$5.invoke(DownloadHistoryTransfer.kt)
+	at dev.openeos.control.ui.DownloadHistoryTransferKt$withDownloadHistoryAdmission$admittedTransfer$1.invokeSuspend(DownloadHistoryTransfer.kt:75)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.UndispatchedCoroutine.afterResume(CoroutineContext.kt:266)
+	at kotlinx.coroutines.AbstractCoroutine.resumeWith(AbstractCoroutine.kt:100)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:47)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.test.TestDispatcher.processEvent$kotlinx_coroutines_test(TestDispatcher.kt:24)
+	at kotlinx.coroutines.test.TestCoroutineScheduler.tryRunNextTaskUnless$kotlinx_coroutines_test(TestCoroutineScheduler.kt:99)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$workRunner$1.invokeSuspend(TestBuilders.kt:327)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersJvmKt.createTestResult(TestBuildersJvm.kt:10)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:310)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:168)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0$default(TestBuilders.kt:160)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0$default(Unknown Source)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest.failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow(PlannedMediaDownloadBatchTest.kt:480)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+	Suppressed: dev.openeos.control.ui.IncompleteMediaCleanupException: The incomplete media output could not be removed.
+		at dev.openeos.control.ui.MediaOutputFinalization$protect$2.invokeSuspend(MediaOutputFinalization.kt:74)
+		at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+		at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+		at kotlinx.coroutines.internal.LimitedDispatcher$Worker.run(LimitedDispatcher.kt:113)
+		at kotlinx.coroutines.scheduling.TaskImpl.run(Tasks.kt:89)
+		at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:589)
+		at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:823)
+		at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:720)
+		at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:707)
+	Caused by: java.io.IOException: Synthetic provider refused partial cleanup
+		at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow$1$result$1$1$1$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:495)
+		at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow$1$result$1$1$1$1.invoke(PlannedMediaDownloadBatchTest.kt)
+		at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$failedCleanupKeepsReceiptRiskAndStopsBeforeTheNextPlannedRow$1$result$1$1$1$1.invoke(PlannedMediaDownloadBatchTest.kt)
+		at dev.openeos.control.ui.MediaOutputFinalization$protect$2.invokeSuspend(MediaOutputFinalization.kt:70)
+		... 8 more
+..java.io.IOException: Synthetic clean transfer failure
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$cleanFailureKeepsEarlierCompletionAndLaterRowsQueuedAfterReopen$1$result$1$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:547)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$cleanFailureKeepsEarlierCompletionAndLaterRowsQueuedAfterReopen$1$result$1$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$cleanFailureKeepsEarlierCompletionAndLaterRowsQueuedAfterReopen$1$result$1$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatch$transfer$5.invokeSuspend(DownloadHistoryTransfer.kt:166)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatch$transfer$5.invoke(DownloadHistoryTransfer.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatch$transfer$5.invoke(DownloadHistoryTransfer.kt)
+	at dev.openeos.control.ui.DownloadHistoryTransferKt$withDownloadHistoryAdmission$admittedTransfer$1.invokeSuspend(DownloadHistoryTransfer.kt:75)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.UndispatchedCoroutine.afterResume(CoroutineContext.kt:266)
+	at kotlinx.coroutines.AbstractCoroutine.resumeWith(AbstractCoroutine.kt:100)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:47)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.test.TestDispatcher.processEvent$kotlinx_coroutines_test(TestDispatcher.kt:24)
+	at kotlinx.coroutines.test.TestCoroutineScheduler.tryRunNextTaskUnless$kotlinx_coroutines_test(TestCoroutineScheduler.kt:99)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$workRunner$1.invokeSuspend(TestBuilders.kt:327)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersJvmKt.createTestResult(TestBuildersJvm.kt:10)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:310)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:168)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0$default(TestBuilders.kt:160)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0$default(Unknown Source)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest.cleanFailureKeepsEarlierCompletionAndLaterRowsQueuedAfterReopen(PlannedMediaDownloadBatchTest.kt:537)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+...java.io.IOException: Synthetic ordinary original read failure
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$ordinaryDownloadFailureStopsBeforeRemainingRows$1$result$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:588)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$ordinaryDownloadFailureStopsBeforeRemainingRows$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$ordinaryDownloadFailureStopsBeforeRemainingRows$1$result$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch(CameraViewModel.kt:179)
+	at dev.openeos.control.ui.CameraViewModelKt.executeMediaBatch$default(CameraViewModel.kt:159)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$ordinaryDownloadFailureStopsBeforeRemainingRows$1.invokeSuspend(PlannedMediaDownloadBatchTest.kt:586)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$ordinaryDownloadFailureStopsBeforeRemainingRows$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest$ordinaryDownloadFailureStopsBeforeRemainingRows$1.invoke(PlannedMediaDownloadBatchTest.kt)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$1.invokeSuspend(TestBuilders.kt:318)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.test.TestDispatcher.processEvent$kotlinx_coroutines_test(TestDispatcher.kt:24)
+	at kotlinx.coroutines.test.TestCoroutineScheduler.tryRunNextTaskUnless$kotlinx_coroutines_test(TestCoroutineScheduler.kt:99)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt$runTest$2$1$workRunner$1.invokeSuspend(TestBuilders.kt:327)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersJvmKt.createTestResult(TestBuildersJvm.kt:10)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:310)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0(TestBuilders.kt:168)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0(Unknown Source)
+	at kotlinx.coroutines.test.TestBuildersKt__TestBuildersKt.runTest-8Mi8wO0$default(TestBuilders.kt:160)
+	at kotlinx.coroutines.test.TestBuildersKt.runTest-8Mi8wO0$default(Unknown Source)
+	at dev.openeos.control.ui.PlannedMediaDownloadBatchTest.ordinaryDownloadFailureStopsBeforeRemainingRows(PlannedMediaDownloadBatchTest.kt:583)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.junit.runner.JUnitCore.runMain(JUnitCore.java:77)
+	at org.junit.runner.JUnitCore.main(JUnitCore.java:36)
+....
+Time: 0.629
+
+OK (21 tests)
+
+
+=== ShootingSettingWorkflowTest ===
+JUnit version 4.13.2
+.................
+Time: 0.143
+
+OK (17 tests)
+
+
+=== CaptureConfigurationJsonBoundaryTest ===
+JUnit version 4.13.2
+....
+Time: 0.045
+
+OK (4 tests)
+
+
+=== MediaSaveRequestTest ===
+JUnit version 4.13.2
+...
+Time: 0.004
+
+OK (3 tests)
+
+
+=== MaintenanceSharedContractTest ===
+JUnit version 4.13.2
+...
+Time: 0.209
+
+OK (3 tests)
+
+
+=== DeliveredJpegStoreTest ===
+JUnit version 4.13.2
+............
+Time: 0.154
+
+OK (12 tests)
+
+
+=== MediaDateRangeStateTest ===
+JUnit version 4.13.2
+.....
+Time: 0.045
+
+OK (5 tests)
+
+
+=== CameraMediaGalleryStoreTest ===
+JUnit version 4.13.2
+...
+Time: 0.055
+
+OK (3 tests)
+
+
+=== MediaMutationContractTest ===
+JUnit version 4.13.2
+....
+Time: 0.262
+
+OK (4 tests)
+
+
+=== AndroidManifestTest ===
+JUnit version 4.13.2
+..
+Time: 0.132
+
+OK (2 tests)
+
+
+=== CaptureReviewEvidenceContractTest ===
+JUnit version 4.13.2
+...
+Time: 0.224
+
+OK (3 tests)
+
+
+=== MaintenanceJsonTest ===
+JUnit version 4.13.2
+........
+Time: 0.077
+
+OK (8 tests)
+
+
+=== CaptureConfigurationExactValueTest ===
+JUnit version 4.13.2
+...
+Time: 0.146
+
+OK (3 tests)
+
+
+=== DiagnosticsTest ===
+JUnit version 4.13.2
+..............
+Time: 0.148
+
+OK (14 tests)
+
+
+=== MediaRatingFilterTest ===
+JUnit version 4.13.2
+...........
+Time: 0.117
+
+OK (11 tests)
+
+
+=== MediaUploadContractTest ===
+JUnit version 4.13.2
+.....
+Time: 0.177
+
+OK (5 tests)
+

@@ -1,0 +1,6 @@
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraAppErrorTest.kt:31:20: warning: check for instance is always 'true'.
+        assertTrue(failure is IllegalStateException)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/LiveViewDecodeFailureTest.kt:47:20: warning: check for instance is always 'true'.
+        assertTrue(error is IllegalStateException)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
