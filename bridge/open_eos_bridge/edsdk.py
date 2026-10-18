@@ -144,16 +144,10 @@ class EdsdkEngine:
                 self._cleanup_in_progress = False
 
     def _require_no_pending_cleanup(self, *, retry: bool = False) -> None:
-        with self._cleanup_state_lock:
-            if not self._pending_cleanup:
-                return
-            if not retry or self._cleanup_in_progress:
-                raise self._cleanup_pending()
-            session = self._pending_cleanup[0]
-            self._cleanup_in_progress = True
-        # Native cleanup may block. Health and admission must still be able to
-        # report the retained owner; only this caller may retry its exact close.
-        self._close_invalid_session(session)
+        # Keep the private caller signature, but never retry an unconfirmed
+        # first close. The provider contract has no release receipt: a second
+        # return can be an idempotent no-op after a partially failed cleanup.
+        del retry
         with self._cleanup_state_lock:
             if self._pending_cleanup:
                 raise self._cleanup_pending()
@@ -161,9 +155,11 @@ class EdsdkEngine:
     def _cleanup_pending(self) -> BridgeError:
         return BridgeError(
             "CAMERA_BUSY",
-            "The EDSDK provider's rejected session has not closed. "
-            "Reconnecting can retry cleanup but cannot recover a missing close operation; "
-            "provider repair and a Bridge restart may be required.",
+            "The EDSDK provider's rejected session cleanup is still in progress."
+            if self._cleanup_in_progress else
+            "The EDSDK provider's rejected session cleanup is unconfirmed. "
+            "Reconnecting cannot clear this process quarantine. "
+            "Check the camera and provider state before restarting Bridge.",
             status_code=409,
             engine=self.name,
         )

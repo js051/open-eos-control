@@ -1,8 +1,10 @@
 """Synthetic providers exercise the production API's unresolved USB ownership."""
 from __future__ import annotations
 
+import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from unittest.mock import Mock
 
 import pytest
@@ -18,6 +20,19 @@ from .fakes import FakeRunner
 from .test_bulb_request_ownership import Provider as RecoverySession
 from .test_bulb_request_ownership import status
 from .test_edsdk import _Provider, _Session
+
+
+@contextmanager
+def quarantined_client(app):
+    """Expect only shutdown's pending-owner error; never consume a body failure."""
+    client = TestClient(app)
+    client.__enter__()
+    try:
+        yield client
+    finally:
+        with pytest.raises(BridgeError) as shutdown:
+            client.__exit__(None, None, None)
+        assert shutdown.value.code == "CAMERA_BUSY"
 
 
 class FailedCleanupSession(_Session):
@@ -63,29 +78,26 @@ def test_rejected_provider_close_failure_blocks_another_local_open(next_engine):
     runner = FakeRunner()
     app = create_app(engine=GPhoto2Engine(runner), edsdk_engine=EdsdkEngine(provider), token="test-token")
     headers = {"Authorization": "Bearer test-token"}
-    with TestClient(app) as client:
-        try:
-            rejected = client.post("/v1/session", headers=headers,
-                                   json={"engine": "edsdk", "cameraId": provider.camera.id})
-            assert rejected.status_code == 502
-            assert rejected.json()["error"]["code"] == "INVALID_PROVIDER_RESPONSE"
-            assert provider.sessions[0].closed is False
-            before_commands = list(runner.commands)
-            before_provider = provider.health_calls, provider.discover_calls
-            payload = {"engine": next_engine}
-            if next_engine == "auto":
-                payload["cameraId"] = provider.camera.id
-            attempted = client.post("/v1/session", headers=headers, json=payload)
-            assert attempted.status_code == 409
-            assert attempted.json()["error"]["code"] == "CAMERA_BUSY"
-            assert provider.open_count == 1
-            assert runner.commands == before_commands
-            assert (provider.health_calls, provider.discover_calls) == before_provider
-            assert provider.sessions[0].close_calls == 2
-            assert "provider-private-close-detail" not in rejected.text + attempted.text
-        finally:
-            for session in provider.sessions:
-                session.allow_close = True
+    with quarantined_client(app) as client:
+        rejected = client.post("/v1/session", headers=headers,
+                               json={"engine": "edsdk", "cameraId": provider.camera.id})
+        assert rejected.status_code == 502
+        assert rejected.json()["error"]["code"] == "INVALID_PROVIDER_RESPONSE"
+        assert provider.sessions[0].closed is False
+        before_commands = list(runner.commands)
+        before_provider = provider.health_calls, provider.discover_calls
+        payload = {"engine": next_engine}
+        if next_engine == "auto":
+            payload["cameraId"] = provider.camera.id
+        attempted = client.post("/v1/session", headers=headers, json=payload)
+        assert attempted.status_code == 409
+        assert attempted.json()["error"]["code"] == "CAMERA_BUSY"
+        assert provider.open_count == 1
+        assert runner.commands == before_commands
+        assert (provider.health_calls, provider.discover_calls) == before_provider
+        assert provider.sessions[0].close_calls == 1
+        assert "provider-private-close-detail" not in rejected.text + attempted.text
+    assert provider.sessions[0].close_calls == 1
 
 
 @pytest.fixture
@@ -100,14 +112,10 @@ def cleanup_api():
     network.open_connection.return_value = network_session
     app = create_app(engine=GPhoto2Engine(runner), edsdk_engine=EdsdkEngine(provider),
                      ccapi_engine=network, token="test-token")
-    with TestClient(app) as client:
+    with quarantined_client(app) as client:
         client.headers["Authorization"] = "Bearer test-token"
-        try:
-            yield client, provider, runner
-        finally:
-            for session in provider.sessions:
-                if isinstance(session, FailedCleanupSession):
-                    session.allow_close = True
+        yield client, provider, runner
+    assert all(session.close_calls == 1 for session in provider.sessions if isinstance(session, FailedCleanupSession))
 
 
 def reject_open(client, provider):
@@ -135,21 +143,25 @@ def test_polling_does_not_retry_close_or_dispatch_local_discovery(cleanup_api):
 
 
 @pytest.mark.parametrize("next_engine", ["edsdk", "libgphoto2", "auto"])
-def test_explicit_reconnect_retries_exact_owner_before_new_local_open(cleanup_api, next_engine):
-    client, provider, _ = cleanup_api
+def test_explicit_reconnect_never_retries_failed_owner_even_if_later_close_would_succeed(cleanup_api, next_engine):
+    client, provider, runner = cleanup_api
     original = reject_open(client, provider)
     provider.wrong_camera = False
     original.allow_close = True
+    before_provider = provider.health_calls, provider.discover_calls
+    before_commands = list(runner.commands)
     payload = {"engine": next_engine}
     if next_engine != "libgphoto2":
         payload["cameraId"] = provider.camera.id
-    created = client.post("/v1/session", json=payload)
-    assert created.status_code == 201, created.text
-    assert original.close_calls == 2
-    assert original.closed is True
-    assert provider.open_count == (1 if next_engine == "libgphoto2" else 2)
-    assert client.delete(f"/v1/session/{created.json()['id']}").status_code == 204
-    assert original.close_calls == 2
+    refused = client.post("/v1/session", json=payload)
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "CAMERA_BUSY"
+    assert "Reconnecting cannot clear" in refused.json()["error"]["message"]
+    assert original.close_calls == 1
+    assert original.closed is False
+    assert provider.open_count == 1
+    assert (provider.health_calls, provider.discover_calls) == before_provider
+    assert runner.commands == before_commands
 
 
 def test_ccapi_connection_does_not_retry_or_depend_on_local_cleanup(cleanup_api):
@@ -180,21 +192,19 @@ def test_registered_session_stop_and_delete_remain_available_during_quarantine(c
     assert original.close_calls == 1
 
 
-def test_shutdown_retries_exact_rejected_owner_and_keeps_failed_cleanup(cleanup_api):
+def test_shutdown_never_retries_or_clears_failed_rejected_owner(cleanup_api):
     client, provider, _ = cleanup_api
     original = reject_open(client, provider)
     manager = client.app.state.session_manager
-    with pytest.raises(BridgeError) as failed:
-        manager.close_all()
-    assert failed.value.code == "CAMERA_BUSY"
-    assert original.close_calls == 2
-    assert client.get("/v1/cameras").status_code == 409
-    original.allow_close = True
-    manager.close_all()
-    assert original.close_calls == 3
-    assert original.closed is True
-    assert client.get("/v1/cameras").status_code == 200
-    assert original.close_calls == 3
+    for later_close_would_succeed in (False, True):
+        original.allow_close = later_close_would_succeed
+        with pytest.raises(BridgeError) as failed:
+            manager.close_all()
+        assert failed.value.code == "CAMERA_BUSY"
+        assert original.close_calls == 1
+        assert original.closed is False
+        assert client.get("/v1/cameras").status_code == 409
+    assert client.get("/health").json()["engines"]["edsdk"]["available"] is False
 
 
 @pytest.mark.parametrize("next_operation", ["open", "discover"])
@@ -245,40 +255,32 @@ def test_inflight_rejected_close_blocks_later_local_admission(cleanup_api, next_
         assert original.close_calls == 1
 
 
-@pytest.mark.parametrize("cleanup_succeeds", [False, True])
-def test_explicit_cleanup_retry_cannot_run_concurrently(cleanup_api, cleanup_succeeds):
+@pytest.mark.parametrize("later_close_would_succeed", [False, True])
+def test_concurrent_reconnects_never_retry_failed_owner(cleanup_api, later_close_would_succeed):
     client, provider, runner = cleanup_api
     original = reject_open(client, provider)
-    original.allow_close = cleanup_succeeds
-    entered, proceed = threading.Event(), threading.Event()
-    original_close = original.close
-
-    def blocked_close():
-        entered.set()
-        assert proceed.wait(3), "Synthetic cleanup retry was not released"
-        original_close()
-
-    original.close = blocked_close
+    original.allow_close = later_close_would_succeed
     before_commands = list(runner.commands)
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        retry = pool.submit(client.post, "/v1/session", json={"engine": "libgphoto2"})
-        try:
-            assert entered.wait(1)
-            for engine in ("edsdk", "auto", "libgphoto2"):
-                refused = client.post("/v1/session", json={"engine": engine, "cameraId": provider.camera.id})
-                assert refused.status_code == 409
-                assert refused.json()["error"]["code"] == "CAMERA_BUSY"
-            assert client.get("/v1/cameras").status_code == 409
-            assert client.get("/health").status_code == 200
-            assert runner.commands == before_commands
-            assert original.close_calls == 1
-            assert not retry.done()
-        finally:
-            proceed.set()
-        assert retry.result(2).status_code == (201 if cleanup_succeeds else 409)
-    assert original.close_calls == 2
-    assert original.closed is cleanup_succeeds
+    before_provider = provider.health_calls, provider.discover_calls
+    ready = threading.Barrier(3)
+
+    def connect(engine):
+        ready.wait(timeout=3)
+        return client.post("/v1/session", json={"engine": engine, "cameraId": provider.camera.id})
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        requests = [pool.submit(connect, engine) for engine in ("edsdk", "auto", "libgphoto2")]
+        for request in requests:
+            refused = request.result(timeout=3)
+            assert refused.status_code == 409
+            assert refused.json()["error"]["code"] == "CAMERA_BUSY"
+    assert client.get("/v1/cameras").status_code == 409
+    assert client.get("/health").status_code == 200
+    assert original.close_calls == 1
+    assert original.closed is False
     assert provider.open_count == 1
+    assert runner.commands == before_commands
+    assert (provider.health_calls, provider.discover_calls) == before_provider
 
 
 @pytest.mark.parametrize("response", [None, object()], ids=["none", "missing-close"])
@@ -288,7 +290,7 @@ def test_missing_cleanup_operation_cannot_clear_retained_owner(response):
     engine = EdsdkEngine(provider)
     runner = FakeRunner()
     app = create_app(engine=GPhoto2Engine(runner), edsdk_engine=engine)
-    with pytest.raises(BridgeError) as shutdown, TestClient(app) as client:
+    with quarantined_client(app) as client:
         rejected = client.post("/v1/session", json={"engine": "edsdk", "cameraId": provider.camera.id})
         assert rejected.status_code == 502
         before_provider = provider.health_calls, provider.discover_calls
@@ -303,11 +305,10 @@ def test_missing_cleanup_operation_cannot_clear_retained_owner(response):
         assert (provider.health_calls, provider.discover_calls) == before_provider
         assert runner.commands == before_commands
         provider.open.assert_called_once()
-    assert shutdown.value.code == "CAMERA_BUSY"
     assert len(engine._pending_cleanup) == 1
 
 
-def test_published_retirement_blocks_rejected_owner_retry(cleanup_api):
+def test_published_retirement_preserves_rejected_owner_quarantine(cleanup_api):
     client, provider, runner = cleanup_api
     provider.wrong_camera = False
     opened = client.post("/v1/session", json={"engine": "edsdk", "cameraId": provider.camera.id})
@@ -348,3 +349,162 @@ def test_published_retirement_blocks_rejected_owner_retry(cleanup_api):
         finally:
             release.set()
         assert deletion.result(timeout=2).status_code == 204
+
+
+def test_reconnect_cannot_use_second_noop_close_as_release_confirmation():
+    provider = WrongCameraProvider()
+    original_open = provider.open
+
+    def open_with_consumed_close(camera_id=None, profile_hint=None):
+        session = original_open(camera_id, profile_hint)
+
+        def consumed_close():
+            session.close_calls += 1
+            if session.close_calls == 1:
+                raise RuntimeError("Synthetic first release failed")
+            # A closed/no-op guard can return normally without confirming release.
+            return None
+
+        session.close = consumed_close
+        return session
+
+    provider.open = open_with_consumed_close
+    engine = EdsdkEngine(provider)
+    app = create_app(engine=GPhoto2Engine(FakeRunner()), edsdk_engine=engine)
+    with quarantined_client(app) as client:
+        rejected = client.post("/v1/session", json={"engine": "edsdk", "cameraId": provider.camera.id})
+        assert rejected.status_code == 502
+        original = provider.sessions[0]
+        assert original.close_calls == 1
+        provider.wrong_camera = False
+        reconnect = client.post("/v1/session", json={"engine": "libgphoto2"})
+        assert reconnect.status_code == 409
+        assert reconnect.json()["error"]["code"] == "CAMERA_BUSY"
+        assert original.close_calls == 1
+        assert original.closed is False
+        assert len(engine._pending_cleanup) == 1
+    assert original.close_calls == 1
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt(), SystemExit(1), asyncio.CancelledError()])
+def test_interrupted_first_close_retains_quarantine_without_retry(interruption):
+    provider = WrongCameraProvider()
+    rejected = FailedCleanupSession(provider.camera.model_copy(update={"id": "edsdk-other-camera"}))
+    rejected.close = Mock(side_effect=interruption)
+    provider.open = Mock(return_value=rejected)
+    engine = EdsdkEngine(provider)
+    with pytest.raises(type(interruption)) as caught:
+        engine.open(provider.camera.id)
+    assert caught.value is interruption
+    rejected.close.assert_called_once_with()
+    rejected.close.side_effect = None
+    before_health = provider.health_calls
+    for retry in (False, True):
+        with pytest.raises(BridgeError) as refused:
+            engine._require_no_pending_cleanup(retry=retry)
+        assert refused.value.code == "CAMERA_BUSY"
+    with pytest.raises(BridgeError) as reconnect:
+        engine.open(provider.camera.id)
+    assert reconnect.value.code == "CAMERA_BUSY"
+    assert engine.health()[0] is False
+    assert engine._pending_cleanup == [rejected]
+    assert provider.health_calls == before_health
+    rejected.close.assert_called_once_with()
+    provider.open.assert_called_once_with(provider.camera.id, None)
+
+
+def test_first_successful_rejected_close_still_clears_quarantine():
+    provider = WrongCameraProvider()
+    original_open = provider.open
+
+    def immediately_cleaned(camera_id=None, profile_hint=None):
+        session = original_open(camera_id, profile_hint)
+        session.allow_close = True
+        return session
+
+    provider.open = immediately_cleaned
+    engine = EdsdkEngine(provider)
+    app = create_app(engine=GPhoto2Engine(FakeRunner()), edsdk_engine=engine)
+    with TestClient(app) as client:
+        rejected = client.post("/v1/session", json={"engine": "edsdk", "cameraId": provider.camera.id})
+        assert rejected.status_code == 502
+        original = provider.sessions[0]
+        assert original.close_calls == 1
+        assert original.closed is True
+        assert not engine._pending_cleanup
+        created = client.post("/v1/session", json={"engine": "libgphoto2"})
+        assert created.status_code == 201
+        assert client.delete(f"/v1/session/{created.json()['id']}").status_code == 204
+    assert original.close_calls == 1
+
+
+def test_quarantined_client_does_not_swallow_test_body_bridge_error():
+    provider = WrongCameraProvider()
+    app = create_app(engine=GPhoto2Engine(FakeRunner()), edsdk_engine=EdsdkEngine(provider))
+    body_failure = BridgeError("SYNTHETIC_BODY_FAILURE", "The test body must not be swallowed.")
+    with pytest.raises(BridgeError) as caught, quarantined_client(app) as client:
+        rejected = client.post("/v1/session", json={"engine": "edsdk", "cameraId": provider.camera.id})
+        assert rejected.status_code == 502
+        raise body_failure
+    assert caught.value is body_failure
+    assert provider.sessions[0].close_calls == 1
+
+
+@pytest.mark.parametrize("retire", ["delete", "shutdown"])
+def test_shutdown_preserves_first_error_and_drains_ccapi_with_both_quarantines(retire):
+    from .test_registered_close_failure import failed_local_close_client
+
+    provider = WrongCameraProvider()
+    provider.wrong_camera = False
+    network = Mock()
+    network.name = "ccapi"
+    network_session = _Session(CameraDescriptor(
+        id="ccapi-test", model="Synthetic", port="network", engine="ccapi",
+    ))
+    network_session.engine_name = "ccapi"
+    network_session.close = Mock()
+    network.open_connection.return_value = network_session
+    app = create_app(engine=GPhoto2Engine(FakeRunner()), edsdk_engine=EdsdkEngine(provider),
+                     ccapi_engine=network, token="test-token")
+    with failed_local_close_client(app) as client:
+        client.headers["Authorization"] = "Bearer test-token"
+        opened = client.post("/v1/session", json={"engine": "edsdk", "cameraId": provider.camera.id})
+        assert opened.status_code == 201
+        active = provider.sessions[-1]
+        failure = OSError("synthetic unknown native cleanup")
+        active.close = Mock(side_effect=failure)
+        provider.wrong_camera = True
+        rejected = client.post("/v1/session", json={
+            "engine": "edsdk", "cameraId": "edsdk-different-requested-camera",
+        })
+        assert rejected.status_code == 502
+        pending = provider.sessions[-1]
+        assert client.post("/v1/session", json={
+            "engine": "ccapi", "ccapiUrl": "http://camera.invalid",
+        }).status_code == 201
+        manager = app.state.session_manager
+        with pytest.raises(OSError) as caught:
+            if retire == "delete":
+                client.delete(f"/v1/session/{opened.json()['id']}")
+            else:
+                manager.close_all()
+        assert caught.value is failure
+        if retire == "delete":
+            network_session.close.assert_not_called()
+        else:
+            network_session.close.assert_called_once_with()
+        active.close.assert_called_once_with()
+        assert pending.close_calls == 1
+        assert manager._failed_local_closes
+        assert client.post("/v1/session", json={"engine": "libgphoto2"}).status_code == 409
+        with pytest.raises(BridgeError) as repeated:
+            manager.close_all()
+        assert repeated.value.code == "ENGINE_COMMAND_FAILED"
+        network_session.close.assert_called_once_with()
+        with pytest.raises(BridgeError) as rejected_owner:
+            manager.local_engines._require_no_pending_cleanup(retry=True)
+        assert rejected_owner.value.code == "CAMERA_BUSY"
+        active.close.assert_called_once_with()
+        assert pending.close_calls == 1
+    active.close.assert_called_once_with()
+    assert pending.close_calls == 1

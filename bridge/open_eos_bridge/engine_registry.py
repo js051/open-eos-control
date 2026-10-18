@@ -59,8 +59,8 @@ class LocalEngineRegistry:
         )
 
     def resolve_name(self, requested: EngineName, camera_id: str | None = None) -> str:
-        # A connection attempt is the explicit retry point, before auto selection
-        # can invoke any local provider's health/discovery operations.
+        # Check rejected-owner quarantine before auto selection can invoke any
+        # local provider health/discovery operations; no failed close is retried.
         self._require_no_pending_cleanup(retry=True)
         if requested == EngineName.AUTO:
             return self._engine_for_camera(camera_id) if camera_id else self.default_engine
