@@ -443,3 +443,7 @@ EDSDK 回傳錯誤 session 後 close 失敗，現保留精確 rejected owner，�
 ### 2026-10-18 04:15 UTC：清理失敗持續隔離，修正先前 retry 推論
 
 正常 registered close 失敗後現保留精確 owner／reservation，local POST、AUTO、discovery 持續拒絕，CCAPI 與其他已登錄 session 的 Stop／DELETE、ordinary-Exception shutdown drain 保留。真 GPhoto2Session＋FakeRunner 證明 close 可能先置 closed 再拋 release error，第二次 close 無命令卻返回 None，因此不能當成功釋放收據。EDSDK protocol 同樣未提供失敗後 retry ACK；先前 04:00 允許 reconnect 重試清除的推論現明確撤回，rejected session 首次 close 失敗後也持續 process quarantine，不再自動重試／解鎖。初次 close 成功的既有路徑保持。代價為需確認相機狀態、必要時修復 provider 後重啟，restart 本身不證明物理 release。合併驗證 125 項＋新增 3 項 distinct，共 128 項已執行通過；變更後兩個測試模組 34 項通過，Ruff/diff clean。詳見 registered-close-contract-audit-2026-10-18.md 與更新的 edsdk-rejected-open-cleanup-2026-10-18.md。
+
+## 2026-10-18 08:47 Android 原始協定 JVM 補證
+
+[恢復與真執行紀錄](android-protocol-jvm-recovery-2026-10-18.zh-TW.md)：完整原 Kotlin 檔編譯與 72 個不同原 JUnit 案例通過，包含 USB observed folders、真 OkHttp Direct Release／Focus／Live View／DELETE。Live View fixture 的 localhost 雙位址造成 2 個 retry／cleanup 失敗，明確綁同一 IPv4 origin 後 8/8通過；產品 strict transport／timeout／owner 不變。這取代相關 authored-only 測試的未執行狀態，不取代完整 Android Gradle／裝置／相機驗收。

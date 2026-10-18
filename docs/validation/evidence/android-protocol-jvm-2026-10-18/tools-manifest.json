@@ -1,0 +1,244 @@
+[
+  {
+    "coordinate": "org.jetbrains.kotlin:kotlin-compiler-embeddable:2.2.21",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/2.2.21/kotlin-compiler-embeddable-2.2.21.jar",
+    "official_sha1": "b13aed5cf8412f9ee9d1e4db21bdcfebcc24f606",
+    "sha256": "9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295",
+    "bytes": 56908512,
+    "utc": "2026-10-18T06:51:57.779962+00:00",
+    "file": "kotlin-compiler-embeddable-2.2.21.jar"
+  },
+  {
+    "coordinate": "org.jetbrains.kotlin:kotlin-stdlib:2.2.21",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.2.21/kotlin-stdlib-2.2.21.jar",
+    "official_sha1": "fa374a986e128314c3db00a20aae55f72a258511",
+    "sha256": "6558a3d233da56a20934b32159f9db5f86ed5816ef098f78a2c223dc6abb79dd",
+    "bytes": 1761445,
+    "utc": "2026-10-18T06:52:04.573677+00:00",
+    "file": "kotlin-stdlib-2.2.21.jar"
+  },
+  {
+    "coordinate": "org.jetbrains.kotlin:kotlin-script-runtime:2.2.21",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-script-runtime/2.2.21/kotlin-script-runtime-2.2.21.jar",
+    "official_sha1": "e9b021c4e335e4ed7a7e3b32285249ae6bb3a6c8",
+    "sha256": "2b1519b427b514d1536c1b425674b03fe914af637924028e9959c6625442df51",
+    "bytes": 44769,
+    "utc": "2026-10-18T06:52:11.605133+00:00",
+    "file": "kotlin-script-runtime-2.2.21.jar"
+  },
+  {
+    "coordinate": "org.jetbrains.kotlin:kotlin-reflect:1.6.10",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-reflect/1.6.10/kotlin-reflect-1.6.10.jar",
+    "official_sha1": "1cbe9c92c12a94eea200d23c2bbaedaf3daf5132",
+    "sha256": "3277ac102ae17aad10a55abec75ff5696c8d109790396434b496e75087854203",
+    "bytes": 3038560,
+    "utc": "2026-10-18T06:52:18.754879+00:00",
+    "file": "kotlin-reflect-1.6.10.jar"
+  },
+  {
+    "coordinate": "org.jetbrains.kotlin:kotlin-daemon-embeddable:2.2.21",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-daemon-embeddable/2.2.21/kotlin-daemon-embeddable-2.2.21.jar",
+    "official_sha1": "78fde5db1c92786448170b351d8f8868acabd2ce",
+    "sha256": "91c0673c22e44b054ae0314d323860ebe1f3aff3f0ebc74fff82c4733dde09be",
+    "bytes": 347987,
+    "utc": "2026-10-18T06:52:26.036888+00:00",
+    "file": "kotlin-daemon-embeddable-2.2.21.jar"
+  },
+  {
+    "coordinate": "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.8.0",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.8.0/kotlinx-coroutines-core-jvm-1.8.0.jar",
+    "official_sha1": "ac1dc37a30a93150b704022f8d895ee1bd3a36b3",
+    "sha256": "9860906a1937490bf5f3b06d2f0e10ef451e65b95b269f22daf68a3d1f5065c5",
+    "bytes": 1548360,
+    "utc": "2026-10-18T06:52:32.410921+00:00",
+    "file": "kotlinx-coroutines-core-jvm-1.8.0.jar"
+  },
+  {
+    "coordinate": "org.jetbrains.kotlin:kotlin-test:2.2.21",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-test/2.2.21/kotlin-test-2.2.21.jar",
+    "official_sha1": "44f2e0643410431fd067bff8bee01df344a8d204",
+    "sha256": "612966ddee4d3d0486156f10c77a57c5c47dae65eb98a2bddf34cf2aeeb894c4",
+    "bytes": 102395,
+    "utc": "2026-10-18T06:52:58.913563+00:00",
+    "file": "kotlin-test-2.2.21.jar"
+  },
+  {
+    "coordinate": "org.jetbrains.kotlin:kotlin-test-junit:2.2.21",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-test-junit/2.2.21/kotlin-test-junit-2.2.21.jar",
+    "official_sha1": "e0a567c97f619e713ca27b1f79db818b1d3ddda0",
+    "sha256": "5d88fcf9a56ee501fbf874ee65e82375ea1221423867c598ff29b11e0ad49317",
+    "bytes": 5081,
+    "utc": "2026-10-18T06:53:05.747588+00:00",
+    "file": "kotlin-test-junit-2.2.21.jar"
+  },
+  {
+    "coordinate": "junit:junit:4.13.2",
+    "url": "https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.jar",
+    "official_sha1": "8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12",
+    "sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3",
+    "bytes": 384581,
+    "utc": "2026-10-18T06:53:11.841407+00:00",
+    "file": "junit-4.13.2.jar"
+  },
+  {
+    "coordinate": "org.hamcrest:hamcrest-core:1.3",
+    "url": "https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar",
+    "official_sha1": "42a25dc3219429f0e5d060061f71acb49bf010a0",
+    "sha256": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9",
+    "bytes": 45024,
+    "utc": "2026-10-18T06:53:18.196738+00:00",
+    "file": "hamcrest-core-1.3.jar"
+  },
+  {
+    "coordinate": "org.jetbrains:annotations:13.0",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/annotations/13.0/annotations-13.0.jar",
+    "official_sha1": "919f0dfe192fb4e063e7dacadee7f8bb9a2672a9",
+    "sha256": "ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478",
+    "bytes": 17536,
+    "utc": "2026-10-18T06:53:25.239989+00:00",
+    "file": "annotations-13.0.jar"
+  },
+  {
+    "file": "kotlinx-coroutines-test-jvm-1.9.0.jar",
+    "coordinate": "org.jetbrains.kotlinx:kotlinx-coroutines-test-jvm:1.9.0",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-test-jvm/1.9.0/kotlinx-coroutines-test-jvm-1.9.0.jar",
+    "official_sha1": "7227c0691a604e2b32f525b628014dda862d0eed",
+    "sha256": "68b87fa90db3dab1e794ff6078364087c07f87e5e4a4d0c8d3272a222ee8fe7e",
+    "bytes": 135030,
+    "utc": "2026-10-18T08:38:00.646036+00:00"
+  },
+  {
+    "file": "json-20240303.jar",
+    "coordinate": "org.json:json:20240303",
+    "url": "https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar",
+    "official_sha1": "0ebb88e8fb5122b7506d5cf1d69f1ccdb790d22a",
+    "sha256": "3cf6cd6892e32e2b4c1c39e0f52f5248a2f5b37646fdfbb79a66b46b618414ed",
+    "bytes": 78332,
+    "utc": "2026-10-18T08:38:07.037951+00:00"
+  },
+  {
+    "file": "okhttp-4.12.0.jar",
+    "coordinate": "com.squareup.okhttp3:okhttp:4.12.0",
+    "url": "https://repo.maven.apache.org/maven2/com/squareup/okhttp3/okhttp/4.12.0/okhttp-4.12.0.jar",
+    "official_sha1": "2f4525d4a200e97e1b87449c2cd9bd2e25b7e8cd",
+    "sha256": "b1050081b14bb7a3a7e55a4d3ef01b5dcfabc453b4573a4fc019767191d5f4e0",
+    "bytes": 789531,
+    "utc": "2026-10-18T08:38:17.382059+00:00"
+  },
+  {
+    "file": "mockwebserver-4.12.0.jar",
+    "coordinate": "com.squareup.okhttp3:mockwebserver:4.12.0",
+    "url": "https://repo.maven.apache.org/maven2/com/squareup/okhttp3/mockwebserver/4.12.0/mockwebserver-4.12.0.jar",
+    "official_sha1": "3bc54cc5c87cd632031d0881f3c313d3799a1476",
+    "sha256": "6784673687f4ac8f21679b9d4bc7cdb46e1a1ce1be9d3133b36bede59a741561",
+    "bytes": 74739,
+    "utc": "2026-10-18T08:38:24.247646+00:00"
+  },
+  {
+    "file": "okio-jvm-3.6.0.jar",
+    "coordinate": "com.squareup.okio:okio-jvm:3.6.0",
+    "url": "https://repo.maven.apache.org/maven2/com/squareup/okio/okio-jvm/3.6.0/okio-jvm-3.6.0.jar",
+    "official_sha1": "5600569133b7bdefe1daf9ec7f4abeb6d13e1786",
+    "sha256": "67543f0736fc422ae927ed0e504b98bc5e269fda0d3500579337cb713da28412",
+    "bytes": 359580,
+    "utc": "2026-10-18T08:38:31.394159+00:00"
+  },
+  {
+    "file": "annotations-23.0.0.jar",
+    "coordinate": "org.jetbrains:annotations:23.0.0",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/annotations/23.0.0/annotations-23.0.0.jar",
+    "official_sha1": "8cc20c07506ec18e0834947b84a864bfc094484e",
+    "sha256": "7b0f19724082cbfcbc66e5abea2b9bc92cf08a1ea11e191933ed43801eb3cd05",
+    "bytes": 29371,
+    "utc": "2026-10-18T08:38:39.230940+00:00"
+  },
+  {
+    "file": "media3-common-1.8.1.aar",
+    "coordinate": "androidx.media3:media3-common:1.8.1",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/media3/media3-common/1.8.1/media3-common-1.8.1.aar",
+    "official_sha1": "6a15d6750a1326ecf41ea2526a9bf2256564b9c7",
+    "sha256": "0e0144f8d0ff5c7f53055b5f37bed4517a87bfdf73601c801d1da1a65829fb6c",
+    "bytes": 537615,
+    "utc": "2026-10-18T08:42:06.390449+00:00",
+    "classes_jar": {
+      "file": "media3-common-1.8.1-classes.jar",
+      "sha256": "563255c0e6abe4edd25b744a6db272e783edc23b5c271d1d570ab4a21230cebb"
+    }
+  },
+  {
+    "file": "media3-container-1.8.1.aar",
+    "coordinate": "androidx.media3:media3-container:1.8.1",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/media3/media3-container/1.8.1/media3-container-1.8.1.aar",
+    "official_sha1": "eee1be341d3c71282e1de506b74523ed62f44cb3",
+    "sha256": "3860a15aa5b2a2baf2dcde38c3b638a384a84daf4855ac47867714c9dac0368d",
+    "bytes": 55279,
+    "utc": "2026-10-18T08:42:13.206507+00:00",
+    "classes_jar": {
+      "file": "media3-container-1.8.1-classes.jar",
+      "sha256": "ede55527cb3389be6461bedaf41940e6e0f984fef00bb2106be22450eeae964d"
+    }
+  },
+  {
+    "file": "media3-extractor-1.8.1.aar",
+    "coordinate": "androidx.media3:media3-extractor:1.8.1",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/media3/media3-extractor/1.8.1/media3-extractor-1.8.1.aar",
+    "official_sha1": "c90ea8ba60e50938439ddcadc6ca7171462f980f",
+    "sha256": "778312cd8a9975debd50c86a20ae4ed7b0770ff43e9b72acfb6664b6ed36d3ae",
+    "bytes": 777827,
+    "utc": "2026-10-18T08:42:19.124874+00:00",
+    "classes_jar": {
+      "file": "media3-extractor-1.8.1-classes.jar",
+      "sha256": "5c90a60b138263c5ec6170ba0d847a9bac823aed88dea915172d71cbdf67570e"
+    }
+  },
+  {
+    "file": "media3-decoder-1.8.1.aar",
+    "coordinate": "androidx.media3:media3-decoder:1.8.1",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/media3/media3-decoder/1.8.1/media3-decoder-1.8.1.aar",
+    "official_sha1": "ccfc55a72b1ae6aa7083857e45b4aa11a0c64c46",
+    "sha256": "ffa96597c2418de39d6b24975c788d3aa4bdab00fb89e6b5b22aef2a49a919e8",
+    "bytes": 18231,
+    "utc": "2026-10-18T08:42:27.485697+00:00",
+    "classes_jar": {
+      "file": "media3-decoder-1.8.1-classes.jar",
+      "sha256": "f7901ef50c1b26920192e5768be21f6f92a327720187421bb3a111a7c767a2c1"
+    }
+  },
+  {
+    "file": "annotation-experimental-1.3.1.aar",
+    "coordinate": "androidx.annotation:annotation-experimental:1.3.1",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/annotation/annotation-experimental/1.3.1/annotation-experimental-1.3.1.aar",
+    "official_sha1": "96a98340221569e1c2deb3da92de5ca6e3389a65",
+    "sha256": "e4d49dc3880b7b7437ea54ce71461e02897faa4e1ecc53e63ecadb1a14c20c9c",
+    "bytes": 36833,
+    "utc": "2026-10-18T08:42:35.043465+00:00",
+    "classes_jar": {
+      "file": "annotation-experimental-1.3.1-classes.jar",
+      "sha256": "ff935d769cc61ee5b6315767059bc31e33ca38edf80b609d9e1724258ceca746"
+    }
+  },
+  {
+    "file": "annotation-1.6.0.jar",
+    "coordinate": "androidx.annotation:annotation:1.6.0",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/annotation/annotation/1.6.0/annotation-1.6.0.jar",
+    "official_sha1": "b94fe605ea8ff0f68f3feab065ae0b7d67860964",
+    "sha256": "fbc64f5c44a7added8b6eab517cf7d70555e25153bf5d44a6ed9b0e5312f7de9",
+    "bytes": 670,
+    "utc": "2026-10-18T08:42:40.928552+00:00"
+  },
+  {
+    "file": "guava-33.3.1-android.jar",
+    "coordinate": "com.google.guava:guava:33.3.1-android",
+    "url": "https://repo.maven.apache.org/maven2/com/google/guava/guava/33.3.1-android/guava-33.3.1-android.jar",
+    "official_sha1": "36162b3b4e9df67dae90db62a2c54616ca42c1bd",
+    "sha256": "2c3e41d1b380f2044d257947a3aa82dabf3ae4b978622745254aa18b6cf89ab0",
+    "bytes": 2918070,
+    "utc": "2026-10-18T08:42:47.878126+00:00"
+  },
+  {
+    "file": "kotlinx-coroutines-core-jvm-1.9.0.jar",
+    "sha256": "ad89c2892235e670f222d819cb3d81188143cb19a05b59df9889ae4269f5c70a",
+    "source": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.9.0/kotlinx-coroutines-core-jvm-1.9.0.module",
+    "official_module_verified": true
+  }
+]
