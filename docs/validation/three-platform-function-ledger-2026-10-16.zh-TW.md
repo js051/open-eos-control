@@ -156,7 +156,7 @@
 | 126 | Optional Canon EDSDK provider | G12 | D/E：僅provider boundary，真Canon EDSDK binding未實作。 | 原生N／browser待驗／成品無 |
 | 127 | iOS CCAPI core | G01/G03/G04/G08 | A+B：對應產品入口存在；能力/readback gate與平台驗證分開。 | 原生N／browser待驗／成品無 |
 | 128 | iOS camera-control app | G04/G06/G08/G13 | A+B：對應產品入口存在；能力/readback gate與平台驗證分開。 | 原生N／browser待驗／成品無 |
-| 129 | iOS USB/PTP | G12 | D/E：iOS direct USB/PTP未實作；Bridge不等同直連。 | 原生N／browser待驗／成品無 |
+| 129 | iOS USB/PTP | G12 | D/E：已有隔離 port／production coordinator 及未經 Apple 編譯的首次 session adapter 原碼；native wire／產品接線未完，Bridge不等同直連。 | 原生N／browser待驗／成品無 |
 
 ## 08:05 UTC 後新增的窄平台證據
 
@@ -475,3 +475,11 @@ EDSDK 回傳錯誤 session 後 close 失敗，現保留精確 rejected owner，�
 ### 2026-10-18 #129 production coordinator
 
 原 PTP value port／reducer 已補 production serial effect pump，逐 effect admission、跨 thread callback、重入取消及精確 cleanup ownership；原 29 案改用真 owner，加 8 案，共 37 XCTest 真執行通過。仍無 Apple adapter／wire codec／產品入口，非 iOS USB 完成。詳 [coordinator 交付範圍](ios-ptp-coordinator-2026-10-18.zh-TW.md)。
+
+### 2026-10-18 15:34 UTC：#129 首次 session 原碼與精確拒絕契約
+
+共同 dev c32f1db549958975ac94ed914b051a9ec316035c。共享核心 50/50 XCTest 真執行通過；包含取消／替換後 late-ready 與未送出拒絕的紅→綠反例。Apple adapter 原碼採首次 session、process-lifetime 唯一 owner、最多 4 個 retained native objects；Apple 分支 NOT_COMPILED／NOT_RUN，DeviceInfo／同物件重開仍 unsupported。未開產品入口，原 #129 仍未完整；詳 [隔離 lifecycle 驗證](ios-ptp-apple-lifecycle-2026-10-18.zh-TW.md)。
+
+### 2026-10-18 15:38 UTC：#129 純 DeviceInfo dataset
+
+新增有界 Swift DeviceInfo dataset decoder，原 Android 完整 production classes 的 13 組同 byte oracle 逐欄對照；Swift 共 64/64 XCTest，原 50 保持。這只處理已分離 dataset，不接 Apple completion、不新增 raw command；#129 native wire／產品接線仍未完成。詳 [跨語言 dataset 驗證](ios-ptp-device-info-dataset-2026-10-18.zh-TW.md)。

@@ -1,0 +1,15 @@
+{
+  "exit": 0,
+  "start": "2026-10-18T15:37:14.293212+00:00",
+  "end": "2026-10-18T15:37:22.332815+00:00",
+  "source_unchanged": true,
+  "tests": 64,
+  "failures": 0,
+  "original_50_tests_unchanged": true,
+  "new_decoder_tests": 14,
+  "android_production_oracle_cases": 13,
+  "oracle_fields_per_successful_case": 14,
+  "oracle_comparison": "Identical dataset bytes; UTF-16 hex strings and sorted code sets",
+  "apple_branch": "NOT_COMPILED / NOT_RUN",
+  "native_read": "NOT_ATTEMPTED; decoder not connected to ApplePort"
+}

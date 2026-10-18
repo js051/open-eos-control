@@ -1,0 +1,38 @@
+[
+  {
+    "path": "Package.swift",
+    "sha256": "0fd40c2a51da0b096efad2332742f6ae66b352587031ae06e6c61d2cbe73ef8f"
+  },
+  {
+    "path": "Sources/OpenEOSCore/ImageCapturePTPPort.swift",
+    "sha256": "5db0a4749f37164eb6d6e37a2e26f05ed6c527d788cd16a86d982eb87afd5736"
+  },
+  {
+    "path": "Sources/OpenEOSCore/ImageCapturePTPStateMachine.swift",
+    "sha256": "2ffaaa55ca06aa640306ad6fe0de836cd827bef384c66b0aae388f0e4b78a0ff"
+  },
+  {
+    "path": "Sources/OpenEOSCore/ImageCapturePTPCoordinator.swift",
+    "sha256": "d4d7996551d26cccb1803229aa04febe675d8b1ff09581b67cc75be354205f89"
+  },
+  {
+    "path": "Sources/OpenEOSCore/ImageCapturePTPApplePort.swift",
+    "sha256": "4aa9e9788485a4182ef9c659cea76f507e5c9000215fa79b4ab0942cfcba3b0c"
+  },
+  {
+    "path": "Sources/OpenEOSCore/PTPDeviceInfo.swift",
+    "sha256": "cce47c6a82cb0bdfbed85c986af34f24dd7ea9533365f9bce06f661113d083e7"
+  },
+  {
+    "path": "Tests/OpenEOSCoreTests/ImageCapturePTPStateMachineTests.swift",
+    "sha256": "e9c1bc5ec55ae2c3ac52b3af3e471816e8cae2f90bd7126d41c623f189224339"
+  },
+  {
+    "path": "Tests/OpenEOSCoreTests/ImageCapturePTPCoordinatorTests.swift",
+    "sha256": "7025257533f9b4c7e03ec277243fcebafacb1d71a6e9358309125e8a678bd4b2"
+  },
+  {
+    "path": "Tests/OpenEOSCoreTests/PTPDeviceInfoDecoderTests.swift",
+    "sha256": "5e8a7be1e883ad37a21b4a38e85592bd1435cac8ffa8d694729ccd77610f62cb"
+  }
+]
