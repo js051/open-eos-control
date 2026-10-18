@@ -96,6 +96,12 @@ public final class ImageCapturePTPApplePort: ImageCapturePTPPort {
     }
 
     private func open(_ request: PTP.Request) {
+        // A new browser may expose a different object for the same physical camera.
+        // Until confirmed release, reject every new open without installing resources.
+        // This source slice does not infer physical identity or auto-retry after release.
+        guard sessions.isEmpty else {
+            emit(.openNotDispatched(request, .unsupportedConcurrentSession)); return
+        }
         guard let record = handles[request.session.handle] else {
             emit(.openNotDispatched(request, .nativeFailure)); return
         }
