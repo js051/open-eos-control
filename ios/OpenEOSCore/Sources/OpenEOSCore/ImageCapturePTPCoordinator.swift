@@ -1,7 +1,7 @@
 import Foundation
 import Dispatch
 
-/// Runs the production reducer and its admitted effects on one private serial executor.
+/// Runs the production reducer and its admitted effects on one explicitly selected serial executor.
 /// This is an internal integration boundary, not a native provider or permission grant.
 ///
 /// `send` and `snapshot` synchronously join this executor. A port must perform effects
@@ -17,9 +17,13 @@ import Dispatch
 /// Keep the port and coordinator together until discovery has stopped, no active session
 /// remains, and cleanup is empty. A nonempty cleanup table is an unresolved native duty.
 public final class ImageCapturePTPCoordinator: @unchecked Sendable {
+    /// Only known serial execution modes are accepted. A main-confined port must use
+    /// mainThread and call native APIs directly in perform, without another queue hop.
+    public enum Executor: Sendable { case dedicated, mainThread }
     public enum BindingError: Error { case portAlreadyBound }
     private let port: ImageCapturePTPPort
-    private let executor = DispatchQueue(label: "org.openeos.imagecapture-ptp")
+    private let executor: DispatchQueue
+    private let executionMode: Executor
     private let executorKey = DispatchSpecificKey<UInt8>()
     private let inboxLock = NSLock()
     private var inbox: [ImageCapturePTP.Event] = []
@@ -30,13 +34,21 @@ public final class ImageCapturePTPCoordinator: @unchecked Sendable {
 
     public init(port: ImageCapturePTPPort,
                 authorization: ImageCapturePTP.AuthorizationSnapshot = .init(
-                    control: .notDetermined, contents: .notDetermined)) throws {
+                    control: .notDetermined, contents: .notDetermined),
+                executor executionMode: Executor = .dedicated) throws {
         // Construction/port binding must be exclusive, before exposing the port to
         // callbacks. Never steal an existing owner's callback or cleanup obligation.
         guard port.receive == nil else { throw BindingError.portAlreadyBound }
         self.port = port
         self.state = .init(authorization: authorization)
-        executor.setSpecific(key: executorKey, value: 1)
+        self.executionMode = executionMode
+        switch executionMode {
+        case .dedicated:
+            executor = DispatchQueue(label: "org.openeos.imagecapture-ptp")
+            executor.setSpecific(key: executorKey, value: 1)
+        case .mainThread:
+            executor = .main
+        }
         port.receive = { [weak self] event in self?.receive(event) }
     }
 
@@ -65,15 +77,22 @@ public final class ImageCapturePTPCoordinator: @unchecked Sendable {
     /// contain the original discovery/session/request identity captured by the adapter.
     public func receive(_ event: ImageCapturePTP.Event) {
         append(event)
-        if DispatchQueue.getSpecific(key: executorKey) != nil {
+        if isOnExecutor {
             drain()
         } else {
             executor.async { [weak self] in self?.drain() }
         }
     }
 
+    private var isOnExecutor: Bool {
+        switch executionMode {
+        case .dedicated: return DispatchQueue.getSpecific(key: executorKey) != nil
+        case .mainThread: return Thread.isMainThread
+        }
+    }
+
     private func onExecutor<T>(_ body: () -> T) -> T {
-        if DispatchQueue.getSpecific(key: executorKey) != nil { return body() }
+        if isOnExecutor { return body() }
         return executor.sync(execute: body)
     }
 
