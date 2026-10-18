@@ -1,0 +1,42 @@
+[
+  {
+    "class": "CameraConnectionConfigurationRecoveryTest",
+    "exit": 0,
+    "tests": 16,
+    "failures": 0,
+    "start": "2026-10-18T09:37:00.685121+00:00",
+    "end": "2026-10-18T09:37:05.829474+00:00"
+  },
+  {
+    "class": "CameraRecordingReviewRecoveryTest",
+    "exit": 0,
+    "tests": 38,
+    "failures": 0,
+    "start": "2026-10-18T09:37:05.829702+00:00",
+    "end": "2026-10-18T09:37:34.327824+00:00"
+  },
+  {
+    "class": "CameraCaptureReviewRecoveryTest",
+    "exit": 0,
+    "tests": 39,
+    "failures": 0,
+    "start": "2026-10-18T09:37:34.328150+00:00",
+    "end": "2026-10-18T09:38:34.835635+00:00"
+  },
+  {
+    "class": "CameraShutterRecoveryStateTest",
+    "exit": 0,
+    "tests": 8,
+    "failures": 0,
+    "start": "2026-10-18T09:38:34.835841+00:00",
+    "end": "2026-10-18T09:38:35.100633+00:00"
+  },
+  {
+    "class": "CameraEventStateRecoveryTest",
+    "exit": 0,
+    "tests": 5,
+    "failures": 0,
+    "start": "2026-10-18T09:38:35.100856+00:00",
+    "end": "2026-10-18T09:38:41.483045+00:00"
+  }
+]

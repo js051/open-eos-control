@@ -1,0 +1,86 @@
+[
+  {
+    "path": "compile-original-imports.txt",
+    "originalSha256": "2cc8dc313f6dd01f7ad17108bc6a7bb2a385dca3c14ed4f2357071766389d0d8"
+  },
+  {
+    "path": "compile-original-command.json",
+    "originalSha256": "50e9e2c8f68ed9d09e290b0fb8b1e44536f7d29b383f6098f6657e16080554ae"
+  },
+  {
+    "path": "integrated-compile.txt",
+    "originalSha256": "72d5b6b4415cfc84bd3832bc7d0f336a9dd6ab9a0cc1198973ec12c50cb24934"
+  },
+  {
+    "path": "compile-command.json",
+    "originalSha256": "19dd3db7a787943bd0f46486a1b31903c569e5b32610fb3ea668c74e663f9113"
+  },
+  {
+    "path": "source-files.json",
+    "originalSha256": "c844e8f3c43e833ec4f7c279be221441f59f38155cf50cf0e3021ce715e44e2e"
+  },
+  {
+    "path": "caller-compile.txt",
+    "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "caller-compile-command.json",
+    "originalSha256": "1a039ead81446d7e47f967d88418535aa675e75abe09199a0d78f388464c307c"
+  },
+  {
+    "path": "caller-results.json",
+    "originalSha256": "9cad1fbf044985cf5d2bf46935eca3b246699d999cf2cb088819c38e09293686"
+  },
+  {
+    "path": "counter-test.txt",
+    "originalSha256": "4b807208c92da8e617eaa8b58106193600ac82bcecc711777bb2bc213ac032cd"
+  },
+  {
+    "path": "counter-compile.txt",
+    "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "annotation-receipt.json",
+    "originalSha256": "2008f276cc9fd2c93174088aeb995e1cbe74a04b4c04faa1a9ca4cbacaa840b0"
+  },
+  {
+    "path": "compose-bom-receipt.json",
+    "originalSha256": "ff844a81ff438b4e24e4fe7610b9533f6593a1672bd04136c7bae714f2d1fa74"
+  },
+  {
+    "path": "compose-receipts.json",
+    "originalSha256": "4d93d6118a5fa740c12fa590730cc89850f5516d0d03eb8ec9bf372ac3217d45"
+  },
+  {
+    "path": "shared-receipts.json",
+    "originalSha256": "e0f7711e880fcd0bd2390ce3b376ecbd147270ad2e8a449769aa2a6fdfe1552e"
+  },
+  {
+    "path": "caller-baseline-caller-results.json",
+    "originalSha256": "8d005c9beb41434aafae5b5a63ca98426b79a38d3f3c7b4bc040863dcde1a305"
+  },
+  {
+    "path": "caller-baseline-CameraRecordingReviewRecoveryTest.txt",
+    "originalSha256": "ffc7eeef4639a1c657cc1f40d4450aff9821b206b9e5aee779397af209c0596a"
+  },
+  {
+    "path": "CameraConnectionConfigurationRecoveryTest.txt",
+    "originalSha256": "977999927cfc40069fe4080431f4dc3db43ff92b681a163542b98f31f8828a05"
+  },
+  {
+    "path": "CameraRecordingReviewRecoveryTest.txt",
+    "originalSha256": "318f895fc9cb270c4d39519d3dee079f0b7c6ec9ec15fe76184ff952bb3751e8"
+  },
+  {
+    "path": "CameraCaptureReviewRecoveryTest.txt",
+    "originalSha256": "bcc51c5408798e259396ec0665142e28d27a492ca71205a84d904cbd142a2e90"
+  },
+  {
+    "path": "CameraShutterRecoveryStateTest.txt",
+    "originalSha256": "eefc000fa8d95354582fa995bd9cbe10a96ac8b4173ab4b2f940238be08d4692"
+  },
+  {
+    "path": "CameraEventStateRecoveryTest.txt",
+    "originalSha256": "60f2ed1bb1e0320fcfcfad6765aba9b7f907decd67df8284fec97ea338a41eb5"
+  }
+]

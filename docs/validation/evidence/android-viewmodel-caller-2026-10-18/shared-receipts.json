@@ -1,0 +1,210 @@
+[
+  {
+    "coordinate": "androidx.lifecycle:lifecycle-common-jvm:2.8.7",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-common-jvm/2.8.7/lifecycle-common-jvm-2.8.7.jar",
+    "path": "androidx/lifecycle/lifecycle-common-jvm/2.8.7/lifecycle-common-jvm-2.8.7.jar",
+    "packaging": "jar",
+    "multiplatform_parent_verified": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-common/2.8.7/lifecycle-common-2.8.7.module",
+    "bytes": 57238,
+    "sha256": "61c873a7327c946ec033c310bb98f3f92eeabcede0e1a5200ab8a1896483c7bf",
+    "verification": "official Gradle module size/SHA256",
+    "licenses": [
+      {
+        "name": "The Apache Software License, Version 2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "runtime_dependencies": [
+      {
+        "groupId": "androidx.annotation",
+        "artifactId": "annotation-jvm",
+        "version": "1.8.1",
+        "scope": "compile",
+        "optional": null
+      },
+      {
+        "groupId": "org.jetbrains.kotlin",
+        "artifactId": "kotlin-stdlib",
+        "version": "1.8.22",
+        "scope": "compile",
+        "optional": null
+      },
+      {
+        "groupId": "org.jetbrains.kotlinx",
+        "artifactId": "kotlinx-coroutines-core",
+        "version": "1.7.3",
+        "scope": "compile",
+        "optional": null
+      }
+    ],
+    "actual_sha256": "61c873a7327c946ec033c310bb98f3f92eeabcede0e1a5200ab8a1896483c7bf",
+    "verified_utc": "2026-10-18T09:21:07.672338+00:00"
+  },
+  {
+    "coordinate": "androidx.lifecycle:lifecycle-viewmodel-android:2.8.7",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-viewmodel-android/2.8.7/lifecycle-viewmodel-android-2.8.7.aar",
+    "path": "androidx/lifecycle/lifecycle-viewmodel-android/2.8.7/lifecycle-viewmodel-android-2.8.7.aar",
+    "packaging": "aar",
+    "multiplatform_parent_verified": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-viewmodel/2.8.7/lifecycle-viewmodel-2.8.7.module",
+    "bytes": 57286,
+    "sha256": "e7e7043f66b077637563ff564a7fc6cee461d284a0f2485c050a2143abbd8920",
+    "verification": "official Gradle module size/SHA256",
+    "licenses": [
+      {
+        "name": "The Apache Software License, Version 2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "runtime_dependencies": [
+      {
+        "groupId": "androidx.annotation",
+        "artifactId": "annotation-jvm",
+        "version": "1.8.0",
+        "scope": "compile",
+        "optional": null
+      },
+      {
+        "groupId": "org.jetbrains.kotlin",
+        "artifactId": "kotlin-stdlib",
+        "version": "1.8.22",
+        "scope": "compile",
+        "optional": null
+      },
+      {
+        "groupId": "org.jetbrains.kotlinx",
+        "artifactId": "kotlinx-coroutines-android",
+        "version": "1.7.3",
+        "scope": "compile",
+        "optional": null
+      },
+      {
+        "groupId": "org.jetbrains.kotlinx",
+        "artifactId": "kotlinx-coroutines-core-jvm",
+        "version": "1.7.3",
+        "scope": "compile",
+        "optional": null
+      }
+    ],
+    "actual_sha256": "e7e7043f66b077637563ff564a7fc6cee461d284a0f2485c050a2143abbd8920",
+    "verified_utc": "2026-10-18T09:21:07.768679+00:00",
+    "classes_file": "lifecycle-viewmodel-android-2.8.7-classes.jar",
+    "classes_sha256": "6fbb150054da900de5a88e5bf64b8bf2ba2d10805fc5cea0a9a26245792d7244"
+  },
+  {
+    "coordinate": "androidx.lifecycle:lifecycle-runtime-android:2.8.7",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-runtime-android/2.8.7/lifecycle-runtime-android-2.8.7.aar",
+    "path": "androidx/lifecycle/lifecycle-runtime-android/2.8.7/lifecycle-runtime-android-2.8.7.aar",
+    "packaging": "aar",
+    "multiplatform_parent_verified": "https://dl.google.com/dl/android/maven2/androidx/lifecycle/lifecycle-runtime/2.8.7/lifecycle-runtime-2.8.7.module",
+    "bytes": 82180,
+    "sha256": "b8eb997dd434d70eb97cbd6d1395b6337c6771717c7acd59f11c0853f3860284",
+    "verification": "official Gradle module size/SHA256",
+    "licenses": [
+      {
+        "name": "The Apache Software License, Version 2.0",
+        "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ],
+    "runtime_dependencies": [
+      {
+        "groupId": "androidx.annotation",
+        "artifactId": "annotation",
+        "version": "1.8.0",
+        "scope": "compile",
+        "optional": null
+      },
+      {
+        "groupId": "androidx.arch.core",
+        "artifactId": "core-common",
+        "version": "2.2.0",
+        "scope": "compile",
+        "optional": null
+      },
+      {
+        "groupId": "androidx.arch.core",
+        "artifactId": "core-runtime",
+        "version": "2.2.0",
+        "scope": "runtime",
+        "optional": null
+      },
+      {
+        "groupId": "androidx.lifecycle",
+        "artifactId": "lifecycle-common",
+        "version": "[2.8.7]",
+        "scope": "compile",
+        "optional": null
+      },
+      {
+        "groupId": "androidx.profileinstaller",
+        "artifactId": "profileinstaller",
+        "version": "1.3.1",
+        "scope": "runtime",
+        "optional": null
+      },
+      {
+        "groupId": "org.jetbrains.kotlin",
+        "artifactId": "kotlin-stdlib",
+        "version": "1.8.22",
+        "scope": "compile",
+        "optional": null
+      },
+      {
+        "groupId": "org.jetbrains.kotlinx",
+        "artifactId": "kotlinx-coroutines-android",
+        "version": "1.7.3",
+        "scope": "compile",
+        "optional": null
+      }
+    ],
+    "actual_sha256": "b8eb997dd434d70eb97cbd6d1395b6337c6771717c7acd59f11c0853f3860284",
+    "verified_utc": "2026-10-18T09:21:11.964418+00:00",
+    "classes_file": "lifecycle-runtime-android-2.8.7-classes.jar",
+    "classes_sha256": "5ebbe28bbfe9da92040fe7b94021cb2981caf2e4c7df6a4bc3b4a0a81faef66c"
+  },
+  {
+    "coordinate": "androidx.core:core:1.15.0",
+    "path": "androidx/core/core/1.15.0/core-1.15.0.aar",
+    "packaging": "aar",
+    "classifier": null,
+    "variant": "releaseVariantReleaseApiPublication",
+    "bytes": 1336135,
+    "sha256": "432b85a1974076e14b487ece4a28c59a84f1b9efc3fc8be72cd7f05d32055e51",
+    "module_path": "androidx/core/core/1.15.0/core-1.15.0.module",
+    "module_consistency": "PASS",
+    "checksum_sidecar": null,
+    "classes_file": "core-1.15.0-classes.jar",
+    "classes_sha256": "e4d3c02d3d3cc92f0c6d59df0a7c7d8faa04936aeabaa4f5f3e55c050f076d9b"
+  },
+  {
+    "coordinate": "org.robolectric:android-all:15-robolectric-12650502",
+    "jar_url": "https://repo.maven.apache.org/maven2/org/robolectric/android-all/15-robolectric-12650502/android-all-15-robolectric-12650502.jar",
+    "final_url": "https://repo.maven.apache.org/maven2/org/robolectric/android-all/15-robolectric-12650502/android-all-15-robolectric-12650502.jar",
+    "jar_bytes": 184872954,
+    "expected_sha256": "6c0670454f6fcee9f1b17aa393e81d71bf26e7e6ae7c5777ed3924b062191d5b",
+    "metadata": [
+      {
+        "url": "https://repo.maven.apache.org/maven2/org/robolectric/android-all/15-robolectric-12650502/android-all-15-robolectric-12650502.pom",
+        "final_url": "https://repo.maven.apache.org/maven2/org/robolectric/android-all/15-robolectric-12650502/android-all-15-robolectric-12650502.pom",
+        "path": "metadata/android-all-15-robolectric-12650502.pom",
+        "bytes": 1635,
+        "sha256": "669bc88c0cc857d518f00858052d92a6a7067cf1559a8acb296f6191da907e68"
+      },
+      {
+        "url": "https://repo.maven.apache.org/maven2/org/robolectric/android-all/15-robolectric-12650502/android-all-15-robolectric-12650502.jar.sha256",
+        "final_url": "https://repo.maven.apache.org/maven2/org/robolectric/android-all/15-robolectric-12650502/android-all-15-robolectric-12650502.jar.sha256",
+        "path": "metadata/android-all-15-robolectric-12650502.jar.sha256",
+        "bytes": 64,
+        "sha256": "f0c36409399966740c2efb6ef1051a095a58500bd96ed34506f64d4b6397b13f"
+      }
+    ],
+    "license": "Apache-2.0 per official POM",
+    "provider_source": "https://raw.githubusercontent.com/robolectric/robolectric/robolectric-4.14.1/robolectric/src/main/java/org/robolectric/plugins/DefaultSdkProvider.java",
+    "local_path": "offline-maven/org/robolectric/android-all/15-robolectric-12650502/android-all-15-robolectric-12650502.jar",
+    "actual_bytes": 184872954,
+    "actual_sha256": "6c0670454f6fcee9f1b17aa393e81d71bf26e7e6ae7c5777ed3924b062191d5b",
+    "verified": true,
+    "utc": "2026-10-18T08:42:44.431821+00:00",
+    "cache_bytes_after": 392423101,
+    "scope": "official non-instrumented Android API35 runtime for standalone production JsonReader tests; not device/Robolectric/Room acceptance"
+  }
+]

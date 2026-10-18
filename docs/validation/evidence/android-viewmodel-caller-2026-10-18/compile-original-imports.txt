@@ -1,0 +1,15 @@
+repository/android/app/src/main/java/dev/openeos/control/ui/CameraViewModel.kt:1334:14: error: unresolved reference 'maintenanceMayRetryStop'.
+        if (!maintenanceMayRetryStop(state.maintenanceSuspended, state.needsLiveViewStopRecovery,
+             ^^^^^^^^^^^^^^^^^^^^^^^
+repository/android/app/src/main/java/dev/openeos/control/ui/CameraViewModel.kt:1592:54: error: unresolved reference 'maintenanceRestoreStopSafe'.
+                !latest.shutterReleaseUnconfirmed && maintenanceRestoreStopSafe(latest.needsLiveViewStopRecovery,
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+repository/android/app/src/main/java/dev/openeos/control/ui/CameraViewModel.kt:1643:38: error: unresolved reference 'MaintenanceStopEvidence'.
+        if (evidence.liveViewStop == MaintenanceStopEvidence.UNKNOWN ||
+                                     ^^^^^^^^^^^^^^^^^^^^^^^
+repository/android/app/src/main/java/dev/openeos/control/ui/CameraViewModel.kt:1644:34: error: unresolved reference 'MaintenanceRestoreEvidence'.
+            (evidence.restore == MaintenanceRestoreEvidence.UNKNOWN && repository.isLiveViewStopRequired())) {
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+repository/android/app/src/main/java/dev/openeos/control/ui/CameraViewModel.kt:1674:17: error: unresolved reference 'maintenanceRestoreStopSafe'.
+                maintenanceRestoreStopSafe(_uiState.value.needsLiveViewStopRecovery,
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^
