@@ -435,3 +435,7 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 ### 2026-10-18 04:00 UTC：本地 USB ownership 退場整合
 
 EDSDK 回傳錯誤 session 後 close 失敗，現保留精確 rejected owner，後續 local admission/discovery fail closed；明確 reconnect 或 shutdown 才嘗試原 owner cleanup。正常 DELETE/shutdown close 尚未完成時，原 camera reservation 同樣擋住其他引擎、同相機與 AUTO 新開啟，CCAPI 與既有 owned Stop 保持可用。新增兩者同時存在的交互測試，確認先拒絕新 admission，不提前重試 pending close。合併後 103 個 distinct Python 測試、Ruff 與 diff check 通過。詳見 edsdk-rejected-open-cleanup-2026-10-18.md 及 local-close-reservation-2026-10-18.zh-TW.md。正常 close 拋錯後 recovery、active duplicate open 的 side effect、實體 cleanup 及三平台 native 驗收仍未完成；此列不改寫原始 89 項歷史狀態。
+
+### 2026-10-18 04:04 UTC：active 相機重複 open 前置拒絕
+
+六個 API 紅案例證明原先相同 canonical camera ID（兩引擎、explicit/AUTO）與 gphoto raw-port alias 雖回 409，仍先呼叫第二次 provider.open。現於既有 local admission 內依已解析 engine 與既有 reservation 提早拒絕；gphoto port alias 只讀已登錄 descriptor，不新增探測。AUTO 原有 health/discover、default 選機及不同相機保持原契約。合併後 111 項測試、Ruff/diff 通過，詳見 local-duplicate-admission-2026-10-18.zh-TW.md。未新增真機或 native 驗收證據。
