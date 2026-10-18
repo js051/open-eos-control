@@ -74,6 +74,8 @@ class EdsdkEngine:
             self._validate_camera(session.camera)
             if session.engine_name != self.name:
                 raise self._invalid_response("camera session belongs to a different engine")
+            if camera_id is not None and session.camera.id != camera_id:
+                raise self._invalid_response("camera session does not match the requested camera")
         except Exception:
             self._close_invalid_session(session)
             raise

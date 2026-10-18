@@ -166,6 +166,69 @@ def test_provider_is_reported_and_selected_by_discovered_camera_id() -> None:
     assert provider.sessions[0].closed is True
 
 
+@pytest.mark.parametrize("requested_engine", ["auto", "edsdk"])
+def test_provider_cannot_substitute_another_camera_for_the_selected_id(requested_engine: str) -> None:
+    class WrongCameraProvider(_Provider):
+        def open(self, camera_id: str | None = None, profile_hint: str | None = None) -> _Session:
+            session = super().open(camera_id, profile_hint)
+            session.camera = self.camera.model_copy(update={"id": "edsdk-other-camera"})
+            return session
+
+    provider = WrongCameraProvider()
+    app = create_app(
+        engine=GPhoto2Engine(FakeRunner()),
+        edsdk_engine=EdsdkEngine(provider),
+        token="test-token",
+    )
+    headers = {"Authorization": "Bearer test-token"}
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/v1/session",
+            headers=headers,
+            json={"engine": requested_engine, "cameraId": provider.camera.id},
+        )
+
+        assert created.status_code == 502
+        assert created.json()["error"]["code"] == "INVALID_PROVIDER_RESPONSE"
+        assert created.json()["error"]["engine"] == "edsdk"
+        assert provider.sessions[0].closed is True
+        # A rejected provider session must not acquire the local USB-engine lock.
+        gphoto = client.post("/v1/session", headers=headers, json={"engine": "libgphoto2"})
+        assert gphoto.status_code == 201
+
+
+def test_provider_can_choose_the_default_camera_when_no_id_is_requested() -> None:
+    provider = _Provider()
+
+    session = EdsdkEngine(provider).open()
+
+    assert session.camera.id == provider.camera.id
+    assert session.closed is False
+    session.close()
+
+
+def test_mismatched_provider_session_keeps_generic_error_when_close_fails() -> None:
+    class FailedCloseSession(_Session):
+        def close(self) -> None:
+            self.closed = True
+            raise RuntimeError("provider-private-close-detail")
+
+    provider = _Provider()
+    session = FailedCloseSession(provider.camera.model_copy(update={"id": "edsdk-other-camera"}))
+    provider.open = lambda camera_id=None, profile_hint=None: session
+
+    with pytest.raises(BridgeError) as failure:
+        EdsdkEngine(provider).open(provider.camera.id)
+
+    assert session.closed is True
+    assert failure.value.code == "INVALID_PROVIDER_RESPONSE"
+    assert failure.value.status_code == 502
+    assert str(failure.value) == (
+        "The EDSDK provider returned an invalid response: camera session does not match the requested camera."
+    )
+
+
 def test_different_local_usb_engines_cannot_own_sessions_at_the_same_time() -> None:
     provider = _Provider()
     app = create_app(

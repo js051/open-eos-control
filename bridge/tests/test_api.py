@@ -5,8 +5,10 @@ import importlib
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -601,6 +603,77 @@ def test_video_playback_reuses_verified_staging_for_multiple_ranges() -> None:
     assert head.status_code == 200
     assert head.headers["content-length"] == str(len(payload))
     assert len(upstream_reads) == 1
+
+
+@pytest.mark.parametrize("retirement_boundary", ["after_staging", "before_cache_put"])
+def test_video_playback_revoked_after_staging_removes_unowned_file(monkeypatch, retirement_boundary: str) -> None:
+    bridge_app = importlib.import_module("open_eos_bridge.app")
+    runner = FakeRunner()
+    video_name = "CLIP_0001.MP4"
+    camera_folder = "/store_00010001/DCIM/100CANON"
+    payload = b"0123456789abc"
+    runner.uploaded_files[(camera_folder, video_name)] = payload
+    runner.stream_payloads[(camera_folder, video_name)] = payload
+    headers = {"Authorization": "Bearer test-token"}
+    staged_ready = threading.Event()
+    resume_preparation = threading.Event()
+    staged_paths: list[Path] = []
+    real_stage_media = bridge_app._stage_media
+    real_cache_put = bridge_app.MediaPlaybackCache.put
+
+    def wait_for_revocation() -> None:
+        staged_ready.set()
+        if not resume_preparation.wait(timeout=5.0):
+            raise AssertionError("Playback preparation was never resumed after staging.")
+
+    def stage_before_revocation(*args, **kwargs):
+        item, staged = real_stage_media(*args, **kwargs)
+        staged_paths.append(staged)
+        if retirement_boundary == "after_staging":
+            wait_for_revocation()
+        return item, staged
+
+    def put_after_revocation(*args, **kwargs):
+        if retirement_boundary == "before_cache_put":
+            wait_for_revocation()
+        return real_cache_put(*args, **kwargs)
+
+    monkeypatch.setattr(bridge_app, "_stage_media", stage_before_revocation)
+    monkeypatch.setattr(bridge_app.MediaPlaybackCache, "put", put_after_revocation)
+    try:
+        with TestClient(create_app(engine=GPhoto2Engine(runner), token="test-token")) as client:
+            created = client.post("/v1/session", headers=headers, json={})
+            session_id = created.json()["id"]
+            media = client.get(f"/v1/session/{session_id}/media", headers=headers).json()["items"]
+            video = next(item for item in media if item["name"] == video_name)
+            issued = client.post(
+                f"/v1/session/{session_id}/media/{video['id']}/playback",
+                headers=headers,
+            )
+            assert issued.status_code == 200
+            playback_url = issued.json()["url"]
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                preparing = executor.submit(client.get, playback_url)
+                try:
+                    assert staged_ready.wait(timeout=5.0), "The real media staging operation did not finish."
+                    assert len(staged_paths) == 1
+                    assert staged_paths[0].read_bytes() == payload
+                    revoked = client.delete(playback_url)
+                    assert revoked.status_code == 204
+                finally:
+                    resume_preparation.set()
+                failed = preparing.result(timeout=5.0)
+            assert not staged_paths[0].exists(), "Revoked playback retained its completed staging file."
+            assert failed.status_code == 404
+            assert failed.json()["error"]["code"] == "MEDIA_PLAYBACK_EXPIRED"
+            assert client.get(playback_url).status_code == 404
+
+        # Neither ticket revocation nor app shutdown can find a file that never entered the cache.
+        assert not staged_paths[0].exists(), "Revoked playback left its completed staging file orphaned."
+    finally:
+        resume_preparation.set()
+        for staged in staged_paths:
+            staged.unlink(missing_ok=True)
 
 
 def test_video_playback_ticket_rejects_images_and_expires_with_session(tmp_path: Path) -> None:

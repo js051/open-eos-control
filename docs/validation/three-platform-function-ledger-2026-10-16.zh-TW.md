@@ -423,3 +423,11 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - 106 個 iOS 來源守門檢查與 4 個 project-path 檢查通過；新增 29 個 fake XCTest **NOT_RUN**，Swift/Xcode、USB、權限 prompt、真機均未驗。來源檢查不證明 Swift runtime 行為。
 - [原未完列公開契約核對](public-provider-contracts-2026-10-18.zh-TW.md)：確認 Apple 原生 iOS PTP API 與公開 EDSDK API 文件；校正過時的文件／平台限制。其他 gphoto maintenance/metadata/coordinates 與 CCAPI upload 仍依各自缺少的確切契約保持 fail-closed。
 - 原始 89 列狀態不改成全部完成；#129 仍缺可用 native provider 與驗收。Release Assessment：none。
+
+## 2026-10-18 03:45 UTC：Bridge 實作缺口續修
+
+- [EDSDK 精確相機／playback staging 退場](bridge-contract-retirement-2026-10-18.zh-TW.md)：錯誤 provider 相機拒絕＋cleanup；兩個 ticket 撤銷交接競態不再遺留原檔暫存，iterator／配置錯誤保留正確 ownership 與 primary error。
+- [gphoto upload inventory](gphoto-upload-inventory-2026-10-18.md)：嚴格目的地／count／identity／UTF-8 admission 與 readback；host-only 列表不能授權 camera upload。
+- [gphoto 精確大小收據](gphoto-upload-size-receipt-2026-10-18.zh-TW.md)：一次 exact-target show-info，以唯一 primary File Size 驗證精確 bytes；不把 list-files 的取整 KB 當精確大小，不重送 upload。
+- [整合收據](bridge-contract-integration-20261018.json)：同一來源十個 Bridge suites 210 項通過、Ruff／diff-check 通過。這是已執行 Python provider/API/helper 測試；與先前僅來源檢查的 iOS PTP 切片不同。真相機、native SDK、mobile native 未驗。
+- Release Assessment：patch；未改版本、未合 main 或發布。原 89 列仍未全部完成。
