@@ -416,3 +416,10 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - [Legacy recording ACK](legacy-recording-ack-receipts-2026-10-17.zh-TW.md)：公開且需身分驗證的舊Start／Stop API曾將部分相機回覆轉成HTTP200與新recording布林值；Stop可誤報false而合成peer仍錄影。現行三端UI走較新的嚴格outcome，不宣稱同一UI缺陷。
 - 只新增POST／PUT recbutton的ACK-only判定，部分成功沿既有RECORDING_COMMAND_UNCONFIRMED拒絕，先於cache／observed更新；保留原完整ACK、非2xx、status-readback-failed、temperature preflight與單次dispatch。八條body期限／modern schema／mobile UI不變。保留的status仍是先前ACK cache，不能當成物理停止證明。
 - 同一70新案基準36紅／34綠→固定70綠，既有Python508與Node154回歸另列；獨立275覆核包含新70與modern205，不重複累計。完整legacy及media兩批合併後，五個相關suite共252通過，[整合來源收據](media-legacy-integration-20261018.json)保留；無native或真相機驗收提升。
+
+## 2026-10-18 01:49 UTC：#129 隔離 PTP 邊界
+
+- [iOS PTP 介面／純狀態機切片](ios-ptp-boundary-2026-10-18.zh-TW.md)：新增精確 handle/session/request、read-only DeviceInfo semantic port、退場清理及最多四個未解決 session 的 admission；尚無 native adapter 或產品入口。
+- 106 個 iOS 來源守門檢查與 4 個 project-path 檢查通過；新增 29 個 fake XCTest **NOT_RUN**，Swift/Xcode、USB、權限 prompt、真機均未驗。來源檢查不證明 Swift runtime 行為。
+- [原未完列公開契約核對](public-provider-contracts-2026-10-18.zh-TW.md)：確認 Apple 原生 iOS PTP API 與公開 EDSDK API 文件；校正過時的文件／平台限制。其他 gphoto maintenance/metadata/coordinates 與 CCAPI upload 仍依各自缺少的確切契約保持 fail-closed。
+- 原始 89 列狀態不改成全部完成；#129 仍缺可用 native provider 與驗收。Release Assessment：none。
