@@ -122,15 +122,17 @@ def _stage_media(
     on_activity: Callable[[], bool] | None = None,
 ) -> tuple[MediaItem, Path]:
     """Read a camera response completely so HTTP length errors happen before headers."""
-    descriptor, name = tempfile.mkstemp(prefix="open-eos-media-", suffix=".bin")
-    os.close(descriptor)
-    staged = Path(name)
+    iterator = iter(chunks)
+    descriptor: int | None = None
+    staged: Path | None = None
     expected = item.size_bytes
     actual = 0
     digest = hashlib.sha256() if jpeg_validation else None
-    iterator = iter(chunks)
+    completed = False
     next_activity_at = 0.0
     try:
+        descriptor, name = tempfile.mkstemp(prefix="open-eos-media-", suffix=".bin")
+        staged = Path(name)
         if playback and not has_playback_storage_capacity(expected, shutil.disk_usage(staged.parent).free):
             raise BridgeError(
                 "MEDIA_PLAYBACK_STORAGE_UNAVAILABLE",
@@ -141,7 +143,9 @@ def _stage_media(
         if max_bytes is not None and expected > max_bytes:
             raise BridgeError("MEDIA_ORIGINAL_JPEG_INVALID", "Original JPEG exceeds the encoded-size limit.",
                               status_code=502, feature=CameraFeature.MEDIA_DOWNLOAD.value)
-        with staged.open("wb") as destination:
+        destination = os.fdopen(descriptor, "wb")
+        descriptor = None  # The file object now owns the descriptor.
+        with destination:
             for chunk in iterator:
                 if cancellation is not None:
                     cancellation.check()
@@ -185,9 +189,12 @@ def _stage_media(
             cancellation.check()
         if digest is not None:
             validate_jpeg_original(staged, expected_sha256=digest.hexdigest())
-        return item.model_copy(update={"size_bytes": actual}), staged
+        result = item.model_copy(update={"size_bytes": actual}), staged
+        completed = True
+        return result
     except OSError as error:
-        _remove_staged_media(staged)
+        if staged is not None:
+            _remove_staged_media(staged)
         if playback and error.errno == errno.ENOSPC:
             raise BridgeError(
                 "MEDIA_PLAYBACK_STORAGE_UNAVAILABLE",
@@ -196,13 +203,26 @@ def _stage_media(
                 feature=CameraFeature.MEDIA_DOWNLOAD.value,
             ) from error
         raise
-    except Exception:
-        _remove_staged_media(staged)
+    except BaseException:
+        if staged is not None:
+            _remove_staged_media(staged)
         raise
     finally:
-        close = getattr(iterator, "close", None)
-        if callable(close):
-            close()
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        if not completed and staged is not None:
+            _remove_staged_media(staged)
+        try:
+            close = getattr(iterator, "close", None)
+            if callable(close):
+                close()
+        except BaseException:
+            # A close failure cannot orphan a completed path or mask a primary failure.
+            if staged is not None:
+                _remove_staged_media(staged)
+            if completed:
+                raise
 
 
 def _staged_media_chunks(
@@ -422,6 +442,10 @@ def create_app(
             if playback_token:
                 try:
                     grant = playback_tickets.resolve(playback_token, renew=True)
+                    if grant is not None:
+                        playback_cache.put(playback_token, session_id, item, staged, grant.expires_at)
+                        # Revocation can finish between the initial grant check and cache publication.
+                        grant = playback_tickets.resolve(playback_token)
                     if grant is None:
                         raise BridgeError(
                             "MEDIA_PLAYBACK_EXPIRED",
@@ -429,16 +453,18 @@ def create_app(
                             status_code=404,
                             feature=CameraFeature.MEDIA_DOWNLOAD.value,
                         )
-                    playback_cache.put(playback_token, session_id, item, staged, grant.expires_at)
+                    cache_owned = True
                 except MediaPlaybackCacheFull as error:
-                    _remove_staged_media(staged)
                     raise BridgeError(
                         "MEDIA_PLAYBACK_BUSY",
                         "Too many camera videos are already prepared for playback.",
                         status_code=503,
                         feature=CameraFeature.MEDIA_DOWNLOAD.value,
                     ) from error
-                cache_owned = True
+                finally:
+                    if not cache_owned:
+                        playback_cache.remove(playback_token)
+                        _remove_staged_media(staged)
         size_bytes = item.size_bytes
         try:
             byte_range = parse_media_range(range_header, size_bytes)

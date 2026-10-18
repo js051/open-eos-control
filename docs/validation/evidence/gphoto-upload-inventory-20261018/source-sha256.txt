@@ -1,0 +1,3 @@
+617be0b6b7b05476a278369a4136d21b629b05283dafbd0bcd4b3080c81d8ebe  bridge/open_eos_bridge/gphoto2.py
+95fc8a895bc410bda46f425626bb1972ff8e31af5c47e959b377ee293390f237  bridge/tests/fakes.py
+589ceda40b94cee08caef8f0c35f2364b8b0ecf3a4efe57169237cb184d161b8  bridge/tests/test_gphoto_upload_inventory.py

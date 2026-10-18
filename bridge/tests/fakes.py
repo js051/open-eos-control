@@ -204,12 +204,42 @@ class FakeRunner:
         if command in (["--wait-event", "1ms"], ["--wait-event", "250ms"]):
             return CommandOutput(b"")
         if command == ["--recurse", "--list-files"]:
+            folders: dict[str, list[tuple[str, bytes]]] = {
+                "/store_00010001": [], "/store_00020001": [],
+            }
+            for (folder, name), payload in self.uploaded_files.items():
+                folders.setdefault(folder, []).append((name, payload))
+
+            def rows(files: list[tuple[str, bytes]]) -> str:
+                return "".join(
+                    f"#{99 + index} {name} rd {(len(payload) + 1023) // 1024} KB "
+                    f"{self._content_type(name)} 1784600002\n"
+                    for index, (name, payload) in enumerate(files)
+                )
+
+            # One counted section per folder, including empty writable roots.
+            media_folder = "/store_00010001/DCIM/100CANON"
+            media_files = folders.pop(media_folder, [])
+            media = MEDIA.replace("There are 2 files", f"There are {2 + len(media_files)} files")
+            media += rows(media_files)
             extra = "".join(
-                f"There is 1 file in folder '{folder}'.\n"
-                f"#99 {name} rd {len(payload)} B {self._content_type(name)} 1784600002\n"
-                for (folder, name), payload in self.uploaded_files.items()
+                f"There are {len(files)} files in folder '{folder}'.\n" + rows(files)
+                for folder, files in folders.items()
             )
-            return CommandOutput((MEDIA + extra).encode())
+            return CommandOutput((media + extra).encode())
+        if (
+            len(command) == 4
+            and command[0] == "--folder"
+            and command[2] == "--show-info"
+            and (command[1], command[3]) in self.uploaded_files
+        ):
+            folder, name = command[1], command[3]
+            payload = self.uploaded_files[(folder, name)]
+            return CommandOutput((
+                f"Information on file '{name}' (folder '{folder}'):\n"
+                f"File:\n  Mime type: '{self._content_type(name)}'\n  Size: {len(payload)} byte(s)\n"
+                "Thumbnail:\n  None available.\nAudio data:\n  None available.\n"
+            ).encode())
         if command == [
             "--folder",
             "/store_00010001/DCIM/100CANON",

@@ -1,0 +1,33 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______ test_upload_rejects_incomplete_collision_inventory_before_dispatch ______
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-42/test_upload_rejects_incomplete0')
+
+    def test_upload_rejects_incomplete_collision_inventory_before_dispatch(tmp_path: Path) -> None:
+        class IncompleteInventoryRunner(FakeRunner):
+            def __init__(self) -> None:
+                super().__init__()
+                self.inventory_calls = 0
+                self.uploaded_files[("/store_00010001", "EXISTING.JPG")] = b"old!"
+
+            def run(self, arguments: list[str], *, timeout: float = 30.0) -> CommandOutput:
+                if self._without_camera(arguments) == ["--recurse", "--list-files"]:
+                    self.inventory_calls += 1
+                    if self.inventory_calls == 1:
+                        self.commands.append(tuple(arguments))
+                        return CommandOutput(b"There is 1 file in folder '/store_00010001'.\n")
+                return super().run(arguments, timeout=timeout)
+
+        runner = IncompleteInventoryRunner()
+        session = GPhoto2Engine(runner, capture_directory=tmp_path).open()
+        source = tmp_path / "payload"
+        source.write_bytes(b"new!")
+
+>       with pytest.raises(BridgeError) as failure:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE <class 'open_eos_bridge.errors.BridgeError'>
+
+tests/test_gphoto_upload_inventory.py:34: Failed
+=========================== short test summary info ============================
+FAILED tests/test_gphoto_upload_inventory.py::test_upload_rejects_incomplete_collision_inventory_before_dispatch

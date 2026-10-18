@@ -1123,6 +1123,7 @@ def parse_storage_info(output: str) -> StorageSnapshot:
 
 class GPhotoMediaListParser:
     folder_pattern = re.compile(r"There (?:is|are) (\d+|no) files? in folder '([^']+)'", re.I)
+    strict_folder_pattern = re.compile(r"^There (?:is|are) (\d+|no) files? in folder '([^']+)'[.:]?$", re.I)
     file_pattern = re.compile(
         r"^#(?P<number>\d+)\s+(?P<name>.+?)\s+"
         r"(?:(?P<access>[a-z-]{2})\s+)?(?P<size>\d+)\s+(?P<unit>[KMGT]?B)"
@@ -1145,7 +1146,7 @@ class GPhotoMediaListParser:
 
     def add_line(self, raw_line: str) -> MediaItem | None:
         line = raw_line.strip()
-        folder_match = self.folder_pattern.search(line)
+        folder_match = (self.strict_folder_pattern if self.strict else self.folder_pattern).search(line)
         if folder_match:
             self.finish()
             count = folder_match.group(1)
@@ -1191,10 +1192,62 @@ class GPhotoMediaListParser:
         )
 
 
-def parse_media_list(output: str) -> list[MediaItem]:
-    parser = GPhotoMediaListParser()
-    items = [item for line in output.splitlines() if (item := parser.add_line(line)) is not None]
+def parse_media_list(output: str, *, required_folder: str | None = None) -> list[MediaItem]:
+    strict = required_folder is not None
+    parser = GPhotoMediaListParser(strict=strict)
+    items: list[MediaItem] = []
+    identities: set[str] = set()
+    folders: set[str] = set()
+    for line in output.splitlines():
+        folder_match = parser.strict_folder_pattern.fullmatch(line.strip()) if strict else None
+        if folder_match:
+            folder = folder_match.group(2)
+            if folder in folders:
+                raise BridgeError("MEDIA_LIST_INVALID_OUTPUT", "Media listing repeats a folder header.")
+            folders.add(folder)
+        item = parser.add_line(line)
+        if item is None:
+            if strict and line.strip() and folder_match is None:
+                raise BridgeError("MEDIA_LIST_INVALID_OUTPUT", "Media listing contains an unrecognized line.")
+            continue
+        if strict:
+            if parser.expected_rows is None:
+                raise BridgeError("MEDIA_LIST_INVALID_OUTPUT", "Media listing row has no folder header.")
+            if item.id in identities:
+                raise BridgeError("MEDIA_LIST_INVALID_OUTPUT", "Media listing contains a duplicate identity.")
+            identities.add(item.id)
+            if len(identities) > MAX_LIST_SNAPSHOT_ITEMS:
+                raise BridgeError("MEDIA_LIST_RESOURCE_LIMIT", "Media listing exceeds the item resource bound.")
+        items.append(item)
+    parser.finish()
+    if strict and not parser.observed_output:
+        raise BridgeError("MEDIA_LIST_INVALID_OUTPUT", "Media listing returned no recognized output.")
+    if strict and required_folder not in folders:
+        raise BridgeError("MEDIA_LIST_INVALID_OUTPUT", "Media listing omitted the upload destination folder.")
     return list(reversed(items))
+
+
+def _valid_upload_media_info(output: str, folder: str, name: str) -> bool:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    expected_header = f"Information on file '{name}' (folder '{folder}'):"
+    sections = ("File:", "Thumbnail:", "Audio data:")
+    if len(lines) < 4 or lines[:2] != [expected_header, "File:"]:
+        return False
+    if [line for line in lines if line in sections] != list(sections):
+        return False
+    primary_keys: set[str] = set()
+    for line in lines[2:lines.index("Thumbnail:")]:
+        key, separator, value = line.partition(":")
+        if not separator or key in primary_keys or key not in {
+            "Mime type", "Size", "Width", "Height", "Downloaded", "Permissions", "Time",
+        }:
+            return False
+        primary_keys.add(key)
+        if key == "Size":
+            match = re.fullmatch(r"([0-9]{1,20})\s+byte\(s\)", value.strip())
+            if match is None or int(match.group(1)) > 0xFFFF_FFFF_FFFF_FFFF:
+                return False
+    return "Size" in primary_keys
 
 
 def parse_media_info(output: str) -> GPhotoMediaInfo:
@@ -2510,16 +2563,28 @@ class GPhoto2Session:
                     return self._capture_preview()
 
     def list_media(self, maximum_items: int | None = None) -> list[MediaItem]:
+        return self._list_media(maximum_items)
+
+    def _list_media(self, maximum_items: int | None = None, *, upload_folder: str | None = None) -> list[MediaItem]:
         with self._lock:
             if maximum_items is not None and maximum_items <= 0:
                 raise ValueError("maximum_items must be positive when provided")
+            if upload_folder is not None and not self._camera_media_supported:
+                raise unsupported(CameraFeature.MEDIA_UPLOAD.value, self.engine_name)
             host_items = self._capture_store.list_items()
             if not self._camera_media_supported and not self._host_capture_supported() and not host_items:
                 raise unsupported(CameraFeature.MEDIA_BROWSER.value, self.engine_name)
             camera_items: list[MediaItem] = []
             if self._camera_media_supported:
-                output = self._run(["--recurse", "--list-files"], timeout=60.0).text
-                camera_items = parse_media_list(output)
+                output = self._run(["--recurse", "--list-files"], timeout=60.0)
+                if upload_folder is None:
+                    listing = output.text
+                else:
+                    try:
+                        listing = output.stdout.decode("utf-8")
+                    except UnicodeDecodeError as error:
+                        raise BridgeError("MEDIA_LIST_INVALID_OUTPUT", "Media listing is not valid UTF-8.") from error
+                camera_items = parse_media_list(listing, required_folder=upload_folder)
             all_items = sorted(
                 [*host_items, *camera_items],
                 key=lambda item: item.capture_time or "",
@@ -2737,7 +2802,9 @@ class GPhoto2Session:
             storage = self._upload_storage()
             if storage is None:
                 raise unsupported(CameraFeature.MEDIA_UPLOAD.value, self.engine_name)
-            before = self.list_media()
+            # Destructive admission and its receipt must not rely on the
+            # permissive parser retained for legacy browsing responses.
+            before = self._list_media(upload_folder=storage.base_dir)
             if any(
                 item.name.casefold() == safe_filename.casefold()
                 and _decode_media_id(item.id)[0] == storage.base_dir
@@ -2766,7 +2833,7 @@ class GPhoto2Session:
                 timeout=600.0,
                 cancelled=cancelled,
             )
-            after = self.list_media()
+            after = self._list_media(upload_folder=storage.base_dir)
             matches = [
                 item
                 for item in after
@@ -2782,7 +2849,10 @@ class GPhoto2Session:
                     feature=CameraFeature.MEDIA_UPLOAD.value,
                     engine=self.engine_name,
                 )
-            uploaded = matches[0]
+            # The ordinary list-files size is rounded up to KB. Require one
+            # exact primary-file byte count from the existing read-only info
+            # path, with upload-only strict identity and size grammar.
+            uploaded = self._media_info(matches[0].id, upload_receipt=True)
             if uploaded.size_bytes != size_bytes:
                 raise BridgeError(
                     "UPLOAD_VERIFY_SIZE_MISMATCH",
@@ -2863,6 +2933,9 @@ class GPhoto2Session:
             self._observed.add(CameraFeature.MEDIA_DELETE)
 
     def media_info(self, media_id: str) -> MediaItem:
+        return self._media_info(media_id)
+
+    def _media_info(self, media_id: str, *, upload_receipt: bool = False) -> MediaItem:
         if is_host_media_id(media_id):
             with self._lock:
                 self._require_open()
@@ -2879,8 +2952,23 @@ class GPhoto2Session:
             output = self._run(
                 ["--folder", folder, "--show-info", name],
                 timeout=60.0,
-            ).text
-            info = parse_media_info(output)
+            )
+            if upload_receipt:
+                try:
+                    text = output.stdout.decode("utf-8", errors="strict")
+                except UnicodeDecodeError:
+                    text = ""
+                if not _valid_upload_media_info(text, folder, name):
+                    raise BridgeError(
+                        "UPLOAD_VERIFY_FAILED",
+                        "gphoto2 did not report one exact primary-file size for the uploaded destination.",
+                        status_code=502,
+                        feature=CameraFeature.MEDIA_UPLOAD.value,
+                        engine=self.engine_name,
+                    )
+            else:
+                text = output.text
+            info = parse_media_info(text)
             if not info.file_section_available:
                 raise BridgeError(
                     "INVALID_MEDIA_INFO",
@@ -3047,7 +3135,11 @@ class GPhoto2Session:
         return settings
 
     def _media_upload_supported(self) -> bool:
-        return self._summary_supports_file_upload and self._upload_storage() is not None
+        return (
+            self._summary_supports_file_upload
+            and self._camera_media_supported
+            and self._upload_storage() is not None
+        )
 
     def _upload_storage(self) -> StorageDevice | None:
         writable = [

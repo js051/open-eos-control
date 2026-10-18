@@ -1,0 +1,6 @@
+{
+  "file": "red.txt",
+  "raw_sha256": "ce2f1cfc3986aa9ecd71a46141c06d70cabc258f7346ba797c124ac11681bbf9",
+  "change": "Trailing whitespace removed only; original retained in task worktree.",
+  "normalized_sha256": "24760b9c8c4281aaba24d7c24c906c59aecfb8e11c733a6ca2b6948a6e3fc416"
+}

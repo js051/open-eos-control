@@ -1,0 +1,46 @@
+{
+  "baseline": "8130d0995ed86eead34c8f418ef6fd93865170ca",
+  "executed_at_utc": "2026-10-18T03:45:31Z",
+  "integration_passed": 210,
+  "scope": "10 selected Bridge suites; synthetic provider/API/helper evidence",
+  "ruff": "PASS",
+  "native_and_physical": "NOT_RUN",
+  "source_sha256": [
+    {
+      "path": "bridge/open_eos_bridge/app.py",
+      "sha256": "5700da07619ae45d103602511f74be5d061de2d6f84be936ba1254debfcf2489"
+    },
+    {
+      "path": "bridge/open_eos_bridge/edsdk.py",
+      "sha256": "5f3ca3e6f30b356eaf99643f01583d3201290c055e518cf5c6cf000d5eb68e63"
+    },
+    {
+      "path": "bridge/open_eos_bridge/gphoto2.py",
+      "sha256": "ba1105e08968ea328d109cc98d40ecbf3294b0e101e08de4a2b649d197d78e40"
+    },
+    {
+      "path": "bridge/tests/fakes.py",
+      "sha256": "83e000e5e445cb73d892ece8b9dd1b9e74ee7e4adf565c8d83c9d29986f973b1"
+    },
+    {
+      "path": "bridge/tests/test_api.py",
+      "sha256": "cc41b241f523f03e937e8b8fdddcc881aef9f71e747ad7ea212a95aa7cc9ccf2"
+    },
+    {
+      "path": "bridge/tests/test_edsdk.py",
+      "sha256": "96a6ecd13603d572792cee94748f21230afb68517763ee60aa160ebec32af028"
+    },
+    {
+      "path": "bridge/tests/test_media_staging.py",
+      "sha256": "440ba73302a2088736c72890ab5e8f3079d72c012125e18959b685ffe1f97745"
+    },
+    {
+      "path": "bridge/tests/test_gphoto_upload_inventory.py",
+      "sha256": "589ceda40b94cee08caef8f0c35f2364b8b0ecf3a4efe57169237cb184d161b8"
+    },
+    {
+      "path": "bridge/tests/test_gphoto_upload_size_receipt.py",
+      "sha256": "a081559f8be92a7bc1dfc94a42ebae1e2c43b4ad91901089b8361c077fa76157"
+    }
+  ]
+}
