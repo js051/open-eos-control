@@ -9,6 +9,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Base64
 
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [35], manifest = org.robolectric.annotation.Config.NONE)
 class CcapiRtpTest {
     @Test
     fun parsesCanonH264AndLatmSessionDescription() {

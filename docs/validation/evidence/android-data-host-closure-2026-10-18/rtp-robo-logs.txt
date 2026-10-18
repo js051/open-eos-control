@@ -1,0 +1,1275 @@
+=== AndroidCcapiRtpSessionTest.txt ===
+JUnit version 4.13.2
+..E..E.E....
+Time: 6.093
+There were 3 failures:
+1) decoderFailureRetiresEncodedOnlyInputAndReplaysFailureToALateListener(dev.openeos.control.data.AndroidCcapiRtpSessionTest)
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertTrue(Assert.java:53)
+	at dev.openeos.control.data.AndroidCcapiRtpSessionTest$decoderFailureRetiresEncodedOnlyInputAndReplaysFailureToALateListener$1.invokeSuspend(AndroidCcapiRtpSessionTest.kt:275)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.internal.ScopeCoroutine.afterResume(Scopes.kt:28)
+	at kotlinx.coroutines.AbstractCoroutine.resumeWith(AbstractCoroutine.kt:100)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:47)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.data.AndroidCcapiRtpSessionTest.decoderFailureRetiresEncodedOnlyInputAndReplaysFailureToALateListener(AndroidCcapiRtpSessionTest.kt:264)
+2) encodedSpsPpsAndKeyFrameDoNotProveDecoderReadiness(dev.openeos.control.data.AndroidCcapiRtpSessionTest)
+java.lang.AssertionError: Truncated synthetic input cannot prove decoded output
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.data.AndroidCcapiRtpSessionTest$encodedSpsPpsAndKeyFrameDoNotProveDecoderReadiness$1.invokeSuspend(AndroidCcapiRtpSessionTest.kt:199)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.internal.ScopeCoroutine.afterResume(Scopes.kt:28)
+	at kotlinx.coroutines.AbstractCoroutine.resumeWith(AbstractCoroutine.kt:100)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:47)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.data.AndroidCcapiRtpSessionTest.encodedSpsPpsAndKeyFrameDoNotProveDecoderReadiness(AndroidCcapiRtpSessionTest.kt:181)
+3) sdpParameterSetsAndEncodedKeyFrameDoNotProveDecoderReadiness(dev.openeos.control.data.AndroidCcapiRtpSessionTest)
+java.lang.AssertionError: Truncated synthetic input cannot prove decoded output
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at dev.openeos.control.data.AndroidCcapiRtpSessionTest$sdpParameterSetsAndEncodedKeyFrameDoNotProveDecoderReadiness$1.invokeSuspend(AndroidCcapiRtpSessionTest.kt:225)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.internal.ScopeCoroutine.afterResume(Scopes.kt:28)
+	at kotlinx.coroutines.AbstractCoroutine.resumeWith(AbstractCoroutine.kt:100)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:47)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.data.AndroidCcapiRtpSessionTest.sdpParameterSetsAndEncodedKeyFrameDoNotProveDecoderReadiness(AndroidCcapiRtpSessionTest.kt:208)
+
+FAILURES!!!
+Tests run: 9,  Failures: 3
+
+
+=== CcapiRtpTest.txt ===
+JUnit version 4.13.2
+................
+Time: 5.115
+
+OK (16 tests)
+
+
+=== ShadowMediaCodec-javap.txt ===
+Compiled from "ShadowMediaCodec.java"
+public class org.robolectric.shadows.ShadowMediaCodec {
+  private static final int DEFAULT_BUFFER_SIZE;
+
+  static final int BUFFER_COUNT;
+
+  private static final int EVENT_CALLBACK;
+
+  private static final int CB_INPUT_AVAILABLE;
+
+  private static final int CB_OUTPUT_AVAILABLE;
+
+  private static final int CB_OUTPUT_FORMAT_CHANGE;
+
+  private static final java.util.Map<java.lang.String, org.robolectric.shadows.ShadowMediaCodec$CodecConfig> encoders;
+
+  private static final java.util.Map<java.lang.String, org.robolectric.shadows.ShadowMediaCodec$CodecConfig> decoders;
+
+  private static final org.robolectric.shadows.ShadowMediaCodec$CodecConfig DEFAULT_CODEC;
+
+  private android.media.MediaCodec realCodec;
+
+  private org.robolectric.shadows.ShadowMediaCodec$CodecConfig$Codec fakeCodec;
+
+  private android.media.MediaCodec$Callback callback;
+
+  private android.media.MediaFormat pendingOutputFormat;
+
+  private android.media.MediaFormat outputFormat;
+
+  private android.media.MediaFormat inputFormat;
+
+  private java.lang.String[] initialPendingOutputFormatKeys;
+
+  private java.lang.Object[] initialPendingOutputFormatValues;
+
+  private final java.util.concurrent.BlockingQueue<java.lang.Integer> inputBuffersPendingDequeue;
+
+  private final java.util.concurrent.BlockingQueue<java.lang.Integer> outputBuffersPendingDequeue;
+
+  private final java.util.List<java.lang.Integer> inputBuffersPendingQueuing;
+
+  private final java.nio.ByteBuffer[] inputBuffers;
+
+  private final java.nio.ByteBuffer[] outputBuffers;
+
+  private final android.media.MediaCodec$BufferInfo[] outputBufferInfos;
+
+  private boolean isAsync;
+
+  public org.robolectric.shadows.ShadowMediaCodec();
+    Code:
+       0: aload_0
+       1: invokespecial #1                  // Method java/lang/Object."<init>":()V
+       4: aload_0
+       5: new           #7                  // class java/util/concurrent/LinkedBlockingDeque
+       8: dup
+       9: invokespecial #9                  // Method java/util/concurrent/LinkedBlockingDeque."<init>":()V
+      12: putfield      #10                 // Field inputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+      15: aload_0
+      16: new           #7                  // class java/util/concurrent/LinkedBlockingDeque
+      19: dup
+      20: invokespecial #9                  // Method java/util/concurrent/LinkedBlockingDeque."<init>":()V
+      23: putfield      #16                 // Field outputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+      26: aload_0
+      27: new           #19                 // class java/util/ArrayList
+      30: dup
+      31: invokespecial #21                 // Method java/util/ArrayList."<init>":()V
+      34: invokestatic  #22                 // Method java/util/Collections.synchronizedList:(Ljava/util/List;)Ljava/util/List;
+      37: putfield      #28                 // Field inputBuffersPendingQueuing:Ljava/util/List;
+      40: aload_0
+      41: bipush        10
+      43: anewarray     #32                 // class java/nio/ByteBuffer
+      46: putfield      #34                 // Field inputBuffers:[Ljava/nio/ByteBuffer;
+      49: aload_0
+      50: bipush        10
+      52: anewarray     #32                 // class java/nio/ByteBuffer
+      55: putfield      #38                 // Field outputBuffers:[Ljava/nio/ByteBuffer;
+      58: aload_0
+      59: bipush        10
+      61: anewarray     #41                 // class android/media/MediaCodec$BufferInfo
+      64: putfield      #43                 // Field outputBufferInfos:[Landroid/media/MediaCodec$BufferInfo;
+      67: aload_0
+      68: iconst_0
+      69: putfield      #47                 // Field isAsync:Z
+      72: return
+
+  public static void addEncoder(java.lang.String, org.robolectric.shadows.ShadowMediaCodec$CodecConfig);
+    Code:
+       0: getstatic     #51                 // Field encoders:Ljava/util/Map;
+       3: aload_0
+       4: aload_1
+       5: invokeinterface #55,  3           // InterfaceMethod java/util/Map.put:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+      10: pop
+      11: return
+
+  public static void addDecoder(java.lang.String, org.robolectric.shadows.ShadowMediaCodec$CodecConfig);
+    Code:
+       0: getstatic     #61                 // Field decoders:Ljava/util/Map;
+       3: aload_0
+       4: aload_1
+       5: invokeinterface #55,  3           // InterfaceMethod java/util/Map.put:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+      10: pop
+      11: return
+
+  public static void clearCodecs();
+    Code:
+       0: getstatic     #51                 // Field encoders:Ljava/util/Map;
+       3: invokeinterface #64,  1           // InterfaceMethod java/util/Map.clear:()V
+       8: getstatic     #61                 // Field decoders:Ljava/util/Map;
+      11: invokeinterface #64,  1           // InterfaceMethod java/util/Map.clear:()V
+      16: return
+
+  protected void __constructor__(java.lang.String, boolean, boolean);
+    Code:
+       0: ldc           #67                 // class android/media/MediaCodec
+       2: aload_0
+       3: getfield      #69                 // Field realCodec:Landroid/media/MediaCodec;
+       6: iconst_3
+       7: anewarray     #73                 // class org/robolectric/util/ReflectionHelpers$ClassParameter
+      10: dup
+      11: iconst_0
+      12: ldc           #75                 // class java/lang/String
+      14: aload_1
+      15: invokestatic  #77                 // Method org/robolectric/util/ReflectionHelpers$ClassParameter.from:(Ljava/lang/Class;Ljava/lang/Object;)Lorg/robolectric/util/ReflectionHelpers$ClassParameter;
+      18: aastore
+      19: dup
+      20: iconst_1
+      21: getstatic     #81                 // Field java/lang/Boolean.TYPE:Ljava/lang/Class;
+      24: iload_2
+      25: invokestatic  #87                 // Method java/lang/Boolean.valueOf:(Z)Ljava/lang/Boolean;
+      28: invokestatic  #77                 // Method org/robolectric/util/ReflectionHelpers$ClassParameter.from:(Ljava/lang/Class;Ljava/lang/Object;)Lorg/robolectric/util/ReflectionHelpers$ClassParameter;
+      31: aastore
+      32: dup
+      33: iconst_2
+      34: getstatic     #81                 // Field java/lang/Boolean.TYPE:Ljava/lang/Class;
+      37: iload_3
+      38: invokestatic  #87                 // Method java/lang/Boolean.valueOf:(Z)Ljava/lang/Boolean;
+      41: invokestatic  #77                 // Method org/robolectric/util/ReflectionHelpers$ClassParameter.from:(Ljava/lang/Class;Ljava/lang/Object;)Lorg/robolectric/util/ReflectionHelpers$ClassParameter;
+      44: aastore
+      45: invokestatic  #91                 // Method org/robolectric/shadow/api/Shadow.invokeConstructor:(Ljava/lang/Class;Ljava/lang/Object;[Lorg/robolectric/util/ReflectionHelpers$ClassParameter;)Ljava/lang/Object;
+      48: pop
+      49: iload_2
+      50: ifne          115
+      53: new           #97                 // class android/media/MediaCodecList
+      56: dup
+      57: iconst_1
+      58: invokespecial #99                 // Method android/media/MediaCodecList."<init>":(I)V
+      61: invokevirtual #102                // Method android/media/MediaCodecList.getCodecInfos:()[Landroid/media/MediaCodecInfo;
+      64: astore        4
+      66: aload         4
+      68: arraylength
+      69: istore        5
+      71: iconst_0
+      72: istore        6
+      74: iload         6
+      76: iload         5
+      78: if_icmpge     115
+      81: aload         4
+      83: iload         6
+      85: aaload
+      86: astore        7
+      88: aload         7
+      90: invokevirtual #106                // Method android/media/MediaCodecInfo.getName:()Ljava/lang/String;
+      93: aload_1
+      94: invokevirtual #112                // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+      97: ifeq          109
+     100: aload         7
+     102: invokevirtual #116                // Method android/media/MediaCodecInfo.isEncoder:()Z
+     105: istore_3
+     106: goto          115
+     109: iinc          6, 1
+     112: goto          74
+     115: iload_3
+     116: ifeq          137
+     119: getstatic     #51                 // Field encoders:Ljava/util/Map;
+     122: aload_1
+     123: getstatic     #120                // Field DEFAULT_CODEC:Lorg/robolectric/shadows/ShadowMediaCodec$CodecConfig;
+     126: invokeinterface #124,  3          // InterfaceMethod java/util/Map.getOrDefault:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+     131: checkcast     #127                // class org/robolectric/shadows/ShadowMediaCodec$CodecConfig
+     134: goto          152
+     137: getstatic     #61                 // Field decoders:Ljava/util/Map;
+     140: aload_1
+     141: getstatic     #120                // Field DEFAULT_CODEC:Lorg/robolectric/shadows/ShadowMediaCodec$CodecConfig;
+     144: invokeinterface #124,  3          // InterfaceMethod java/util/Map.getOrDefault:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+     149: checkcast     #127                // class org/robolectric/shadows/ShadowMediaCodec$CodecConfig
+     152: astore        4
+     154: aload_0
+     155: aload         4
+     157: invokestatic  #129                // Method org/robolectric/shadows/ShadowMediaCodec$CodecConfig.access$000:(Lorg/robolectric/shadows/ShadowMediaCodec$CodecConfig;)Lorg/robolectric/shadows/ShadowMediaCodec$CodecConfig$Codec;
+     160: putfield      #133                // Field fakeCodec:Lorg/robolectric/shadows/ShadowMediaCodec$CodecConfig$Codec;
+     163: iconst_0
+     164: istore        5
+     166: iload         5
+     168: bipush        10
+     170: if_icmpge     235
+     173: aload_0
+     174: getfield      #34                 // Field inputBuffers:[Ljava/nio/ByteBuffer;
+     177: iload         5
+     179: aload         4
+     181: invokestatic  #137                // Method org/robolectric/shadows/ShadowMediaCodec$CodecConfig.access$100:(Lorg/robolectric/shadows/ShadowMediaCodec$CodecConfig;)I
+     184: invokestatic  #141                // Method java/nio/ByteBuffer.allocateDirect:(I)Ljava/nio/ByteBuffer;
+     187: getstatic     #145                // Field java/nio/ByteOrder.LITTLE_ENDIAN:Ljava/nio/ByteOrder;
+     190: invokevirtual #151                // Method java/nio/ByteBuffer.order:(Ljava/nio/ByteOrder;)Ljava/nio/ByteBuffer;
+     193: aastore
+     194: aload_0
+     195: getfield      #38                 // Field outputBuffers:[Ljava/nio/ByteBuffer;
+     198: iload         5
+     200: aload         4
+     202: invokestatic  #155                // Method org/robolectric/shadows/ShadowMediaCodec$CodecConfig.access$200:(Lorg/robolectric/shadows/ShadowMediaCodec$CodecConfig;)I
+     205: invokestatic  #141                // Method java/nio/ByteBuffer.allocateDirect:(I)Ljava/nio/ByteBuffer;
+     208: getstatic     #145                // Field java/nio/ByteOrder.LITTLE_ENDIAN:Ljava/nio/ByteOrder;
+     211: invokevirtual #151                // Method java/nio/ByteBuffer.order:(Ljava/nio/ByteOrder;)Ljava/nio/ByteBuffer;
+     214: aastore
+     215: aload_0
+     216: getfield      #43                 // Field outputBufferInfos:[Landroid/media/MediaCodec$BufferInfo;
+     219: iload         5
+     221: new           #41                 // class android/media/MediaCodec$BufferInfo
+     224: dup
+     225: invokespecial #158                // Method android/media/MediaCodec$BufferInfo."<init>":()V
+     228: aastore
+     229: iinc          5, 1
+     232: goto          166
+     235: return
+
+  protected void native_setCallback(android.media.MediaCodec$Callback);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: putfield      #159                // Field callback:Landroid/media/MediaCodec$Callback;
+       5: return
+
+  protected void native_configure(java.lang.String[], java.lang.Object[], android.view.Surface, android.media.MediaCrypto, int);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: aload_2
+       3: aload_3
+       4: aload         4
+       6: iload         5
+       8: invokespecial #163                // Method innerConfigure:([Ljava/lang/String;[Ljava/lang/Object;Landroid/view/Surface;Landroid/media/MediaCrypto;I)V
+      11: return
+
+  protected void native_configure(java.lang.String[], java.lang.Object[], android.view.Surface, android.media.MediaCrypto, android.os.IBinder, int);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: aload_2
+       3: aload_3
+       4: aload         4
+       6: iload         6
+       8: invokespecial #163                // Method innerConfigure:([Ljava/lang/String;[Ljava/lang/Object;Landroid/view/Surface;Landroid/media/MediaCrypto;I)V
+      11: return
+
+  protected void native_configure(java.lang.String[], java.lang.Object[], android.view.Surface, android.media.MediaCrypto, java.lang.Object, int);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: aload_2
+       3: aload_3
+       4: aload         4
+       6: iload         6
+       8: invokespecial #163                // Method innerConfigure:([Ljava/lang/String;[Ljava/lang/Object;Landroid/view/Surface;Landroid/media/MediaCrypto;I)V
+      11: return
+
+  private void innerConfigure(java.lang.String[], java.lang.Object[], android.view.Surface, android.media.MediaCrypto, int);
+    Code:
+       0: aload_0
+       1: aload_0
+       2: getfield      #159                // Field callback:Landroid/media/MediaCodec$Callback;
+       5: ifnull        12
+       8: iconst_1
+       9: goto          13
+      12: iconst_0
+      13: putfield      #47                 // Field isAsync:Z
+      16: aload_0
+      17: aload_1
+      18: aload_2
+      19: invokestatic  #167                // Method recreateMediaFormatFromKeysValues:([Ljava/lang/String;[Ljava/lang/Object;)Landroid/media/MediaFormat;
+      22: putfield      #171                // Field pendingOutputFormat:Landroid/media/MediaFormat;
+      25: aload_0
+      26: aload_1
+      27: aload_2
+      28: invokestatic  #167                // Method recreateMediaFormatFromKeysValues:([Ljava/lang/String;[Ljava/lang/Object;)Landroid/media/MediaFormat;
+      31: putfield      #175                // Field inputFormat:Landroid/media/MediaFormat;
+      34: aload_0
+      35: aload_1
+      36: putfield      #178                // Field initialPendingOutputFormatKeys:[Ljava/lang/String;
+      39: aload_0
+      40: aload_2
+      41: putfield      #182                // Field initialPendingOutputFormatValues:[Ljava/lang/Object;
+      44: aload_0
+      45: getfield      #133                // Field fakeCodec:Lorg/robolectric/shadows/ShadowMediaCodec$CodecConfig$Codec;
+      48: aload_0
+      49: getfield      #171                // Field pendingOutputFormat:Landroid/media/MediaFormat;
+      52: aload_3
+      53: aload         4
+      55: iload         5
+      57: invokeinterface #186,  5          // InterfaceMethod org/robolectric/shadows/ShadowMediaCodec$CodecConfig$Codec.onConfigured:(Landroid/media/MediaFormat;Landroid/view/Surface;Landroid/media/MediaCrypto;I)V
+      62: return
+
+  protected void native_start();
+    Code:
+       0: aload_0
+       1: getfield      #10                 // Field inputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+       4: invokeinterface #192,  1          // InterfaceMethod java/util/concurrent/BlockingQueue.clear:()V
+       9: aload_0
+      10: getfield      #16                 // Field outputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+      13: invokeinterface #192,  1          // InterfaceMethod java/util/concurrent/BlockingQueue.clear:()V
+      18: iconst_0
+      19: istore_1
+      20: iload_1
+      21: bipush        10
+      23: if_icmpge     46
+      26: aload_0
+      27: getfield      #10                 // Field inputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+      30: iload_1
+      31: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+      34: invokeinterface #200,  2          // InterfaceMethod java/util/concurrent/BlockingQueue.add:(Ljava/lang/Object;)Z
+      39: pop
+      40: iinc          1, 1
+      43: goto          20
+      46: aload_0
+      47: getfield      #47                 // Field isAsync:Z
+      50: ifeq          242
+      53: new           #203                // class java/util/HashMap
+      56: dup
+      57: invokespecial #205                // Method java/util/HashMap."<init>":()V
+      60: astore_1
+      61: aload_0
+      62: getfield      #171                // Field pendingOutputFormat:Landroid/media/MediaFormat;
+      65: ifnull        169
+      68: aload_0
+      69: getfield      #171                // Field pendingOutputFormat:Landroid/media/MediaFormat;
+      72: ldc           #206                // String csd-0
+      74: iconst_2
+      75: newarray       byte
+      77: dup
+      78: iconst_0
+      79: bipush        19
+      81: bastore
+      82: dup
+      83: iconst_1
+      84: bipush        16
+      86: bastore
+      87: invokestatic  #208                // Method java/nio/ByteBuffer.wrap:([B)Ljava/nio/ByteBuffer;
+      90: invokevirtual #212                // Method android/media/MediaFormat.setByteBuffer:(Ljava/lang/String;Ljava/nio/ByteBuffer;)V
+      93: aload_0
+      94: getfield      #171                // Field pendingOutputFormat:Landroid/media/MediaFormat;
+      97: ldc           #218                // String csd-1
+      99: iconst_0
+     100: newarray       byte
+     102: invokestatic  #208                // Method java/nio/ByteBuffer.wrap:([B)Ljava/nio/ByteBuffer;
+     105: invokevirtual #212                // Method android/media/MediaFormat.setByteBuffer:(Ljava/lang/String;Ljava/nio/ByteBuffer;)V
+     108: aload_0
+     109: getfield      #178                // Field initialPendingOutputFormatKeys:[Ljava/lang/String;
+     112: ifnull        169
+     115: aload_0
+     116: getfield      #182                // Field initialPendingOutputFormatValues:[Ljava/lang/Object;
+     119: ifnull        169
+     122: aload_0
+     123: getfield      #178                // Field initialPendingOutputFormatKeys:[Ljava/lang/String;
+     126: arraylength
+     127: aload_0
+     128: getfield      #182                // Field initialPendingOutputFormatValues:[Ljava/lang/Object;
+     131: arraylength
+     132: if_icmpne     169
+     135: iconst_0
+     136: istore_2
+     137: iload_2
+     138: aload_0
+     139: getfield      #178                // Field initialPendingOutputFormatKeys:[Ljava/lang/String;
+     142: arraylength
+     143: if_icmpge     169
+     146: aload_1
+     147: aload_0
+     148: getfield      #178                // Field initialPendingOutputFormatKeys:[Ljava/lang/String;
+     151: iload_2
+     152: aaload
+     153: aload_0
+     154: getfield      #182                // Field initialPendingOutputFormatValues:[Ljava/lang/Object;
+     157: iload_2
+     158: aaload
+     159: invokevirtual #220                // Method java/util/HashMap.put:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+     162: pop
+     163: iinc          2, 1
+     166: goto          137
+     169: aload_1
+     170: ldc           #206                // String csd-0
+     172: iconst_2
+     173: newarray       byte
+     175: dup
+     176: iconst_0
+     177: bipush        19
+     179: bastore
+     180: dup
+     181: iconst_1
+     182: bipush        16
+     184: bastore
+     185: invokestatic  #208                // Method java/nio/ByteBuffer.wrap:([B)Ljava/nio/ByteBuffer;
+     188: invokevirtual #220                // Method java/util/HashMap.put:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+     191: pop
+     192: aload_1
+     193: ldc           #218                // String csd-1
+     195: iconst_0
+     196: newarray       byte
+     198: invokestatic  #208                // Method java/nio/ByteBuffer.wrap:([B)Ljava/nio/ByteBuffer;
+     201: invokevirtual #220                // Method java/util/HashMap.put:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+     204: pop
+     205: aload_0
+     206: iconst_1
+     207: iconst_4
+     208: iconst_0
+     209: aload_1
+     210: invokespecial #221                // Method postFakeNativeEvent:(IIILjava/lang/Object;)V
+     213: aload_0
+     214: aload_0
+     215: getfield      #10                 // Field inputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+     218: invokeinterface #225,  1          // InterfaceMethod java/util/concurrent/BlockingQueue.take:()Ljava/lang/Object;
+     223: checkcast     #196                // class java/lang/Integer
+     226: invokevirtual #229                // Method java/lang/Integer.intValue:()I
+     229: invokespecial #233                // Method makeInputBufferAvailable:(I)V
+     232: goto          242
+     235: astore_2
+     236: invokestatic  #238                // Method java/lang/Thread.currentThread:()Ljava/lang/Thread;
+     239: invokevirtual #244                // Method java/lang/Thread.interrupt:()V
+     242: return
+    Exception table:
+       from    to  target type
+         213   232   235   Class java/lang/InterruptedException
+
+  protected void native_flush();
+    Code:
+       0: aload_0
+       1: getfield      #47                 // Field isAsync:Z
+       4: ifne          72
+       7: aload_0
+       8: getfield      #10                 // Field inputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+      11: invokeinterface #192,  1          // InterfaceMethod java/util/concurrent/BlockingQueue.clear:()V
+      16: aload_0
+      17: getfield      #16                 // Field outputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+      20: invokeinterface #192,  1          // InterfaceMethod java/util/concurrent/BlockingQueue.clear:()V
+      25: aload_0
+      26: getfield      #28                 // Field inputBuffersPendingQueuing:Ljava/util/List;
+      29: invokeinterface #247,  1          // InterfaceMethod java/util/List.clear:()V
+      34: iconst_0
+      35: istore_1
+      36: iload_1
+      37: bipush        10
+      39: if_icmpge     72
+      42: aload_0
+      43: getfield      #10                 // Field inputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+      46: iload_1
+      47: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+      50: invokeinterface #200,  2          // InterfaceMethod java/util/concurrent/BlockingQueue.add:(Ljava/lang/Object;)Z
+      55: pop
+      56: aload_0
+      57: getfield      #34                 // Field inputBuffers:[Ljava/nio/ByteBuffer;
+      60: iload_1
+      61: aaload
+      62: invokevirtual #250                // Method java/nio/Buffer.clear:()Ljava/nio/Buffer;
+      65: pop
+      66: iinc          1, 1
+      69: goto          36
+      72: return
+
+  protected java.nio.ByteBuffer[] getBuffers(boolean);
+    Code:
+       0: iload_1
+       1: ifeq          11
+       4: aload_0
+       5: getfield      #34                 // Field inputBuffers:[Ljava/nio/ByteBuffer;
+       8: goto          15
+      11: aload_0
+      12: getfield      #38                 // Field outputBuffers:[Ljava/nio/ByteBuffer;
+      15: areturn
+
+  protected java.nio.ByteBuffer getBuffer(boolean, int);
+    Code:
+       0: iload_1
+       1: ifeq          11
+       4: aload_0
+       5: getfield      #34                 // Field inputBuffers:[Ljava/nio/ByteBuffer;
+       8: goto          15
+      11: aload_0
+      12: getfield      #38                 // Field outputBuffers:[Ljava/nio/ByteBuffer;
+      15: astore_3
+      16: iload_2
+      17: iflt          44
+      20: iload_2
+      21: aload_3
+      22: arraylength
+      23: if_icmpge     44
+      26: iload_1
+      27: ifeq          38
+      30: aload_0
+      31: iload_2
+      32: invokespecial #255                // Method codecOwnsInputBuffer:(I)Z
+      35: ifne          44
+      38: aload_3
+      39: iload_2
+      40: aaload
+      41: goto          45
+      44: aconst_null
+      45: areturn
+
+  protected int native_dequeueInputBuffer(long);
+    Code:
+       0: aload_0
+       1: getfield      #47                 // Field isAsync:Z
+       4: ifne          11
+       7: iconst_1
+       8: goto          12
+      11: iconst_0
+      12: ldc_w         #259                // String Attempting to deque buffer in Async mode.
+      15: invokestatic  #261                // Method com/google/common/base/Preconditions.checkState:(ZLjava/lang/Object;)V
+      18: lload_1
+      19: lconst_0
+      20: lcmp
+      21: ifge          40
+      24: aload_0
+      25: getfield      #10                 // Field inputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+      28: invokeinterface #225,  1          // InterfaceMethod java/util/concurrent/BlockingQueue.take:()Ljava/lang/Object;
+      33: checkcast     #196                // class java/lang/Integer
+      36: astore_3
+      37: goto          57
+      40: aload_0
+      41: getfield      #10                 // Field inputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+      44: lload_1
+      45: getstatic     #267                // Field java/util/concurrent/TimeUnit.MICROSECONDS:Ljava/util/concurrent/TimeUnit;
+      48: invokeinterface #273,  4          // InterfaceMethod java/util/concurrent/BlockingQueue.poll:(JLjava/util/concurrent/TimeUnit;)Ljava/lang/Object;
+      53: checkcast     #196                // class java/lang/Integer
+      56: astore_3
+      57: aload_3
+      58: ifnonnull     63
+      61: iconst_m1
+      62: ireturn
+      63: aload_0
+      64: getfield      #28                 // Field inputBuffersPendingQueuing:Ljava/util/List;
+      67: aload_3
+      68: invokeinterface #277,  2          // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
+      73: pop
+      74: aload_3
+      75: invokevirtual #229                // Method java/lang/Integer.intValue:()I
+      78: ireturn
+      79: astore_3
+      80: invokestatic  #238                // Method java/lang/Thread.currentThread:()Ljava/lang/Thread;
+      83: invokevirtual #244                // Method java/lang/Thread.interrupt:()V
+      86: iconst_m1
+      87: ireturn
+    Exception table:
+       from    to  target type
+          18    62    79   Class java/lang/InterruptedException
+          63    78    79   Class java/lang/InterruptedException
+
+  protected void native_queueInputBuffer(int, int, int, long, int);
+    Code:
+       0: iload_1
+       1: iflt          29
+       4: iload_1
+       5: aload_0
+       6: getfield      #34                 // Field inputBuffers:[Ljava/nio/ByteBuffer;
+       9: arraylength
+      10: if_icmpge     29
+      13: aload_0
+      14: iload_1
+      15: invokespecial #255                // Method codecOwnsInputBuffer:(I)Z
+      18: ifne          29
+      21: aload_0
+      22: iload_1
+      23: invokespecial #278                // Method canQueueInputBuffer:(I)Z
+      26: ifne          54
+      29: iconst_0
+      30: iconst_0
+      31: new           #281                // class java/lang/StringBuilder
+      34: dup
+      35: invokespecial #283                // Method java/lang/StringBuilder."<init>":()V
+      38: ldc_w         #284                // String Input buffer not owned by client:
+      41: invokevirtual #286                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      44: iload_1
+      45: invokevirtual #290                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+      48: invokevirtual #293                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+      51: invokestatic  #296                // Method throwCodecException:(IILjava/lang/String;)V
+      54: new           #41                 // class android/media/MediaCodec$BufferInfo
+      57: dup
+      58: invokespecial #158                // Method android/media/MediaCodec$BufferInfo."<init>":()V
+      61: astore        7
+      63: aload         7
+      65: iload_2
+      66: iload_3
+      67: lload         4
+      69: iload         6
+      71: invokevirtual #300                // Method android/media/MediaCodec$BufferInfo.set:(IIJI)V
+      74: aload_0
+      75: iload_1
+      76: aload         7
+      78: invokespecial #304                // Method makeOutputBufferAvailable:(ILandroid/media/MediaCodec$BufferInfo;)V
+      81: aload_0
+      82: getfield      #28                 // Field inputBuffersPendingQueuing:Ljava/util/List;
+      85: iload_1
+      86: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+      89: invokeinterface #308,  2          // InterfaceMethod java/util/List.remove:(Ljava/lang/Object;)Z
+      94: pop
+      95: return
+
+  protected int native_dequeueOutputBuffer(android.media.MediaCodec$BufferInfo, long);
+    Code:
+       0: aload_0
+       1: getfield      #47                 // Field isAsync:Z
+       4: ifne          11
+       7: iconst_1
+       8: goto          12
+      11: iconst_0
+      12: ldc_w         #259                // String Attempting to deque buffer in Async mode.
+      15: invokestatic  #261                // Method com/google/common/base/Preconditions.checkState:(ZLjava/lang/Object;)V
+      18: aload_0
+      19: getfield      #171                // Field pendingOutputFormat:Landroid/media/MediaFormat;
+      22: ifnull        41
+      25: aload_0
+      26: aload_0
+      27: getfield      #171                // Field pendingOutputFormat:Landroid/media/MediaFormat;
+      30: putfield      #311                // Field outputFormat:Landroid/media/MediaFormat;
+      33: aload_0
+      34: aconst_null
+      35: putfield      #171                // Field pendingOutputFormat:Landroid/media/MediaFormat;
+      38: bipush        -2
+      40: ireturn
+      41: lload_2
+      42: lconst_0
+      43: lcmp
+      44: ifge          64
+      47: aload_0
+      48: getfield      #16                 // Field outputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+      51: invokeinterface #225,  1          // InterfaceMethod java/util/concurrent/BlockingQueue.take:()Ljava/lang/Object;
+      56: checkcast     #196                // class java/lang/Integer
+      59: astore        4
+      61: goto          82
+      64: aload_0
+      65: getfield      #16                 // Field outputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+      68: lload_2
+      69: getstatic     #267                // Field java/util/concurrent/TimeUnit.MICROSECONDS:Ljava/util/concurrent/TimeUnit;
+      72: invokeinterface #273,  4          // InterfaceMethod java/util/concurrent/BlockingQueue.poll:(JLjava/util/concurrent/TimeUnit;)Ljava/lang/Object;
+      77: checkcast     #196                // class java/lang/Integer
+      80: astore        4
+      82: aload         4
+      84: ifnonnull     89
+      87: iconst_m1
+      88: ireturn
+      89: aload_0
+      90: getfield      #43                 // Field outputBufferInfos:[Landroid/media/MediaCodec$BufferInfo;
+      93: aload         4
+      95: invokevirtual #229                // Method java/lang/Integer.intValue:()I
+      98: aaload
+      99: aload_1
+     100: invokestatic  #314                // Method copyBufferInfo:(Landroid/media/MediaCodec$BufferInfo;Landroid/media/MediaCodec$BufferInfo;)V
+     103: aload         4
+     105: invokevirtual #229                // Method java/lang/Integer.intValue:()I
+     108: ireturn
+     109: astore        4
+     111: invokestatic  #238                // Method java/lang/Thread.currentThread:()Ljava/lang/Thread;
+     114: invokevirtual #244                // Method java/lang/Thread.interrupt:()V
+     117: iconst_m1
+     118: ireturn
+    Exception table:
+       from    to  target type
+          18    40   109   Class java/lang/InterruptedException
+          41    88   109   Class java/lang/InterruptedException
+          89   108   109   Class java/lang/InterruptedException
+
+  protected void releaseOutputBuffer(int, boolean);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: invokespecial #318                // Method releaseOutputBuffer:(I)V
+       5: return
+
+  protected void releaseOutputBuffer(int, long);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: invokespecial #318                // Method releaseOutputBuffer:(I)V
+       5: return
+
+  private void releaseOutputBuffer(int);
+    Code:
+       0: aload_0
+       1: getfield      #16                 // Field outputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+       4: iload_1
+       5: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+       8: invokeinterface #321,  2          // InterfaceMethod java/util/concurrent/BlockingQueue.contains:(Ljava/lang/Object;)Z
+      13: ifeq          27
+      16: new           #324                // class java/lang/IllegalStateException
+      19: dup
+      20: ldc_w         #326                // String Cannot release a buffer when it\'s still owned by the codec
+      23: invokespecial #328                // Method java/lang/IllegalStateException."<init>":(Ljava/lang/String;)V
+      26: athrow
+      27: aload_0
+      28: iload_1
+      29: invokespecial #233                // Method makeInputBufferAvailable:(I)V
+      32: return
+
+  private void makeInputBufferAvailable(int);
+    Code:
+       0: iload_1
+       1: iflt          13
+       4: iload_1
+       5: aload_0
+       6: getfield      #34                 // Field inputBuffers:[Ljava/nio/ByteBuffer;
+       9: arraylength
+      10: if_icmplt     24
+      13: new           #331                // class java/lang/IndexOutOfBoundsException
+      16: dup
+      17: ldc_w         #333                // String Cannot make non-existent input available.
+      20: invokespecial #335                // Method java/lang/IndexOutOfBoundsException."<init>":(Ljava/lang/String;)V
+      23: athrow
+      24: aload_0
+      25: getfield      #34                 // Field inputBuffers:[Ljava/nio/ByteBuffer;
+      28: iload_1
+      29: aaload
+      30: invokevirtual #250                // Method java/nio/Buffer.clear:()Ljava/nio/Buffer;
+      33: pop
+      34: aload_0
+      35: getfield      #47                 // Field isAsync:Z
+      38: ifeq          66
+      41: aload_0
+      42: getfield      #28                 // Field inputBuffersPendingQueuing:Ljava/util/List;
+      45: iload_1
+      46: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+      49: invokeinterface #277,  2          // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
+      54: pop
+      55: aload_0
+      56: iconst_1
+      57: iconst_1
+      58: iload_1
+      59: aconst_null
+      60: invokespecial #221                // Method postFakeNativeEvent:(IIILjava/lang/Object;)V
+      63: goto          80
+      66: aload_0
+      67: getfield      #10                 // Field inputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+      70: iload_1
+      71: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+      74: invokeinterface #200,  2          // InterfaceMethod java/util/concurrent/BlockingQueue.add:(Ljava/lang/Object;)Z
+      79: pop
+      80: return
+
+  private void makeOutputBufferAvailable(int, android.media.MediaCodec$BufferInfo);
+    Code:
+       0: iload_1
+       1: iflt          13
+       4: iload_1
+       5: aload_0
+       6: getfield      #38                 // Field outputBuffers:[Ljava/nio/ByteBuffer;
+       9: arraylength
+      10: if_icmplt     24
+      13: new           #331                // class java/lang/IndexOutOfBoundsException
+      16: dup
+      17: ldc_w         #336                // String Cannot make non-existent output buffer available.
+      20: invokespecial #335                // Method java/lang/IndexOutOfBoundsException."<init>":(Ljava/lang/String;)V
+      23: athrow
+      24: aload_0
+      25: getfield      #34                 // Field inputBuffers:[Ljava/nio/ByteBuffer;
+      28: iload_1
+      29: aaload
+      30: astore_3
+      31: aload_0
+      32: getfield      #38                 // Field outputBuffers:[Ljava/nio/ByteBuffer;
+      35: iload_1
+      36: aaload
+      37: astore        4
+      39: aload_0
+      40: getfield      #43                 // Field outputBufferInfos:[Landroid/media/MediaCodec$BufferInfo;
+      43: iload_1
+      44: aaload
+      45: astore        5
+      47: aload         4
+      49: invokevirtual #250                // Method java/nio/Buffer.clear:()Ljava/nio/Buffer;
+      52: pop
+      53: aload_3
+      54: aload_2
+      55: getfield      #338                // Field android/media/MediaCodec$BufferInfo.offset:I
+      58: invokevirtual #342                // Method java/nio/Buffer.position:(I)Ljava/nio/Buffer;
+      61: aload_2
+      62: getfield      #338                // Field android/media/MediaCodec$BufferInfo.offset:I
+      65: aload_2
+      66: getfield      #346                // Field android/media/MediaCodec$BufferInfo.size:I
+      69: iadd
+      70: invokevirtual #349                // Method java/nio/Buffer.limit:(I)Ljava/nio/Buffer;
+      73: pop
+      74: aload_0
+      75: getfield      #133                // Field fakeCodec:Lorg/robolectric/shadows/ShadowMediaCodec$CodecConfig$Codec;
+      78: aload_0
+      79: getfield      #34                 // Field inputBuffers:[Ljava/nio/ByteBuffer;
+      82: iload_1
+      83: aaload
+      84: aload_0
+      85: getfield      #38                 // Field outputBuffers:[Ljava/nio/ByteBuffer;
+      88: iload_1
+      89: aaload
+      90: invokeinterface #352,  3          // InterfaceMethod org/robolectric/shadows/ShadowMediaCodec$CodecConfig$Codec.process:(Ljava/nio/ByteBuffer;Ljava/nio/ByteBuffer;)V
+      95: aload         5
+      97: aload_2
+      98: getfield      #356                // Field android/media/MediaCodec$BufferInfo.flags:I
+     101: putfield      #356                // Field android/media/MediaCodec$BufferInfo.flags:I
+     104: aload         5
+     106: aload         4
+     108: invokevirtual #359                // Method java/nio/Buffer.position:()I
+     111: putfield      #346                // Field android/media/MediaCodec$BufferInfo.size:I
+     114: aload         5
+     116: aload_2
+     117: getfield      #338                // Field android/media/MediaCodec$BufferInfo.offset:I
+     120: putfield      #338                // Field android/media/MediaCodec$BufferInfo.offset:I
+     123: aload         5
+     125: aload_2
+     126: getfield      #361                // Field android/media/MediaCodec$BufferInfo.presentationTimeUs:J
+     129: putfield      #361                // Field android/media/MediaCodec$BufferInfo.presentationTimeUs:J
+     132: aload         4
+     134: invokevirtual #365                // Method java/nio/Buffer.flip:()Ljava/nio/Buffer;
+     137: pop
+     138: aload_0
+     139: getfield      #16                 // Field outputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+     142: iload_1
+     143: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+     146: invokeinterface #200,  2          // InterfaceMethod java/util/concurrent/BlockingQueue.add:(Ljava/lang/Object;)Z
+     151: pop
+     152: aload_0
+     153: getfield      #47                 // Field isAsync:Z
+     156: ifeq          186
+     159: aload_0
+     160: getfield      #16                 // Field outputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+     163: iload_1
+     164: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+     167: invokeinterface #368,  2          // InterfaceMethod java/util/concurrent/BlockingQueue.remove:(Ljava/lang/Object;)Z
+     172: pop
+     173: aload_0
+     174: iconst_1
+     175: iconst_2
+     176: iload_1
+     177: aload_0
+     178: getfield      #43                 // Field outputBufferInfos:[Landroid/media/MediaCodec$BufferInfo;
+     181: iload_1
+     182: aaload
+     183: invokespecial #221                // Method postFakeNativeEvent:(IIILjava/lang/Object;)V
+     186: return
+
+  private void postFakeNativeEvent(int, int, int, java.lang.Object);
+    Code:
+       0: ldc           #67                 // class android/media/MediaCodec
+       2: aload_0
+       3: getfield      #69                 // Field realCodec:Landroid/media/MediaCodec;
+       6: ldc_w         #369                // String postEventFromNative
+       9: iconst_4
+      10: anewarray     #73                 // class org/robolectric/util/ReflectionHelpers$ClassParameter
+      13: dup
+      14: iconst_0
+      15: getstatic     #371                // Field java/lang/Integer.TYPE:Ljava/lang/Class;
+      18: iload_1
+      19: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+      22: invokestatic  #77                 // Method org/robolectric/util/ReflectionHelpers$ClassParameter.from:(Ljava/lang/Class;Ljava/lang/Object;)Lorg/robolectric/util/ReflectionHelpers$ClassParameter;
+      25: aastore
+      26: dup
+      27: iconst_1
+      28: getstatic     #371                // Field java/lang/Integer.TYPE:Ljava/lang/Class;
+      31: iload_2
+      32: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+      35: invokestatic  #77                 // Method org/robolectric/util/ReflectionHelpers$ClassParameter.from:(Ljava/lang/Class;Ljava/lang/Object;)Lorg/robolectric/util/ReflectionHelpers$ClassParameter;
+      38: aastore
+      39: dup
+      40: iconst_2
+      41: getstatic     #371                // Field java/lang/Integer.TYPE:Ljava/lang/Class;
+      44: iload_3
+      45: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+      48: invokestatic  #77                 // Method org/robolectric/util/ReflectionHelpers$ClassParameter.from:(Ljava/lang/Class;Ljava/lang/Object;)Lorg/robolectric/util/ReflectionHelpers$ClassParameter;
+      51: aastore
+      52: dup
+      53: iconst_3
+      54: ldc           #2                  // class java/lang/Object
+      56: aload         4
+      58: invokestatic  #77                 // Method org/robolectric/util/ReflectionHelpers$ClassParameter.from:(Ljava/lang/Class;Ljava/lang/Object;)Lorg/robolectric/util/ReflectionHelpers$ClassParameter;
+      61: aastore
+      62: invokestatic  #372                // Method org/robolectric/util/ReflectionHelpers.callInstanceMethod:(Ljava/lang/Class;Ljava/lang/Object;Ljava/lang/String;[Lorg/robolectric/util/ReflectionHelpers$ClassParameter;)Ljava/lang/Object;
+      65: pop
+      66: return
+
+  private boolean codecOwnsInputBuffer(int);
+    Code:
+       0: aload_0
+       1: getfield      #10                 // Field inputBuffersPendingDequeue:Ljava/util/concurrent/BlockingQueue;
+       4: iload_1
+       5: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+       8: invokeinterface #321,  2          // InterfaceMethod java/util/concurrent/BlockingQueue.contains:(Ljava/lang/Object;)Z
+      13: ireturn
+
+  private boolean canQueueInputBuffer(int);
+    Code:
+       0: aload_0
+       1: getfield      #28                 // Field inputBuffersPendingQueuing:Ljava/util/List;
+       4: iload_1
+       5: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+       8: invokeinterface #378,  2          // InterfaceMethod java/util/List.contains:(Ljava/lang/Object;)Z
+      13: ireturn
+
+  protected void invalidateByteBuffer(java.nio.ByteBuffer[], int);
+    Code:
+       0: return
+
+  protected void invalidateByteBufferLocked(java.nio.ByteBuffer[], int, boolean);
+    Code:
+       0: return
+
+  protected void validateInputByteBuffer(java.nio.ByteBuffer[], int);
+    Code:
+       0: return
+
+  protected void validateInputByteBufferLocked(java.nio.ByteBuffer[], int);
+    Code:
+       0: return
+
+  protected void revalidateByteBuffer(java.nio.ByteBuffer[], int);
+    Code:
+       0: return
+
+  protected void revalidateByteBuffer(java.nio.ByteBuffer[], int, boolean);
+    Code:
+       0: return
+
+  protected void validateOutputByteBuffer(java.nio.ByteBuffer[], int, android.media.MediaCodec$BufferInfo);
+    Code:
+       0: aload_1
+       1: ifnull        46
+       4: iload_2
+       5: iflt          46
+       8: iload_2
+       9: aload_1
+      10: arraylength
+      11: if_icmpge     46
+      14: aload_1
+      15: iload_2
+      16: aaload
+      17: astore        4
+      19: aload         4
+      21: ifnull        46
+      24: aload         4
+      26: aload_3
+      27: getfield      #338                // Field android/media/MediaCodec$BufferInfo.offset:I
+      30: aload_3
+      31: getfield      #346                // Field android/media/MediaCodec$BufferInfo.size:I
+      34: iadd
+      35: invokevirtual #349                // Method java/nio/Buffer.limit:(I)Ljava/nio/Buffer;
+      38: aload_3
+      39: getfield      #338                // Field android/media/MediaCodec$BufferInfo.offset:I
+      42: invokevirtual #342                // Method java/nio/Buffer.position:(I)Ljava/nio/Buffer;
+      45: pop
+      46: return
+
+  protected void validateOutputByteBufferLocked(java.nio.ByteBuffer[], int, android.media.MediaCodec$BufferInfo);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: iload_2
+       3: aload_3
+       4: invokevirtual #379                // Method validateOutputByteBuffer:([Ljava/nio/ByteBuffer;ILandroid/media/MediaCodec$BufferInfo;)V
+       7: return
+
+  protected void invalidateByteBuffers(java.nio.ByteBuffer[]);
+    Code:
+       0: return
+
+  protected void invalidateByteBuffersLocked(java.nio.ByteBuffer[]);
+    Code:
+       0: return
+
+  protected void freeByteBuffer(java.nio.ByteBuffer);
+    Code:
+       0: return
+
+  protected void freeByteBufferLocked(java.nio.ByteBuffer);
+    Code:
+       0: return
+
+  protected android.media.MediaFormat getOutputFormat();
+    Code:
+       0: aload_0
+       1: getfield      #171                // Field pendingOutputFormat:Landroid/media/MediaFormat;
+       4: ifnonnull     14
+       7: aload_0
+       8: getfield      #311                // Field outputFormat:Landroid/media/MediaFormat;
+      11: ifnull        18
+      14: iconst_1
+      15: goto          19
+      18: iconst_0
+      19: ldc_w         #383                // String Codec is not configured.
+      22: invokestatic  #261                // Method com/google/common/base/Preconditions.checkState:(ZLjava/lang/Object;)V
+      25: aload_0
+      26: getfield      #171                // Field pendingOutputFormat:Landroid/media/MediaFormat;
+      29: ifnull        39
+      32: aload_0
+      33: getfield      #171                // Field pendingOutputFormat:Landroid/media/MediaFormat;
+      36: goto          43
+      39: aload_0
+      40: getfield      #311                // Field outputFormat:Landroid/media/MediaFormat;
+      43: areturn
+
+  protected android.media.MediaFormat getInputFormat();
+    Code:
+       0: aload_0
+       1: getfield      #175                // Field inputFormat:Landroid/media/MediaFormat;
+       4: ifnull        11
+       7: iconst_1
+       8: goto          12
+      11: iconst_0
+      12: ldc_w         #383                // String Codec is not configured.
+      15: invokestatic  #261                // Method com/google/common/base/Preconditions.checkState:(ZLjava/lang/Object;)V
+      18: aload_0
+      19: getfield      #175                // Field inputFormat:Landroid/media/MediaFormat;
+      22: areturn
+
+  private static void copyBufferInfo(android.media.MediaCodec$BufferInfo, android.media.MediaCodec$BufferInfo);
+    Code:
+       0: aload_1
+       1: aload_0
+       2: getfield      #338                // Field android/media/MediaCodec$BufferInfo.offset:I
+       5: aload_0
+       6: getfield      #346                // Field android/media/MediaCodec$BufferInfo.size:I
+       9: aload_0
+      10: getfield      #361                // Field android/media/MediaCodec$BufferInfo.presentationTimeUs:J
+      13: aload_0
+      14: getfield      #356                // Field android/media/MediaCodec$BufferInfo.flags:I
+      17: invokevirtual #300                // Method android/media/MediaCodec$BufferInfo.set:(IIJI)V
+      20: return
+
+  private static android.media.MediaFormat recreateMediaFormatFromKeysValues(java.lang.String[], java.lang.Object[]);
+    Code:
+       0: new           #213                // class android/media/MediaFormat
+       3: dup
+       4: invokespecial #385                // Method android/media/MediaFormat."<init>":()V
+       7: astore_2
+       8: iconst_0
+       9: istore_3
+      10: iload_3
+      11: aload_0
+      12: arraylength
+      13: if_icmpge     173
+      16: aload_1
+      17: iload_3
+      18: aaload
+      19: ifnull        31
+      22: aload_1
+      23: iload_3
+      24: aaload
+      25: instanceof    #32                 // class java/nio/ByteBuffer
+      28: ifeq          47
+      31: aload_2
+      32: aload_0
+      33: iload_3
+      34: aaload
+      35: aload_1
+      36: iload_3
+      37: aaload
+      38: checkcast     #32                 // class java/nio/ByteBuffer
+      41: invokevirtual #212                // Method android/media/MediaFormat.setByteBuffer:(Ljava/lang/String;Ljava/nio/ByteBuffer;)V
+      44: goto          167
+      47: aload_1
+      48: iload_3
+      49: aaload
+      50: instanceof    #196                // class java/lang/Integer
+      53: ifeq          75
+      56: aload_2
+      57: aload_0
+      58: iload_3
+      59: aaload
+      60: aload_1
+      61: iload_3
+      62: aaload
+      63: checkcast     #196                // class java/lang/Integer
+      66: invokevirtual #229                // Method java/lang/Integer.intValue:()I
+      69: invokevirtual #386                // Method android/media/MediaFormat.setInteger:(Ljava/lang/String;I)V
+      72: goto          167
+      75: aload_1
+      76: iload_3
+      77: aaload
+      78: instanceof    #390                // class java/lang/Long
+      81: ifeq          103
+      84: aload_2
+      85: aload_0
+      86: iload_3
+      87: aaload
+      88: aload_1
+      89: iload_3
+      90: aaload
+      91: checkcast     #390                // class java/lang/Long
+      94: invokevirtual #392                // Method java/lang/Long.longValue:()J
+      97: invokevirtual #396                // Method android/media/MediaFormat.setLong:(Ljava/lang/String;J)V
+     100: goto          167
+     103: aload_1
+     104: iload_3
+     105: aaload
+     106: instanceof    #400                // class java/lang/Float
+     109: ifeq          131
+     112: aload_2
+     113: aload_0
+     114: iload_3
+     115: aaload
+     116: aload_1
+     117: iload_3
+     118: aaload
+     119: checkcast     #400                // class java/lang/Float
+     122: invokevirtual #402                // Method java/lang/Float.floatValue:()F
+     125: invokevirtual #406                // Method android/media/MediaFormat.setFloat:(Ljava/lang/String;F)V
+     128: goto          167
+     131: aload_1
+     132: iload_3
+     133: aaload
+     134: instanceof    #75                 // class java/lang/String
+     137: ifeq          156
+     140: aload_2
+     141: aload_0
+     142: iload_3
+     143: aaload
+     144: aload_1
+     145: iload_3
+     146: aaload
+     147: checkcast     #75                 // class java/lang/String
+     150: invokevirtual #410                // Method android/media/MediaFormat.setString:(Ljava/lang/String;Ljava/lang/String;)V
+     153: goto          167
+     156: new           #414                // class java/lang/IllegalArgumentException
+     159: dup
+     160: ldc_w         #416                // String Invalid value for key.
+     163: invokespecial #418                // Method java/lang/IllegalArgumentException."<init>":(Ljava/lang/String;)V
+     166: athrow
+     167: iinc          3, 1
+     170: goto          10
+     173: aload_2
+     174: areturn
+
+  private static void throwCodecException(int, int, java.lang.String);
+    Code:
+       0: ldc_w         #419                // class android/media/MediaCodec$CodecException
+       3: iconst_3
+       4: anewarray     #73                 // class org/robolectric/util/ReflectionHelpers$ClassParameter
+       7: dup
+       8: iconst_0
+       9: getstatic     #371                // Field java/lang/Integer.TYPE:Ljava/lang/Class;
+      12: iload_0
+      13: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+      16: invokestatic  #77                 // Method org/robolectric/util/ReflectionHelpers$ClassParameter.from:(Ljava/lang/Class;Ljava/lang/Object;)Lorg/robolectric/util/ReflectionHelpers$ClassParameter;
+      19: aastore
+      20: dup
+      21: iconst_1
+      22: getstatic     #371                // Field java/lang/Integer.TYPE:Ljava/lang/Class;
+      25: iload_1
+      26: invokestatic  #195                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+      29: invokestatic  #77                 // Method org/robolectric/util/ReflectionHelpers$ClassParameter.from:(Ljava/lang/Class;Ljava/lang/Object;)Lorg/robolectric/util/ReflectionHelpers$ClassParameter;
+      32: aastore
+      33: dup
+      34: iconst_2
+      35: ldc           #75                 // class java/lang/String
+      37: aload_2
+      38: invokestatic  #77                 // Method org/robolectric/util/ReflectionHelpers$ClassParameter.from:(Ljava/lang/Class;Ljava/lang/Object;)Lorg/robolectric/util/ReflectionHelpers$ClassParameter;
+      41: aastore
+      42: invokestatic  #421                // Method org/robolectric/util/ReflectionHelpers.callConstructor:(Ljava/lang/Class;[Lorg/robolectric/util/ReflectionHelpers$ClassParameter;)Ljava/lang/Object;
+      45: checkcast     #419                // class android/media/MediaCodec$CodecException
+      48: athrow
+
+  private static void lambda$static$0(java.nio.ByteBuffer, java.nio.ByteBuffer);
+    Code:
+       0: aload_1
+       1: aload_0
+       2: invokevirtual #425                // Method java/nio/ByteBuffer.put:(Ljava/nio/ByteBuffer;)Ljava/nio/ByteBuffer;
+       5: pop
+       6: return
+
+  static {};
+    Code:
+       0: new           #203                // class java/util/HashMap
+       3: dup
+       4: invokespecial #205                // Method java/util/HashMap."<init>":()V
+       7: putstatic     #51                 // Field encoders:Ljava/util/Map;
+      10: new           #203                // class java/util/HashMap
+      13: dup
+      14: invokespecial #205                // Method java/util/HashMap."<init>":()V
+      17: putstatic     #61                 // Field decoders:Ljava/util/Map;
+      20: new           #127                // class org/robolectric/shadows/ShadowMediaCodec$CodecConfig
+      23: dup
+      24: sipush        512
+      27: sipush        512
+      30: invokedynamic #428,  0            // InvokeDynamic #0:process:()Lorg/robolectric/shadows/ShadowMediaCodec$CodecConfig$Codec;
+      35: invokespecial #431                // Method org/robolectric/shadows/ShadowMediaCodec$CodecConfig."<init>":(IILorg/robolectric/shadows/ShadowMediaCodec$CodecConfig$Codec;)V
+      38: putstatic     #120                // Field DEFAULT_CODEC:Lorg/robolectric/shadows/ShadowMediaCodec$CodecConfig;
+      41: return
+}
+
+=== compile.txt ===
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:853:56: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                    override fun onFailure(call: Call, error: IOException) {
+                                                       ^^^^^
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:910:56: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                    override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                       ^^^^^
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:1069:52: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                   ^^^^^
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:2349:52: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                   ^^^^^
