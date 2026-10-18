@@ -1,0 +1,4 @@
+START realStillCaptureCancellationJoinsPacedResponseWithoutReplay
+END tests=1 failures=0
+START realStillCaptureManualCancellationWaitsForMatchingRelease
+END tests=1 failures=0

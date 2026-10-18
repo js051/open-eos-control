@@ -1,0 +1,250 @@
+[
+  {
+    "class": "BridgeMediaListingTest",
+    "exit_code": 0,
+    "tests": 10,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:19:28.286459+00:00",
+    "finished_utc": "2026-10-18T09:19:29.956942+00:00"
+  },
+  {
+    "class": "CameraFocusInfoClientTest",
+    "exit_code": 0,
+    "tests": 3,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:19:29.957189+00:00",
+    "finished_utc": "2026-10-18T09:19:30.773446+00:00"
+  },
+  {
+    "class": "CameraMediaRatingJsonTest",
+    "exit_code": 0,
+    "tests": 10,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:19:30.773782+00:00",
+    "finished_utc": "2026-10-18T09:19:36.655021+00:00"
+  },
+  {
+    "class": "CameraMediaStreamingTest",
+    "exit_code": 0,
+    "tests": 7,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:19:36.655341+00:00",
+    "finished_utc": "2026-10-18T09:19:37.170701+00:00"
+  },
+  {
+    "class": "CameraRepositoryTest",
+    "exit_code": 0,
+    "tests": 12,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:19:37.171062+00:00",
+    "finished_utc": "2026-10-18T09:19:39.290775+00:00"
+  },
+  {
+    "class": "CcapiClientTest",
+    "exit_code": 0,
+    "tests": 183,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:19:39.291057+00:00",
+    "finished_utc": "2026-10-18T09:22:20.639928+00:00"
+  },
+  {
+    "class": "CcapiControlRecoveryTest",
+    "exit_code": 0,
+    "tests": 14,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:22:20.640355+00:00",
+    "finished_utc": "2026-10-18T09:22:32.644017+00:00"
+  },
+  {
+    "class": "CcapiFocusReleaseRecoveryTest",
+    "exit_code": 0,
+    "tests": 4,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:22:32.644574+00:00",
+    "finished_utc": "2026-10-18T09:22:35.024588+00:00"
+  },
+  {
+    "class": "CcapiHeldAutofocusTest",
+    "exit_code": 0,
+    "tests": 3,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:22:35.025003+00:00",
+    "finished_utc": "2026-10-18T09:22:35.743896+00:00"
+  },
+  {
+    "class": "CcapiLiveViewCompletionTest",
+    "exit_code": 0,
+    "tests": 2,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:22:35.744561+00:00",
+    "finished_utc": "2026-10-18T09:22:38.272148+00:00"
+  },
+  {
+    "class": "CcapiLiveViewJourneyTest",
+    "exit_code": 0,
+    "tests": 11,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:22:38.272762+00:00",
+    "finished_utc": "2026-10-18T09:22:54.439882+00:00"
+  },
+  {
+    "class": "CcapiMediaImageCancellationTest",
+    "exit_code": 0,
+    "tests": 2,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:22:54.440232+00:00",
+    "finished_utc": "2026-10-18T09:22:54.955681+00:00"
+  },
+  {
+    "class": "CcapiMediaInventoryTest",
+    "exit_code": 0,
+    "tests": 34,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:22:54.956073+00:00",
+    "finished_utc": "2026-10-18T09:23:00.436070+00:00"
+  },
+  {
+    "class": "CcapiMultipartLiveViewSessionTest",
+    "exit_code": 0,
+    "tests": 3,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:23:00.436476+00:00",
+    "finished_utc": "2026-10-18T09:23:02.959145+00:00"
+  },
+  {
+    "class": "CcapiShutterAutofocusTest",
+    "exit_code": 0,
+    "tests": 6,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:23:02.959518+00:00",
+    "finished_utc": "2026-10-18T09:23:04.076602+00:00"
+  },
+  {
+    "class": "ConnectionFailureProtocolTest",
+    "exit_code": 0,
+    "tests": 24,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:23:04.077083+00:00",
+    "finished_utc": "2026-10-18T09:23:07.601068+00:00"
+  },
+  {
+    "class": "DesktopBridgeClientTest",
+    "exit_code": 0,
+    "tests": 40,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:23:07.601842+00:00",
+    "finished_utc": "2026-10-18T09:23:17.453112+00:00"
+  },
+  {
+    "class": "DesktopBridgeConnectionCancellationTest",
+    "exit_code": 0,
+    "tests": 8,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:23:17.453556+00:00",
+    "finished_utc": "2026-10-18T09:23:18.931833+00:00"
+  },
+  {
+    "class": "DesktopBridgeControlDeadlineTest",
+    "exit_code": 0,
+    "tests": 10,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:23:18.932174+00:00",
+    "finished_utc": "2026-10-18T09:23:36.166152+00:00"
+  },
+  {
+    "class": "DesktopBridgeFocusParityTest",
+    "exit_code": 0,
+    "tests": 20,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:23:36.166608+00:00",
+    "finished_utc": "2026-10-18T09:23:59.702669+00:00"
+  },
+  {
+    "class": "DesktopBridgeLiveViewRecoveryTest",
+    "exit_code": 0,
+    "tests": 15,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:23:59.703152+00:00",
+    "finished_utc": "2026-10-18T09:24:03.378685+00:00"
+  },
+  {
+    "class": "DesktopBridgeMediaImageCancellationTest",
+    "exit_code": 0,
+    "tests": 11,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:24:03.379067+00:00",
+    "finished_utc": "2026-10-18T09:24:05.399645+00:00"
+  },
+  {
+    "class": "DesktopBridgeShutterAutofocusTest",
+    "exit_code": 0,
+    "tests": 5,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:24:05.400017+00:00",
+    "finished_utc": "2026-10-18T09:24:07.770801+00:00"
+  },
+  {
+    "class": "DesktopBridgeShutterRecoveryTest",
+    "exit_code": 0,
+    "tests": 19,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:24:07.771292+00:00",
+    "finished_utc": "2026-10-18T09:24:12.532140+00:00"
+  },
+  {
+    "class": "MediaMetadataTransportTest",
+    "exit_code": 0,
+    "tests": 6,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:24:12.532643+00:00",
+    "finished_utc": "2026-10-18T09:24:21.863857+00:00"
+  },
+  {
+    "class": "OriginalMediaDownloadIntegrityTest",
+    "exit_code": 0,
+    "tests": 12,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:24:21.864372+00:00",
+    "finished_utc": "2026-10-18T09:24:23.090729+00:00"
+  },
+  {
+    "class": "RecordingLifecycleBridgeTest",
+    "exit_code": 0,
+    "tests": 2,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:24:23.091268+00:00",
+    "finished_utc": "2026-10-18T09:24:24.313708+00:00"
+  },
+  {
+    "class": "RecordingRequestAdmissionTest",
+    "exit_code": 0,
+    "tests": 2,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:24:24.314236+00:00",
+    "finished_utc": "2026-10-18T09:24:24.930208+00:00"
+  },
+  {
+    "class": "RecordingResponseShapeTest",
+    "exit_code": 0,
+    "tests": 3,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:24:24.930833+00:00",
+    "finished_utc": "2026-10-18T09:24:32.177493+00:00"
+  },
+  {
+    "class": "RecordingStatusReadbackTest",
+    "exit_code": 0,
+    "tests": 11,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:24:32.178106+00:00",
+    "finished_utc": "2026-10-18T09:24:36.570178+00:00"
+  },
+  {
+    "class": "ShootingSettingTransportTest",
+    "exit_code": 0,
+    "tests": 8,
+    "failures": 0,
+    "started_utc": "2026-10-18T09:24:36.571899+00:00",
+    "finished_utc": "2026-10-18T09:24:38.200031+00:00"
+  }
+]

@@ -4,7 +4,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -37,7 +39,7 @@ class DesktopBridgeClientTest {
         server.shutdown()
     }
 
-    @Test fun maintenanceUsesOnlyNewOutcomeAndNeverFallsBackToLegacyMutation() = runTest {
+    @Test fun maintenanceUsesOnlyNewOutcomeAndNeverFallsBackToLegacyMutation() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
         server.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
@@ -51,7 +53,7 @@ class DesktopBridgeClientTest {
         assertEquals(false, JSONObject(write.body.readUtf8()).getBoolean("autoPowerOff"))
     }
 
-    @Test fun maintenanceClockOutcomePreservesResponseWhenClockReadIsMalformed() = runTest {
+    @Test fun maintenanceClockOutcomePreservesResponseWhenClockReadIsMalformed() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
         server.enqueue(jsonResponse("""{"version":1,"engine":"libgphoto2","operation":"clock-sync","autoPowerOff":false,"responseEvidence":"response-received","clockReadEvidence":"matched","clockReference":null,"clockObservation":{}}"""))
@@ -68,7 +70,7 @@ class DesktopBridgeClientTest {
         assertEquals("no-cache, no-store", read.getHeader("Cache-Control"))
     }
 
-    @Test fun maintenanceRawDecimalExponentAndOverflowTokensNeverBecomeIntegerProof() = runTest {
+    @Test fun maintenanceRawDecimalExponentAndOverflowTokensNeverBecomeIntegerProof() = runDesktopBridgeClientTestWithRealClock {
         for (token in listOf("1.0", "1e0", "18446744073709551616")) {
             server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
             val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
@@ -85,7 +87,7 @@ class DesktopBridgeClientTest {
         }
     }
 
-    @Test fun maintenanceControlUsesDedicatedStopStartRoutesAndStrictTypedProof() = runTest {
+    @Test fun maintenanceControlUsesDedicatedStopStartRoutesAndStrictTypedProof() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
         server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}"""))
@@ -93,17 +95,23 @@ class DesktopBridgeClientTest {
         client.startLiveView(preview)
         val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), preview)
         val guard = MaintenanceIoContext(kotlin.coroutines.coroutineContext) {}
-        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}"""))
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false,"restoreToken":"synthetic_restore_permit_12345678"}"""))
         kotlinx.coroutines.withContext(guard) { access.stopLiveView() }
-        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false,"source":"LIBGPHOTO2_JPEG"}"""))
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false,"restoreToken":"synthetic_restore_permit_12345678","restoreOutcome":"started","source":"LIBGPHOTO2_JPEG"}"""))
         kotlinx.coroutines.withContext(guard) { access.restore() }
         repeat(3) { server.takeRequest() }
-        assertEquals("/v1/session/session-1/maintenance/control/liveview/stop", server.takeRequest().path)
-        assertEquals("/v1/session/session-1/maintenance/control/liveview/start", server.takeRequest().path)
+        val stop = server.takeRequest()
+        assertEquals("POST", stop.method)
+        assertEquals("/v1/session/session-1/maintenance/control/liveview/stop", stop.path)
+        assertEquals(true, JSONObject(stop.body.readUtf8()).get("prepareRestore"))
+        val start = server.takeRequest()
+        assertEquals("POST", start.method)
+        assertEquals("/v1/session/session-1/maintenance/control/liveview/start", start.path)
+        assertEquals("synthetic_restore_permit_12345678", JSONObject(start.body.readUtf8()).get("restoreToken"))
         assertTrue(client.liveViewStopRequired) // Normal active responsibility is retained.
     }
 
-    @Test fun unknownMaintenanceRestoreRetainsStrictRetryStopAndCloseWithoutGenericCleanup() = runTest {
+    @Test fun unknownMaintenanceRestoreRetainsStrictRetryStopAndCloseWithoutGenericCleanup() = runDesktopBridgeClientTestWithRealClock {
         var authReplays = 0
         val http = okhttp3.OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).authenticator { _, response ->
             authReplays++; response.request.newBuilder().header("Authorization", "synthetic-replay").build()
@@ -113,9 +121,11 @@ class DesktopBridgeClientTest {
         server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}"""))
         val preview = LiveViewRequest(); client.startLiveView(preview)
         val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), preview)
-        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")); access.stopLiveView()
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false,"restoreToken":"synthetic_restore_permit_12345678"}""")); access.stopLiveView()
         server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+        val beforeRestore = server.requestCount
         assertTrue(runCatching { access.restore() }.isFailure); assertTrue(client.maintenanceStopOwned)
+        assertEquals(beforeRestore + 1, server.requestCount)
         repeat(5) { server.takeRequest() }
         val strictClient = client.javaClass.getDeclaredField("captureConfigurationHttpClient").apply { isAccessible = true }.get(client) as okhttp3.OkHttpClient
         assertEquals(15_000, strictClient.callTimeoutMillis)
@@ -139,14 +149,14 @@ class DesktopBridgeClientTest {
         assertEquals(beforeClose + 2, server.requestCount)
     }
 
-    @Test fun restoredMaintenanceSessionCloseReleasesNewBulbBeforeStrictStopAndLocalRetire() = runTest {
+    @Test fun restoredMaintenanceSessionCloseReleasesNewBulbBeforeStrictStopAndLocalRetire() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
         server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}"""))
         val preview = LiveViewRequest(); client.startLiveView(preview)
         val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), preview)
-        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")); access.stopLiveView()
-        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}""")); access.restore()
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false,"restoreToken":"synthetic_restore_permit_12345678"}""")); access.stopLiveView()
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false,"restoreToken":"synthetic_restore_permit_12345678","restoreOutcome":"started"}""")); access.restore()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.requestUrl!!.encodedPath
@@ -157,8 +167,10 @@ class DesktopBridgeClientTest {
                         jsonResponse(JSONObject().put("ownerId", ownerId).put("outcome", if (active) "started" else "released")
                             .put("status", JSONObject().put("bulbExposureActive", active).put("shutterReleaseUnconfirmed", false)).toString())
                     }
-                    path.endsWith("/maintenance/control/liveview/stop") -> jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")
-                    path.endsWith("/maintenance/control/session") -> MockResponse().setResponseCode(204)
+                    request.method == "POST" && path == "/v1/session/session-1/maintenance/control/liveview/stop" -> {
+                        jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false,"restoreToken":"synthetic_restore_permit_12345678","restoreOutcome":"stopped"}""")
+                    }
+                    request.method == "DELETE" && path == "/v1/session/session-1/maintenance/control/session" -> MockResponse().setResponseCode(204)
                     else -> MockResponse().setResponseCode(404)
                 }
             }
@@ -166,12 +178,14 @@ class DesktopBridgeClientTest {
         client.startBulbExposure()
         repeat(6) { server.takeRequest() }
         assertFalse(client.closeMaintenanceSession())
+        val cleanupRequests = (0 until 3).map { server.takeRequest() }
         assertEquals(listOf("/v1/session/session-1/bulb/stop/owned", "/v1/session/session-1/maintenance/control/liveview/stop",
-            "/v1/session/session-1/maintenance/control/session"), (0 until 3).map { server.takeRequest().path })
+            "/v1/session/session-1/maintenance/control/session"), cleanupRequests.map { it.path })
+        assertEquals("synthetic_restore_permit_12345678", JSONObject(cleanupRequests[1].body.readUtf8()).get("restoreToken"))
         assertEquals(9, server.requestCount)
     }
 
-    @Test fun maintenanceLocalRetireRouteFailureDoesNotUseGenericDeleteOrRetry() = runTest {
+    @Test fun maintenanceLocalRetireRouteFailureDoesNotUseGenericDeleteOrRetry() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
         client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SLEEP), null)
@@ -183,7 +197,7 @@ class DesktopBridgeClientTest {
         assertEquals("/v1/session/session-1/maintenance/control/session", server.takeRequest().path)
     }
 
-    @Test fun sameSessionWarningRevisionSupersedesStrictStopAndStartResponses() = runTest {
+    @Test fun sameSessionWarningRevisionSupersedesStrictStopAndStartResponses() = runDesktopBridgeClientTestWithRealClock {
         lateinit var client: DesktopBridgeClient
         var bumpWarning = false
         val http = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
@@ -201,19 +215,21 @@ class DesktopBridgeClientTest {
         server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}""")); client.startLiveView(LiveViewRequest())
         val access = client.maintenanceAccess(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING), LiveViewRequest())
         bumpWarning = true
-        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}"""))
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false,"restoreToken":"synthetic_restore_permit_12345678"}"""))
         assertTrue(runCatching { access.stopLiveView() }.isFailure); assertTrue(client.maintenanceStopOwned)
         bumpWarning = false
-        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")); client.stopLiveView()
+        server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false,"restoreToken":"synthetic_restore_permit_12345678"}""")); access.stopLiveView()
         bumpWarning = true
-        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false}"""))
+        server.enqueue(jsonResponse("""{"active":true,"liveViewStopUnconfirmed":false,"restoreToken":"synthetic_restore_permit_12345678","restoreOutcome":"started"}"""))
+        val beforeRestore = server.requestCount
         assertTrue(runCatching { access.restore() }.isFailure); assertTrue(client.maintenanceStopOwned)
+        assertEquals(beforeRestore + 1, server.requestCount)
         bumpWarning = false
         server.enqueue(jsonResponse("""{"active":false,"liveViewStopUnconfirmed":false}""")); client.stopLiveView()
         assertFalse(client.liveViewStopRequired)
     }
 
-    @Test fun maintenanceEventStopRejectsRedirectOrWrongStatusWithoutMainAction() = runTest {
+    @Test fun maintenanceEventStopRejectsRedirectOrWrongStatusWithoutMainAction() = runDesktopBridgeClientTestWithRealClock {
         for (code in listOf(200, 201, 202, 302)) {
             server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
             val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
@@ -228,7 +244,7 @@ class DesktopBridgeClientTest {
         }
     }
 
-    @Test fun maintenanceKeepPowerRestoreWithNoPriorPreviewNeverStartsLiveView() = runTest {
+    @Test fun maintenanceKeepPowerRestoreWithNoPriorPreviewNeverStartsLiveView() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON, code = 201))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
         server.enqueue(jsonResponse("""{"version":1,"engine":"libgphoto2","operation":"sensor-cleaning","autoPowerOff":false,"responseEvidence":"response-received","clockReadEvidence":"not-applicable","clockReference":null,"clockObservation":null}"""))
@@ -245,7 +261,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun freshMediaMetadataPreservesMimeAliasesAndRejectsTheirDisagreement() = runTest {
+    fun freshMediaMetadataPreservesMimeAliasesAndRejectsTheirDisagreement() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(jsonResponse(SESSION_JSON))
         val client = DesktopBridgeClient(server.url("/").toString())
@@ -266,7 +282,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun missingCreatedSessionEngineIsNotInferredFromApiDisplayName() = runTest {
+    fun missingCreatedSessionEngineIsNotInferredFromApiDisplayName() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON))
         val session = JSONObject(SESSION_JSON)
         session.getJSONObject("camera").remove("engine")
@@ -278,7 +294,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun unknownAndConflictingMediaNeverIssueThumbnailPreviewOrStreamRequests() = runTest {
+    fun unknownAndConflictingMediaNeverIssueThumbnailPreviewOrStreamRequests() = runDesktopBridgeClientTestWithRealClock {
         val client = DesktopBridgeClient(server.url("/").toString())
         for (item in listOf(CameraMediaItem("unknown", "FILE.bin", "other"),
             CameraMediaItem("conflict", "FRAME.JPG", "image", contentType = "video/mp4"))) {
@@ -290,7 +306,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun successfulDirectoryAckReadsOneFreshSelectionOnTheSameFrozenSession() = runTest {
+    fun successfulDirectoryAckReadsOneFreshSelectionOnTheSameFrozenSession() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON.replace("libgphoto2", "ccapi")))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
         server.enqueue(jsonResponse("""{"name":"OTHER"}"""))
@@ -309,7 +325,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun successfulDirectoryAckSurvivesItsScopedReadFailureWithoutRetry() = runTest {
+    fun successfulDirectoryAckSurvivesItsScopedReadFailureWithoutRetry() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON.replace("libgphoto2", "ccapi")))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
         server.enqueue(jsonResponse("""{"name":"OTHER"}"""))
@@ -326,7 +342,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun cancellationAfterDirectoryAckDoesNotStartAutomaticReadback() = runTest {
+    fun cancellationAfterDirectoryAckDoesNotStartAutomaticReadback() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON.replace("libgphoto2", "ccapi")))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
         server.enqueue(jsonResponse("""{"name":"OTHER"}"""))
@@ -340,7 +356,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun captureConfigurationBridgeReceiptRetainsAckAndRecoveryUsesFreshBoundedRoute() = runTest {
+    fun captureConfigurationBridgeReceiptRetainsAckAndRecoveryUsesFreshBoundedRoute() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON.replace("libgphoto2", "ccapi")))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
         server.enqueue(jsonResponse("""{"error":{"code":"CAPTURE_CONFIG_READBACK_FAILED","message":"SYNTHETIC read failure",
@@ -361,7 +377,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun captureConfigurationWrongReceiptAndOversizedBodyRemainUnknown() = runTest {
+    fun captureConfigurationWrongReceiptAndOversizedBodyRemainUnknown() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
         for (body in listOf("""{"error":{"code":"CAPTURE_CONFIG_READBACK_FAILED","message":"SYNTHETIC",
@@ -377,7 +393,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun oldBridgeRecovery404HasNoCapabilitiesFallback() = runTest {
+    fun oldBridgeRecovery404HasNoCapabilitiesFallback() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
         server.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
@@ -386,7 +402,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun bridgeClientMapsCompleteSessionContractAndBearerAuthentication() = runTest {
+    fun bridgeClientMapsCompleteSessionContractAndBearerAuthentication() = runDesktopBridgeClientTestWithRealClock {
         val dispatcher = BridgeDispatcher()
         server.dispatcher = dispatcher
         val client = DesktopBridgeClient(
@@ -599,7 +615,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun mediaListRejectsLimitsOutsideBridgeContract() = runTest {
+    fun mediaListRejectsLimitsOutsideBridgeContract() = runDesktopBridgeClientTestWithRealClock {
         val client = DesktopBridgeClient(server.url("/").toString())
 
         listOf(0, -1, 1001).forEach { limit ->
@@ -611,7 +627,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun mediaFoldersAcceptOnlyCompleteBoundedStringPairsAndKeepMalformedItemsBrowseable() = runTest {
+    fun mediaFoldersAcceptOnlyCompleteBoundedStringPairsAndKeepMalformedItemsBrowseable() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(jsonResponse(SESSION_JSON))
         val opaqueId = "synthetic-folder:TEST%2F+TEST"
@@ -669,7 +685,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun mediaFolderMetadataRefreshAndMutationsUseMatchingAuthoritativeItemResponses() = runTest {
+    fun mediaFolderMetadataRefreshAndMutationsUseMatchingAuthoritativeItemResponses() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(jsonResponse(SESSION_JSON))
         val itemId = "gphoto2:opaque-item"
@@ -724,7 +740,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun mediaFolderResponsesDoNotReuseStaleMetadataOrAcceptAnotherItemsIdentity() = runTest {
+    fun mediaFolderResponsesDoNotReuseStaleMetadataOrAcceptAnotherItemsIdentity() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(jsonResponse(SESSION_JSON))
         server.enqueue(jsonResponse("""{"id":"ccapi:item","name":"IMG_0001.JPG","kind":"image"}"""))
@@ -752,7 +768,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun mediaUploadCancellationBeforeDispatchSendsNoPost() = runTest {
+    fun mediaUploadCancellationBeforeDispatchSendsNoPost() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
         val client = DesktopBridgeClient(server.url("/").toString())
         client.initialize()
@@ -767,7 +783,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun mediaUploadReceiptIsRecordedBeforeCancelledIoReturn() = runTest {
+    fun mediaUploadReceiptIsRecordedBeforeCancelledIoReturn() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
         server.enqueue(jsonResponse("""{"id":"exact/receipt","name":"SAME.JPG","kind":"image","sizeBytes":1}""", 201))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
@@ -785,7 +801,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun mediaUploadLostAcknowledgementIsUnknownAndDoesNotReplay() = runTest {
+    fun mediaUploadLostAcknowledgementIsUnknownAndDoesNotReplay() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
         server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
@@ -799,7 +815,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun mediaUploadActualHttpDecoderRejectsInvalidSharedReceiptsWithoutRetry() = runTest {
+    fun mediaUploadActualHttpDecoderRejectsInvalidSharedReceiptsWithoutRetry() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON)); server.enqueue(jsonResponse(SESSION_JSON))
         val client = DesktopBridgeClient(server.url("/").toString()); client.initialize()
         val cases = dev.openeos.control.ui.loadMediaUploadFixture().receipts
@@ -819,7 +835,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun mediaUploadStreamsExactBytesAndReportsProgress() = runTest {
+    fun mediaUploadStreamsExactBytesAndReportsProgress() = runDesktopBridgeClientTestWithRealClock {
         val bytes = ByteArray(192 * 1024 + 17) { (it % 251).toByte() }
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(jsonResponse(SESSION_JSON))
@@ -857,7 +873,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun mediaArchiveUsesBooleanBridgeRouteAndParsesAuthoritativeResponse() = runTest {
+    fun mediaArchiveUsesBooleanBridgeRouteAndParsesAuthoritativeResponse() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(jsonResponse(SESSION_JSON))
         server.enqueue(
@@ -882,7 +898,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun mediaPlaybackReusesOneTicketForRangesAndRevokesAfterLastHandleCloses() = runTest {
+    fun mediaPlaybackReusesOneTicketForRangesAndRevokesAfterLastHandleCloses() = runDesktopBridgeClientTestWithRealClock {
         val bytes = byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7)
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(jsonResponse(SESSION_JSON, code = 201))
@@ -956,7 +972,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun mediaPlaybackRejectsTicketOutsideBridgeOrigin() = runTest {
+    fun mediaPlaybackRejectsTicketOutsideBridgeOrigin() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(jsonResponse(SESSION_JSON, code = 201))
         server.enqueue(
@@ -982,7 +998,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun mediaUploadRejectsOversizedBridgeResponseBeforeJsonParsing() = runTest {
+    fun mediaUploadRejectsOversizedBridgeResponseBeforeJsonParsing() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(jsonResponse(SESSION_JSON))
         server.enqueue(MockResponse().setResponseCode(201).setBody("x".repeat(32 * 1024 + 1)))
@@ -1004,7 +1020,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun bridgeEventPollingUsesAdvertisedLifecycle() = runTest {
+    fun bridgeEventPollingUsesAdvertisedLifecycle() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(jsonResponse(SESSION_JSON, code = 201))
         server.enqueue(
@@ -1036,7 +1052,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun bridgeEventPollingRejectsOversizedResponseBeforeParsing() = runTest {
+    fun bridgeEventPollingRejectsOversizedResponseBeforeParsing() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(jsonResponse(SESSION_JSON, code = 201))
         server.enqueue(
@@ -1059,7 +1075,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun bridgeCapabilitiesInferMissingOrInvalidProfileWithoutInventingR6Identity() = runTest {
+    fun bridgeCapabilitiesInferMissingOrInvalidProfileWithoutInventingR6Identity() = runDesktopBridgeClientTestWithRealClock {
         val cases = listOf(
             BridgeProfileCase(
                 sessionModel = "Canon EOS-R6 Mark III",
@@ -1121,7 +1137,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun bridgeErrorsPreserveStableCodeFeatureAndEngine() = runTest {
+    fun bridgeErrorsPreserveStableCodeFeatureAndEngine() = runDesktopBridgeClientTestWithRealClock {
         server.enqueue(jsonResponse(HEALTH_JSON))
         server.enqueue(
             jsonResponse(
@@ -1150,7 +1166,7 @@ class DesktopBridgeClientTest {
     }
 
     @Test
-    fun bridgeCapabilitiesDiscardMalformedTextSettingContracts() = runTest {
+    fun bridgeCapabilitiesDiscardMalformedTextSettingContracts() = runDesktopBridgeClientTestWithRealClock {
         val capabilitiesJson = JSONObject(CAPABILITIES_JSON)
         capabilitiesJson.getJSONArray("settings").apply {
             put(JSONObject().put("key", "bad-kind").put("value", "TEST").put("values", emptyList<String>())
@@ -1496,3 +1512,7 @@ class DesktopBridgeClientTest {
         """
     }
 }
+
+// Real loopback sockets use wall-clock I/O; virtual deadlines can expire before dispatch.
+private fun runDesktopBridgeClientTestWithRealClock(block: suspend CoroutineScope.() -> Unit): Unit =
+    runBlocking { withTimeout(60_000) { block() } }

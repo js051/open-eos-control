@@ -7,7 +7,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
@@ -61,7 +61,7 @@ class CcapiClientTest {
         dev.openeos.control.ui.MaintenanceDraft(dev.openeos.control.ui.MaintenanceOwner(Any(), 1), "synthetic-confirmation", request),
         client.maintenanceAccess(request, null), { true }, publish = {})
 
-    @Test fun maintenanceClockSeparatesAcceptedResponseFromFreshReadWithoutStatus() = runTest {
+    @Test fun maintenanceClockSeparatesAcceptedResponseFromFreshReadWithoutStatus() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
         val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(1_700_000_000_000, 28_800, false))
         val clock = """{"datetime":"Wed, 15 Nov 2023 06:13:20 +0800","dst":false}"""
@@ -77,7 +77,7 @@ class CcapiClientTest {
         assertEquals("no-cache, no-store", read.getHeader("Cache-Control"))
     }
 
-    @Test fun maintenanceClockReadFailureRetainsResponseAndRecoveryNeverWrites() = runTest {
+    @Test fun maintenanceClockReadFailureRetainsResponseAndRecoveryNeverWrites() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
         val request = MaintenanceRequest(MaintenanceAction.CLOCK_SYNC, MaintenanceClockTarget(1_700_000_000_000, 0, false))
         val clock = """{"datetime":"Tue, 14 Nov 2023 22:13:20 +0000","dst":false}"""
@@ -92,7 +92,7 @@ class CcapiClientTest {
         assertNotNull(attempt.snapshot().evidence.recoveryClock)
     }
 
-    @Test fun maintenanceSimulatorCleaningUsesExact204AndDoesNotRestoreOrSleepAutomatically() = runTest {
+    @Test fun maintenanceSimulatorCleaningUsesExact204AndDoesNotRestoreOrSleepAutomatically() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
         server.enqueue(MockResponse().setResponseCode(204)); server.enqueue(jsonResponse(STATUS_JSON))
         val attempt = maintenanceAttempt(MaintenanceRequest(MaintenanceAction.SENSOR_CLEANING)); attempt.run()
@@ -103,7 +103,7 @@ class CcapiClientTest {
         assertEquals("/ccapi/status", server.takeRequest().path)
     }
 
-    @Test fun maintenanceEventStopRejectsRedirectAndNon204WithoutDispatch() = runTest {
+    @Test fun maintenanceEventStopRejectsRedirectAndNon204WithoutDispatch() = runCcapiClientTestWithRealClock {
         for (code in listOf(200, 201, 202, 302)) {
             client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
             server.enqueue(jsonResponse("""{"ver100":[{"path":"/event/polling","get":true,"delete":true},{"path":"/functions/sensorcleaning","post":true}]}"""))
@@ -117,7 +117,7 @@ class CcapiClientTest {
         }
     }
 
-    @Test fun maintenanceLiveViewDependenciesUseStrictTransportAndNeverRetryStartOrCleanup() = runTest {
+    @Test fun maintenanceLiveViewDependenciesUseStrictTransportAndNeverRetryStartOrCleanup() = runCcapiClientTestWithRealClock {
         var authReplays = 0
         val http = okhttp3.OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).authenticator { _, response ->
             authReplays++; response.request.newBuilder().header("Authorization", "synthetic-replay").build()
@@ -158,7 +158,7 @@ class CcapiClientTest {
         assertFalse(client.liveViewStopRequired); assertFalse(client.maintenanceStopOwned)
     }
 
-    @Test fun maintenanceEventStopFailurePreventsCleaningDispatch() = runTest {
+    @Test fun maintenanceEventStopFailurePreventsCleaningDispatch() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver100":[{"path":"/event/polling","get":true,"delete":true},{"path":"/functions/sensorcleaning","post":true}]}"""))
         client.initialize()
@@ -171,7 +171,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaClassificationPreservesLiteralIdentityAndExplicitMimeAliases() = runTest {
+    fun mediaClassificationPreservesLiteralIdentityAndExplicitMimeAliases() = runCcapiClientTestWithRealClock {
         for (alias in CAMERA_MEDIA_MIME_ALIASES) {
             server.enqueue(jsonResponse("""{"items":[{"id":"SYNTHETIC ","name":"FRAME.JPG ","kind":"image","$alias":" "}]}"""))
             val item = client.listMedia().single()
@@ -201,7 +201,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun unknownAndConflictingMediaNeverIssueThumbnailPreviewOrStreamRequests() = runTest {
+    fun unknownAndConflictingMediaNeverIssueThumbnailPreviewOrStreamRequests() = runCcapiClientTestWithRealClock {
         for (item in listOf(CameraMediaItem("unknown", "FILE.bin", "other"),
             CameraMediaItem("conflict", "FRAME.JPG", "image", contentType = "video/mp4"))) {
             assertTrue(runCatching { client.mediaThumbnail(item) }.exceptionOrNull() is IllegalArgumentException)
@@ -212,7 +212,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun infoMapsCameraIdentity() = runTest {
+    fun infoMapsCameraIdentity() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse(INFO_JSON))
 
         val info = client.info()
@@ -227,7 +227,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun authenticatedRequestsSendBasicAuthorizationHeader() = runTest {
+    fun authenticatedRequestsSendBasicAuthorizationHeader() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             username = "camera-user",
@@ -244,7 +244,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun authenticatedRequestsKeepAuthorizationWithInjectedHttpClient() = runTest {
+    fun authenticatedRequestsKeepAuthorizationWithInjectedHttpClient() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             httpClient = OkHttpClient(),
@@ -262,7 +262,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun statusMapsCameraState() = runTest {
+    fun statusMapsCameraState() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse(STATUS_JSON))
 
         val status = client.status()
@@ -284,7 +284,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun capabilitiesMapSupportedValues() = runTest {
+    fun capabilitiesMapSupportedValues() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse(CAPABILITIES_JSON))
 
         val capabilities = client.capabilities()
@@ -306,7 +306,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorSourceAudioControlsUseBackedEndpoints() = runTest {
+    fun simulatorSourceAudioControlsUseBackedEndpoints() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{
@@ -344,7 +344,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorLiveViewMagnificationUsesBackedIntegerEndpoint() = runTest {
+    fun simulatorLiveViewMagnificationUsesBackedIntegerEndpoint() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse(CAPABILITIES_JSON))
         server.enqueue(jsonResponse("""{"accepted":true,"value":10}"""))
 
@@ -361,7 +361,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorCardSelectionCapabilityWritesRealSimulatorEndpoint() = runTest {
+    fun simulatorCardSelectionCapabilityWritesRealSimulatorEndpoint() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{
@@ -394,7 +394,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorFileNamingCapabilityWritesBackedEndpoint() = runTest {
+    fun simulatorFileNamingCapabilityWritesBackedEndpoint() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse(SIMULATOR_FILE_NAMING_CAPABILITIES_JSON))
         server.enqueue(jsonResponse(SIMULATOR_FILE_NAMING_CAPABILITIES_JSON))
         server.enqueue(
@@ -422,7 +422,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorDeviceFunctionSettingsUseBackedEndpoints() = runTest {
+    fun simulatorDeviceFunctionSettingsUseBackedEndpoints() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{
@@ -453,7 +453,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorAutoPowerOffSeparatesTimedSettingAndSleepAction() = runTest {
+    fun simulatorAutoPowerOffSeparatesTimedSettingAndSleepAction() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{
@@ -486,7 +486,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realAutoPowerOffUsesFreshAbilityAndSeparateImmediateAction() = runTest {
+    fun realAutoPowerOffUsesFreshAbilityAndSeparateImmediateAction() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -522,7 +522,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realCameraSleepRequiresCanonAcceptedStatus() = runTest {
+    fun realCameraSleepRequiresCanonAcceptedStatus() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -552,7 +552,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realAutoPowerOffWithoutImmediateAbilityKeepsTimedSettingButHidesSleep() = runTest {
+    fun realAutoPowerOffWithoutImmediateAbilityKeepsTimedSettingButHidesSleep() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -582,7 +582,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorSensorCleaningUsesBackedEndpointAndBooleanPayload() = runTest {
+    fun simulatorSensorCleaningUsesBackedEndpointAndBooleanPayload() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{"iso":[],"shutter":[],"aperture":[],"white_balance":[]}""",
@@ -603,7 +603,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realSensorCleaningRequiresAdvertisedPostAndSendsCanonPayload() = runTest {
+    fun realSensorCleaningRequiresAdvertisedPostAndSendsCanonPayload() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -626,7 +626,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realSensorCleaningRejectsNonCanonSuccessStatus() = runTest {
+    fun realSensorCleaningRejectsNonCanonSuccessStatus() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -644,7 +644,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realSensorCleaningDoesNotSendUnadvertisedCommand() = runTest {
+    fun realSensorCleaningDoesNotSendUnadvertisedCommand() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver100":[{"path":"/functions/datetime","get":true}]}"""))
 
@@ -660,7 +660,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realDeviceFunctionSettingsRequirePairsRefreshAndWriteAdvertisedValue() = runTest {
+    fun realDeviceFunctionSettingsRequirePairsRefreshAndWriteAdvertisedValue() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -694,7 +694,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realDeviceFunctionSettingsRejectMalformedOrCrossVersionContracts() = runTest {
+    fun realDeviceFunctionSettingsRejectMalformedOrCrossVersionContracts() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -720,7 +720,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun setExposureSendsPatchBody() = runTest {
+    fun setExposureSendsPatchBody() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse(STATUS_JSON.replace("\"800\"", "\"1600\"")))
 
         val status = client.setExposure(iso = "1600")
@@ -734,7 +734,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorClockSyncUsesBackedEndpoint() = runTest {
+    fun simulatorClockSyncUsesBackedEndpoint() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse(STATUS_JSON))
 
         val status = client.syncCameraClock()
@@ -748,7 +748,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realClockSyncRequiresAdvertisedReadWriteAndVerifiesReadback() = runTest {
+    fun realClockSyncRequiresAdvertisedReadWriteAndVerifiesReadback() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         val formatter = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss xx", Locale.US)
         val requested = ZonedDateTime.now()
@@ -788,7 +788,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realClockSyncDoesNotCombineReadAndWriteAcrossApiVersions() = runTest {
+    fun realClockSyncDoesNotCombineReadAndWriteAcrossApiVersions() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -818,7 +818,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun startRecordingPostsThenRefreshesStatus() = runTest {
+    fun startRecordingPostsThenRefreshesStatus() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse("""{"ok":true,"recording":true}"""))
         server.enqueue(jsonResponse(STATUS_JSON.replace("\"recording\": false", "\"recording\": true")))
 
@@ -833,7 +833,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun tapFocusSendsNormalizedCoordinates() = runTest {
+    fun tapFocusSendsNormalizedCoordinates() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse("""{"ok":true,"x":0.25,"y":0.75}"""))
 
         val result = client.tapFocus(0.25, 0.75)
@@ -850,7 +850,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorClickWhiteBalanceSendsNormalizedCoordinatesAndUpdatesStatus() = runTest {
+    fun simulatorClickWhiteBalanceSendsNormalizedCoordinatesAndUpdatesStatus() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse(STATUS_JSON.replace("\"white_balance\": \"auto\"", "\"white_balance\": \"click\"")))
 
         val status = client.clickWhiteBalance(0.4, 0.6)
@@ -865,7 +865,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realClickWhiteBalanceUsesAdvertisedCanonCoordinates() = runTest {
+    fun realClickWhiteBalanceUsesAdvertisedCanonCoordinates() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -919,7 +919,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realTapFocusUsesAdvertisedCanonCoordinates() = runTest {
+    fun realTapFocusUsesAdvertisedCanonCoordinates() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -960,7 +960,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realTapFocusWithoutDetailedFrameDoesNotSendGuessedCoordinates() = runTest {
+    fun realTapFocusWithoutDetailedFrameDoesNotSendGuessedCoordinates() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -1006,7 +1006,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun jpegStopFailureIsReportedAndCanBeRetriedWithoutLosingOwnership() = runTest {
+    fun jpegStopFailureIsReportedAndCanBeRetriedWithoutLosingOwnership() = runCcapiClientTestWithRealClock {
         client.forceRealCamera()
         server.enqueue(MockResponse().setResponseCode(204))
         server.enqueue(liveViewJpegResponse())
@@ -1028,7 +1028,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun startLiveViewPostsCanonDisplayAndSize() = runTest {
+    fun startLiveViewPostsCanonDisplayAndSize() = runCcapiClientTestWithRealClock {
         client.forceRealCamera()
         server.enqueue(MockResponse().setResponseCode(204))
         server.enqueue(liveViewJpegResponse())
@@ -1044,7 +1044,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun startLiveViewRetriesWithoutSizeWhenCameraRejectsRequestedParameters() = runTest {
+    fun startLiveViewRetriesWithoutSizeWhenCameraRejectsRequestedParameters() = runCcapiClientTestWithRealClock {
         client.forceRealCamera()
         server.enqueue(
             MockResponse()
@@ -1069,7 +1069,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun startLiveViewFallsBackFromInvalidLargeToMediumAndPrunesLarge() = runTest {
+    fun startLiveViewFallsBackFromInvalidLargeToMediumAndPrunesLarge() = runCcapiClientTestWithRealClock {
         client.forceRealCamera()
         server.enqueue(MockResponse().setResponseCode(400).setBody("""{"message":"Invalid parameter"}"""))
         server.enqueue(MockResponse().setResponseCode(400).setBody("""{"message":"Invalid parameter"}"""))
@@ -1089,18 +1089,19 @@ class CcapiClientTest {
     }
 
     @Test
-    fun startLiveViewDoesNotHideServerFailuresBehindParameterFallback() = runTest {
+    fun startLiveViewDoesNotHideServerFailuresBehindParameterFallback() = runCcapiClientTestWithRealClock {
         client.forceRealCamera()
-        server.enqueue(MockResponse().setResponseCode(503).setBody("camera busy"))
+        server.enqueue(MockResponse().setResponseCode(503).setHeader("Retry-After", "0").setBody("camera busy"))
         // A failed start still owns its compensating stop; acknowledge that cleanup explicitly.
         server.enqueue(MockResponse().setResponseCode(204))
 
         val failure = runCatching { client.startLiveView() }.exceptionOrNull()
 
         assertTrue(failure is IllegalStateException)
+        assertTrue(failure?.cause is java.io.IOException)
+        assertEquals("Single-attempt request rejected (HTTP 503).", failure?.cause?.message)
         assertFalse(failure is CcapiLiveViewReleaseException)
         assertTrue(failure?.message.orEmpty().contains("HTTP 503"))
-        assertTrue(failure?.message.orEmpty().contains("camera busy"))
         assertFalse(client.liveViewStopRequired)
         assertEquals(2, server.requestCount)
         val start = server.takeRequest()
@@ -1118,7 +1119,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun discoveryFallbackUsesTheVersionThatActuallyResponded() = runTest {
+    fun discoveryFallbackUsesTheVersionThatActuallyResponded() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1146,7 +1147,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun discoveryLoadsCanonDeveloperApiListWhenRootOmitsOperations() = runTest {
+    fun discoveryLoadsCanonDeveloperApiListWhenRootOmitsOperations() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1185,7 +1186,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun discoveryLoadsDeveloperApiListWhenFirmwareReturnsVersionWithoutCommands() = runTest {
+    fun discoveryLoadsDeveloperApiListWhenFirmwareReturnsVersionWithoutCommands() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1226,7 +1227,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun discoveryRejectsEmptyDeveloperApiListWithoutInventingCapabilities() = runTest {
+    fun discoveryRejectsEmptyDeveloperApiListWithoutInventingCapabilities() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1254,7 +1255,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun discoveryReportsDeveloperApiFailureWithoutInventingCapabilities() = runTest {
+    fun discoveryReportsDeveloperApiFailureWithoutInventingCapabilities() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1282,7 +1283,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realCapabilitiesFollowAdvertisedApiOperations() = runTest {
+    fun realCapabilitiesFollowAdvertisedApiOperations() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1322,7 +1323,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realEventPollingRequiresAdvertisedGetAndDeleteLifecycle() = runTest {
+    fun realEventPollingRequiresAdvertisedGetAndDeleteLifecycle() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1350,7 +1351,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun version100EventPollingAppliesExternalRecordingAction() = runTest {
+    fun version100EventPollingAppliesExternalRecordingAction() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1370,7 +1371,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun version110EventPollingAppliesExternalRecordingStatus() = runTest {
+    fun version110EventPollingAppliesExternalRecordingStatus() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1392,7 +1393,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun malformedRecordingEventDoesNotReplaceKnownState() = runTest {
+    fun malformedRecordingEventDoesNotReplaceKnownState() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1415,7 +1416,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realEventPollingIsNotAdvertisedForIncompleteLifecycle() = runTest {
+    fun realEventPollingIsNotAdvertisedForIncompleteLifecycle() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1437,7 +1438,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonMultipartLiveViewUsesAdvertisedPersistentLifecycle() = runTest {
+    fun canonMultipartLiveViewUsesAdvertisedPersistentLifecycle() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1503,7 +1504,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonMultipartLiveViewRetriesTransientNotStartedResponses() = runTest {
+    fun canonMultipartLiveViewRetriesTransientNotStartedResponses() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1544,7 +1545,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun multipartCapabilityRequiresAllOperationsInTheSameApiVersion() = runTest {
+    fun multipartCapabilityRequiresAllOperationsInTheSameApiVersion() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1571,7 +1572,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun version100EventPollingUsesContinueMode() = runTest {
+    fun version100EventPollingUsesContinueMode() = runCcapiClientTestWithRealClock {
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
             treatAsSimulator = false,
@@ -1592,7 +1593,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorEventPollingTracksSequence() = runTest {
+    fun simulatorEventPollingTracksSequence() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse("""{"sequence":3,"keys":["shootingsettings","contents"]}"""))
         server.enqueue(jsonResponse("""{"sequence":3,"keys":[]}"""))
 
@@ -1606,7 +1607,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun identityFallbackStillContinuesAfter404AndAcceptsSuccessfulNonJsonBody() = runTest {
+    fun identityFallbackStillContinuesAfter404AndAcceptsSuccessfulNonJsonBody() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").newBuilder().host("127.0.0.1").build().toString(), treatAsSimulator = false)
         repeat(3) { server.enqueue(MockResponse().setResponseCode(404)) }
         server.enqueue(MockResponse().setResponseCode(200).setBody("identity response without JSON"))
@@ -1708,7 +1709,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonRtpLiveViewUsesAdvertisedSdpStartAndStopContract() = runTest {
+    fun canonRtpLiveViewUsesAdvertisedSdpStartAndStopContract() = runCcapiClientTestWithRealClock {
         lateinit var nativeSession: FakeNativeLiveViewSession
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
@@ -1766,7 +1767,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun automaticLiveViewCleansUpRejectedRtpAndFallsBackToJpeg() = runTest {
+    fun automaticLiveViewCleansUpRejectedRtpAndFallsBackToJpeg() = runCcapiClientTestWithRealClock {
         lateinit var nativeSession: FakeNativeLiveViewSession
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
@@ -1799,7 +1800,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun automaticLiveViewCleansUpRtpWithoutVideoAndFallsBackToJpeg() = runTest {
+    fun automaticLiveViewCleansUpRtpWithoutVideoAndFallsBackToJpeg() = runCcapiClientTestWithRealClock {
         lateinit var nativeSession: FakeNativeLiveViewSession
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
@@ -1841,7 +1842,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun latestFirmwareAutoFallsBackToPostOnlySmallJpegAndStopsWithPostOff() = runTest {
+    fun latestFirmwareAutoFallsBackToPostOnlySmallJpegAndStopsWithPostOff() = runCcapiClientTestWithRealClock {
         lateinit var nativeSession: FakeNativeLiveViewSession
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
@@ -1909,7 +1910,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun latestFirmwareAutoFallsBackFromRejectedRtpToPostOnlyMultipart() = runTest {
+    fun latestFirmwareAutoFallsBackFromRejectedRtpToPostOnlyMultipart() = runCcapiClientTestWithRealClock {
         lateinit var nativeSession: FakeNativeLiveViewSession
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
@@ -1978,7 +1979,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun explicitRtpWithoutVideoStopsTheCameraAndReportsTheReadinessFailure() = runTest {
+    fun explicitRtpWithoutVideoStopsTheCameraAndReportsTheReadinessFailure() = runCcapiClientTestWithRealClock {
         lateinit var nativeSession: FakeNativeLiveViewSession
         client = CcapiClient(
             baseUrl = server.url("/").toString(),
@@ -2017,7 +2018,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun discoveryAcceptsSameOriginUrlEntriesAndRejectsUnsafeOperations() = runTest {
+    fun discoveryAcceptsSameOriginUrlEntriesAndRejectsUnsafeOperations() = runCcapiClientTestWithRealClock {
         val cameraOrigin = server.url("/").toString().trimEnd('/')
         client = CcapiClient(cameraOrigin, treatAsSimulator = false)
         server.enqueue(
@@ -2052,7 +2053,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realCapabilitiesUseAdvertisedPrimarySettingEndpointsWhenAggregateReadFails() = runTest {
+    fun realCapabilitiesUseAdvertisedPrimarySettingEndpointsWhenAggregateReadFails() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -2094,7 +2095,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realCapabilitiesKeepLastValidSettingsAcrossTransientAggregateFailure() = runTest {
+    fun realCapabilitiesKeepLastValidSettingsAcrossTransientAggregateFailure() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse(DISCOVERY_JSON))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
@@ -2114,7 +2115,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realFocusDriveUsesAdvertisedPostAndCanonValue() = runTest {
+    fun realFocusDriveUsesAdvertisedPostAndCanonValue() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -2137,7 +2138,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorFocusDriveUsesBackedEndpointAndVerifiesResponse() = runTest {
+    fun simulatorFocusDriveUsesBackedEndpointAndVerifiesResponse() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse("""{"ok":true,"direction":"far","step":"large"}"""))
 
         val result = client.driveFocus(FocusDriveDirection.FAR, FocusDriveStep.LARGE)
@@ -2155,7 +2156,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realFocusDriveRejectsUnadvertisedCommandWithoutRequest() = runTest {
+    fun realFocusDriveRejectsUnadvertisedCommandWithoutRequest() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[{"path":"/deviceinformation","get":true}]}"""))
 
@@ -2170,7 +2171,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realCapabilityEvidenceIsBoundedAndRemovesQueries() = runTest {
+    fun realCapabilityEvidenceIsBoundedAndRemovesQueries() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         val longSegment = "x".repeat(600)
         val entries = (0 until 300).joinToString(",") { index ->
@@ -2188,7 +2189,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realCapabilitiesRejectReadOnlySettingsWrongShutterMethodAndIncompleteLiveView() = runTest {
+    fun realCapabilitiesRejectReadOnlySettingsWrongShutterMethodAndIncompleteLiveView() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -2228,7 +2229,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realCapabilitiesExposeAdvancedSettingsFromShootingSettings() = runTest {
+    fun realCapabilitiesExposeAdvancedSettingsFromShootingSettings() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
         server.enqueue(jsonResponse("""{}"""))
@@ -2245,7 +2246,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realStatusUsesBatteryListStorageListAndMergedSettings() = runTest {
+    fun realStatusUsesBatteryListStorageListAndMergedSettings() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89,"quality":"good"}]}"""))
         server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","maxsize":64000000000,"spacesize":32000000000,"freeimages":-1},{"name":"card2","capacity":128000000000,"freebytes":64000000000,"remainingimages":2400}]}"""))
@@ -2272,7 +2273,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realStatusUsesOnlyAdvertisedStrictCanonLensAndTemperaturePayloads() = runTest {
+    fun realStatusUsesOnlyAdvertisedStrictCanonLensAndTemperaturePayloads() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse(DEVICE_STATUS_DISCOVERY_JSON))
         server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
         server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
@@ -2310,7 +2311,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun malformedAdvertisedLensAndTemperatureRemainPlanned() = runTest {
+    fun malformedAdvertisedLensAndTemperatureRemainPlanned() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse(DEVICE_STATUS_DISCOVERY_JSON))
         server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
         server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
@@ -2337,7 +2338,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun oversizedAdvertisedLensNameRemainsPlanned() = runTest {
+    fun oversizedAdvertisedLensNameRemainsPlanned() = runCcapiClientTestWithRealClock {
         val oversizedName = "R".repeat(513)
         server.enqueue(jsonResponse(DEVICE_STATUS_DISCOVERY_JSON))
         server.enqueue(jsonResponse("""{"batterylist":[{"level":89}]}"""))
@@ -2358,7 +2359,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun temperatureRestrictionIsRefreshedBeforeStillCaptureWithoutSendingShutterCommand() = runTest {
+    fun temperatureRestrictionIsRefreshedBeforeStillCaptureWithoutSendingShutterCommand() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{"ver100":[
@@ -2395,7 +2396,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun unavailableRealStatusValuesRemainUnknown() = runTest {
+    fun unavailableRealStatusValuesRemainUnknown() = runCcapiClientTestWithRealClock {
         client.forceRealCamera()
         repeat(6) {
             server.enqueue(MockResponse().setResponseCode(404))
@@ -2412,7 +2413,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realSetExposureUsesVersionedSettingPathAndAcceptsEmptySuccess() = runTest {
+    fun realSetExposureUsesVersionedSettingPathAndAcceptsEmptySuccess() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
         server.enqueue(jsonResponse("""{}"""))
@@ -2435,7 +2436,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realSetExposureRejectsValueOutsideCameraAbilityWithoutPut() = runTest {
+    fun realSetExposureRejectsValueOutsideCameraAbilityWithoutPut() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse(DISCOVERY_JSON))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
@@ -2451,7 +2452,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realSetCameraSettingUsesDiscoveredAdvancedSettingPath() = runTest {
+    fun realSetCameraSettingUsesDiscoveredAdvancedSettingPath() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
         server.enqueue(jsonResponse("""{}"""))
@@ -2474,7 +2475,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonZoomRequiresMatchingGetPostAndWritesIntegerValue() = runTest {
+    fun canonZoomRequiresMatchingGetPostAndWritesIntegerValue() = runCcapiClientTestWithRealClock {
         val discovery = """{"ver100":[
             {"path":"/devicestatus/batterylist","get":true},
             {"path":"/devicestatus/storage","get":true},
@@ -2508,7 +2509,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonZoomIsHiddenWithoutMatchingPost() = runTest {
+    fun canonZoomIsHiddenWithoutMatchingPost() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{"ver100":[
@@ -2530,7 +2531,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonSoundRecordingLevelRequiresMatchingGetPutAndWritesIntegerValue() = runTest {
+    fun canonSoundRecordingLevelRequiresMatchingGetPutAndWritesIntegerValue() = runCcapiClientTestWithRealClock {
         val discovery = """{"ver100":[
             {"path":"/devicestatus/batterylist","get":true},
             {"path":"/devicestatus/storage","get":true},
@@ -2577,7 +2578,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonSoundRecordingLevelRejectsMalformedRanges() = runTest {
+    fun canonSoundRecordingLevelRejectsMalformedRanges() = runCcapiClientTestWithRealClock {
         val discovery = """{"ver100":[
             {"path":"/shooting/settings","get":true},
             {"path":"/shooting/settings/soundrecording/level","get":true,"put":true}
@@ -2611,7 +2612,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonSoundRecordingLevelDoesNotCombineGetPutAcrossVersions() = runTest {
+    fun canonSoundRecordingLevelDoesNotCombineGetPutAcrossVersions() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{
@@ -2635,7 +2636,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonSoundRecordingControlsRequireMatchingPairAndRefreshBeforeStringWrite() = runTest {
+    fun canonSoundRecordingControlsRequireMatchingPairAndRefreshBeforeStringWrite() = runCcapiClientTestWithRealClock {
         val discovery = """{"ver100":[
             {"path":"/devicestatus/batterylist","get":true},
             {"path":"/devicestatus/storage","get":true},
@@ -2678,7 +2679,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonCurrentSourceAudioControlsExposeR6MarkIIIAbilities() = runTest {
+    fun canonCurrentSourceAudioControlsExposeR6MarkIIIAbilities() = runCcapiClientTestWithRealClock {
         val discovery = """{
             "ver100":[
                 {"path":"/devicestatus/batterylist","get":true},
@@ -2727,7 +2728,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonSoundRecordingControlsRejectMalformedStringAbilities() = runTest {
+    fun canonSoundRecordingControlsRejectMalformedStringAbilities() = runCcapiClientTestWithRealClock {
         val discovery = """{"ver100":[
             {"path":"/shooting/settings","get":true},
             {"path":"/shooting/settings/soundrecording/attenuator","get":true,"put":true}
@@ -2760,7 +2761,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonSoundRecordingControlsDoNotCombineGetPutAcrossVersions() = runTest {
+    fun canonSoundRecordingControlsDoNotCombineGetPutAcrossVersions() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{
@@ -2784,7 +2785,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonSoundRecordingControlsDoNotUseAggregateSettingsAsEndpointGet() = runTest {
+    fun canonSoundRecordingControlsDoNotUseAggregateSettingsAsEndpointGet() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{"ver100":[
@@ -2807,7 +2808,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonFocusBracketingRequiresExactPairsAndWritesIntegerAfterRefresh() = runTest {
+    fun canonFocusBracketingRequiresExactPairsAndWritesIntegerAfterRefresh() = runCcapiClientTestWithRealClock {
         val discovery = """{"ver100":[
             {"path":"/devicestatus/batterylist","get":true},
             {"path":"/devicestatus/storage","get":true},
@@ -2860,7 +2861,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonFocusBracketingRejectsMalformedRootAndDoesNotProbeChildren() = runTest {
+    fun canonFocusBracketingRejectsMalformedRootAndDoesNotProbeChildren() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{"ver100":[
@@ -2890,7 +2891,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonFocusBracketingDoesNotCombineGetPutAcrossVersions() = runTest {
+    fun canonFocusBracketingDoesNotCombineGetPutAcrossVersions() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{
@@ -2918,7 +2919,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonMovieSettingsRequireExactPairsAndWriteStringAfterRefresh() = runTest {
+    fun canonMovieSettingsRequireExactPairsAndWriteStringAfterRefresh() = runCcapiClientTestWithRealClock {
         val discovery = """{
             "ver100":[
                 {"path":"/devicestatus/batterylist","get":true},
@@ -2976,7 +2977,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonMovieSettingsDoNotCombineVersionsOrTrustAggregateOnly() = runTest {
+    fun canonMovieSettingsDoNotCombineVersionsOrTrustAggregateOnly() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{
@@ -3005,7 +3006,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonMovieModeRequiresMatchingGetPostAndWritesAction() = runTest {
+    fun canonMovieModeRequiresMatchingGetPostAndWritesAction() = runCcapiClientTestWithRealClock {
         val discovery = """{"ver100":[
             {"path":"/devicestatus/batterylist","get":true},
             {"path":"/devicestatus/storage","get":true},
@@ -3039,7 +3040,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonMovieModeIsHiddenWithoutMatchingPostOrValidStatus() = runTest {
+    fun canonMovieModeIsHiddenWithoutMatchingPostOrValidStatus() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{"ver100":[
@@ -3081,7 +3082,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonCardSelectionRequiresMatchingGetPutAndWritesOnlyAdvertisedValue() = runTest {
+    fun canonCardSelectionRequiresMatchingGetPutAndWritesOnlyAdvertisedValue() = runCcapiClientTestWithRealClock {
         val discovery = """{"ver100":[
             {"path":"/shooting/settings","get":true},
             {"path":"/functions/cardselection/stillimage","get":true,"put":true},
@@ -3131,7 +3132,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonCardSelectionRejectsMalformedAbilityAndCrossVersionPairing() = runTest {
+    fun canonCardSelectionRejectsMalformedAbilityAndCrossVersionPairing() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{"ver100":[
@@ -3176,7 +3177,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonDirectoryControlRequiresCompleteGroupAndCreatesAdvertisedDirectory() = runTest {
+    fun canonDirectoryControlRequiresCompleteGroupAndCreatesAdvertisedDirectory() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{"ver100":[
@@ -3226,7 +3227,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonDirectoryControlRejectsMalformedAndCrossVersionContracts() = runTest {
+    fun canonDirectoryControlRejectsMalformedAndCrossVersionContracts() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{"ver100":[
@@ -3277,7 +3278,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun captureDirectoryAckSurvivesFailedSelectionReadAndRecoveryIsFreshGetOnly() = runTest {
+    fun captureDirectoryAckSurvivesFailedSelectionReadAndRecoveryIsFreshGetOnly() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse("""{"ver100":[
             {"path":"/functions/directory/createdirectory","post":true},
             {"path":"/functions/directory/directoryselection","get":true,"put":true}]}"""))
@@ -3300,7 +3301,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun cachedAggregateDirectorySelectionDoesNotProveCanonicalReadSucceeded() = runTest {
+    fun cachedAggregateDirectorySelectionDoesNotProveCanonicalReadSucceeded() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse("""{"ver100":[
             {"path":"/shooting/settings","get":true},
             {"path":"/shooting/settings/directoryselection","put":true},
@@ -3320,7 +3321,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun namingAckSurvivesFailedCompleteReadbackAndDirectExceptionCarriesReceipt() = runTest {
+    fun namingAckSurvivesFailedCompleteReadbackAndDirectExceptionCarriesReceipt() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse(CANON_FILE_NAMING_DISCOVERY_JSON)); server.enqueue(jsonResponse("{}")); enqueueCanonFileNaming()
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         client.initialize(); client.capabilities()
@@ -3339,7 +3340,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun namingCompleteMismatchRetainsAcknowledgedWriteAndDifferentObservedValue() = runTest {
+    fun namingCompleteMismatchRetainsAcknowledgedWriteAndDifferentObservedValue() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse(CANON_FILE_NAMING_DISCOVERY_JSON)); server.enqueue(jsonResponse("{}")); enqueueCanonFileNaming()
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         client.initialize(); client.capabilities()
@@ -3353,7 +3354,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun captureConfigurationRedirectAndMalformedAckNeverBecomeAcknowledged() = runTest {
+    fun captureConfigurationRedirectAndMalformedAckNeverBecomeAcknowledged() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
         server.enqueue(MockResponse().setResponseCode(307).setHeader("Location", server.url("/SYNTHETIC/redirect")))
         val redirect = CaptureConfigurationEvidence(CaptureConfigurationRequest(CaptureConfigurationOperation.CREATE_DIRECTORY, "ABCDE"))
@@ -3370,7 +3371,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun captureDirectoryPartialReceiptsNeverAcknowledgeOrReadBack() = runTest {
+    fun captureDirectoryPartialReceiptsNeverAcknowledgeOrReadBack() = runCcapiClientTestWithRealClock {
         for (real in listOf(true, false)) for (kind in 0..2) {
             if (real) server.enqueue(jsonResponse("""{"ver100":[
                 {"path":"/functions/directory/createdirectory","post":true},
@@ -3399,7 +3400,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun captureNamingPartialReceiptsNeverAcknowledgeOrRefresh() = runTest {
+    fun captureNamingPartialReceiptsNeverAcknowledgeOrRefresh() = runCcapiClientTestWithRealClock {
         for (kind in 0..2) {
             server.enqueue(jsonResponse(CANON_FILE_NAMING_DISCOVERY_JSON)); server.enqueue(jsonResponse("{}")); enqueueCanonFileNaming()
             client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
@@ -3428,7 +3429,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun captureCompleteDirectoryReceiptsKeepExistingSuccessfulStatuses() = runTest {
+    fun captureCompleteDirectoryReceiptsKeepExistingSuccessfulStatuses() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = true)
         for (status in listOf(200, 201, 202)) {
             server.enqueue(jsonResponse("""{"directoryname":"ABCDE"}""").setResponseCode(status))
@@ -3440,7 +3441,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonFileNamingRequiresCompleteGroupAndVerifiesStringAndIntegerUpdates() = runTest {
+    fun canonFileNamingRequiresCompleteGroupAndVerifiesStringAndIntegerUpdates() = runCcapiClientTestWithRealClock {
         server.enqueue(jsonResponse(CANON_FILE_NAMING_DISCOVERY_JSON))
         server.enqueue(jsonResponse("{}"))
         enqueueCanonFileNaming()
@@ -3487,7 +3488,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun canonFileNamingRejectsIncompleteMalformedAndCrossVersionContracts() = runTest {
+    fun canonFileNamingRejectsIncompleteMalformedAndCrossVersionContracts() = runCcapiClientTestWithRealClock {
         val incompleteDiscovery = CANON_FILE_NAMING_DISCOVERY_JSON.replace(
             "{\"path\":\"/functions/filename/movies/userdefined\",\"get\":true,\"put\":true}",
             "{\"path\":\"/functions/filename/movies/userdefined\",\"get\":true}",
@@ -3542,7 +3543,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realStillImageQualityUsesAdvertisedObjectFieldsAndPreservesCompanionFormat() = runTest {
+    fun realStillImageQualityUsesAdvertisedObjectFieldsAndPreservesCompanionFormat() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
         server.enqueue(jsonResponse("""{}"""))
@@ -3582,7 +3583,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realWhiteBalanceShiftUsesAdvertisedRangeAndWritesIntegerObject() = runTest {
+    fun realWhiteBalanceShiftUsesAdvertisedRangeAndWritesIntegerObject() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(jsonResponse(REAL_SETTINGS_JSON))
         server.enqueue(jsonResponse("""{}"""))
@@ -3616,7 +3617,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realWhiteBalanceShiftHidesMalformedOrUnboundedRanges() = runTest {
+    fun realWhiteBalanceShiftHidesMalformedOrUnboundedRanges() = runCcapiClientTestWithRealClock {
         client.forceRealCamera()
         server.enqueue(
             jsonResponse(
@@ -3640,7 +3641,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realWhiteBalanceShiftRequiresCompleteIntegerCurrentValue() = runTest {
+    fun realWhiteBalanceShiftRequiresCompleteIntegerCurrentValue() = runCcapiClientTestWithRealClock {
         client.forceRealCamera()
         server.enqueue(
             jsonResponse(
@@ -3664,7 +3665,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realRecordingAcceptsEmptyCommandSuccess() = runTest {
+    fun realRecordingAcceptsEmptyCommandSuccess() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"))
         server.enqueue(MockResponse().setResponseCode(204))
         server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89,"quality":"good"}]}"""))
@@ -3684,7 +3685,15 @@ class CcapiClientTest {
     @Test
     fun realStillCaptureCancellationJoinsPacedResponseWithoutReplay() = runBlocking {
         client.forceRealCamera()
-        server.enqueue(MockResponse().setBody("{           }").throttleBody(1, 200, TimeUnit.MILLISECONDS))
+        // QueueDispatcher.peek() also throttles the incoming request body. Return the
+        // paced response only after dispatch receives a complete shutter request.
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse = when {
+                request.method == "POST" && request.path == "/ccapi/ver100/shooting/control/shutterbutton" ->
+                    MockResponse().setBody("{           }").throttleBody(1, 200, TimeUnit.MILLISECONDS)
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
         val capture = launch(Dispatchers.IO) { runCatching { client.captureStill() } }
         assertEquals("/ccapi/ver100/shooting/control/shutterbutton",
             server.takeRequest(2, TimeUnit.SECONDS)?.path)
@@ -3710,8 +3719,19 @@ class CcapiClientTest {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver100":[{"path":"/shooting/control/shutterbutton/manual","put":true}]}"""))
         client.initialize(); server.takeRequest()
-        server.enqueue(MockResponse().setBody("{           }").throttleBody(1, 200, TimeUnit.MILLISECONDS))
-        server.enqueue(MockResponse().setBody("{}").setBodyDelay(250, TimeUnit.MILLISECONDS))
+        // Keep request admission unthrottled; only the response producer is paced.
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                if (request.method != "PUT" || request.path != "/ccapi/ver100/shooting/control/shutterbutton/manual") {
+                    return MockResponse().setResponseCode(404)
+                }
+                return when (JSONObject(request.body.clone().readUtf8()).optString("action")) {
+                    "full_press" -> MockResponse().setBody("{           }").throttleBody(1, 200, TimeUnit.MILLISECONDS)
+                    "release" -> MockResponse().setBody("{}").setBodyDelay(250, TimeUnit.MILLISECONDS)
+                    else -> MockResponse().setResponseCode(404)
+                }
+            }
+        }
         val capture = launch(Dispatchers.IO) { runCatching { client.captureStill() } }
         assertEquals("full_press", JSONObject(requireNotNull(server.takeRequest(2, TimeUnit.SECONDS)).body.readUtf8()).getString("action"))
         capture.cancel()
@@ -3748,7 +3768,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realStillCaptureUsesAdvertisedShutterEndpointWithAutofocus() = runTest {
+    fun realStillCaptureUsesAdvertisedShutterEndpointWithAutofocus() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(
             prefix = "/ccapi/ver110",
             prefixes = listOf("/ccapi/ver110", "/ccapi/ver100"),
@@ -3770,7 +3790,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realStillCaptureUsesAdvertisedManualPutAndAlwaysReleasesShutter() = runTest {
+    fun realStillCaptureUsesAdvertisedManualPutAndAlwaysReleasesShutter() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -3794,7 +3814,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun bulbExposureUsesAdvertisedManualPressAndReleaseWithoutStatusPollingWhilePressed() = runTest {
+    fun bulbExposureUsesAdvertisedManualPressAndReleaseWithoutStatusPollingWhilePressed() = runCcapiClientTestWithRealClock {
         fun takeRequest() = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
@@ -3834,7 +3854,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun failedBulbPressStillAttemptsShutterRelease() = runTest {
+    fun failedBulbPressStillAttemptsShutterRelease() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -3843,7 +3863,7 @@ class CcapiClientTest {
         )
         server.enqueue(jsonResponse("""{"batterylist":[{"kind":"battery","level":89}]}"""))
         server.enqueue(jsonResponse("""{"storagelist":[{"name":"card1","spacesize":32000000000}]}"""))
-        server.enqueue(MockResponse().setResponseCode(503).setBody("press response lost"))
+        server.enqueue(MockResponse().setResponseCode(503).setHeader("Retry-After", "0").setBody("press response lost"))
         server.enqueue(MockResponse().setResponseCode(204))
 
         client.initialize()
@@ -3853,14 +3873,16 @@ class CcapiClientTest {
         repeat(2) { server.takeRequest() }
         val press = server.takeRequest()
         val release = server.takeRequest()
-        assertTrue(failure is IllegalStateException)
+        assertTrue("Strict single-attempt rejection must remain an IOException: $failure", failure is java.io.IOException)
+        assertEquals("Single-attempt request rejected (HTTP 503).", failure?.message)
+        assertEquals(5, server.requestCount)
         assertEquals("full_press", JSONObject(press.body.readUtf8()).getString("action"))
         assertEquals("release", JSONObject(release.body.readUtf8()).getString("action"))
         assertTrue(CameraFeature.BULB_EXPOSURE !in client.observedFeatureSnapshot())
     }
 
     @Test
-    fun halfPressUsesManualCommandThenReleasesShutter() = runTest {
+    fun halfPressUsesManualCommandThenReleasesShutter() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -3884,7 +3906,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun autofocusUsesAdvertisedCanonStartAndStopActions() = runTest {
+    fun autofocusUsesAdvertisedCanonStartAndStopActions() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -3909,10 +3931,10 @@ class CcapiClientTest {
     }
 
     @Test
-    fun failedAutofocusStartStillSendsStop() = runTest {
+    fun failedAutofocusStartStillSendsStop() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[{"path":"/shooting/control/af","post":true}]}"""))
-        server.enqueue(MockResponse().setResponseCode(503).setBody("focus failed"))
+        server.enqueue(MockResponse().setResponseCode(503).setHeader("Retry-After", "0").setBody("focus failed"))
         server.enqueue(MockResponse().setResponseCode(204))
 
         client.initialize()
@@ -3921,13 +3943,15 @@ class CcapiClientTest {
         server.takeRequest()
         val start = server.takeRequest()
         val stop = server.takeRequest()
-        assertTrue(failure is IllegalStateException)
+        assertTrue("Strict single-attempt rejection must remain an IOException: $failure", failure is java.io.IOException)
+        assertEquals("Single-attempt request rejected (HTTP 503).", failure?.message)
+        assertEquals(3, server.requestCount)
         assertEquals("start", JSONObject(start.body.readUtf8()).getString("action"))
         assertEquals("stop", JSONObject(stop.body.readUtf8()).getString("action"))
     }
 
     @Test
-    fun unadvertisedAutofocusFailsWithoutSendingACommand() = runTest {
+    fun unadvertisedAutofocusFailsWithoutSendingACommand() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[{"path":"/deviceinformation","get":true}]}"""))
 
@@ -3961,7 +3985,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaListTraversesStorageDirectoriesAndAllPages() = runTest {
+    fun realMediaListTraversesStorageDirectoriesAndAllPages() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver110")
         server.enqueue(jsonResponse("""{"pagenumber":1}"""))
         server.enqueue(jsonResponse("""{"path":["/ccapi/ver110/contents/card1"]}"""))
@@ -3992,7 +4016,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaFoldersKeepCardAndPhotoMovieDirectoryIdentityWithoutInfoRequests() = runTest {
+    fun realMediaFoldersKeepCardAndPhotoMovieDirectoryIdentityWithoutInfoRequests() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         val root = "/ccapi/ver140/contents"
         val card2 = "$root/card2"
@@ -4045,7 +4069,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaFoldersUseTheSameIdentityForAbsoluteAndRelativeListingsAndRefresh() = runTest {
+    fun realMediaFoldersUseTheSameIdentityForAbsoluteAndRelativeListingsAndRefresh() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         val parent = "/ccapi/ver140/contents/card2/DCIM/100CANON"
         val path = "$parent/IMG_0001.JPG"
@@ -4076,7 +4100,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaFolderLabelsDecodeDisplaySegmentsWithoutChangingRequestIdentities() = runTest {
+    fun realMediaFolderLabelsDecodeDisplaySegmentsWithoutChangingRequestIdentities() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         val parent = "/ccapi/ver140/contents/card2/DCIM/Travel%20%2B%20%E7%B4%A0%E6%9D%90"
         val path = "$parent/IMG_0001.JPG"
@@ -4095,7 +4119,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun nonContentsResourcePathsRemainBrowseableButDoNotClaimCameraFolderProvenance() = runTest {
+    fun nonContentsResourcePathsRemainBrowseableButDoNotClaimCameraFolderProvenance() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         val paths = listOf(
             "/ccapi/ver140/other/contents/IMG_0001.JPG",
@@ -4115,7 +4139,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaFolderListingStillRejectsForeignOriginsAndEncodedTraversal() = runTest {
+    fun realMediaFolderListingStillRejectsForeignOriginsAndEncodedTraversal() = runCcapiClientTestWithRealClock {
         val unsafePaths = listOf(
             "http://attacker.invalid/ccapi/ver140/contents/card1/IMG_0001.JPG",
             "/ccapi/ver140/contents/card1/%2e%2e/IMG_0001.JPG",
@@ -4136,7 +4160,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaListReportsCameraErrorsInsteadOfReturningAnEmptyLibrary() = runTest {
+    fun realMediaListReportsCameraErrorsInsteadOfReturningAnEmptyLibrary() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver110")
         server.enqueue(MockResponse().setResponseCode(404).setBody("unsupported query"))
         server.enqueue(MockResponse().setResponseCode(404).setBody("unsupported query"))
@@ -4150,7 +4174,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaListStopsRetryingUnsupportedDescendingOrder() = runTest {
+    fun realMediaListStopsRetryingUnsupportedDescendingOrder() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         server.enqueue(jsonResponse("""{"pagenumber":2}"""))
         server.enqueue(
@@ -4182,7 +4206,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaListReturnsMoreThanFiveHundredItemsAndPublishesProgress() = runTest {
+    fun realMediaListReturnsMoreThanFiveHundredItemsAndPublishesProgress() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         server.enqueue(jsonResponse("""{"pagenumber":6}"""))
         repeat(6) { pageIndex ->
@@ -4213,7 +4237,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun recentMediaListUsesInfoDatesAcrossPhotoAndVideoContainers() = runTest {
+    fun recentMediaListUsesInfoDatesAcrossPhotoAndVideoContainers() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         val photoContainer = "/ccapi/ver140/contents/card2/DCIM/100EOSR6"
         val videoContainer = "/ccapi/ver140/contents/card2/XFVC/REEL_0001"
@@ -4275,7 +4299,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaListTraversesMoreThanOneHundredPages() = runTest {
+    fun realMediaListTraversesMoreThanOneHundredPages() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         server.enqueue(jsonResponse("""{"pagenumber":101}"""))
         repeat(101) { pageIndex ->
@@ -4303,7 +4327,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaListRejectsNegativePageCount() = runTest {
+    fun realMediaListRejectsNegativePageCount() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         server.enqueue(jsonResponse("""{"pagenumber":-1}"""))
 
@@ -4315,7 +4339,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaListFairlyMergesSiblingPhotoAndVideoContainers() = runTest {
+    fun realMediaListFairlyMergesSiblingPhotoAndVideoContainers() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         val containers =
             """{"path":["/ccapi/ver140/contents/card2/DCIM/100EOSR6","/ccapi/ver140/contents/card2/XFVC/REEL_0001"]}"""
@@ -4345,7 +4369,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMagnificationRetiresDetailedGeometryBeforeBothCoordinateActions() = runTest {
+    fun realMagnificationRetiresDetailedGeometryBeforeBothCoordinateActions() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver140":[
             {"path":"/shooting/liveview","post":true,"delete":true},
@@ -4388,7 +4412,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realDetailedGeometryPrefixWithTruncatedTailNeverAuthorizesTouchAf() = runTest {
+    fun realDetailedGeometryPrefixWithTruncatedTailNeverAuthorizesTouchAf() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[
             {"path":"/shooting/liveview","post":true,"delete":true},
@@ -4407,7 +4431,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMalformedDetailedRectangleNeverDispatchesTouchAf() = runTest {
+    fun realMalformedDetailedRectangleNeverDispatchesTouchAf() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[
             {"path":"/shooting/liveview","post":true,"delete":true},
@@ -4430,7 +4454,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realLiveViewMagnificationUsesAdvertisedStringValueAndReadback() = runTest {
+    fun realLiveViewMagnificationUsesAdvertisedStringValueAndReadback() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -4476,7 +4500,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realLiveViewMagnificationRejectsInvalidNumericAbilityPayload() = runTest {
+    fun realLiveViewMagnificationRejectsInvalidNumericAbilityPayload() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -4499,7 +4523,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realLiveViewMagnificationRequiresSameVersionGetAndPut() = runTest {
+    fun realLiveViewMagnificationRequiresSameVersionGetAndPut() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(
             jsonResponse(
@@ -4522,7 +4546,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorMediaCanBeListedAndDownloaded() = runTest {
+    fun simulatorMediaCanBeListedAndDownloaded() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{"items":[{"id":"SIM_0001.PNG","name":"SIM_0001.PNG","kind":"image","size_bytes":6,"archive":true}]}""",
@@ -4550,7 +4574,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorMediaDoesNotInferFoldersFromOpaquePathLikeIds() = runTest {
+    fun simulatorMediaDoesNotInferFoldersFromOpaquePathLikeIds() = runCcapiClientTestWithRealClock {
         server.enqueue(
             jsonResponse(
                 """{"items":[{"id":"card1/DCIM/100CANON/IMG_0001.JPG","name":"IMG_0001.JPG","kind":"image"},{"id":"usb:store_00020001/100CANON/MVI_0001.MP4","name":"MVI_0001.MP4","kind":"video"}]}""",
@@ -4568,7 +4592,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun simulatorMediaUploadStreamsExactBytesAndRealCcapiRefusesUnverifiedUpload() = runTest {
+    fun simulatorMediaUploadStreamsExactBytesAndRealCcapiRefusesUnverifiedUpload() = runCcapiClientTestWithRealClock {
         val bytes = ByteArray(96 * 1024 + 7) { (it % 239).toByte() }
         server.enqueue(
             MockResponse()
@@ -4608,7 +4632,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaThumbnailUsesCanonKindQueryAndReturnsBoundedImage() = runTest {
+    fun mediaThumbnailUsesCanonKindQueryAndReturnsBoundedImage() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
         val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0x01, 0xFF.toByte(), 0xD9.toByte())
@@ -4630,7 +4654,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaThumbnailRejectsOversizedOrNonImageResponses() = runTest {
+    fun mediaThumbnailRejectsOversizedOrNonImageResponses() = runCcapiClientTestWithRealClock {
         val item = CameraMediaItem("SIM_0001.PNG", "SIM_0001.PNG", "image")
         server.enqueue(binaryResponse(ByteArray(8 * 1024 * 1024 + 1), "image/png"))
 
@@ -4647,7 +4671,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaThumbnailRejectsCrossOriginAndTraversalPathsBeforeFetching() = runTest {
+    fun mediaThumbnailRejectsCrossOriginAndTraversalPathsBeforeFetching() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
         client.initialize()
@@ -4672,7 +4696,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaPreviewUsesCanonDisplayQueryAndRejectsVideoBeforeFetching() = runTest {
+    fun mediaPreviewUsesCanonDisplayQueryAndRejectsVideoBeforeFetching() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
         val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0x02, 0xFF.toByte(), 0xD9.toByte())
@@ -4699,7 +4723,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaPreviewRejectsTextAndOversizedResponses() = runTest {
+    fun mediaPreviewRejectsTextAndOversizedResponses() = runCcapiClientTestWithRealClock {
         val item = CameraMediaItem("SIM_0001.PNG", "SIM_0001.PNG", "image")
         server.enqueue(jsonResponse("""{"message":"not a preview"}"""))
         val textFailure = runCatching { client.mediaPreview(item) }.exceptionOrNull()
@@ -4714,7 +4738,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaDeletionUsesEncodedSimulatorIdAndAdvertisedRealCameraPath() = runTest {
+    fun mediaDeletionUsesEncodedSimulatorIdAndAdvertisedRealCameraPath() = runCcapiClientTestWithRealClock {
         server.enqueue(MockResponse().setResponseCode(204))
         client.deleteMedia(CameraMediaItem("SIM FILE.PNG", "SIM FILE.PNG", "image"))
 
@@ -4737,7 +4761,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaDeletionDoesNotRunWithoutAdvertisedDeleteMethod() = runTest {
+    fun realMediaDeletionDoesNotRunWithoutAdvertisedDeleteMethod() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
         client.initialize()
@@ -4756,7 +4780,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaMetadataUsesAdvertisedCanonPutAndVerifiesReadback() = runTest {
+    fun mediaMetadataUsesAdvertisedCanonPutAndVerifiesReadback() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true,"put":true}]}"""))
         client.initialize()
@@ -4844,7 +4868,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaPlaybackResolvesMissingFileSizeBeforeCreatingStreamSource() = runTest {
+    fun mediaPlaybackResolvesMissingFileSizeBeforeCreatingStreamSource() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
         client.initialize()
@@ -4864,7 +4888,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaPlaybackStillStreamsWhenOptionalInfoPreflightFails() = runTest {
+    fun mediaPlaybackStillStreamsWhenOptionalInfoPreflightFails() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
         client.initialize()
@@ -4880,7 +4904,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaMetadataDoesNotWriteWithoutAdvertisedContentsPut() = runTest {
+    fun mediaMetadataDoesNotWriteWithoutAdvertisedContentsPut() = runCcapiClientTestWithRealClock {
         client = CcapiClient(server.url("/").toString(), treatAsSimulator = false)
         server.enqueue(jsonResponse("""{"ver110":[{"path":"/contents","get":true}]}"""))
         client.initialize()
@@ -4899,7 +4923,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaDownloadStreamsInBoundedChunksAndReportsProgress() = runTest {
+    fun mediaDownloadStreamsInBoundedChunksAndReportsProgress() = runCcapiClientTestWithRealClock {
         val bytes = ByteArray(2 * 1024 * 1024 + 123) { (it % 251).toByte() }
         server.enqueue(binaryResponse(bytes, "video/mp4"))
         val output = CountingOutputStream()
@@ -4918,7 +4942,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun recentMediaPublishesFirstEightBeforeReadingRemainingInfoAndReusesDatesOnFullCard() = runTest {
+    fun recentMediaPublishesFirstEightBeforeReadingRemainingInfoAndReusesDatesOnFullCard() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         val paths = (1..20).map { "/ccapi/ver140/contents/card1/IMG_${it.toString().padStart(4, '0')}.JPG" }
         val listing = """{"path":[${paths.joinToString(",") { "\"$it\"" }}]}"""
@@ -4947,7 +4971,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun cancellingAfterFirstRecentBatchStopsRemainingMetadataRequests() = runTest {
+    fun cancellingAfterFirstRecentBatchStopsRemainingMetadataRequests() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver140")
         server.enqueue(jsonResponse("""{"pagenumber":1}"""))
         val paths = (1..20).joinToString(",") { "\"/ccapi/ver140/contents/card1/IMG_$it.JPG\"" }
@@ -4959,7 +4983,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaDownloadPreservesTransportFailureForSafeOuterRetry() = runTest {
+    fun mediaDownloadPreservesTransportFailureForSafeOuterRetry() = runCcapiClientTestWithRealClock {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
         val item = CameraMediaItem("timeout.jpg", "timeout.jpg", "image")
 
@@ -4972,7 +4996,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun realMediaDownloadRetriesHttpVariantsBeforeWriting() = runTest {
+    fun realMediaDownloadRetriesHttpVariantsBeforeWriting() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver110")
         val item = CameraMediaItem(
             id = "/ccapi/ver110/contents/card1/100CANON/IMG_0001.CR3",
@@ -4996,7 +5020,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaDownloadDoesNotRetryAfterDestinationWriteFails() = runTest {
+    fun mediaDownloadDoesNotRetryAfterDestinationWriteFails() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver110")
         val item = CameraMediaItem(
             id = "/ccapi/ver110/contents/card1/100CANON/IMG_0001.JPG",
@@ -5015,7 +5039,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun mediaDownloadPropagatesCancellationWithoutTryingAnotherVariant() = runTest {
+    fun mediaDownloadPropagatesCancellationWithoutTryingAnotherVariant() = runCcapiClientTestWithRealClock {
         client.forceRealCamera(prefix = "/ccapi/ver110")
         val item = CameraMediaItem(
             id = "/ccapi/ver110/contents/card1/100CANON/CLIP_0001.MP4",
@@ -5068,7 +5092,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun liveViewFrameExtractsSingleJpegFrame() = runTest {
+    fun liveViewFrameExtractsSingleJpegFrame() = runCcapiClientTestWithRealClock {
         val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x01, 0x02, 0xFF.toByte(), 0xD9.toByte())
         server.enqueue(binaryResponse(jpeg, "image/jpeg"))
 
@@ -5083,7 +5107,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun liveViewFrameExtractsFirstJpegFromMultipartStream() = runTest {
+    fun liveViewFrameExtractsFirstJpegFromMultipartStream() = runCcapiClientTestWithRealClock {
         val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x03, 0x04, 0xFF.toByte(), 0xD9.toByte())
         val multipart = "--frame\r\nContent-Type: image/jpeg\r\n\r\n".toByteArray() +
             jpeg +
@@ -5098,7 +5122,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun liveViewFrameFallsBackFromFlipToFlipDetail() = runTest {
+    fun liveViewFrameFallsBackFromFlipToFlipDetail() = runCcapiClientTestWithRealClock {
         client.forceRealCamera()
         val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x05, 0x06, 0xFF.toByte(), 0xD9.toByte())
         server.enqueue(MockResponse().setResponseCode(404).setHeader("content-type", "text/plain").setBody("not found"))
@@ -5114,7 +5138,7 @@ class CcapiClientTest {
     }
 
     @Test
-    fun liveViewFrameRetriesTransientCanonDeviceBusy() = runTest {
+    fun liveViewFrameRetriesTransientCanonDeviceBusy() = runCcapiClientTestWithRealClock {
         client.forceRealCamera()
         val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x07, 0x08, 0xFF.toByte(), 0xD9.toByte())
         server.enqueue(
@@ -5479,3 +5503,7 @@ class CcapiClientTest {
         """
     }
 }
+
+// Real loopback sockets use wall-clock I/O; virtual deadlines can expire before dispatch.
+private fun runCcapiClientTestWithRealClock(block: suspend CoroutineScope.() -> Unit): Unit =
+    runBlocking { withTimeout(60_000) { block() } }

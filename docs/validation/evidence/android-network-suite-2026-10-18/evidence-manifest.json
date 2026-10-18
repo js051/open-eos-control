@@ -1,0 +1,158 @@
+[
+  {
+    "file": "final-network-results.json",
+    "raw_sha256": "bcace822185f5edae8660dcdd00ce8a5a5f3fe0e58ac23df8b1b4a8fd80a1436"
+  },
+  {
+    "file": "final-network-source-manifest.json",
+    "raw_sha256": "a9e30f3540b7f0254a00cab6dfaaf0692f34390b2a2ab012510c1e8e70aead35"
+  },
+  {
+    "file": "next-compile.txt",
+    "raw_sha256": "da741df049364462bdb218284e1f985b658ade22dfbe00ef19845b7f81e75c1c"
+  },
+  {
+    "file": "next-compile-command.json",
+    "raw_sha256": "500c0f84b5fee006b12346bd499538d0f2050dfce60e44f9991515e71ab62c4c"
+  },
+  {
+    "file": "next-runtime-classpath.txt",
+    "raw_sha256": "2f0604951387dfbb26dce1755c942ad0f0e1dce6e24e106bcbb5b35f58e3c44f"
+  },
+  {
+    "file": "strict-fixture-test.txt",
+    "raw_sha256": "6ac5d59dd804f44b45edc0b4ad39935e02d56c9534bafd820d3ff043f074387f"
+  },
+  {
+    "file": "still-fixture-test.txt",
+    "raw_sha256": "3d9252d2068b08ec9d7b1f3372861f24dda44310759abaf9aecf407a113f9e86"
+  },
+  {
+    "file": "maintenance-permit-test.txt",
+    "raw_sha256": "8f14b9688d5f8debed6bdadc4de6acd2c7761b23d8e2b6fe8ba7439234bd9d58"
+  },
+  {
+    "file": "BridgeMediaListingTest.txt",
+    "raw_sha256": "3aceaa647b17e3a1f9938acf7982f13f253a225ab4ab25da60641a34bea925bc"
+  },
+  {
+    "file": "CameraFocusInfoClientTest.txt",
+    "raw_sha256": "a5cf52e3cad92db7d564a17fadb1297712e925280abb30a1991ccbd977186028"
+  },
+  {
+    "file": "CameraMediaRatingJsonTest.txt",
+    "raw_sha256": "d9e385924441bbc72860d756940e5f5d53c912ed0fe5066885dfeaa2e893e4c4"
+  },
+  {
+    "file": "CameraMediaStreamingTest.txt",
+    "raw_sha256": "df28ed02b0081abadf4a0b39516758424a3539aaf668557d614d025f8e4dbb9c"
+  },
+  {
+    "file": "CameraRepositoryTest.txt",
+    "raw_sha256": "e366160daa9bd3125b3b39a2452153e7329e51852ae786d54d7e49999715d38f"
+  },
+  {
+    "file": "CcapiClientTest.txt",
+    "raw_sha256": "57e9d1df66e6ad06df8e69b2a43568985e3a120a160f2f0d34643479574b2126"
+  },
+  {
+    "file": "CcapiControlRecoveryTest.txt",
+    "raw_sha256": "293992617f6636a49abcae512b77e69da58768a186e3653d9777ee870b41f9ab"
+  },
+  {
+    "file": "CcapiFocusReleaseRecoveryTest.txt",
+    "raw_sha256": "279dfe64e7812321c1348c5c1c9fd521abea1a540e9968571972da16cc94b897"
+  },
+  {
+    "file": "CcapiHeldAutofocusTest.txt",
+    "raw_sha256": "a43028559c389f94480a82482609ed13149fdc4a956d1f619e8d958a4ff8c746"
+  },
+  {
+    "file": "CcapiLiveViewCompletionTest.txt",
+    "raw_sha256": "69e29d9f90a824288094c14c057547149c36982b2bf72b19a72bc79947bbc27a"
+  },
+  {
+    "file": "CcapiLiveViewJourneyTest.txt",
+    "raw_sha256": "236d9f8788a24ff1e4801d21e21b38cf0b7514c2f54178389c222811a0d39fec"
+  },
+  {
+    "file": "CcapiMediaImageCancellationTest.txt",
+    "raw_sha256": "47e9661f60678ba45b811769a2b8502fc3f9cd5cdf8c3d50ff903d67c5ed2acc"
+  },
+  {
+    "file": "CcapiMediaInventoryTest.txt",
+    "raw_sha256": "a663b51358ca0130813f2570a33ad8d54397e2a05c0e62f2ca09c43bc344c807"
+  },
+  {
+    "file": "CcapiMultipartLiveViewSessionTest.txt",
+    "raw_sha256": "6c2a2d6885a12c4c4fbc076a5738f71ed4556264a973aedbfa935061d50fdc6b"
+  },
+  {
+    "file": "CcapiShutterAutofocusTest.txt",
+    "raw_sha256": "c5ef22d105d1de1522b2ad82dbee946cb73fb4cf48aace80261634faff4583a1"
+  },
+  {
+    "file": "ConnectionFailureProtocolTest.txt",
+    "raw_sha256": "bdd90ffbe241e1b92e3fe6f22b1b48fa27b6fe68e0d39fa02818d4f1c6d3dc29"
+  },
+  {
+    "file": "DesktopBridgeClientTest.txt",
+    "raw_sha256": "033d0205fcc6562aa91ba115d30ba8396f59b26388a032cbeba25af8615abea9"
+  },
+  {
+    "file": "DesktopBridgeConnectionCancellationTest.txt",
+    "raw_sha256": "bf2f75171dd56aa9544f61611922c91492f0ce963aa208c65e2632717e05bba6"
+  },
+  {
+    "file": "DesktopBridgeControlDeadlineTest.txt",
+    "raw_sha256": "f51227d8bcbad5adad638574470dc9d9b28e6a23c11b087085b45941812daa1e"
+  },
+  {
+    "file": "DesktopBridgeFocusParityTest.txt",
+    "raw_sha256": "80d301e2227569235303fb8a5e2f7e3d7af42b582cbd2cadda3e0a41889924f9"
+  },
+  {
+    "file": "DesktopBridgeLiveViewRecoveryTest.txt",
+    "raw_sha256": "f792f8123156abe78ada16b0c423033da8d6c72864494389969c3e98a83de6f4"
+  },
+  {
+    "file": "DesktopBridgeMediaImageCancellationTest.txt",
+    "raw_sha256": "a0fc2a3adec76b13ce0e5416b1409c72103257a12c8a8cef5952dd5e3dd188ad"
+  },
+  {
+    "file": "DesktopBridgeShutterAutofocusTest.txt",
+    "raw_sha256": "58291e5b55325307fc7267a0f99d21d113788235d8cac58e1afc45332977511e"
+  },
+  {
+    "file": "DesktopBridgeShutterRecoveryTest.txt",
+    "raw_sha256": "9138c66f54a86f02e5553b7ebf5524af5f9d757b22fecba08e4c159cfc49ae8a"
+  },
+  {
+    "file": "MediaMetadataTransportTest.txt",
+    "raw_sha256": "3be182a9b5e913fae653454e64f11bf5036480c86b5c2b4a6e45c5497198c55f"
+  },
+  {
+    "file": "OriginalMediaDownloadIntegrityTest.txt",
+    "raw_sha256": "972cfaae88fe24c8ab0d538bc6860c7a03e73163adc376309114f5c95c446a7e"
+  },
+  {
+    "file": "RecordingLifecycleBridgeTest.txt",
+    "raw_sha256": "c36d521d2321ffa1c80a10a0996cb1adc0d7b209f7324266e0768b1a5aa7b9ce"
+  },
+  {
+    "file": "RecordingRequestAdmissionTest.txt",
+    "raw_sha256": "223fec04afb54a5340c8b3a65192900e1cef9b375610cfb54c065537a3958a49"
+  },
+  {
+    "file": "RecordingResponseShapeTest.txt",
+    "raw_sha256": "ec3433d8df8baed169848eb3079894937611502fe952ef9b0b576d348f1f3b7a"
+  },
+  {
+    "file": "RecordingStatusReadbackTest.txt",
+    "raw_sha256": "ed4a449b03d8f16d666e387bb014a659bcd2a9bd88e2238d7e4f9d06e354f4f2"
+  },
+  {
+    "file": "ShootingSettingTransportTest.txt",
+    "raw_sha256": "ff95b1d26f783af620a92578fc76642651665702f5823e425547d5a3d3f5be1b"
+  }
+]
