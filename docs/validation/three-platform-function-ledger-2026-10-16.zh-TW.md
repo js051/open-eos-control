@@ -451,3 +451,7 @@ EDSDK 回傳錯誤 session 後 close 失敗，現保留精確 rejected owner，�
 ### 2026-10-18 09:09 UTC Android 原始網路契約恢復
 
 [詳細證據](android-liveview-recording-recovery-2026-10-18.zh-TW.md)：31 類 baseline 500 項有 56 fail；據此修復 AUTO Live View fallback geometry owner 與 REC malformed-success unknown 分類。完整 106 檔重新編譯及最終 61 項通過。兩大網路類剩餘失敗另行保留，未計為全套綠燈；Android native／真機、Apple-only build／真機門檻不變。
+
+### 2026-10-18 09:24 UTC 原網路 500 項整批收斂
+
+[詳細證據](android-network-suite-2026-10-18.zh-TW.md)：31 類原網路 JUnit 500/500 passed、106 檔完整編譯及 source hash 一致。原56fail經產品修正與嚴格匹配的fixture逐項收斂，沒有放寬安全gate；所有185個test檔、完整App/native與三端真機仍有獨立未驗門檻。

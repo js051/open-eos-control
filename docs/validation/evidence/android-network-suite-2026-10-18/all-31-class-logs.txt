@@ -1,0 +1,273 @@
+=== BridgeMediaListingTest ===
+JUnit version 4.13.2
+..........
+Time: 1.512
+
+OK (10 tests)
+
+
+=== CameraFocusInfoClientTest ===
+JUnit version 4.13.2
+...
+Time: 0.671
+
+OK (3 tests)
+
+
+=== CameraMediaRatingJsonTest ===
+JUnit version 4.13.2
+..........
+Time: 5.722
+
+OK (10 tests)
+
+
+=== CameraMediaStreamingTest ===
+JUnit version 4.13.2
+.......
+Time: 0.368
+
+OK (7 tests)
+
+
+=== CameraRepositoryTest ===
+JUnit version 4.13.2
+............
+Time: 1.983
+
+OK (12 tests)
+
+
+=== CcapiClientTest ===
+JUnit version 4.13.2
+.........................................................................................................................Oct 18, 2026 5:21:40 PM okhttp3.mockwebserver.MockWebServer$serveConnection$$inlined$execute$default$1 runOnce
+SEVERE: MockWebServer[54451] connection from /127.0.0.1 crashed
+org.json.JSONException: A JSONObject text must begin with '{' at 0 [character 1 line 1]
+	at org.json.JSONTokener.syntaxError(JSONTokener.java:503)
+	at org.json.JSONObject.<init>(JSONObject.java:213)
+	at org.json.JSONObject.<init>(JSONObject.java:430)
+	at dev.openeos.control.data.CcapiClientTest$realStillCaptureManualCancellationWaitsForMatchingRelease$1$1.dispatch(CcapiClientTest.kt:3728)
+	at okhttp3.mockwebserver.MockWebServer$SocketHandler.processOneRequest(MockWebServer.kt:601)
+	at okhttp3.mockwebserver.MockWebServer$SocketHandler.handle(MockWebServer.kt:552)
+	at okhttp3.mockwebserver.MockWebServer$serveConnection$$inlined$execute$default$1.runOnce(TaskQueue.kt:220)
+	at okhttp3.internal.concurrent.TaskRunner.runTask(TaskRunner.kt:116)
+	at okhttp3.internal.concurrent.TaskRunner.access$runTask(TaskRunner.kt:42)
+	at okhttp3.internal.concurrent.TaskRunner$runnable$1.run(TaskRunner.kt:65)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1136)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635)
+	at java.base/java.lang.Thread.run(Thread.java:840)
+
+..............................................................
+Time: 161.155
+
+OK (183 tests)
+
+
+=== CcapiControlRecoveryTest ===
+JUnit version 4.13.2
+.............Oct 18, 2026 5:22:22 PM okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+WARNING: MockWebServer[36163] connection from /127.0.0.1 didn't make a request
+.
+Time: 11.775
+
+OK (14 tests)
+
+
+=== CcapiFocusReleaseRecoveryTest ===
+JUnit version 4.13.2
+....
+Time: 2.101
+
+OK (4 tests)
+
+
+=== CcapiHeldAutofocusTest ===
+JUnit version 4.13.2
+...
+Time: 0.492
+
+OK (3 tests)
+
+
+=== CcapiLiveViewCompletionTest ===
+JUnit version 4.13.2
+..
+Time: 2.357
+
+OK (2 tests)
+
+
+=== CcapiLiveViewJourneyTest ===
+JUnit version 4.13.2
+...........
+Time: 16.045
+
+OK (11 tests)
+
+
+=== CcapiMediaImageCancellationTest ===
+JUnit version 4.13.2
+..
+Time: 0.347
+
+OK (2 tests)
+
+
+=== CcapiMediaInventoryTest ===
+JUnit version 4.13.2
+..................................
+Time: 5.295
+
+OK (34 tests)
+
+
+=== CcapiMultipartLiveViewSessionTest ===
+JUnit version 4.13.2
+...
+Time: 2.391
+
+OK (3 tests)
+
+
+=== CcapiShutterAutofocusTest ===
+JUnit version 4.13.2
+......
+Time: 0.983
+
+OK (6 tests)
+
+
+=== ConnectionFailureProtocolTest ===
+JUnit version 4.13.2
+.........Oct 18, 2026 5:23:04 PM okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+WARNING: MockWebServer[38153] connection from /127.0.0.1 didn't make a request
+...............
+Time: 3.382
+
+OK (24 tests)
+
+
+=== DesktopBridgeClientTest ===
+JUnit version 4.13.2
+........................................
+Time: 9.73
+
+OK (40 tests)
+
+
+=== DesktopBridgeConnectionCancellationTest ===
+JUnit version 4.13.2
+........
+Time: 1.318
+
+OK (8 tests)
+
+
+=== DesktopBridgeControlDeadlineTest ===
+JUnit version 4.13.2
+..........
+Time: 17.084
+
+OK (10 tests)
+
+
+=== DesktopBridgeFocusParityTest ===
+JUnit version 4.13.2
+....................
+Time: 23.384
+
+OK (20 tests)
+
+
+=== DesktopBridgeLiveViewRecoveryTest ===
+JUnit version 4.13.2
+...............
+Time: 3.507
+
+OK (15 tests)
+
+
+=== DesktopBridgeMediaImageCancellationTest ===
+JUnit version 4.13.2
+...........
+Time: 1.877
+
+OK (11 tests)
+
+
+=== DesktopBridgeShutterAutofocusTest ===
+JUnit version 4.13.2
+.....
+Time: 2.178
+
+OK (5 tests)
+
+
+=== DesktopBridgeShutterRecoveryTest ===
+JUnit version 4.13.2
+...................
+Time: 4.594
+
+OK (19 tests)
+
+
+=== MediaMetadataTransportTest ===
+JUnit version 4.13.2
+......
+Time: 9.145
+
+OK (6 tests)
+
+
+=== OriginalMediaDownloadIntegrityTest ===
+JUnit version 4.13.2
+............
+Time: 0.999
+
+OK (12 tests)
+
+
+=== RecordingLifecycleBridgeTest ===
+JUnit version 4.13.2
+..
+Time: 1.044
+
+OK (2 tests)
+
+
+=== RecordingRequestAdmissionTest ===
+JUnit version 4.13.2
+..
+Time: 0.473
+
+OK (2 tests)
+
+
+=== RecordingResponseShapeTest ===
+JUnit version 4.13.2
+...
+Time: 7.046
+
+OK (3 tests)
+
+
+=== RecordingStatusReadbackTest ===
+JUnit version 4.13.2
+......Oct 18, 2026 5:24:34 PM okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+WARNING: MockWebServer[50775] connection from /127.0.0.1 didn't make a request
+Oct 18, 2026 5:24:34 PM okhttp3.mockwebserver.MockWebServer$SocketHandler handle
+WARNING: MockWebServer[43445] connection from /127.0.0.1 didn't make a request
+.....
+Time: 4.222
+
+OK (11 tests)
+
+
+=== ShootingSettingTransportTest ===
+JUnit version 4.13.2
+........
+Time: 1.403
+
+OK (8 tests)
+
+

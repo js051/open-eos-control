@@ -1,0 +1,10 @@
+START failedBulbPressStillAttemptsShutterRelease
+END tests=1 failures=0
+START startLiveViewDoesNotHideServerFailuresBehindParameterFallback
+END tests=1 failures=0
+START failedAutofocusStartStillSendsStop
+END tests=1 failures=0
+START realStillCaptureCancellationJoinsPacedResponseWithoutReplay
+END tests=1 failures=0
+START realStillCaptureManualCancellationWaitsForMatchingRelease
+END tests=1 failures=0
