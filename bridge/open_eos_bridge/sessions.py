@@ -24,6 +24,7 @@ class SessionManager:
         self._bulb_requests: dict[str, BulbRequests] = {}
         self._maintenance_live_view: dict[str, MaintenanceLiveViewRequests] = {}
         self._camera_sessions: dict[str, str] = {}
+        self._failed_local_closes: dict[str, tuple[str, CameraEngineSession]] = {}
         self._lock = threading.RLock()
         self._open_lock = threading.Lock()
 
@@ -60,7 +61,7 @@ class SessionManager:
                 request.ccapi_password or "",
             )
         else:
-            # Metadata-only preflight precedes any saved-owner cleanup attempt.
+            # Metadata-only preflight precedes the rejected-owner quarantine check.
             self._require_no_local_retirement(request.engine.value)
             self.local_engines._require_no_pending_cleanup(retry=True)
             with self._open_lock:
@@ -127,6 +128,8 @@ class SessionManager:
         # Metadata-only preflight is repeated under local admission before probes.
         # Retirement publishes under admission, then drops it before physical close.
         with self._lock:
+            if self._failed_local_closes:
+                raise self._failed_local_close_error(engine_name, admission=True)
             for key, owner in self._camera_sessions.items():
                 if key.partition(":")[0] == EngineName.CCAPI.value:
                     continue
@@ -140,6 +143,30 @@ class SessionManager:
                     status_code=409,
                     engine=engine_name,
                 )
+
+    def _failed_local_close_error(self, engine_name: str | None = None, *, admission: bool = False) -> BridgeError:
+        return BridgeError(
+            "CAMERA_BUSY" if admission else "ENGINE_COMMAND_FAILED",
+            "A previous local USB session's cleanup is unconfirmed and that session is no longer available. "
+            "Check and stop the camera, repair the provider if needed, then restart the Bridge. "
+            "Restart does not confirm physical release.",
+            status_code=409 if admission else 502,
+            engine=engine_name,
+        )
+
+    def _complete_close_reservation(
+        self, key: str, identifier: str, session: CameraEngineSession, *, closed: bool,
+    ) -> None:
+        with self._lock:
+            if self._camera_sessions.get(key) != identifier:
+                return
+            if closed or key.partition(":")[0] == EngineName.CCAPI.value:
+                self._camera_sessions.pop(key, None)
+            else:
+                # Keep the exact retired owner, separate from active sessions.
+                # A later idempotent close can return without touching native
+                # resources, so this record must never be cleared by retrying it.
+                self._failed_local_closes[key] = (identifier, session)
 
     def _require_compatible_local_engine(self, engine_name: str) -> None:
         if engine_name == EngineName.CCAPI.value:
@@ -221,12 +248,13 @@ class SessionManager:
                 self._maintenance_live_view.pop(session_id, None)
                 session = self._sessions.pop(session_id)
                 self._bulb_requests.pop(session_id, None)
+                camera_key = f"{session.engine_name}:{session.camera.id}"
+            closed = False
             try:
                 guard.finish_retirement(session.close)
+                closed = True
             finally:
-                # Keep the camera reserved until this exact session's final cleanup ends.
-                with self._lock:
-                    self._camera_sessions.pop(f"{session.engine_name}:{session.camera.id}", None)
+                self._complete_close_reservation(camera_key, session_id, session, closed=closed)
 
     def retire_maintenance(self, session_id: str) -> None:
         guard = self._bulb_requests_for(session_id)
@@ -264,32 +292,35 @@ class SessionManager:
         # Publish retirement only after an admitted open has registered. Release
         # admission before waiting for per-session retirement or physical cleanup.
         with self._open_lock, self._lock:
-            sessions = [(identifier, session, self._bulb_requests_for(identifier))
+            sessions = [(identifier, session, self._bulb_requests_for(identifier),
+                         f"{session.engine_name}:{session.camera.id}")
                         for identifier, session in self._sessions.items()]
-            for identifier, _, guard in sessions:
+            for identifier, _, guard, _ in sessions:
                 guard.retire()
                 self._retire_controls(identifier)
             self._sessions.clear()
             self._bulb_requests.clear()
             self._maintenance_live_view.clear()
-        failure = None
-        for identifier, session, guard in sessions:
+            failure = self._failed_local_close_error() if self._failed_local_closes else None
+        for identifier, session, guard, camera_key in sessions:
+            closed = False
             try:
                 with guard.retirement_lock:
                     guard.finish_retirement(session.close)
+                    closed = True
             except Exception as error:
                 # Provider and subprocess cleanup can raise ordinary OS errors.
                 # Drain every session, then preserve the first reported failure.
                 failure = failure or error
             finally:
-                with self._lock:
-                    key = f"{session.engine_name}:{session.camera.id}"
-                    if self._camera_sessions.get(key) == identifier:
-                        self._camera_sessions.pop(key, None)
+                self._complete_close_reservation(camera_key, identifier, session, closed=closed)
         try:
             with self._open_lock:
                 self.local_engines._require_no_pending_cleanup(retry=True)
         except Exception as error:
             failure = failure or error
+        with self._lock:
+            if failure is None and self._failed_local_closes:
+                failure = self._failed_local_close_error()
         if failure is not None:
             raise failure

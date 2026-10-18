@@ -42,6 +42,12 @@ After an acknowledged shutter and any required release, a failed status read ret
 
 This workflow is covered by an independent synthetic HTTP peer and automated tests; physical-camera validation remains pending.
 
+## Local USB cleanup failures
+
+If closing a registered local USB session raises, the Bridge retains that exact retired owner's reservation. New local connections, including AUTO, and camera discovery return `CAMERA_BUSY` for the rest of that Bridge process. Reconnecting, polling, and shutdown do not retry its close or clear the reservation: an already-closed provider can return successfully on a second close without performing any cleanup.
+
+The failed session's handle has been removed, so its Stop and DELETE cannot be retried. Other existing sessions' Stop/disconnect operations and CCAPI remain available. Ordinary cleanup exceptions do not prevent shutdown from draining the other sessions; repeated shutdown reports the retained uncertainty without repeating the failed close. A process-level interruption still propagates immediately and can interrupt that drain. Check and stop the camera, repair the provider if needed, then restart the Bridge. Restart resets process-local state and does not prove physical shutter release or camera cleanup. Retry an explicit Stop before disconnecting whenever that original session is still available.
+
 ## Install
 
 Windows x64 release assets include a single-file executable:

@@ -439,3 +439,7 @@ EDSDK 回傳錯誤 session 後 close 失敗，現保留精確 rejected owner，�
 ### 2026-10-18 04:04 UTC：active 相機重複 open 前置拒絕
 
 六個 API 紅案例證明原先相同 canonical camera ID（兩引擎、explicit/AUTO）與 gphoto raw-port alias 雖回 409，仍先呼叫第二次 provider.open。現於既有 local admission 內依已解析 engine 與既有 reservation 提早拒絕；gphoto port alias 只讀已登錄 descriptor，不新增探測。AUTO 原有 health/discover、default 選機及不同相機保持原契約。合併後 111 項測試、Ruff/diff 通過，詳見 local-duplicate-admission-2026-10-18.zh-TW.md。未新增真機或 native 驗收證據。
+
+### 2026-10-18 04:15 UTC：清理失敗持續隔離，修正先前 retry 推論
+
+正常 registered close 失敗後現保留精確 owner／reservation，local POST、AUTO、discovery 持續拒絕，CCAPI 與其他已登錄 session 的 Stop／DELETE、ordinary-Exception shutdown drain 保留。真 GPhoto2Session＋FakeRunner 證明 close 可能先置 closed 再拋 release error，第二次 close 無命令卻返回 None，因此不能當成功釋放收據。EDSDK protocol 同樣未提供失敗後 retry ACK；先前 04:00 允許 reconnect 重試清除的推論現明確撤回，rejected session 首次 close 失敗後也持續 process quarantine，不再自動重試／解鎖。初次 close 成功的既有路徑保持。代價為需確認相機狀態、必要時修復 provider 後重啟，restart 本身不證明物理 release。合併驗證 125 項＋新增 3 項 distinct，共 128 項已執行通過；變更後兩個測試模組 34 項通過，Ruff/diff clean。詳見 registered-close-contract-audit-2026-10-18.md 與更新的 edsdk-rejected-open-cleanup-2026-10-18.md。
