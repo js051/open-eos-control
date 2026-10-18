@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 from .bulb import BulbRequests
 from .engine import CameraEngineSession, NetworkCameraEngine
@@ -28,7 +28,11 @@ class SessionManager:
         self._open_lock = threading.Lock()
 
     def discover(self) -> list[CameraDescriptor]:
-        return self.local_engines.discover()
+        self._require_no_local_retirement()
+        self.local_engines._require_no_pending_cleanup()
+        with self._open_lock:
+            self._require_no_local_retirement()
+            return self.local_engines.discover()
 
     def create(self, request: SessionCreateRequest) -> SessionCreated:
         use_ccapi = request.engine == EngineName.CCAPI or (
@@ -56,7 +60,11 @@ class SessionManager:
                 request.ccapi_password or "",
             )
         else:
+            # Metadata-only preflight precedes any saved-owner cleanup attempt.
+            self._require_no_local_retirement(request.engine.value)
+            self.local_engines._require_no_pending_cleanup(retry=True)
             with self._open_lock:
+                self._require_no_local_retirement(request.engine.value)
                 engine_name = self.local_engines.resolve_name(request.engine, request.camera_id)
                 self._require_compatible_local_engine(engine_name)
                 session = self.local_engines.open(engine_name, request.camera_id, request.profile_hint)
@@ -90,16 +98,34 @@ class SessionManager:
             self._camera_sessions[camera_key] = session_id
         return SessionCreated(id=session_id, engine=session.engine_name, camera=session.camera)
 
+    def _require_no_local_retirement(self, engine_name: str | None = None) -> None:
+        # Metadata-only preflight is repeated under local admission before probes.
+        # Retirement publishes under admission, then drops it before physical close.
+        with self._lock:
+            for key, owner in self._camera_sessions.items():
+                if key.partition(":")[0] == EngineName.CCAPI.value:
+                    continue
+                current = self._sessions.get(owner)
+                # An independent CCAPI registration can reuse the retired token.
+                if current is not None and key == f"{current.engine_name}:{current.camera.id}":
+                    continue
+                raise BridgeError(
+                    "CAMERA_BUSY",
+                    "A local USB camera session is still closing.",
+                    status_code=409,
+                    engine=engine_name,
+                )
+
     def _require_compatible_local_engine(self, engine_name: str) -> None:
         if engine_name == EngineName.CCAPI.value:
             return
         with self._lock:
-            active_local_engines = {
-                session.engine_name
-                for session in self._sessions.values()
-                if session.engine_name != EngineName.CCAPI.value
+            reserved_local_engines = {
+                key.partition(":")[0]
+                for key in self._camera_sessions
+                if key.partition(":")[0] != EngineName.CCAPI.value
             }
-            if active_local_engines and engine_name not in active_local_engines:
+            if reserved_local_engines and engine_name not in reserved_local_engines:
                 raise BridgeError(
                     "CAMERA_BUSY",
                     "Another local USB engine already owns a camera session.",
@@ -159,7 +185,10 @@ class SessionManager:
     def delete(self, session_id: str) -> None:
         guard = self._bulb_requests_for(session_id)
         with guard.retirement_lock:
-            with self._lock:
+            # Do not wait for admission while holding manager metadata. CCAPI
+            # retirement remains independent of local provider admission.
+            admission = self._open_lock if guard.session.engine_name != EngineName.CCAPI.value else nullcontext()
+            with admission, self._lock:
                 if not self.is_current(session_id, guard.session):
                     raise BridgeError("SESSION_NOT_FOUND", "Camera session was not found.", status_code=404)
                 guard.retire()
@@ -207,7 +236,9 @@ class SessionManager:
                     self._camera_sessions.pop(f"{session.engine_name}:{session.camera.id}", None)
 
     def close_all(self) -> None:
-        with self._lock:
+        # Publish retirement only after an admitted open has registered. Release
+        # admission before waiting for per-session retirement or physical cleanup.
+        with self._open_lock, self._lock:
             sessions = [(identifier, session, self._bulb_requests_for(identifier))
                         for identifier, session in self._sessions.items()]
             for identifier, _, guard in sessions:
@@ -230,5 +261,10 @@ class SessionManager:
                     key = f"{session.engine_name}:{session.camera.id}"
                     if self._camera_sessions.get(key) == identifier:
                         self._camera_sessions.pop(key, None)
+        try:
+            with self._open_lock:
+                self.local_engines._require_no_pending_cleanup(retry=True)
+        except Exception as error:
+            failure = failure or error
         if failure is not None:
             raise failure

@@ -431,3 +431,7 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - [gphoto 精確大小收據](gphoto-upload-size-receipt-2026-10-18.zh-TW.md)：一次 exact-target show-info，以唯一 primary File Size 驗證精確 bytes；不把 list-files 的取整 KB 當精確大小，不重送 upload。
 - [整合收據](bridge-contract-integration-20261018.json)：同一來源十個 Bridge suites 210 項通過、Ruff／diff-check 通過。這是已執行 Python provider/API/helper 測試；與先前僅來源檢查的 iOS PTP 切片不同。真相機、native SDK、mobile native 未驗。
 - Release Assessment：patch；未改版本、未合 main 或發布。原 89 列仍未全部完成。
+
+### 2026-10-18 04:00 UTC：本地 USB ownership 退場整合
+
+EDSDK 回傳錯誤 session 後 close 失敗，現保留精確 rejected owner，後續 local admission/discovery fail closed；明確 reconnect 或 shutdown 才嘗試原 owner cleanup。正常 DELETE/shutdown close 尚未完成時，原 camera reservation 同樣擋住其他引擎、同相機與 AUTO 新開啟，CCAPI 與既有 owned Stop 保持可用。新增兩者同時存在的交互測試，確認先拒絕新 admission，不提前重試 pending close。合併後 103 個 distinct Python 測試、Ruff 與 diff check 通過。詳見 edsdk-rejected-open-cleanup-2026-10-18.md 及 local-close-reservation-2026-10-18.zh-TW.md。正常 close 拋錯後 recovery、active duplicate open 的 side effect、實體 cleanup 及三平台 native 驗收仍未完成；此列不改寫原始 89 項歷史狀態。

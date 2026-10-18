@@ -35,6 +35,7 @@ class LocalEngineRegistry:
         return result
 
     def discover(self) -> list[CameraDescriptor]:
+        self._require_no_pending_cleanup()
         cameras: list[CameraDescriptor] = []
         failures: list[BridgeError] = []
         available_engines = 0
@@ -58,6 +59,9 @@ class LocalEngineRegistry:
         )
 
     def resolve_name(self, requested: EngineName, camera_id: str | None = None) -> str:
+        # A connection attempt is the explicit retry point, before auto selection
+        # can invoke any local provider's health/discovery operations.
+        self._require_no_pending_cleanup(retry=True)
         if requested == EngineName.AUTO:
             return self._engine_for_camera(camera_id) if camera_id else self.default_engine
         if requested not in {EngineName.LIBGPHOTO2, EngineName.EDSDK}:
@@ -70,6 +74,7 @@ class LocalEngineRegistry:
         camera_id: str | None = None,
         profile_hint: str | None = None,
     ) -> CameraEngineSession:
+        self._require_no_pending_cleanup()
         engine = self._engines.get(engine_name)
         if engine is None:
             raise BridgeError(
@@ -79,6 +84,12 @@ class LocalEngineRegistry:
                 engine=engine_name,
             )
         return engine.open(camera_id, profile_hint)
+
+    def _require_no_pending_cleanup(self, *, retry: bool = False) -> None:
+        for engine in self.engines:
+            cleanup = getattr(engine, "_require_no_pending_cleanup", None)
+            if callable(cleanup):
+                cleanup(retry=retry)
 
     def _engine_for_camera(self, camera_id: str) -> str:
         for engine in self.engines:

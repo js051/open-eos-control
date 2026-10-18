@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import suppress
+import threading
 
 from .edsdk_contract import EdsdkProvider
 from .edsdk_loader import EdsdkProviderLoadResult, load_edsdk_provider
@@ -25,8 +25,17 @@ class EdsdkEngine:
             if provider is not None
             else load_edsdk_provider()
         )
+        self._open_lock = threading.RLock()
+        self._cleanup_state_lock = threading.Lock()
+        # Keep even malformed/None responses: absence of a usable close operation
+        # cannot prove that the provider released the native resources it opened.
+        self._pending_cleanup: list[object] = []
+        self._cleanup_in_progress = False
 
     def health(self) -> tuple[bool, str | None, str | None]:
+        with self._cleanup_state_lock:
+            if self._pending_cleanup:
+                return False, None, "The EDSDK provider has an unconfirmed rejected-session cleanup."
         provider = self._load_result.provider
         if provider is None:
             return False, None, self._load_result.detail
@@ -43,6 +52,7 @@ class EdsdkEngine:
         return bool(available), version, detail
 
     def discover(self) -> list[CameraDescriptor]:
+        self._require_no_pending_cleanup()
         provider = self._require_provider()
         try:
             cameras = provider.discover()
@@ -61,6 +71,12 @@ class EdsdkEngine:
         camera_id: str | None = None,
         profile_hint: str | None = None,
     ) -> CameraEngineSession:
+        self._require_no_pending_cleanup(retry=True)
+        with self._open_lock:
+            self._require_no_pending_cleanup()
+            return self._open(camera_id, profile_hint)
+
+    def _open(self, camera_id: str | None, profile_hint: str | None) -> CameraEngineSession:
         provider = self._require_provider()
         try:
             session = provider.open(camera_id, profile_hint)
@@ -77,6 +93,9 @@ class EdsdkEngine:
             if camera_id is not None and session.camera.id != camera_id:
                 raise self._invalid_response("camera session does not match the requested camera")
         except Exception:
+            with self._cleanup_state_lock:
+                self._pending_cleanup.append(session)
+                self._cleanup_in_progress = True
             self._close_invalid_session(session)
             raise
         return session
@@ -107,10 +126,47 @@ class EdsdkEngine:
             raise self._invalid_response("camera descriptor has an invalid engine or ID")
 
     def _close_invalid_session(self, session: object) -> None:
-        close = getattr(session, "close", None)
-        if callable(close):
-            with suppress(Exception):
-                close()
+        closed = False
+        try:
+            close = getattr(session, "close", None)
+            if not callable(close):
+                return
+            close()
+            closed = True
+        except Exception:
+            # Preserve both the original validation error and the exact owner.
+            # Native exception messages can contain private provider details.
+            return
+        finally:
+            with self._cleanup_state_lock:
+                if closed and self._pending_cleanup and self._pending_cleanup[0] is session:
+                    self._pending_cleanup.clear()
+                self._cleanup_in_progress = False
+
+    def _require_no_pending_cleanup(self, *, retry: bool = False) -> None:
+        with self._cleanup_state_lock:
+            if not self._pending_cleanup:
+                return
+            if not retry or self._cleanup_in_progress:
+                raise self._cleanup_pending()
+            session = self._pending_cleanup[0]
+            self._cleanup_in_progress = True
+        # Native cleanup may block. Health and admission must still be able to
+        # report the retained owner; only this caller may retry its exact close.
+        self._close_invalid_session(session)
+        with self._cleanup_state_lock:
+            if self._pending_cleanup:
+                raise self._cleanup_pending()
+
+    def _cleanup_pending(self) -> BridgeError:
+        return BridgeError(
+            "CAMERA_BUSY",
+            "The EDSDK provider's rejected session has not closed. "
+            "Reconnecting can retry cleanup but cannot recover a missing close operation; "
+            "provider repair and a Bridge restart may be required.",
+            status_code=409,
+            engine=self.name,
+        )
 
     def _invalid_response(self, reason: str) -> BridgeError:
         return BridgeError(
