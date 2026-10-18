@@ -67,6 +67,7 @@ class SessionManager:
                 self._require_no_local_retirement(request.engine.value)
                 engine_name = self.local_engines.resolve_name(request.engine, request.camera_id)
                 self._require_compatible_local_engine(engine_name)
+                self._require_unreserved_local_camera(engine_name, request.camera_id)
                 session = self.local_engines.open(engine_name, request.camera_id, request.profile_hint)
                 try:
                     return self._register(session)
@@ -97,6 +98,30 @@ class SessionManager:
             self._bulb_requests[session_id] = BulbRequests(session)
             self._camera_sessions[camera_key] = session_id
         return SessionCreated(id=session_id, engine=session.engine_name, camera=session.camera)
+
+    def _require_unreserved_local_camera(self, engine_name: str, camera_id: str | None) -> None:
+        # An unspecified/default camera still belongs to provider selection. The
+        # definitive registration check also handles aliases and returned identities.
+        if camera_id is None:
+            return
+        with self._lock:
+            existing = self._camera_sessions.get(f"{engine_name}:{camera_id}")
+            if existing is None and engine_name == EngineName.LIBGPHOTO2.value:
+                # GPhoto2Engine explicitly accepts a descriptor's raw port as an
+                # alias. Use only already registered descriptors, without probing.
+                for owner, session in self._sessions.items():
+                    if session.engine_name == engine_name and session.camera.port == camera_id:
+                        key = f"{engine_name}:{session.camera.id}"
+                        if self._camera_sessions.get(key) == owner:
+                            existing = owner
+                            break
+            if existing is not None:
+                raise BridgeError(
+                    "CAMERA_BUSY",
+                    f"Camera already belongs to bridge session {existing}.",
+                    status_code=409,
+                    engine=engine_name,
+                )
 
     def _require_no_local_retirement(self, engine_name: str | None = None) -> None:
         # Metadata-only preflight is repeated under local admission before probes.

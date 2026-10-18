@@ -314,7 +314,12 @@ def test_published_retirement_blocks_rejected_owner_retry(cleanup_api):
     assert opened.status_code == 201
     active = provider.sessions[-1]
     provider.wrong_camera = True
-    pending = reject_open(client, provider)
+    rejected = client.post("/v1/session", json={
+        "engine": "edsdk", "cameraId": "edsdk-different-requested-camera",
+    })
+    assert rejected.status_code == 502
+    assert rejected.json()["error"]["code"] == "INVALID_PROVIDER_RESPONSE"
+    pending = provider.sessions[-1]
     entered = threading.Event()
     release = threading.Event()
     original_close = active.close
