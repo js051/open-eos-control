@@ -1,0 +1,363 @@
+{
+  "base_commit": "8e2bc47a244cc77a5cd4ab81e503b4d310b5e9c9",
+  "source_files": [
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/AndroidCcapiRtpSession.kt",
+      "sha256": "c1b6cf194a8aa916b1ac29ca7988c7ae2afcb85409a68f3ef5a1ec9075483c72"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/AndroidLiveViewJpegValidator.kt",
+      "sha256": "33320f759702e5443a49426b317954a1b11cb04299be81552e263f4ba58138b9"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/AndroidRtpAudioPlayer.kt",
+      "sha256": "63d85cd88eda4e419ab8ad08baffc937b008470579d8610d073a29374bf3e098"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/AndroidUsbPtpTransport.kt",
+      "sha256": "7821dfaee9901319ba153ea226a6ac707f26597d30b5561f388a545d3c1345c6"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/AutomaticJpegOriginal.kt",
+      "sha256": "b75da202d8d5f2a40ffbd6d6c63527f84089c00514a507ebc8d38c1274e3dc3e"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/BridgeBulbAccess.kt",
+      "sha256": "9f9db034592ae3f68c5f29a39173292b99f5008b914b3843aeb45465d0089249"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/BridgeBulbDeadline.kt",
+      "sha256": "b14c921a10fa2bbeb606f14acb718e511a7a9d888772c5895ed2c381bcd160d3"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/BridgeBulbRequestSession.kt",
+      "sha256": "77082b0492cda953e6cba413785e130e1d9abee52c6cc0e4810dba313a88cd77"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/BridgeHeldAutofocusSession.kt",
+      "sha256": "40d0762d2a2ce89d2230077693eba0ee3d686536c27029e9ab062223f1872522"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/BridgeMediaListingDecoder.kt",
+      "sha256": "a6b547952388340d081320dd9461f7f55cfc5959c10749296063f685aa3ff7fc"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/BridgeShutterReleaseSession.kt",
+      "sha256": "81b62c61e6245e8546df2d84eb8b6995f991f57b55787a104d3ac9f399d6c752"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CameraBackend.kt",
+      "sha256": "2ee39b3466dd06fc94769cb297bee2ed895cf5f4b575963a0bc11a30dc1740b3"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CameraFocusMetadata.kt",
+      "sha256": "97b6f5dc8fcf82dd8422ca122514682c8681a6464ab69e168af91dbe0ac45d82"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CameraMediaClassification.kt",
+      "sha256": "541bb0287499647d8a19a35587493cb4d4159f33756427099dc54099077561f4"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CameraMediaMetadataJson.kt",
+      "sha256": "6175cd11b76e8f62722178bb332bb07f975eab9ebb1e6eec1ef831770903f75f"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CameraMediaPageCount.kt",
+      "sha256": "e162736fb40270e552fd8ef51404a52a9057c70507051f8e044924e00b121d1b"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CameraMediaRatingJson.kt",
+      "sha256": "55060f71c88c59892520e20fd766ed5327fc8d176bd8461e668b068d6ef369d6"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CameraMediaStreaming.kt",
+      "sha256": "8f2b0984b32c4db566d677df1fc26b62b6194c1cbf88fefce7e9643194167265"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CameraModels.kt",
+      "sha256": "e43dbbabe7062ce0debeddca8ed39efa1f8ef0d4caa5ecea7b22de7f3ed24b70"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt",
+      "sha256": "ef4069f9806e07d535e4105b3a1d464c0d9d5c38b7e6791145d2488ff7f48786"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CameraRepository.kt",
+      "sha256": "c10522ca55c67f42dfd534e1afbdc74b6401b6f8930d29aa4b0a2328d2c9196e"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CanonEosPtp.kt",
+      "sha256": "2fcbbfeba374e55f0ecbdeac99aa45c213b65937bfa51c06ac19588c2071fd32"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CaptureConfigurationEvidence.kt",
+      "sha256": "e2a15c16b8fedbd6857e46d7ff59b7e0af32992fd86b9f22003890ebca02cd41"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CaptureConfigurationJson.kt",
+      "sha256": "c18d6b7bc578d707b989848c5aa22365a750f0b32be56e80f1abe0804192e2e3"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CaptureStatusReadbackException.kt",
+      "sha256": "fe4ab922d4aac71db854d96f87bb7a39c02ad775b7b2d180f98481fc99e2598c"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+      "sha256": "6a167f932ca33544ec308d107c75396799933ec767c48b23745b5f3d5249c3cf"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CcapiMultipartLiveView.kt",
+      "sha256": "b77fe1d506653992495f4ac3282771f035fc40f38acb677cdf7ab97d2efbedef"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CcapiRtp.kt",
+      "sha256": "4902dd133aa3648e9bb8e15a419955beaf0953ad0685e954ea3d1bd8b8514125"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/CcapiRtpAudio.kt",
+      "sha256": "fef57fdee7ace6516debc93aedb6471b37ccb5cb4cec2ab89f504fc3bbc5d068"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/ConnectionFailure.kt",
+      "sha256": "4330e35b37f5fe0304d31ff250425734ee7838acb145f6667a70d696e6816f94"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/ConnectionRetirement.kt",
+      "sha256": "08b570f07dd3959c5fd56bcf84dfe362eef0a896ed67f9cc85f652f538ebebbd"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt",
+      "sha256": "4295ffb967acf99b082a4e2e14ff5e865a604584517999d69c8e34b6473c3069"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/DownloadHistoryFileStorage.kt",
+      "sha256": "e2470dfb2ef5302449a260f99bb0b9509859b6e09322ac595e2b4ded65be8829"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/DownloadHistoryStore.kt",
+      "sha256": "0d4e39bc89005de276459cc180f007f63255b4fd872001d844f56a24568b5861"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/HeldAutofocusSession.kt",
+      "sha256": "02f1636c21ab46fc3f9dd8ebc1be66a9cfd7d7fa861f6f806d7d4911f22b7dff"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/LiveViewGeometryState.kt",
+      "sha256": "938d8f202330ef48c9f05d7d7a5c3e68c6d33b9c3c65357fe964aa42fff054f6"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/LiveViewLifecycle.kt",
+      "sha256": "dbc5a93478b66d3322bb26ab504e6c403fb0b2972b681661e54a4754727642e7"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/LiveViewLiveness.kt",
+      "sha256": "713b292e4dcc4cbbaa069e2f621c730a8c90ed825016a270567baf84375588fe"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/LiveViewStartOperation.kt",
+      "sha256": "147fc9011912fee32f9c5a781f8d3beab8fa96abca9dbe849c720c97e47d2b05"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/MaintenanceEvidence.kt",
+      "sha256": "7fe769d5dda7f4bd0acfe5b5777de505533a70066623b08ecc69fdddda99941d"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/MediaDeleteEvidence.kt",
+      "sha256": "628a19c06393f03c887952ea8bd211c8f251f2f72e3582963876bc98aa232d3f"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/MediaDeleteHttp.kt",
+      "sha256": "6db915902f9a1e8bfc3556ff92e3760e05281fae39217d39d69dd0e004347d79"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/MediaMetadataEvidence.kt",
+      "sha256": "5b2d32a2ebe317c1a072fcfb6226032a559e81c9e3a032b1b418db9f852f2382"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/MediaMetadataItem.kt",
+      "sha256": "1580b0e8139dce2aa46f4f240e2c3719a16d8280c97e2561e43e06ede6393738"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/MediaUploadAttempt.kt",
+      "sha256": "5f4eab3dfc76d97d43a74c414725c03a3c0e4110adddc2cb0149b18fbf410e61"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/NativeLiveViewSession.kt",
+      "sha256": "0d95ddc10f505c069502b8ac5837b0a410a2ee7f2e64450f0a2203485ab08fe5"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/NativeRtpFrameProgress.kt",
+      "sha256": "71f70ff6f7fd096e9cd318f353fdf89e6a9308442d24741c0ccb6526f771c1b1"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/NativeRtpLutRenderer.kt",
+      "sha256": "936932a352d5dfcabcda9188355c06260756e59b2b264504634dc212f5228ced"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/NativeRtpSurfaceWait.kt",
+      "sha256": "2925df3535d9fcc7d2d6cf167b1cdafafc703a58a246024fbff1f7c741f1d688"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/NativeVideoGeometry.kt",
+      "sha256": "baf3fb9e99f0df65a13887f27120d080bb18279ab14224ed16d0a06d34391b8d"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/NativeVideoLut.kt",
+      "sha256": "8c8bd1bb6cd5ad195e27b0aa6fcfdcf9e27c8787bbc8689193849fc04916e9a7"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/PtpBufferedInput.kt",
+      "sha256": "247f7febd01f4a777e5c4ee617217f61bf4d08002def42f5f4a6aa82b3e96fe6"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/PtpObservedMediaFolders.kt",
+      "sha256": "ab44dd9d469bef664b27336f8eb5a564b60ed527c25462bcb8de9b25d4bd2d2d"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/PtpProperties.kt",
+      "sha256": "fcf872186f9361f4e02552432a7bfe16e9340436cc9f90f84a86e281ccbd7e64"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/PtpProtocol.kt",
+      "sha256": "6dfe645f02a58ff4e0e3e6d3be27eec3180f537bcccdb2c0e2908b183f9b028c"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/PtpStandardProperties.kt",
+      "sha256": "b700d76f6d2004113e6f36a4bb914c4c03b929a043abf694a026c63056bb1ce7"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/RecordingAccess.kt",
+      "sha256": "ca64cd47b99c0ec1b3e4604bd910e61f2e03c58d850a8248a13d6b421a5e7d6d"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/RecordingCommandUnconfirmedException.kt",
+      "sha256": "c9d5030ae103daa4c965635902bed6c0bc25474d3bf75a00a334593ff6843803"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/RecordingLifecycle.kt",
+      "sha256": "cf4f076f9b7c12fea7010260336ce1040530487eb61bb5182a1cafa952a7760c"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/RecordingStatusReadbackException.kt",
+      "sha256": "c1dd52dbd7ecef3f90225b9067ef02bd95961cfc7af262681dd7ded45b97fdf5"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/RtpAudioPlayback.kt",
+      "sha256": "ddcc1df4083b837b9dce204d662f013f39e164f5ea6e2858164d0498d53cefac"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/RtpAudioPlaybackOwner.kt",
+      "sha256": "da392cb3e6a7c9207941a6db3146b570bc0ed0520e2346233327672965053081"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/ShootingSettingEvidence.kt",
+      "sha256": "9409de519f2618ca264c2856fcecbded7ade2327a6ae3c5ba129bb20e648fdbb"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/ShootingSettingJson.kt",
+      "sha256": "c2c0967a4fd4589e198bd7913a1425d09b881c5cbd17784f91c8ea4cc3ad2930"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/ShutterReleaseSession.kt",
+      "sha256": "b1e1708555c7938c94f13bd9c8cb90f5fb0e37a993d9153c479a3df144363749"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/StrictMediaJson.kt",
+      "sha256": "9ea850d244a64b2a2776062d75bb07ac4709a1fe33cecdc326f86c56cd8bf169"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/UsbHostCaptureStore.kt",
+      "sha256": "c562ad2aac4dbc4f0684b02bbb0c9d80cd033e033336d0c9ed32aaa02b826970"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/data/UsbPtpCameraBackend.kt",
+      "sha256": "b6801d63c8efe31fdd65c7277eba109683f4e7f7f6bfa2da84c4a9debf468961"
+    },
+    {
+      "path": "android/app/src/test/java/dev/openeos/control/data/CcapiDirectReleaseTransportTest.kt",
+      "sha256": "972e271a523c89c20652635d73105b06d1d9f3b88eaea0616394d1c387437365"
+    },
+    {
+      "path": "android/app/src/test/java/dev/openeos/control/data/CcapiFocusAckReceiptTest.kt",
+      "sha256": "ac1661d80ad8588fde7f57f33406b643ab778da5929cfa77924b2766e9c86380"
+    },
+    {
+      "path": "android/app/src/test/java/dev/openeos/control/data/CcapiLiveViewControlTransportTest.kt",
+      "sha256": "3b858792776abbb7117305ecfed71c04a28419f4dbb3081c10c4786f32e82825"
+    },
+    {
+      "path": "android/app/src/test/java/dev/openeos/control/data/MediaDeleteHttpTest.kt",
+      "sha256": "1d32e970f6492ba6eebe601016ec738283228968ee6068f8bb14960a1645c62e"
+    },
+    {
+      "path": "android/app/src/test/java/dev/openeos/control/data/UsbPtpObservedFoldersTest.kt",
+      "sha256": "97b47a734788e181956514925d96a3da43c3f7a2fa8fea5bcd339be945a8a9fa"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/ui/MediaLibrary.kt",
+      "sha256": "ffa626743dc3b0d76dfd46054615d8b07b748027a9690c20202e03a2b5b96fdd"
+    },
+    {
+      "path": "android/app/src/main/java/dev/openeos/control/ui/MediaCaptureDate.kt",
+      "sha256": "200a0c1bb8da42ff4b95f616b77209c4b9911a2b613c31dff0163851ce1043de"
+    }
+  ],
+  "normalized_logs": [
+    {
+      "file": "native-compile-baseline.txt",
+      "original_sha256": "976425d4c8711b6e795beb4b307c648eb94037575588d6965f961f24f768379d"
+    },
+    {
+      "file": "native-compile.txt",
+      "original_sha256": "976425d4c8711b6e795beb4b307c648eb94037575588d6965f961f24f768379d"
+    },
+    {
+      "file": "native-test-results-baseline.json",
+      "original_sha256": "ead2914a32849d576c0c57d7d668bd1a7725e0698b7f92945cf1cfd60f7b169a"
+    },
+    {
+      "file": "liveview-fixed-result.json",
+      "original_sha256": "664f91f97ae809c65f9edd103a02931e8a3f0c98bfb5078f772c252e439c4cee"
+    },
+    {
+      "file": "CcapiDirectReleaseTransportTest.txt",
+      "original_sha256": "7ae5c7d0590303fdee0b0fce2f9d51acb80253c68e839818ef6d7a4f84807ea5"
+    },
+    {
+      "file": "CcapiFocusAckReceiptTest.txt",
+      "original_sha256": "eb097efd85636f26dd5df7fd6f7dfe1983be08a3d17f066671b980004ce7f3e5"
+    },
+    {
+      "file": "CcapiLiveViewControlTransportTest-baseline.txt",
+      "original_sha256": "7267d19c6a79e2103f4d37d0440548a6318793853f60450273b4e0a1f9643063"
+    },
+    {
+      "file": "CcapiLiveViewControlTransportTest-fixed.txt",
+      "original_sha256": "3bd479bb1bb8c7784f4d17ed52ec8fe074af00cffd4e2a8bf68dff2acc4966bf"
+    },
+    {
+      "file": "MediaDeleteHttpTest.txt",
+      "original_sha256": "89132c0b78a7e8b539a3c0dab856b975374ad17ebb8d1e6d0dbf883e05868e5c"
+    },
+    {
+      "file": "UsbPtpObservedFoldersTest.txt",
+      "original_sha256": "b125950829c4e8dffbbf6094858bd282ba83f612c7660cb8ce2d0ca3f0ff4734"
+    },
+    {
+      "file": "native-source-files.json",
+      "original_sha256": "91de94609d5c9a00c4c5731d0162d1faaf2abf2e31c1908ad8894a2e23d5df3d"
+    },
+    {
+      "file": "tools-manifest.json",
+      "original_sha256": "7e73f82bc3fa227d3935f56d9da765d89c44dd4370cf2ca1084acb5d5c9adfdc"
+    },
+    {
+      "file": "compile-command.json",
+      "original_sha256": "7f8bd73d03bbad992ef6a4738614e8c47f7b99e319abd187876139c83d3a8c0c"
+    },
+    {
+      "file": "runtime-classpath.txt",
+      "original_sha256": "2f0604951387dfbb26dce1755c942ad0f0e1dce6e24e106bcbb5b35f58e3c44f"
+    }
+  ]
+}

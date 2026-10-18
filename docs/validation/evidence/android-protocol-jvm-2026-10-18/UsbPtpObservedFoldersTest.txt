@@ -1,0 +1,14 @@
+JUnit version 4.13.2
+.......Session-replacement case INFO: cancelled=true; staleFeatures=[]
+Session-replacement case PROTECTION: cancelled=true; staleFeatures=[]
+Session-replacement case RATING: cancelled=true; staleFeatures=[]
+.StorageInfo failure/recovery: original=CameraMediaFolder(id=ptp:00010001:0000000A, label=Storage 00010001 / DCIM); refreshed=CameraMediaFolder(id=ptp:00010001:0000000A, label=Storage 00010001 / DCIM); visible=[ptp:0000002A]
+...Confirmed storage change after failure: ids=[65537, 65538]; restored=false; folder=null
+..........Confirmed storage change after failure: ids=[]; restored=true; folder=null
+..Session-replacement case THUMBNAIL: cancelled=true; staleFeatures=[]
+Session-replacement case PREVIEW: cancelled=true; staleFeatures=[]
+Session-replacement case DOWNLOAD: cancelled=true; staleFeatures=[]
+..
+Time: 0.42
+
+OK (25 tests)

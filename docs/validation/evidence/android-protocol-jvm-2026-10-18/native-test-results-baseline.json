@@ -1,0 +1,32 @@
+[
+  {
+    "class": "CcapiDirectReleaseTransportTest",
+    "exit_code": 0,
+    "started_utc": "2026-10-18T08:44:27.825222+00:00",
+    "finished_utc": "2026-10-18T08:44:50.862799+00:00"
+  },
+  {
+    "class": "CcapiFocusAckReceiptTest",
+    "exit_code": 0,
+    "started_utc": "2026-10-18T08:44:50.863332+00:00",
+    "finished_utc": "2026-10-18T08:44:57.549094+00:00"
+  },
+  {
+    "class": "CcapiLiveViewControlTransportTest",
+    "exit_code": 1,
+    "started_utc": "2026-10-18T08:44:57.549678+00:00",
+    "finished_utc": "2026-10-18T08:45:14.758468+00:00"
+  },
+  {
+    "class": "MediaDeleteHttpTest",
+    "exit_code": 0,
+    "started_utc": "2026-10-18T08:45:14.758989+00:00",
+    "finished_utc": "2026-10-18T08:45:15.489703+00:00"
+  },
+  {
+    "class": "UsbPtpObservedFoldersTest",
+    "exit_code": 0,
+    "started_utc": "2026-10-18T08:45:15.490610+00:00",
+    "finished_utc": "2026-10-18T08:45:16.118684+00:00"
+  }
+]

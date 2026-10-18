@@ -1,5 +1,6 @@
 package dev.openeos.control.data
 
+import java.net.InetAddress
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -188,8 +189,12 @@ class CcapiLiveViewControlTransportTest {
                     else -> { events += "unexpected"; MockResponse().setResponseCode(404) }
                 }
             }
-            server.start()
-            client = CcapiClient(server.url("/").toString(), httpClient = http, treatAsSimulator = false)
+            // Keep the fixture origin on its actual listener. A deadline can retire the
+            // first localhost route; ::1 is not this IPv4-only synthetic camera.
+            // Production strict no-replay behavior must not be relaxed for the fixture.
+            server.start(InetAddress.getByName("127.0.0.1"), 0)
+            val baseUrl = server.url("/").newBuilder().host("127.0.0.1").build()
+            client = CcapiClient(baseUrl.toString(), httpClient = http, treatAsSimulator = false)
         }
         override fun close() {
             stopResponse = { MockResponse().setResponseCode(204) }
