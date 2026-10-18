@@ -1,0 +1,72 @@
+[
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/icdevicebrowser/controlauthorizationstatus.json",
+    "file": "official-00.json",
+    "sha256": "13e057b2169bedfb591665c492aab832881251599fe92df64fa6c45406d642cc"
+  },
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/icdevicebrowser/contentsauthorizationstatus.json",
+    "file": "official-01.json",
+    "sha256": "ad6b80f3c8218bb2022b08709a0729f46859a32ff86c296ae8b50a4b80160952"
+  },
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/icdevicebrowser/requestcontrolauthorization(completion:).json",
+    "file": "official-02.json",
+    "sha256": "466450ea6c5712e47a348ddbc70370fa61cf9f7062595144f29bbcc75c47fd63"
+  },
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/icdevice/requestopensession(options:completion:).json",
+    "file": "official-03.json",
+    "sha256": "ac1360da2df2b98148f38de385969e70bdb10dfc37601185b19f6cf9538a1ec8"
+  },
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/icdevice/requestclosesession(options:completion:).json",
+    "file": "official-04.json",
+    "sha256": "538dc5c42b6e508dc7a7c57a651acaa9299cf49ac09583ad0b764914d7f6cddc"
+  },
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/iccameradevice/ptpeventhandler.json",
+    "file": "official-05.json",
+    "sha256": "f254df6d585defa803bbbee74dc0075b634b2cef1e2dae6dcb5aa8ed9c5036a3"
+  },
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/iccameradevicedelegate.json",
+    "file": "official-06.json",
+    "sha256": "d045179e43d7778c1ed5c0dc806d54d55c3088d2d22e80112417233704e5b2c2"
+  },
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/icdevicedelegate.json",
+    "file": "official-07.json",
+    "sha256": "a84ca78b3554432282b1e6519e03453292b95592ac7b22d56583fe9273ae9ca9"
+  },
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/icdevicebrowserdelegate.json",
+    "file": "official-08.json",
+    "sha256": "e9ce06cedc6a4aabad774847bfe286e0af9246d2a8f9215b01ce6ab672d7e914"
+  },
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/icdevice/transporttype.json",
+    "file": "official-09.json",
+    "sha256": "0c26fba12ee082f47611aa87a40aedae262b05f27b897afeafa632289f1a0192"
+  },
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/icdevice/capabilities.json",
+    "file": "official-10.json",
+    "sha256": "5f8b8d44abf55da8c444b1eaa86bd82b48dd6b322393f760592c4a2639ed4a3f"
+  },
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/icdevice/name.json",
+    "file": "official-11.json",
+    "sha256": "a287856ea81221450f64f8defae973e89d2aaf28bd7471f16d7326f899dfa789"
+  },
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/icdevice/uuidstring.json",
+    "file": "official-12.json",
+    "sha256": "2d50dae25c4f261677943e99e05892683a4284491268f490f2386a6250def49c"
+  },
+  {
+    "url": "https://developer.apple.com/tutorials/data/documentation/imagecapturecore/icdevicetransport/transporttypeusb.json",
+    "file": "official-13.json",
+    "sha256": "41d1c2b901bb38b514ed17125aa9110a37174f4d969f112689d9db4bbc1aa495"
+  }
+]

@@ -69,6 +69,7 @@ public enum ImageCapturePTP {
     public enum Failure: Equatable, Sendable {
         case nativeFailure
         case unsupportedWireContract
+        case unsupportedSessionReuse
     }
 
     /// Names/order follow Apple's Objective-C completion declaration. No interpretation
@@ -88,10 +89,15 @@ public enum ImageCapturePTP {
         public let failure: Failure?
     }
 
+    public enum InvalidationReason: Equatable, Sendable {
+        case capabilityLost, accessRestricted, deviceRemoved, nativeError
+    }
+
     public enum RetirementReason: Equatable, Sendable {
         case selectionChanged, cancelled, suspended, discoveryStopped, removed
         case authorizationLost, authorizationTimedOut, openFailed, openTimedOut
         case exchangeTimedOut, exchangeFailed, sessionClosed
+        case sessionInvalidated(InvalidationReason)
     }
 
     public enum DeviceInfoOutcome: Equatable, Sendable {
@@ -107,6 +113,7 @@ public enum ImageCapturePTP {
     public enum Block: Equatable, Sendable {
         case notDiscovered, notUSB, ptpUnavailable, cleanupPending, cleanupCapacityReached
         case authorizationNotGranted(Authorization)
+        case openNotDispatched(Failure)
     }
 
     public enum Phase: Equatable, Sendable {
@@ -143,9 +150,14 @@ public enum ImageCapturePTP {
         case select(Handle, requestControlAuthorization: Bool)
         case authorizationChanged(AuthorizationSnapshot)
         case authorizationCompleted(Request, Authorization)
+        /// Preflight refusal only: native open was never called and no new session
+        /// context, delegate or event handler was installed or retained by the adapter.
+        case openNotDispatched(Request, Failure)
         case openCompleted(Request, Failure?)
         case becameReady(Session)
         case sessionClosed(Session)
+        /// Revokes admission without asserting physical closure or changing global auth.
+        case sessionInvalidated(Session, InvalidationReason)
         case readDeviceInfo
         case deviceInfoCompleted(Request, CompletionBuffers, Failure?)
         case ptpEvent(Session, Data)
