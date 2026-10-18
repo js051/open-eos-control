@@ -1,0 +1,19 @@
+{
+  "integration_source_commit": "be7cc55c",
+  "bridge_focused": {
+    "passed": 252,
+    "exit_code": 0,
+    "files": [
+      "test_ccapi_legacy_recording_receipts.py",
+      "test_media_delete_receipts.py",
+      "test_ccapi_control_partial_ack.py",
+      "test_ccapi_focus_ack_receipts.py",
+      "test_capture_configuration_partial_ack.py"
+    ]
+  },
+  "source": {
+    "filename": "bridge/open_eos_bridge/ccapi.py",
+    "sha256": "8f7af845364f0e07d6ee55627e61f66d3bfbb3d03232bd0a904df3b5db86bbb7"
+  },
+  "limits": "Integration synthetic API/session/transport tests only; native, physical camera and complete platform acceptance not run."
+}

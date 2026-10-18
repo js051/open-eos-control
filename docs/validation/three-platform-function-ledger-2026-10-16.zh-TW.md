@@ -409,3 +409,10 @@ G11/G13：[三條 strict cleanup](../android-maintenance-cleanup-deadline.md) �
 - [Media DELETE receipts](media-delete-partial-receipts-2026-10-17.zh-TW.md)：帶Content-Range的空204曾被確認刪除，真API與原PC函式因此移除項目／消耗選取並抑制晚清單，即使合成peer仍保留原檔。Bridge／Android兩行修正只收窄204成功界線，包含空header；403與帶range的403維持原拒絕分類。iOS原本已拒絕，PC錯誤處理原樣保留。
 - 新focused基準6紅／37綠；Bridge相關188通過，PC ownership48通過。相同7案API→原PC函式中，3個partial204改為uncertain並保留項目／選取；完整204兩控制仍成功，206／403原分類保留，每案只一次DELETE。Android exact transport/helper＋擷取caller host基準3紅→10綠；native MockWebServer已寫未跑。
 - 合併capture／focus來源後Bridge focused96、API7→PC7、Android10再次通過，[精確收據與基準／固定回覆](evidence/media-delete-integration-20261017/)保留。這是同檔不同hunk整合驗證，不重複計為新功能；原生／真相機／OS目的地與原89列其他驗收未因此完成。
+
+
+## 2026-10-18 00:02 UTC G04 相容REC API收據
+
+- [Legacy recording ACK](legacy-recording-ack-receipts-2026-10-17.zh-TW.md)：公開且需身分驗證的舊Start／Stop API曾將部分相機回覆轉成HTTP200與新recording布林值；Stop可誤報false而合成peer仍錄影。現行三端UI走較新的嚴格outcome，不宣稱同一UI缺陷。
+- 只新增POST／PUT recbutton的ACK-only判定，部分成功沿既有RECORDING_COMMAND_UNCONFIRMED拒絕，先於cache／observed更新；保留原完整ACK、非2xx、status-readback-failed、temperature preflight與單次dispatch。八條body期限／modern schema／mobile UI不變。保留的status仍是先前ACK cache，不能當成物理停止證明。
+- 同一70新案基準36紅／34綠→固定70綠，既有Python508與Node154回歸另列；獨立275覆核包含新70與modern205，不重複累計。完整legacy及media兩批合併後，五個相關suite共252通過，[整合來源收據](media-legacy-integration-20261018.json)保留；無native或真相機驗收提升。
