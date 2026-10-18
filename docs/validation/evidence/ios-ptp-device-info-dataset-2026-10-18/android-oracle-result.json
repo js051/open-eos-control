@@ -1,0 +1,8 @@
+{
+  "start": "2026-10-18T15:35:42.858382+00:00",
+  "end": "2026-10-18T15:35:43.690799+00:00",
+  "exit": 0,
+  "cases": 13,
+  "production_source_sha256": "6dfe645f02a58ff4e0e3e6d3be27eec3180f537bcccdb2c0e2908b183f9b028c",
+  "whole_production_classes": true
+}
