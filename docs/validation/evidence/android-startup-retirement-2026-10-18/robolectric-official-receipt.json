@@ -1,0 +1,1283 @@
+{
+  "status": "VERIFIED",
+  "artifacts": [
+    {
+      "coordinate": "org.robolectric:annotations:4.14.1",
+      "url": "https://repo.maven.apache.org/maven2/org/robolectric/annotations/4.14.1/annotations-4.14.1.jar",
+      "path": "org/robolectric/annotations/4.14.1/annotations-4.14.1.jar",
+      "packaging": "jar",
+      "bytes": 51131,
+      "sha256": "463a5ad1386c31010bc9af00bfe19a1b758d8c2dedd8c19e5c75d29ab8abb9ba",
+      "verification": "official Gradle module size/SHA256",
+      "licenses": [
+        {
+          "name": "The MIT License",
+          "url": "https://opensource.org/licenses/MIT"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "463a5ad1386c31010bc9af00bfe19a1b758d8c2dedd8c19e5c75d29ab8abb9ba",
+      "verified_utc": "2026-10-18T09:18:20.364879+00:00"
+    },
+    {
+      "coordinate": "org.robolectric:robolectric:4.14.1",
+      "url": "https://repo.maven.apache.org/maven2/org/robolectric/robolectric/4.14.1/robolectric-4.14.1.jar",
+      "path": "org/robolectric/robolectric/4.14.1/robolectric-4.14.1.jar",
+      "packaging": "jar",
+      "bytes": 170182,
+      "sha256": "e0a73d45bceb94a5a0352b66e2120ad4a4b222fe406079130893b6c79d4441d1",
+      "verification": "official Gradle module size/SHA256",
+      "licenses": [
+        {
+          "name": "The MIT License",
+          "url": "https://opensource.org/licenses/MIT"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "annotations",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "junit",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "pluginapi",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "resources",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "sandbox",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "utils",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "utils-reflector",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "plugins-maven-dependency-resolver",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "javax.inject",
+          "artifactId": "javax.inject",
+          "version": "1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "javax.annotation",
+          "artifactId": "javax.annotation-api",
+          "version": "1.3.2",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "shadows-framework",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.bouncycastle",
+          "artifactId": "bcprov-jdk18on",
+          "version": "1.78.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "androidx.test",
+          "artifactId": "monitor",
+          "version": "1.7.2",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.conscrypt",
+          "artifactId": "conscrypt-openjdk-uber",
+          "version": "2.5.2",
+          "scope": "runtime",
+          "optional": null
+        },
+        {
+          "groupId": "org.yaml",
+          "artifactId": "snakeyaml",
+          "version": "2.3",
+          "scope": "runtime",
+          "optional": null
+        },
+        {
+          "groupId": "androidx.test.espresso",
+          "artifactId": "espresso-idling-resource",
+          "version": "3.6.1",
+          "scope": "runtime",
+          "optional": null
+        },
+        {
+          "groupId": "com.google.testparameterinjector",
+          "artifactId": "test-parameter-injector",
+          "version": "1.18",
+          "scope": "runtime",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "e0a73d45bceb94a5a0352b66e2120ad4a4b222fe406079130893b6c79d4441d1",
+      "verified_utc": "2026-10-18T09:18:20.513970+00:00"
+    },
+    {
+      "coordinate": "org.robolectric:junit:4.14.1",
+      "url": "https://repo.maven.apache.org/maven2/org/robolectric/junit/4.14.1/junit-4.14.1.jar",
+      "path": "org/robolectric/junit/4.14.1/junit-4.14.1.jar",
+      "packaging": "jar",
+      "bytes": 14367,
+      "sha256": "2cee817aadce3552706b09450ad1ea7ff5981924072d2adfe40ddad57d5fa123",
+      "verification": "official Gradle module size/SHA256",
+      "licenses": [
+        {
+          "name": "The MIT License",
+          "url": "https://opensource.org/licenses/MIT"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "annotations",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "sandbox",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "pluginapi",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "shadowapi",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "utils-reflector",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "2cee817aadce3552706b09450ad1ea7ff5981924072d2adfe40ddad57d5fa123",
+      "verified_utc": "2026-10-18T09:18:23.980393+00:00"
+    },
+    {
+      "coordinate": "org.robolectric:pluginapi:4.14.1",
+      "url": "https://repo.maven.apache.org/maven2/org/robolectric/pluginapi/4.14.1/pluginapi-4.14.1.jar",
+      "path": "org/robolectric/pluginapi/4.14.1/pluginapi-4.14.1.jar",
+      "packaging": "jar",
+      "bytes": 10324,
+      "sha256": "ad8b74238d59bce6631e29190c105dd0c4701e836a2631060678407f621c7b7a",
+      "verification": "official Gradle module size/SHA256",
+      "licenses": [
+        {
+          "name": "The MIT License",
+          "url": "https://opensource.org/licenses/MIT"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "annotations",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "com.google.guava",
+          "artifactId": "guava",
+          "version": "33.3.1-jre",
+          "scope": "compile",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "ad8b74238d59bce6631e29190c105dd0c4701e836a2631060678407f621c7b7a",
+      "verified_utc": "2026-10-18T09:18:24.127405+00:00"
+    },
+    {
+      "coordinate": "org.robolectric:resources:4.14.1",
+      "url": "https://repo.maven.apache.org/maven2/org/robolectric/resources/4.14.1/resources-4.14.1.jar",
+      "path": "org/robolectric/resources/4.14.1/resources-4.14.1.jar",
+      "packaging": "jar",
+      "bytes": 407614,
+      "sha256": "54eb274a47dec9e74cc9b45b9e4335bb5d83857c63b2a49dd8d1993e6321f2c5",
+      "verification": "official Gradle module size/SHA256",
+      "licenses": [
+        {
+          "name": "The MIT License",
+          "url": "https://opensource.org/licenses/MIT"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "utils",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "annotations",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "pluginapi",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "com.google.auto.value",
+          "artifactId": "auto-value-annotations",
+          "version": "1.11.0",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "com.google.guava",
+          "artifactId": "guava",
+          "version": "33.3.1-jre",
+          "scope": "compile",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "54eb274a47dec9e74cc9b45b9e4335bb5d83857c63b2a49dd8d1993e6321f2c5",
+      "verified_utc": "2026-10-18T09:18:27.117214+00:00"
+    },
+    {
+      "coordinate": "org.robolectric:sandbox:4.14.1",
+      "url": "https://repo.maven.apache.org/maven2/org/robolectric/sandbox/4.14.1/sandbox-4.14.1.jar",
+      "path": "org/robolectric/sandbox/4.14.1/sandbox-4.14.1.jar",
+      "packaging": "jar",
+      "bytes": 135838,
+      "sha256": "de361f3de8c08d4488cf156683830f2bd43db1da85a5b136ad6d065b868d3bab",
+      "verification": "official Gradle module size/SHA256",
+      "licenses": [
+        {
+          "name": "The MIT License",
+          "url": "https://opensource.org/licenses/MIT"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "annotations",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "utils",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "shadowapi",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "utils-reflector",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "javax.annotation",
+          "artifactId": "javax.annotation-api",
+          "version": "1.3.2",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "javax.inject",
+          "artifactId": "javax.inject",
+          "version": "1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.ow2.asm",
+          "artifactId": "asm",
+          "version": "9.7.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.ow2.asm",
+          "artifactId": "asm-commons",
+          "version": "9.7.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "com.google.guava",
+          "artifactId": "guava",
+          "version": "33.3.1-jre",
+          "scope": "compile",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "de361f3de8c08d4488cf156683830f2bd43db1da85a5b136ad6d065b868d3bab",
+      "verified_utc": "2026-10-18T09:18:27.164256+00:00"
+    },
+    {
+      "coordinate": "org.robolectric:utils:4.14.1",
+      "url": "https://repo.maven.apache.org/maven2/org/robolectric/utils/4.14.1/utils-4.14.1.jar",
+      "path": "org/robolectric/utils/4.14.1/utils-4.14.1.jar",
+      "packaging": "jar",
+      "bytes": 55492,
+      "sha256": "6884eec32c9c9b23d74250e30a5ba9c5ece48784f808feba98f119b215ab59d8",
+      "verification": "official SHA256 sidecar",
+      "licenses": [
+        {
+          "name": "The MIT License",
+          "url": "https://opensource.org/licenses/MIT"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "annotations",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "pluginapi",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "javax.inject",
+          "artifactId": "javax.inject",
+          "version": "1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "javax.annotation",
+          "artifactId": "javax.annotation-api",
+          "version": "1.3.2",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "com.google.errorprone",
+          "artifactId": "error_prone_annotation",
+          "version": "2.34.0",
+          "scope": "runtime",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "6884eec32c9c9b23d74250e30a5ba9c5ece48784f808feba98f119b215ab59d8",
+      "verified_utc": "2026-10-18T09:18:29.837228+00:00"
+    },
+    {
+      "coordinate": "org.robolectric:utils-reflector:4.14.1",
+      "url": "https://repo.maven.apache.org/maven2/org/robolectric/utils-reflector/4.14.1/utils-reflector-4.14.1.jar",
+      "path": "org/robolectric/utils-reflector/4.14.1/utils-reflector-4.14.1.jar",
+      "packaging": "jar",
+      "bytes": 26578,
+      "sha256": "eb8f52cdc24f59ae4cf13369c5bf990354c19c386e3e8f9f5d5cee04d836557b",
+      "verification": "official Gradle module size/SHA256",
+      "licenses": [
+        {
+          "name": "The MIT License",
+          "url": "https://opensource.org/licenses/MIT"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.ow2.asm",
+          "artifactId": "asm",
+          "version": "9.7.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.ow2.asm",
+          "artifactId": "asm-commons",
+          "version": "9.7.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.ow2.asm",
+          "artifactId": "asm-util",
+          "version": "9.7.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "utils",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "eb8f52cdc24f59ae4cf13369c5bf990354c19c386e3e8f9f5d5cee04d836557b",
+      "verified_utc": "2026-10-18T09:18:29.992655+00:00"
+    },
+    {
+      "coordinate": "org.robolectric:plugins-maven-dependency-resolver:4.14.1",
+      "url": "https://repo.maven.apache.org/maven2/org/robolectric/plugins-maven-dependency-resolver/4.14.1/plugins-maven-dependency-resolver-4.14.1.jar",
+      "path": "org/robolectric/plugins-maven-dependency-resolver/4.14.1/plugins-maven-dependency-resolver-4.14.1.jar",
+      "packaging": "jar",
+      "bytes": 15222,
+      "sha256": "6c8dbc979db0780755e712acab9eeb9396811b2d4dc31a92a5b259f9876205ec",
+      "verification": "official SHA256 sidecar",
+      "licenses": [
+        {
+          "name": "The MIT License",
+          "url": "https://opensource.org/licenses/MIT"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "pluginapi",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "utils",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "com.google.auto.value",
+          "artifactId": "auto-value-annotations",
+          "version": "1.11.0",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "com.google.guava",
+          "artifactId": "guava",
+          "version": "33.3.1-jre",
+          "scope": "compile",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "6c8dbc979db0780755e712acab9eeb9396811b2d4dc31a92a5b259f9876205ec",
+      "verified_utc": "2026-10-18T09:18:35.067388+00:00"
+    },
+    {
+      "coordinate": "org.robolectric:shadows-framework:4.14.1",
+      "url": "https://repo.maven.apache.org/maven2/org/robolectric/shadows-framework/4.14.1/shadows-framework-4.14.1.jar",
+      "path": "org/robolectric/shadows-framework/4.14.1/shadows-framework-4.14.1.jar",
+      "packaging": "jar",
+      "bytes": 4766936,
+      "sha256": "f3cf7785eecf9b2e80fbb4caac4c42f63eeea3506e289581c04696a56a494622",
+      "verification": "official Gradle module size/SHA256",
+      "licenses": [
+        {
+          "name": "The MIT License",
+          "url": "https://opensource.org/licenses/MIT"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "annotations",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "nativeruntime",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "resources",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "pluginapi",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "sandbox",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "shadowapi",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "utils",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "utils-reflector",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "androidx.test",
+          "artifactId": "monitor",
+          "version": "1.7.2",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "com.almworks.sqlite4java",
+          "artifactId": "sqlite4java",
+          "version": "1.0.392",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "com.ibm.icu",
+          "artifactId": "icu4j",
+          "version": "75.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "com.google.auto.value",
+          "artifactId": "auto-value-annotations",
+          "version": "1.11.0",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "com.google.errorprone",
+          "artifactId": "error_prone_annotation",
+          "version": "2.34.0",
+          "scope": "runtime",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "f3cf7785eecf9b2e80fbb4caac4c42f63eeea3506e289581c04696a56a494622",
+      "verified_utc": "2026-10-18T09:18:35.398403+00:00"
+    },
+    {
+      "coordinate": "org.robolectric:nativeruntime:4.14.1",
+      "url": "https://repo.maven.apache.org/maven2/org/robolectric/nativeruntime/4.14.1/nativeruntime-4.14.1.jar",
+      "path": "org/robolectric/nativeruntime/4.14.1/nativeruntime-4.14.1.jar",
+      "packaging": "jar",
+      "bytes": 53484,
+      "sha256": "c07b66d315aec3272a7c64aa5f154b4194be2cc6030a733d16f2ee87330232a8",
+      "verification": "official Gradle module size/SHA256",
+      "licenses": [
+        {
+          "name": "The MIT License",
+          "url": "https://opensource.org/licenses/MIT"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "shadowapi",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "utils",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "utils-reflector",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "com.google.guava",
+          "artifactId": "guava",
+          "version": "33.3.1-jre",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "nativeruntime-dist-compat",
+          "version": "1.0.16",
+          "scope": "runtime",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "c07b66d315aec3272a7c64aa5f154b4194be2cc6030a733d16f2ee87330232a8",
+      "verified_utc": "2026-10-18T09:18:37.964962+00:00"
+    },
+    {
+      "coordinate": "org.robolectric:shadowapi:4.14.1",
+      "url": "https://repo.maven.apache.org/maven2/org/robolectric/shadowapi/4.14.1/shadowapi-4.14.1.jar",
+      "path": "org/robolectric/shadowapi/4.14.1/shadowapi-4.14.1.jar",
+      "packaging": "jar",
+      "bytes": 15882,
+      "sha256": "fd158863cee488475206ba1d23ff4c7d29be412eccd21b12d9416b0030aa582d",
+      "verification": "official Gradle module size/SHA256",
+      "licenses": [
+        {
+          "name": "The MIT License",
+          "url": "https://opensource.org/licenses/MIT"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "annotations",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.robolectric",
+          "artifactId": "utils",
+          "version": "4.14.1",
+          "scope": "compile",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "fd158863cee488475206ba1d23ff4c7d29be412eccd21b12d9416b0030aa582d",
+      "verified_utc": "2026-10-18T09:18:38.181887+00:00"
+    },
+    {
+      "coordinate": "javax.inject:javax.inject:1",
+      "url": "https://repo.maven.apache.org/maven2/javax/inject/javax.inject/1/javax.inject-1.jar",
+      "path": "javax/inject/javax.inject/1/javax.inject-1.jar",
+      "packaging": "jar",
+      "bytes": 2497,
+      "sha1": "6975da39a7040257bd51d21a231b76c915872d38",
+      "verification": "official SHA1 sidecar; local SHA256 receipt",
+      "licenses": [
+        {
+          "name": "The Apache Software License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "91c77044a50c481636c32d916fd89c9118a72195390452c81065080f957de7ff",
+      "verified_utc": "2026-10-18T09:18:38.183579+00:00"
+    },
+    {
+      "coordinate": "javax.annotation:javax.annotation-api:1.3.2",
+      "url": "https://repo.maven.apache.org/maven2/javax/annotation/javax.annotation-api/1.3.2/javax.annotation-api-1.3.2.jar",
+      "path": "javax/annotation/javax.annotation-api/1.3.2/javax.annotation-api-1.3.2.jar",
+      "packaging": "jar",
+      "bytes": 26586,
+      "sha1": "934c04d3cfef185a8008e7bf34331b79730a9d43",
+      "verification": "official SHA1 sidecar; local SHA256 receipt",
+      "licenses": [
+        {
+          "name": "CDDL + GPLv2 with classpath exception",
+          "url": "https://github.com/javaee/javax.annotation/blob/master/LICENSE"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "e04ba5195bcd555dc95650f7cc614d151e4bcd52d29a10b8aa2197f3ab89ab9b",
+      "verified_utc": "2026-10-18T09:18:38.184275+00:00"
+    },
+    {
+      "coordinate": "org.bouncycastle:bcprov-jdk18on:1.78.1",
+      "url": "https://repo.maven.apache.org/maven2/org/bouncycastle/bcprov-jdk18on/1.78.1/bcprov-jdk18on-1.78.1.jar",
+      "path": "org/bouncycastle/bcprov-jdk18on/1.78.1/bcprov-jdk18on-1.78.1.jar",
+      "packaging": "jar",
+      "bytes": 8324412,
+      "sha256": "add5915e6acfc6ab5836e1fd8a5e21c6488536a8c1f21f386eeb3bf280b702d7",
+      "verification": "official SHA256 sidecar",
+      "licenses": [
+        {
+          "name": "Bouncy Castle Licence",
+          "url": "https://www.bouncycastle.org/licence.html"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "add5915e6acfc6ab5836e1fd8a5e21c6488536a8c1f21f386eeb3bf280b702d7",
+      "verified_utc": "2026-10-18T09:18:42.283350+00:00"
+    },
+    {
+      "coordinate": "androidx.test:monitor:1.7.2",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/test/monitor/1.7.2/monitor-1.7.2.aar",
+      "path": "androidx/test/monitor/1.7.2/monitor-1.7.2.aar",
+      "packaging": "aar",
+      "bytes": 102970,
+      "sha256": "868cc120d10d024b886fa157e1e1eaee0e6a8e5d55e7f765ef41d8fc0fea775b",
+      "verification": "official SHA256 sidecar",
+      "licenses": [
+        {
+          "name": "The Apache Software License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "androidx.annotation",
+          "artifactId": "annotation",
+          "version": "1.7.0-beta01",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "androidx.tracing",
+          "artifactId": "tracing",
+          "version": "1.1.0",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.jetbrains.kotlin",
+          "artifactId": "kotlin-stdlib",
+          "version": "1.8.20",
+          "scope": "compile",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "868cc120d10d024b886fa157e1e1eaee0e6a8e5d55e7f765ef41d8fc0fea775b",
+      "verified_utc": "2026-10-18T09:18:45.696448+00:00"
+    },
+    {
+      "coordinate": "org.conscrypt:conscrypt-openjdk-uber:2.5.2",
+      "url": "https://repo.maven.apache.org/maven2/org/conscrypt/conscrypt-openjdk-uber/2.5.2/conscrypt-openjdk-uber-2.5.2.jar",
+      "path": "org/conscrypt/conscrypt-openjdk-uber/2.5.2/conscrypt-openjdk-uber-2.5.2.jar",
+      "packaging": "jar",
+      "bytes": 4534256,
+      "sha1": "d858f142ea189c62771c505a6548d8606ac098fe",
+      "verification": "official SHA1 sidecar; local SHA256 receipt",
+      "licenses": [
+        {
+          "name": "Apache 2",
+          "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "eaf537d98e033d0f0451cd1b8cc74e02d7b55ec882da63c88060d806ba89c348",
+      "verified_utc": "2026-10-18T09:18:48.735326+00:00"
+    },
+    {
+      "coordinate": "org.yaml:snakeyaml:2.3",
+      "url": "https://repo.maven.apache.org/maven2/org/yaml/snakeyaml/2.3/snakeyaml-2.3.jar",
+      "path": "org/yaml/snakeyaml/2.3/snakeyaml-2.3.jar",
+      "packaging": "jar",
+      "bytes": 342152,
+      "sha1": "936b36210e27320f920536f695cf1af210c44586",
+      "verification": "official SHA1 sidecar; local SHA256 receipt",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "63a76fe66b652360bd4c2c107e6f0258daa7d4bb492008ba8c26fcd230ff9146",
+      "verified_utc": "2026-10-18T09:18:48.737804+00:00"
+    },
+    {
+      "coordinate": "org.robolectric:nativeruntime-dist-compat:1.0.16",
+      "url": "https://repo.maven.apache.org/maven2/org/robolectric/nativeruntime-dist-compat/1.0.16/nativeruntime-dist-compat-1.0.16.jar",
+      "path": "org/robolectric/nativeruntime-dist-compat/1.0.16/nativeruntime-dist-compat-1.0.16.jar",
+      "packaging": "jar",
+      "bytes": 157996126,
+      "sha256": "2f4e879b00eed634d0e43353ecff80db4d5ce24b3b213d1e6053cb21b0ced10f",
+      "verification": "official SHA256 sidecar",
+      "licenses": [
+        {
+          "name": "Apache 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "2f4e879b00eed634d0e43353ecff80db4d5ce24b3b213d1e6053cb21b0ced10f",
+      "verified_utc": "2026-10-18T09:18:51.972181+00:00"
+    },
+    {
+      "coordinate": "androidx.test.espresso:espresso-idling-resource:3.6.1",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/test/espresso/espresso-idling-resource/3.6.1/espresso-idling-resource-3.6.1.aar",
+      "path": "androidx/test/espresso/espresso-idling-resource/3.6.1/espresso-idling-resource-3.6.1.aar",
+      "packaging": "aar",
+      "bytes": 5064,
+      "sha256": "bc63a8780f1c707724e389f530cb2e1a6847da97f6a8114604c002aba2fd86ca",
+      "verification": "official SHA256 sidecar",
+      "licenses": [
+        {
+          "name": "The Apache Software License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "bc63a8780f1c707724e389f530cb2e1a6847da97f6a8114604c002aba2fd86ca",
+      "verified_utc": "2026-10-18T09:18:52.191999+00:00"
+    },
+    {
+      "coordinate": "com.google.testparameterinjector:test-parameter-injector:1.18",
+      "url": "https://repo.maven.apache.org/maven2/com/google/testparameterinjector/test-parameter-injector/1.18/test-parameter-injector-1.18.jar",
+      "path": "com/google/testparameterinjector/test-parameter-injector/1.18/test-parameter-injector-1.18.jar",
+      "packaging": "jar",
+      "bytes": 123774,
+      "sha1": "5da02ca88c55bab58071a33e3f5fb6cfcf5df270",
+      "verification": "official SHA1 sidecar; local SHA256 receipt",
+      "licenses": [],
+      "runtime_dependencies": [
+        {
+          "groupId": "junit",
+          "artifactId": "junit",
+          "version": "4.13.2",
+          "scope": null,
+          "optional": null
+        }
+      ],
+      "actual_sha256": "e5a7c649c54c412049908247ca5e25fe6921d746849c6017a84dc6044237a4b4",
+      "verified_utc": "2026-10-18T09:18:57.625230+00:00"
+    },
+    {
+      "coordinate": "com.almworks.sqlite4java:sqlite4java:1.0.392",
+      "url": "https://repo.maven.apache.org/maven2/com/almworks/sqlite4java/sqlite4java/1.0.392/sqlite4java-1.0.392.jar",
+      "path": "com/almworks/sqlite4java/sqlite4java/1.0.392/sqlite4java-1.0.392.jar",
+      "packaging": "jar",
+      "bytes": 132506,
+      "sha1": "d6234e08ff4e1607ff5321da2579571f05ff778d",
+      "verification": "official SHA1 sidecar; local SHA256 receipt",
+      "licenses": [
+        {
+          "name": "The Apache Software License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "243a64470fda0e86a6fddeb0af4c7aa9426ce84e68cbfe18d75ee5da4b7e0b92",
+      "verified_utc": "2026-10-18T09:18:57.692963+00:00"
+    },
+    {
+      "coordinate": "com.google.auto.value:auto-value-annotations:1.11.0",
+      "url": "https://repo.maven.apache.org/maven2/com/google/auto/value/auto-value-annotations/1.11.0/auto-value-annotations-1.11.0.jar",
+      "path": "com/google/auto/value/auto-value-annotations/1.11.0/auto-value-annotations-1.11.0.jar",
+      "packaging": "jar",
+      "bytes": 7491,
+      "sha1": "f0d047931d07cfbc6fa4079854f181ff62891d6f",
+      "verification": "official SHA1 sidecar; local SHA256 receipt",
+      "licenses": [],
+      "runtime_dependencies": [],
+      "actual_sha256": "5a055ce4255333b3346e1a8703da5bf8ff049532286fdcd31712d624abe111dd",
+      "verified_utc": "2026-10-18T09:19:03.783937+00:00"
+    },
+    {
+      "coordinate": "com.ibm.icu:icu4j:75.1",
+      "url": "https://repo.maven.apache.org/maven2/com/ibm/icu/icu4j/75.1/icu4j-75.1.jar",
+      "path": "com/ibm/icu/icu4j/75.1/icu4j-75.1.jar",
+      "packaging": "jar",
+      "bytes": 14312248,
+      "sha1": "e8f8dcc2967f5ec2cfae185172293adfa5599b78",
+      "verification": "official SHA1 sidecar; local SHA256 receipt",
+      "licenses": [],
+      "runtime_dependencies": [],
+      "actual_sha256": "543e43a91d1499e331c711a756f833d6fb8cc019f9c9913c0bdf4d53009932d5",
+      "verified_utc": "2026-10-18T09:19:05.918611+00:00"
+    },
+    {
+      "coordinate": "com.google.errorprone:error_prone_annotation:2.34.0",
+      "url": "https://repo.maven.apache.org/maven2/com/google/errorprone/error_prone_annotation/2.34.0/error_prone_annotation-2.34.0.jar",
+      "path": "com/google/errorprone/error_prone_annotation/2.34.0/error_prone_annotation-2.34.0.jar",
+      "packaging": "jar",
+      "bytes": 8275,
+      "sha1": "d74b3474300d060bfb83f961bb0ec118c502ec76",
+      "verification": "official SHA1 sidecar; local SHA256 receipt",
+      "licenses": [
+        {
+          "name": "Apache 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "com.google.guava",
+          "artifactId": "guava",
+          "version": "${guava.version}",
+          "scope": null,
+          "optional": null
+        }
+      ],
+      "actual_sha256": "99f8b53c75a50617d4f9bf45512eda82e7d8e9eb377471d822d3d4c4e034c510",
+      "verified_utc": "2026-10-18T09:19:09.339388+00:00"
+    },
+    {
+      "coordinate": "org.ow2.asm:asm:9.7.1",
+      "url": "https://repo.maven.apache.org/maven2/org/ow2/asm/asm/9.7.1/asm-9.7.1.jar",
+      "path": "org/ow2/asm/asm/9.7.1/asm-9.7.1.jar",
+      "packaging": "jar",
+      "bytes": 126093,
+      "sha256": "8cadd43ac5eb6d09de05faecca38b917a040bb9139c7edeb4cc81c740b713281",
+      "verification": "official SHA256 sidecar",
+      "licenses": [
+        {
+          "name": "BSD-3-Clause",
+          "url": "https://asm.ow2.io/license.html"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "8cadd43ac5eb6d09de05faecca38b917a040bb9139c7edeb4cc81c740b713281",
+      "verified_utc": "2026-10-18T09:19:09.480617+00:00"
+    },
+    {
+      "coordinate": "org.ow2.asm:asm-commons:9.7.1",
+      "url": "https://repo.maven.apache.org/maven2/org/ow2/asm/asm-commons/9.7.1/asm-commons-9.7.1.jar",
+      "path": "org/ow2/asm/asm-commons/9.7.1/asm-commons-9.7.1.jar",
+      "packaging": "jar",
+      "bytes": 73459,
+      "sha256": "9a579b54d292ad9be171d4313fd4739c635592c2b5ac3a459bbd1049cddec6a0",
+      "verification": "official SHA256 sidecar",
+      "licenses": [
+        {
+          "name": "BSD-3-Clause",
+          "url": "https://asm.ow2.io/license.html"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.ow2.asm",
+          "artifactId": "asm",
+          "version": "9.7.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.ow2.asm",
+          "artifactId": "asm-tree",
+          "version": "9.7.1",
+          "scope": "compile",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "9a579b54d292ad9be171d4313fd4739c635592c2b5ac3a459bbd1049cddec6a0",
+      "verified_utc": "2026-10-18T09:19:15.474690+00:00"
+    },
+    {
+      "coordinate": "org.ow2.asm:asm-tree:9.7.1",
+      "url": "https://repo.maven.apache.org/maven2/org/ow2/asm/asm-tree/9.7.1/asm-tree-9.7.1.jar",
+      "path": "org/ow2/asm/asm-tree/9.7.1/asm-tree-9.7.1.jar",
+      "packaging": "jar",
+      "bytes": 51939,
+      "sha256": "9929881f59eb6b840e86d54570c77b59ce721d104e6dfd7a40978991c2d3b41f",
+      "verification": "official SHA256 sidecar",
+      "licenses": [
+        {
+          "name": "BSD-3-Clause",
+          "url": "https://asm.ow2.io/license.html"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.ow2.asm",
+          "artifactId": "asm",
+          "version": "9.7.1",
+          "scope": "compile",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "9929881f59eb6b840e86d54570c77b59ce721d104e6dfd7a40978991c2d3b41f",
+      "verified_utc": "2026-10-18T09:19:15.544178+00:00"
+    },
+    {
+      "coordinate": "org.ow2.asm:asm-util:9.7.1",
+      "url": "https://repo.maven.apache.org/maven2/org/ow2/asm/asm-util/9.7.1/asm-util-9.7.1.jar",
+      "path": "org/ow2/asm/asm-util/9.7.1/asm-util-9.7.1.jar",
+      "packaging": "jar",
+      "bytes": 94519,
+      "sha256": "f885be71b5c90556f5f1ad1c4f9276b29b96057c497d46666fe4ddbec3cb43c6",
+      "verification": "official SHA256 sidecar",
+      "licenses": [
+        {
+          "name": "BSD-3-Clause",
+          "url": "https://asm.ow2.io/license.html"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.ow2.asm",
+          "artifactId": "asm",
+          "version": "9.7.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.ow2.asm",
+          "artifactId": "asm-tree",
+          "version": "9.7.1",
+          "scope": "compile",
+          "optional": null
+        },
+        {
+          "groupId": "org.ow2.asm",
+          "artifactId": "asm-analysis",
+          "version": "9.7.1",
+          "scope": "compile",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "f885be71b5c90556f5f1ad1c4f9276b29b96057c497d46666fe4ddbec3cb43c6",
+      "verified_utc": "2026-10-18T09:19:20.666619+00:00"
+    },
+    {
+      "coordinate": "org.ow2.asm:asm-analysis:9.7.1",
+      "url": "https://repo.maven.apache.org/maven2/org/ow2/asm/asm-analysis/9.7.1/asm-analysis-9.7.1.jar",
+      "path": "org/ow2/asm/asm-analysis/9.7.1/asm-analysis-9.7.1.jar",
+      "packaging": "jar",
+      "bytes": 35126,
+      "sha256": "85b29371884ba31bb76edf22323c2c24e172c3267a67152eba3d1ccc2e041ef2",
+      "verification": "official SHA256 sidecar",
+      "licenses": [
+        {
+          "name": "BSD-3-Clause",
+          "url": "https://asm.ow2.io/license.html"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "org.ow2.asm",
+          "artifactId": "asm-tree",
+          "version": "9.7.1",
+          "scope": "compile",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "85b29371884ba31bb76edf22323c2c24e172c3267a67152eba3d1ccc2e041ef2",
+      "verified_utc": "2026-10-18T09:19:20.720722+00:00"
+    },
+    {
+      "coordinate": "androidx.tracing:tracing:1.1.0",
+      "url": "https://dl.google.com/dl/android/maven2/androidx/tracing/tracing/1.1.0/tracing-1.1.0.aar",
+      "path": "androidx/tracing/tracing/1.1.0/tracing-1.1.0.aar",
+      "packaging": "aar",
+      "bytes": 5149,
+      "sha256": "5b78e2c618fc10b3d14decc01df76158f15954ad746aacf0607766721da081f6",
+      "verification": "official Gradle module size/SHA256",
+      "licenses": [
+        {
+          "name": "The Apache Software License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ],
+      "runtime_dependencies": [
+        {
+          "groupId": "androidx.annotation",
+          "artifactId": "annotation",
+          "version": "1.2.0",
+          "scope": "runtime",
+          "optional": null
+        }
+      ],
+      "actual_sha256": "5b78e2c618fc10b3d14decc01df76158f15954ad746aacf0607766721da081f6",
+      "verified_utc": "2026-10-18T09:19:26.588209+00:00"
+    },
+    {
+      "coordinate": "com.google.code.findbugs:jsr305:3.0.2",
+      "url": "https://repo.maven.apache.org/maven2/com/google/code/findbugs/jsr305/3.0.2/jsr305-3.0.2.jar",
+      "path": "com/google/code/findbugs/jsr305/3.0.2/jsr305-3.0.2.jar",
+      "packaging": "jar",
+      "bytes": 19936,
+      "sha1": "25ea2e8b0c338a877313bd4672d3fe056ea78f0d",
+      "verification": "official SHA1 sidecar; local SHA256 receipt",
+      "licenses": [
+        {
+          "name": "The Apache Software License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "766ad2a0783f2687962c8ad74ceecc38a28b9f72a2d085ee438b7813e928d0c7",
+      "verified_utc": "2026-10-18T09:19:26.589396+00:00"
+    },
+    {
+      "coordinate": "com.google.guava:guava:33.3.1-jre",
+      "url": "https://repo.maven.apache.org/maven2/com/google/guava/guava/33.3.1-jre/guava-33.3.1-jre.jar",
+      "path": "com/google/guava/guava/33.3.1-jre/guava-33.3.1-jre.jar",
+      "packaging": "jar",
+      "bytes": 3079289,
+      "sha1": "852f8b363da0111e819460021ca693cacca3e8db",
+      "verification": "official SHA1 sidecar; local SHA256 receipt",
+      "licenses": [],
+      "runtime_dependencies": [
+        {
+          "groupId": "com.google.guava",
+          "artifactId": "failureaccess",
+          "version": "1.0.2",
+          "scope": null,
+          "optional": null
+        },
+        {
+          "groupId": "com.google.guava",
+          "artifactId": "listenablefuture",
+          "version": "9999.0-empty-to-avoid-conflict-with-guava",
+          "scope": null,
+          "optional": null
+        },
+        {
+          "groupId": "com.google.code.findbugs",
+          "artifactId": "jsr305",
+          "version": null,
+          "scope": null,
+          "optional": null
+        },
+        {
+          "groupId": "org.checkerframework",
+          "artifactId": "checker-qual",
+          "version": null,
+          "scope": null,
+          "optional": null
+        },
+        {
+          "groupId": "com.google.errorprone",
+          "artifactId": "error_prone_annotations",
+          "version": null,
+          "scope": null,
+          "optional": null
+        },
+        {
+          "groupId": "com.google.j2objc",
+          "artifactId": "j2objc-annotations",
+          "version": null,
+          "scope": null,
+          "optional": null
+        }
+      ],
+      "actual_sha256": "4bf0e2c5af8e4525c96e8fde17a4f7307f97f8478f11c4c8e35a0e3298ae4e90",
+      "verified_utc": "2026-10-18T09:19:28.917722+00:00"
+    },
+    {
+      "coordinate": "org.checkerframework:checker-qual:3.43.0",
+      "url": "https://repo.maven.apache.org/maven2/org/checkerframework/checker-qual/3.43.0/checker-qual-3.43.0.jar",
+      "path": "org/checkerframework/checker-qual/3.43.0/checker-qual-3.43.0.jar",
+      "packaging": "jar",
+      "bytes": 231525,
+      "sha256": "3fbc2e98f05854c3df16df9abaa955b91b15b3ecac33623208ed6424640ef0f6",
+      "verification": "official Gradle module size/SHA256",
+      "licenses": [
+        {
+          "name": "The MIT License",
+          "url": "http://opensource.org/licenses/MIT"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "3fbc2e98f05854c3df16df9abaa955b91b15b3ecac33623208ed6424640ef0f6",
+      "verified_utc": "2026-10-18T09:19:28.926493+00:00"
+    },
+    {
+      "coordinate": "com.google.j2objc:j2objc-annotations:3.0.0",
+      "url": "https://repo.maven.apache.org/maven2/com/google/j2objc/j2objc-annotations/3.0.0/j2objc-annotations-3.0.0.jar",
+      "path": "com/google/j2objc/j2objc-annotations/3.0.0/j2objc-annotations-3.0.0.jar",
+      "packaging": "jar",
+      "bytes": 12467,
+      "sha1": "7399e65dd7e9ff3404f4535b2f017093bdb134c7",
+      "verification": "official SHA1 sidecar; local SHA256 receipt",
+      "licenses": [
+        {
+          "name": "Apache License, Version 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "88241573467ddca44ffd4d74aa04c2bbfd11bf7c17e0c342c94c9de7a70a7c64",
+      "verified_utc": "2026-10-18T09:19:32.343969+00:00"
+    },
+    {
+      "coordinate": "com.google.errorprone:error_prone_annotations:2.34.0",
+      "url": "https://repo.maven.apache.org/maven2/com/google/errorprone/error_prone_annotations/2.34.0/error_prone_annotations-2.34.0.jar",
+      "path": "com/google/errorprone/error_prone_annotations/2.34.0/error_prone_annotations-2.34.0.jar",
+      "packaging": "jar",
+      "bytes": 19399,
+      "sha1": "50746f95b7ce9cd90af8915415989643d5b445e3",
+      "verification": "official SHA1 sidecar; local SHA256 receipt",
+      "licenses": [
+        {
+          "name": "Apache 2.0",
+          "url": "http://www.apache.org/licenses/LICENSE-2.0.txt"
+        }
+      ],
+      "runtime_dependencies": [],
+      "actual_sha256": "2a799487cfdcd248cb65f40c5ae5183389e1a3876735ed84c6ca3f2080de49e5",
+      "verified_utc": "2026-10-18T09:19:32.492244+00:00"
+    }
+  ]
+}

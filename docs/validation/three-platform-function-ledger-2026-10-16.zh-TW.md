@@ -459,3 +459,7 @@ EDSDK 回傳錯誤 session 後 close 失敗，現保留精確 rejected owner，�
 ### 2026-10-18 09:38 UTC ViewModel 完整 caller 閉包
 
 [詳細證據](android-viewmodel-caller-2026-10-18.zh-TW.md)：恢復官方 Compose/Lifecycle 最小材料，確證並補齊原 CameraViewModel 缺失的四個 import；完整48檔編譯，五類 caller 106/106 通過。保留原105/106失敗證據及 recording listing 計數修正；第一幀取消8案、完整App/native與真機仍獨立未完成。
+
+### 2026-10-18 09:47 UTC startup 退役與單一 Stop owner
+
+[詳細證據](android-startup-retirement-2026-10-18.zh-TW.md)：真socket／Robolectric首幀契約揭露並修復restart等待舊Start、rapid off/on遺失replacement、disconnect雙Stop三個缺口。完整來源編譯及186個不同host案例通過，包含failed cleanup保留責任且不重送。新增官方host runner不代表Android裝置／完整App／三端真機驗收。

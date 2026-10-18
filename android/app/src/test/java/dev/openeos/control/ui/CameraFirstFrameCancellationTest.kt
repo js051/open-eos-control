@@ -36,13 +36,15 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Production VM/repository/CCAPI cancellation before the Android bitmap boundary. */
+/** Production VM/repository/CCAPI cancellation with a synthetic Android bitmap host. */
 @OptIn(ExperimentalCoroutinesApi::class)
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [35], manifest = org.robolectric.annotation.Config.NONE)
 class CameraFirstFrameCancellationTest {
     private val main = StandardTestDispatcher()
     private val server = MockWebServer()
     private val frameReads = AtomicInteger()
-    private val successfulFrameReads = CopyOnWriteArraySet(listOf(1))
+    private val successfulFrameReads = CopyOnWriteArraySet<Int>()
     private val viewWrites = CopyOnWriteArrayList<String>()
     private val shutterWrites = CopyOnWriteArrayList<String>()
     private val blockRelease = AtomicBoolean(false)
@@ -92,10 +94,10 @@ class CameraFirstFrameCancellationTest {
                     path.endsWith("/shooting/settings") -> json("{}")
                     path.endsWith("/shooting/liveview/flip") -> {
                         if (frameReads.incrementAndGet() in successfulFrameReads) {
-                            // The backend's startup probe scans JPEG boundaries without decoding.
-                            // The second request never reaches BitmapFactory, which needs Android.
+                            // Only capture fixtures complete startup. Use a decodable JPEG rather
+                            // than a marker-only payload; startup fixtures block their first probe.
                             MockResponse().setHeader("Content-Type", "image/jpeg")
-                                .setBody(Buffer().write(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xd9.toByte())))
+                                .setBody(Buffer().write(java.util.Base64.getDecoder().decode(VALID_JPEG_BASE64)))
                         } else MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
                     }
                     else -> MockResponse().setResponseCode(404)
@@ -131,7 +133,7 @@ class CameraFirstFrameCancellationTest {
         }
     }
 
-    @Test fun disconnectCancelsPublishedSessionsFirstFrameAndClearsConnectBusy() = runBlocking {
+    @Test fun disconnectCancelsStartupProbeAndClearsConnectBusy() = runBlocking {
         connectUntilFirstFrameIsBlocked()
         viewModel.disconnect()
         assertTrue(pumpUntil { activeFrameReads() == 0 && !repository.isLiveViewRunning() })
@@ -144,18 +146,18 @@ class CameraFirstFrameCancellationTest {
         assertEquals(listOf("medium", "off"), viewWrites.toList())
     }
 
-    @Test fun disablingLiveViewCancelsPublishedSessionsFirstFrameWithoutDisconnecting() = runBlocking {
+    @Test fun disablingLiveViewCancelsStartupProbeWithoutDisconnecting() = runBlocking {
         assertPreviewStopCancelsInitialFrame { viewModel.setLiveViewAutoRefresh(false) }
     }
 
-    @Test fun backgroundingCancelsPublishedSessionsFirstFrameWithoutDisconnecting() = runBlocking {
+    @Test fun backgroundingCancelsStartupProbeWithoutDisconnecting() = runBlocking {
         assertPreviewStopCancelsInitialFrame { viewModel.setAppForeground(false) }
     }
 
     @Test fun disablingLiveViewCancelsAReconciliationsFirstFrameAndReleasesItsMutex() = runBlocking {
         connectWithLiveViewOff()
         viewModel.setLiveViewAutoRefresh(true)
-        assertTrue(pumpUntil { frameReads.get() == 2 && CameraOperation.LIVE_VIEW in viewModel.uiState.value.pendingOperations })
+        assertTrue(pumpUntil { frameReads.get() == 1 && CameraOperation.LIVE_VIEW in viewModel.uiState.value.pendingOperations })
         viewModel.setLiveViewAutoRefresh(false)
         assertTrue("Stop must not wait behind the transition's blocked first-frame read", pumpUntil(1_000) {
             activeFrameReads() == 0 && !repository.isLiveViewRunning() && !viewModel.uiState.value.busy
@@ -167,11 +169,13 @@ class CameraFirstFrameCancellationTest {
     @Test fun explicitRestartCancelsTheOldFirstFrameBeforeWaitingForTheTransitionMutex() = runBlocking {
         connectWithLiveViewOff()
         viewModel.setLiveViewAutoRefresh(true)
-        assertTrue(pumpUntil { frameReads.get() == 2 && activeFrameReads() == 1 })
-        successfulFrameReads += 3 // The explicitly requested replacement start's validation probe.
+        assertTrue(pumpUntil { frameReads.get() == 1 && activeFrameReads() == 1 &&
+            CameraOperation.LIVE_VIEW in viewModel.uiState.value.pendingOperations })
+        assertFalse(repository.isLiveViewRunning())
+        assertTrue(repository.isLiveViewStopRequired())
         viewModel.restartLiveView()
         assertTrue("Restart must reach its own first-frame read without the old HTTP timeout", pumpUntil(1_000) {
-            frameReads.get() == 4 && activeFrameReads() == 1
+            frameReads.get() == 2 && activeFrameReads() == 1
         })
         assertEquals(listOf("medium", "off", "medium"), viewWrites.toList())
         viewModel.setLiveViewAutoRefresh(false)
@@ -186,7 +190,7 @@ class CameraFirstFrameCancellationTest {
         viewModel.setLiveViewAutoRefresh(false)
         viewModel.setLiveViewAutoRefresh(true)
         assertTrue(pumpUntil {
-            frameReads.get() == 3 && activeFrameReads() == 1 &&
+            frameReads.get() == 2 && activeFrameReads() == 1 &&
                 CameraOperation.CONNECT !in viewModel.uiState.value.pendingOperations
         })
         assertTrue(viewModel.uiState.value.connected)
@@ -196,14 +200,18 @@ class CameraFirstFrameCancellationTest {
         assertTrue("Stopping the replacement must still cancel its active first-frame read", pumpUntil(1_000) {
             activeFrameReads() == 0 && !repository.isLiveViewRunning() && !viewModel.uiState.value.busy
         })
-        assertEquals(listOf("medium", "off"), viewWrites.toList())
+        // The cancelled startup owes Stop before the replacement can admit Start.
+        assertEquals(listOf("medium", "off", "medium", "off"), viewWrites.toList())
     }
 
     @Test fun backgroundAfterCaptureReleaseCancelsOnlyItsAuxiliaryFrame() = runBlocking {
         connectWithLiveViewOff()
-        // Establish a real running backend without crossing Android BitmapFactory. Queueing the
-        // capture in the same turn makes the existing capture interlock defer UI reconciliation.
+        // Establish a ready backend and explicitly consume its cached startup frame.
+        // Queue capture in the same turn as preview-on so reconciliation is interlocked;
+        // the next network read is the capture-owned auxiliary refresh after release.
+        successfulFrameReads += 1
         repository.setLiveViewEnabled(true)
+        repository.fetchLiveViewFrame()
         viewModel.setLiveViewAutoRefresh(true)
         viewModel.captureStill()
         assertTrue(pumpUntil { frameReads.get() == 2 && activeFrameReads() == 1 })
@@ -220,7 +228,9 @@ class CameraFirstFrameCancellationTest {
 
     @Test fun backgroundWhileCaptureReleaseIsUnacknowledgedDoesNotCancelTheReleaseOrStopEarly() = runBlocking {
         connectWithLiveViewOff()
+        successfulFrameReads += 1
         repository.setLiveViewEnabled(true)
+        repository.fetchLiveViewFrame()
         blockRelease.set(true)
         viewModel.setLiveViewAutoRefresh(true)
         viewModel.captureStill()
@@ -230,7 +240,8 @@ class CameraFirstFrameCancellationTest {
         main.scheduler.runCurrent()
         assertEquals(setOf(CameraOperation.CAPTURE), viewModel.uiState.value.pendingOperations)
         assertEquals(listOf("medium"), viewWrites.toList())
-        assertTrue(repository.isLiveViewRunning())
+        assertFalse(repository.isLiveViewRunning())
+        assertTrue("Retired readiness must retain its remote Stop obligation", repository.isLiveViewStopRequired())
         val releaseCall = http.dispatcher.runningCalls().single {
             it.request().method == "POST" && it.request().url.encodedPath.endsWith("/shutterbutton/manual")
         }
@@ -254,7 +265,8 @@ class CameraFirstFrameCancellationTest {
         connectUntilFirstFrameIsBlocked()
         stop()
         assertTrue(pumpUntil {
-            !repository.isLiveViewRunning() && CameraOperation.LIVE_VIEW !in viewModel.uiState.value.pendingOperations
+            !repository.isLiveViewRunning() && !repository.isLiveViewStopRequired() &&
+                viewModel.uiState.value.connected && CameraOperation.LIVE_VIEW !in viewModel.uiState.value.pendingOperations
         })
         assertEquals(listOf("medium", "off"), viewWrites.toList())
         assertTrue(viewModel.uiState.value.connected)
@@ -268,9 +280,12 @@ class CameraFirstFrameCancellationTest {
 
     private suspend fun connectUntilFirstFrameIsBlocked() {
         viewModel.connect()
-        assertTrue(pumpUntil { frameReads.get() == 2 && viewModel.uiState.value.connected })
+        // Start is admitted, but no first frame has arrived and readiness is not published.
+        assertTrue(pumpUntil { frameReads.get() == 1 && activeFrameReads() == 1 })
         assertEquals(setOf(CameraOperation.CONNECT), viewModel.uiState.value.pendingOperations)
-        assertTrue(repository.isLiveViewRunning())
+        assertFalse(viewModel.uiState.value.connected)
+        assertFalse(repository.isLiveViewRunning())
+        assertTrue(repository.isLiveViewStopRequired())
         assertEquals(1, activeFrameReads())
     }
 
@@ -290,6 +305,7 @@ class CameraFirstFrameCancellationTest {
     private fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
 
     private companion object {
+        const val VALID_JPEG_BASE64 = "/9j/4AAQSkZJRgABAgAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwAooooA/9k="
         const val DISCOVERY = """{"ver100":[
           {"path":"/deviceinformation","get":true},
           {"path":"/devicestatus/battery","get":true},

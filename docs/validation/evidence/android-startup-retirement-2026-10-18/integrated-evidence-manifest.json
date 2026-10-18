@@ -1,0 +1,114 @@
+[
+  {
+    "path": "CameraCaptureReviewRecoveryTest.txt",
+    "originalSha256": "67897ca54f4df7f5280e2ad61f927fddd5ccad9c903381768d31680f9124d8b7"
+  },
+  {
+    "path": "CameraConnectionConfigurationRecoveryTest.txt",
+    "originalSha256": "1768b13ffb7bdf8d9fddd65c29db5e8fcd3bd269ade66c3cc410f3bc491a4583"
+  },
+  {
+    "path": "CameraEventStateRecoveryTest.txt",
+    "originalSha256": "1d7cd3c003185277bfd250a8ad98a5db3c0edde0a9e77a6a32149f7c8a6eb57b"
+  },
+  {
+    "path": "CameraFirstFrameCancellationTest.txt",
+    "originalSha256": "122282afa5a30441258b300b89a85a6eaf4dc12e469639fc201348ba0acf18a3"
+  },
+  {
+    "path": "CameraFocusReadGateTest.txt",
+    "originalSha256": "0d1f5a93e8cb52ad50257846f880ba945740bf4fb9fef019332570ee7a268fb5"
+  },
+  {
+    "path": "CameraLiveViewRecoveryStateTest.txt",
+    "originalSha256": "e58939f0803165070910d9fabe9df59349f518b949e2330c030071c83496f085"
+  },
+  {
+    "path": "CameraRecordingReviewRecoveryTest.txt",
+    "originalSha256": "92a1619ff3cd384701bcb5c1604f7a3c0afc9c47f986ca0d8dac4409dd45480b"
+  },
+  {
+    "path": "CameraRepositoryTest.txt",
+    "originalSha256": "538c82cd7808f1d90f4e3d8dcad9ce5f26f062614d6a4040ae485ed878769408"
+  },
+  {
+    "path": "CameraShutterRecoveryStateTest.txt",
+    "originalSha256": "a2c22c8077653be8d1c5640c75809788c69c4e2cdcc5f47515a4145580bb9598"
+  },
+  {
+    "path": "CcapiLiveViewCompletionTest.txt",
+    "originalSha256": "90cb6fc2ea90de3af72d615a30a32194b45792be9e4448cd2b13ace7e15e7214"
+  },
+  {
+    "path": "CcapiLiveViewJourneyTest.txt",
+    "originalSha256": "b55532245d22f472deb5760748cdc9036605b9478acf324c04695b48eac9d3ee"
+  },
+  {
+    "path": "CcapiMultipartLiveViewSessionTest.txt",
+    "originalSha256": "986fa9a9c713d700f34661c3cf8b77c226f5ef3a4361ea1cf51956b3de180132"
+  },
+  {
+    "path": "DesktopBridgeConnectionCancellationTest.txt",
+    "originalSha256": "46ce7313e69e876ca256de59e881ca5cdccebb137c69029c15da2c4cd0c7884a"
+  },
+  {
+    "path": "DesktopBridgeLiveViewRecoveryTest.txt",
+    "originalSha256": "49cc399062457ad07938f22c52da0a979efe2c51579e26f2a7004a2aab9869e7"
+  },
+  {
+    "path": "LiveViewLivenessTest.txt",
+    "originalSha256": "9244c89e183c3149b4db1e72530bcc60205e5c389bedfffa95c619a71072a901"
+  },
+  {
+    "path": "caller-command.json",
+    "originalSha256": "1e3cc05b452399eb25361e6778aa0754d1439292269a3419de3953f804a84a02"
+  },
+  {
+    "path": "caller-compile.txt",
+    "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "caller-results.json",
+    "originalSha256": "71bb4c135e586955240de61ae0bda3bc6c528a4b33b23ea3d4d7d7b84955b4f1"
+  },
+  {
+    "path": "data-command.json",
+    "originalSha256": "7481760e9e750d1c222a38964e4385fab05b63be92752c6a04fdb4e880aa1772"
+  },
+  {
+    "path": "data-compile.txt",
+    "originalSha256": "835c73085a883ab2e0cc00e40ae87d2878650cd8e28ed0e17525f8db17b7910a"
+  },
+  {
+    "path": "preview-command.json",
+    "originalSha256": "2c9a6bd86f4bfb352d35c64518fb390c903ece58f5fa541f558f29fdf77806d3"
+  },
+  {
+    "path": "preview-compile.txt",
+    "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "preview-full-closure-missing.txt",
+    "originalSha256": "fd43407543580651c8ad3a6e0e7be888c6119ebf52bce86b27ccab6b4aaab923"
+  },
+  {
+    "path": "preview-results.json",
+    "originalSha256": "8b23fb0dfec36c58fd1c610a1cfb44d438829c4a12c0589394be822061e0b5cf"
+  },
+  {
+    "path": "results.json",
+    "originalSha256": "f8c52f471bb61381312c3ee05ac3fcd8e20971d96526d9c7e06fc651cc8d8b63"
+  },
+  {
+    "path": "source-manifest.json",
+    "originalSha256": "440f3c8caaa709984d2d18a898e6d7a78c0b166446eefd3ba0189c8163fe4e7f"
+  },
+  {
+    "path": "ui-command.json",
+    "originalSha256": "7d7e114ca1b104fe0414ad649bac18ca63a5bf1324e8104f65a1aad83e3f9501"
+  },
+  {
+    "path": "ui-compile.txt",
+    "originalSha256": "72d5b6b4415cfc84bd3832bc7d0f336a9dd6ab9a0cc1198973ec12c50cb24934"
+  }
+]

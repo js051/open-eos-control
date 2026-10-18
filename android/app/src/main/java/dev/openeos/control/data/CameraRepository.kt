@@ -169,10 +169,12 @@ class CameraRepository(
             liveViewRequest = request.clampTo(capabilities.liveView)
             var liveViewFrameUrl: String? = null
             var liveViewStartError: String? = null
+            var liveViewStartRetired = false
             if (startLiveView && status.shutterReleaseUnconfirmed != true &&
                 status.bulbExposureActive != true && capabilities.matrix.supports(CameraFeature.LIVE_VIEW)) {
                 try {
                     liveViewRunning = startOwnedLiveView()
+                    liveViewStartRetired = !liveViewRunning
                     if (liveViewRunning && !backend.prefersBitmapLiveViewFrames) {
                         liveViewFrameUrl = nextLiveViewFrameUrl()
                     }
@@ -196,6 +198,7 @@ class CameraRepository(
                 activeLiveViewSource = backend.activeLiveViewSource,
                 nativeLiveViewSession = backend.nativeLiveViewSession,
                 liveViewStartError = liveViewStartError,
+                liveViewStartRetired = liveViewStartRetired,
             )
         } catch (exception: Exception) {
             // Cancellation still owns any partly initialized backend until cleanup completes.
@@ -539,6 +542,7 @@ data class CameraSession(
     val activeLiveViewSource: LiveViewSource? = null,
     val nativeLiveViewSession: NativeLiveViewSession? = null,
     val liveViewStartError: String? = null,
+    val liveViewStartRetired: Boolean = false,
 )
 
 private fun CameraCapabilities.forCamera(info: CameraInfo): CameraCapabilities =
