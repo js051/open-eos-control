@@ -1,0 +1,78 @@
+[
+  {
+    "path": "contracts/media-delivery/v1/outcome-vectors.json",
+    "sha256": "09d67dfb7aa16e636718045c938fd25199a39bd69bd64db52a124e2080204f92"
+  },
+  {
+    "path": "contracts/media-type/v1/media-type-vectors.json",
+    "sha256": "d24efab5bb73d5edc1d222395322f4295c4c31a3ae180d8b3d9293ce4e4b7d14"
+  },
+  {
+    "path": "contracts/media-date-review/v1/date-review-vectors.json",
+    "sha256": "8eb57e04446478fe523c1e8cd08c0cc57b524d9fcb7f63845fc28d6d02f57e9a"
+  },
+  {
+    "path": "contracts/capture-review-evidence/v1/review-evidence-vectors.json",
+    "sha256": "aab83ace169997c2f9788ea45f2863513f0a0d99e3211143c0e60475eb7ec7b1"
+  },
+  {
+    "path": "contracts/live-view-lut/v1/numeric-vectors.json",
+    "sha256": "64a316b0809a3bb116064eaf07d9cf5c45431b51ba8f20ca3df97154bb743a64"
+  },
+  {
+    "path": "contracts/lut-import/v1/utf8-vectors.json",
+    "sha256": "570d6f8e59f1300f98ed081b617110b8c13fb365fe5153ab23d6ef8c0cb7baf4"
+  },
+  {
+    "path": "contracts/jpeg-original/v1/jpeg-original-vectors.json",
+    "sha256": "639e85317c0d5fbb72f4f5f8ebccfa696593c7c41881f43900021ccd30f1f6d1"
+  },
+  {
+    "path": "contracts/media-mutation/v1/media-mutation-vectors.json",
+    "sha256": "2d30173f8abb0538f1aa320cfce24e2fb0e01f86ef6fc54db93a052ed2fdd401"
+  },
+  {
+    "path": "contracts/media-mutation/v1/media-mutation-eligibility-vectors.json",
+    "sha256": "c7c6e27e7455ff12989cea4fab48f97fd103344ff442987a37cc4a32e3f99a1d"
+  },
+  {
+    "path": "contracts/media-upload/v1/upload-outcome-vectors.json",
+    "sha256": "dcb90087f58db32166fa86291486190a1aca1ea368ff7e74cf3342a601c8b1fd"
+  },
+  {
+    "path": "contracts/media-delete/v1/delete-outcome-vectors.json",
+    "sha256": "f42c67bc2b80185ac2198d00a59a9188b4424a4e6fa21a0f9df69f26fef15a68"
+  },
+  {
+    "path": "contracts/capture-configuration/v1/capture-configuration-vectors.json",
+    "sha256": "7a3496afc0e9f0523399a41f251d1e243f59318866549f37aeb29e6733a01aa5"
+  },
+  {
+    "path": "contracts/capture-configuration/v1/exact-value-vectors.json",
+    "sha256": "0ce969f4faaf795daae1fcc680807f1841313ef487ad3fefb1f8a682a92263c7"
+  },
+  {
+    "path": "contracts/shooting-setting/v1/shooting-setting-vectors.json",
+    "sha256": "31d0ee62c2875490a26d54dad0d435a990d074d7fc04598d34a52963a07d8864"
+  },
+  {
+    "path": "contracts/maintenance-lifecycle/v1/maintenance-vectors.json",
+    "sha256": "22bdd7fd4473db5a3ccfefb5c52c39e4141343658f0b5e75351082f6c243078b"
+  },
+  {
+    "path": "contracts/recording-lifecycle/v1/recording-vectors.json",
+    "sha256": "b96c731fee7e265ff8e7292df2e955ace44b726eb8e3fb09a90d34d1f4ff3a3c"
+  },
+  {
+    "path": "contracts/liveview-lifecycle/v1/liveview-vectors.json",
+    "sha256": "ad47258a156a2934f90300807cbabcb73ea50a8f27d27c7ae8e0f7a9e91150e2"
+  },
+  {
+    "path": "contracts/rtp-presentation/v1/monitor-vectors.json",
+    "sha256": "6809376250b9ffb91a74a4348d69b7fd03d397f03aecc47e95d5da3a0cc03e45"
+  },
+  {
+    "path": "contracts/connection-lifecycle/v1/session-creation-rejection-vectors.json",
+    "sha256": "3856273dcab8e6620ad40dd912b4ba2380b3f0650ec6c8dbd3ae70ef739934bf"
+  }
+]

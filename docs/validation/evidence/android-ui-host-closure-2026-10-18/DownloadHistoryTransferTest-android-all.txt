@@ -1,0 +1,22 @@
+JUnit version 4.13.2
+.......java.net.ProtocolException: unexpected end of stream
+	at okhttp3.internal.http1.Http1ExchangeCodec$FixedLengthSource.read(Http1ExchangeCodec.kt:379)
+	at okhttp3.internal.connection.Exchange$ResponseBodySource.read(Exchange.kt:281)
+	at okio.RealBufferedSource.request(RealBufferedSource.kt:209)
+	at okio.PeekSource.read(PeekSource.kt:50)
+	at okio.RealBufferedSource.request(RealBufferedSource.kt:209)
+	at okhttp3.Response.peekBody(Response.kt:197)
+	at dev.openeos.control.data.CcapiClient$requestMediaFile$2.invokeSuspend(CcapiClient.kt:3876)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.internal.LimitedDispatcher$Worker.run(LimitedDispatcher.kt:113)
+	at kotlinx.coroutines.scheduling.TaskImpl.run(Tasks.kt:89)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:589)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:823)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:720)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:707)
+...........
+Time: 0.505
+
+OK (18 tests)
+

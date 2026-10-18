@@ -1,0 +1,18 @@
+[
+  {
+    "class": "CameraForegroundJpegImportTest",
+    "tests": 23,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:48:59.574865+00:00",
+    "end": "2026-10-18T09:49:11.736945+00:00"
+  },
+  {
+    "class": "CameraMediaPreviewOwnershipTest",
+    "tests": 28,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:49:11.737152+00:00",
+    "end": "2026-10-18T09:49:29.052753+00:00"
+  }
+]

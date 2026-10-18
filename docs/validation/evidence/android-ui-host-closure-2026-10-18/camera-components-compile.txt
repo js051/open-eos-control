@@ -1,0 +1,156 @@
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:202:14: error: unresolved reference 'CameraActions'.
+    actions: CameraActions,
+             ^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:236:67: error: unresolved reference 'openCaptureReview'.
+                    if (hasNotice) showStatus = true else actions.openCaptureReview()
+                                                                  ^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:287:9: error: unresolved reference 'CaptureReviewStatusDialog'.
+        CaptureReviewStatusDialog(state, actions) { showStatus = false }
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:326:49: error: unresolved reference 'CameraActions'.
+fun CameraHeader(state: CameraUiState, actions: CameraActions) {
+                                                ^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:350:33: error: unresolved reference 'setUiMode'.
+            onFirst = { actions.setUiMode(UiMode.CONTROL) },
+                                ^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:351:34: error: unresolved reference 'setUiMode'.
+            onSecond = { actions.setUiMode(UiMode.DEBUG) },
+                                 ^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:354:104: error: unresolved reference 'disconnect'.
+        ToolIconButton(LucideR.drawable.lucide_ic_unplug, stringResource(R.string.disconnect), actions.disconnect)
+                                                                                                       ^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:361:56: error: unresolved reference 'CameraActions'.
+fun CameraOverlayHeader(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
+                                                       ^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:408:23: error: unresolved reference 'setHudVisible'.
+            { actions.setHudVisible(false) },
+                      ^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:437:14: error: unresolved reference 'CameraActions'.
+    actions: CameraActions,
+             ^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:447:9: error: unresolved reference 'DarkSheetSystemBarsEffect'.
+        DarkSheetSystemBarsEffect()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:469:14: error: unresolved reference 'CameraActions'.
+    actions: CameraActions,
+             ^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:517:33: error: unresolved reference 'setUiMode'.
+                        actions.setUiMode(UiMode.MEDIA)
+                                ^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:526:29: error: unresolved reference 'openPicker'.
+                    actions.openPicker(SettingPicker.MORE)
+                            ^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:534:29: error: unresolved reference 'openPicker'.
+                    actions.openPicker(SettingPicker.LANGUAGE)
+                            ^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:542:29: error: unresolved reference 'setUiMode'.
+                    actions.setUiMode(UiMode.DEBUG)
+                            ^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:550:29: error: unresolved reference 'disconnect'.
+                    actions.disconnect()
+                            ^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:965:50: error: unresolved reference 'CameraActions'.
+fun LiveViewFrame(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
+                                                 ^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1235:76: error: unresolved reference 'tapFocus'.
+                                        LiveViewTapAction.FOCUS -> actions.tapFocus(point.x, point.y)
+                                                                           ^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1236:84: error: unresolved reference 'clickWhiteBalance'.
+                                        LiveViewTapAction.WHITE_BALANCE -> actions.clickWhiteBalance(point.x, point.y)
+                                                                                   ^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1290:17: error: unresolved reference 'CameraReportedFocusOverlay'.
+                CameraReportedFocusOverlay(state.cameraFocusInfo, state.cameraFocusInfoAtMillis, sourceAspectRatio, displayAspectRatio)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1293:40: error: cannot infer type for type parameter 'R'. Specify it explicitly.
+                state.cameraFocusInfo?.let { !focusInfoMatchesImage(it, sourceAspectRatio) } == true ||
+                                       ^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1293:47: error: unresolved reference 'focusInfoMatchesImage'.
+                state.cameraFocusInfo?.let { !focusInfoMatchesImage(it, sourceAspectRatio) } == true ||
+                                              ^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1296:17: error: unresolved reference 'FocusIndicator'.
+                FocusIndicator(state.focusPoint, state.focusFeedback, displayAspectRatio)
+                ^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1320:29: error: unresolved reference 'setLiveViewTapAction'.
+                    actions.setLiveViewTapAction(
+                            ^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1342:13: error: unresolved reference 'CameraAutofocusButton'.
+            CameraAutofocusButton(state, actions, Modifier.align(Alignment.BottomEnd).zIndex(1f)
+            ^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1366:69: error: unresolved reference 'setLiveViewMagnification'.
+                            .clickable(enabled = enabled) { actions.setLiveViewMagnification(target) }
+                                                                    ^^^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1567:63: error: unresolved reference 'cameraHudHeight'.
+    this.padding(top = CAMERA_OVERLAY_HEADER_HEIGHT, bottom = cameraHudHeight())
+                                                              ^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1586:5: error: return type mismatch: expected 'Dp', actual 'Comparable<String & Dp>'.
+    if (state.hudVisible) cameraHudHeight() + 12.dp else 12.dp
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1586:27: error: unresolved reference 'cameraHudHeight'.
+    if (state.hudVisible) cameraHudHeight() + 12.dp else 12.dp
+                          ^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1803:28: error: unresolved reference 'cameraRotationQuadrant'.
+    val rotationQuadrant = cameraRotationQuadrant(LocalCameraControlTargetRotation.current)
+                           ^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1834:50: error: unresolved reference 'CameraActions'.
+fun ExposureStrip(state: CameraUiState, actions: CameraActions, modifier: Modifier = Modifier) {
+                                                 ^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1837:24: error: unresolved reference 'localizedCameraValue'.
+    val whiteBalance = localizedCameraValue("whitebalance", exposure?.whiteBalance ?: "-")
+                       ^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1838:31: error: unresolved reference 'localizedHudWhiteBalance'.
+    val compactWhiteBalance = localizedHudWhiteBalance(exposure?.whiteBalance ?: "-")
+                              ^^^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1840:163: error: unresolved reference 'openPicker'.
+        ExposureCell(SettingPicker.ISO, stringResource(R.string.iso), exposure?.iso ?: "-", available && state.capabilities?.iso?.isNotEmpty() == true) { actions.openPicker(SettingPicker.ISO) }
+                                                                                                                                                                  ^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1841:179: error: unresolved reference 'openPicker'.
+        ExposureCell(SettingPicker.SHUTTER, stringResource(R.string.shutter), exposure?.shutter ?: "-", available && state.capabilities?.shutter?.isNotEmpty() == true) { actions.openPicker(SettingPicker.SHUTTER) }
+                                                                                                                                                                                  ^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1842:183: error: unresolved reference 'openPicker'.
+        ExposureCell(SettingPicker.APERTURE, stringResource(R.string.aperture), exposure?.aperture ?: "-", available && state.capabilities?.aperture?.isNotEmpty() == true) { actions.openPicker(SettingPicker.APERTURE) }
+                                                                                                                                                                                      ^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1844:56: error: unresolved reference 'openPicker'.
+            valueDescription = whiteBalance) { actions.openPicker(SettingPicker.WHITE_BALANCE) }
+                                                       ^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1898:50: error: unresolved reference 'CameraActions'.
+fun CaptureButton(state: CameraUiState, actions: CameraActions) {
+                                                 ^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1945:44: error: unresolved reference 'retryShutterRelease'.
+                    releaseOnly -> actions.retryShutterRelease()
+                                           ^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1946:51: error: unresolved reference 'toggleBulbExposure'.
+                    bulbActive || bulb -> actions.toggleBulbExposure()
+                                                  ^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1947:38: error: unresolved reference 'captureStill'.
+                    photo -> actions.captureStill()
+                                     ^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraComponents.kt:1948:37: error: unresolved reference 'toggleRecording'.
+                    else -> actions.toggleRecording()
+                                    ^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraRotatingLayout.kt:126:12: error: unresolved reference 'cameraRotationQuadrant'.
+    return cameraRotationQuadrant(rotationDegrees) % 2 == 1
+           ^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/NativeRtpMonitorSampler.kt:10:33: error: unresolved reference 'NativeRtpMonitorEvidence'.
+import dev.openeos.control.data.NativeRtpMonitorEvidence
+                                ^^^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/NativeRtpMonitorSampler.kt:136:24: error: unresolved reference 'NativeRtpMonitorEvidence'.
+        val evidence = NativeRtpMonitorEvidence(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraOrientationTest.kt:179:25: error: unresolved reference 'cameraRotationQuadrant'.
+        assertEquals(0, cameraRotationQuadrant(0f))
+                        ^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraOrientationTest.kt:180:25: error: unresolved reference 'cameraRotationQuadrant'.
+        assertEquals(1, cameraRotationQuadrant(90f))
+                        ^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraOrientationTest.kt:181:25: error: unresolved reference 'cameraRotationQuadrant'.
+        assertEquals(2, cameraRotationQuadrant(180f))
+                        ^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraOrientationTest.kt:182:25: error: unresolved reference 'cameraRotationQuadrant'.
+        assertEquals(3, cameraRotationQuadrant(270f))
+                        ^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraOrientationTest.kt:183:25: error: unresolved reference 'cameraRotationQuadrant'.
+        assertEquals(3, cameraRotationQuadrant(-90f))
+                        ^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraOrientationTest.kt:184:25: error: unresolved reference 'cameraRotationQuadrant'.
+        assertEquals(0, cameraRotationQuadrant(720f))
+                        ^^^^^^^^^^^^^^^^^^^^^^

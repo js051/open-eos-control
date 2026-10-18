@@ -47,6 +47,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [35], manifest = org.robolectric.annotation.Config.NONE)
 class DownloadHistoryTransferTest {
     @get:Rule val temporary = TemporaryFolder()
 

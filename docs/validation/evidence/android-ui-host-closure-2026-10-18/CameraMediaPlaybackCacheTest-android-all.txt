@@ -1,0 +1,13 @@
+JUnit version 4.13.2
+..E...
+Time: 0.191
+There was 1 failure:
+1) classifiesStorageFailureThroughWrappedErrno(dev.openeos.control.ui.CameraMediaPlaybackCacheTest)
+java.lang.UnsatisfiedLinkError: 'void android.system.OsConstants.initConstants()'
+	at android.system.OsConstants.initConstants(Native Method)
+	at android.system.OsConstants.<clinit>(OsConstants.java:1250)
+	at dev.openeos.control.ui.CameraMediaPlaybackCacheTest.classifiesStorageFailureThroughWrappedErrno(CameraMediaPlaybackCacheTest.kt:59)
+
+FAILURES!!!
+Tests run: 5,  Failures: 1
+

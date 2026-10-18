@@ -13,6 +13,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [35], manifest = org.robolectric.annotation.Config.NONE)
 class CameraMediaPlaybackCacheTest {
     @get:Rule
     val temporaryFolder = TemporaryFolder()

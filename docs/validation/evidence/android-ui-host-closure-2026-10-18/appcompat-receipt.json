@@ -1,0 +1,15 @@
+[
+  {
+    "file": "appcompat-1.7.1.aar",
+    "coordinate": "androidx.appcompat:appcompat:1.7.1",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/appcompat/appcompat/1.7.1/appcompat-1.7.1.aar",
+    "official_sha1": "6c5b56046c7b08e7bf94b6dd14cb616453e6be11",
+    "sha256": "2ad334a323b28046e89b738c77d184cb3dcca32a551ab048851b2fda23a3ba26",
+    "bytes": 1148656,
+    "utc": "2026-10-18T09:57:47.762867+00:00",
+    "classes_jar": {
+      "file": "appcompat-1.7.1-classes.jar",
+      "sha256": "db91fd8da93c0681613374e7ac0b657aaf0148e26d080f30c521098a182017b1"
+    }
+  }
+]

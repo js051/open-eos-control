@@ -1,0 +1,10 @@
+[
+  {
+    "path": "android/app/src/test/java/dev/openeos/control/ui/CameraForegroundJpegImportTest.kt",
+    "sha256": "d489813626b7bb6d84275075b030aedd8b81eed76a950af2d3d8f55c32eed9dd"
+  },
+  {
+    "path": "android/app/src/test/java/dev/openeos/control/ui/CameraMediaPreviewOwnershipTest.kt",
+    "sha256": "642142971f5877e108332633b2b46e251a4fb348bdac05ca0e2ddefae538ff3f"
+  }
+]

@@ -1,0 +1,466 @@
+[
+  {
+    "class": "MediaFolderFilterTest",
+    "tests": 8,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:24.898927+00:00",
+    "end": "2026-10-18T09:53:25.168987+00:00"
+  },
+  {
+    "class": "LiveViewGeometryTest",
+    "tests": 5,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:25.169293+00:00",
+    "end": "2026-10-18T09:53:25.384176+00:00"
+  },
+  {
+    "class": "NativeFrameSamplingGateTest",
+    "tests": 8,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:25.384494+00:00",
+    "end": "2026-10-18T09:53:25.549074+00:00"
+  },
+  {
+    "class": "SavedJpegHandoffControllerTest",
+    "tests": 6,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:25.549358+00:00",
+    "end": "2026-10-18T09:53:25.964976+00:00"
+  },
+  {
+    "class": "MediaTypeContractTest",
+    "tests": 10,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:25.965290+00:00",
+    "end": "2026-10-18T09:53:26.380740+00:00"
+  },
+  {
+    "class": "CameraCapturePreviewListingTest",
+    "tests": 11,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:26.381154+00:00",
+    "end": "2026-10-18T09:53:34.412452+00:00"
+  },
+  {
+    "class": "CameraImportHandoffTest",
+    "tests": 2,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:34.412814+00:00",
+    "end": "2026-10-18T09:53:34.783567+00:00"
+  },
+  {
+    "class": "LiveViewLutNumericContractTest",
+    "tests": 5,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:34.783915+00:00",
+    "end": "2026-10-18T09:53:35.150069+00:00"
+  },
+  {
+    "class": "CameraMediaPlaybackCacheTest",
+    "tests": 5,
+    "failures": 1,
+    "exit": 1,
+    "start": "2026-10-18T09:53:35.150542+00:00",
+    "end": "2026-10-18T09:53:35.566469+00:00"
+  },
+  {
+    "class": "StringResourcesTest",
+    "tests": 3,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:35.566751+00:00",
+    "end": "2026-10-18T09:53:36.040189+00:00"
+  },
+  {
+    "class": "MediaOutputFinalizationTest",
+    "tests": 8,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:36.040640+00:00",
+    "end": "2026-10-18T09:53:36.512733+00:00"
+  },
+  {
+    "class": "MediaDateReviewContractTest",
+    "tests": 10,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:36.513038+00:00",
+    "end": "2026-10-18T09:53:36.987257+00:00"
+  },
+  {
+    "class": "MediaDateRangeTest",
+    "tests": 9,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:36.987593+00:00",
+    "end": "2026-10-18T09:53:37.353080+00:00"
+  },
+  {
+    "class": "ShootingSettingSharedContractTest",
+    "tests": 3,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:37.353387+00:00",
+    "end": "2026-10-18T09:53:37.668769+00:00"
+  },
+  {
+    "class": "CubeLutImporterTest",
+    "tests": 18,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:37.669198+00:00",
+    "end": "2026-10-18T09:53:37.990617+00:00"
+  },
+  {
+    "class": "LiveViewMonitoringTest",
+    "tests": 10,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:37.991025+00:00",
+    "end": "2026-10-18T09:53:38.208816+00:00"
+  },
+  {
+    "class": "CaptureReviewEvidenceTest",
+    "tests": 5,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:38.209239+00:00",
+    "end": "2026-10-18T09:53:38.474460+00:00"
+  },
+  {
+    "class": "MediaMutationEligibilityTest",
+    "tests": 2,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:38.474767+00:00",
+    "end": "2026-10-18T09:53:38.793053+00:00"
+  },
+  {
+    "class": "MediaDeleteBatchTest",
+    "tests": 10,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:38.793395+00:00",
+    "end": "2026-10-18T09:53:39.058947+00:00"
+  },
+  {
+    "class": "CameraImportHandoffOwnerTest",
+    "tests": 8,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:39.059395+00:00",
+    "end": "2026-10-18T09:53:39.475910+00:00"
+  },
+  {
+    "class": "MediaRatingFilterStateTest",
+    "tests": 5,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:39.476362+00:00",
+    "end": "2026-10-18T09:53:39.751619+00:00"
+  },
+  {
+    "class": "LiveViewDecodeFailureTest",
+    "tests": 6,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:39.753303+00:00",
+    "end": "2026-10-18T09:53:40.022844+00:00"
+  },
+  {
+    "class": "ForegroundJpegImportPolicyTest",
+    "tests": 20,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:40.023274+00:00",
+    "end": "2026-10-18T09:53:40.238265+00:00"
+  },
+  {
+    "class": "CaptureConfigurationSharedContractTest",
+    "tests": 4,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:40.238696+00:00",
+    "end": "2026-10-18T09:53:40.656766+00:00"
+  },
+  {
+    "class": "DownloadContinuationDraftTest",
+    "tests": 5,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:40.657295+00:00",
+    "end": "2026-10-18T09:53:40.876614+00:00"
+  },
+  {
+    "class": "ForegroundJpegImportRunnerTest",
+    "tests": 17,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:40.877028+00:00",
+    "end": "2026-10-18T09:53:41.295967+00:00"
+  },
+  {
+    "class": "CameraMediaPickerRequestsTest",
+    "tests": 10,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:41.296346+00:00",
+    "end": "2026-10-18T09:53:41.511066+00:00"
+  },
+  {
+    "class": "MediaDeliveryOutcomeContractTest",
+    "tests": 5,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:41.511564+00:00",
+    "end": "2026-10-18T09:53:41.826643+00:00"
+  },
+  {
+    "class": "CameraAppErrorTest",
+    "tests": 4,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:41.827149+00:00",
+    "end": "2026-10-18T09:53:42.042915+00:00"
+  },
+  {
+    "class": "SavedJpegStagingTest",
+    "tests": 9,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:42.043432+00:00",
+    "end": "2026-10-18T09:53:42.409045+00:00"
+  },
+  {
+    "class": "MediaScreenActionGateTest",
+    "tests": 6,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:42.409458+00:00",
+    "end": "2026-10-18T09:53:42.627674+00:00"
+  },
+  {
+    "class": "MaintenanceWorkflowTest",
+    "tests": 44,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:42.628044+00:00",
+    "end": "2026-10-18T09:53:43.046651+00:00"
+  },
+  {
+    "class": "DownloadHistoryTransferTest",
+    "tests": 18,
+    "failures": 1,
+    "exit": 1,
+    "start": "2026-10-18T09:53:43.047145+00:00",
+    "end": "2026-10-18T09:53:43.869085+00:00"
+  },
+  {
+    "class": "MediaReviewSelectionTest",
+    "tests": 6,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:43.869686+00:00",
+    "end": "2026-10-18T09:53:44.136967+00:00"
+  },
+  {
+    "class": "MediaDeleteSelectionTest",
+    "tests": 6,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:44.137350+00:00",
+    "end": "2026-10-18T09:53:44.354793+00:00"
+  },
+  {
+    "class": "ShootingSettingJsonTest",
+    "tests": 3,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:44.355194+00:00",
+    "end": "2026-10-18T09:53:44.570595+00:00"
+  },
+  {
+    "class": "MediaDeleteSharedContractTest",
+    "tests": 7,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:44.570979+00:00",
+    "end": "2026-10-18T09:53:45.037805+00:00"
+  },
+  {
+    "class": "CaptureConfigurationWorkflowTest",
+    "tests": 23,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:45.038191+00:00",
+    "end": "2026-10-18T09:53:45.403625+00:00"
+  },
+  {
+    "class": "MediaDownloadBatchPolicyTest",
+    "tests": 6,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:45.404413+00:00",
+    "end": "2026-10-18T09:53:45.723148+00:00"
+  },
+  {
+    "class": "CameraUiStateTest",
+    "tests": 15,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:45.723714+00:00",
+    "end": "2026-10-18T09:53:46.241202+00:00"
+  },
+  {
+    "class": "MediaMetadataBatchTest",
+    "tests": 14,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:46.241641+00:00",
+    "end": "2026-10-18T09:53:46.508119+00:00"
+  },
+  {
+    "class": "OfflinePreviewTest",
+    "tests": 1,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:46.508547+00:00",
+    "end": "2026-10-18T09:53:46.725700+00:00"
+  },
+  {
+    "class": "PlannedMediaDownloadBatchTest",
+    "tests": 21,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:46.726598+00:00",
+    "end": "2026-10-18T09:53:47.547438+00:00"
+  },
+  {
+    "class": "ShootingSettingWorkflowTest",
+    "tests": 17,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:47.547825+00:00",
+    "end": "2026-10-18T09:53:47.864964+00:00"
+  },
+  {
+    "class": "CaptureConfigurationJsonBoundaryTest",
+    "tests": 4,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:47.865380+00:00",
+    "end": "2026-10-18T09:53:48.080064+00:00"
+  },
+  {
+    "class": "MediaSaveRequestTest",
+    "tests": 3,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:48.080489+00:00",
+    "end": "2026-10-18T09:53:48.246541+00:00"
+  },
+  {
+    "class": "MaintenanceSharedContractTest",
+    "tests": 3,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:48.246948+00:00",
+    "end": "2026-10-18T09:53:48.666936+00:00"
+  },
+  {
+    "class": "DeliveredJpegStoreTest",
+    "tests": 12,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:48.667540+00:00",
+    "end": "2026-10-18T09:53:49.037371+00:00"
+  },
+  {
+    "class": "MediaDateRangeStateTest",
+    "tests": 5,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:49.038102+00:00",
+    "end": "2026-10-18T09:53:49.253800+00:00"
+  },
+  {
+    "class": "CameraMediaGalleryStoreTest",
+    "tests": 3,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:49.254264+00:00",
+    "end": "2026-10-18T09:53:49.530933+00:00"
+  },
+  {
+    "class": "MediaMutationContractTest",
+    "tests": 4,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:49.531553+00:00",
+    "end": "2026-10-18T09:53:49.998094+00:00"
+  },
+  {
+    "class": "AndroidManifestTest",
+    "tests": 2,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:49.998610+00:00",
+    "end": "2026-10-18T09:53:50.314850+00:00"
+  },
+  {
+    "class": "CaptureReviewEvidenceContractTest",
+    "tests": 3,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:50.315606+00:00",
+    "end": "2026-10-18T09:53:50.730916+00:00"
+  },
+  {
+    "class": "MaintenanceJsonTest",
+    "tests": 8,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:50.731401+00:00",
+    "end": "2026-10-18T09:53:50.946291+00:00"
+  },
+  {
+    "class": "CaptureConfigurationExactValueTest",
+    "tests": 3,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:50.946957+00:00",
+    "end": "2026-10-18T09:53:51.312197+00:00"
+  },
+  {
+    "class": "DiagnosticsTest",
+    "tests": 14,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:51.312722+00:00",
+    "end": "2026-10-18T09:53:51.631363+00:00"
+  },
+  {
+    "class": "MediaRatingFilterTest",
+    "tests": 11,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:51.631844+00:00",
+    "end": "2026-10-18T09:53:51.900578+00:00"
+  },
+  {
+    "class": "MediaUploadContractTest",
+    "tests": 5,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:53:51.901026+00:00",
+    "end": "2026-10-18T09:53:52.266319+00:00"
+  }
+]
