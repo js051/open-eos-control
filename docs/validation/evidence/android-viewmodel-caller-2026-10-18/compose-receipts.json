@@ -1,0 +1,50 @@
+[
+  {
+    "file": "runtime-android-1.7.6.aar",
+    "coordinate": "androidx.compose.runtime:runtime-android:1.7.6",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime-android/1.7.6/runtime-android-1.7.6.aar",
+    "official_sha1": "4a413ce3ef6d1c1e9f8fdc47613154bbd6780ede",
+    "sha256": "482942683274e1961727b2a76d68fe4ab4abb8145fd8b3146142144ce0b25311",
+    "bytes": 2415630,
+    "utc": "2026-10-18T09:24:07.326359+00:00",
+    "classes_jar": {
+      "file": "runtime-android-1.7.6-classes.jar",
+      "sha256": "aeb2a678f6ce36634e12716be30bd2e8ea768b0e534687983d7fea703142978b"
+    }
+  },
+  {
+    "file": "ui-android-1.7.6.aar",
+    "coordinate": "androidx.compose.ui:ui-android:1.7.6",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-android/1.7.6/ui-android-1.7.6.aar",
+    "official_sha1": "50f44a3b5cd79ed21f7c02e48b30129702200a56",
+    "sha256": "42df06e3390808c85256a7efd74d448da71cbc168b41497a30535045c926f5b0",
+    "bytes": 5031134,
+    "utc": "2026-10-18T09:24:13.136224+00:00",
+    "classes_jar": {
+      "file": "ui-android-1.7.6-classes.jar",
+      "sha256": "83346f5e42f5738a1cb277d52f2c2d5d1c9de765f37d6b538fe243fd7c1640d0"
+    }
+  },
+  {
+    "file": "ui-util-android-1.7.6.aar",
+    "coordinate": "androidx.compose.ui:ui-util-android:1.7.6",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-util-android/1.7.6/ui-util-android-1.7.6.aar",
+    "official_sha1": "943ea447286231a4f72379a76e298c705e534258",
+    "sha256": "f74120949fd8f82fbfbcc3793246108f9554df0f51ecc7fb5d721ac971c4394a",
+    "bytes": 15696,
+    "utc": "2026-10-18T09:24:18.824608+00:00",
+    "classes_jar": {
+      "file": "ui-util-android-1.7.6-classes.jar",
+      "sha256": "6c35a2d572ec444c31a2231aabe3dcd544e66ee9d1b58c5ed2b9f8f351140f11"
+    }
+  },
+  {
+    "file": "kotlin-compose-compiler-plugin-embeddable-2.2.21.jar",
+    "coordinate": "org.jetbrains.kotlin:kotlin-compose-compiler-plugin-embeddable:2.2.21",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compose-compiler-plugin-embeddable/2.2.21/kotlin-compose-compiler-plugin-embeddable-2.2.21.jar",
+    "official_sha1": "3ef063abec8bd058e67ff430787c743465a9df24",
+    "sha256": "bd6b2db8bbf5ef1c12888ae885b72054e70cea7ef4d6e8bb5eca4faa0539393f",
+    "bytes": 935264,
+    "utc": "2026-10-18T09:24:34.619872+00:00"
+  }
+]

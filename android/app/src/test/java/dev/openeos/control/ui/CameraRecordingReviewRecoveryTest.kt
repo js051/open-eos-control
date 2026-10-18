@@ -1046,8 +1046,8 @@ private class RecordingReviewPeer {
                         }
                     }
                     path == "/ccapi/media" -> {
-                        if (failListing.get()) return MockResponse().setResponseCode(503)
                         countListing()
+                        if (failListing.get()) return MockResponse().setResponseCode(503)
                         val names = visibleItems()
                         hold(nextListing)
                         json(JSONObject().put("items", JSONArray(names.map { name -> JSONObject()

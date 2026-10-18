@@ -1,0 +1,11 @@
+[
+  {
+    "file": "annotation-jvm-1.6.0.jar",
+    "coordinate": "androidx.annotation:annotation-jvm:1.6.0",
+    "url": "https://dl.google.com/dl/android/maven2/androidx/annotation/annotation-jvm/1.6.0/annotation-jvm-1.6.0.jar",
+    "official_sha1": "a7257339a052df0f91433cf9651231bbb802b502",
+    "sha256": "60b10b5ef5769b79570172e015b8159405c92f034ba88b9391a977589c9deb4e",
+    "bytes": 55218,
+    "utc": "2026-10-18T09:21:26.399859+00:00"
+  }
+]

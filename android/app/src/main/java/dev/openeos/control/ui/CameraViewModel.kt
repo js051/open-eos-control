@@ -15,6 +15,10 @@ import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.openeos.control.data.MaintenanceAction
+import dev.openeos.control.data.MaintenanceStopEvidence
+import dev.openeos.control.data.MaintenanceRestoreEvidence
+import dev.openeos.control.data.maintenanceMayRetryStop
+import dev.openeos.control.data.maintenanceRestoreStopSafe
 import dev.openeos.control.data.MaintenanceRequest
 import dev.openeos.control.data.MaintenanceClockTarget
 import dev.openeos.control.data.MaintenanceClockEvidence
