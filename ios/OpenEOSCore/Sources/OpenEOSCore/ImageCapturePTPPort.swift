@@ -70,6 +70,7 @@ public enum ImageCapturePTP {
         case nativeFailure
         case unsupportedWireContract
         case unsupportedSessionReuse
+        case unsupportedConcurrentSession
     }
 
     /// Names/order follow Apple's Objective-C completion declaration. No interpretation

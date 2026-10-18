@@ -20,3 +20,9 @@
 [收據與重現資料](evidence/ios-ptp-apple-lifecycle-2026-10-18/)。官方 API 來源清單保留於該證據目錄。這是 #129 的未接線原碼與已執行共享核心測試，尚不是可用 iOS USB provider。
 
 Release Assessment：none。無版本、tag 或 release。
+
+## 單 native session 的保守限制
+
+官方未承諾跨 browser 的 ICCameraDevice 物件穩定性，不能據新物件判斷它必為另一實體相機。adapter 在建立任何新 session 資源前要求 sessions 為空；任何 open／close／逾時／失敗責任仍 retained 時均回 openNotDispatched(unsupportedConcurrentSession)。只有 confirmed close 的 release 才移除原 context。同步 close completion 在 release 前的重入仍可能被保守拒絕，需再次明確選擇，不自動重試。
+
+這是 **source-only** 的單 native session 限制；同樣 NOT_COMPILED／NOT_RUN，不證明實體身分、框架釋放或跨 browser 重開安全。共享核心 64 項回歸僅核事件型別與既有拒絕／清理契約，不能驗證 Apple guard 的原生執行。
