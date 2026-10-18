@@ -1,0 +1,162 @@
+{
+  "attempt1-command.json": [
+    "<EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/bin/swift",
+    "test",
+    "--package-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/slice",
+    "--cache-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/cache",
+    "--config-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/config",
+    "--security-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/security",
+    "--scratch-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/build",
+    "--skip-update",
+    "--disable-netrc",
+    "--jobs",
+    "2"
+  ],
+  "attempt1-result.json": {
+    "exit": 1,
+    "start": "2026-10-18T11:37:15.525222+00:00",
+    "end": "2026-10-18T11:37:16.341942+00:00",
+    "source_unchanged": true
+  },
+  "attempt1-source-manifest.json": [
+    {
+      "path": "Package.swift",
+      "sha256": "0fd40c2a51da0b096efad2332742f6ae66b352587031ae06e6c61d2cbe73ef8f"
+    },
+    {
+      "path": "Sources/OpenEOSCore/ImageCapturePTPPort.swift",
+      "sha256": "23010b9df1ca16cb9918cc39fdc1cb887dd02405ac707015545d423b515e4fd4"
+    },
+    {
+      "path": "Sources/OpenEOSCore/ImageCapturePTPStateMachine.swift",
+      "sha256": "38cf2893d1cf04a6101d523d10c0f32e92731f30c5beed06b06957f68d59a81f"
+    },
+    {
+      "path": "Sources/OpenEOSCore/ImageCapturePTPCoordinator.swift",
+      "sha256": "5a16d1f07c90f3bc89520ca96731280bd2f65e8cc9c2e228d516aa5de1abaa20"
+    },
+    {
+      "path": "Tests/OpenEOSCoreTests/ImageCapturePTPStateMachineTests.swift",
+      "sha256": "55ccf7774eacb36668995235f1c4064c6dfaa109b57f4b09b49e3e3da5fa05be"
+    },
+    {
+      "path": "Tests/OpenEOSCoreTests/ImageCapturePTPCoordinatorTests.swift",
+      "sha256": "e70751694597c3bce10d12f4fc6f54fe66db7ec373b58d9f534f70f212c6988b"
+    }
+  ],
+  "attempt2-command.json": [
+    "<EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/bin/swift",
+    "test",
+    "--package-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/slice",
+    "--cache-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/cache",
+    "--config-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/config",
+    "--security-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/security",
+    "--scratch-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/build",
+    "--skip-update",
+    "--disable-netrc",
+    "--jobs",
+    "2"
+  ],
+  "attempt2-result.json": {
+    "exit": 1,
+    "start": "2026-10-18T15:13:15.476166+00:00",
+    "end": "2026-10-18T15:13:22.827853+00:00",
+    "source_unchanged": true
+  },
+  "attempt2-source-manifest.json": [
+    {
+      "path": "Package.swift",
+      "sha256": "0fd40c2a51da0b096efad2332742f6ae66b352587031ae06e6c61d2cbe73ef8f"
+    },
+    {
+      "path": "Sources/OpenEOSCore/ImageCapturePTPPort.swift",
+      "sha256": "23010b9df1ca16cb9918cc39fdc1cb887dd02405ac707015545d423b515e4fd4"
+    },
+    {
+      "path": "Sources/OpenEOSCore/ImageCapturePTPStateMachine.swift",
+      "sha256": "38cf2893d1cf04a6101d523d10c0f32e92731f30c5beed06b06957f68d59a81f"
+    },
+    {
+      "path": "Sources/OpenEOSCore/ImageCapturePTPCoordinator.swift",
+      "sha256": "a9826fc71b7d8a6092b92ce16b2c8dfc010c2e4288fc8b04c1dd61e07766c7d3"
+    },
+    {
+      "path": "Tests/OpenEOSCoreTests/ImageCapturePTPStateMachineTests.swift",
+      "sha256": "55ccf7774eacb36668995235f1c4064c6dfaa109b57f4b09b49e3e3da5fa05be"
+    },
+    {
+      "path": "Tests/OpenEOSCoreTests/ImageCapturePTPCoordinatorTests.swift",
+      "sha256": "f148138599a5a8340d4d2a459ec88d9fa49490a17ac4e5e26b1f4102a8435d90"
+    }
+  ],
+  "command.json": [
+    "<EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/bin/swift",
+    "test",
+    "--package-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/slice",
+    "--cache-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/cache",
+    "--config-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/config",
+    "--security-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/security",
+    "--scratch-path",
+    "<EOS_WORKSPACE>/ptp-coordinator-validation/build",
+    "--skip-update",
+    "--disable-netrc",
+    "--jobs",
+    "2"
+  ],
+  "environment.json": {
+    "CLANG_MODULE_CACHE_PATH": "<EOS_WORKSPACE>/ptp-coordinator-validation/module-cache",
+    "SWIFT_MODULECACHE_PATH": "<EOS_WORKSPACE>/ptp-coordinator-validation/module-cache",
+    "XDG_CACHE_HOME": "<EOS_WORKSPACE>/ptp-coordinator-validation/xdg-cache"
+  },
+  "result.json": {
+    "exit": 0,
+    "start": "2026-10-18T15:13:44.716977+00:00",
+    "end": "2026-10-18T15:13:49.100294+00:00",
+    "source_unchanged": true,
+    "xctest_tests": 37,
+    "xctest_failures": 0,
+    "existing_test_bodies_unchanged": true,
+    "new_coordinator_tests": 8,
+    "scope": "Foundation-only original-source PTP slice; no native ImageCaptureCore or wire validation"
+  },
+  "source-manifest.json": [
+    {
+      "path": "Package.swift",
+      "sha256": "0fd40c2a51da0b096efad2332742f6ae66b352587031ae06e6c61d2cbe73ef8f"
+    },
+    {
+      "path": "Sources/OpenEOSCore/ImageCapturePTPPort.swift",
+      "sha256": "23010b9df1ca16cb9918cc39fdc1cb887dd02405ac707015545d423b515e4fd4"
+    },
+    {
+      "path": "Sources/OpenEOSCore/ImageCapturePTPStateMachine.swift",
+      "sha256": "38cf2893d1cf04a6101d523d10c0f32e92731f30c5beed06b06957f68d59a81f"
+    },
+    {
+      "path": "Sources/OpenEOSCore/ImageCapturePTPCoordinator.swift",
+      "sha256": "a9826fc71b7d8a6092b92ce16b2c8dfc010c2e4288fc8b04c1dd61e07766c7d3"
+    },
+    {
+      "path": "Tests/OpenEOSCoreTests/ImageCapturePTPStateMachineTests.swift",
+      "sha256": "55ccf7774eacb36668995235f1c4064c6dfaa109b57f4b09b49e3e3da5fa05be"
+    },
+    {
+      "path": "Tests/OpenEOSCoreTests/ImageCapturePTPCoordinatorTests.swift",
+      "sha256": "8b5eea66f3f7b9879cd86fac084a5dd81e2e740a80f0782ceb65248849a9e828"
+    }
+  ]
+}

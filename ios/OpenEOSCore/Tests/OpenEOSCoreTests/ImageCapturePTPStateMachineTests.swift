@@ -525,39 +525,32 @@ final class ImageCapturePTPStateMachineTests: XCTestCase {
     }
 }
 
-/// Scripted callbacks exercise the production reducer and admission method. This
-/// fake has no mirrored lifecycle model, packet encoder, timer, or native I/O.
-private final class FakeImageCapturePTPPort: ImageCapturePTPPort {
+/// Scripted callbacks exercise the production coordinator, reducer and admission.
+/// This fake has no lifecycle model, effect pump, packet encoder, timer, or native I/O.
+private final class FakeImageCapturePTPPort {
     typealias PTP = ImageCapturePTP
-    var receive: ((PTP.Event) -> Void)?
-    var state: ImageCapturePTPStateMachine
-    var performed: [PTP.Effect] = []
-    var onPerform: ((PTP.Effect) -> Void)?
-    private var queue: [PTP.Effect] = []
-    private var draining = false
+    private let port: RecordingImageCapturePTPPort
+    private let coordinator: ImageCapturePTPCoordinator
+    var state: ImageCapturePTPStateMachine { coordinator.snapshot }
+    var performed: [PTP.Effect] { port.performed }
+    var onPerform: ((PTP.Effect) -> Void)? {
+        get { port.onPerform }
+        set { port.onPerform = newValue }
+    }
 
     init(control: PTP.Authorization = .authorized, contents: PTP.Authorization = .unknown) {
-        state = .init(authorization: .init(control: control, contents: contents))
-        receive = { [weak self] event in self?.send(event) }
+        let port = RecordingImageCapturePTPPort()
+        self.port = port
+        self.coordinator = try! ImageCapturePTPCoordinator(port: port,
+            authorization: .init(control: control, contents: contents))
     }
 
-    func perform(_ effect: PTP.Effect) {
-        performed.append(effect)
-        onPerform?(effect)
+    func emit(_ event: PTP.Event) {
+        port.receive?(event)
+        _ = coordinator.snapshot // Join callback processing for deterministic assertions.
     }
 
-    func emit(_ event: PTP.Event) { receive?(event) }
-
-    func send(_ event: PTP.Event) {
-        queue += state.receive(event)
-        guard !draining else { return }
-        draining = true
-        defer { draining = false }
-        while !queue.isEmpty {
-            let effect = queue.removeFirst()
-            if state.admit(effect) { perform(effect) }
-        }
-    }
+    func send(_ event: PTP.Event) { coordinator.send(event) }
 
     func discover(_ camera: PTP.Camera) {
         if state.discovery == nil { send(.startDiscovery) }
@@ -585,5 +578,15 @@ private final class FakeImageCapturePTPPort: ImageCapturePTPPort {
     }
     private func requests(_ extract: (PTP.Effect) -> PTP.Request?) -> [PTP.Request] {
         performed.compactMap(extract)
+    }
+}
+
+private final class RecordingImageCapturePTPPort: ImageCapturePTPPort {
+    var receive: ((ImageCapturePTP.Event) -> Void)?
+    var performed: [ImageCapturePTP.Effect] = []
+    var onPerform: ((ImageCapturePTP.Effect) -> Void)?
+    func perform(_ effect: ImageCapturePTP.Effect) {
+        performed.append(effect)
+        onPerform?(effect)
     }
 }

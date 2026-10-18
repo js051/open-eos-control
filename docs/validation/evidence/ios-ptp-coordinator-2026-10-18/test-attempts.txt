@@ -1,0 +1,133 @@
+=== attempt1-test.txt ===
+warning: '--skip-update' option is deprecated and will be removed in a future release
+error: 'slice': Invalid manifest (compiled with: ["<EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/bin/swiftc", "-vfsoverlay", "/tmp/TemporaryDirectory.XmbxRg/vfs.yaml", "-L", "<EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/lib/swift/pm/ManifestAPI", "-lPackageDescription", "-Xlinker", "-rpath", "-Xlinker", "<EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/lib/swift/pm/ManifestAPI", "-swift-version", "5", "-I", "<EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/lib/swift/pm/ManifestAPI", "-package-description-version", "5.10.0", "<EOS_WORKSPACE>/ptp-coordinator-validation/slice/Package.swift", "-o", "/tmp/TemporaryDirectory.TSY80p/slice-manifest"])
+<unknown>:0: error: unable to open output file '/home/agent/.cache/clang/ModuleCache/1BENI2BDD2VOP/SwiftShims-1AUBHXR1AC7SU.pcm': 'Read-only file system'
+<unknown>:0: error: could not build C module 'SwiftShims'
+
+=== attempt2-test.txt ===
+warning: '--skip-update' option is deprecated and will be removed in a future release
+Building for debugging...
+[Pre-planning 1 / 124]
+[Starting]
+[30 / 55] OpenEOSCore
+[32 / 55] OpenEOSCore
+[40 / 60] OpenEOSCoreTests-product
+error: SwiftCompile normal x86_64 <EOS_WORKSPACE>/ptp-coordinator-validation/slice/Tests/OpenEOSCoreTests/ImageCapturePTPCoordinatorTests.swift failed with a nonzero exit code. Command line:     cd <EOS_WORKSPACE>/ptp-coordinator-validation
+    builtin-SwiftPerFileCompile ImageCapturePTPCoordinatorTests.swift
+<EOS_WORKSPACE>/ptp-coordinator-validation/slice/Tests/OpenEOSCoreTests/ImageCapturePTPCoordinatorTests.swift:95:27: error: value of tuple type '(ImageCapturePTP.Request, seconds: UInt)' has no member 'kind'
+ 93 |         port.onPerform = { effect in
+ 94 |             guard case .armDeadline(let request) = effect,
+ 95 |                   request.kind == .deviceInfo else { return }
+    |                           `- error: value of tuple type '(ImageCapturePTP.Request, seconds: UInt)' has no member 'kind'
+ 96 |             let count = port.effects.count
+ 97 |             owner.send(.cancel)
+Failed frontend command:
+<EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/bin/swift-frontend -frontend -c <EOS_WORKSPACE>/ptp-coordinator-validation/build/out/Intermediates.noindex/OpenEOSCore.build/Debug-linux-x86_64/OpenEOSCoreTests-p.build/DerivedSources/test_anchor.swift -primary-file <EOS_WORKSPACE>/ptp-coordinator-validation/slice/Tests/OpenEOSCoreTests/ImageCapturePTPCoordinatorTests.swift <EOS_WORKSPACE>/ptp-coordinator-validation/slice/Tests/OpenEOSCoreTests/ImageCapturePTPStateMachineTests.swift -emit-dependencies-path <EOS_WORKSPACE>/ptp-coordinator-validation/build/out/Intermediates.noindex/OpenEOSCore.build/Debug-linux-x86_64/OpenEOSCoreTests-p.build/Objects-normal/x86_64/ImageCapturePTPCoordinatorTests.d -emit-const-values-path <EOS_WORKSPACE>/ptp-coordinator-validation/build/out/Intermediates.noindex/OpenEOSCore.build/Debug-linux-x86_64/OpenEOSCoreTests-p.build/Objects-normal/x86_64/ImageCapturePTPCoordinatorTests.swiftconstvalues -emit-reference-dependencies-path <EOS_WORKSPACE>/ptp-coordinator-validation/build/out/Intermediates.noindex/OpenEOSCore.build/Debug-linux-x86_64/OpenEOSCoreTests-p.build/Objects-normal/x86_64/ImageCapturePTPCoordinatorTests.swiftdeps -serialize-diagnostics-path <EOS_WORKSPACE>/ptp-coordinator-validation/build/out/Intermediates.noindex/OpenEOSCore.build/Debug-linux-x86_64/OpenEOSCoreTests-p.build/Objects-normal/x86_64/ImageCapturePTPCoordinatorTests.dia -target x86_64-unknown-linux-gnu -disable-objc-interop -I <EOS_WORKSPACE>/ptp-coordinator-validation/build/out/Products/Debug-linux-x86_64 -module-cache-path <EOS_WORKSPACE>/ptp-coordinator-validation/build/out/ModuleCache.noindex -no-color-diagnostics -Xcc -fno-color-diagnostics -enable-testing -g -debug-info-format\=dwarf -dwarf-version\=4 -swift-version 5 -Onone -D SWIFT_PACKAGE -D DEBUG -D Xcode -serialize-debugging-options -enable-experimental-feature DebugDescriptionMacro -empty-abi-descriptor -external-plugin-path <EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/lib/swift/host/plugins/testing\#<EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/bin/swift-plugin-server -validate-clang-modules-once -clang-build-session-file <EOS_WORKSPACE>/ptp-coordinator-validation/build/out/ModuleCache.noindex/Session.modulevalidation -Xcc -working-directory -Xcc <EOS_WORKSPACE>/ptp-coordinator-validation -enable-anonymous-context-mangled-names -file-compilation-dir <EOS_WORKSPACE>/ptp-coordinator-validation -Xcc -fno-omit-frame-pointer -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -Xcc -fmodules-prune-interval\=86400 -Xcc -fmodules-prune-after\=345600 -Xcc -I<EOS_WORKSPACE>/ptp-coordinator-validation/build/out/Products/Debug-linux-x86_64/include -Xcc -I<EOS_WORKSPACE>/ptp-coordinator-validation/build/out/Intermediates.noindex/OpenEOSCore.build/Debug-linux-x86_64/OpenEOSCoreTests-p.build/DerivedSources-normal/x86_64 -Xcc -I<EOS_WORKSPACE>/ptp-coordinator-validation/build/out/Intermediates.noindex/OpenEOSCore.build/Debug-linux-x86_64/OpenEOSCoreTests-p.build/DerivedSources/x86_64 -Xcc -I<EOS_WORKSPACE>/ptp-coordinator-validation/build/out/Intermediates.noindex/OpenEOSCore.build/Debug-linux-x86_64/OpenEOSCoreTests-p.build/DerivedSources -Xcc -DSWIFT_PACKAGE -Xcc -DDEBUG\=1 -no-auto-bridging-header-chaining -module-name OpenEOSCoreTests -package-name slice -const-gather-protocols-file <EOS_WORKSPACE>/ptp-coordinator-validation/build/out/Intermediates.noindex/OpenEOSCore.build/Debug-linux-x86_64/OpenEOSCoreTests-p.build/Objects-normal/x86_64/OpenEOSCoreTests_const_extract_protocols.json -in-process-plugin-server-path <EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/lib/swift/host/libSwiftInProcPluginServer.so -plugin-path <EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/lib/swift/host/plugins -plugin-path <EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/local/lib/swift/host/plugins -parse-as-library -o <EOS_WORKSPACE>/ptp-coordinator-validation/build/out/Intermediates.noindex/OpenEOSCore.build/Debug-linux-x86_64/OpenEOSCoreTests-p.build/Objects-normal/x86_64/ImageCapturePTPCoordinatorTests.o -index-unit-output-path /OpenEOSCore.build/Debug-linux-x86_64/OpenEOSCoreTests-p.build/Objects-normal/x86_64/ImageCapturePTPCoordinatorTests.o -index-store-path <EOS_WORKSPACE>/ptp-coordinator-validation/build/out -index-system-modules
+error: Build failed
+error: fatalError
+
+=== test.txt ===
+warning: '--skip-update' option is deprecated and will be removed in a future release
+Building for debugging...
+[4 / 28] OpenEOSCore
+[5 / 28] OpenEOSCore
+[7 / 25] OpenEOSCore
+[11 / 30] OpenEOSCoreTests-product
+[12 / 30] OpenEOSCoreTests-product
+[17 / 28] OpenEOSCore-product
+[17 / 28] OpenEOSCoreTests-product
+[21 / 29] OpenEOSCoreTests-product
+[25 / 32] OpenEOSCoreTests-test-runner
+[29 / 32] OpenEOSCoreTests-test-runner
+[33 / 33] OpenEOSCoreTests-test-runner
+Build complete! (3.04 secs)
+Test Suite 'All tests' started at 2026-10-18 23:13:48.937
+Test Suite 'Debug-linux-x86_64.xctest' started at 2026-10-18 23:13:48.944
+Test Suite 'ImageCapturePTPCoordinatorTests' started at 2026-10-18 23:13:48.944
+Test Case 'ImageCapturePTPCoordinatorTests.testConcurrentExternalCallbacksAreSerializedWithoutLosingInputs' started at 2026-10-18 23:13:48.944
+Test Case 'ImageCapturePTPCoordinatorTests.testConcurrentExternalCallbacksAreSerializedWithoutLosingInputs' passed (0.003 seconds)
+Test Case 'ImageCapturePTPCoordinatorTests.testExistingCallbackIsNeverOverwritten' started at 2026-10-18 23:13:48.947
+Test Case 'ImageCapturePTPCoordinatorTests.testExistingCallbackIsNeverOverwritten' passed (0.0 seconds)
+Test Case 'ImageCapturePTPCoordinatorTests.testForeignThreadCallbackReturnsWhilePerformIsStillOnExecutor' started at 2026-10-18 23:13:48.948
+Test Case 'ImageCapturePTPCoordinatorTests.testForeignThreadCallbackReturnsWhilePerformIsStillOnExecutor' passed (0.0 seconds)
+Test Case 'ImageCapturePTPCoordinatorTests.testNilPortBindsAndSecondOwnerCannotStealCallbacks' started at 2026-10-18 23:13:48.948
+Test Case 'ImageCapturePTPCoordinatorTests.testNilPortBindsAndSecondOwnerCannotStealCallbacks' passed (0.0 seconds)
+Test Case 'ImageCapturePTPCoordinatorTests.testOldDeadlineAndLateOpenOnlyCloseOriginalOwner' started at 2026-10-18 23:13:48.948
+Test Case 'ImageCapturePTPCoordinatorTests.testOldDeadlineAndLateOpenOnlyCloseOriginalOwner' passed (0.001 seconds)
+Test Case 'ImageCapturePTPCoordinatorTests.testReentrantQueuedReadCancellationRemainsNotDispatched' started at 2026-10-18 23:13:48.949
+Test Case 'ImageCapturePTPCoordinatorTests.testReentrantQueuedReadCancellationRemainsNotDispatched' passed (0.0 seconds)
+Test Case 'ImageCapturePTPCoordinatorTests.testReentrantSendThenSnapshotCancelsReadWithoutNestedEffects' started at 2026-10-18 23:13:48.949
+Test Case 'ImageCapturePTPCoordinatorTests.testReentrantSendThenSnapshotCancelsReadWithoutNestedEffects' passed (0.0 seconds)
+Test Case 'ImageCapturePTPCoordinatorTests.testSnapshotReducesReentrantInputBeforeReturning' started at 2026-10-18 23:13:48.949
+Test Case 'ImageCapturePTPCoordinatorTests.testSnapshotReducesReentrantInputBeforeReturning' passed (0.0 seconds)
+Test Suite 'ImageCapturePTPCoordinatorTests' passed at 2026-10-18 23:13:48.950
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.005 (0.005) seconds
+Test Suite 'ImageCapturePTPStateMachineTests' started at 2026-10-18 23:13:48.950
+Test Case 'ImageCapturePTPStateMachineTests.testAuthorizationTimeoutAndNewSelectionIgnoreOldGrant' started at 2026-10-18 23:13:48.950
+Test Case 'ImageCapturePTPStateMachineTests.testAuthorizationTimeoutAndNewSelectionIgnoreOldGrant' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testAuthorizedPromptOpensOnceAndContentsCannotGrantControl' started at 2026-10-18 23:13:48.950
+Test Case 'ImageCapturePTPStateMachineTests.testAuthorizedPromptOpensOnceAndContentsCannotGrantControl' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testBothOpenReadyOrdersRequireBothSignals' started at 2026-10-18 23:13:48.951
+Test Case 'ImageCapturePTPStateMachineTests.testBothOpenReadyOrdersRequireBothSignals' passed (0.001 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testCancelStopRemovalAndSelectionRetainInterruptedReadOwnership' started at 2026-10-18 23:13:48.951
+Test Case 'ImageCapturePTPStateMachineTests.testCancelStopRemovalAndSelectionRetainInterruptedReadOwnership' passed (0.001 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testCancelledOpeningQuarantinesExactObjectAndLateSuccessClosesOnlyOldSession' started at 2026-10-18 23:13:48.952
+Test Case 'ImageCapturePTPStateMachineTests.testCancelledOpeningQuarantinesExactObjectAndLateSuccessClosesOnlyOldSession' passed (0.001 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testCloseFailureQuarantinesObjectAndExplicitRetryUsesNewRequest' started at 2026-10-18 23:13:48.953
+Test Case 'ImageCapturePTPStateMachineTests.testCloseFailureQuarantinesObjectAndExplicitRetryUsesNewRequest' passed (0.001 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testCloseTimeoutIsUnresolvedAndLateCloseSuccessReleasesOnlyItsOwner' started at 2026-10-18 23:13:48.953
+Test Case 'ImageCapturePTPStateMachineTests.testCloseTimeoutIsUnresolvedAndLateCloseSuccessReleasesOnlyItsOwner' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testDeniedAndRestrictedDoNotAutomaticallyReprompt' started at 2026-10-18 23:13:48.954
+Test Case 'ImageCapturePTPStateMachineTests.testDeniedAndRestrictedDoNotAutomaticallyReprompt' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testDeniedRestrictedUnknownAndUndeterminedDoNotAdmitWork' started at 2026-10-18 23:13:48.954
+Test Case 'ImageCapturePTPStateMachineTests.testDeniedRestrictedUnknownAndUndeterminedDoNotAdmitWork' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testDuplicateEffectsCannotDispatchTwiceAndUndispatchedCallbacksAreIgnored' started at 2026-10-18 23:13:48.954
+Test Case 'ImageCapturePTPStateMachineTests.testDuplicateEffectsCannotDispatchTwiceAndUndispatchedCallbacksAreIgnored' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testEmptyOrMalformedBuffersNeverBecomeDeviceInfoSuccess' started at 2026-10-18 23:13:48.955
+Test Case 'ImageCapturePTPStateMachineTests.testEmptyOrMalformedBuffersNeverBecomeDeviceInfoSuccess' passed (0.001 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testEqualDescriptorsAndMissingUUIDDoNotAliasTwoObjects' started at 2026-10-18 23:13:48.955
+Test Case 'ImageCapturePTPStateMachineTests.testEqualDescriptorsAndMissingUUIDDoNotAliasTwoObjects' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testEventsAreExactSessionScopedAndNeverCompleteARead' started at 2026-10-18 23:13:48.955
+Test Case 'ImageCapturePTPStateMachineTests.testEventsAreExactSessionScopedAndNeverCompleteARead' passed (0.101 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testExplicitAuthorizationRequestHasOneIdentityAndCancelledReplyCannotOpen' started at 2026-10-18 23:13:49.057
+Test Case 'ImageCapturePTPStateMachineTests.testExplicitAuthorizationRequestHasOneIdentityAndCancelledReplyCannotOpen' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testFrameworkErrorPreservesBuffersAndRetiresWithoutRetry' started at 2026-10-18 23:13:49.057
+Test Case 'ImageCapturePTPStateMachineTests.testFrameworkErrorPreservesBuffersAndRetiresWithoutRetry' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testOneOutstandingReadAndDistinctBuffersStayUnvalidated' started at 2026-10-18 23:13:49.057
+Test Case 'ImageCapturePTPStateMachineTests.testOneOutstandingReadAndDistinctBuffersStayUnvalidated' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testOnlyAnExactDiscoveredUSBPTPHandleCanOpen' started at 2026-10-18 23:13:49.058
+Test Case 'ImageCapturePTPStateMachineTests.testOnlyAnExactDiscoveredUSBPTPHandleCanOpen' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testPermissionRevocationDuringReadRetiresAdmissionAndRecordsUnknownOutcome' started at 2026-10-18 23:13:49.058
+Test Case 'ImageCapturePTPStateMachineTests.testPermissionRevocationDuringReadRetiresAdmissionAndRecordsUnknownOutcome' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testPermissionRevocationWhileOpeningPreservesLateCleanup' started at 2026-10-18 23:13:49.058
+Test Case 'ImageCapturePTPStateMachineTests.testPermissionRevocationWhileOpeningPreservesLateCleanup' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testReadyThenOpenFailureRetainsCloseObligation' started at 2026-10-18 23:13:49.059
+Test Case 'ImageCapturePTPStateMachineTests.testReadyThenOpenFailureRetainsCloseObligation' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testReentrantCancellationBeforeOpenDispatchDoesNotInventCleanupObligation' started at 2026-10-18 23:13:49.059
+Test Case 'ImageCapturePTPStateMachineTests.testReentrantCancellationBeforeOpenDispatchDoesNotInventCleanupObligation' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testReentrantCancellationBeforeReadDispatchDoesNotClaimItWasSent' started at 2026-10-18 23:13:49.059
+Test Case 'ImageCapturePTPStateMachineTests.testReentrantCancellationBeforeReadDispatchDoesNotClaimItWasSent' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testRemovalAndReappearanceDoNotReuseOldObjectOrDiscoveryCallbacks' started at 2026-10-18 23:13:49.060
+Test Case 'ImageCapturePTPStateMachineTests.testRemovalAndReappearanceDoNotReuseOldObjectOrDiscoveryCallbacks' passed (0.001 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testReselectionBeforeOldReleaseEffectKeepsNewSessionOwnership' started at 2026-10-18 23:13:49.060
+Test Case 'ImageCapturePTPStateMachineTests.testReselectionBeforeOldReleaseEffectKeepsNewSessionOwnership' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testSuspensionRetiresReadAndRequiresFreshAuthorizationSnapshot' started at 2026-10-18 23:13:49.061
+Test Case 'ImageCapturePTPStateMachineTests.testSuspensionRetiresReadAndRequiresFreshAuthorizationSnapshot' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testTimedOutOpeningStillClosesAfterLateErrorAndReadinessCannotReviveIt' started at 2026-10-18 23:13:49.061
+Test Case 'ImageCapturePTPStateMachineTests.testTimedOutOpeningStillClosesAfterLateErrorAndReadinessCannotReviveIt' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testTimeoutRetiresEpochAndLateReadCannotAffectNewCamera' started at 2026-10-18 23:13:49.061
+Test Case 'ImageCapturePTPStateMachineTests.testTimeoutRetiresEpochAndLateReadCannotAffectNewCamera' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testUnexpectedSessionClosureRetiresOutstandingReadWithoutPhysicalAcknowledgment' started at 2026-10-18 23:13:49.062
+Test Case 'ImageCapturePTPStateMachineTests.testUnexpectedSessionClosureRetiresOutstandingReadWithoutPhysicalAcknowledgment' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testUnresolvedCleanupBudgetBlocksNewOpensWithoutDroppingOldObligations' started at 2026-10-18 23:13:49.062
+Test Case 'ImageCapturePTPStateMachineTests.testUnresolvedCleanupBudgetBlocksNewOpensWithoutDroppingOldObligations' passed (0.001 seconds)
+Test Suite 'ImageCapturePTPStateMachineTests' passed at 2026-10-18 23:13:49.063
+	 Executed 29 tests, with 0 failures (0 unexpected) in 0.113 (0.113) seconds
+Test Suite 'Debug-linux-x86_64.xctest' passed at 2026-10-18 23:13:49.063
+	 Executed 37 tests, with 0 failures (0 unexpected) in 0.118 (0.118) seconds
+Test Suite 'All tests' passed at 2026-10-18 23:13:49.063
+	 Executed 37 tests, with 0 failures (0 unexpected) in 0.118 (0.118) seconds
+◇ Test run started.
+↳ Testing Library Version: 6.4.1 (804dc4530ef3666)
+↳ Target Platform: x86_64-unknown-linux-gnu
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
