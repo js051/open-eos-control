@@ -1,0 +1,175 @@
+[
+  {
+    "batch": "ptp-apple-contract-red",
+    "result": {
+      "exit": 1,
+      "start": "2026-10-18T15:25:52.108668+00:00",
+      "end": "2026-10-18T15:26:01.628327+00:00",
+      "source_unchanged": true,
+      "tests": 48,
+      "failed_test_cases": 5,
+      "assertion_failures": 12,
+      "apple_branch": "NOT_COMPILED / NOT_RUN",
+      "red_baseline": "New event declarations accepted but transitions intentionally no-op"
+    },
+    "source_manifest": [
+      {
+        "path": "Package.swift",
+        "sha256": "0fd40c2a51da0b096efad2332742f6ae66b352587031ae06e6c61d2cbe73ef8f"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPPort.swift",
+        "sha256": "5db0a4749f37164eb6d6e37a2e26f05ed6c527d788cd16a86d982eb87afd5736"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPStateMachine.swift",
+        "sha256": "3a1be83ba799faf46f34241caf943364affe46a2acedd8fcad651da2491d72ed"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPCoordinator.swift",
+        "sha256": "d4d7996551d26cccb1803229aa04febe675d8b1ff09581b67cc75be354205f89"
+      },
+      {
+        "path": "Tests/OpenEOSCoreTests/ImageCapturePTPStateMachineTests.swift",
+        "sha256": "41dd8379dbdbd07274b679384035871166d3ba93598025c9dd7358596d14d70c"
+      },
+      {
+        "path": "Tests/OpenEOSCoreTests/ImageCapturePTPCoordinatorTests.swift",
+        "sha256": "7025257533f9b4c7e03ec277243fcebafacb1d71a6e9358309125e8a678bd4b2"
+      }
+    ]
+  },
+  {
+    "batch": "ptp-apple-contract-green",
+    "result": {
+      "exit": 0,
+      "start": "2026-10-18T15:26:40.479088+00:00",
+      "end": "2026-10-18T15:26:48.339220+00:00",
+      "source_unchanged": true,
+      "tests": 48,
+      "failed_test_cases": 0,
+      "assertion_failures": 0,
+      "apple_branch": "NOT_COMPILED / NOT_RUN",
+      "red_baseline": null
+    },
+    "source_manifest": [
+      {
+        "path": "Package.swift",
+        "sha256": "0fd40c2a51da0b096efad2332742f6ae66b352587031ae06e6c61d2cbe73ef8f"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPPort.swift",
+        "sha256": "5db0a4749f37164eb6d6e37a2e26f05ed6c527d788cd16a86d982eb87afd5736"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPStateMachine.swift",
+        "sha256": "0dbec00bdf5d738ff21d3d35244410f188c755267f92046840abd8ac9153cb3e"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPCoordinator.swift",
+        "sha256": "d4d7996551d26cccb1803229aa04febe675d8b1ff09581b67cc75be354205f89"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPApplePort.swift",
+        "sha256": "bb87635dc0f63a865e1907aa2e41920f96b44717e63ec9a6255cb516730dba33"
+      },
+      {
+        "path": "Tests/OpenEOSCoreTests/ImageCapturePTPStateMachineTests.swift",
+        "sha256": "41dd8379dbdbd07274b679384035871166d3ba93598025c9dd7358596d14d70c"
+      },
+      {
+        "path": "Tests/OpenEOSCoreTests/ImageCapturePTPCoordinatorTests.swift",
+        "sha256": "7025257533f9b4c7e03ec277243fcebafacb1d71a6e9358309125e8a678bd4b2"
+      }
+    ]
+  },
+  {
+    "batch": "ptp-late-ready-red",
+    "result": {
+      "exit": 1,
+      "start": "2026-10-18T15:28:58.812250+00:00",
+      "end": "2026-10-18T15:29:07.847982+00:00",
+      "source_unchanged": true,
+      "tests": 50,
+      "failed_test_cases": 2,
+      "assertion_failures": 4,
+      "apple_branch": "NOT_COMPILED / NOT_RUN",
+      "scope": "Foundation PTP contracts; native Apple source excluded by conditional compilation"
+    },
+    "source_manifest": [
+      {
+        "path": "Package.swift",
+        "sha256": "0fd40c2a51da0b096efad2332742f6ae66b352587031ae06e6c61d2cbe73ef8f"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPPort.swift",
+        "sha256": "5db0a4749f37164eb6d6e37a2e26f05ed6c527d788cd16a86d982eb87afd5736"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPStateMachine.swift",
+        "sha256": "0dbec00bdf5d738ff21d3d35244410f188c755267f92046840abd8ac9153cb3e"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPCoordinator.swift",
+        "sha256": "d4d7996551d26cccb1803229aa04febe675d8b1ff09581b67cc75be354205f89"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPApplePort.swift",
+        "sha256": "4aa9e9788485a4182ef9c659cea76f507e5c9000215fa79b4ab0942cfcba3b0c"
+      },
+      {
+        "path": "Tests/OpenEOSCoreTests/ImageCapturePTPStateMachineTests.swift",
+        "sha256": "e9c1bc5ec55ae2c3ac52b3af3e471816e8cae2f90bd7126d41c623f189224339"
+      },
+      {
+        "path": "Tests/OpenEOSCoreTests/ImageCapturePTPCoordinatorTests.swift",
+        "sha256": "7025257533f9b4c7e03ec277243fcebafacb1d71a6e9358309125e8a678bd4b2"
+      }
+    ]
+  },
+  {
+    "batch": "ptp-late-ready-green",
+    "result": {
+      "exit": 0,
+      "start": "2026-10-18T15:29:16.948762+00:00",
+      "end": "2026-10-18T15:29:26.275816+00:00",
+      "source_unchanged": true,
+      "tests": 50,
+      "failed_test_cases": 0,
+      "assertion_failures": 0,
+      "apple_branch": "NOT_COMPILED / NOT_RUN",
+      "scope": "Foundation PTP contracts; native Apple source excluded by conditional compilation",
+      "original_40_test_bodies_unchanged": true
+    },
+    "source_manifest": [
+      {
+        "path": "Package.swift",
+        "sha256": "0fd40c2a51da0b096efad2332742f6ae66b352587031ae06e6c61d2cbe73ef8f"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPPort.swift",
+        "sha256": "5db0a4749f37164eb6d6e37a2e26f05ed6c527d788cd16a86d982eb87afd5736"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPStateMachine.swift",
+        "sha256": "2ffaaa55ca06aa640306ad6fe0de836cd827bef384c66b0aae388f0e4b78a0ff"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPCoordinator.swift",
+        "sha256": "d4d7996551d26cccb1803229aa04febe675d8b1ff09581b67cc75be354205f89"
+      },
+      {
+        "path": "Sources/OpenEOSCore/ImageCapturePTPApplePort.swift",
+        "sha256": "4aa9e9788485a4182ef9c659cea76f507e5c9000215fa79b4ab0942cfcba3b0c"
+      },
+      {
+        "path": "Tests/OpenEOSCoreTests/ImageCapturePTPStateMachineTests.swift",
+        "sha256": "e9c1bc5ec55ae2c3ac52b3af3e471816e8cae2f90bd7126d41c623f189224339"
+      },
+      {
+        "path": "Tests/OpenEOSCoreTests/ImageCapturePTPCoordinatorTests.swift",
+        "sha256": "7025257533f9b4c7e03ec277243fcebafacb1d71a6e9358309125e8a678bd4b2"
+      }
+    ]
+  }
+]

@@ -519,6 +519,153 @@ final class ImageCapturePTPStateMachineTests: XCTestCase {
         XCTAssertEqual(port.reads.count, 1)
     }
 
+    func testPreflightOpenRejectionHasNoNativeCleanupAndKeepsReason() throws {
+        let port = FakeImageCapturePTPPort()
+        port.onPerform = { effect in
+            if case .openSession(let request) = effect {
+                port.emit(.openNotDispatched(request, .unsupportedSessionReuse))
+            }
+        }
+        defer { port.onPerform = nil }
+        let request = try port.begin(camera())
+        XCTAssertEqual(port.state.phase, .blocked(.openNotDispatched(.unsupportedSessionReuse)))
+        XCTAssertTrue(port.state.cleanup.isEmpty)
+        XCTAssertTrue(port.closes.isEmpty)
+        XCTAssertTrue(port.performed.contains(.cancelDeadline(request)))
+        port.emit(.openCompleted(request, nil))
+        port.emit(.becameReady(request.session))
+        XCTAssertEqual(port.state.phase, .blocked(.openNotDispatched(.unsupportedSessionReuse)))
+        XCTAssertFalse(port.performed.contains(.releaseSession(request.session)))
+    }
+
+    func testLatePreflightRejectionClearsOnlyCancelledOrTimedOutOpen() throws {
+        for timeout in [false, true] {
+            let port = FakeImageCapturePTPPort()
+            let request = try port.begin(camera())
+            port.send(timeout ? .deadlineExpired(request) : .cancel)
+            let retired = port.state.phase
+            XCTAssertEqual(port.state.cleanup[request.session], .awaitingOpen(request))
+            port.emit(.openNotDispatched(request, .unsupportedSessionReuse))
+            XCTAssertTrue(port.state.cleanup.isEmpty)
+            XCTAssertEqual(port.state.phase, retired)
+            XCTAssertTrue(port.closes.isEmpty)
+        }
+    }
+
+    func testLatePreflightRejectionCannotAffectReplacementOwner() throws {
+        let port = FakeImageCapturePTPPort()
+        let old = try port.begin(camera())
+        let current = try port.begin(camera())
+        let phase = port.state.phase
+        port.emit(.openNotDispatched(old, .unsupportedSessionReuse))
+        XCTAssertNil(port.state.cleanup[old.session])
+        XCTAssertEqual(port.state.session, current.session)
+        XCTAssertEqual(port.state.phase, phase)
+        let effects = port.performed.count
+        port.emit(.openNotDispatched(old, .unsupportedSessionReuse))
+        port.emit(.openNotDispatched(.init(session: current.session), .nativeFailure))
+        XCTAssertEqual(port.performed.count, effects)
+        XCTAssertEqual(port.state.phase, phase)
+    }
+
+    func testReadyEvidencePreventsPreflightRejectionFromClearingObligation() throws {
+        for retireFirst in [false, true] {
+            let port = FakeImageCapturePTPPort()
+            let request = try port.begin(camera())
+            port.emit(.becameReady(request.session))
+            if retireFirst { port.send(.cancel) }
+            let phase = port.state.phase
+            let cleanup = port.state.cleanup
+            port.emit(.openNotDispatched(request, .unsupportedSessionReuse))
+            XCTAssertEqual(port.state.phase, phase)
+            XCTAssertEqual(port.state.cleanup, cleanup)
+            port.emit(.openCompleted(request, nil))
+            if !retireFirst { port.send(.cancel) }
+            XCTAssertEqual(port.closes.count, 1)
+            XCTAssertEqual(port.closes.first?.session, request.session)
+        }
+    }
+
+    func testCompletedOpenCannotBeUndispatched() throws {
+        let port = FakeImageCapturePTPPort()
+        let request = try port.begin(camera())
+        port.emit(.openCompleted(request, nil))
+        port.emit(.openNotDispatched(request, .unsupportedSessionReuse))
+        port.send(.cancel)
+        XCTAssertEqual(port.closes.count, 1)
+        XCTAssertEqual(port.closes.first?.session, request.session)
+    }
+
+    func testExactSessionInvalidationDuringOpeningPreservesLateCleanup() throws {
+        let port = FakeImageCapturePTPPort()
+        let request = try port.begin(camera())
+        port.emit(.sessionInvalidated(request.session, .accessRestricted))
+        XCTAssertEqual(port.state.phase, .retired(.sessionInvalidated(.accessRestricted)))
+        XCTAssertEqual(port.state.authorization.control, .authorized)
+        XCTAssertEqual(port.state.cleanup[request.session], .awaitingOpen(request))
+        port.emit(.openCompleted(request, nil))
+        XCTAssertEqual(port.closes.count, 1)
+        XCTAssertEqual(port.closes.first?.session, request.session)
+    }
+
+    func testInvalidationDuringReadIsUnknownNotConfirmedClose() throws {
+        let port = FakeImageCapturePTPPort()
+        try port.ready(camera())
+        port.send(.readDeviceInfo)
+        let read = try XCTUnwrap(port.reads.last)
+        port.emit(.sessionInvalidated(read.session, .capabilityLost))
+        XCTAssertEqual(port.state.deviceInfoOutcome, .outcomeUnknown(read, .sessionInvalidated(.capabilityLost)))
+        let close = try XCTUnwrap(port.closes.last)
+        XCTAssertEqual(port.state.cleanup[read.session], .closing(close, deadlineExpired: false))
+        port.emit(.sessionInvalidated(read.session, .nativeError))
+        XCTAssertEqual(port.closes.count, 1)
+        XCTAssertFalse(port.performed.contains(.releaseSession(read.session)))
+    }
+
+    func testOldSessionInvalidationCannotRevokeReplacement() throws {
+        let port = FakeImageCapturePTPPort()
+        let old = try port.begin(camera())
+        let current = try port.begin(camera())
+        let phase = port.state.phase
+        port.emit(.sessionInvalidated(old.session, .deviceRemoved))
+        XCTAssertEqual(port.state.phase, phase)
+        XCTAssertEqual(port.state.session, current.session)
+        XCTAssertEqual(port.state.authorization.control, .authorized)
+    }
+
+    func testCancelledOpenLateReadyPreventsContradictoryPreflightRefusal() throws {
+        let port = FakeImageCapturePTPPort()
+        let old = try port.begin(camera())
+        port.send(.cancel)
+        let phase = port.state.phase
+        port.emit(.becameReady(old.session))
+        XCTAssertEqual(port.state.phase, phase)
+        port.emit(.openNotDispatched(old, .unsupportedSessionReuse))
+        XCTAssertEqual(port.state.cleanup[old.session], .awaitingOpen(old))
+        XCTAssertEqual(port.state.phase, phase)
+        port.send(.readDeviceInfo)
+        XCTAssertTrue(port.reads.isEmpty)
+        port.emit(.openCompleted(old, nil))
+        XCTAssertEqual(port.closes.map(\.session), [old.session])
+    }
+
+    func testReplacedOpenLateReadyCannotClearOldDebtOrReviveOwner() throws {
+        let port = FakeImageCapturePTPPort()
+        let old = try port.begin(camera())
+        let current = try port.begin(camera())
+        let phase = port.state.phase
+        port.emit(.becameReady(old.session))
+        port.emit(.openNotDispatched(old, .unsupportedSessionReuse))
+        XCTAssertEqual(port.state.cleanup[old.session], .awaitingOpen(old))
+        XCTAssertEqual(port.state.phase, phase)
+        XCTAssertEqual(port.state.session, current.session)
+        port.send(.readDeviceInfo)
+        XCTAssertTrue(port.reads.isEmpty)
+        port.emit(.openCompleted(old, nil))
+        XCTAssertEqual(port.closes.map(\.session), [old.session])
+        XCTAssertEqual(port.state.phase, phase)
+    }
+
     private func camera(transport: PTP.Camera.Transport = .usb, acceptsPTP: Bool = true) -> PTP.Camera {
         .init(handle: .init(), displayName: "Synthetic camera", reportedUUID: nil,
               vendorID: 0x1234, productID: 0x5678, transport: transport, acceptsPTP: acceptsPTP)

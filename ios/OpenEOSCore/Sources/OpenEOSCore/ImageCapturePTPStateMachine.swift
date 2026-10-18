@@ -19,6 +19,9 @@ public struct ImageCapturePTPStateMachine {
     public private(set) var lastInterruptedDeviceInfoOutcome: ImageCapturePTP.DeviceInfoOutcome?
     public private(set) var lastEvent: ImageCapturePTP.ReceivedEvent?
     private var dispatched: Set<ImageCapturePTP.Request> = []
+    // Evidence that contradicts a preflight refusal. Limited to admitted open requests:
+    // one current owner plus the bounded unresolved cleanup table. No timeout discards it.
+    private var readyObserved: Set<ImageCapturePTP.Request> = []
 
     public init(authorization: ImageCapturePTP.AuthorizationSnapshot = .init(
         control: .notDetermined, contents: .notDetermined)) {
@@ -106,16 +109,34 @@ public struct ImageCapturePTPStateMachine {
             }
             phase = .blocked(.authorizationNotGranted(status))
             return [.cancelDeadline(request)]
+        case .openNotDispatched(let request, let failure):
+            guard dispatched.contains(request), !readyObserved.contains(request) else { return [] }
+            if cleanup[request.session] == .awaitingOpen(request) {
+                dispatched.remove(request)
+                cleanup.removeValue(forKey: request.session)
+                return [.cancelDeadline(request)]
+            }
+            guard session == request.session,
+                  phase == .opening(request, didOpen: false, didBecomeReady: false) else { return [] }
+            dispatched.remove(request)
+            phase = .blocked(.openNotDispatched(failure))
+            lastEvent = nil
+            return [.cancelDeadline(request)]
+        case .sessionInvalidated(let owner, let reason):
+            guard session == owner else { return [] }
+            return retire(.sessionInvalidated(reason))
         case .openCompleted(let request, let failure):
             // Retired opening retains its own object until the callback arrives.
             // Even a failed open gets close cleanup: an error is not proof that no
             // framework session was established, especially with prior ready events.
             if cleanup[request.session] == .awaitingOpen(request), dispatched.remove(request) != nil {
+                readyObserved.remove(request)
                 return close(request.session)
             }
             guard case .opening(let current, let didOpen, let ready) = phase,
                   current == request, session == request.session, !didOpen,
                   dispatched.remove(request) != nil else { return [] }
+            readyObserved.remove(request)
             if failure != nil {
                 phase = .opening(request, didOpen: true, didBecomeReady: ready)
                 return retire(.openFailed)
@@ -127,8 +148,15 @@ public struct ImageCapturePTPStateMachine {
             phase = .opening(request, didOpen: true, didBecomeReady: false)
             return []
         case .becameReady(let owner):
+            // Late readiness is evidence of native work even after retirement. Keep
+            // that evidence on the exact bounded awaiting-open obligation; never revive it.
+            if case .awaitingOpen(let request) = cleanup[owner], dispatched.contains(request) {
+                readyObserved.insert(request)
+                return []
+            }
             guard session == owner, case .opening(let request, let opened, _) = phase,
                   opened || dispatched.contains(request) else { return [] }
+            if dispatched.contains(request) { readyObserved.insert(request) }
             if opened {
                 phase = .ready
                 return [.cancelDeadline(request)]
