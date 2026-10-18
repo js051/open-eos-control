@@ -1,0 +1,77 @@
+warning: '--skip-update' option is deprecated and will be removed in a future release
+Building for debugging...
+[Constructing description]
+[Planning deferred tasks]
+[31 / 54] OpenEOSCore
+[44 / 59] OpenEOSCore
+[48 / 59] OpenEOSCoreTests-product
+[52 / 60] OpenEOSCoreTests-product
+[54 / 61] OpenEOSCoreTests-test-runner
+[56 / 63] OpenEOSCoreTests-test-runner
+[60 / 63] OpenEOSCoreTests-test-runner
+[64 / 64] OpenEOSCoreTests-test-runner
+Build complete! (7.27 secs)
+Test Suite 'Selected tests' started at 2026-10-18 14:36:22.140
+Test Suite 'ImageCapturePTPStateMachineTests' started at 2026-10-18 14:36:22.141
+Test Case 'ImageCapturePTPStateMachineTests.testAuthorizationTimeoutAndNewSelectionIgnoreOldGrant' started at 2026-10-18 14:36:22.141
+Test Case 'ImageCapturePTPStateMachineTests.testAuthorizationTimeoutAndNewSelectionIgnoreOldGrant' passed (0.001 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testAuthorizedPromptOpensOnceAndContentsCannotGrantControl' started at 2026-10-18 14:36:22.142
+Test Case 'ImageCapturePTPStateMachineTests.testAuthorizedPromptOpensOnceAndContentsCannotGrantControl' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testBothOpenReadyOrdersRequireBothSignals' started at 2026-10-18 14:36:22.142
+Test Case 'ImageCapturePTPStateMachineTests.testBothOpenReadyOrdersRequireBothSignals' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testCancelStopRemovalAndSelectionRetainInterruptedReadOwnership' started at 2026-10-18 14:36:22.142
+Test Case 'ImageCapturePTPStateMachineTests.testCancelStopRemovalAndSelectionRetainInterruptedReadOwnership' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testCancelledOpeningQuarantinesExactObjectAndLateSuccessClosesOnlyOldSession' started at 2026-10-18 14:36:22.142
+Test Case 'ImageCapturePTPStateMachineTests.testCancelledOpeningQuarantinesExactObjectAndLateSuccessClosesOnlyOldSession' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testCloseFailureQuarantinesObjectAndExplicitRetryUsesNewRequest' started at 2026-10-18 14:36:22.143
+Test Case 'ImageCapturePTPStateMachineTests.testCloseFailureQuarantinesObjectAndExplicitRetryUsesNewRequest' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testCloseTimeoutIsUnresolvedAndLateCloseSuccessReleasesOnlyItsOwner' started at 2026-10-18 14:36:22.143
+Test Case 'ImageCapturePTPStateMachineTests.testCloseTimeoutIsUnresolvedAndLateCloseSuccessReleasesOnlyItsOwner' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testDeniedAndRestrictedDoNotAutomaticallyReprompt' started at 2026-10-18 14:36:22.143
+Test Case 'ImageCapturePTPStateMachineTests.testDeniedAndRestrictedDoNotAutomaticallyReprompt' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testDeniedRestrictedUnknownAndUndeterminedDoNotAdmitWork' started at 2026-10-18 14:36:22.143
+Test Case 'ImageCapturePTPStateMachineTests.testDeniedRestrictedUnknownAndUndeterminedDoNotAdmitWork' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testDuplicateEffectsCannotDispatchTwiceAndUndispatchedCallbacksAreIgnored' started at 2026-10-18 14:36:22.143
+Test Case 'ImageCapturePTPStateMachineTests.testDuplicateEffectsCannotDispatchTwiceAndUndispatchedCallbacksAreIgnored' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testEmptyOrMalformedBuffersNeverBecomeDeviceInfoSuccess' started at 2026-10-18 14:36:22.143
+Test Case 'ImageCapturePTPStateMachineTests.testEmptyOrMalformedBuffersNeverBecomeDeviceInfoSuccess' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testEqualDescriptorsAndMissingUUIDDoNotAliasTwoObjects' started at 2026-10-18 14:36:22.143
+Test Case 'ImageCapturePTPStateMachineTests.testEqualDescriptorsAndMissingUUIDDoNotAliasTwoObjects' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testEventsAreExactSessionScopedAndNeverCompleteARead' started at 2026-10-18 14:36:22.143
+Test Case 'ImageCapturePTPStateMachineTests.testEventsAreExactSessionScopedAndNeverCompleteARead' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testExplicitAuthorizationRequestHasOneIdentityAndCancelledReplyCannotOpen' started at 2026-10-18 14:36:22.144
+Test Case 'ImageCapturePTPStateMachineTests.testExplicitAuthorizationRequestHasOneIdentityAndCancelledReplyCannotOpen' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testFrameworkErrorPreservesBuffersAndRetiresWithoutRetry' started at 2026-10-18 14:36:22.144
+Test Case 'ImageCapturePTPStateMachineTests.testFrameworkErrorPreservesBuffersAndRetiresWithoutRetry' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testOneOutstandingReadAndDistinctBuffersStayUnvalidated' started at 2026-10-18 14:36:22.144
+Test Case 'ImageCapturePTPStateMachineTests.testOneOutstandingReadAndDistinctBuffersStayUnvalidated' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testOnlyAnExactDiscoveredUSBPTPHandleCanOpen' started at 2026-10-18 14:36:22.144
+Test Case 'ImageCapturePTPStateMachineTests.testOnlyAnExactDiscoveredUSBPTPHandleCanOpen' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testPermissionRevocationDuringReadRetiresAdmissionAndRecordsUnknownOutcome' started at 2026-10-18 14:36:22.144
+Test Case 'ImageCapturePTPStateMachineTests.testPermissionRevocationDuringReadRetiresAdmissionAndRecordsUnknownOutcome' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testPermissionRevocationWhileOpeningPreservesLateCleanup' started at 2026-10-18 14:36:22.144
+Test Case 'ImageCapturePTPStateMachineTests.testPermissionRevocationWhileOpeningPreservesLateCleanup' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testReadyThenOpenFailureRetainsCloseObligation' started at 2026-10-18 14:36:22.144
+Test Case 'ImageCapturePTPStateMachineTests.testReadyThenOpenFailureRetainsCloseObligation' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testReentrantCancellationBeforeOpenDispatchDoesNotInventCleanupObligation' started at 2026-10-18 14:36:22.144
+Test Case 'ImageCapturePTPStateMachineTests.testReentrantCancellationBeforeOpenDispatchDoesNotInventCleanupObligation' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testReentrantCancellationBeforeReadDispatchDoesNotClaimItWasSent' started at 2026-10-18 14:36:22.144
+Test Case 'ImageCapturePTPStateMachineTests.testReentrantCancellationBeforeReadDispatchDoesNotClaimItWasSent' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testRemovalAndReappearanceDoNotReuseOldObjectOrDiscoveryCallbacks' started at 2026-10-18 14:36:22.144
+Test Case 'ImageCapturePTPStateMachineTests.testRemovalAndReappearanceDoNotReuseOldObjectOrDiscoveryCallbacks' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testReselectionBeforeOldReleaseEffectKeepsNewSessionOwnership' started at 2026-10-18 14:36:22.144
+Test Case 'ImageCapturePTPStateMachineTests.testReselectionBeforeOldReleaseEffectKeepsNewSessionOwnership' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testSuspensionRetiresReadAndRequiresFreshAuthorizationSnapshot' started at 2026-10-18 14:36:22.145
+Test Case 'ImageCapturePTPStateMachineTests.testSuspensionRetiresReadAndRequiresFreshAuthorizationSnapshot' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testTimedOutOpeningStillClosesAfterLateErrorAndReadinessCannotReviveIt' started at 2026-10-18 14:36:22.145
+Test Case 'ImageCapturePTPStateMachineTests.testTimedOutOpeningStillClosesAfterLateErrorAndReadinessCannotReviveIt' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testTimeoutRetiresEpochAndLateReadCannotAffectNewCamera' started at 2026-10-18 14:36:22.145
+Test Case 'ImageCapturePTPStateMachineTests.testTimeoutRetiresEpochAndLateReadCannotAffectNewCamera' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testUnexpectedSessionClosureRetiresOutstandingReadWithoutPhysicalAcknowledgment' started at 2026-10-18 14:36:22.145
+Test Case 'ImageCapturePTPStateMachineTests.testUnexpectedSessionClosureRetiresOutstandingReadWithoutPhysicalAcknowledgment' passed (0.0 seconds)
+Test Case 'ImageCapturePTPStateMachineTests.testUnresolvedCleanupBudgetBlocksNewOpensWithoutDroppingOldObligations' started at 2026-10-18 14:36:22.145
+Test Case 'ImageCapturePTPStateMachineTests.testUnresolvedCleanupBudgetBlocksNewOpensWithoutDroppingOldObligations' passed (0.0 seconds)
+Test Suite 'ImageCapturePTPStateMachineTests' passed at 2026-10-18 14:36:22.145
+	 Executed 29 tests, with 0 failures (0 unexpected) in 0.004 (0.004) seconds
+Test Suite 'Selected tests' passed at 2026-10-18 14:36:22.145
+	 Executed 29 tests, with 0 failures (0 unexpected) in 0.004 (0.004) seconds
