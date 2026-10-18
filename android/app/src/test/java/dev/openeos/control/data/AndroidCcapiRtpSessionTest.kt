@@ -83,10 +83,11 @@ class AndroidCcapiRtpSessionTest {
         val videoPort = availableUdpPort()
         val audioPort = availableUdpPort(excluding = setOf(videoPort))
         val events = Collections.synchronizedList(mutableListOf<NativeLiveViewEvent>())
+        val factories = AtomicInteger()
         val session = session(
             videoPort = videoPort,
             audioPort = audioPort,
-            extractorFactory = { ThrowingLatmExtractor() },
+            extractorFactory = { factories.incrementAndGet(); ThrowingLatmExtractor() },
             audioPlayerFactory = { error("Audio player must not start while muted.") },
         )
         val sender = DatagramSocket()
@@ -96,8 +97,11 @@ class AndroidCcapiRtpSessionTest {
             session.start()
             await { session.audioStatus.available }
             sender.send(audioPacket(audioPort, sequence = 1, timestamp = 1_000, payload = byteArrayOf(7)))
-            await { session.audioStatus.error?.contains("LATM parse failed") == true }
+            // The failure event precedes parser recovery; wait for the completed reset.
+            await { factories.get() == 2 && session.audioStatus.available &&
+                session.audioStatus.error?.contains("LATM parse failed") == true }
 
+            assertEquals(2, factories.get())
             assertTrue(session.audioStatus.available)
             assertFalse(session.audioStatus.enabled)
             assertTrue(events.none { it is NativeLiveViewEvent.Failed })
@@ -155,6 +159,60 @@ class AndroidCcapiRtpSessionTest {
             assertEquals(2L, session.audioStatus.playbackEpoch)
             assertTrue(session.audioStatus.enabled)
             assertEquals(null, session.audioStatus.error)
+        } finally { session.close() }
+    }
+
+    @Test
+    fun parserFailureRevokesAvailabilityBeforePublishingAndFailedResetStaysUnavailable() {
+        val videoPort = availableUdpPort()
+        val audioPort = availableUdpPort(setOf(videoPort))
+        val statuses = Collections.synchronizedList(mutableListOf<NativeLiveViewAudioStatus>())
+        val factories = AtomicInteger()
+        val session = session(videoPort, audioPort,
+            extractorFactory = {
+                if (factories.incrementAndGet() == 1) ThrowingLatmExtractor()
+                else error("synthetic parser reset failure")
+            },
+            audioPlayerFactory = { error("Audio must stay muted") })
+        try {
+            session.setListener { event ->
+                if (event is NativeLiveViewEvent.AudioStatusChanged) statuses.add(event.status)
+            }
+            session.start()
+            await { session.audioStatus.available }
+            DatagramSocket().use { it.send(audioPacket(audioPort, 1, 1_000, byteArrayOf(1))) }
+            await { session.audioStatus.error?.contains("parser reset failed") == true }
+            val failures = synchronized(statuses) {
+                statuses.filter { it.error?.contains("LATM parse failed") == true ||
+                    it.error?.contains("parser reset failed") == true }
+            }
+            assertTrue(failures.isNotEmpty())
+            assertTrue("Parser failure events must revoke availability before publishing",
+                failures.all { !it.available && !it.enabled })
+            assertEquals(2, factories.get())
+        } finally { session.close() }
+    }
+
+    @Test
+    fun parserInitializationFailureNeverPublishesAvailableAudio() {
+        val videoPort = availableUdpPort()
+        val statuses = Collections.synchronizedList(mutableListOf<NativeLiveViewAudioStatus>())
+        val session = session(videoPort, availableUdpPort(setOf(videoPort)),
+            extractorFactory = { error("synthetic parser initialization failure") },
+            audioPlayerFactory = { error("Audio must stay muted") })
+        try {
+            session.setListener { event ->
+                if (event is NativeLiveViewEvent.AudioStatusChanged) statuses.add(event.status)
+            }
+            session.start()
+            await { session.audioStatus.error?.contains("parser initialization") == true &&
+                !session.audioStatus.available }
+            val failures = synchronized(statuses) {
+                statuses.filter { it.error?.contains("parser initialization") == true }
+            }
+            assertTrue(failures.isNotEmpty())
+            assertTrue("Parser failure must revoke availability before publishing its error",
+                failures.all { !it.available && !it.enabled })
         } finally { session.close() }
     }
 

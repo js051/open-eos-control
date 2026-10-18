@@ -1,0 +1,574 @@
+=== AndroidCcapiRtpSessionTest.txt ===
+JUnit version 4.13.2
+..Exception in thread "DefaultDispatcher-worker-5" java.lang.UnsatisfiedLinkError: no media_jni in java.library.path: /usr/java/packages/lib:/usr/lib64:/lib64:/lib:/usr/lib
+	at java.base/java.lang.ClassLoader.loadLibrary(ClassLoader.java:2434)
+	at java.base/java.lang.Runtime.loadLibrary0(Runtime.java:818)
+	at java.base/java.lang.System.loadLibrary(System.java:2006)
+	at android.media.MediaCodec.<clinit>(MediaCodec.java:5759)
+	at dev.openeos.control.data.AndroidCcapiRtpSession.decodeSurface(AndroidCcapiRtpSession.kt:574)
+	at dev.openeos.control.data.AndroidCcapiRtpSession.decodeSurface$default(AndroidCcapiRtpSession.kt:518)
+	at dev.openeos.control.data.AndroidCcapiRtpSession.decodeTo(AndroidCcapiRtpSession.kt:508)
+	at dev.openeos.control.data.AndroidCcapiRtpSession.access$decodeTo(AndroidCcapiRtpSession.kt:57)
+	at dev.openeos.control.data.AndroidCcapiRtpSession$restartDecoder$1$1.invokeSuspend(AndroidCcapiRtpSession.kt:246)
+	at dev.openeos.control.data.AndroidCcapiRtpSession$restartDecoder$1$1.invoke(AndroidCcapiRtpSession.kt)
+	at dev.openeos.control.data.AndroidCcapiRtpSession$restartDecoder$1$1.invoke(AndroidCcapiRtpSession.kt)
+	at dev.openeos.control.data.NativeVideoLutKt$launchDrainedNativeVideoJob$1.invokeSuspend(NativeVideoLut.kt:139)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.internal.LimitedDispatcher$Worker.run(LimitedDispatcher.kt:113)
+	at kotlinx.coroutines.scheduling.TaskImpl.run(Tasks.kt:89)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:589)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:823)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:720)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:707)
+	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [StandaloneCoroutine{Cancelling}@7342912c, Dispatchers.IO]
+..Exception in thread "DefaultDispatcher-worker-5" java.lang.NoClassDefFoundError: Could not initialize class android.media.MediaCodec
+	at dev.openeos.control.data.AndroidCcapiRtpSession.decodeSurface(AndroidCcapiRtpSession.kt:574)
+	at dev.openeos.control.data.AndroidCcapiRtpSession.decodeSurface$default(AndroidCcapiRtpSession.kt:518)
+	at dev.openeos.control.data.AndroidCcapiRtpSession.decodeTo(AndroidCcapiRtpSession.kt:508)
+	at dev.openeos.control.data.AndroidCcapiRtpSession.access$decodeTo(AndroidCcapiRtpSession.kt:57)
+	at dev.openeos.control.data.AndroidCcapiRtpSession$restartDecoder$1$1.invokeSuspend(AndroidCcapiRtpSession.kt:246)
+	at dev.openeos.control.data.AndroidCcapiRtpSession$restartDecoder$1$1.invoke(AndroidCcapiRtpSession.kt)
+	at dev.openeos.control.data.AndroidCcapiRtpSession$restartDecoder$1$1.invoke(AndroidCcapiRtpSession.kt)
+	at dev.openeos.control.data.NativeVideoLutKt$launchDrainedNativeVideoJob$1.invokeSuspend(NativeVideoLut.kt:139)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.internal.LimitedDispatcher$Worker.run(LimitedDispatcher.kt:113)
+	at kotlinx.coroutines.scheduling.TaskImpl.run(Tasks.kt:89)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:589)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:823)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:720)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:707)
+	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [StandaloneCoroutine{Cancelling}@53ae4c10, Dispatchers.IO]
+Caused by: java.lang.ExceptionInInitializerError: Exception java.lang.UnsatisfiedLinkError: no media_jni in java.library.path: /usr/java/packages/lib:/usr/lib64:/lib64:/lib:/usr/lib [in thread "DefaultDispatcher-worker-5"]
+	at java.base/java.lang.ClassLoader.loadLibrary(ClassLoader.java:2434)
+	at java.base/java.lang.Runtime.loadLibrary0(Runtime.java:818)
+	at java.base/java.lang.System.loadLibrary(System.java:2006)
+	at android.media.MediaCodec.<clinit>(MediaCodec.java:5759)
+	... 16 more
+.Exception in thread "DefaultDispatcher-worker-3" java.lang.NoClassDefFoundError: Could not initialize class android.media.MediaCodec
+	at dev.openeos.control.data.AndroidCcapiRtpSession.decodeSurface(AndroidCcapiRtpSession.kt:574)
+	at dev.openeos.control.data.AndroidCcapiRtpSession.decodeSurface$default(AndroidCcapiRtpSession.kt:518)
+	at dev.openeos.control.data.AndroidCcapiRtpSession.decodeTo(AndroidCcapiRtpSession.kt:508)
+	at dev.openeos.control.data.AndroidCcapiRtpSession.access$decodeTo(AndroidCcapiRtpSession.kt:57)
+	at dev.openeos.control.data.AndroidCcapiRtpSession$restartDecoder$1$1.invokeSuspend(AndroidCcapiRtpSession.kt:246)
+	at dev.openeos.control.data.AndroidCcapiRtpSession$restartDecoder$1$1.invoke(AndroidCcapiRtpSession.kt)
+	at dev.openeos.control.data.AndroidCcapiRtpSession$restartDecoder$1$1.invoke(AndroidCcapiRtpSession.kt)
+	at dev.openeos.control.data.NativeVideoLutKt$launchDrainedNativeVideoJob$1.invokeSuspend(NativeVideoLut.kt:139)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.internal.LimitedDispatcher$Worker.run(LimitedDispatcher.kt:113)
+	at kotlinx.coroutines.scheduling.TaskImpl.run(Tasks.kt:89)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler.runSafely(CoroutineScheduler.kt:589)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.executeTask(CoroutineScheduler.kt:823)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:720)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:707)
+	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [StandaloneCoroutine{Cancelling}@1923c747, Dispatchers.IO]
+Caused by: java.lang.ExceptionInInitializerError: Exception java.lang.UnsatisfiedLinkError: no media_jni in java.library.path: /usr/java/packages/lib:/usr/lib64:/lib64:/lib:/usr/lib [in thread "DefaultDispatcher-worker-5"]
+	at java.base/java.lang.ClassLoader.loadLibrary(ClassLoader.java:2434)
+	at java.base/java.lang.Runtime.loadLibrary0(Runtime.java:818)
+	at java.base/java.lang.System.loadLibrary(System.java:2006)
+	at android.media.MediaCodec.<clinit>(MediaCodec.java:5759)
+	... 16 more
+....E
+Time: 6.309
+There was 1 failure:
+1) audioExtractorInitializationFailureDoesNotEscapeIntoVideoStartup(dev.openeos.control.data.AndroidCcapiRtpSessionTest)
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertFalse(Assert.java:65)
+	at org.junit.Assert.assertFalse(Assert.java:75)
+	at dev.openeos.control.data.AndroidCcapiRtpSessionTest.audioExtractorInitializationFailureDoesNotEscapeIntoVideoStartup(AndroidCcapiRtpSessionTest.kt:172)
+
+FAILURES!!!
+Tests run: 9,  Failures: 1
+
+
+=== AndroidUsbPtpTransportTest.txt ===
+JUnit version 4.13.2
+...
+Time: 0.139
+
+OK (3 tests)
+
+
+=== AutomaticJpegOriginalTest.txt ===
+JUnit version 4.13.2
+................
+Time: 0.154
+
+OK (16 tests)
+
+
+=== AutomaticJpegSharedContractTest.txt ===
+JUnit version 4.13.2
+.
+Time: 0.166
+
+OK (1 test)
+
+
+=== BridgeBulbCallbackTest.txt ===
+JUnit version 4.13.2
+.....
+Time: 0.14
+
+OK (5 tests)
+
+
+=== BridgeBulbObservationRaceTest.txt ===
+JUnit version 4.13.2
+.
+Time: 0.068
+
+OK (1 test)
+
+
+=== BridgeBulbRequestSessionTest.txt ===
+JUnit version 4.13.2
+.................
+Time: 0.106
+
+OK (17 tests)
+
+
+=== BridgeFocusMetadataTest.txt ===
+JUnit version 4.13.2
+.....
+Time: 0.053
+
+OK (5 tests)
+
+
+=== BridgeHeldAutofocusSessionTest.txt ===
+JUnit version 4.13.2
+.......
+Time: 0.085
+
+OK (7 tests)
+
+
+=== CameraFocusMetadataTest.txt ===
+JUnit version 4.13.2
+.......
+Time: 0.036
+
+OK (7 tests)
+
+
+=== CameraMediaPageCountTest.txt ===
+JUnit version 4.13.2
+...
+Time: 0.021
+
+OK (3 tests)
+
+
+=== CameraModelsTest.txt ===
+JUnit version 4.13.2
+..
+Time: 0.028
+
+OK (2 tests)
+
+
+=== CameraNetworkDiagnosticsTest.txt ===
+JUnit version 4.13.2
+.
+Time: 0.004
+
+OK (1 test)
+
+
+=== CameraProfileTest.txt ===
+JUnit version 4.13.2
+..
+Time: 0.02
+
+OK (2 tests)
+
+
+=== CanonEosPtpTest.txt ===
+JUnit version 4.13.2
+........................................
+Time: 0.093
+
+OK (40 tests)
+
+
+=== CcapiMultipartLiveViewTest.txt ===
+JUnit version 4.13.2
+.......
+Time: 0.097
+
+OK (7 tests)
+
+
+=== CcapiRtpTest.txt ===
+JUnit version 4.13.2
+......E..........
+Time: 0.104
+There was 1 failure:
+1) media3LatmParserExtractsRawAacAndInBandFormat(dev.openeos.control.data.CcapiRtpTest)
+java.lang.UnsatisfiedLinkError: 'java.lang.String android.os.SystemProperties.native_get(java.lang.String, java.lang.String)'
+	at android.os.SystemProperties.native_get(Native Method)
+	at android.os.SystemProperties.get(SystemProperties.java:197)
+	at android.os.Build.getString(Build.java:1570)
+	at android.os.Build.<clinit>(Build.java:64)
+	at android.os.Build$VERSION.<clinit>(Build.java:338)
+	at androidx.media3.common.util.Util.<clinit>(Util.java:162)
+	at androidx.media3.common.Format.<init>(Format.java:1155)
+	at androidx.media3.common.Format.<init>(Format.java:134)
+	at androidx.media3.common.Format$Builder.build(Format.java:839)
+	at androidx.media3.common.Format.<clinit>(Format.java:882)
+	at androidx.media3.common.Format$Builder.build(Format.java:839)
+	at androidx.media3.extractor.ts.LatmReader.parseStreamMuxConfig(LatmReader.java:229)
+	at androidx.media3.extractor.ts.LatmReader.parseAudioMuxElement(LatmReader.java:174)
+	at androidx.media3.extractor.ts.LatmReader.consume(LatmReader.java:149)
+	at dev.openeos.control.data.Media3LatmSampleExtractor.consume(CcapiRtpAudio.kt:186)
+	at dev.openeos.control.data.CcapiRtpTest.media3LatmParserExtractsRawAacAndInBandFormat(CcapiRtpTest.kt:257)
+
+FAILURES!!!
+Tests run: 16,  Failures: 1
+
+
+=== ConnectionFailureTest.txt ===
+JUnit version 4.13.2
+.........
+Time: 0.033
+
+OK (9 tests)
+
+
+=== ConnectionRejectionContractTest.txt ===
+JUnit version 4.13.2
+.
+Time: 0.052
+
+OK (1 test)
+
+
+=== ConnectionResourceAcquisitionTest.txt ===
+JUnit version 4.13.2
+.......
+Time: 0.073
+
+OK (7 tests)
+
+
+=== DownloadHistoryContinuationStoreTest.txt ===
+JUnit version 4.13.2
+............................
+Time: 0.337
+
+OK (28 tests)
+
+
+=== DownloadHistoryStoreTest.txt ===
+JUnit version 4.13.2
+.................................................
+Time: 0.601
+
+OK (49 tests)
+
+
+=== HeldAutofocusSessionTest.txt ===
+JUnit version 4.13.2
+.....
+Time: 0.127
+
+OK (5 tests)
+
+
+=== LiveViewGeometryStateTest.txt ===
+JUnit version 4.13.2
+..........
+Time: 0.018
+
+OK (10 tests)
+
+
+=== LiveViewLifecycleContractTest.txt ===
+JUnit version 4.13.2
+.
+Time: 0.084
+
+OK (1 test)
+
+
+=== MediaMetadataEvidenceTest.txt ===
+JUnit version 4.13.2
+....
+Time: 0.034
+
+OK (4 tests)
+
+
+=== MediaMetadataItemTest.txt ===
+JUnit version 4.13.2
+...
+Time: 0.027
+
+OK (3 tests)
+
+
+=== MediaUploadAttemptTest.txt ===
+JUnit version 4.13.2
+...........
+Time: 0.063
+
+OK (11 tests)
+
+
+=== NativeRtpFrameProgressTest.txt ===
+JUnit version 4.13.2
+.....
+Time: 0.018
+
+OK (5 tests)
+
+
+=== NativeRtpMonitorContractTest.txt ===
+JUnit version 4.13.2
+.
+Time: 0.086
+
+OK (1 test)
+
+
+=== NativeRtpSurfaceWaitTest.txt ===
+JUnit version 4.13.2
+........
+Time: 0.007
+
+OK (8 tests)
+
+
+=== NativeVideoGeometryTest.txt ===
+JUnit version 4.13.2
+..
+Time: 0.016
+
+OK (2 tests)
+
+
+=== NativeVideoLutTest.txt ===
+JUnit version 4.13.2
+...........
+Time: 0.076
+
+OK (11 tests)
+
+
+=== PtpConnectionRetirementTest.txt ===
+JUnit version 4.13.2
+......
+Time: 0.074
+
+OK (6 tests)
+
+
+=== PtpDeleteBoundaryTest.txt ===
+JUnit version 4.13.2
+......
+Time: 0.085
+
+OK (6 tests)
+
+
+=== PtpObservedMediaFoldersTest.txt ===
+JUnit version 4.13.2
+......
+Time: 0.063
+
+OK (6 tests)
+
+
+=== PtpPropertiesTest.txt ===
+JUnit version 4.13.2
+........
+Time: 0.05
+
+OK (8 tests)
+
+
+=== PtpProtocolTest.txt ===
+JUnit version 4.13.2
+...............
+Time: 0.198
+
+OK (15 tests)
+
+
+=== PtpStandardPropertiesTest.txt ===
+JUnit version 4.13.2
+.....
+Time: 0.046
+
+OK (5 tests)
+
+
+=== PtpUploadBoundaryTest.txt ===
+JUnit version 4.13.2
+...
+Time: 0.064
+
+OK (3 tests)
+
+
+=== RecordingLifecycleContractTest.txt ===
+JUnit version 4.13.2
+..
+Time: 0.116
+
+OK (2 tests)
+
+
+=== RecordingLifecycleTest.txt ===
+JUnit version 4.13.2
+............
+Time: 0.04
+
+OK (12 tests)
+
+
+=== RtpAudioPlaybackTest.txt ===
+JUnit version 4.13.2
+..........................
+Time: 0.875
+
+OK (26 tests)
+
+
+=== ShutterReleaseSessionTest.txt ===
+JUnit version 4.13.2
+....
+Time: 0.136
+
+OK (4 tests)
+
+
+=== StrictMediaJsonTest.txt ===
+JUnit version 4.13.2
+...
+Time: 0.029
+
+OK (3 tests)
+
+
+=== UsbHostPreviewBoundedReadTest.txt ===
+JUnit version 4.13.2
+...............
+Time: 0.068
+
+OK (15 tests)
+
+
+=== UsbPtpStorageOwnershipTest.txt ===
+JUnit version 4.13.2
+............
+Time: 0.243
+
+OK (12 tests)
+
+
+=== attempt1-compile.txt ===
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:95:32: error: only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ConnectivityManager?'.
+            connectivityManager.getNetworkCapabilities(network)
+                               ^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:100:57: error: only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ConnectivityManager?'.
+            targetAddress == null || connectivityManager.getLinkProperties(network)
+                                                        ^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:105:49: error: only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ConnectivityManager?'.
+        val linkProperties = connectivityManager.getLinkProperties(selected)
+                                                ^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:135:49: error: only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ConnectivityManager?'.
+        val defaultNetwork = connectivityManager.activeNetwork
+                                                ^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:136:51: error: cannot infer type for type parameter 'R'. Specify it explicitly.
+        val defaultCapabilities = defaultNetwork?.let(connectivityManager::getNetworkCapabilities)
+                                                  ^^^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:136:76: error: only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ConnectivityManager?'.
+        val defaultCapabilities = defaultNetwork?.let(connectivityManager::getNetworkCapabilities)
+                                                                           ^^^^^^^^^^^^^^^^^^^^^^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:137:53: error: cannot infer type for type parameter 'R'. Specify it explicitly.
+        val defaultLinkProperties = defaultNetwork?.let(connectivityManager::getLinkProperties)
+                                                    ^^^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:137:78: error: only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ConnectivityManager?'.
+        val defaultLinkProperties = defaultNetwork?.let(connectivityManager::getLinkProperties)
+                                                                             ^^^^^^^^^^^^^^^^^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:146:44: error: cannot infer type for type parameter 'R'. Specify it explicitly.
+            interfaceName = cameraNetwork?.let(connectivityManager::getLinkProperties)?.interfaceName,
+                                           ^^^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:146:69: error: only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ConnectivityManager?'.
+            interfaceName = cameraNetwork?.let(connectivityManager::getLinkProperties)?.interfaceName,
+                                                                    ^^^^^^^^^^^^^^^^^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:146:89: error: unresolved reference 'interfaceName'.
+            interfaceName = cameraNetwork?.let(connectivityManager::getLinkProperties)?.interfaceName,
+                                                                                        ^^^^^^^^^^^^^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:151:36: error: only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ConnectivityManager?'.
+                connectivityManager.getNetworkCapabilities(network).isValidatedCellular()
+                                   ^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:156:65: error: unresolved reference 'interfaceName'.
+            systemDefaultInterfaceName = defaultLinkProperties?.interfaceName,
+                                                                ^^^^^^^^^^^^^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:161:28: error: only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ConnectivityManager?'.
+        connectivityManager.getNetworkCapabilities(this)
+                           ^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:165:28: error: only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ConnectivityManager?'.
+        connectivityManager.getNetworkCapabilities(this)
+                           ^
+src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt:171:28: error: only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ConnectivityManager?'.
+        connectivityManager.allNetworks.toList()
+                           ^
+src/test/java/dev/openeos/control/data/PtpDeleteBoundaryTest.kt:51:45: error: unresolved reference 'executeMediaDeleteBatch'.
+        val result = dev.openeos.control.ui.executeMediaDeleteBatch("ptp-partial", dev.openeos.control.ui.MediaDeleteOwner(Any(), 1),
+                                            ^^^^^^^^^^^^^^^^^^^^^^^
+src/test/java/dev/openeos/control/data/PtpDeleteBoundaryTest.kt:51:107: error: unresolved reference 'MediaDeleteOwner'.
+        val result = dev.openeos.control.ui.executeMediaDeleteBatch("ptp-partial", dev.openeos.control.ui.MediaDeleteOwner(Any(), 1),
+                                                                                                          ^^^^^^^^^^^^^^^^
+src/test/java/dev/openeos/control/data/PtpDeleteBoundaryTest.kt:52:52: error: cannot infer type for type parameter 'R'. Specify it explicitly.
+            listOf("ptp:00000042", "ptp:00000043").map {
+                                                   ^^^
+src/test/java/dev/openeos/control/data/PtpDeleteBoundaryTest.kt:53:40: error: unresolved reference 'MediaDeleteRequest'.
+                dev.openeos.control.ui.MediaDeleteRequest(it, "SAME.JPG", dev.openeos.control.ui.MediaDeleteSource.CAMERA_CARD)
+                                       ^^^^^^^^^^^^^^^^^^
+src/test/java/dev/openeos/control/data/PtpDeleteBoundaryTest.kt:53:98: error: unresolved reference 'MediaDeleteSource'.
+                dev.openeos.control.ui.MediaDeleteRequest(it, "SAME.JPG", dev.openeos.control.ui.MediaDeleteSource.CAMERA_CARD)
+                                                                                                 ^^^^^^^^^^^^^^^^^
+src/test/java/dev/openeos/control/data/PtpDeleteBoundaryTest.kt:54:39: error: unresolved reference 'MediaDeleteBatchControl'.
+            }, dev.openeos.control.ui.MediaDeleteBatchControl(), { true }, { null },
+                                      ^^^^^^^^^^^^^^^^^^^^^^^
+src/test/java/dev/openeos/control/data/PtpDeleteBoundaryTest.kt:55:15: error: cannot infer type for value parameter 'request'. Specify it explicitly.
+            { request, evidence -> session.deleteObject(mediaDeletePtpHandle(request.id), evidence = evidence) })
+              ^^^^^^^
+src/test/java/dev/openeos/control/data/PtpDeleteBoundaryTest.kt:55:24: error: cannot infer type for value parameter 'evidence'. Specify it explicitly.
+            { request, evidence -> session.deleteObject(mediaDeletePtpHandle(request.id), evidence = evidence) })
+                       ^^^^^^^^
+src/test/java/dev/openeos/control/data/PtpDeleteBoundaryTest.kt:55:44: error: suspension functions can only be called within coroutine body.
+            { request, evidence -> session.deleteObject(mediaDeletePtpHandle(request.id), evidence = evidence) })
+                                           ^^^^^^^^^^^^
+src/test/java/dev/openeos/control/data/PtpDeleteBoundaryTest.kt:55:86: error: unresolved reference 'id'.
+            { request, evidence -> session.deleteObject(mediaDeletePtpHandle(request.id), evidence = evidence) })
+                                                                                     ^^
+src/test/java/dev/openeos/control/data/PtpDeleteBoundaryTest.kt:56:110: error: unresolved reference 'it'.
+        assertEquals(listOf(MediaDeleteOutcome.UNCERTAIN, MediaDeleteOutcome.NOT_STARTED), result.rows.map { it.outcome })
+                                                                                                             ^^
+src/test/java/dev/openeos/control/data/UsbPtpCameraBackendTest.kt:24:42: error: no value passed for parameter 'advertiseCapture'.
+        val transport = ScriptedTransport()
+                                         ^^
+
+=== compile.txt ===
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:853:56: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                    override fun onFailure(call: Call, error: IOException) {
+                                                       ^^^^^
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:910:56: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                    override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                       ^^^^^
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:1069:52: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                   ^^^^^
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:2349:52: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                   ^^^^^

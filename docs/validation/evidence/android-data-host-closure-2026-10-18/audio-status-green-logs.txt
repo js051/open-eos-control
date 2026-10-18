@@ -1,0 +1,37 @@
+=== RtpAudioPlaybackTest.txt ===
+JUnit version 4.13.2
+..........................
+Time: 0.876
+
+OK (26 tests)
+
+
+=== compile.txt ===
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:853:56: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                    override fun onFailure(call: Call, error: IOException) {
+                                                       ^^^^^
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:910:56: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                    override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                       ^^^^^
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:1069:52: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                   ^^^^^
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:2349:52: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                   ^^^^^
+
+=== test.txt ===
+START parserInitializationFailureNeverPublishesAvailableAudio
+END tests=1 failures=0
+START audioExtractorInitializationFailureDoesNotEscapeIntoVideoStartup
+END tests=1 failures=0
+START rtpAudioIsDefaultMutedAndOnlyQueuesSamplesAfterExplicitEnable
+END tests=1 failures=0
+START latmParseFailureRemainsAnAudioStatusErrorAndDoesNotFailVideo
+END tests=1 failures=0
+START backgroundMutesAndForegroundRequiresANewManualEnable
+END tests=1 failures=0
+START audioPlayerFailureIsAudioOnlyAndExplicitRetryUsesANewEpoch
+END tests=1 failures=0
+START rtpReadinessTimesOutWithPacketDiagnostics
+END tests=1 failures=0

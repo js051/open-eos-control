@@ -423,8 +423,10 @@ internal class AndroidCcapiRtpSession(
     ) {
         val depacketizer = LatmRtpDepacketizer(audio.payloadType)
         var extractor = try { latmExtractorFactory() } catch (exception: Exception) {
+            // The owner publishes its failure synchronously; revoke availability first so
+            // listeners never receive a parser failure that still advertises usable audio.
+            updateAudioStatus(notify = false) { it.copy(available = false) }
             audioPlayback.setAvailable(false, error = "Canon RTP LATM parser initialization failed: ${exception.message ?: exception.javaClass.simpleName}")
-            updateAudioStatus { it.copy(available = false) }
             return
         }
         val buffer = ByteArray(MAX_RTP_DATAGRAM_BYTES)
@@ -486,9 +488,9 @@ internal class AndroidCcapiRtpSession(
             } catch (exception: Exception) {
                 depacketizer.resetAfterDiscontinuity()
                 recordDroppedAudioAccessUnit()
+                updateAudioStatus(notify = false) { it.copy(available = false) }
                 audioPlayback.setAvailable(false,
                     error = "Canon RTP LATM parse failed: ${exception.message ?: exception.javaClass.simpleName}")
-                updateAudioStatus(notify = false) { it.copy(available = false) }
                 extractor = try { latmExtractorFactory().also { it.reset() } } catch (reset: Exception) {
                     updateAudioStatus { it.copy(available = false,
                         error = "Canon RTP LATM parser reset failed: ${reset.message ?: reset.javaClass.simpleName}") }

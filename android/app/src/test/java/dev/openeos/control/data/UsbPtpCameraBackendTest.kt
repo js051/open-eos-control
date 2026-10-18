@@ -21,7 +21,7 @@ import java.nio.charset.StandardCharsets
 
 class UsbPtpCameraBackendTest {
     @Test fun cancelledTransportAcquisitionClosesHandleBeforeAnyPtpCommand() = runTest {
-        val transport = ScriptedTransport()
+        val transport = ScriptedTransport(advertiseCapture = false)
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         val backend = UsbPtpCameraBackend(CameraConnection.AndroidUsbPtp("synthetic-usb"), PtpTransportFactory {

@@ -1,0 +1,424 @@
+{
+  "compile-command.json": [
+    "<SHARED_OFFICIAL_TOOLS>/tools/jdk-17.0.20.1+1/bin/java",
+    "-Xmx768m",
+    "-XX:ActiveProcessorCount=2",
+    "-cp",
+    "<EOS_WORKSPACE>/android-recovery/jars/kotlin-compiler-embeddable-2.2.21.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlin-stdlib-2.2.21.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlin-script-runtime-2.2.21.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlin-reflect-1.6.10.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlin-daemon-embeddable-2.2.21.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlinx-coroutines-core-jvm-1.8.0.jar:<EOS_WORKSPACE>/android-recovery/jars/annotations-23.0.0.jar",
+    "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler",
+    "-no-stdlib",
+    "-no-reflect",
+    "-jvm-target",
+    "17",
+    "-classpath",
+    "<EOS_WORKSPACE>/android-recovery/jars/json-20240303.jar:<EOS_WORKSPACE>/android-recovery/jars/junit-4.13.2.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlin-stdlib-2.2.21.jar:<EOS_WORKSPACE>/android-recovery/jars/media3-extractor-1.8.1-classes.jar:<EOS_WORKSPACE>/android-recovery/jars/media3-common-1.8.1-classes.jar:<EOS_WORKSPACE>/android-recovery/jars/media3-container-1.8.1-classes.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlin-test-junit-2.2.21.jar:<EOS_WORKSPACE>/android-recovery/jars/hamcrest-core-1.3.jar:<EOS_WORKSPACE>/android-recovery/jars/annotation-experimental-1.3.1-classes.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlinx-coroutines-test-jvm-1.9.0.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlin-test-2.2.21.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlinx-coroutines-core-jvm-1.9.0.jar:<EOS_WORKSPACE>/android-recovery/jars/okio-jvm-3.6.0.jar:<EOS_WORKSPACE>/android-recovery/jars/annotations-23.0.0.jar:<EOS_WORKSPACE>/android-recovery/jars/okhttp-4.12.0.jar:<EOS_WORKSPACE>/android-recovery/jars/mockwebserver-4.12.0.jar:<EOS_WORKSPACE>/android-recovery/jars/guava-33.3.1-android.jar:<EOS_WORKSPACE>/android-recovery/jars/media3-decoder-1.8.1-classes.jar:<EOS_WORKSPACE>/android-recovery/jars/annotation-1.6.0.jar:<SHARED_OFFICIAL_TOOLS>/sdk/platforms/android-35/android.jar",
+    "-d",
+    "<EOS_WORKSPACE>/android-recovery/remaining-data/audio-status-red/classes",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/AndroidCcapiRtpSession.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/AndroidLiveViewJpegValidator.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/AndroidRtpAudioPlayer.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/AndroidUsbPtpTransport.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/AutomaticJpegOriginal.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/BridgeBulbAccess.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/BridgeBulbDeadline.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/BridgeBulbRequestSession.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/BridgeHeldAutofocusSession.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/BridgeMediaListingDecoder.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/BridgeShutterReleaseSession.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CameraBackend.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CameraFocusMetadata.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CameraMediaClassification.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CameraMediaMetadataJson.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CameraMediaPageCount.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CameraMediaRatingJson.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CameraMediaStreaming.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CameraModels.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CameraRepository.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CanonEosPtp.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CaptureConfigurationEvidence.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CaptureConfigurationJson.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CaptureStatusReadbackException.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CcapiMultipartLiveView.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CcapiRtp.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/CcapiRtpAudio.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/ConnectionFailure.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/ConnectionRetirement.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/DownloadHistoryFileStorage.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/DownloadHistoryStore.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/HeldAutofocusSession.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/LiveViewGeometryState.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/LiveViewLifecycle.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/LiveViewLiveness.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/LiveViewStartOperation.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/MaintenanceEvidence.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/MediaDeleteEvidence.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/MediaDeleteHttp.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/MediaMetadataEvidence.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/MediaMetadataItem.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/MediaUploadAttempt.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/NativeLiveViewSession.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/NativeRtpFrameProgress.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/NativeRtpLutRenderer.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/NativeRtpSurfaceWait.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/NativeVideoGeometry.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/NativeVideoLut.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/PtpBufferedInput.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/PtpObservedMediaFolders.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/PtpProperties.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/PtpProtocol.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/PtpStandardProperties.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/RecordingAccess.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/RecordingCommandUnconfirmedException.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/RecordingLifecycle.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/RecordingStatusReadbackException.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/RtpAudioPlayback.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/RtpAudioPlaybackOwner.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/ShootingSettingEvidence.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/ShootingSettingJson.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/ShutterReleaseSession.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/StrictMediaJson.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/UsbHostCaptureStore.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/UsbPtpCameraBackend.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/MediaLibrary.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/MediaCaptureDate.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/MaintenanceWorkflow.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/NativeRtpMonitorEvidence.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/MediaDeleteBatch.kt",
+    "<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/data/AndroidCcapiRtpSessionTest.kt"
+  ],
+  "compile-result.json": {
+    "exit": 0
+  },
+  "results.json": [
+    {
+      "class": "AndroidCcapiRtpSessionTest",
+      "methods": [
+        "parserInitializationFailureNeverPublishesAvailableAudio",
+        "audioExtractorInitializationFailureDoesNotEscapeIntoVideoStartup"
+      ],
+      "tests": 2,
+      "failures": 1,
+      "exit": 1,
+      "start": "2026-10-18T10:17:46.360718+00:00",
+      "end": "2026-10-18T10:17:46.575527+00:00"
+    }
+  ],
+  "run-command.json": [
+    "<SHARED_OFFICIAL_TOOLS>/tools/jdk-17.0.20.1+1/bin/java",
+    "-Xmx768m",
+    "-XX:ActiveProcessorCount=2",
+    "-cp",
+    "<EOS_WORKSPACE>/android-recovery/remaining-data/audio-status-red/classes:<EOS_WORKSPACE>/android-recovery/runner-classes:<EOS_WORKSPACE>/android-recovery/jars/json-20240303.jar:<EOS_WORKSPACE>/android-recovery/jars/junit-4.13.2.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlin-stdlib-2.2.21.jar:<EOS_WORKSPACE>/android-recovery/jars/media3-extractor-1.8.1-classes.jar:<EOS_WORKSPACE>/android-recovery/jars/media3-common-1.8.1-classes.jar:<EOS_WORKSPACE>/android-recovery/jars/media3-container-1.8.1-classes.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlin-test-junit-2.2.21.jar:<EOS_WORKSPACE>/android-recovery/jars/hamcrest-core-1.3.jar:<EOS_WORKSPACE>/android-recovery/jars/annotation-experimental-1.3.1-classes.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlinx-coroutines-test-jvm-1.9.0.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlin-test-2.2.21.jar:<EOS_WORKSPACE>/android-recovery/jars/kotlinx-coroutines-core-jvm-1.9.0.jar:<EOS_WORKSPACE>/android-recovery/jars/okio-jvm-3.6.0.jar:<EOS_WORKSPACE>/android-recovery/jars/annotations-23.0.0.jar:<EOS_WORKSPACE>/android-recovery/jars/okhttp-4.12.0.jar:<EOS_WORKSPACE>/android-recovery/jars/mockwebserver-4.12.0.jar:<EOS_WORKSPACE>/android-recovery/jars/guava-33.3.1-android.jar:<EOS_WORKSPACE>/android-recovery/jars/media3-decoder-1.8.1-classes.jar:<EOS_WORKSPACE>/android-recovery/jars/annotation-1.6.0.jar:<EOS_WORKSPACE>/android-recovery/viewmodel-materials/android-all-15-robolectric-12650502.jar",
+    "TraceMethod",
+    "dev.openeos.control.data.AndroidCcapiRtpSessionTest",
+    "parserInitializationFailureNeverPublishesAvailableAudio",
+    "audioExtractorInitializationFailureDoesNotEscapeIntoVideoStartup"
+  ],
+  "source-manifest.json": {
+    "whole_files": true,
+    "files": [
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/AndroidCcapiRtpSession.kt",
+        "sha256": "c1b6cf194a8aa916b1ac29ca7988c7ae2afcb85409a68f3ef5a1ec9075483c72"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/AndroidLiveViewJpegValidator.kt",
+        "sha256": "33320f759702e5443a49426b317954a1b11cb04299be81552e263f4ba58138b9"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/AndroidRtpAudioPlayer.kt",
+        "sha256": "63d85cd88eda4e419ab8ad08baffc937b008470579d8610d073a29374bf3e098"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/AndroidUsbPtpTransport.kt",
+        "sha256": "7821dfaee9901319ba153ea226a6ac707f26597d30b5561f388a545d3c1345c6"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/AutomaticJpegOriginal.kt",
+        "sha256": "b75da202d8d5f2a40ffbd6d6c63527f84089c00514a507ebc8d38c1274e3dc3e"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/BridgeBulbAccess.kt",
+        "sha256": "9f9db034592ae3f68c5f29a39173292b99f5008b914b3843aeb45465d0089249"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/BridgeBulbDeadline.kt",
+        "sha256": "b14c921a10fa2bbeb606f14acb718e511a7a9d888772c5895ed2c381bcd160d3"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/BridgeBulbRequestSession.kt",
+        "sha256": "77082b0492cda953e6cba413785e130e1d9abee52c6cc0e4810dba313a88cd77"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/BridgeHeldAutofocusSession.kt",
+        "sha256": "40d0762d2a2ce89d2230077693eba0ee3d686536c27029e9ab062223f1872522"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/BridgeMediaListingDecoder.kt",
+        "sha256": "a6b547952388340d081320dd9461f7f55cfc5959c10749296063f685aa3ff7fc"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/BridgeShutterReleaseSession.kt",
+        "sha256": "81b62c61e6245e8546df2d84eb8b6995f991f57b55787a104d3ac9f399d6c752"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CameraBackend.kt",
+        "sha256": "2ee39b3466dd06fc94769cb297bee2ed895cf5f4b575963a0bc11a30dc1740b3"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CameraFocusMetadata.kt",
+        "sha256": "97b6f5dc8fcf82dd8422ca122514682c8681a6464ab69e168af91dbe0ac45d82"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CameraMediaClassification.kt",
+        "sha256": "541bb0287499647d8a19a35587493cb4d4159f33756427099dc54099077561f4"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CameraMediaMetadataJson.kt",
+        "sha256": "6175cd11b76e8f62722178bb332bb07f975eab9ebb1e6eec1ef831770903f75f"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CameraMediaPageCount.kt",
+        "sha256": "e162736fb40270e552fd8ef51404a52a9057c70507051f8e044924e00b121d1b"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CameraMediaRatingJson.kt",
+        "sha256": "55060f71c88c59892520e20fd766ed5327fc8d176bd8461e668b068d6ef369d6"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CameraMediaStreaming.kt",
+        "sha256": "8f2b0984b32c4db566d677df1fc26b62b6194c1cbf88fefce7e9643194167265"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CameraModels.kt",
+        "sha256": "e43dbbabe7062ce0debeddca8ed39efa1f8ef0d4caa5ecea7b22de7f3ed24b70"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CameraNetworkRouting.kt",
+        "sha256": "ef4069f9806e07d535e4105b3a1d464c0d9d5c38b7e6791145d2488ff7f48786"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CameraRepository.kt",
+        "sha256": "838b64e33a83b8fe63c796037171d2a6888fcf969a488a8a5cbe55201e9e21fe"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CanonEosPtp.kt",
+        "sha256": "2fcbbfeba374e55f0ecbdeac99aa45c213b65937bfa51c06ac19588c2071fd32"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CaptureConfigurationEvidence.kt",
+        "sha256": "e2a15c16b8fedbd6857e46d7ff59b7e0af32992fd86b9f22003890ebca02cd41"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CaptureConfigurationJson.kt",
+        "sha256": "c18d6b7bc578d707b989848c5aa22365a750f0b32be56e80f1abe0804192e2e3"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CaptureStatusReadbackException.kt",
+        "sha256": "fe4ab922d4aac71db854d96f87bb7a39c02ad775b7b2d180f98481fc99e2598c"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CcapiClient.kt",
+        "sha256": "3e61b4f582a70e3a9ca2f9a78e513b2d3ee8bbaf16043444388c98005906fe60"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CcapiMultipartLiveView.kt",
+        "sha256": "b77fe1d506653992495f4ac3282771f035fc40f38acb677cdf7ab97d2efbedef"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CcapiRtp.kt",
+        "sha256": "4902dd133aa3648e9bb8e15a419955beaf0953ad0685e954ea3d1bd8b8514125"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/CcapiRtpAudio.kt",
+        "sha256": "fef57fdee7ace6516debc93aedb6471b37ccb5cb4cec2ab89f504fc3bbc5d068"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/ConnectionFailure.kt",
+        "sha256": "4330e35b37f5fe0304d31ff250425734ee7838acb145f6667a70d696e6816f94"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/ConnectionRetirement.kt",
+        "sha256": "08b570f07dd3959c5fd56bcf84dfe362eef0a896ed67f9cc85f652f538ebebbd"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt",
+        "sha256": "4295ffb967acf99b082a4e2e14ff5e865a604584517999d69c8e34b6473c3069"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/DownloadHistoryFileStorage.kt",
+        "sha256": "e2470dfb2ef5302449a260f99bb0b9509859b6e09322ac595e2b4ded65be8829"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/DownloadHistoryStore.kt",
+        "sha256": "0d4e39bc89005de276459cc180f007f63255b4fd872001d844f56a24568b5861"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/HeldAutofocusSession.kt",
+        "sha256": "02f1636c21ab46fc3f9dd8ebc1be66a9cfd7d7fa861f6f806d7d4911f22b7dff"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/LiveViewGeometryState.kt",
+        "sha256": "938d8f202330ef48c9f05d7d7a5c3e68c6d33b9c3c65357fe964aa42fff054f6"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/LiveViewLifecycle.kt",
+        "sha256": "dbc5a93478b66d3322bb26ab504e6c403fb0b2972b681661e54a4754727642e7"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/LiveViewLiveness.kt",
+        "sha256": "713b292e4dcc4cbbaa069e2f621c730a8c90ed825016a270567baf84375588fe"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/LiveViewStartOperation.kt",
+        "sha256": "5c7c922b378a21402f971dba9c59339ff1a1d707ef4c97f2b4f73e88e04ea938"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/MaintenanceEvidence.kt",
+        "sha256": "7fe769d5dda7f4bd0acfe5b5777de505533a70066623b08ecc69fdddda99941d"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/MediaDeleteEvidence.kt",
+        "sha256": "628a19c06393f03c887952ea8bd211c8f251f2f72e3582963876bc98aa232d3f"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/MediaDeleteHttp.kt",
+        "sha256": "6db915902f9a1e8bfc3556ff92e3760e05281fae39217d39d69dd0e004347d79"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/MediaMetadataEvidence.kt",
+        "sha256": "5b2d32a2ebe317c1a072fcfb6226032a559e81c9e3a032b1b418db9f852f2382"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/MediaMetadataItem.kt",
+        "sha256": "1580b0e8139dce2aa46f4f240e2c3719a16d8280c97e2561e43e06ede6393738"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/MediaUploadAttempt.kt",
+        "sha256": "5f4eab3dfc76d97d43a74c414725c03a3c0e4110adddc2cb0149b18fbf410e61"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/NativeLiveViewSession.kt",
+        "sha256": "0d95ddc10f505c069502b8ac5837b0a410a2ee7f2e64450f0a2203485ab08fe5"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/NativeRtpFrameProgress.kt",
+        "sha256": "71f70ff6f7fd096e9cd318f353fdf89e6a9308442d24741c0ccb6526f771c1b1"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/NativeRtpLutRenderer.kt",
+        "sha256": "936932a352d5dfcabcda9188355c06260756e59b2b264504634dc212f5228ced"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/NativeRtpSurfaceWait.kt",
+        "sha256": "2925df3535d9fcc7d2d6cf167b1cdafafc703a58a246024fbff1f7c741f1d688"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/NativeVideoGeometry.kt",
+        "sha256": "baf3fb9e99f0df65a13887f27120d080bb18279ab14224ed16d0a06d34391b8d"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/NativeVideoLut.kt",
+        "sha256": "8c8bd1bb6cd5ad195e27b0aa6fcfdcf9e27c8787bbc8689193849fc04916e9a7"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/PtpBufferedInput.kt",
+        "sha256": "247f7febd01f4a777e5c4ee617217f61bf4d08002def42f5f4a6aa82b3e96fe6"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/PtpObservedMediaFolders.kt",
+        "sha256": "ab44dd9d469bef664b27336f8eb5a564b60ed527c25462bcb8de9b25d4bd2d2d"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/PtpProperties.kt",
+        "sha256": "fcf872186f9361f4e02552432a7bfe16e9340436cc9f90f84a86e281ccbd7e64"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/PtpProtocol.kt",
+        "sha256": "6dfe645f02a58ff4e0e3e6d3be27eec3180f537bcccdb2c0e2908b183f9b028c"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/PtpStandardProperties.kt",
+        "sha256": "b700d76f6d2004113e6f36a4bb914c4c03b929a043abf694a026c63056bb1ce7"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/RecordingAccess.kt",
+        "sha256": "ca64cd47b99c0ec1b3e4604bd910e61f2e03c58d850a8248a13d6b421a5e7d6d"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/RecordingCommandUnconfirmedException.kt",
+        "sha256": "c9d5030ae103daa4c965635902bed6c0bc25474d3bf75a00a334593ff6843803"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/RecordingLifecycle.kt",
+        "sha256": "cf4f076f9b7c12fea7010260336ce1040530487eb61bb5182a1cafa952a7760c"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/RecordingStatusReadbackException.kt",
+        "sha256": "c1dd52dbd7ecef3f90225b9067ef02bd95961cfc7af262681dd7ded45b97fdf5"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/RtpAudioPlayback.kt",
+        "sha256": "ddcc1df4083b837b9dce204d662f013f39e164f5ea6e2858164d0498d53cefac"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/RtpAudioPlaybackOwner.kt",
+        "sha256": "da392cb3e6a7c9207941a6db3146b570bc0ed0520e2346233327672965053081"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/ShootingSettingEvidence.kt",
+        "sha256": "9409de519f2618ca264c2856fcecbded7ade2327a6ae3c5ba129bb20e648fdbb"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/ShootingSettingJson.kt",
+        "sha256": "c2c0967a4fd4589e198bd7913a1425d09b881c5cbd17784f91c8ea4cc3ad2930"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/ShutterReleaseSession.kt",
+        "sha256": "b1e1708555c7938c94f13bd9c8cb90f5fb0e37a993d9153c479a3df144363749"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/StrictMediaJson.kt",
+        "sha256": "9ea850d244a64b2a2776062d75bb07ac4709a1fe33cecdc326f86c56cd8bf169"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/UsbHostCaptureStore.kt",
+        "sha256": "c562ad2aac4dbc4f0684b02bbb0c9d80cd033e033336d0c9ed32aaa02b826970"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/UsbPtpCameraBackend.kt",
+        "sha256": "b6801d63c8efe31fdd65c7277eba109683f4e7f7f6bfa2da84c4a9debf468961"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/ui/MediaLibrary.kt",
+        "sha256": "ffa626743dc3b0d76dfd46054615d8b07b748027a9690c20202e03a2b5b96fdd"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/ui/MediaCaptureDate.kt",
+        "sha256": "200a0c1bb8da42ff4b95f616b77209c4b9911a2b613c31dff0163851ce1043de"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/ui/MaintenanceWorkflow.kt",
+        "sha256": "fc0e033cd8c8efb7e4c3a2c239d94b107d2ec62d8243fd9c7c4a39229dd0093e"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/data/NativeRtpMonitorEvidence.kt",
+        "sha256": "43fb136e1fc9c7f3ee24aa15cba6a98c14a0dfd96bfa9fce799da2b1bccbdbcb"
+      },
+      {
+        "path": "android/app/src/main/java/dev/openeos/control/ui/MediaDeleteBatch.kt",
+        "sha256": "2941b0130128dab77b1c677326f33d7bc3b08423523c266f448084f470653517"
+      },
+      {
+        "path": "android/app/src/test/java/dev/openeos/control/data/AndroidCcapiRtpSessionTest.kt",
+        "sha256": "f8aae36d527beb11c4cb6c3d32a29f51db0bf3f698dae82303a8904fed3e164d"
+      }
+    ]
+  },
+  "source-verification.json": {
+    "source_unchanged": true
+  }
+}

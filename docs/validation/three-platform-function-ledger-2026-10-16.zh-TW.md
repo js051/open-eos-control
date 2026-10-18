@@ -467,3 +467,7 @@ EDSDK 回傳錯誤 session 後 close 失敗，現保留精確 rejected owner，�
 ### 2026-10-18 Android UI full-source host closure
 
 原 UI 77 類已有 72 類本輪完整來源 host 執行證據；新增 media caller 51 案、其餘 58 類 498 案（兩個 Android runtime harness 修正後均通過）、label 3／language 3／connection 8 案。剩餘 5 類完整來源共用 Media3 UI 材料門檻。未宣稱 UI／真機／三端完成。詳見 [完整收據](android-ui-host-closure-2026-10-18.zh-TW.md)。
+
+### 2026-10-18 Android data full-source closure／音訊事件一致性
+
+原剩餘 48 類完整來源執行：USB 97 案修正漏參數後全過；其餘 420 案 baseline 2 紅，LATM 16 案用合法 Robolectric 通過，音訊事件錯誤先於 availability 撤銷已用兩個 listener 紅測確證並修正，最終 34 項音訊／owner 回歸全過。RTP 三個 codec readiness／failure 案仍需真 codec 或明確故障 fixture；預設 Robolectric passthrough 不具該證據力。詳見 [紅綠與材料邊界](android-data-host-closure-2026-10-18.zh-TW.md)。

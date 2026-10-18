@@ -1,0 +1,223 @@
+=== attempt1-run.py ===
+from pathlib import Path
+import json,re,subprocess,hashlib,datetime,shutil
+out=Path(__file__).resolve().parent;r=out.parent;repo=r.parent/'repository';test=repo/'android/app/src/test/java/dev/openeos/control/data'
+seen=set()
+for p in r.rglob('*results.json'):
+ if out in p.parents: continue
+ seen.update(re.findall(r'"class"\s*:\s*"(?:dev\.openeos\.control\.\w+\.)?([A-Za-z0-9_]+Test)"',p.read_text()))
+tests=[p for p in sorted(test.glob('*Test.kt')) if p.stem not in seen]
+assert len(tests)==48,len(tests)
+tests.sort(key=lambda p:(p.stem=='AndroidCcapiRtpSessionTest',p.stem))
+prod=[repo/p for p in json.loads((r/'next-source-files.json').read_text()) if '/src/main/' in p]
+prod.append(repo/'android/app/src/main/java/dev/openeos/control/data/NativeRtpMonitorEvidence.kt')
+files=prod+tests+[test/'UsbPtpObservedFoldersTest.kt']+sorted(test.glob('*FixtureLoader.kt'))+[repo/'android/app/src/test/java/dev/openeos/control/ui/MediaUploadFixtureLoader.kt',repo/'android/app/src/test/java/dev/openeos/control/ui/MediaUploadFixture.kt']
+files=list(dict.fromkeys(files))
+hashes={str(p.relative_to(repo)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
+(out/'source-manifest.json').write_text(json.dumps({'whole_files':True,'files':hashes,'executed_test_classes':[p.stem for p in tests]},indent=2))
+cmd=json.loads((r/'next-compile-command.json').read_text());cmd=cmd[:cmd.index('-d')]+['-d',str(out/'classes')]+[str(p) for p in files]
+cp=cmd[cmd.index('-classpath')+1].split(':');cp=[p for p in cp if not p.endswith('/android.jar')]+[str(r/'viewmodel-materials/android-all-15-robolectric-12650502.jar')]
+cmd[cmd.index('-classpath')+1]=':'.join(cp)
+(out/'compile-command.json').write_text(json.dumps(cmd,indent=2))
+with (out/'compile.txt').open('w') as f:code=subprocess.run(cmd,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=240).returncode
+(out/'compile-result.json').write_text(json.dumps({'exit':code}))
+print('compile',code,flush=True)
+if code: print((out/'compile.txt').read_text()[-14000:],flush=True);raise SystemExit(code)
+resources=out/'resources';resources.mkdir(exist_ok=True)
+g=(repo/'android/app/build.gradle.kts').read_text().split('val unitContractFixtures = listOf(',1)[1].split('\n)',1)[0];fixtures=[]
+for rel in re.findall(r'"([^"\n]+)"',g):
+ p=(repo/'android/app'/rel).resolve();shutil.copyfile(p,resources/p.name);fixtures.append({'path':str(p.relative_to(repo)),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+(out/'fixture-manifest.json').write_text(json.dumps(fixtures,indent=2))
+results=[];commands=[]
+for p in tests:
+ name=p.stem;log=out/(name+'.txt');run=[cmd[0],'-Xmx768m','-XX:ActiveProcessorCount=2','-cp',str(out/'classes')+':'+':'.join(cp)+':'+str(resources),'org.junit.runner.JUnitCore','dev.openeos.control.data.'+name]
+ commands.append(run);(out/'run-commands.json').write_text(json.dumps(commands,indent=2));start=datetime.datetime.now(datetime.timezone.utc).isoformat()
+ with log.open('w') as f:
+  try:code=subprocess.run(run,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=240).returncode
+  except subprocess.TimeoutExpired:code=124
+ s=log.read_text();ok=re.search(r'OK \((\d+) tests?\)',s);bad=re.search(r'Tests run: (\d+),  Failures: (\d+)',s)
+ row={'class':name,'tests':int(ok[1]) if ok else int(bad[1]) if bad else None,'failures':0 if ok else int(bad[2]) if bad else None,'exit':code,'start':start,'end':datetime.datetime.now(datetime.timezone.utc).isoformat()};results.append(row);(out/'results.json').write_text(json.dumps(results,indent=2));print(json.dumps(row),flush=True)
+ if code:print(s[-4500:],flush=True)
+unchanged=all(hashlib.sha256((repo/p).read_bytes()).hexdigest()==h for p,h in hashes.items())
+(out/'source-verification.json').write_text(json.dumps({'source_unchanged':unchanged},indent=2));assert unchanged
+raise SystemExit(any(x['exit'] for x in results))
+
+=== run-audio-green.py ===
+from pathlib import Path
+import json,subprocess,hashlib,datetime,re,sys
+out=Path(__file__).resolve().parent;r=out.parent;repo=r.parent/'repository';o=out/(sys.argv[1] if len(sys.argv)>1 else 'audio-status-green');o.mkdir(exist_ok=True)
+base=json.loads((out/'compile-command.json').read_text());files=[Path(p) for p in base[base.index('-d')+2:] if '/src/main/' in p];files.append(repo/'android/app/src/test/java/dev/openeos/control/data/AndroidCcapiRtpSessionTest.kt');files.append(repo/'android/app/src/test/java/dev/openeos/control/data/RtpAudioPlaybackTest.kt');cmd=base[:base.index('-d')]+['-d',str(o/'classes')]+list(map(str,files))
+hashes={str(p.relative_to(repo)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files};(o/'source-manifest.json').write_text(json.dumps({'whole_files':True,'files':hashes},indent=2));(o/'compile-command.json').write_text(json.dumps(cmd,indent=2))
+with (o/'compile.txt').open('w') as f:code=subprocess.run(cmd,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=240).returncode
+print('audio status compile',code,flush=True);(o/'compile-result.json').write_text(json.dumps({'exit':code}))
+if code:print((o/'compile.txt').read_text()[-12000:],flush=True);raise SystemExit(code)
+cp=[p for p in cmd[cmd.index('-classpath')+1].split(':') if not p.endswith('/android.jar')]+[str(r/'viewmodel-materials/android-all-15-robolectric-12650502.jar')]
+methods=['parserInitializationFailureNeverPublishesAvailableAudio','audioExtractorInitializationFailureDoesNotEscapeIntoVideoStartup','rtpAudioIsDefaultMutedAndOnlyQueuesSamplesAfterExplicitEnable','latmParseFailureRemainsAnAudioStatusErrorAndDoesNotFailVideo','backgroundMutesAndForegroundRequiresANewManualEnable','audioPlayerFailureIsAudioOnlyAndExplicitRetryUsesANewEpoch','rtpReadinessTimesOutWithPacketDiagnostics'];run=[cmd[0],'-Xmx768m','-XX:ActiveProcessorCount=2','-cp',str(o/'classes')+':'+str(r/'runner-classes')+':'+':'.join(cp),'TraceMethod','dev.openeos.control.data.AndroidCcapiRtpSessionTest']+methods;(o/'run-command.json').write_text(json.dumps(run,indent=2));start=datetime.datetime.now(datetime.timezone.utc).isoformat()
+with (o/'test.txt').open('w') as f:
+ try:code=subprocess.run(run,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=90).returncode
+ except subprocess.TimeoutExpired:code=124
+s=(o/'test.txt').read_text();counts=re.findall(r'END tests=(\d+) failures=(\d+)',s);row={'class':'AndroidCcapiRtpSessionTest','methods':methods,'tests':sum(int(t) for t,f in counts),'failures':sum(int(f) for t,f in counts),'exit':code,'start':start,'end':datetime.datetime.now(datetime.timezone.utc).isoformat()};(o/'results.json').write_text(json.dumps([row],indent=2));print(json.dumps(row),flush=True);print(s,flush=True)
+run2=run[:run.index('TraceMethod')]+['org.junit.runner.JUnitCore','dev.openeos.control.data.RtpAudioPlaybackTest'];(o/'playback-command.json').write_text(json.dumps(run2,indent=2));start=datetime.datetime.now(datetime.timezone.utc).isoformat()
+with (o/'RtpAudioPlaybackTest.txt').open('w') as f:
+ try:code2=subprocess.run(run2,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=90).returncode
+ except subprocess.TimeoutExpired:code2=124
+s2=(o/'RtpAudioPlaybackTest.txt').read_text();ok=re.search(r'OK \((\d+) tests?\)',s2);bad=re.search(r'Tests run: (\d+),  Failures: (\d+)',s2)
+row2={'class':'RtpAudioPlaybackTest','tests':int(ok[1]) if ok else int(bad[1]) if bad else None,'failures':0 if ok else int(bad[2]) if bad else None,'exit':code2,'start':start,'end':datetime.datetime.now(datetime.timezone.utc).isoformat()};(o/'results.json').write_text(json.dumps([row,row2],indent=2));print(json.dumps(row2),flush=True);print(s2,flush=True)
+code=code or code2
+unchanged=all(hashlib.sha256((repo/p).read_bytes()).hexdigest()==h for p,h in hashes.items());(o/'source-verification.json').write_text(json.dumps({'source_unchanged':unchanged}));assert unchanged
+raise SystemExit(code)
+
+=== run-audio-parse-green.py ===
+from pathlib import Path
+import json,subprocess,hashlib,datetime,re,sys
+out=Path(__file__).resolve().parent;r=out.parent;repo=r.parent/'repository';o=out/(sys.argv[1] if len(sys.argv)>1 else 'audio-status-green');o.mkdir(exist_ok=True)
+base=json.loads((out/'compile-command.json').read_text());files=[Path(p) for p in base[base.index('-d')+2:] if '/src/main/' in p];files.append(repo/'android/app/src/test/java/dev/openeos/control/data/AndroidCcapiRtpSessionTest.kt');files.append(repo/'android/app/src/test/java/dev/openeos/control/data/RtpAudioPlaybackTest.kt');cmd=base[:base.index('-d')]+['-d',str(o/'classes')]+list(map(str,files))
+hashes={str(p.relative_to(repo)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files};(o/'source-manifest.json').write_text(json.dumps({'whole_files':True,'files':hashes},indent=2));(o/'compile-command.json').write_text(json.dumps(cmd,indent=2))
+with (o/'compile.txt').open('w') as f:code=subprocess.run(cmd,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=240).returncode
+print('audio status compile',code,flush=True);(o/'compile-result.json').write_text(json.dumps({'exit':code}))
+if code:print((o/'compile.txt').read_text()[-12000:],flush=True);raise SystemExit(code)
+cp=[p for p in cmd[cmd.index('-classpath')+1].split(':') if not p.endswith('/android.jar')]+[str(r/'viewmodel-materials/android-all-15-robolectric-12650502.jar')]
+methods=['parserFailureRevokesAvailabilityBeforePublishingAndFailedResetStaysUnavailable','parserInitializationFailureNeverPublishesAvailableAudio','audioExtractorInitializationFailureDoesNotEscapeIntoVideoStartup','rtpAudioIsDefaultMutedAndOnlyQueuesSamplesAfterExplicitEnable','latmParseFailureRemainsAnAudioStatusErrorAndDoesNotFailVideo','backgroundMutesAndForegroundRequiresANewManualEnable','audioPlayerFailureIsAudioOnlyAndExplicitRetryUsesANewEpoch','rtpReadinessTimesOutWithPacketDiagnostics'];run=[cmd[0],'-Xmx768m','-XX:ActiveProcessorCount=2','-cp',str(o/'classes')+':'+str(r/'runner-classes')+':'+':'.join(cp),'TraceMethod','dev.openeos.control.data.AndroidCcapiRtpSessionTest']+methods;(o/'run-command.json').write_text(json.dumps(run,indent=2));start=datetime.datetime.now(datetime.timezone.utc).isoformat()
+with (o/'test.txt').open('w') as f:
+ try:code=subprocess.run(run,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=90).returncode
+ except subprocess.TimeoutExpired:code=124
+s=(o/'test.txt').read_text();counts=re.findall(r'END tests=(\d+) failures=(\d+)',s);row={'class':'AndroidCcapiRtpSessionTest','methods':methods,'tests':sum(int(t) for t,f in counts),'failures':sum(int(f) for t,f in counts),'exit':code,'start':start,'end':datetime.datetime.now(datetime.timezone.utc).isoformat()};(o/'results.json').write_text(json.dumps([row],indent=2));print(json.dumps(row),flush=True);print(s,flush=True)
+run2=run[:run.index('TraceMethod')]+['org.junit.runner.JUnitCore','dev.openeos.control.data.RtpAudioPlaybackTest'];(o/'playback-command.json').write_text(json.dumps(run2,indent=2));start=datetime.datetime.now(datetime.timezone.utc).isoformat()
+with (o/'RtpAudioPlaybackTest.txt').open('w') as f:
+ try:code2=subprocess.run(run2,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=90).returncode
+ except subprocess.TimeoutExpired:code2=124
+s2=(o/'RtpAudioPlaybackTest.txt').read_text();ok=re.search(r'OK \((\d+) tests?\)',s2);bad=re.search(r'Tests run: (\d+),  Failures: (\d+)',s2)
+row2={'class':'RtpAudioPlaybackTest','tests':int(ok[1]) if ok else int(bad[1]) if bad else None,'failures':0 if ok else int(bad[2]) if bad else None,'exit':code2,'start':start,'end':datetime.datetime.now(datetime.timezone.utc).isoformat()};(o/'results.json').write_text(json.dumps([row,row2],indent=2));print(json.dumps(row2),flush=True);print(s2,flush=True)
+code=code or code2
+unchanged=all(hashlib.sha256((repo/p).read_bytes()).hexdigest()==h for p,h in hashes.items());(o/'source-verification.json').write_text(json.dumps({'source_unchanged':unchanged}));assert unchanged
+raise SystemExit(code)
+
+=== run-audio-parse.py ===
+from pathlib import Path
+import json,subprocess,hashlib,datetime,re,sys
+out=Path(__file__).resolve().parent;r=out.parent;repo=r.parent/'repository';o=out/(sys.argv[1] if len(sys.argv)>1 else 'audio-parse-red');o.mkdir(exist_ok=True)
+base=json.loads((out/'compile-command.json').read_text());files=[Path(p) for p in base[base.index('-d')+2:] if '/src/main/' in p];files.append(repo/'android/app/src/test/java/dev/openeos/control/data/AndroidCcapiRtpSessionTest.kt');cmd=base[:base.index('-d')]+['-d',str(o/'classes')]+list(map(str,files))
+hashes={str(p.relative_to(repo)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files};(o/'source-manifest.json').write_text(json.dumps({'whole_files':True,'files':hashes},indent=2));(o/'compile-command.json').write_text(json.dumps(cmd,indent=2))
+with (o/'compile.txt').open('w') as f:code=subprocess.run(cmd,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=240).returncode
+print('audio status compile',code,flush=True);(o/'compile-result.json').write_text(json.dumps({'exit':code}))
+if code:print((o/'compile.txt').read_text()[-12000:],flush=True);raise SystemExit(code)
+cp=[p for p in cmd[cmd.index('-classpath')+1].split(':') if not p.endswith('/android.jar')]+[str(r/'viewmodel-materials/android-all-15-robolectric-12650502.jar')]
+methods=['parserFailureRevokesAvailabilityBeforePublishingAndFailedResetStaysUnavailable'];run=[cmd[0],'-Xmx768m','-XX:ActiveProcessorCount=2','-cp',str(o/'classes')+':'+str(r/'runner-classes')+':'+':'.join(cp),'TraceMethod','dev.openeos.control.data.AndroidCcapiRtpSessionTest']+methods;(o/'run-command.json').write_text(json.dumps(run,indent=2));start=datetime.datetime.now(datetime.timezone.utc).isoformat()
+with (o/'test.txt').open('w') as f:
+ try:code=subprocess.run(run,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=90).returncode
+ except subprocess.TimeoutExpired:code=124
+s=(o/'test.txt').read_text();counts=re.findall(r'END tests=(\d+) failures=(\d+)',s);row={'class':'AndroidCcapiRtpSessionTest','methods':methods,'tests':sum(int(t) for t,f in counts),'failures':sum(int(f) for t,f in counts),'exit':code,'start':start,'end':datetime.datetime.now(datetime.timezone.utc).isoformat()};(o/'results.json').write_text(json.dumps([row],indent=2));print(json.dumps(row),flush=True);print(s,flush=True)
+unchanged=all(hashlib.sha256((repo/p).read_bytes()).hexdigest()==h for p,h in hashes.items());(o/'source-verification.json').write_text(json.dumps({'source_unchanged':unchanged}));assert unchanged
+raise SystemExit(code)
+
+=== run-audio-status.py ===
+from pathlib import Path
+import json,subprocess,hashlib,datetime,re,sys
+out=Path(__file__).resolve().parent;r=out.parent;repo=r.parent/'repository';o=out/(sys.argv[1] if len(sys.argv)>1 else 'audio-status-red');o.mkdir(exist_ok=True)
+base=json.loads((out/'compile-command.json').read_text());files=[Path(p) for p in base[base.index('-d')+2:] if '/src/main/' in p];files.append(repo/'android/app/src/test/java/dev/openeos/control/data/AndroidCcapiRtpSessionTest.kt');cmd=base[:base.index('-d')]+['-d',str(o/'classes')]+list(map(str,files))
+hashes={str(p.relative_to(repo)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files};(o/'source-manifest.json').write_text(json.dumps({'whole_files':True,'files':hashes},indent=2));(o/'compile-command.json').write_text(json.dumps(cmd,indent=2))
+with (o/'compile.txt').open('w') as f:code=subprocess.run(cmd,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=240).returncode
+print('audio status compile',code,flush=True);(o/'compile-result.json').write_text(json.dumps({'exit':code}))
+if code:print((o/'compile.txt').read_text()[-12000:],flush=True);raise SystemExit(code)
+cp=[p for p in cmd[cmd.index('-classpath')+1].split(':') if not p.endswith('/android.jar')]+[str(r/'viewmodel-materials/android-all-15-robolectric-12650502.jar')]
+methods=['parserInitializationFailureNeverPublishesAvailableAudio','audioExtractorInitializationFailureDoesNotEscapeIntoVideoStartup'];run=[cmd[0],'-Xmx768m','-XX:ActiveProcessorCount=2','-cp',str(o/'classes')+':'+str(r/'runner-classes')+':'+':'.join(cp),'TraceMethod','dev.openeos.control.data.AndroidCcapiRtpSessionTest']+methods;(o/'run-command.json').write_text(json.dumps(run,indent=2));start=datetime.datetime.now(datetime.timezone.utc).isoformat()
+with (o/'test.txt').open('w') as f:
+ try:code=subprocess.run(run,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=90).returncode
+ except subprocess.TimeoutExpired:code=124
+s=(o/'test.txt').read_text();counts=re.findall(r'END tests=(\d+) failures=(\d+)',s);row={'class':'AndroidCcapiRtpSessionTest','methods':methods,'tests':sum(int(t) for t,f in counts),'failures':sum(int(f) for t,f in counts),'exit':code,'start':start,'end':datetime.datetime.now(datetime.timezone.utc).isoformat()};(o/'results.json').write_text(json.dumps([row],indent=2));print(json.dumps(row),flush=True);print(s,flush=True)
+unchanged=all(hashlib.sha256((repo/p).read_bytes()).hexdigest()==h for p,h in hashes.items());(o/'source-verification.json').write_text(json.dumps({'source_unchanged':unchanged}));assert unchanged
+raise SystemExit(code)
+
+=== run-rtp-robo.py ===
+from pathlib import Path
+import json,subprocess,hashlib,datetime,re
+out=Path(__file__).resolve().parent;r=out.parent;repo=r.parent/'repository';m=r/'viewmodel-materials';rb=m/'robolectric';o=out/'rtp-robo';o.mkdir(exist_ok=True)
+base=json.loads((out/'compile-command.json').read_text());files=[Path(p) for p in base[base.index('-d')+2:] if '/src/main/' in p];names=['CcapiRtpTest','AndroidCcapiRtpSessionTest'];files += [repo/('android/app/src/test/java/dev/openeos/control/data/'+n+'.kt') for n in names]
+assert all('RobolectricTestRunner' in p.read_text() for p in files[-2:]), 'Await original runner annotations from parent'
+cmd=base[:base.index('-d')]+['-d',str(o/'classes')]+list(map(str,files));sdkcp=cmd[cmd.index('-classpath')+1].split(':');robo=(rb/'classpath.txt').read_text().strip().split(':');cmd[cmd.index('-classpath')+1]=':'.join(dict.fromkeys(sdkcp+robo))
+hashes={str(p.relative_to(repo)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files};(o/'source-manifest.json').write_text(json.dumps({'whole_files':True,'files':hashes},indent=2));(o/'compile-command.json').write_text(json.dumps(cmd,indent=2))
+with (o/'compile.txt').open('w') as f:code=subprocess.run(cmd,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=240).returncode
+print('rtp robo compile',code,flush=True);(o/'compile-result.json').write_text(json.dumps({'exit':code}))
+if code:print((o/'compile.txt').read_text()[-12000:],flush=True);raise SystemExit(code)
+cp=[p for p in sdkcp if not p.endswith('/android.jar')]+[str(m/'android-all-15-robolectric-12650502.jar')]+robo;cp=list(dict.fromkeys(cp));results=[];runs=[]
+for name in names:
+ run=[cmd[0],'-Xmx768m','-XX:ActiveProcessorCount=2','-Drobolectric.offline=true','-Drobolectric.usePreinstrumentedJars=false','-Drobolectric.dependency.dir='+str(rb/'sdk'),'-cp',str(o/'classes')+':'+':'.join(cp)+':'+str(out/'resources'),'org.junit.runner.JUnitCore','dev.openeos.control.data.'+name];runs.append(run);(o/'run-commands.json').write_text(json.dumps(runs,indent=2));start=datetime.datetime.now(datetime.timezone.utc).isoformat()
+ with (o/(name+'.txt')).open('w') as f:
+  try:code=subprocess.run(run,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=240).returncode
+  except subprocess.TimeoutExpired:code=124
+ s=(o/(name+'.txt')).read_text();ok=re.search(r'OK \((\d+) tests?\)',s);bad=re.search(r'Tests run: (\d+),  Failures: (\d+)',s)
+ row={'class':name,'tests':int(ok[1]) if ok else int(bad[1]) if bad else None,'failures':0 if ok else int(bad[2]) if bad else None,'exit':code,'start':start,'end':datetime.datetime.now(datetime.timezone.utc).isoformat()};results.append(row);(o/'results.json').write_text(json.dumps(results,indent=2));print(json.dumps(row),flush=True)
+ print(s[-14000:] if code else s[-2000:],flush=True)
+unchanged=all(hashlib.sha256((repo/p).read_bytes()).hexdigest()==h for p,h in hashes.items());(o/'source-verification.json').write_text(json.dumps({'source_unchanged':unchanged}));assert unchanged
+raise SystemExit(any(x['exit'] for x in results))
+
+=== run-usb.py ===
+from pathlib import Path
+import json,subprocess,hashlib,datetime,re
+out=Path(__file__).resolve().parent;r=out.parent;repo=r.parent/'repository';o=out/'usb97';o.mkdir(exist_ok=True)
+cmd=json.loads((out/'compile-command.json').read_text());files=[Path(p) for p in cmd[cmd.index('-d')+2:] if '/src/main/' in p];files.append(repo/'android/app/src/test/java/dev/openeos/control/data/UsbPtpCameraBackendTest.kt')
+# Full production closure, original corrected test, no extraction and no production modification.
+cmd=cmd[:cmd.index('-d')]+['-d',str(o/'classes')]+list(map(str,files))
+hashes={str(p.relative_to(repo)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files};(o/'source-manifest.json').write_text(json.dumps({'whole_files':True,'files':hashes},indent=2));(o/'compile-command.json').write_text(json.dumps(cmd,indent=2))
+with (o/'compile.txt').open('w') as f:code=subprocess.run(cmd,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=240).returncode
+print('usb97 compile',code,flush=True)
+(o/'compile-result.json').write_text(json.dumps({'exit':code}))
+if code:print((o/'compile.txt').read_text()[-12000:],flush=True);raise SystemExit(code)
+cp=[p for p in cmd[cmd.index('-classpath')+1].split(':') if not p.endswith('/android.jar')]+[str(r/'viewmodel-materials/android-all-15-robolectric-12650502.jar')]
+run=[cmd[0],'-Xmx768m','-XX:ActiveProcessorCount=2','-cp',str(o/'classes')+':'+':'.join(cp)+':'+str(out/'resources'),'org.junit.runner.JUnitCore','dev.openeos.control.data.UsbPtpCameraBackendTest'];(o/'run-command.json').write_text(json.dumps(run,indent=2));start=datetime.datetime.now(datetime.timezone.utc).isoformat()
+with (o/'UsbPtpCameraBackendTest.txt').open('w') as f:
+ try:code=subprocess.run(run,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=240).returncode
+ except subprocess.TimeoutExpired:code=124
+s=(o/'UsbPtpCameraBackendTest.txt').read_text();ok=re.search(r'OK \((\d+) tests?\)',s);bad=re.search(r'Tests run: (\d+),  Failures: (\d+)',s)
+row={'class':'UsbPtpCameraBackendTest','tests':int(ok[1]) if ok else int(bad[1]) if bad else None,'failures':0 if ok else int(bad[2]) if bad else None,'exit':code,'start':start,'end':datetime.datetime.now(datetime.timezone.utc).isoformat()};(o/'results.json').write_text(json.dumps([row],indent=2));print(json.dumps(row),flush=True)
+if code:print(s[-16000:],flush=True)
+unchanged=all(hashlib.sha256((repo/p).read_bytes()).hexdigest()==h for p,h in hashes.items());(o/'source-verification.json').write_text(json.dumps({'source_unchanged':unchanged}));assert unchanged
+raise SystemExit(code)
+
+=== run.py ===
+from pathlib import Path
+import json,re,subprocess,hashlib,datetime,shutil
+out=Path(__file__).resolve().parent;r=out.parent;repo=r.parent/'repository';test=repo/'android/app/src/test/java/dev/openeos/control/data'
+seen=set()
+for p in r.rglob('*results.json'):
+ if out in p.parents: continue
+ seen.update(re.findall(r'"class"\s*:\s*"(?:dev\.openeos\.control\.\w+\.)?([A-Za-z0-9_]+Test)"',p.read_text()))
+tests=[p for p in sorted(test.glob('*Test.kt')) if p.stem not in seen]
+assert len(tests)==48,len(tests)
+blocked=[p for p in tests if p.stem=='UsbPtpCameraBackendTest']
+(out/'blocked-tests.json').write_text(json.dumps([{'class':p.stem,'tests':97,'reason':'Original test line24 calls ScriptedTransport without required advertiseCapture argument declared line3064; source unmodified'} for p in blocked],indent=2))
+tests=[p for p in tests if p not in blocked]
+tests.sort(key=lambda p:(p.stem=='AndroidCcapiRtpSessionTest',p.stem))
+prod=[repo/p for p in json.loads((r/'next-source-files.json').read_text()) if '/src/main/' in p]
+prod.append(repo/'android/app/src/main/java/dev/openeos/control/data/NativeRtpMonitorEvidence.kt')
+prod.append(repo/'android/app/src/main/java/dev/openeos/control/ui/MediaDeleteBatch.kt')
+files=prod+tests+[test/'UsbPtpObservedFoldersTest.kt']+sorted(test.glob('*FixtureLoader.kt'))+[repo/'android/app/src/test/java/dev/openeos/control/ui/MediaUploadFixtureLoader.kt',repo/'android/app/src/test/java/dev/openeos/control/ui/MediaUploadFixture.kt']
+files=list(dict.fromkeys(files))
+hashes={str(p.relative_to(repo)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
+(out/'source-manifest.json').write_text(json.dumps({'whole_files':True,'files':hashes,'executed_test_classes':[p.stem for p in tests]},indent=2))
+cmd=json.loads((r/'next-compile-command.json').read_text());cmd=cmd[:cmd.index('-d')]+['-d',str(out/'classes')]+[str(p) for p in files]
+cp=cmd[cmd.index('-classpath')+1].split(':');cp=[p for p in cp if not p.endswith('/android.jar')]+[str(r/'viewmodel-materials/android-all-15-robolectric-12650502.jar')]
+# Compile against original SDK; android-all replaces runtime only.
+(out/'compile-command.json').write_text(json.dumps(cmd,indent=2))
+with (out/'compile.txt').open('w') as f:code=subprocess.run(cmd,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=240).returncode
+(out/'compile-result.json').write_text(json.dumps({'exit':code}))
+print('compile',code,flush=True)
+if code: print((out/'compile.txt').read_text()[-14000:],flush=True);raise SystemExit(code)
+resources=out/'resources';resources.mkdir(exist_ok=True)
+g=(repo/'android/app/build.gradle.kts').read_text().split('val unitContractFixtures = listOf(',1)[1].split('\n)',1)[0];fixtures=[]
+for rel in re.findall(r'"([^"\n]+)"',g):
+ p=(repo/'android/app'/rel).resolve();shutil.copyfile(p,resources/p.name);fixtures.append({'path':str(p.relative_to(repo)),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+(out/'fixture-manifest.json').write_text(json.dumps(fixtures,indent=2))
+results=[];commands=[]
+for p in tests:
+ name=p.stem;log=out/(name+'.txt');run=[cmd[0],'-Xmx768m','-XX:ActiveProcessorCount=2','-cp',str(out/'classes')+':'+':'.join(cp)+':'+str(resources),'org.junit.runner.JUnitCore','dev.openeos.control.data.'+name]
+ commands.append(run);(out/'run-commands.json').write_text(json.dumps(commands,indent=2));start=datetime.datetime.now(datetime.timezone.utc).isoformat()
+ with log.open('w') as f:
+  try:code=subprocess.run(run,cwd=repo/'android/app',stdout=f,stderr=subprocess.STDOUT,timeout=240).returncode
+  except subprocess.TimeoutExpired:code=124
+ s=log.read_text();ok=re.search(r'OK \((\d+) tests?\)',s);bad=re.search(r'Tests run: (\d+),  Failures: (\d+)',s)
+ row={'class':name,'tests':int(ok[1]) if ok else int(bad[1]) if bad else None,'failures':0 if ok else int(bad[2]) if bad else None,'exit':code,'start':start,'end':datetime.datetime.now(datetime.timezone.utc).isoformat()};results.append(row);(out/'results.json').write_text(json.dumps(results,indent=2));print(json.dumps(row),flush=True)
+ if code:print(s[-4500:],flush=True)
+unchanged=all(hashlib.sha256((repo/p).read_bytes()).hexdigest()==h for p,h in hashes.items())
+(out/'source-verification.json').write_text(json.dumps({'source_unchanged':unchanged},indent=2));assert unchanged
+raise SystemExit(any(x['exit'] for x in results))

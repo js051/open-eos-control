@@ -1,0 +1,21 @@
+=== UsbPtpCameraBackendTest.txt ===
+JUnit version 4.13.2
+.................................................................................................
+Time: 5.704
+
+OK (97 tests)
+
+
+=== compile.txt ===
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:853:56: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                    override fun onFailure(call: Call, error: IOException) {
+                                                       ^^^^^
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:910:56: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                    override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                       ^^^^^
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:1069:52: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                   ^^^^^
+src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:2349:52: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                   ^^^^^
