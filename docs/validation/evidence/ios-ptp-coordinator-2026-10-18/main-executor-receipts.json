@@ -1,0 +1,61 @@
+{
+  "command.json": [
+    "<EOS_WORKSPACE>/tool-cache/swift-6.4.1/swift-6.4.1-RELEASE-debian13/usr/bin/swift",
+    "test",
+    "--package-path",
+    "<EOS_WORKSPACE>/ptp-main-executor-validation/slice",
+    "--cache-path",
+    "<EOS_WORKSPACE>/ptp-main-executor-validation/cache",
+    "--config-path",
+    "<EOS_WORKSPACE>/ptp-main-executor-validation/config",
+    "--security-path",
+    "<EOS_WORKSPACE>/ptp-main-executor-validation/security",
+    "--scratch-path",
+    "<EOS_WORKSPACE>/ptp-main-executor-validation/build",
+    "--skip-update",
+    "--disable-netrc",
+    "--jobs",
+    "2"
+  ],
+  "environment.json": {
+    "CLANG_MODULE_CACHE_PATH": "<EOS_WORKSPACE>/ptp-main-executor-validation/module-cache",
+    "SWIFT_MODULECACHE_PATH": "<EOS_WORKSPACE>/ptp-main-executor-validation/module-cache",
+    "XDG_CACHE_HOME": "<EOS_WORKSPACE>/ptp-main-executor-validation/xdg-cache"
+  },
+  "result.json": {
+    "exit": 0,
+    "start": "2026-10-18T15:18:04.532861+00:00",
+    "end": "2026-10-18T15:18:13.710017+00:00",
+    "source_unchanged": true,
+    "tests": 40,
+    "failures": 0,
+    "original_37_test_bodies_unchanged": true,
+    "scope": "Foundation-only PTP slice; main executor integration design, not native API validation"
+  },
+  "source-manifest.json": [
+    {
+      "path": "Package.swift",
+      "sha256": "0fd40c2a51da0b096efad2332742f6ae66b352587031ae06e6c61d2cbe73ef8f"
+    },
+    {
+      "path": "Sources/OpenEOSCore/ImageCapturePTPPort.swift",
+      "sha256": "23010b9df1ca16cb9918cc39fdc1cb887dd02405ac707015545d423b515e4fd4"
+    },
+    {
+      "path": "Sources/OpenEOSCore/ImageCapturePTPStateMachine.swift",
+      "sha256": "38cf2893d1cf04a6101d523d10c0f32e92731f30c5beed06b06957f68d59a81f"
+    },
+    {
+      "path": "Sources/OpenEOSCore/ImageCapturePTPCoordinator.swift",
+      "sha256": "d4d7996551d26cccb1803229aa04febe675d8b1ff09581b67cc75be354205f89"
+    },
+    {
+      "path": "Tests/OpenEOSCoreTests/ImageCapturePTPStateMachineTests.swift",
+      "sha256": "55ccf7774eacb36668995235f1c4064c6dfaa109b57f4b09b49e3e3da5fa05be"
+    },
+    {
+      "path": "Tests/OpenEOSCoreTests/ImageCapturePTPCoordinatorTests.swift",
+      "sha256": "7025257533f9b4c7e03ec277243fcebafacb1d71a6e9358309125e8a678bd4b2"
+    }
+  ]
+}

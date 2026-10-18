@@ -145,6 +145,72 @@ final class ImageCapturePTPCoordinatorTests: XCTestCase {
         XCTAssertEqual(port.maximumDepth, 1)
     }
 
+    func testMainThreadSendAndSnapshotPerformInlineOnMainThread() throws {
+        XCTAssertTrue(Thread.isMainThread)
+        let port = Port()
+        let owner = try mainOwner(port)
+        port.onPerform = { _ in XCTAssertTrue(Thread.isMainThread) }
+        defer { port.onPerform = nil }
+        owner.send(.startDiscovery)
+        XCTAssertNotNil(owner.snapshot.discovery)
+        XCTAssertEqual(port.effects.count, 1)
+        XCTAssertEqual(port.maximumDepth, 1)
+    }
+
+    func testMainThreadReentrantSendCancelsBeforeReadAdmission() throws {
+        XCTAssertTrue(Thread.isMainThread)
+        let port = Port()
+        let owner = try mainOwner(port)
+        try ready(camera(), owner, port)
+        var cancelled = false
+        port.onPerform = { effect in
+            XCTAssertTrue(Thread.isMainThread)
+            guard case .armDeadline = effect, !cancelled else { return }
+            cancelled = true
+            let count = port.effects.count
+            owner.send(.cancel)
+            guard case .notDispatched(_, .cancelled) = owner.snapshot.deviceInfoOutcome else {
+                return XCTFail("Read must remain undispatched")
+            }
+            XCTAssertEqual(port.effects.count, count)
+        }
+        defer { port.onPerform = nil }
+        owner.send(.readDeviceInfo)
+        XCTAssertFalse(port.effects.contains { if case .readDeviceInfo = $0 { return true }; return false })
+        XCTAssertEqual(port.maximumDepth, 1)
+    }
+
+    func testMainThreadForeignCallbackReturnsBeforeMainPerformReturns() throws {
+        XCTAssertTrue(Thread.isMainThread)
+        let port = Port()
+        let owner = try mainOwner(port)
+        let camera = camera()
+        try discover(camera, owner)
+        port.onPerform = { effect in
+            XCTAssertTrue(Thread.isMainThread)
+            guard case .armDeadline = effect else { return }
+            let returned = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async {
+                port.receive?(.cancel)
+                returned.signal()
+            }
+            XCTAssertEqual(returned.wait(timeout: .now() + 1), .success)
+            let count = port.effects.count
+            XCTAssertEqual(owner.snapshot.phase, .retired(.cancelled))
+            XCTAssertEqual(port.effects.count, count)
+        }
+        defer { port.onPerform = nil }
+        owner.send(.select(camera.handle, requestControlAuthorization: false))
+        XCTAssertFalse(port.effects.contains { if case .openSession = $0 { return true }; return false })
+        XCTAssertTrue(owner.snapshot.cleanup.isEmpty)
+        XCTAssertEqual(port.maximumDepth, 1)
+    }
+
+    private func mainOwner(_ port: Port) throws -> ImageCapturePTPCoordinator {
+        try ImageCapturePTPCoordinator(port: port,
+            authorization: .init(control: .authorized, contents: .unknown), executor: .mainThread)
+    }
+
     private func owner(_ port: Port) throws -> ImageCapturePTPCoordinator {
         try ImageCapturePTPCoordinator(port: port,
             authorization: .init(control: .authorized, contents: .unknown))
