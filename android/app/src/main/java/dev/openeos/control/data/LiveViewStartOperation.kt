@@ -8,6 +8,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicReference
 
 /** Retiring a preview Start must not cancel its enclosing camera-control connection. */
 internal class LiveViewStartOperation {
@@ -20,7 +21,12 @@ internal class LiveViewStartOperation {
 
     suspend fun run(start: suspend () -> Unit, stopRequired: () -> Boolean, stop: suspend () -> Unit): Boolean = supervisorScope {
         check(current == null) { "Live View Start must be serialized by its connection owner." }
-        val attempt = Attempt(async(start = CoroutineStart.LAZY) { start() })
+        // Preserve the child's own terminal outcome even when parent cancellation wins await.
+        val childFailure = AtomicReference<Throwable?>()
+        val attempt = Attempt(async(start = CoroutineStart.LAZY) {
+            try { start() }
+            catch (failure: Throwable) { childFailure.set(failure); throw failure }
+        })
         current = attempt
         try {
             attempt.job.start()
@@ -34,9 +40,15 @@ internal class LiveViewStartOperation {
                 false
             } else true
         } catch (failure: CancellationException) {
-            // Cancellation can win after Start returned readiness but before await resumes.
-            // Stop uses the original captured backend, never whichever source is selected later.
-            withContext(NonCancellable) { if (stopRequired()) stop() }
+            // Parent cancellation can win await while the backend still owns startup cleanup.
+            // Join that producer before considering an additional Stop on the original owner.
+            withContext(NonCancellable) {
+                attempt.job.join()
+                // A substantive child failure must retain its original meaning and Stop debt,
+                // just as when await observes it directly. Debt is not permission to retry it.
+                childFailure.get()?.takeUnless { it is CancellationException }?.let { throw it }
+                if (stopRequired()) stop()
+            }
             coroutineContext.ensureActive()
             if (!attempt.retired) throw failure
             false

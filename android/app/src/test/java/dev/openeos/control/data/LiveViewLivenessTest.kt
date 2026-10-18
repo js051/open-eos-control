@@ -1,6 +1,7 @@
 package dev.openeos.control.data
 
 import kotlinx.coroutines.*
+import kotlinx.coroutines.test.runCurrent
 import kotlin.coroutines.CoroutineContext
 import org.junit.Assert.*
 import org.junit.Test
@@ -137,5 +138,160 @@ class LiveViewLivenessTest {
         task.cancelAndJoin()
         assertTrue(task.isCancelled)
         assertEquals(1, stops)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun parentCancellationJoinsBackendStopBeforeConsideringWrapperCleanup() = kotlinx.coroutines.test.runTest {
+        val owner = LiveViewStartOperation()
+        val entered = CompletableDeferred<Unit>()
+        val cleanupEntered = CompletableDeferred<Unit>()
+        val allowCleanup = CompletableDeferred<Unit>()
+        var required = false
+        var backendStops = 0
+        var wrapperStops = 0
+        val caller = launch {
+            runCatching {
+                owner.run(start = {
+                    required = true
+                    entered.complete(Unit)
+                    try { awaitCancellation() }
+                    finally {
+                        withContext(NonCancellable) {
+                            backendStops++
+                            cleanupEntered.complete(Unit)
+                            allowCleanup.await()
+                            required = false
+                        }
+                    }
+                }, stopRequired = { required }, stop = { wrapperStops++; required = false })
+            }
+        }
+        entered.await()
+        caller.cancel()
+        try {
+            cleanupEntered.await()
+            runCurrent()
+            assertFalse("Caller must join the actual backend cleanup", caller.isCompleted)
+            assertEquals(1, backendStops)
+            assertEquals("Wrapper must not duplicate a still-running backend Stop", 0, wrapperStops)
+        } finally {
+            allowCleanup.complete(Unit)
+            caller.join()
+        }
+        assertTrue(caller.isCancelled)
+        assertFalse(required)
+        assertEquals(1, backendStops)
+        assertEquals(0, wrapperStops)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun parentCancellationNeverAutomaticallyRetriesFailedBackendStop() = kotlinx.coroutines.test.runTest {
+        val owner = LiveViewStartOperation()
+        val entered = CompletableDeferred<Unit>()
+        val cleanupEntered = CompletableDeferred<Unit>()
+        val allowCleanup = CompletableDeferred<Unit>()
+        var required = false
+        var backendStops = 0
+        var wrapperStops = 0
+        val originalFailure = CcapiLiveViewReleaseException(java.io.IOException("Synthetic Stop acknowledgement lost"))
+        var reportedFailure: Throwable? = null
+        val caller = launch {
+            reportedFailure = runCatching {
+                owner.run(start = {
+                    required = true
+                    entered.complete(Unit)
+                    try { awaitCancellation() }
+                    finally {
+                        withContext(NonCancellable) {
+                            backendStops++
+                            cleanupEntered.complete(Unit)
+                            allowCleanup.await()
+                            throw originalFailure
+                        }
+                    }
+                }, stopRequired = { required }, stop = { wrapperStops++ })
+            }.exceptionOrNull()
+        }
+        entered.await()
+        caller.cancel()
+        try {
+            cleanupEntered.await()
+            runCurrent()
+            assertFalse("Caller must wait for the original cleanup outcome", caller.isCompleted)
+        } finally {
+            allowCleanup.complete(Unit)
+            caller.join()
+        }
+        assertTrue(caller.isCancelled)
+        assertTrue("Parent cancellation must not swallow the original cleanup failure",
+            generateSequence(reportedFailure) { it.cause }.any { it === originalFailure })
+        assertTrue("Failed original Stop must retain explicit recovery responsibility", required)
+        assertEquals(1, backendStops)
+        assertEquals("Outstanding debt does not authorize automatic Stop replay", 0, wrapperStops)
+    }
+
+    @Test fun parentCancellationBeforeLazyStartRunsDoesNotInventStopDuty() = runBlocking {
+        val tasks = java.util.ArrayDeque<Runnable>()
+        val dispatcher = object : CoroutineDispatcher() {
+            override fun dispatch(context: CoroutineContext, block: Runnable) { tasks.addLast(block) }
+        }
+        val scope = CoroutineScope(SupervisorJob() + dispatcher)
+        val owner = LiveViewStartOperation()
+        var starts = 0
+        var required = false
+        var stops = 0
+        val caller = scope.launch {
+            owner.run(start = { starts++; required = true }, stopRequired = { required }, stop = { stops++ })
+        }
+        try {
+            tasks.removeFirst().run() // Parent schedules lazy Start, but the child has not run.
+            assertEquals(0, starts)
+            caller.cancel()
+            while (tasks.isNotEmpty()) tasks.removeFirst().run()
+            assertTrue(caller.isCompleted)
+            assertTrue(caller.isCancelled)
+            assertEquals(0, starts)
+            assertEquals(0, stops)
+            assertFalse(required)
+        } finally { scope.cancel(); while (tasks.isNotEmpty()) tasks.removeFirst().run() }
+    }
+
+    @Test fun retiredStartWithFailedWrapperStopRetainsDebtAndOriginalFailureWithoutReplay() = kotlinx.coroutines.test.runTest {
+        val owner = LiveViewStartOperation()
+        val entered = CompletableDeferred<Unit>()
+        var required = false
+        var stops = 0
+        val originalFailure = java.io.IOException("Synthetic wrapper Stop acknowledgement lost")
+        val result = async {
+            runCatching {
+                owner.run(start = { required = true; entered.complete(Unit); awaitCancellation() },
+                    stopRequired = { required }, stop = { stops++; throw originalFailure })
+            }
+        }
+        entered.await()
+        owner.retire()
+        val failure = result.await().exceptionOrNull()
+        assertTrue("A retired Start must report its failed Stop rather than return false",
+            generateSequence(failure) { it.cause }.any { it === originalFailure })
+        assertEquals(1, stops)
+        assertTrue(required)
+        assertTrue(currentCoroutineContext().isActive)
+    }
+
+    @Test fun bridgeStylePureCancellationStillDelegatesOneStopToWrapper() = kotlinx.coroutines.test.runTest {
+        // Bridge Start retains a remote Stop obligation but does not clean it up in its own finally.
+        val owner = LiveViewStartOperation()
+        val entered = CompletableDeferred<Unit>()
+        var required = false
+        var stops = 0
+        val caller = launch {
+            owner.run(start = { required = true; entered.complete(Unit); awaitCancellation() },
+                stopRequired = { required }, stop = { stops++; required = false })
+        }
+        entered.await()
+        caller.cancelAndJoin()
+        assertTrue(caller.isCancelled)
+        assertEquals(1, stops)
+        assertFalse(required)
     }
 }

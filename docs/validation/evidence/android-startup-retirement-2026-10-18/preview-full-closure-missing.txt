@@ -1,0 +1,27 @@
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraViewModelPreviewTest.kt:52:35: error: unresolved reference 'canPreviewGalleryItem'.
+            assertTrue(item.name, canPreviewGalleryItem(state, item))
+                                  ^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraViewModelPreviewTest.kt:53:36: error: unresolved reference 'canPreviewGalleryItem'.
+            assertFalse(item.name, canPreviewGalleryItem(
+                                   ^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraViewModelPreviewTest.kt:68:35: error: unresolved reference 'canPreviewGalleryItem'.
+            assertTrue(item.name, canPreviewGalleryItem(state, available))
+                                  ^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraViewModelPreviewTest.kt:69:36: error: unresolved reference 'canPreviewGalleryItem'.
+            assertFalse(item.name, canPreviewGalleryItem(state, item.copy(previewAvailable = false)))
+                                   ^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraViewModelPreviewTest.kt:70:36: error: unresolved reference 'canPreviewGalleryItem'.
+            assertFalse(item.name, canPreviewGalleryItem(offline.copy(previewMode = false), available))
+                                   ^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraViewModelPreviewTest.kt:71:36: error: unresolved reference 'canPreviewGalleryItem'.
+            assertFalse(item.name, canPreviewGalleryItem(
+                                   ^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraViewModelPreviewTest.kt:82:20: error: unresolved reference 'canPreviewGalleryItem'.
+        assertTrue(canPreviewGalleryItem(state, video.copy(streamAvailable = true)))
+                   ^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraViewModelPreviewTest.kt:83:21: error: unresolved reference 'canPreviewGalleryItem'.
+        assertFalse(canPreviewGalleryItem(state, video.copy(streamAvailable = false)))
+                    ^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/ui/CameraViewModelPreviewTest.kt:84:21: error: unresolved reference 'canPreviewGalleryItem'.
+        assertFalse(canPreviewGalleryItem(
+                    ^^^^^^^^^^^^^^^^^^^^^

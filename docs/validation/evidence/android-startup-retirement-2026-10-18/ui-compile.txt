@@ -1,0 +1,22 @@
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/CameraAppError.kt:7:36: warning: this annotation is currently applied to the value parameter only, but in the future it will also be applied to field.
+- To opt in to applying to both value parameter and field, add '-Xannotation-default-target=param-property' to your compiler arguments.
+- To keep applying to the value parameter only, use the '@param:' annotation target.
+
+See https://youtrack.jetbrains.com/issue/KT-73255 for more details.
+internal enum class CameraAppError(@StringRes val messageResource: Int) {
+                                   ^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/ui/DeliveredJpegStore.kt:72:35: warning: non-public primary constructor is exposed via the generated 'copy()' method of the 'data' class.
+
+The generated 'copy()' will change its visibility in future releases.
+
+To suppress the warning do one of the following:
+- Annotate the data class with the '@ConsistentCopyVisibility' annotation.
+- Use the '-Xconsistent-data-class-copy-visibility' compiler flag.
+- Annotate the data class with the '@ExposedCopyVisibility' annotation
+  (Discouraged, but can be used to keep binary compatibility).
+
+To learn more, see the documentation of the '@ConsistentCopyVisibility' and '@ExposedCopyVisibility' annotations.
+
+This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KT-11914.
+data class DeliveredJpegListState internal constructor(
+                                  ^^^^^^^^

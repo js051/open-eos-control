@@ -1,0 +1,66 @@
+[
+  {
+    "class": "dev.openeos.control.data.LiveViewLivenessTest",
+    "tests": 16,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:45:46.035492+00:00",
+    "end": "2026-10-18T09:45:46.300561+00:00"
+  },
+  {
+    "class": "dev.openeos.control.data.CameraRepositoryTest",
+    "tests": 12,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:45:46.300773+00:00",
+    "end": "2026-10-18T09:45:48.420440+00:00"
+  },
+  {
+    "class": "dev.openeos.control.data.CcapiLiveViewCompletionTest",
+    "tests": 2,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:45:48.420714+00:00",
+    "end": "2026-10-18T09:45:50.891683+00:00"
+  },
+  {
+    "class": "dev.openeos.control.data.CcapiLiveViewJourneyTest",
+    "tests": 11,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:45:50.891957+00:00",
+    "end": "2026-10-18T09:46:07.057049+00:00"
+  },
+  {
+    "class": "dev.openeos.control.data.CcapiMultipartLiveViewSessionTest",
+    "tests": 3,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:46:07.057389+00:00",
+    "end": "2026-10-18T09:46:09.628357+00:00"
+  },
+  {
+    "class": "dev.openeos.control.data.DesktopBridgeLiveViewRecoveryTest",
+    "tests": 15,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:46:09.628656+00:00",
+    "end": "2026-10-18T09:46:13.356984+00:00"
+  },
+  {
+    "class": "dev.openeos.control.data.DesktopBridgeConnectionCancellationTest",
+    "tests": 8,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:46:13.357389+00:00",
+    "end": "2026-10-18T09:46:14.675081+00:00"
+  },
+  {
+    "class": "dev.openeos.control.ui.CameraFirstFrameCancellationTest",
+    "tests": 8,
+    "failures": 0,
+    "exit": 0,
+    "start": "2026-10-18T09:46:14.675697+00:00",
+    "end": "2026-10-18T09:46:24.292379+00:00"
+  }
+]

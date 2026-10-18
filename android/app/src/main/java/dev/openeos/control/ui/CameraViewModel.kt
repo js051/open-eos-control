@@ -1044,6 +1044,10 @@ class CameraViewModel(
         adoptShutterReleaseStatus(session.status)
         if (!appInForeground || !_uiState.value.liveViewAutoRefresh) {
             reconcileLiveView()
+        } else if (session.liveViewStartRetired) {
+            // An off/on race can retire startup before this control session is published.
+            // Reconcile only that explicit retirement, never an ordinary failed Start.
+            queueLiveViewReconciliation()
         } else if (session.capabilities.matrix.supports(CameraFeature.LIVE_VIEW) && session.status.temperature?.liveViewAllowed != false) {
             if (session.nativeLiveViewSession == null) {
                 if (refreshLiveViewFrameInternal(reportErrors = true)) startLiveViewLoopIfNeeded()
@@ -1255,11 +1259,15 @@ class CameraViewModel(
             clearLiveViewPresentation()
             _uiState.update { it.copy(liveViewStopPending = repository.isLiveViewStopRequired() &&
                 !repository.isLiveViewRunning() && !it.needsLiveViewStopRecovery) }
-        } else if (restart && _uiState.value.nativeLiveViewSession == null && liveViewFrameReads.any { !it.stopped }) {
-            // Release an in-flight frame before waiting for the transition mutex. Do not pause
-            // native rendering or bypass a camera-command interlock before reconciliation.
-            liveViewGeneration += 1
-            cancelLiveViewFrameReads()
+        } else if (restart && _uiState.value.nativeLiveViewSession == null) {
+            // Retire an admitted startup probe before waiting for the transition mutex.
+            // Its original owner must settle Stop before reconciliation can admit a replacement.
+            repository.cancelPendingLiveViewStart()
+            if (liveViewFrameReads.any { !it.stopped }) {
+                // Do not pause native rendering or bypass a camera-command interlock.
+                liveViewGeneration += 1
+                cancelLiveViewFrameReads()
+            }
         }
         val generation = cameraSessionGeneration
         val connection = _uiState.value.info

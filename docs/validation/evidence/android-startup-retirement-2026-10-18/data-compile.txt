@@ -1,0 +1,18 @@
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:853:56: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                    override fun onFailure(call: Call, error: IOException) {
+                                                       ^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:910:56: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                    override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                       ^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:1069:52: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                   ^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/main/java/dev/openeos/control/data/DesktopBridgeClient.kt:2349:52: warning: the corresponding parameter in the supertype 'Callback' is named 'e'. This may cause problems when calling this function with named arguments.
+                override fun onFailure(call: Call, error: IOException) { complete(Result.failure(error)) }
+                                                   ^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/data/RecordingStatusReadbackTest.kt:149:37: warning: check for instance is always 'false'.
+                assertFalse(detail, failure is CancellationException)
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<EOS_WORKSPACE>/repository/android/app/src/test/java/dev/openeos/control/data/ShootingSettingTransportTest.kt:23:79: warning: the corresponding parameter in the supertype 'Dispatcher' is named 'request'. This may cause problems when calling this function with named arguments.
+            server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
+                                                                              ^

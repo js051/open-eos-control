@@ -1,0 +1,38 @@
+[
+  {
+    "path": "raw-android-all-8fail.txt",
+    "originalSha256": "67f308dbc20bb5f1d8cdadf594dc4e43b4305127ed8e64355b79be1116441576"
+  },
+  {
+    "path": "robolectric-marker-8fail.txt",
+    "originalSha256": "c8171122d373ed0232bb43bd95358350cbe0a0f4fae6d01b565fa15e1656d4ad"
+  },
+  {
+    "path": "valid-jpeg-7fail.txt",
+    "originalSha256": "3276946b22f528b9df4aeec903227d283fc34e275eb5c993ec8fbfcef06c6374"
+  },
+  {
+    "path": "startup-4fail.txt",
+    "originalSha256": "11a40dfd565fdc838ec4c0c1ea350752f95b54410efefc6b31f7a8148cd5f89d"
+  },
+  {
+    "path": "restart-rapid-2fail.txt",
+    "originalSha256": "122b7d96c71795c9d5b94f70feb6a0773153f456d20f68c1b27392960f01fcc1"
+  },
+  {
+    "path": "combined-8pass.txt",
+    "originalSha256": "4fffaf491c56feefdebf0dc9eb8f0612d5a373b2cbce1ac404c317ef1507868c"
+  },
+  {
+    "path": "owner-baseline-16-2fail.txt",
+    "originalSha256": "fb48341c25fec6b98ef9ef03ce98e0b336adf1dc4ea14399077802d657a3341e"
+  },
+  {
+    "path": "owner-fixed-16pass.txt",
+    "originalSha256": "c85e976e210c56c316437edbdc4db01ad6645ba96478dc7cad1e7ec02c3f3fd1"
+  },
+  {
+    "path": "robolectric-official-receipt.json",
+    "originalSha256": "bfdbbe1ffef78646e35262d7077954f656aca67d4c92a36911e1d23028927ad1"
+  }
+]

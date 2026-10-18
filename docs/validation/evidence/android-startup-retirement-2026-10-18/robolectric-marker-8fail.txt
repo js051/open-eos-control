@@ -1,0 +1,431 @@
+JUnit version 4.13.2
+.Before teardown: connected=true; pending=[]; running=false; stopRequired=false; viewWrites=[medium, off]
+start GET /ccapi
+end GET /ccapi
+start GET /ccapi/ver100/deviceinformation
+end GET /ccapi/ver100/deviceinformation
+start GET /ccapi/ver100/devicestatus/batterylist
+end GET /ccapi/ver100/devicestatus/batterylist
+start GET /ccapi/ver100/devicestatus/battery
+end GET /ccapi/ver100/devicestatus/battery
+start GET /ccapi/ver100/devicestatus/storage
+end GET /ccapi/ver100/devicestatus/storage
+start GET /ccapi/ver100/devicestatus/currentstorage
+end GET /ccapi/ver100/devicestatus/currentstorage
+start GET /ccapi/ver100/contents
+end GET /ccapi/ver100/contents
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+start GET /ccapi/ver100/shooting/liveview/flip
+end GET /ccapi/ver100/shooting/liveview/flip
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+E.Before teardown: connected=true; pending=[]; running=false; stopRequired=false; viewWrites=[medium, off]
+start GET /ccapi
+end GET /ccapi
+start GET /ccapi/ver100/deviceinformation
+end GET /ccapi/ver100/deviceinformation
+start GET /ccapi/ver100/devicestatus/batterylist
+end GET /ccapi/ver100/devicestatus/batterylist
+start GET /ccapi/ver100/devicestatus/battery
+end GET /ccapi/ver100/devicestatus/battery
+start GET /ccapi/ver100/devicestatus/storage
+end GET /ccapi/ver100/devicestatus/storage
+start GET /ccapi/ver100/devicestatus/currentstorage
+end GET /ccapi/ver100/devicestatus/currentstorage
+start GET /ccapi/ver100/contents
+end GET /ccapi/ver100/contents
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+start GET /ccapi/ver100/shooting/liveview/flip
+end GET /ccapi/ver100/shooting/liveview/flip
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+E.Before teardown: connected=true; pending=[]; running=false; stopRequired=false; viewWrites=[medium, off]
+start GET /ccapi
+end GET /ccapi
+start GET /ccapi/ver100/deviceinformation
+end GET /ccapi/ver100/deviceinformation
+start GET /ccapi/ver100/devicestatus/batterylist
+end GET /ccapi/ver100/devicestatus/batterylist
+start GET /ccapi/ver100/devicestatus/battery
+end GET /ccapi/ver100/devicestatus/battery
+start GET /ccapi/ver100/devicestatus/storage
+end GET /ccapi/ver100/devicestatus/storage
+start GET /ccapi/ver100/devicestatus/currentstorage
+end GET /ccapi/ver100/devicestatus/currentstorage
+start GET /ccapi/ver100/contents
+end GET /ccapi/ver100/contents
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+start GET /ccapi/ver100/shooting/liveview/flip
+end GET /ccapi/ver100/shooting/liveview/flip
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start POST /ccapi/ver100/shooting/control/shutterbutton/manual
+end POST /ccapi/ver100/shooting/control/shutterbutton/manual
+start POST /ccapi/ver100/shooting/control/shutterbutton/manual
+end POST /ccapi/ver100/shooting/control/shutterbutton/manual
+start GET /ccapi/ver100/devicestatus/batterylist
+end GET /ccapi/ver100/devicestatus/batterylist
+start GET /ccapi/ver100/devicestatus/battery
+end GET /ccapi/ver100/devicestatus/battery
+start GET /ccapi/ver100/devicestatus/storage
+end GET /ccapi/ver100/devicestatus/storage
+start GET /ccapi/ver100/devicestatus/currentstorage
+end GET /ccapi/ver100/devicestatus/currentstorage
+start GET /ccapi/ver100/contents
+end GET /ccapi/ver100/contents
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+E.Before teardown: connected=true; pending=[]; running=false; stopRequired=false; viewWrites=[medium, off]
+start GET /ccapi
+end GET /ccapi
+start GET /ccapi/ver100/deviceinformation
+end GET /ccapi/ver100/deviceinformation
+start GET /ccapi/ver100/devicestatus/batterylist
+end GET /ccapi/ver100/devicestatus/batterylist
+start GET /ccapi/ver100/devicestatus/battery
+end GET /ccapi/ver100/devicestatus/battery
+start GET /ccapi/ver100/devicestatus/storage
+end GET /ccapi/ver100/devicestatus/storage
+start GET /ccapi/ver100/devicestatus/currentstorage
+end GET /ccapi/ver100/devicestatus/currentstorage
+start GET /ccapi/ver100/contents
+end GET /ccapi/ver100/contents
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+start GET /ccapi/ver100/shooting/liveview/flip
+end GET /ccapi/ver100/shooting/liveview/flip
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+E.Before teardown: connected=true; pending=[]; running=false; stopRequired=false; viewWrites=[medium, off]
+start GET /ccapi
+end GET /ccapi
+start GET /ccapi/ver100/deviceinformation
+end GET /ccapi/ver100/deviceinformation
+start GET /ccapi/ver100/devicestatus/batterylist
+end GET /ccapi/ver100/devicestatus/batterylist
+start GET /ccapi/ver100/devicestatus/battery
+end GET /ccapi/ver100/devicestatus/battery
+start GET /ccapi/ver100/devicestatus/storage
+end GET /ccapi/ver100/devicestatus/storage
+start GET /ccapi/ver100/devicestatus/currentstorage
+end GET /ccapi/ver100/devicestatus/currentstorage
+start GET /ccapi/ver100/contents
+end GET /ccapi/ver100/contents
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+start GET /ccapi/ver100/shooting/liveview/flip
+end GET /ccapi/ver100/shooting/liveview/flip
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+E.Before teardown: connected=true; pending=[]; running=false; stopRequired=false; viewWrites=[medium, off]
+start GET /ccapi
+end GET /ccapi
+start GET /ccapi/ver100/deviceinformation
+end GET /ccapi/ver100/deviceinformation
+start GET /ccapi/ver100/devicestatus/batterylist
+end GET /ccapi/ver100/devicestatus/batterylist
+start GET /ccapi/ver100/devicestatus/battery
+end GET /ccapi/ver100/devicestatus/battery
+start GET /ccapi/ver100/devicestatus/storage
+end GET /ccapi/ver100/devicestatus/storage
+start GET /ccapi/ver100/devicestatus/currentstorage
+end GET /ccapi/ver100/devicestatus/currentstorage
+start GET /ccapi/ver100/contents
+end GET /ccapi/ver100/contents
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+start GET /ccapi/ver100/shooting/liveview/flip
+end GET /ccapi/ver100/shooting/liveview/flip
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+E.Before teardown: connected=true; pending=[CAPTURE]; running=false; stopRequired=true; viewWrites=[medium]
+start GET /ccapi
+end GET /ccapi
+start GET /ccapi/ver100/deviceinformation
+end GET /ccapi/ver100/deviceinformation
+start GET /ccapi/ver100/devicestatus/batterylist
+end GET /ccapi/ver100/devicestatus/batterylist
+start GET /ccapi/ver100/devicestatus/battery
+end GET /ccapi/ver100/devicestatus/battery
+start GET /ccapi/ver100/devicestatus/storage
+end GET /ccapi/ver100/devicestatus/storage
+start GET /ccapi/ver100/devicestatus/currentstorage
+end GET /ccapi/ver100/devicestatus/currentstorage
+start GET /ccapi/ver100/contents
+end GET /ccapi/ver100/contents
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+start GET /ccapi/ver100/shooting/liveview/flip
+end GET /ccapi/ver100/shooting/liveview/flip
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start POST /ccapi/ver100/shooting/control/shutterbutton/manual
+end POST /ccapi/ver100/shooting/control/shutterbutton/manual
+start POST /ccapi/ver100/shooting/control/shutterbutton/manual
+Oct 18, 2026 5:29:50 PM okhttp3.mockwebserver.MockWebServer$serveConnection$$inlined$execute$default$1 runOnce
+SEVERE: MockWebServer[56653] connection from /127.0.0.1 crashed
+org.json.JSONException: End of input at character 0 of
+	at org.json.JSONTokener.syntaxError(JSONTokener.java:469)
+	at org.json.JSONTokener.nextValue(JSONTokener.java:101)
+	at org.json.JSONObject.<init>(JSONObject.java:168)
+	at org.json.JSONObject.<init>(JSONObject.java:185)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest$setUp$1.dispatch(CameraFirstFrameCancellationTest.kt:87)
+	at okhttp3.mockwebserver.MockWebServer$SocketHandler.processOneRequest(MockWebServer.kt:601)
+	at okhttp3.mockwebserver.MockWebServer$SocketHandler.handle(MockWebServer.kt:552)
+	at okhttp3.mockwebserver.MockWebServer$serveConnection$$inlined$execute$default$1.runOnce(TaskQueue.kt:220)
+	at okhttp3.internal.concurrent.TaskRunner.runTask(TaskRunner.kt:116)
+	at okhttp3.internal.concurrent.TaskRunner.access$runTask(TaskRunner.kt:42)
+	at okhttp3.internal.concurrent.TaskRunner$runnable$1.run(TaskRunner.kt:65)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1136)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635)
+	at java.base/java.lang.Thread.run(Thread.java:840)
+
+E.Before teardown: connected=true; pending=[]; running=false; stopRequired=false; viewWrites=[medium, off]
+start GET /ccapi
+end GET /ccapi
+start GET /ccapi/ver100/deviceinformation
+end GET /ccapi/ver100/deviceinformation
+start GET /ccapi/ver100/devicestatus/batterylist
+end GET /ccapi/ver100/devicestatus/batterylist
+start GET /ccapi/ver100/devicestatus/battery
+end GET /ccapi/ver100/devicestatus/battery
+start GET /ccapi/ver100/devicestatus/storage
+end GET /ccapi/ver100/devicestatus/storage
+start GET /ccapi/ver100/devicestatus/currentstorage
+end GET /ccapi/ver100/devicestatus/currentstorage
+start GET /ccapi/ver100/contents
+end GET /ccapi/ver100/contents
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start GET /ccapi/ver100/shooting/settings
+end GET /ccapi/ver100/shooting/settings
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+start GET /ccapi/ver100/shooting/liveview/flip
+end GET /ccapi/ver100/shooting/liveview/flip
+start POST /ccapi/ver100/shooting/liveview
+end POST /ccapi/ver100/shooting/liveview
+E
+Time: 27.777
+There were 8 failures:
+1) disconnectCancelsPublishedSessionsFirstFrameAndClearsConnectBusy(dev.openeos.control.ui.CameraFirstFrameCancellationTest)
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertTrue(Assert.java:53)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.connectUntilFirstFrameIsBlocked(CameraFirstFrameCancellationTest.kt:273)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.access$connectUntilFirstFrameIsBlocked(CameraFirstFrameCancellationTest.kt:40)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest$connectUntilFirstFrameIsBlocked$1.invokeSuspend(CameraFirstFrameCancellationTest.kt)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTaskKt.resume(DispatchedTask.kt:221)
+	at kotlinx.coroutines.DispatchedTaskKt.dispatch(DispatchedTask.kt:154)
+	at kotlinx.coroutines.CancellableContinuationImpl.dispatchResume(CancellableContinuationImpl.kt:470)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core(CancellableContinuationImpl.kt:504)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core$default(CancellableContinuationImpl.kt:493)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeUndispatched(CancellableContinuationImpl.kt:596)
+	at kotlinx.coroutines.EventLoopImplBase$DelayedResumeTask.run(EventLoop.common.kt:497)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.disconnectCancelsPublishedSessionsFirstFrameAndClearsConnectBusy(CameraFirstFrameCancellationTest.kt:136)
+2) disablingLiveViewCancelsAReconciliationsFirstFrameAndReleasesItsMutex(dev.openeos.control.ui.CameraFirstFrameCancellationTest)
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertTrue(Assert.java:53)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest$disablingLiveViewCancelsAReconciliationsFirstFrameAndReleasesItsMutex$1.invokeSuspend(CameraFirstFrameCancellationTest.kt:160)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTaskKt.resume(DispatchedTask.kt:221)
+	at kotlinx.coroutines.DispatchedTaskKt.dispatch(DispatchedTask.kt:154)
+	at kotlinx.coroutines.CancellableContinuationImpl.dispatchResume(CancellableContinuationImpl.kt:470)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core(CancellableContinuationImpl.kt:504)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core$default(CancellableContinuationImpl.kt:493)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeUndispatched(CancellableContinuationImpl.kt:596)
+	at kotlinx.coroutines.EventLoopImplBase$DelayedResumeTask.run(EventLoop.common.kt:497)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.disablingLiveViewCancelsAReconciliationsFirstFrameAndReleasesItsMutex(CameraFirstFrameCancellationTest.kt:157)
+3) backgroundAfterCaptureReleaseCancelsOnlyItsAuxiliaryFrame(dev.openeos.control.ui.CameraFirstFrameCancellationTest)
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertTrue(Assert.java:53)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest$backgroundAfterCaptureReleaseCancelsOnlyItsAuxiliaryFrame$1.invokeSuspend(CameraFirstFrameCancellationTest.kt:211)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTaskKt.resume(DispatchedTask.kt:221)
+	at kotlinx.coroutines.DispatchedTaskKt.dispatch(DispatchedTask.kt:154)
+	at kotlinx.coroutines.CancellableContinuationImpl.dispatchResume(CancellableContinuationImpl.kt:470)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core(CancellableContinuationImpl.kt:504)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core$default(CancellableContinuationImpl.kt:493)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeUndispatched(CancellableContinuationImpl.kt:596)
+	at kotlinx.coroutines.EventLoopImplBase$DelayedResumeTask.run(EventLoop.common.kt:497)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.backgroundAfterCaptureReleaseCancelsOnlyItsAuxiliaryFrame(CameraFirstFrameCancellationTest.kt:204)
+4) rapidOffThenOnRetainsTheReplacementFrameOwnerWhileConnectFinishes(dev.openeos.control.ui.CameraFirstFrameCancellationTest)
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertTrue(Assert.java:53)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.connectUntilFirstFrameIsBlocked(CameraFirstFrameCancellationTest.kt:273)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.access$connectUntilFirstFrameIsBlocked(CameraFirstFrameCancellationTest.kt:40)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest$connectUntilFirstFrameIsBlocked$1.invokeSuspend(CameraFirstFrameCancellationTest.kt)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTaskKt.resume(DispatchedTask.kt:221)
+	at kotlinx.coroutines.DispatchedTaskKt.dispatch(DispatchedTask.kt:154)
+	at kotlinx.coroutines.CancellableContinuationImpl.dispatchResume(CancellableContinuationImpl.kt:470)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core(CancellableContinuationImpl.kt:504)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core$default(CancellableContinuationImpl.kt:493)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeUndispatched(CancellableContinuationImpl.kt:596)
+	at kotlinx.coroutines.EventLoopImplBase$DelayedResumeTask.run(EventLoop.common.kt:497)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.rapidOffThenOnRetainsTheReplacementFrameOwnerWhileConnectFinishes(CameraFirstFrameCancellationTest.kt:186)
+5) disablingLiveViewCancelsPublishedSessionsFirstFrameWithoutDisconnecting(dev.openeos.control.ui.CameraFirstFrameCancellationTest)
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertTrue(Assert.java:53)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.connectUntilFirstFrameIsBlocked(CameraFirstFrameCancellationTest.kt:273)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.access$connectUntilFirstFrameIsBlocked(CameraFirstFrameCancellationTest.kt:40)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest$connectUntilFirstFrameIsBlocked$1.invokeSuspend(CameraFirstFrameCancellationTest.kt)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTaskKt.resume(DispatchedTask.kt:221)
+	at kotlinx.coroutines.DispatchedTaskKt.dispatch(DispatchedTask.kt:154)
+	at kotlinx.coroutines.CancellableContinuationImpl.dispatchResume(CancellableContinuationImpl.kt:470)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core(CancellableContinuationImpl.kt:504)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core$default(CancellableContinuationImpl.kt:493)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeUndispatched(CancellableContinuationImpl.kt:596)
+	at kotlinx.coroutines.EventLoopImplBase$DelayedResumeTask.run(EventLoop.common.kt:497)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.disablingLiveViewCancelsPublishedSessionsFirstFrameWithoutDisconnecting(CameraFirstFrameCancellationTest.kt:149)
+6) explicitRestartCancelsTheOldFirstFrameBeforeWaitingForTheTransitionMutex(dev.openeos.control.ui.CameraFirstFrameCancellationTest)
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertTrue(Assert.java:53)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest$explicitRestartCancelsTheOldFirstFrameBeforeWaitingForTheTransitionMutex$1.invokeSuspend(CameraFirstFrameCancellationTest.kt:172)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTaskKt.resume(DispatchedTask.kt:221)
+	at kotlinx.coroutines.DispatchedTaskKt.dispatch(DispatchedTask.kt:154)
+	at kotlinx.coroutines.CancellableContinuationImpl.dispatchResume(CancellableContinuationImpl.kt:470)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core(CancellableContinuationImpl.kt:504)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core$default(CancellableContinuationImpl.kt:493)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeUndispatched(CancellableContinuationImpl.kt:596)
+	at kotlinx.coroutines.EventLoopImplBase$DelayedResumeTask.run(EventLoop.common.kt:497)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.explicitRestartCancelsTheOldFirstFrameBeforeWaitingForTheTransitionMutex(CameraFirstFrameCancellationTest.kt:169)
+7) backgroundWhileCaptureReleaseIsUnacknowledgedDoesNotCancelTheReleaseOrStopEarly(dev.openeos.control.ui.CameraFirstFrameCancellationTest)
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertTrue(Assert.java:53)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest$backgroundWhileCaptureReleaseIsUnacknowledgedDoesNotCancelTheReleaseOrStopEarly$1.invokeSuspend(CameraFirstFrameCancellationTest.kt:235)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTaskKt.resume(DispatchedTask.kt:221)
+	at kotlinx.coroutines.DispatchedTaskKt.dispatch(DispatchedTask.kt:154)
+	at kotlinx.coroutines.CancellableContinuationImpl.dispatchResume(CancellableContinuationImpl.kt:470)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core(CancellableContinuationImpl.kt:504)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core$default(CancellableContinuationImpl.kt:493)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeUndispatched(CancellableContinuationImpl.kt:596)
+	at kotlinx.coroutines.EventLoopImplBase$DelayedResumeTask.run(EventLoop.common.kt:497)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.backgroundWhileCaptureReleaseIsUnacknowledgedDoesNotCancelTheReleaseOrStopEarly(CameraFirstFrameCancellationTest.kt:223)
+8) backgroundingCancelsPublishedSessionsFirstFrameWithoutDisconnecting(dev.openeos.control.ui.CameraFirstFrameCancellationTest)
+java.lang.AssertionError
+	at org.junit.Assert.fail(Assert.java:87)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at org.junit.Assert.assertTrue(Assert.java:53)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.connectUntilFirstFrameIsBlocked(CameraFirstFrameCancellationTest.kt:273)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.access$connectUntilFirstFrameIsBlocked(CameraFirstFrameCancellationTest.kt:40)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest$connectUntilFirstFrameIsBlocked$1.invokeSuspend(CameraFirstFrameCancellationTest.kt)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTaskKt.resume(DispatchedTask.kt:221)
+	at kotlinx.coroutines.DispatchedTaskKt.dispatch(DispatchedTask.kt:154)
+	at kotlinx.coroutines.CancellableContinuationImpl.dispatchResume(CancellableContinuationImpl.kt:470)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core(CancellableContinuationImpl.kt:504)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core$default(CancellableContinuationImpl.kt:493)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeUndispatched(CancellableContinuationImpl.kt:596)
+	at kotlinx.coroutines.EventLoopImplBase$DelayedResumeTask.run(EventLoop.common.kt:497)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at dev.openeos.control.ui.CameraFirstFrameCancellationTest.backgroundingCancelsPublishedSessionsFirstFrameWithoutDisconnecting(CameraFirstFrameCancellationTest.kt:153)
+
+FAILURES!!!
+Tests run: 8,  Failures: 8
+
