@@ -130,7 +130,7 @@ def test_disconnect_during_preparation_reaps_child_and_allows_new_download(
 
         asyncio.run(exercise())
         response = client.get(download_path, headers=headers)
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         assert response.content == b"declaredvideo"
 
 
@@ -285,3 +285,62 @@ def test_close_failure_still_drains_preparation_and_preserves_cancellation(task_
         assert drained.is_set()
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("invalid", ["identity", "duplicate", "rounded", "missing", "zero", "utf8"])
+def test_download_rejects_nonexact_primary_receipt_before_starting_stream(invalid):
+    from open_eos_bridge.gphoto2 import CommandOutput
+
+    class Runner(FakeRunner):
+        streams = 0
+
+        def run(self, arguments, *, timeout=30):
+            result = super().run(arguments, timeout=timeout)
+            if "--show-info" not in arguments:
+                return result
+            text = result.text
+            if invalid == "identity":
+                text = text.replace("CANCEL.MP4", "OTHER.MP4")
+            elif invalid == "duplicate":
+                text = text.replace("Size: 13 byte(s)", "Size: 13 byte(s)\n  Size: 13 byte(s)")
+            elif invalid == "rounded":
+                text = text.replace("Size: 13 byte(s)", "Size: 1 KB")
+            elif invalid == "missing":
+                text = text.replace("  Size: 13 byte(s)\n", "")
+            elif invalid == "zero":
+                text = text.replace("Size: 13 byte(s)", "Size: 0 byte(s)")
+            else:
+                return CommandOutput(result.stdout + b"\xff")
+            return CommandOutput(text.encode())
+
+        def open_stream(self, arguments, *, timeout=300):
+            self.streams += 1
+            return super().open_stream(arguments, timeout=timeout)
+
+    runner = Runner()
+    key = ("/store_00010001/DCIM/100CANON", "CANCEL.MP4")
+    runner.uploaded_files[key] = runner.stream_payloads[key] = b"declaredvideo"
+    with TestClient(create_app(engine=GPhoto2Engine(runner))) as client:
+        sid = client.post("/v1/session", json={}).json()["id"]
+        items = client.get(f"/v1/session/{sid}/media").json()["items"]
+        item = next(item for item in items if item["name"] == key[1])
+        assert item["sizeBytes"] == 1024
+        response = client.get(f"/v1/session/{sid}/media/{item['id']}")
+        assert response.status_code == 502
+        assert response.json()["error"]["code"] == "INVALID_MEDIA_INFO"
+        assert runner.streams == 0
+
+
+def test_download_exact_receipt_still_rejects_truncated_payload():
+    runner = FakeRunner()
+    key = ("/store_00010001/DCIM/100CANON", "CANCEL.MP4")
+    runner.uploaded_files[key] = b"declaredvideo"
+    runner.stream_payloads[key] = b"short"
+    with TestClient(create_app(engine=GPhoto2Engine(runner))) as client:
+        sid = client.post("/v1/session", json={}).json()["id"]
+        items = client.get(f"/v1/session/{sid}/media").json()["items"]
+        item = next(item for item in items if item["name"] == key[1])
+        response = client.get(f"/v1/session/{sid}/media/{item['id']}")
+        assert response.status_code == 502
+        assert response.json()["error"]["code"] == "MEDIA_LENGTH_MISMATCH"
+        assert "5 of 13 bytes" in response.json()["error"]["message"]
