@@ -1236,7 +1236,7 @@ final class OpenEOSControlUITests: XCTestCase {
                 app.buttons["upload-media-button"].tap()
                 XCTAssertTrue(app.otherElements["media-upload-document-picker"].waitForExistence(timeout: 8))
                 // directoryURL is a starting-location hint. The real provider may
-                // show Documents first; navigate its existing synthetic folder.
+                // show Documents first; navigate its existing synthetic folder. No delegate injection.
                 let folder = app.staticTexts["Synthetic Upload Journey"]
                 let source = app.cells.containing(NSPredicate(format: "label CONTAINS %@", "SYNTHETIC-UPLOAD")).firstMatch
                 let locationReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
