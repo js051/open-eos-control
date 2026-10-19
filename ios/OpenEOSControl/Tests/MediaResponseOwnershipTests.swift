@@ -301,6 +301,93 @@ final class MediaResponseOwnershipTests: XCTestCase {
         XCTAssertEqual(uploads, 1)
     }
 
+    func testPickerCancelledTransitionRequiresActualDismissalBeforeDelivery() throws {
+        var presented = true, completions = 0, dismissals = 0
+        var transition: ((Bool) -> Void)?
+        var dismiss: (() -> Void)?
+        let retirement = MediaUploadPicker.Retirement(isPresented: { presented }, dismiss: {
+            dismissals += 1
+            dismiss = $0
+        }, completion: { completions += 1 })
+        retirement.observe { transition = $0; return true }
+        try XCTUnwrap(transition)(true)
+        XCTAssertEqual(dismissals, 1)
+        XCTAssertEqual(completions, 0)
+        presented = false
+        try XCTUnwrap(dismiss)()
+        XCTAssertEqual(completions, 1)
+        try XCTUnwrap(transition)(false)
+        XCTAssertEqual(completions, 1)
+    }
+
+    func testPickerUnregisteredTransitionFallsBackToOneVerifiedDismissal() throws {
+        var presented = true, completions = 0, dismissals = 0
+        var dismiss: (() -> Void)?
+        let retirement = MediaUploadPicker.Retirement(isPresented: { presented }, dismiss: {
+            dismissals += 1
+            dismiss = $0
+        }, completion: { completions += 1 })
+        retirement.observe { _ in false }
+        XCTAssertEqual(dismissals, 1)
+        XCTAssertEqual(completions, 0)
+        // A spurious completion while the picker is still presented cannot admit.
+        try XCTUnwrap(dismiss)()
+        XCTAssertEqual(completions, 0)
+        presented = false
+        try XCTUnwrap(dismiss)()
+        XCTAssertEqual(completions, 1)
+    }
+
+    func testPickerDeliveryWaitsForRetirementAndRemainsOneShot() throws {
+        let opening = MediaUploadSelection(owner: UUID())
+        var completions: [(MediaUploadSelection, [URL]?)] = []
+        var retirement: (() -> Void)?
+        let coordinator = MediaUploadPicker.Coordinator(selection: opening) { completions.append(($0, $1)) }
+        coordinator.retirement = { retirement = $0 }
+        let controller = UIDocumentPickerViewController(forOpeningContentTypes: [.data])
+        let url = URL(fileURLWithPath: "/synthetic/SELECTED.JPG")
+        coordinator.documentPicker(controller, didPickDocumentsAt: [url])
+        coordinator.documentPickerWasCancelled(controller)
+        XCTAssertTrue(completions.isEmpty)
+        let finish = try XCTUnwrap(retirement)
+        finish()
+        finish()
+        XCTAssertEqual(completions.count, 1)
+        XCTAssertEqual(completions.first?.0, opening)
+        XCTAssertEqual(completions.first?.1, [url])
+    }
+
+    func testPickerRetirementAfterExternalTeardownCannotDeliverOldSelection() throws {
+        let opening = MediaUploadSelection(owner: UUID())
+        var completions = 0
+        var retirement: (() -> Void)?
+        let coordinator = MediaUploadPicker.Coordinator(selection: opening) { _, _ in completions += 1 }
+        coordinator.retirement = { retirement = $0 }
+        let controller = UIDocumentPickerViewController(forOpeningContentTypes: [.data])
+        coordinator.documentPicker(controller, didPickDocumentsAt: [URL(fileURLWithPath: "/synthetic/OLD.JPG")])
+        coordinator.invalidate()
+        try XCTUnwrap(retirement)()
+        coordinator.documentPickerWasCancelled(controller)
+        XCTAssertEqual(completions, 0)
+    }
+
+    func testPickerCancelAlsoWaitsForRetirementWithoutCreatingSelection() throws {
+        let opening = MediaUploadSelection(owner: UUID())
+        var completions = 0
+        var retirement: (() -> Void)?
+        let coordinator = MediaUploadPicker.Coordinator(selection: opening) { ticket, urls in
+            XCTAssertEqual(ticket, opening)
+            XCTAssertNil(urls)
+            completions += 1
+        }
+        coordinator.retirement = { retirement = $0 }
+        let controller = UIDocumentPickerViewController(forOpeningContentTypes: [.data])
+        coordinator.documentPickerWasCancelled(controller)
+        XCTAssertEqual(completions, 0)
+        try XCTUnwrap(retirement)()
+        XCTAssertEqual(completions, 1)
+    }
+
     func testRejectedProviderGrantNeverDispatchesAndDoesNotReleaseAnUnacquiredGrant() async throws {
         let peer = MediaOwnershipPeer()
         let state = makeState([peer])
