@@ -328,6 +328,16 @@ class IOSEvidenceTests(unittest.TestCase):
         with self.assertRaises(evidence.EvidenceError):
             evidence.geometry_text(data + b"live-view-label=private\n")
 
+    def test_recording_mode_diagnostics_keep_fixed_controls_and_reject_labels(self):
+        data = ("[OEC_MEDIA_UI_GEOMETRY] recording-review-traditionalChinese\n"
+                "capture-mode-picker count=1\n"
+                "capture-mode-apply count=1\n"
+                "capture-mode-apply[0] enabled=false hittable=true frame=(0, 20, 44, 44)\n").encode()
+        self.assertEqual(evidence.geometry_text(data), data)
+        for extra in (b"capture-mode-label=private\n", b"capture-mode-url=https://example.invalid\n"):
+            with self.assertRaises(evidence.EvidenceError):
+                evidence.geometry_text(data + extra)
+
     def test_attempts_remaining_tests_after_an_export_failure(self):
         exports = []
 

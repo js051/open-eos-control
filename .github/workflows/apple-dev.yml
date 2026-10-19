@@ -187,15 +187,28 @@ jobs:
         timeout-minutes: 45
         run: |
           rm -rf TestResults.xcresult
+          python ../../scripts/ci/prepare_ios_picker_test_plist.py prepare \
+            --source App/Info.plist --output "$RUNNER_TEMP/eos-ui-test.plist" \
+            --receipt "$RUNNER_TEMP/eos-ui-test-plist-receipt.json"
           xcodebuild \
             -project OpenEOSControl.xcodeproj \
             -scheme OpenEOSControl \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.device_id }}' \
-            -derivedDataPath .derived-data \
+            -derivedDataPath .derived-data-ui \
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO \
+            "OEC_APP_INFOPLIST_FILE=$RUNNER_TEMP/eos-ui-test.plist" \
             "SWIFT_ACTIVE_COMPILATION_CONDITIONS=\$(inherited) OEC_REQUIRE_SIMULATOR_E2E" \
             test
+
+      - name: Verify isolated picker test configuration
+        if: always()
+        run: |
+          python ../../scripts/ci/prepare_ios_picker_test_plist.py verify \
+            --source App/Info.plist --output "$RUNNER_TEMP/eos-ui-test.plist" \
+            --receipt "$RUNNER_TEMP/eos-ui-test-plist-receipt.json" \
+            --ordinary-app .derived-data/Build/Products/Debug-iphonesimulator/OpenEOSControl.app/Info.plist \
+            --test-app .derived-data-ui/Build/Products/Debug-iphonesimulator/OpenEOSControl.app/Info.plist
 
       - name: Export bounded shutter recovery diagnostics
         if: always()

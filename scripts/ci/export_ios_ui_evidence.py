@@ -38,6 +38,7 @@ MEDIA_CONTROLS = (
     "media-library-summary-complete", "media-library-summary-failed",
     "live-view-interaction-surface", "live-view-decoded-frame", "live-view-start-again-button",
     "more-actions-button", "live-view-tap-action-control",
+    "capture-mode-picker", "capture-mode-apply",
 )
 
 HIT_TARGET_CASES = (

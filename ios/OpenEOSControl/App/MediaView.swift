@@ -25,12 +25,7 @@ struct MediaView: View {
     @State private var isRatingFilterPresented = false
     @State private var ratingFilterOwner: UUID?
     @State private var ratingFilterDraft = MediaRatingFilter.all
-    @State private var isDateFilterPresented = false
-    @State private var dateFilterOwner: UUID?
-    @State private var dateFilterStart = Date()
-    @State private var dateFilterEnd = Date()
-    // The picker edits literal dates using a UTC carrier, never a capture instant.
-    private let dateFilterTimeZone = MediaCaptureDate.carrierTimeZone
+    @State private var dateFilterPresentation: MediaDateFilterPresentation?
 
     private struct ThumbnailDemand: Hashable {
         let id: String
@@ -122,8 +117,7 @@ struct MediaView: View {
             pendingMetadataDeletion = nil
             pendingPreviewDeletion = nil
             pendingPreviewMetadataPresentation = nil
-            isDateFilterPresented = false
-            dateFilterOwner = nil
+            dateFilterPresentation = nil
             isRatingFilterPresented = false
             ratingFilterOwner = nil
             isFolderFilterPresented = false
@@ -133,7 +127,19 @@ struct MediaView: View {
             MediaBatchActivityView(payload: payload)
         }
         .mediaFilesExport(filesExporter)
-        .sheet(isPresented: $isDateFilterPresented) { dateFilterSheet }
+        .sheet(item: $dateFilterPresentation) { presentation in
+            MediaDateFilterSheet(presentation: presentation, onClose: { closingID in
+                guard dateFilterPresentation?.id == closingID else { return }
+                dateFilterPresentation = nil
+            }, onApply: { opening, range in
+                guard dateFilterPresentation?.id == opening.id,
+                      opening.admits(range, currentOwner: camera.mediaLibrarySessionID),
+                      camera.setMediaDateRange(range, owner: opening.owner)
+                else { return }
+                dateFilterPresentation = nil
+            })
+            .id(presentation.id)
+        }
         .sheet(isPresented: $isRatingFilterPresented) { ratingFilterSheet }
         .sheet(isPresented: $isFolderFilterPresented) { folderFilterSheet }
         .fullScreenCover(
@@ -356,12 +362,10 @@ struct MediaView: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 Button {
-                    dateFilterOwner = camera.mediaLibrarySessionID
-                    let today = MediaCaptureDate.dayKey(at: Date(), in: camera.mediaDateDisplayZone)
-                        .flatMap(MediaCaptureDate.dayCarrier) ?? Date()
-                    dateFilterStart = camera.mediaDateRange?.startDayCarrier ?? today
-                    dateFilterEnd = camera.mediaDateRange?.endDayCarrier ?? today
-                    isDateFilterPresented = true
+                    dateFilterPresentation = MediaDateFilterPresentation(
+                        owner: camera.mediaLibrarySessionID, range: camera.mediaDateRange,
+                        displayZone: camera.mediaDateDisplayZone
+                    )
                 } label: {
                     Label(language.string("media_date_range"), systemImage: "calendar")
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -726,73 +730,6 @@ struct MediaView: View {
             return camera.supports(.mediaDownload)
         }
         return mediaIsPhoto(item) && item.previewAvailable && camera.supports(.mediaPreview)
-    }
-
-    private var dateFilterCalendar: Calendar {
-        var calendar = Calendar(identifier: .iso8601)
-        calendar.timeZone = dateFilterTimeZone
-        return calendar
-    }
-
-    private var dateFilterDraft: MediaDateRange? {
-        MediaDateRange(startDate: dateFilterStart, endDate: dateFilterEnd, timeZone: dateFilterTimeZone)
-    }
-
-    private var dateFilterSheet: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(language.string("media_date_start"))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityHidden(true)
-                        DatePicker(language.string("media_date_start"), selection: $dateFilterStart, displayedComponents: .date)
-                            .labelsHidden()
-                            .accessibilityLabel(language.string("media_date_start"))
-                            .accessibilityIdentifier("media-date-start")
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(language.string("media_date_end"))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityHidden(true)
-                        DatePicker(language.string("media_date_end"), selection: $dateFilterEnd, displayedComponents: .date)
-                            .labelsHidden()
-                            .accessibilityLabel(language.string("media_date_end"))
-                            .accessibilityIdentifier("media-date-end")
-                    }
-                    Text(language.format("media_date_timezone", camera.mediaDateDisplayZone.identifier))
-                    if dateFilterDraft == nil {
-                        Text(language.string("media_date_invalid"))
-                            .foregroundStyle(.red)
-                            .accessibilityIdentifier("media-date-invalid")
-                    }
-                }
-                Section {
-                    Text(language.string("media_date_loaded_only"))
-                    Text(language.string("media_date_unknown_excluded"))
-                }
-            }
-            .environment(\.timeZone, dateFilterTimeZone)
-            .environment(\.calendar, dateFilterCalendar)
-            .environment(\.locale, language.locale)
-            .navigationTitle(language.string("media_date_range"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(language.string("cancel")) { isDateFilterPresented = false }
-                        .accessibilityIdentifier("media-date-cancel")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(language.string("apply")) {
-                        guard let owner = dateFilterOwner, let range = dateFilterDraft else { return }
-                        camera.setMediaDateRange(range, owner: owner)
-                        isDateFilterPresented = false
-                    }
-                    .disabled(dateFilterDraft == nil || dateFilterOwner != camera.mediaLibrarySessionID)
-                    .accessibilityIdentifier("media-date-apply")
-                }
-            }
-        }
     }
 
     private var folderChoices: [CameraMediaFolder] {
@@ -1674,6 +1611,116 @@ private struct CameraVideoPreview: View {
     }
 }
 
+
+// A sheet opening carries its owner and literal dates as one immutable value.
+// Every opening has a new identity, even when Cancel is followed by the same range.
+struct MediaDateFilterPresentation: Identifiable {
+    let id = UUID()
+    let owner: UUID
+    let initialStart: Date
+    let initialEnd: Date
+
+    init(owner: UUID, range: MediaDateRange?, displayZone: TimeZone, now: Date = Date()) {
+        self.owner = owner
+        let today = MediaCaptureDate.dayKey(at: now, in: displayZone)
+            .flatMap(MediaCaptureDate.dayCarrier) ?? now
+        initialStart = range?.startDayCarrier ?? today
+        initialEnd = range?.endDayCarrier ?? today
+    }
+
+    func admits(_ range: MediaDateRange?, currentOwner: UUID) -> Bool {
+        range != nil && owner == currentOwner
+    }
+}
+
+private struct MediaDateFilterSheet: View {
+    @EnvironmentObject private var camera: CameraAppState
+    @EnvironmentObject private var language: AppLanguageStore
+    let presentation: MediaDateFilterPresentation
+    let onClose: (UUID) -> Void
+    let onApply: (MediaDateFilterPresentation, MediaDateRange) -> Void
+    @State private var dateFilterStart: Date
+    @State private var dateFilterEnd: Date
+    // The picker edits literal dates using a UTC carrier, never a capture instant.
+    private let dateFilterTimeZone = MediaCaptureDate.carrierTimeZone
+
+    init(presentation: MediaDateFilterPresentation, onClose: @escaping (UUID) -> Void,
+         onApply: @escaping (MediaDateFilterPresentation, MediaDateRange) -> Void) {
+        self.presentation = presentation
+        self.onClose = onClose
+        self.onApply = onApply
+        _dateFilterStart = State(initialValue: presentation.initialStart)
+        _dateFilterEnd = State(initialValue: presentation.initialEnd)
+    }
+
+    private var dateFilterCalendar: Calendar {
+        var calendar = Calendar(identifier: .iso8601)
+        calendar.timeZone = dateFilterTimeZone
+        return calendar
+    }
+
+    private var dateFilterDraft: MediaDateRange? {
+        MediaDateRange(startDate: dateFilterStart, endDate: dateFilterEnd, timeZone: dateFilterTimeZone)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(language.string("media_date_start"))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityHidden(true)
+                        DatePicker(language.string("media_date_start"), selection: $dateFilterStart, displayedComponents: .date)
+                            .labelsHidden()
+                            .accessibilityLabel(language.string("media_date_start"))
+                            .accessibilityIdentifier("media-date-start")
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(language.string("media_date_end"))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityHidden(true)
+                        DatePicker(language.string("media_date_end"), selection: $dateFilterEnd, displayedComponents: .date)
+                            .labelsHidden()
+                            .accessibilityLabel(language.string("media_date_end"))
+                            .accessibilityIdentifier("media-date-end")
+                    }
+                    Text(language.format("media_date_timezone", camera.mediaDateDisplayZone.identifier))
+                    if dateFilterDraft == nil {
+                        Text(language.string("media_date_invalid"))
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("media-date-invalid")
+                    }
+                }
+                Section {
+                    Text(language.string("media_date_loaded_only"))
+                    Text(language.string("media_date_unknown_excluded"))
+                }
+            }
+            .environment(\.timeZone, dateFilterTimeZone)
+            .environment(\.calendar, dateFilterCalendar)
+            .environment(\.locale, language.locale)
+            .navigationTitle(language.string("media_date_range"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(language.string("cancel")) { onClose(presentation.id) }
+                        .accessibilityIdentifier("media-date-cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(language.string("apply")) {
+                        guard let range = dateFilterDraft,
+                              presentation.admits(range, currentOwner: camera.mediaLibrarySessionID)
+                        else { return }
+                        onApply(presentation, range)
+                    }
+                    .disabled(!presentation.admits(dateFilterDraft, currentOwner: camera.mediaLibrarySessionID))
+                    .accessibilityIdentifier("media-date-apply")
+                }
+            }
+        }
+    }
+}
 
 private extension CameraMediaFolder {
     var folderViewIdentity: Data { mediaFolderIdentity(self) }

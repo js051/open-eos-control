@@ -17,7 +17,9 @@ targets:
       - package: OpenEOSCore
     settings:
       base:
-        INFOPLIST_FILE: App/Info.plist
+        # Only the isolated CI test invocation overrides this app-specific input.
+        OEC_APP_INFOPLIST_FILE: App/Info.plist
+        INFOPLIST_FILE: $(OEC_APP_INFOPLIST_FILE)
         PRODUCT_BUNDLE_IDENTIFIER: dev.openeos.control
         PRODUCT_NAME: OpenEOSControl
         MARKETING_VERSION: 0.13.0
