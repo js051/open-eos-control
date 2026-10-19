@@ -207,7 +207,7 @@ final class LiveViewStopOwnershipTests: XCTestCase {
         await bridgeOpen(peer)
         await peer.plan("POST", "/v1/session/synthetic-old/liveview/start", body: #"{"active":true}"#, gate: "start")
         await peer.plan("POST", "/v1/session/synthetic-old/liveview/stop", body: #"{"active":false,"liveViewStopUnconfirmed":false}"#)
-        await peer.plan("DELETE", "/v1/session/synthetic-old")
+        await peer.plan("DELETE", "/v1/session/synthetic-old", body: "", status: 204)
         let client = try DesktopBridgeClient(baseURL: "http://192.0.2.1:18181", transport: peer)
         try await client.initialize()
         let start = Task { try await client.startLiveView() }
@@ -220,6 +220,8 @@ final class LiveViewStopOwnershipTests: XCTestCase {
         }
         await peer.release("start")
         await close.value
+        let unconfirmed = await client.connectionRetirementUnconfirmed
+        XCTAssertFalse(unconfirmed)
         do { try await start.value; XCTFail("Closing Start cannot install") } catch {}
         let requests = await peer.requests().filter { $0.url?.path.hasSuffix("/liveview/flip") != true }
         XCTAssertEqual(requests.suffix(2).map { $0.url!.path }, ["/v1/session/synthetic-old/liveview/stop", "/v1/session/synthetic-old"])

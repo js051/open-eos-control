@@ -15,7 +15,7 @@ final class ConnectionCancellationTests: XCTestCase {
                                          outcome: fails ? .rejected : .success, holdDeletion: bridge && !fails)
                 let new = ConnectingPeer(owner: "B", phase: .metadata)
                 try await withFixture([old, new], bridge: bridge) { fixture in
-                    let state = fixture.state
+                    let state = try XCTUnwrap(fixture.state)
                     let first = fixture.connect()
                     try await waitForGate("opening", peer: old)
                     XCTAssertTrue(state.canCancelConnection)
@@ -88,7 +88,7 @@ final class ConnectionCancellationTests: XCTestCase {
         let old = ConnectingPeer(owner: "A", phase: .creation)
         let new = ConnectingPeer(owner: "B", phase: .none)
         try await withFixture([old, new], bridge: true) { fixture in
-            let state = fixture.state
+            let state = try XCTUnwrap(fixture.state)
             let first = fixture.connect()
             try await waitForGate("opening", peer: old)
             state.cancelConnection()
@@ -116,7 +116,7 @@ final class ConnectionCancellationTests: XCTestCase {
                                      outcome: lostPOST ? .lost : .success, failDeletion: !lostPOST)
             let unused = ConnectingPeer(owner: "B", phase: .none)
             try await withFixture([old, unused], bridge: true) { fixture in
-                let state = fixture.state
+                let state = try XCTUnwrap(fixture.state)
                 let first = fixture.connect()
                 try await waitForGate("opening", peer: old)
                 state.cancelConnection()
@@ -154,7 +154,7 @@ final class ConnectionCancellationTests: XCTestCase {
                                          deletionSafetyCode: lateDelete ? code : nil)
                 let unused = ConnectingPeer(owner: "B", phase: .none)
                 try await withFixture([old, unused], bridge: true) { fixture in
-                    let state = fixture.state
+                    let state = try XCTUnwrap(fixture.state)
                     let opening = fixture.connect()
                     try await waitForGate("opening", peer: old)
                     state.cancelConnection()
@@ -190,7 +190,7 @@ final class ConnectionCancellationTests: XCTestCase {
         let old = ConnectingPeer(owner: "A", phase: .creation, holdDeletion: true)
         let new = ConnectingPeer(owner: "B", phase: .none)
         try await withFixture([old, new], bridge: true) { fixture in
-            let state = fixture.state
+            let state = try XCTUnwrap(fixture.state)
             let opening = fixture.connect()
             try await waitForGate("opening", peer: old)
             state.cancelConnection()

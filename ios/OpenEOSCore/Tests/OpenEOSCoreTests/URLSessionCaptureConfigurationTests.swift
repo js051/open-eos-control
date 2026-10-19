@@ -6,6 +6,20 @@ import XCTest
 /// Authored native loopback coverage. Source validation on Linux does not execute
 /// URLSession or establish physical-camera transport acceptance.
 final class URLSessionCaptureConfigurationTests: XCTestCase {
+    func testReadOnlyBodyIsRejectedBeforeDispatch() async throws {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:1/must-not-send")!)
+        request.httpMethod = "GET"
+        request.httpBody = Data("{}".utf8)
+        do {
+            _ = try await URLSessionCameraHTTPTransport().sendCaptureConfiguration(request)
+            XCTFail("A read-only request must not silently discard its body")
+        } catch CCAPIError.invalidResponse {
+            // Pre-dispatch validation, not a connection failure or retry.
+        } catch {
+            XCTFail("Expected pre-dispatch rejection, got \(error)")
+        }
+    }
+
     func testCaptureConfigurationPOSTAndPUTNeverFollowRedirectOrReplayBody() async throws {
         for method in ["POST", "PUT"] {
             for mode in CaptureConfigurationWirePeer.Mode.allCases where mode != .heldPartial {

@@ -6,6 +6,20 @@ import XCTest
 /// Authored native URLSession tests, NOT_RUN without macOS/Swift. A source check
 /// cannot establish socket replay, cancellation, or physical-camera acceptance.
 final class URLSessionRecordingLifecycleTests: XCTestCase {
+    func testReadOnlyBodyIsRejectedBeforeDispatch() async throws {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:1/must-not-send")!)
+        request.httpMethod = "GET"
+        request.httpBody = Data("{}".utf8)
+        do {
+            _ = try await URLSessionCameraHTTPTransport().sendRecordingCommand(request)
+            XCTFail("A read-only request must not silently discard its body")
+        } catch CCAPIError.invalidResponse {
+            // Pre-dispatch validation, not a connection failure or retry.
+        } catch {
+            XCTFail("Expected pre-dispatch rejection, got \(error)")
+        }
+    }
+
     func testRecordingCommandsNeverRedirectAuthenticateOrReplay() async throws {
         for method in ["POST", "PUT"] {
             for mode in RecordingLifecycleWirePeer.Mode.allCases where mode != .heldPartial {
