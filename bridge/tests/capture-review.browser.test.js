@@ -577,6 +577,9 @@ const cases = [
       assert.equal(await page.locator("#media-preview-title").innerText(), "SYNTHETIC_OLD_A.JPG");
       await page.click("#media-preview-close");
       const writes = cameraWrites.slice();
+      const retryBefore = await retry.boundingBox();
+      const halfPressBefore = await page.locator("#half-press-button").boundingBox();
+      assert.ok(retryBefore && halfPressBefore);
       // Fixed synthetic controls only: distinguish a repeated recovery gesture
       // from a camera control moving under its second click.
       await page.evaluate(() => {
@@ -595,6 +598,8 @@ const cases = [
       });
       await retry.dblclick();
       assert.deepEqual(cameraWrites, writes, "The repeated recovery gesture emits no camera write");
+      assert.equal((await retry.boundingBox())?.y, retryBefore.y,
+        "Searching must keep the recovery target under the repeated gesture");
       await page.waitForFunction(() => {
         const button = document.querySelector("#latest-media-retry");
         return button && !button.hidden && !button.disabled &&
@@ -606,6 +611,8 @@ const cases = [
       await retry.click();
       await waitForNew(page);
       assert.deepEqual(cameraWrites, writes, "The complete recovery emits no new camera write");
+      assert.ok((await page.locator("#half-press-button").boundingBox())?.y >= halfPressBefore.y,
+        "Discovery must not pull a camera mutation into the former recovery target");
       assert.equal(await page.isChecked("#shutter-af-toggle"), false);
       await assertOneCapture(simulatorOrigin);
     },
