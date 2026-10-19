@@ -34,6 +34,9 @@ TESTS = (
     "testRealPickerSelectionCancelOrLostAckKeepsUncertaintyAcrossReconnect",
 )
 MEDIA_PHASES = dict(zip(TESTS[3:], ("metadata-menu", "recording-review", "date-reopen", "grid-initial", "white-balance-tap", "picker-cancel", "picker-selection")))
+EXTRA_MEDIA_PHASES = {
+    "testDirectCCAPIControlsReachTheRunningCameraSimulator": ("direct-capture-mode",),
+}
 MEDIA_CONTROLS = (
     "media-mutation-menu", "media-date-range", "media-date-apply", "media-date-cancel",
     "media-filter", "capture-review-status", "capture-review-retry", "latest-media-button",
@@ -149,7 +152,9 @@ def attachment_name(suggested: object, test: str) -> str | None:
                 rf"shutter-recovery-connect-{cases}-{reconnect}(?:-geometry)?|"
                 rf"shutter-recovery-sheet-stop-{cases})")
     elif test in MEDIA_PHASES:
-        base = rf"media-ui-{MEDIA_PHASES[test]}-(?:english|traditionalChinese)(?:-geometry)?"
+        phases = (MEDIA_PHASES[test],) + EXTRA_MEDIA_PHASES.get(test, ())
+        allowed = "|".join(map(re.escape, phases))
+        base = rf"media-ui-(?:{allowed})-(?:english|traditionalChinese)(?:-geometry)?"
     else:
         return None
     # Xcode may append a counter/UUID and a file extension to the supplied name.
@@ -208,7 +213,8 @@ def geometry_text(data: bytes) -> bytes:
             rf"{peers}\[[0-3]\] connect-overlap={rect} contains-connect-center=(?:true|false)",
         )
     if lines and lines[0].startswith("[OEC_MEDIA_UI_GEOMETRY]"):
-        phases = "|".join(map(re.escape, MEDIA_PHASES.values()))
+        phases = "|".join(map(re.escape, (*MEDIA_PHASES.values(),
+            *(phase for extra in EXTRA_MEDIA_PHASES.values() for phase in extra))))
         controls = "|".join(map(re.escape, MEDIA_CONTROLS))
         patterns = (
             rf"\[OEC_MEDIA_UI_GEOMETRY\] (?:{phases})-(?:english|traditionalChinese)",

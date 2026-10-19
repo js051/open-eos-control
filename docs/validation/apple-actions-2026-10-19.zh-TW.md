@@ -157,3 +157,11 @@
 - 原 XXXL 雙語旅程新增未展開時不可見 mutation control 的負例，展開後真正捲到相同 Rating 與 rating 5 控制，仍要求原 5 秒內 enabled／hittable。原取消零寫入、確認後精確 readback／單次操作、歷史清除取消等斷言未更改；一般 Menu 分支與所有 target／能力 guard 增加 source guard，這不替代 Apple UI 執行。
 - run15 上傳失敗末尾有 unexpected termination 收據，尚未有 crash 原因。後置診斷先讀固定 app state；非 running 狀態只記 enum 整數，不查已退出 App 的 AX／畫面。不得把缺少 uncertain 結果先判為 ticket 被取消或 file access 失敗。
 - 本地完整 220 source guards、61 CI helper tests、兩個 Swift 檔 syntax parse 與 diff check 通過；沒有本地 UIKit runtime。第十六輪尚待交付與真 Apple gate。
+
+
+## 第十六輪原生結果與第十七輪同步／導航預算
+
+- Source `7c24b558a3a96b5f814f22629b307f2836c4d5d5`，run https://github.com/js051/open-eos-control/actions/runs/39228047526 。安全、Core、普通與測試 build／隔離驗證通過；App **825/825**。大字級 metadata 完整雙語展開、取消零寫入、確認評分／readback／歷史旅程通過；真 OS picker 雙語取消重開與六種語言／cancel／lost-ack／success 上傳重連組合全過。上傳這批僅增加失敗後診斷，前輪 unexpected termination 原因仍未確證，不能宣稱 crash 已修。
+- UI 43 案有 **2 個失敗案例／3 個斷言**。direct simulator 控制已完成 Video、REC、Stop，最後 Photo 沒有第二次 mode 更新，count 仍 1；單 tap log 不證選段／Apply 已被接受。兩個 mode 轉換加入與既有錄影旅程一致的前置互動與 selected gate，各 5 秒有界、每個 segment／Apply 仍僅一次 tap；原20秒 mode 狀態／精確 count 1、2 不變。原失敗才收固定 direct-capture-mode phase，例外原樣重拋，無新成功判準或重送。新增前置等待會增加整段 journey 最長時間，不把它報成產品性能改善。
+- 日期已知資料夾 Apply 與篩選值正確，XXXL 第一照片的 lazy card 在第三次原生手勢後才出現於 `(140,899.67,48,48)`，viewport 底端 874，仍需約74pt修正。三次手勢／idle 主導約9秒，既有sole-container cache正常；不是缺少照片或冗餘AX查詢。僅這個明確XXXL長距離呼叫將導航預算 **8→15秒**，容納第四次停止修正；正常尺寸與其他呼叫原預算不變，手勢速度、hittable／真tap、尺寸與所有日期／篩選斷言保留。這是根據量測調整harness導航上限，不是產品性能修復，也不改相機deadline。
+- 第十六輪 bounded artifact `12177490765`，5,323,409 bytes，SHA256 `e27903cbb068840bc2b23df6ae9f121deb783e49043cb0ed1ec9ecf06ae34ec4`。新增direct phase只屬原direct測試，沿原固定控件／24MiB／128行／64檔／PNG／symlink規則，無任意文字或URL。第十七輪仍待原Apple驗證。

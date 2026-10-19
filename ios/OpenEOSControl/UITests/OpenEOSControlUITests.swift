@@ -1059,7 +1059,11 @@ final class OpenEOSControlUITests: XCTestCase {
             app.buttons["media-folder-apply"].tap()
             XCTAssertTrue(app.staticTexts["media-folder-applied"].waitForExistence(timeout: 5))
             XCTAssertEqual(app.staticTexts["media-folder-applied"].label, "card1/DCIM/100CANON")
-            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: 8))
+            // This journey explicitly runs Accessibility XXXL. Three measured
+            // native search gestures consumed ~9s before the lazy card appeared;
+            // allow a fourth stopped correction, without changing gesture speed
+            // or the original interaction/visibility/filter assertions.
+            XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: 15))
             XCTAssertFalse(app.buttons["media-actions-preview-002"].exists)
             // This control belongs to the media content, not fixed sheet chrome.
             XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: 8, knownScrollableContent: true))
@@ -1509,11 +1513,15 @@ final class OpenEOSControlUITests: XCTestCase {
         try prepareNewShootingSettingForAsyncTest(in: app)
         let captureMode = app.segmentedControls["capture-mode-picker"]
         _ = try XCTUnwrap((captureMode.waitForExistence(timeout: 8)) ? true : nil)
-        try tapForAsyncTest(captureMode.buttons["Video"])
-        try tapForAsyncTest(app.buttons["capture-mode-apply"])
-        try await waitForSimulatorState { state in
-            state["movie_mode"] as? String == "on" &&
-                (state["movie_mode_update_count"] as? NSNumber)?.intValue == 1
+        try selectDirectCaptureMode("Video", other: "Photo", in: app)
+        do {
+            try await waitForSimulatorState { state in
+                state["movie_mode"] as? String == "on" &&
+                    (state["movie_mode_update_count"] as? NSNumber)?.intValue == 1
+            }
+        } catch {
+            recordMediaUIEvidence(in: app, phase: "direct-capture-mode", language: "english")
+            throw error
         }
         let record = app.buttons["record-button"]
         _ = try XCTUnwrap((waitForInteraction(record, timeout: 8)) ? true : nil)
@@ -1523,11 +1531,15 @@ final class OpenEOSControlUITests: XCTestCase {
         try tapForAsyncTest(record)
         try await waitForSimulatorState { state in state["recording"] as? Bool == false }
         try prepareNewShootingSettingForAsyncTest(in: app)
-        try tapForAsyncTest(captureMode.buttons["Photo"])
-        try tapForAsyncTest(app.buttons["capture-mode-apply"])
-        try await waitForSimulatorState { state in
-            state["movie_mode"] as? String == "off" &&
-                (state["movie_mode_update_count"] as? NSNumber)?.intValue == 2
+        try selectDirectCaptureMode("Photo", other: "Video", in: app)
+        do {
+            try await waitForSimulatorState { state in
+                state["movie_mode"] as? String == "off" &&
+                    (state["movie_mode_update_count"] as? NSNumber)?.intValue == 2
+            }
+        } catch {
+            recordMediaUIEvidence(in: app, phase: "direct-capture-mode", language: "english")
+            throw error
         }
 
         try openMoreActionsForAsyncTest(in: app)
@@ -2328,6 +2340,31 @@ final class OpenEOSControlUITests: XCTestCase {
         var buttonIdentifier: String { "live-view-tap-action-\(rawValue)" }
     }
 
+    @MainActor
+    private func selectDirectCaptureMode(_ title: String, other: String, in app: XCUIApplication) throws {
+        let mode = app.segmentedControls["capture-mode-picker"]
+        let segments = mode.buttons.matching(identifier: title)
+        let segment = segments.element
+        let interactive = waitForInteraction(segment, timeout: 5)
+        if !interactive { recordMediaUIEvidence(in: app, phase: "direct-capture-mode", language: "english") }
+        _ = try XCTUnwrap(interactive ? true : nil)
+        XCTAssertEqual(segments.count, 1)
+        try tapForAsyncTest(segment)
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            segment.isSelected && !mode.buttons[other].isSelected
+        }, object: nil)
+        let selectedReady = XCTWaiter.wait(for: [selected], timeout: 5) == .completed
+        if !selectedReady { recordMediaUIEvidence(in: app, phase: "direct-capture-mode", language: "english") }
+        _ = try XCTUnwrap(selectedReady ? true : nil)
+        let applies = app.buttons.matching(identifier: "capture-mode-apply")
+        let apply = applies.element
+        let applyReady = waitForInteraction(apply, timeout: 5)
+        if !applyReady { recordMediaUIEvidence(in: app, phase: "direct-capture-mode", language: "english") }
+        _ = try XCTUnwrap(applyReady ? true : nil)
+        XCTAssertEqual(applies.count, 1)
+        try tapForAsyncTest(apply)
+    }
+
     private func openMoreSettingsForTapSelection(in app: XCUIApplication) throws {
         try openMoreActionsForAsyncTest(in: app)
         let moreSettings = app.buttons["more-settings-menu-button"]
@@ -3107,7 +3144,7 @@ final class OpenEOSControlUITests: XCTestCase {
     }
 
     private func recordMediaUIEvidence(in app: XCUIApplication, phase: String, language: String) {
-        guard ["metadata-menu", "recording-review", "date-reopen", "grid-initial", "white-balance-tap"].contains(phase),
+        guard ["metadata-menu", "recording-review", "date-reopen", "grid-initial", "white-balance-tap", "direct-capture-mode"].contains(phase),
               ["english", "traditionalChinese"].contains(language) else { return }
         var lines = ["[OEC_MEDIA_UI_GEOMETRY] \(phase)-\(language)", "window=\(app.windows.firstMatch.frame)"]
         for identifier in [
@@ -3125,7 +3162,7 @@ final class OpenEOSControlUITests: XCTestCase {
                 lines.append("\(identifier)[\(index)] enabled=\(element.isEnabled) hittable=\(element.isHittable) frame=\(element.frame)")
             }
         }
-        if phase == "recording-review" {
+        if phase == "recording-review" || phase == "direct-capture-mode" {
             let mode = app.segmentedControls["capture-mode-picker"]
             for (identifier, label) in [("capture-segment-photo", language == "english" ? "Photo" : "拍照"),
                                         ("capture-segment-video", language == "english" ? "Video" : "錄影")] {
