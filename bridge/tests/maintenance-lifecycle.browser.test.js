@@ -81,7 +81,7 @@ async function journey(browser,origin,mode,language){
     await page.waitForSelector('#live-toggle-button:not([disabled])');assert.deepEqual(reads,['GET','GET']);
     assert.match(await page.locator('#live-toggle-button').textContent(),language==='en'?/Start/:/開始/);
    }else if(mode!=='sleep')assert.equal(await page.locator('[data-maintenance-action="restore"]').last().isDisabled(),true);
-   if(['lost','duplicate','redirect'].includes(mode))assert.match(await page.locator('[data-maintenance-history]').textContent(),language==='en'?/unknown/:/不確定/);
+   if(['lost','duplicate','redirect'].includes(mode))assert.match(await page.locator('[data-maintenance-history]').textContent(),language==='en'?/Command response: Unknown/:/動作回應: 結果不確定/);
   }
   assert.equal(writes.length,1);assert.deepEqual(errors,[]);console.log(`maintenance ${mode} ${language}: passed`);
   await retireFixtureSession({ page }, { maintenance: !['clean', 'reconnect'].includes(mode) });
