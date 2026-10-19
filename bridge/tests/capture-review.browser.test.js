@@ -577,7 +577,24 @@ const cases = [
       assert.equal(await page.locator("#media-preview-title").innerText(), "SYNTHETIC_OLD_A.JPG");
       await page.click("#media-preview-close");
       const writes = cameraWrites.slice();
+      // Fixed synthetic controls only: distinguish a repeated recovery gesture
+      // from a camera control moving under its second click.
+      await page.evaluate(() => {
+        const ids = new Set(["latest-media-retry", "half-press-button", "autofocus-button"]);
+        window.__captureReviewGesture = [];
+        for (const type of ["pointerdown", "pointerup", "click", "dblclick"]) {
+          document.addEventListener(type, (event) => {
+            const button = event.target.closest?.("button");
+            if (!ids.has(button?.id) || window.__captureReviewGesture.length >= 24) return;
+            const rect = button.getBoundingClientRect();
+            window.__captureReviewGesture.push({ type, id: button.id, detail: event.detail,
+              x: event.clientX, y: event.clientY, top: rect.top, height: rect.height,
+              disabled: button.disabled });
+          }, true);
+        }
+      });
       await retry.dblclick();
+      assert.deepEqual(cameraWrites, writes, "The repeated recovery gesture emits no camera write");
       await page.waitForFunction(() => {
         const button = document.querySelector("#latest-media-retry");
         return button && !button.hidden && !button.disabled &&
@@ -1130,6 +1147,7 @@ async function run() {
           const preview = await page.evaluate(() => {
             const image = document.querySelector("#media-preview-image");
             return {
+              recoveryGesture: window.__captureReviewGesture || [],
               dialogOpen: document.querySelector("#media-preview-dialog")?.open,
               title: document.querySelector("#media-preview-title")?.textContent,
               latest: document.querySelector("#latest-media-label")?.textContent,
