@@ -50,6 +50,25 @@ final class CubeLutImportReadTests: XCTestCase {
         }
     }
 
+    func testParserAcceptsCRLFAndMixedLineEndingsWithoutChangingTable() throws {
+        let lf = "TITLE \"Synthetic line endings\"\n# table follows\n" + Self.identity
+        let expected = try parseCubeLut(lf, fallbackName: "line-endings")
+        let mixed = lf.split(separator: "\n", omittingEmptySubsequences: false).enumerated()
+            .map { index, line in String(line) + (index.isMultiple(of: 2) ? "\r\n" : "\n") }.joined()
+        for text in [lf.replacingOccurrences(of: "\n", with: "\r\n"), mixed] {
+            let actual = try parseCubeLut(text, fallbackName: "line-endings")
+            XCTAssertEqual(actual.name, expected.name)
+            XCTAssertEqual(actual.size, expected.size)
+            XCTAssertEqual(actual.domainMin, expected.domainMin)
+            XCTAssertEqual(actual.domainMax, expected.domainMax)
+            XCTAssertEqual(actual.values, expected.values)
+            XCTAssertEqual(actual.rgbaData, expected.rgbaData)
+        }
+        // CRLF compatibility does not introduce a new bare-CR parser dialect.
+        XCTAssertThrowsError(try parseCubeLut(Self.identity.replacingOccurrences(of: "\n", with: "\r"),
+            fallbackName: "bare-cr"))
+    }
+
     func testExactLimitAndGrowingUnknownSizeStopAfterOneOverflowByte() throws {
         let fixture = try contract()
         XCTAssertEqual(fixture.sizeBoundaryCases.map(\.bytes), [maximumCubeLutBytes, maximumCubeLutBytes + 1])

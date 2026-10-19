@@ -1,5 +1,7 @@
 import Foundation
 import OpenEOSCore
+import SwiftUI
+import UIKit
 import XCTest
 
 @testable import OpenEOSControl
@@ -101,6 +103,50 @@ final class ShortShutterRecoveryStateTests: XCTestCase {
         state.screen = .control
         let writes = await peer.commands()
         XCTAssertEqual(writes.map(\.action), ["start", "stop", "start", "stop"])
+    }
+
+    func testHostedHeldAFButtonTracksCapabilityAdmissionOnTheSameControl() async throws {
+        let peer = ShortShutterPeer(control: .autofocus)
+        let state = makeState([peer])
+        let language = AppLanguageStore(defaults: UserDefaults(suiteName: "HeldAFHosted.\(UUID().uuidString)")!)
+        let host = UIHostingController(rootView: HeldAutofocusButton(camera: state).environmentObject(language))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            state.requestDisconnect()
+            Task { await peer.releaseAll() }
+        }
+        func focusButton(in view: UIView) -> AccessibleFocusButton? {
+            if let button = view as? AccessibleFocusButton { return button }
+            for child in view.subviews {
+                if let button = focusButton(in: child) { return button }
+            }
+            return nil
+        }
+        host.loadViewIfNeeded()
+        host.view.layoutIfNeeded()
+        try await waitUntil { focusButton(in: host.view)?.accessibilityLabel == language.string("held_autofocus") }
+        let button = try XCTUnwrap(focusButton(in: host.view))
+        XCTAssertFalse(button.isEnabled)
+        try await connect(state)
+        XCTAssertTrue(state.canStartHeldAutofocus)
+        try await waitUntil { button.isEnabled }
+        XCTAssertTrue(focusButton(in: host.view) === button)
+        state.setApplicationActive(false)
+        XCTAssertFalse(state.canStartHeldAutofocus)
+        try await waitUntil { !button.isEnabled }
+        state.setApplicationActive(true)
+        try await waitUntil { button.isEnabled }
+        await state.disconnect()
+        try await waitUntil { !button.isEnabled }
+        XCTAssertTrue(focusButton(in: host.view) === button)
+        let commands = await peer.commands()
+        XCTAssertTrue(commands.isEmpty, "Capability rendering must not synthesize an autofocus press")
     }
 
     func testHeldAFRequiresCapabilityAndReleasesOnBackgroundWithoutRepress() async throws {

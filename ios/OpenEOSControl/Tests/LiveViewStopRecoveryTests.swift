@@ -321,7 +321,7 @@ private actor AppLiveViewPeer: CameraHTTPTransport {
         var status = 200
         if path == "/health" { body = ["ok": true, "service": "open-eos-control-bridge", "version": "0.13.0"] }
         else if path == "/v1/session" { body = ["id": owner, "engine": "ccapi"] }
-        else if path == "/v1/session/\(owner)", method == "DELETE" { body = [:] }
+        else if path == "/v1/session/\(owner)", method == "DELETE" { return CameraHTTPResponse(statusCode: 204) }
         else if path.hasSuffix("/info") { body = ["connected": true, "model": "Synthetic Live View camera", "serial": "SYNTHETIC", "api": "fixture"] }
         else if path.hasSuffix("/status") { body = ["connected": true, "recording": observedRecording, "liveViewStopUnconfirmed": false] }
         else if path.hasSuffix("/capabilities") {

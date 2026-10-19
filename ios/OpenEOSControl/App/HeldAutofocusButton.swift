@@ -12,6 +12,8 @@ struct HeldAutofocusButton: UIViewRepresentable {
 
     func makeUIView(context: Context) -> AccessibleFocusButton {
         let button = AccessibleFocusButton(type: .system)
+        // Remain inert until updateUIView applies the current camera capability.
+        button.isEnabled = false
         button.setTitle("AF-ON", for: .normal)
         button.titleLabel?.font = .systemFont(ofSize: 12, weight: .bold)
         button.accessibilityIdentifier = "held-autofocus-button"

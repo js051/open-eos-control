@@ -11,6 +11,7 @@ struct CubeLut: Identifiable, Hashable, Sendable {
     let domainMax: [Float]
     let values: [Float]
     let rgbaData: Data
+    let previewEncoding: CubeLutPreviewEncoding?
 
     init(name: String, size: Int, domainMin: [Float], domainMax: [Float], values: [Float]) {
         self.name = name
@@ -26,7 +27,9 @@ struct CubeLut: Identifiable, Hashable, Sendable {
             rgba.append(values[index + 2])
             rgba.append(1)
         }
-        rgbaData = rgba.withUnsafeBytes { Data($0) }
+        let data = rgba.withUnsafeBytes { Data($0) }
+        rgbaData = data
+        previewEncoding = CubeLutPreviewEncoding.make(values: values, originalData: data)
     }
 
     static func == (lhs: CubeLut, rhs: CubeLut) -> Bool { lhs.id == rhs.id }
@@ -65,6 +68,61 @@ struct CubeLut: Identifiable, Hashable, Sendable {
     }
 }
 
+/// CIColorCube can clip extended-range table texels before it interpolates them.
+/// Encode each channel affinely into its supported range, then undo that affine
+/// transform after interpolation. Raw LUT values remain the CPU/wire authority.
+struct CubeLutPreviewEncoding: Sendable {
+    let rgbaData: Data
+    let scale: [Float]
+    let bias: [Float]
+
+    static func make(values: [Float], originalData: Data) -> Self? {
+        guard !values.isEmpty, values.count.isMultiple(of: 3), values.allSatisfy(\.isFinite) else { return nil }
+        if values.allSatisfy({ (0...1).contains($0) }) {
+            return Self(rgbaData: originalData, scale: [1, 1, 1], bias: [0, 0, 0])
+        }
+        var scale: [Float] = [1, 1, 1]
+        var bias: [Float] = [0, 0, 0]
+        var spans: [Double] = [1, 1, 1]
+        var constant: [Float?] = [nil, nil, nil]
+        for channel in 0..<3 {
+            var minimum = values[channel]
+            var maximum = minimum
+            for index in stride(from: channel, to: values.count, by: 3) {
+                minimum = min(minimum, values[index])
+                maximum = max(maximum, values[index])
+            }
+            // A convex interpolation entirely on one side of the final clamp
+            // is constant after that clamp, including finite Float extremes.
+            if maximum <= 0 { constant[channel] = 0; continue }
+            if minimum >= 1 { constant[channel] = 1; continue }
+            let lower = min(minimum, 0)
+            let upper = max(maximum, 1)
+            let span = Double(upper) - Double(lower)
+            let floatSpan = Float(span)
+            // Never send an infinite inverse transform to the GPU. Finite
+            // coefficients do not promise byte precision for arbitrary ranges.
+            guard floatSpan.isFinite, floatSpan > 0 else { return nil }
+            scale[channel] = floatSpan
+            bias[channel] = lower
+            spans[channel] = span
+        }
+        var rgba: [Float] = []
+        rgba.reserveCapacity(values.count / 3 * 4)
+        for index in stride(from: 0, to: values.count, by: 3) {
+            for channel in 0..<3 {
+                let encoded = constant[channel]
+                    ?? Float((Double(values[index + channel]) - Double(bias[channel])) / spans[channel])
+                guard encoded.isFinite, (0...1).contains(encoded) else { return nil }
+                rgba.append(encoded)
+            }
+            // Table alpha remains one, so its RGB is also valid premultiplied data.
+            rgba.append(1)
+        }
+        return Self(rgbaData: rgba.withUnsafeBytes { Data($0) }, scale: scale, bias: bias)
+    }
+}
+
 enum CubeLutError: LocalizedError {
     case invalid(String)
 
@@ -87,7 +145,11 @@ func parseCubeLut(_ text: String, fallbackName: String) throws -> CubeLut {
     var hasDomainMax = false
     var values: [Float] = []
 
-    for (zeroBasedLine, sourceLine) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+    // Swift treats CRLF as one Character, so splitting on the LF Character alone
+    // misses Windows line endings. Preserve the byte decoder's text contract;
+    // normalize only parser line boundaries, without admitting bare CR lines.
+    let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
+    for (zeroBasedLine, sourceLine) in lines.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
         let line = String(sourceLine).split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if line.isEmpty { continue }
@@ -155,7 +217,7 @@ func parseCubeLut(_ text: String, fallbackName: String) throws -> CubeLut {
 }
 
 // Display previews use encoded sRGB numbers on every platform, not scene-linear light.
-// Extended range preserves negative/over-range table entries until after interpolation.
+// Extended range allows the post-interpolation affine restore before the final clamp.
 let cubeLutPreviewOutputColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 private let cubeLutWorkingColorSpace = CGColorSpace(name: CGColorSpace.extendedSRGB)!
 
@@ -177,7 +239,8 @@ func applyCubeLutPreview(_ input: CIImage, lut: CubeLut) -> CIImage? {
     guard (2...64).contains(lut.size), lut.domainMin.count == 3, lut.domainMax.count == 3,
           lut.values.count == lut.size * lut.size * lut.size * 3,
           lut.values.allSatisfy({ $0.isFinite }),
-          zip(lut.domainMin, lut.domainMax).allSatisfy({ $0.isFinite && $1.isFinite && $0 < $1 }) else { return nil }
+          zip(lut.domainMin, lut.domainMax).allSatisfy({ $0.isFinite && $1.isFinite && $0 < $1 }),
+          let encoding = lut.previewEncoding else { return nil }
     let inverse = zip(lut.domainMin, lut.domainMax).map { 1 / ($1 - $0) }
     let bias = zip(lut.domainMin, inverse).map { -$0 * $1 }
     guard inverse.allSatisfy({ $0.isFinite && $0 > 0 }), bias.allSatisfy({ $0.isFinite }) else { return nil }
@@ -195,11 +258,26 @@ func applyCubeLutPreview(_ input: CIImage, lut: CubeLut) -> CIImage? {
     guard let clamped = clamp.outputImage else { return nil }
     cube.setValue(clamped, forKey: kCIInputImageKey)
     cube.setValue(lut.size, forKey: "inputCubeDimension")
-    cube.setValue(lut.rgbaData, forKey: "inputCubeData")
+    cube.setValue(encoding.rgbaData, forKey: "inputCubeData")
     cube.setValue(cubeLutWorkingColorSpace, forKey: "inputColorSpace")
     guard let interpolated = cube.outputImage else { return nil }
-    // Clamp the interpolated result, never each table entry. Early clipping changes nonlinear LUTs.
-    outputClamp.setValue(interpolated, forKey: kCIInputImageKey)
+    var restored = interpolated
+    if encoding.scale != [1, 1, 1] || encoding.bias != [0, 0, 0] {
+        guard let restore = CIFilter(name: "CIColorMatrix") else { return nil }
+        restore.setValue(interpolated, forKey: kCIInputImageKey)
+        restore.setValue(CIVector(x: CGFloat(encoding.scale[0]), y: 0, z: 0, w: 0), forKey: "inputRVector")
+        restore.setValue(CIVector(x: 0, y: CGFloat(encoding.scale[1]), z: 0, w: 0), forKey: "inputGVector")
+        restore.setValue(CIVector(x: 0, y: 0, z: CGFloat(encoding.scale[2]), w: 0), forKey: "inputBVector")
+        // CI color filters operate on unpremultiplied values. Restore RGB only;
+        // do not add an alpha bias or multiply alpha by the RGB range.
+        restore.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
+        restore.setValue(CIVector(x: CGFloat(encoding.bias[0]), y: CGFloat(encoding.bias[1]),
+            z: CGFloat(encoding.bias[2]), w: 0), forKey: "inputBiasVector")
+        guard let output = restore.outputImage else { return nil }
+        restored = output
+    }
+    // Clamp only after interpolation and restoration. Early clipping changes nonlinear LUTs.
+    outputClamp.setValue(restored, forKey: kCIInputImageKey)
     outputClamp.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputMinComponents")
     outputClamp.setValue(CIVector(x: 1, y: 1, z: 1, w: 1), forKey: "inputMaxComponents")
     return outputClamp.outputImage?.cropped(to: input.extent)

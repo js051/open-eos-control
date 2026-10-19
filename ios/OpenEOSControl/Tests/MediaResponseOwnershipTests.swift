@@ -879,6 +879,9 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
             eventPollCount += 1
             return await withCheckedContinuation { eventContinuation = $0 }
         }
+        if method == "DELETE", path == "/v1/session/synthetic-owner" {
+            return CameraHTTPResponse(statusCode: 204)
+        }
         if path == "/health" {
             object = ["ok": true, "service": "open-eos-control-bridge", "version": "0.13.0"]
         } else if path == "/v1/session" {

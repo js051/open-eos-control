@@ -1091,6 +1091,9 @@ private actor RecordingRecoveryPeer: CameraHTTPTransport {
             else { code = "COMMAND_REJECTED" }
             return CameraHTTPResponse(statusCode: 502, body: try JSONSerialization.data(withJSONObject: ["error": ["code": code, "message": "Synthetic failure"]]))
         case .normal, .status, .cachedFalse:
+            if method == "DELETE", path == "/v1/session/\(owner)" {
+                return CameraHTTPResponse(statusCode: 204)
+            }
             return CameraHTTPResponse(statusCode: 200, body: response)
         }
     }

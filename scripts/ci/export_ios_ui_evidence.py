@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Manually export bounded, synthetic-only shutter recovery evidence.
+"""Export bounded, synthetic-only shutter recovery evidence.
 
-This helper is not wired to an automatic CI export/upload step. It reads an
-existing result bundle only; it neither runs tests nor changes their outcome.
+The Apple-only dev workflow invokes this helper after its existing tests. It reads
+an existing result bundle only; it neither runs tests nor changes their outcome.
 Requires an existing macOS host with Xcode 16+ xcresulttool; no installs or
 legacy/full dumps.
 Apple documents the modern commands and their runtime help in:

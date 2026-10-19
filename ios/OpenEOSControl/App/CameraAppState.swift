@@ -2598,6 +2598,11 @@ final class CameraAppState: ObservableObject {
         let observation = cancelled ? CameraRecordingObservation.unavailable : outcome.observation
         recordingStopDuty = CameraRecordingPolicy.stopRequired(previous: previousDuty, starting: outcome.starting,
             response: response, observation: observation)
+        if !outcome.starting {
+            // The Stop attempt returned; only a fresh false observation may start
+            // media review below. Keep its boundary for deliberate recovery.
+            captureReviewState = .idle
+        }
         guard response != .notSent && response != .rejected || observation.observedRecording != nil else {
             if !cancelled, response == .rejected { lastError = language.string("recording_command_rejected") }
             return
