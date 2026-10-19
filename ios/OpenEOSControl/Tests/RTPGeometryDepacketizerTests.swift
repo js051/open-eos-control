@@ -34,7 +34,8 @@ final class RTPGeometryDepacketizerTests: XCTestCase {
     }
 
     private func packet(_ sequence: UInt16, _ payload: [UInt8], marker: Bool = false) -> Data {
-        Data([0x80, (marker ? 0x80 : 0) | 103, UInt8(sequence >> 8), UInt8(sequence & 255),
-              0, 0, 0x46, 0x50, 0, 0, 0, 1] + payload)
+        let header: [UInt8] = [0x80, (marker ? 0x80 : 0) | 103, UInt8(sequence >> 8), UInt8(sequence & 255),
+                               0, 0, 0x46, 0x50, 0, 0, 0, 1]
+        return Data(header + payload)
     }
 }
