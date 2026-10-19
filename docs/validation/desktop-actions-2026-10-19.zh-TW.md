@@ -21,3 +21,13 @@ This supplemental dev-only workflow reuses the original Linux desktop job withou
 - Gphoto targeted pytest 本地缺 pytest，未執行，保留由原完整 CI gate 驗證；不以 AST 或 source guard 冒充 Python runtime 全綠。
 
 The first native desktop run stopped at the unchanged lint gate with 540 findings; browser and Python runtime suites did not run. The scoped formatting correction preserves assertions, literal values, and normalized executable AST. Original lint rules remain enabled. The follow-up CI result is pending.
+
+## 第二輪：lint 收斂，Chromium 實際 CSP 錯誤
+
+- Source `282648ac9997b9576baf1d8ecd4d13f2baaf8a8f`，[run39262378403](https://github.com/js051/open-eos-control/actions/runs/39262378403) 的原 Ruff、JS syntax 與全部 module scripts 通過。
+- 第一個 `local-video.browser.test.js` 原 `pageErrors == []` 斷言收到 11 個同樣 inline-style CSP 拒絕，hash `sha256-lmnlZV/+SXaJRvUJl58if6AWgpyfeGrlvujZ4tCEOgY=`。其餘 browser scripts／pytest／package 尚未執行。
+- 保留 `style-src 'self'` 與全部錯誤斷言，不加入 unsafe-inline、不過濾 error；新診斷只於既有 console error 輸出固定 source 類別與 line/column，不輸出完整 URL。
+- [Playwright 1.62 screenshotter 原碼](https://github.com/microsoft/playwright/blob/v1.62.0/packages/playwright-core/src/server/screenshotter.ts) 核對未證實本輪錯誤來自 screenshot，尚不能據相同 hash 判定產品或工具根因。
+- 同 source 的 Windows 原生封裝再次通過（run39262378065）；Apple21正常執行中，未為本診斷取消或重啟。
+
+The actual Chromium journey exposed repeated inline-style CSP errors. The strict error assertion and production CSP are unchanged. A bounded source-category/line/column diagnostic is added to establish the origin; this is not yet a product fix.
