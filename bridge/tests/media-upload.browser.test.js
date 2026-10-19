@@ -64,7 +64,7 @@ async function fixture(browser, origin, mode = "confirmed", language = "en") {
       return;
     }
     assert.equal(route.request().method(), "GET"); reads.push(route.request().url());
-    if (mode === "refresh-reconnect" && reads.length === 2) await gate.promise;
+    if (mode === "refresh-reconnect" && writes.length === 1) await gate.promise;
     // Pre-existing same name and size in another folder is intentionally present.
     try { await route.fulfill({ status: 200, contentType: "application/json", json: { items: [{ ...RECEIPT, id: "synthetic:existing-other-folder" }] } }); }
     catch (error) { if (mode !== "refresh-reconnect") throw error; }
@@ -79,6 +79,8 @@ async function fixture(browser, origin, mode = "confirmed", language = "en") {
   await page.waitForSelector("#connect-button:not([disabled])"); await page.click("#connect-button");
   await page.waitForSelector("#control-view:not([hidden])"); await page.click('.tab[data-view="media"]');
   await page.waitForSelector(".media-card");
+  // Connect enriches Latest (limit 8); opening Media reads the visible roster (limit 61).
+  assert.deepEqual(reads.map(url => new URL(url).searchParams.get("limit")), ["8", "61"]);
   return { context, page, errors, writes, reads, redirectedWrites, gate };
 }
 
@@ -113,13 +115,15 @@ async function confirmed(browser, origin, language) {
 async function uncertain(browser, origin, mode, language = "en") {
   const f = await fixture(browser, origin, mode, language);
   try {
+    const beforeUploadReads = f.reads.length;
     await choose(f.page);
     if (mode === "cancel") { await f.page.waitForSelector("#media-transfer:not([hidden])"); await f.page.click("#media-transfer-cancel"); f.gate.resolve(); }
     await outcome(f.page, "uncertain");
-    assert.equal(f.writes.length, 1); assert.equal(f.redirectedWrites.length, 0); assert.equal(f.reads.length, 1, "uncertainty does not trigger a reconciliation scan");
+    assert.equal(f.writes.length, 1); assert.equal(f.redirectedWrites.length, 0); assert.equal(f.reads.length, beforeUploadReads, "uncertainty does not trigger a reconciliation scan");
     assert.match(await f.page.locator("#media-upload-outcome-message").innerText(), language === "en" ? /result unknown/ : /結果不明/);
     await f.page.click("#media-upload-review"); await f.page.waitForSelector("#media-upload-review:not([disabled])");
     await outcome(f.page, "uncertain"); assert.equal(f.writes.length, 1);
+    assert.equal(f.reads.length, beforeUploadReads + 1, "only explicit review adds one inventory read");
     await f.page.screenshot({ path: path.join(RESULTS, `desktop-upload-${mode}-${language}.png`), fullPage: true });
     assert.deepEqual(f.errors, []);
     await retireFixtureSession(f);
