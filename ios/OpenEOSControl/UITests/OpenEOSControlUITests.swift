@@ -1817,7 +1817,23 @@ final class OpenEOSControlUITests: XCTestCase {
             _ = try await simulatorRequest(path: "/ccapi/test/capture-delivery", method: "POST",
                                            jsonBody: ["original_delay_ms": 0])
             try tapForAsyncTest(download)
-            _ = try XCTUnwrap(waitForInteraction(share, timeout: 10) ? true : nil)
+            let recoveredShareReady = waitForInteraction(share, timeout: 10)
+            if !recoveredShareReady {
+                addScreenshot(name: "media-ui-capture-original-recovery-\(language)")
+                let lines = [
+                    "[OEC_MEDIA_UI_GEOMETRY] capture-original-recovery-\(language)",
+                    "app-state=\(app.state.rawValue)",
+                    "capture-original-share count=\(app.buttons.matching(identifier: "media-preview-share-\(mediaID)").count)",
+                    "capture-original-download count=\(app.buttons.matching(identifier: "media-preview-download-\(mediaID)").count)",
+                    "capture-original-cancel count=\(app.buttons.matching(identifier: "media-preview-cancel-download-\(mediaID)").count)",
+                    "capture-original-alert count=\(app.alerts.count)",
+                ]
+                let attachment = XCTAttachment(string: lines.joined(separator: "\n"))
+                attachment.name = "media-ui-capture-original-recovery-\(language)-geometry"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+            _ = try XCTUnwrap(recoveredShareReady ? true : nil)
             let delivered = try await simulatorRequest(path: "/ccapi/test/state")
             _ = try XCTUnwrap((delivered["capture_count"] as? NSNumber)?.intValue == 1 ? true : nil)
             _ = try XCTUnwrap((delivered["canonical"] as? [String: Any])?["shutter_af_requests"] as? [Bool] == [false] ? true : nil)
