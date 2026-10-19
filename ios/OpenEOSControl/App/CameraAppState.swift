@@ -2798,7 +2798,7 @@ final class CameraAppState: ObservableObject {
     }
 
     enum CaptureModeTraceStage: String {
-        case pickerSelection, request, rejected, localFallback, alreadyConfigured, dispatch, settled
+        case touchBegan, pickerSelection, request, rejected, localFallback, alreadyConfigured, dispatch, settled
     }
 
     func traceCaptureMode(_ stage: CaptureModeTraceStage, requested mode: AppCaptureMode) {

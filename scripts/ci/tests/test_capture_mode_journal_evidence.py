@@ -23,7 +23,7 @@ class CaptureModeJournalEvidenceTests(unittest.TestCase):
         evidence.collect_capture_mode_journal(self.container, self.output, self.report)
 
     def test_fixed_events_preserve_exact_order(self):
-        data = self.line + self.line.replace(b"requested=video", b"requested=photo")
+        data = self.line.replace(b"pickerSelection", b"touchBegan") + self.line + self.line.replace(b"requested=video", b"requested=photo")
         self.source.write_bytes(data)
         self.collect()
         self.assertEqual((self.output / "capture-mode-trace.txt").read_bytes(), data)
@@ -74,3 +74,17 @@ class CaptureModeJournalEvidenceTests(unittest.TestCase):
         self.assertIn('["OEC_HTTP_PRESET_URL"] == "http://127.0.0.1:18080"', body)
         self.assertIn("lines.suffix(128)", body)
         self.assertIn("guard bytes.count <= 16_384", body)
+
+    def test_touch_probe_is_test_only_passive_and_bounded_to_picker(self):
+        root = Path(__file__).resolve().parents[3]
+        source = (root / "ios/OpenEOSControl/App/CaptureModeTouchProbe.swift").read_text()
+        self.assertTrue(source.startswith("#if DEBUG && OEC_REQUIRE_SIMULATOR_E2E"))
+        for guard in ('["OEC_CAPTURE_MODE_TRACE"] == "1"',
+                      '["OEC_HTTP_PRESET_URL"] == "http://127.0.0.1:18080"',
+                      "frame.contains(point)", "point.x < frame.midX ? .photo : .video",
+                      "recognizer.cancelsTouchesInView = false", "recognizer.delaysTouchesBegan = false",
+                      "recognizer.delaysTouchesEnded = false", "removeGestureRecognizer(observer)"):
+            self.assertIn(guard, source)
+        self.assertNotIn("return true", source)
+        self.assertNotIn(".sendActions", source)
+        self.assertNotIn(".tap()", source)

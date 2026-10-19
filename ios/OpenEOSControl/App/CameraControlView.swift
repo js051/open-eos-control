@@ -296,6 +296,13 @@ private struct CaptureModePicker: View {
             .disabled(camera.recordingStopRequired || camera.bulbExposureActive || !camera.canStartShootingSetting
                 || camera.isBusy(.capture) || camera.isBusy(.recording))
             .accessibilityIdentifier("capture-mode-picker")
+            #if DEBUG && OEC_REQUIRE_SIMULATOR_E2E
+            .background {
+                if CaptureModeTouchProbe.enabled {
+                    CaptureModeTouchProbe(camera: camera).allowsHitTesting(false)
+                }
+            }
+            #endif
             // Reserve this slot before a selection begins. In the bottom-aligned
             // controls, inserting Apply moved the segmented picker by more than
             // its own height. Keeping geometry stable avoids that mid-selection reflow.
