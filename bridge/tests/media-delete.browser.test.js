@@ -122,7 +122,7 @@ async function runJourney(browser, origin, mode, language = "en") {
       }
       f.gate.resolve();
     }
-    await f.page.waitForSelector("#media-delete-cancel[hidden]");
+    await f.page.waitForSelector("#media-delete-cancel[hidden]", { state: "attached" });
     const rows = await f.page.locator("#media-delete-list li").evaluateAll(nodes => nodes.map(node => ({ id: node.dataset.mediaId, status: node.dataset.outcome })));
     if (["lost", "server-error", "redirect-307", "redirect-308", "cancel", "retire"].includes(mode)) {
       assert.equal(f.writes.length, 1); assert.equal(rows[0].status, "uncertain");
