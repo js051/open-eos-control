@@ -40,3 +40,13 @@ The actual Chromium journey exposed repeated inline-style CSP errors. The strict
 - 新 production-function 回歸實際先紅（多出 style setter），修後 23/23 通過；驗證 id/class/AX 複製、同一 decoded image、以及新幾何。真 Chromium 原空錯誤斷言待後續 gate，不將 Node synthetic CSSOM 當作瀏覽器 CSP 驗收。
 
 The bounded diagnostic identified production attribute copying as the source. The correction skips serialized style replay while retaining fresh CSSOM layout and all frame-ownership guards. The new regression failed before the fix and passes afterward; native Chromium validation is pending.
+
+## 第四輪：真 Chromium CSP 通過，設定旅程同步候選
+
+- Source `30c7c27dc17f202f8dc5e4f7c2abc4bad1c1abed`，[run39264520372](https://github.com/js051/open-eos-control/actions/runs/39264520372) 已通過原 `local-video.browser.test.js`，包含原空 console errors 斷言；CSP 修正取得真正 Chromium 證據。
+- 後續 `ccapi.browser.test.js:1439` 的時鐘按鈕被仍開啟的設定 dialog 擋住。原 ISO 流程只等 peer ISO=1600／事件送達，便外部修改 ISO=3200，沒有等第一筆 scoped outcome 及 editor 完成。
+- `apply_setting_outcome` 寫入後另做 scoped GET，再產生 matched/mismatch receipt；peer 寫入／事件成立不能證明這個讀取已結束。因此有可成立的測試競態，但本輪沒有 response receipt，尚未證實它就是此次根因。
+- 最小候選在原外部變更前明驗唯一既有 POST response 的 HTTP200、response-received、matched、setting.value=1600，再等待 dialog 正常關閉。沒有新增寫入、強制關閉、force click 或改變 timeout；若 receipt 本來失敗，會更早明確失敗。
+- 原外部事件更新與 clock/AF/後續驗收全保留。此同步候選仍待真正 Chromium；其他 browser／pytest／package gates 尚未到達。
+
+The original live-view browser journey now passes under the unchanged strict CSP. The next CCAPI journey is blocked by an open settings dialog. Its external ISO update previously started before the scoped transaction and editor were known to have completed. The candidate adds exact successful-outcome assertions and normal dialog completion before that external update. The race is plausible from the implementation, but its occurrence in the failed run is not yet established; native validation remains pending.
