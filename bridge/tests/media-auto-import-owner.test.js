@@ -28,7 +28,8 @@ function deferred() {
 }
 function element() {
   const listeners = new Map();
-  return { hidden: false, disabled: false, textContent: "", dataset: {}, children: [], open: false,
+  return { hidden: false, disabled: false, textContent: "", dataset: {}, children: [], open: false, style: {},
+    getBoundingClientRect() { return { height: 0 }; },
     replaceChildren() { this.children = []; }, append(...children) { this.children.push(...children); },
     querySelectorAll() { return this.children; },
     setAttribute() {},
@@ -44,6 +45,7 @@ function fixture(options = {}) {
     mediaThumbnailLoads: new Set(), mediaThumbnailUrls: new Map(), mediaThumbnailFailures: new Set(), mediaGeneration: 0,
     media: [base], mediaLoadStatus: "COMPLETE", refreshGeneration: 0, operatorConfirmedFeatures: new Set() };
   const ui = new Proxy({}, { get(target, key) { return target[key] ||= element(); } });
+  ui.latestMediaRetry.parentElement = element();
   const calls = { picker: 0, requests: [], directories: 0, raw: [], history: [], renders: 0, warnings: 0 };
   const entered = Object.fromEntries(["inventory", "metadata", "original", "write", "close", "abort", "history", "thumbnail"].map(name => [name, deferred()]));
   const timers = new Map();
