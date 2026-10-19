@@ -1470,13 +1470,28 @@ async function run() {
     await page.click('.exposure-control[data-setting-key="iso"]');
     await page.waitForSelector("#setting-dialog[open]");
     await page.getByRole("button", { name: "1600", exact: true }).click();
-    const isoOutcomeResponse = page.waitForResponse(response =>
-      response.request().method() === "POST" && response.url().endsWith("/settings/iso/outcome"))
-      .then(async response => ({ status: response.status(), outcome: await response.json() }));
-    // Capture the body as soon as the response arrives, before click's idle wait.
-    const [, isoResponse] = await Promise.all([
-      page.locator("#setting-dialog .button.primary").click(), isoOutcomeResponse,
-    ]);
+    await page.evaluate(() => {
+      const originalFetch = window.fetch;
+      window.__syntheticISOOutcome = null;
+      window.fetch = function (input, init) {
+        const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+        const method = init?.method || (input instanceof Request ? input.method : "GET");
+        const response = originalFetch.call(this, input, init);
+        if (method !== "POST" || url.origin !== location.origin ||
+            !/^\/v1\/session\/[^/]+\/settings\/iso\/outcome$/.test(url.pathname)) return response;
+        window.fetch = originalFetch;
+        return response.then(async received => {
+          // Observe the same native response without relying on CDP retaining its body.
+          // This delays delivery to the app; it is not a timing/performance assertion.
+          const outcome = await received.clone().json();
+          window.__syntheticISOOutcome = { status: received.status, outcome };
+          return received;
+        });
+      };
+    });
+    await page.locator("#setting-dialog .button.primary").click();
+    await page.waitForFunction(() => window.__syntheticISOOutcome !== null);
+    const isoResponse = await page.evaluate(() => window.__syntheticISOOutcome);
     assert.equal(isoResponse.status, 200);
     const isoOutcome = isoResponse.outcome;
     assert.equal(isoOutcome.writeEvidence, "response-received");
