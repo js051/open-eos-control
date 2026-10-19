@@ -17,10 +17,17 @@ class IOSMediaUploadSourceTests(unittest.TestCase):
         self.assertIn("uploadSelection = camera.beginMediaUploadSelection()", view)
         self.assertIn("startMediaUpload(url, selection: opening, access: .securityScoped)", view)
         self.assertIn("let selection: MediaUploadSelection", picker)
-        self.assertIn("guard !delivered else { return }", picker)
+        self.assertIn("guard !delivered, !invalidated else { return }", picker)
         self.assertIn("delivered = true", picker)
+        self.assertIn("guard !invalidated, !completed else { return }", picker)
+        self.assertIn("coordinator.invalidate()", picker)
+        self.assertIn("picker.modalPresentationStyle = .overFullScreen", picker)
+        self.assertIn("present(picker, animated: true)", picker)
+        self.assertIn("if cancelled || isPresented() { dismiss() }", picker)
+        self.assertIn("if !registered { dismiss() }", picker)
+        self.assertIn("guard !isPresented() else { return }", picker)
         self.assertIn(
-            "func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}", picker
+            "func updateUIViewController(_ controller: Presenter, context: Context) {}", picker
         )
 
     def test_app_releases_grant_once_and_never_confirms_by_listing(self):
