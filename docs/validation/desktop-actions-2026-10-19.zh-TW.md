@@ -108,3 +108,11 @@ The real browser failure retained valid Bridge framing but an unknown Stop-prepa
 - 單一 synthetic item 改用合法 `gphoto2:` ID 與 exact URI 編碼 route；保留原200{}、500作不確定回覆，另加204空回覆及403明確拒絕。只在此測試忽略該 DELETE 的 abort，刻意交付退役回覆，驗真正 owner fence；不改產品 transport。
 - marker 在真 stream EOF 後排入下一 task；若真204的body為null，只證 fetch 已返回與後續 continuation 可執行，不宣稱讀取不存在的stream。原B同ID媒體、dialog、enabled、diagnostics與零重送斷言完整保留。
 - 本地 syntax／diff check 與565項原media-delete module測試通過，四個更新後真browser案例仍待下一輪。
+
+### 第十二輪：CCAPI／Bulb 整支通過，capture-review 三項 fixture 修正
+
+- `831a733d0d4fe5800c4c688bb0021dfe744ad03c` / Actions `39273766245` 真 Chromium 已通過完整 CCAPI browser（四類 late DELETE、雙語日期／錄影 review／原檔、held AF 等）及後續 Bulb/short-control recovery browser。Windows `39273771403` 全過。
+- capture-review browser 執行到末尾，共三紅：not-ready recovery 的舊文案 regex；missing-proof／premature-entropy 已成功拒絕後，恢復 helper 卻要求最初二張圖與 picker=0。
+- 原失敗圖顯示完整現行 `No new media was observed...` 狀態，改用 exact 文案；仍保留原四次查找／重查四次、單 capture 與無新 write。兩個 JPEG 失敗 artifact 均證 gallery COMPLETE、三張32×24縮圖、latest=SIM_0003、picker=1、單original且停止。恢復 helper 現顯式傳這個精確基線；預設二張／oldA／picker0不變，第二個明確快門才期待capture2。
+- 原 JPEG 零輸出／failed history、恢復不重試舊ID、無自動快門與新照片才成功等斷言保留。原12秒與20秒等待未延長。
+- 本地 syntax/diff與抽取原helper的隔離 fake-DOM red→green 檢查通過：舊helper拒三張基線，新明確三張基線通過，原二張預設仍過且拒未指定三張。這不等同真瀏覽器；新整批仍待 Actions。

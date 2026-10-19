@@ -89,10 +89,10 @@ async function connect(page, simulatorOrigin) {
   await page.waitForFunction(() => document.querySelector("#latest-media-label")?.textContent === "SYNTHETIC_OLD_A.JPG");
 }
 
-async function capture(page, simulatorOrigin) {
+async function capture(page, simulatorOrigin, expectedCaptureCount = 1) {
   await page.uncheck("#shutter-af-toggle");
   await page.click("#shutter-button");
-  await waitForPeer(simulatorOrigin, (state) => state.capture_count === 1, "one physical-command-shaped POST");
+  await waitForPeer(simulatorOrigin, (state) => state.capture_count === expectedCaptureCount, "the exact explicit capture count");
 }
 
 async function waitForNew(page) {
@@ -108,15 +108,18 @@ async function openPreview(page) {
   });
 }
 
-async function startForegroundImportAfterGallerySettles(page) {
-  // The fixture starts with exactly two old JPEGs. Finish their real gallery
+async function startForegroundImportAfterGallerySettles(page, {
+  expectedNames = ["SYNTHETIC_OLD_A.JPG", "SYNTHETIC_OLD_B.JPG"],
+  expectedLatest = "SYNTHETIC_OLD_A.JPG", previousPickerCalls = 0,
+} = {}) {
+  // Finish the explicitly expected baseline's real gallery
   // reads before the single Start gesture; lazy thumbnail admission can otherwise
   // change the button's availability while that gesture is being delivered.
-  await page.waitForFunction(() => document.querySelector("#media-summary")?.dataset.loadStatus === "COMPLETE" &&
-    document.querySelectorAll("#media-list .media-thumbnail").length === 2);
+  await page.waitForFunction(count => document.querySelector("#media-summary")?.dataset.loadStatus === "COMPLETE" &&
+    document.querySelectorAll("#media-list .media-thumbnail").length === count, expectedNames.length);
   assert.deepEqual((await page.locator("#media-list .media-copy strong").allTextContents()).sort(),
-    ["SYNTHETIC_OLD_A.JPG", "SYNTHETIC_OLD_B.JPG"]);
-  for (let index = 0; index < 2; index += 1) {
+    [...expectedNames].sort());
+  for (let index = 0; index < expectedNames.length; index += 1) {
     // Both cards need their own observation at the narrow 200% layout.
     await page.locator("#media-list .media-thumbnail").nth(index).scrollIntoViewIfNeeded();
     await page.waitForFunction((position) => {
@@ -126,16 +129,16 @@ async function startForegroundImportAfterGallerySettles(page) {
         image.naturalWidth === 32 && image.naturalHeight === 24;
     }, index);
   }
-  await page.waitForFunction(() => {
+  await page.waitForFunction(expected => {
     const image = document.querySelector("#latest-media-thumbnail img");
-    return document.querySelector("#latest-media-label")?.textContent === "SYNTHETIC_OLD_A.JPG" &&
+    return document.querySelector("#latest-media-label")?.textContent === expected &&
       image?.complete && image.naturalWidth === 32 && image.naturalHeight === 24;
-  });
+  }, expectedLatest);
   await page.locator("#media-auto-start").scrollIntoViewIfNeeded();
   await page.waitForFunction(() => document.querySelector("#media-auto-start")?.disabled === false);
-  assert.equal(await page.evaluate(() => window.__batchPickerCalls), 0);
+  assert.equal(await page.evaluate(() => window.__batchPickerCalls), previousPickerCalls);
   await page.click("#media-auto-start");
-  await page.waitForFunction(() => window.__batchPickerCalls === 1);
+  await page.waitForFunction(expected => window.__batchPickerCalls === expected, previousPickerCalls + 1);
 }
 
 function filePlatform({ mode, delayWritable, pauseSecondWrite }) {
@@ -562,9 +565,11 @@ const cases = [
       await page.waitForFunction(() => {
         const button = document.querySelector("#latest-media-retry");
         return button && !button.hidden && !button.disabled &&
-          /not.*visible|not.*ready/i.test(document.querySelector("#latest-media-review-status")?.textContent || "");
+          document.querySelector("#latest-media-review-status")?.textContent ===
+            "No new media was observed in the completed checks. Check again without taking another photo.";
       });
-      assert.match(await page.locator("#latest-media-review-status").innerText(), /not.*visible|not.*ready/i);
+      assert.equal(await page.locator("#latest-media-review-status").innerText(),
+        "No new media was observed in the completed checks. Check again without taking another photo.");
       assert.equal(listingRequests.length, 5, "One connection read and four capture reads");
       assert.equal(await page.locator("#latest-media-label").innerText(), "SYNTHETIC_OLD_A.JPG");
       await page.click("#latest-media-button");
@@ -576,7 +581,8 @@ const cases = [
       await page.waitForFunction(() => {
         const button = document.querySelector("#latest-media-retry");
         return button && !button.hidden && !button.disabled &&
-          /not.*visible|not.*ready/i.test(document.querySelector("#latest-media-review-status")?.textContent || "");
+          document.querySelector("#latest-media-review-status")?.textContent ===
+            "No new media was observed in the completed checks. Check again without taking another photo.";
       });
       assert.equal(listingRequests.length, 9, "Repeated click must share one bounded review owner");
       await configure(simulatorOrigin, { mode: "new-second" });
@@ -1034,12 +1040,15 @@ for (const fault of ["missing-proof", "premature-entropy"]) {
       await assertOneCapture(simulatorOrigin);
       if (fault === "missing-proof") await page.unroute(pattern, handler);
       await configure(simulatorOrigin, { invalid_original: false });
-      await startForegroundImportAfterGallerySettles(page);
+      await startForegroundImportAfterGallerySettles(page, {
+        expectedNames: ["SYNTHETIC_OLD_A.JPG", "SYNTHETIC_OLD_B.JPG", "SIM_0003.JPG"],
+        expectedLatest: "SIM_0003.JPG", previousPickerCalls: 1,
+      });
       await page.waitForFunction(() => document.querySelector("#media-auto-panel")?.dataset.phase === "watching");
       assert.equal(originalRequests.length, 1, "explicit re-enable establishes fresh baselines, never retries old IDs");
       assert.equal((await peerState(simulatorOrigin)).capture_count, 1, "recovery never resends the shutter");
       await page.click('.tab[data-view="live"]');
-      await capture(page, simulatorOrigin);
+      await capture(page, simulatorOrigin, 2);
       await page.click('.tab[data-view="media"]');
       await page.waitForFunction(() => document.querySelectorAll('#media-auto-list [data-status="completed"]').length === 1,
         null, { timeout: 20_000 });
