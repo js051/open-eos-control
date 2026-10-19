@@ -73,5 +73,39 @@ class RecordingModeDiagnosticsSourceTests(unittest.TestCase):
             self.assertIn(assertion, self.journey)
 
 
+class CaptureModeActionSourceTests(unittest.TestCase):
+    """Source contracts only; native AX and touch behavior require Apple UI tests."""
+
+    def test_explicit_mode_actions_only_edit_owned_draft(self):
+        source = (ROOT / "ios/OpenEOSControl/App/CameraControlView.swift").read_text()
+        picker = source.split("private struct CaptureModePicker: View {", 1)[1].split(
+            "private struct ExposureStrip", 1)[0]
+        self.assertIn('modeButton(.photo, title: "photo")', picker)
+        self.assertIn('modeButton(.video, title: "video")', picker)
+        self.assertNotIn('Picker("capture_mode", selection:', picker)
+        action = picker.split("private func modeButton(", 1)[1]
+        for required in ("guard canSelectMode else { return }", "draft = mode", "revision = UUID()",
+                         ".frame(maxWidth: .infinity, minHeight: 44)",
+                         ".accessibilityAddTraits(selected ? .isSelected : [])"):
+            self.assertIn(required, action)
+        for guard in ("!camera.recordingStopRequired", "!camera.bulbExposureActive",
+                      "camera.canStartShootingSetting", "!camera.isBusy(.capture)", "!camera.isBusy(.recording)"):
+            self.assertIn(guard, picker)
+        self.assertNotIn("setCaptureMode(", action)
+        self.assertEqual(picker.count("await camera.setCaptureMode("), 1)
+        for guard in ("if let selected = draft", "revision == submittedRevision", "owner == editorOwner",
+                      "sessionOwner == camera.mediaLibrarySessionID", "selected == camera.captureMode"):
+            self.assertIn(guard, picker)
+
+    def test_native_journeys_preserve_selection_and_single_write_checks(self):
+        source = UI_TESTS.read_text()
+        self.assertNotIn('app.segmentedControls["capture-mode-picker"]', source)
+        self.assertEqual(source.count('app.otherElements["capture-mode-picker"]'), 4)
+        self.assertIn("segment.isSelected && !mode.buttons[other].isSelected", source)
+        self.assertIn("mode.buttons[videoMode].isSelected && !photo.isSelected", source)
+        self.assertIn("XCTAssertGreaterThanOrEqual(segment.frame.height, 44)", source)
+        self.assertIn('(state["movie_mode_update_count"] as? NSNumber)?.intValue == 2', source)
+
+
 if __name__ == "__main__":
     unittest.main()
