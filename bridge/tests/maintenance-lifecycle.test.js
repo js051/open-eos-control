@@ -90,3 +90,47 @@ test('pending maintenance cancellation has a translated label in both dictionari
   assert.equal((app.match(/cancel: "Cancel"/g) || []).length, 1);
   assert.equal((app.match(/cancel: "取消"/g) || []).length, 1);
 });
+
+test('maintenance empty 204 accepts an EOF-only browser stream, never payload bytes', async () => {
+ const previous = global.fetch;
+ const response = (chunks, headers = {}) => ({status:204,headers:new Headers(headers),body:new ReadableStream({
+  start(controller) { for(const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk)); controller.close(); }
+ })});
+ try {
+  for(const headers of [{},{'content-length':'0'}]) {
+   global.fetch = async () => response([],headers);
+   assert.deepEqual(await transport.transfer('/synthetic/events',{method:'DELETE',strictSettings:true,emptyResponseStatus:204}),{status:204,body:null});
+  }
+  for(const chunks of [[' '],['{}'],['\n'],['0']]) {
+   global.fetch = async () => response(chunks);
+   await assert.rejects(transport.transfer('/synthetic/events',{method:'DELETE',strictSettings:true,emptyResponseStatus:204}));
+  }
+  for(const headers of [{'content-length':'1'},{'content-length':'00'},{'transfer-encoding':'chunked'},{'content-range':'bytes 0-0/1'},{'content-encoding':'gzip'}]) {
+   global.fetch = async () => response([],headers);
+   await assert.rejects(transport.transfer('/synthetic/events',{method:'DELETE',strictSettings:true,emptyResponseStatus:204}));
+  }
+  global.fetch = async () => response([]);
+  await assert.rejects(transport.transfer('/synthetic/events',{method:'DELETE',strictSettings:true}));
+ } finally { global.fetch = previous; }
+});
+
+test('maintenance empty response waits for EOF and preserves stream failure', async () => {
+ const previous = global.fetch;
+ let streamController;
+ try {
+  global.fetch = async () => ({status:204,headers:new Headers(),body:new ReadableStream({
+   start(controller) { streamController=controller; }
+  })});
+  let settled=false;
+  const pending=transport.transfer('/synthetic/events',{method:'DELETE',strictSettings:true,emptyResponseStatus:204})
+   .then(value=>{settled=true;return value;});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(settled,false,'204 headers without EOF do not acknowledge Stop');
+  streamController.close();
+  assert.deepEqual(await pending,{status:204,body:null});
+  global.fetch=async()=>({status:204,headers:new Headers(),body:new ReadableStream({
+   start(controller) { controller.error(new Error('synthetic stream failed')); }
+  })});
+  await assert.rejects(transport.transfer('/synthetic/events',{method:'DELETE',strictSettings:true,emptyResponseStatus:204}),/synthetic stream failed/);
+ } finally {global.fetch=previous;}
+});

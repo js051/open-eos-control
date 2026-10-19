@@ -75,3 +75,13 @@ The sixth run confirms successful HTTP statuses for the two preceding Bridge con
 - 使用 [Playwright page.unrouteAll](https://playwright.dev/docs/api/class-page#page-unroute-all) 的 `behavior: wait`，不使用會忽略後續錯誤的 `ignoreErrors`。原互動、相機命令、timeout 與斷言全留。
 
 An in-flight capability route handler failed during browser teardown and concealed the primary journey failure. The harness now reports that primary error and drains its existing page routes before closure. Cleanup failures remain failures. This correction does not establish the underlying maintenance cause.
+
+## 第八輪與空 204 stream 反例
+
+- Source `9e5c8d786021d2bb8be1d6a1d1ec97f7212c0a21`，[run39269514812](https://github.com/js051/open-eos-control/actions/runs/39269514812) 保留了原 maintenance 失敗；沒有再被 route teardown 錯誤遮蔽。
+- event204 的固定 Bridge framing 診斷為空長度合法、無 transfer encoding／content range、identity encoding，UI Stop preparation=Unknown 且未取消。尚未取得瀏覽器 body 型態本身。
+- [Mozilla Response.body 文件](https://developer.mozilla.org/en-US/docs/Web/API/Response/body) 明載瀏覽器對無 body 的204可能仍提供 ReadableStream。現 transport 只承認 body=null，對實際 EOF-only stream 誤作 JSON；新增 exact fake response 反例真紅 `Unexpected end of JSON input`。
+- 最小修保留原 framing／status 守門，對非 null stream 只於真正 EOF 且0 bytes才接受；任何payload byte立即拒絕。未讀EOF不能承認，stream失敗不能變成功，未明確指定空status的回覆仍走原JSON驗證。
+- 471項相關transport tests通過，含空格／JSON／換行／非零或非canonical長度／TE／range／gzip拒絕、pending EOF與read error。這是原碼與host證據，真Chromium maintenance仍待後續驗證。
+
+The real browser failure retained valid Bridge framing but an unknown Stop-preparation outcome. A documented browser compatibility edge is now reproduced locally: an EOF-only stream on an expected empty 204 was incorrectly parsed as JSON. The correction requires actual zero-byte EOF and preserves all framing and nonempty-payload rejection. Native Chromium confirmation remains pending.
