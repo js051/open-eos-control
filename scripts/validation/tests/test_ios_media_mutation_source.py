@@ -123,6 +123,26 @@ class IOSMediaMutationSourceTests(unittest.TestCase):
             languages.append(set(keys))
         self.assertEqual(*languages)
 
+    def test_accessibility_actions_keep_same_draft_and_capability_guards(self):
+        panel = (APP / 'MediaMetadataBatchPanel.swift').read_text()
+        self.assertIn('if dynamicTypeSize.isAccessibilitySize {', panel)
+        self.assertIn('Menu(language.string("media_mutation_menu"))', panel)
+        accessible = panel.split('private var accessibleActions:', 1)[1].split('private func action(', 1)[0]
+        for token in ['expansionButton', 'ForEach(0...5', 'ForEach([0, 90, 180, 270]',
+                      'accessibleAction(.protection(true))', 'accessibleAction(.protection(false))',
+                      'accessibleAction(.archive(true))', 'accessibleAction(.archive(false))',
+                      '!camera.supports(.mediaRating)', '!camera.supports(.mediaRotate)',
+                      '!camera.canPrepareMediaMetadataBatch']:
+            self.assertIn(token, accessible)
+        self.assertNotIn('startMediaMetadataBatch', accessible)
+        self.assertIn('.accessibilityIdentifier(id)', accessible)
+        self.assertIn('expanded.wrappedValue.toggle()', accessible)
+        self.assertNotIn('.accessibilityElement(children: .contain)', accessible)
+        action = panel.split('private func action(', 1)[1]
+        self.assertIn('camera.makeMediaMetadataBatchDraft(target, displayed: displayedItems)', action)
+        self.assertIn('.disabled(!camera.supports(target.feature))', action)
+        self.assertIn('if draft != nil {', action)
+
     def test_ui_journey_reaches_review_cancel_and_confirm_in_both_languages(self):
         ui = (APP.parent / 'UITests/OpenEOSControlUITests.swift').read_text()
         test = ui.split('func testCanonicalMetadataBatchReviewCancellationAndExactReadbackInBothLanguages()', 1)[1].split('func testCanonicalBatchPreparesTwoOriginals', 1)[0]

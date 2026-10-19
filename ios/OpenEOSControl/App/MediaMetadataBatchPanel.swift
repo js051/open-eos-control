@@ -5,6 +5,10 @@ import SwiftUI
 struct MediaMetadataBatchPanel: View {
     @EnvironmentObject private var camera: CameraAppState
     @EnvironmentObject private var language: AppLanguageStore
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var actionsExpanded = false
+    @State private var ratingExpanded = false
+    @State private var rotationExpanded = false
     let displayedItems: [CameraMediaItem]
     let showsControls: Bool
     @State private var draft: MediaMetadataBatchDraft?
@@ -15,20 +19,24 @@ struct MediaMetadataBatchPanel: View {
         // Keep the bounded command header addressable while history rows remain lazy.
         VStack(alignment: .leading, spacing: 8) {
             if showsControls {
-                Menu(language.string("media_mutation_menu")) {
-                    Menu(language.string("media_mutation_rating_menu")) {
-                        ForEach(0...5, id: \.self) { action(.rating($0)) }
-                    }.disabled(!camera.supports(.mediaRating))
-                        .accessibilityIdentifier("media-mutation-rating-menu")
-                    action(.protection(true)); action(.protection(false))
-                    Menu(language.string("media_mutation_rotation_menu")) {
-                        ForEach([0, 90, 180, 270], id: \.self) { action(.rotation($0)) }
-                    }.disabled(!camera.supports(.mediaRotate))
-                        .accessibilityIdentifier("media-mutation-rotation-menu")
-                    action(.archive(true)); action(.archive(false))
+                if dynamicTypeSize.isAccessibilitySize {
+                    accessibleActions
+                } else {
+                    Menu(language.string("media_mutation_menu")) {
+                        Menu(language.string("media_mutation_rating_menu")) {
+                            ForEach(0...5, id: \.self) { action(.rating($0)) }
+                        }.disabled(!camera.supports(.mediaRating))
+                            .accessibilityIdentifier("media-mutation-rating-menu")
+                        action(.protection(true)); action(.protection(false))
+                        Menu(language.string("media_mutation_rotation_menu")) {
+                            ForEach([0, 90, 180, 270], id: \.self) { action(.rotation($0)) }
+                        }.disabled(!camera.supports(.mediaRotate))
+                            .accessibilityIdentifier("media-mutation-rotation-menu")
+                        action(.archive(true)); action(.archive(false))
+                    }
+                    .disabled(!camera.canPrepareMediaMetadataBatch)
+                    .accessibilityIdentifier("media-mutation-menu")
                 }
-                .disabled(!camera.canPrepareMediaMetadataBatch)
-                .accessibilityIdentifier("media-mutation-menu")
             }
             if let rejection = camera.mediaMetadataBatchRejection {
                 Text(language.format("media_mutation_rejected_count", rejection.selectedCount))
@@ -127,9 +135,62 @@ struct MediaMetadataBatchPanel: View {
         }
     }
 
+    // Large text uses the surrounding media ScrollView rather than a deep
+    // transient native menu. All choices still create the same owned draft.
+    private var accessibleActions: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            expansionButton("media_mutation_menu", id: "media-mutation-menu", expanded: $actionsExpanded)
+            if actionsExpanded {
+                expansionButton("media_mutation_rating_menu", id: "media-mutation-rating-menu", expanded: $ratingExpanded)
+                    .disabled(!camera.supports(.mediaRating))
+                if ratingExpanded {
+                    ForEach(0...5, id: \.self) { accessibleAction(.rating($0)) }
+                }
+                accessibleAction(.protection(true)); accessibleAction(.protection(false))
+                expansionButton("media_mutation_rotation_menu", id: "media-mutation-rotation-menu", expanded: $rotationExpanded)
+                    .disabled(!camera.supports(.mediaRotate))
+                if rotationExpanded {
+                    ForEach([0, 90, 180, 270], id: \.self) { accessibleAction(.rotation($0)) }
+                }
+                accessibleAction(.archive(true)); accessibleAction(.archive(false))
+            }
+        }
+        .disabled(!camera.canPrepareMediaMetadataBatch)
+    }
+
+    // Give the actual toggle button its ID, rather than an AX container that
+    // might propagate an identifier to its descendants.
+    private func expansionButton(_ title: String, id: String, expanded: Binding<Bool>) -> some View {
+        Button { expanded.wrappedValue.toggle() } label: {
+            HStack {
+                Text(language.string(title)).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Image(systemName: expanded.wrappedValue ? "chevron.up" : "chevron.down")
+                    .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(language.string(expanded.wrappedValue ? "media_mutation_expanded" : "media_mutation_collapsed"))
+        .accessibilityIdentifier(id)
+    }
+
+    private func accessibleAction(_ target: CameraMediaMutation) -> some View {
+        action(target)
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     private func action(_ target: CameraMediaMutation) -> some View {
         Button(target.label(language)) {
             draft = camera.makeMediaMetadataBatchDraft(target, displayed: displayedItems)
+            if draft != nil {
+                actionsExpanded = false
+                ratingExpanded = false
+                rotationExpanded = false
+            }
         }.disabled(!camera.supports(target.feature))
             .accessibilityIdentifier("media-mutation-action-" + target.actionID)
     }

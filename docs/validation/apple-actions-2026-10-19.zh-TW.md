@@ -142,3 +142,18 @@
 - OS provider 啟動 gate 本輪通過。選檔 case 對 folder StaticText 的真 tap 後仍停在 parent；候選改點唯一含該 exact 合成標籤的 Cell，保持原 8 秒與唯一性、真正 picker／delegate 路徑及後續全部斷言。Cancel 已有完整可見畫面卻未通過原互動 waiter，尚未確證是 hittable／enabled 結果或兩次 AX Find 耗完 8 秒；加入既有 trace 回呼只記固定查詢階段與 Bool，不增加 AX 查詢，不增加 timeout 或刪互動門檻。
 - 診斷僅增加唯一 Cancel／folder Cell 的 frame，以及 menu 已讀 frame；不遍歷會變動的檔案文字、不再於失敗診斷呼叫 hittable。固定四種 frame 欄位只接受 index 0，未知 ID／文字／多 index 均拒絕；原 24 MiB、64 檔、PNG/text/symlink 防護不變。完整 219 source guards、59 CI helpers、Swift parse 與 diffcheck 過。
 - 第十四輪 artifact `12171790417`，6,704,769 bytes，SHA256 `bfb175c67ca5a6c69f26615dca94db88c1ba6b49548d00195aebc11bd5dd7a73`。上述三個剩餘 UI gate 仍未完成，不宣稱 Apple-only 或三平台全綠。
+
+
+## 第十五輪結果與選檔後置診斷
+
+- Source `db0b9616dee72756dc7e1605d5b9d4f076e82f1a`，run https://github.com/js051/open-eos-control/actions/runs/39221563182 。安全、Core、普通／測試 build 與隔離驗證通過；App **825/825**，UI 43 案剩 **2 案／2 斷言失敗**。日期往返、WB、錄影以及真 OS picker 雙語取消／重開通過。
+- 上傳旅程已完成英語 cancel／lost-ack／success 與繁中 cancel，包括原重連與歷史不確定性斷言。繁中 lost-ack 真點 synthetic file 後，在原 8 秒內未見 uncertain 結果；尚未到最後繁中 success，不能宣稱完整選檔／上傳驗收。沒有該失敗點畫面，尚不能分辨 picker 未交付、admission／file-access 拒絕或結果呈現。下一診斷先保存原等待 Bool，失敗才收固定 picker 畫面與 complete／uncertain／not-sent／recovery／error／cancel 六個計數，不讀錯誤文字，原失敗仍保留。
+- metadata 真 Rating frame `(13,62,370,123)` 與螢幕完整可見列吻合，排除先前「已知 off-layout proxy」的肯定說法；localized query 並未找到另一節點。5 秒內只有一次有效 frame，下一次解析仍 retry，未到 enabled／hittable。這是原生 Menu AX 尚未穩定的證據，不能推論實體觸控失效，也不能把追加等待當已證產品修復。
+- 第十五輪 artifact `12173931903`，7,775,005 bytes，SHA256 `ef98117769ac9fb99d74e39d4e0f395dc8385468bfc78fdb36491c1aae0b9f3e`。後置診斷仍沿原 exact test／phase、24 MiB、64 檔與 PNG/text/symlink 限制；尚無新的 Apple 執行結果。
+
+### 第十六輪候選範圍
+
+- 大字級 metadata 改以原媒體 ScrollView 內可展開的動作群組呈現，避免超大文字巢狀暫態選單；普通字級仍為原 Menu。所有 rating／protection／rotation／archive 選項、動態能力禁用、同一 frozen draft 確認與 owner 防護保留。這是可用性設計改善，並非已證明舊選單的人手點擊失效。
+- 原 XXXL 雙語旅程新增未展開時不可見 mutation control 的負例，展開後真正捲到相同 Rating 與 rating 5 控制，仍要求原 5 秒內 enabled／hittable。原取消零寫入、確認後精確 readback／單次操作、歷史清除取消等斷言未更改；一般 Menu 分支與所有 target／能力 guard 增加 source guard，這不替代 Apple UI 執行。
+- run15 上傳失敗末尾有 unexpected termination 收據，尚未有 crash 原因。後置診斷先讀固定 app state；非 running 狀態只記 enum 整數，不查已退出 App 的 AX／畫面。不得把缺少 uncertain 結果先判為 ticket 被取消或 file access 失敗。
+- 本地完整 220 source guards、61 CI helper tests、兩個 Swift 檔 syntax parse 與 diff check 通過；沒有本地 UIKit runtime。第十六輪尚待交付與真 Apple gate。

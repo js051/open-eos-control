@@ -483,20 +483,22 @@ final class OpenEOSControlUITests: XCTestCase {
                 _ = try XCTUnwrap(scrollToInteraction(checkbox, in: app, timeout: 8) ? true : nil)
                 try tapForAsyncTest(checkbox)
             }
+            XCTAssertFalse(app.buttons["media-mutation-action-rating-5"].exists,
+                "Collapsed accessibility actions must not expose a mutation control")
             let menu = app.buttons["media-mutation-menu"]
             let menuReady = scrollToInteraction(menu, in: app, timeout: 8)
             recordMediaUIEvidence(in: app, phase: "metadata-menu", language: language)
             _ = try XCTUnwrap(menuReady ? true : nil)
             try tapForAsyncTest(menu)
-            // Native Menu can expose an off-layout identifier proxy. Address
-            // the unique, localized menu row that UIKit actually renders.
-            let ratingRows = app.buttons.matching(NSPredicate(format: "label == %@", language == "english" ? "Rating" : "評分"))
+            // Accessibility text sizes use inline, scrollable choices rather
+            // than the compact native Menu. The same review/owner contract applies.
+            let ratingRows = app.buttons.matching(identifier: "media-mutation-rating-menu")
             let ratingMenu = ratingRows.element
-            _ = try XCTUnwrap(waitForMenuInteraction(ratingMenu, in: app, language: language, timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(scrollToInteraction(ratingMenu, in: app, timeout: 5) ? true : nil)
             XCTAssertEqual(ratingRows.count, 1)
             try tapForAsyncTest(ratingMenu)
             let ratingAction = app.buttons["media-mutation-action-rating-5"]
-            _ = try XCTUnwrap(waitForMenuInteraction(ratingAction, in: app, language: language, timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(scrollToInteraction(ratingAction, in: app, timeout: 5) ? true : nil)
             try tapForAsyncTest(ratingAction)
             let cancel = app.buttons["media-mutation-review-cancel"]
             _ = try XCTUnwrap(waitForInteraction(cancel, timeout: 5) ? true : nil)
@@ -509,10 +511,10 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertFalse(app.buttons["media-mutation-cancel"].exists)
             _ = try XCTUnwrap(scrollToInteraction(menu, in: app, timeout: 8) ? true : nil)
             try tapForAsyncTest(menu)
-            _ = try XCTUnwrap(waitForMenuInteraction(ratingMenu, in: app, language: language, timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(scrollToInteraction(ratingMenu, in: app, timeout: 5) ? true : nil)
             XCTAssertEqual(ratingRows.count, 1)
             try tapForAsyncTest(ratingMenu)
-            _ = try XCTUnwrap(waitForMenuInteraction(ratingAction, in: app, language: language, timeout: 5) ? true : nil)
+            _ = try XCTUnwrap(scrollToInteraction(ratingAction, in: app, timeout: 5) ? true : nil)
             try tapForAsyncTest(ratingAction)
             let confirm = app.buttons["media-mutation-confirm"]
             _ = try XCTUnwrap(waitForInteraction(confirm, timeout: 5) ? true : nil)
@@ -1273,7 +1275,9 @@ final class OpenEOSControlUITests: XCTestCase {
                     XCTAssertTrue(waitForInteraction(cancel, timeout: 8)); cancel.tap()
                 }
                 let resultID = scenario == "success" ? "media-upload-complete" : "media-upload-uncertain"
-                XCTAssertTrue(app.staticTexts[resultID].waitForExistence(timeout: 8))
+                let resultVisible = app.staticTexts[resultID].waitForExistence(timeout: 8)
+                if !resultVisible { recordPickerUIEvidence(in: app, phase: "picker-selection", language: language) }
+                XCTAssertTrue(resultVisible)
                 if scenario != "success" {
                     XCTAssertFalse(app.staticTexts["media-upload-complete"].exists)
                     XCTAssertTrue(app.staticTexts["media-upload-recovery"].exists)
@@ -3161,6 +3165,16 @@ final class OpenEOSControlUITests: XCTestCase {
     private func recordPickerUIEvidence(in app: XCUIApplication, phase: String, language: String) {
         guard ["picker-cancel", "picker-selection"].contains(phase),
               ["english", "traditionalChinese"].contains(language) else { return }
+        // A failed upload can coincide with app termination. Preserve that
+        // fixed state without querying a dead app or changing the original failure.
+        let appState = app.state
+        if appState != .runningForeground && appState != .runningBackground && appState != .runningBackgroundSuspended {
+            let attachment = XCTAttachment(string: "[OEC_MEDIA_UI_GEOMETRY] \(phase)-\(language)\napp-state=\(appState.rawValue)")
+            attachment.name = "media-ui-\(phase)-\(language)-geometry"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            return
+        }
         // Capture before querying a remote provider whose AX collection can change.
         addScreenshot(name: "media-ui-\(phase)-\(language)")
         var lines = ["[OEC_MEDIA_UI_GEOMETRY] \(phase)-\(language)", "window=\(app.windows.firstMatch.frame)"]
@@ -3174,6 +3188,12 @@ final class OpenEOSControlUITests: XCTestCase {
             ("picker-synthetic-folder", app.staticTexts.matching(identifier: "Synthetic Upload Journey")),
             ("picker-synthetic-folder-cell", app.cells.containing(.staticText, identifier: "Synthetic Upload Journey")),
             ("media-upload-document-picker", app.otherElements.matching(identifier: "media-upload-document-picker")),
+            ("media-upload-complete", app.staticTexts.matching(identifier: "media-upload-complete")),
+            ("media-upload-uncertain", app.staticTexts.matching(identifier: "media-upload-uncertain")),
+            ("media-upload-not-sent", app.staticTexts.matching(identifier: "media-upload-not-sent")),
+            ("media-upload-recovery", app.staticTexts.matching(identifier: "media-upload-recovery")),
+            ("media-upload-error", app.staticTexts.matching(identifier: "media-upload-error")),
+            ("cancel-media-upload-status", app.buttons.matching(identifier: "cancel-media-upload-status")),
         ]
         for (identifier, matches) in queries {
             let count = matches.count

@@ -46,6 +46,8 @@ MEDIA_CONTROLS = (
     "picker-cancel-en", "picker-cancel-zh", "picker-browse-en", "picker-browse-zh",
     "picker-synthetic-cell", "picker-synthetic-text", "picker-synthetic-folder", "media-upload-document-picker",
     "picker-synthetic-folder-cell", "media-native-menu-target",
+    "media-upload-complete", "media-upload-uncertain", "media-upload-not-sent",
+    "media-upload-recovery", "media-upload-error", "cancel-media-upload-status",
 )
 
 HIT_TARGET_CASES = (
@@ -211,6 +213,7 @@ def geometry_text(data: bytes) -> bytes:
         patterns = (
             rf"\[OEC_MEDIA_UI_GEOMETRY\] (?:{phases})-(?:english|traditionalChinese)",
             rf"window={rect}",
+            r"app-state=[0-4]",
             rf"(?:{controls}) count=\d+",
             rf"(?:picker-cancel-en|picker-cancel-zh|picker-synthetic-folder-cell|media-native-menu-target)\[0\] frame={rect}",
             rf"(?:{controls})\[[0-3]\] enabled=(?:true|false) hittable=(?:true|false) frame={rect}",
