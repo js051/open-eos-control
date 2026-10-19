@@ -31,3 +31,12 @@ The first native desktop run stopped at the unchanged lint gate with 540 finding
 - 同 source 的 Windows 原生封裝再次通過（run39262378065）；Apple21正常執行中，未為本診斷取消或重啟。
 
 The actual Chromium journey exposed repeated inline-style CSP errors. The strict error assertion and production CSP are unchanged. A bounded source-category/line/column diagnostic is added to establish the origin; this is not yet a product fix.
+
+## 第三輪根因定位與最小修正
+
+- Source `a3314b04641cade1e5249b9b8bd16029ae7e7b45`，[run39263435123](https://github.com/js051/open-eos-control/actions/runs/39263435123) 的固定來源診斷全部指向 `app.js:6609`（console location 為 zero-based line6608）。
+- 真根因為 `pollLiveView` 把前張 image 全部非 src 屬性複製到新 decoded image，其中含原 CSSOM 幾何序列化後的 `style`，`setAttribute` 重新解析遭 strict CSP 拒絕。
+- 最小產品修正僅排除 `style` 屬性複製，原 `renderMonitoringFrame → applyLiveViewLayout → positionMonitorLayer` 仍以 CSSOM 套用新幾何；不放寬 CSP、不重新指定 src、不改 owner／decoded-frame admission。
+- 新 production-function 回歸實際先紅（多出 style setter），修後 23/23 通過；驗證 id/class/AX 複製、同一 decoded image、以及新幾何。真 Chromium 原空錯誤斷言待後續 gate，不將 Node synthetic CSSOM 當作瀏覽器 CSP 驗收。
+
+The bounded diagnostic identified production attribute copying as the source. The correction skips serialized style replay while retaining fresh CSSOM layout and all frame-ownership guards. The new regression failed before the fix and passes afterward; native Chromium validation is pending.

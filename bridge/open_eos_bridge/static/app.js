@@ -6606,7 +6606,11 @@
         // Install the already-decoded object itself. Reassigning src on another
         // img would leave display and monitoring on different decode revisions.
         for (const attribute of ui.liveImage.attributes) {
-          if (attribute.name !== "src") decoded.image.setAttribute(attribute.name, attribute.value);
+          // Geometry is reapplied through CSSOM by renderMonitoringFrame below.
+          // Replaying its serialized style attribute violates strict style-src.
+          if (attribute.name !== "src" && attribute.name !== "style") {
+            decoded.image.setAttribute(attribute.name, attribute.value);
+          }
         }
         ui.liveImage.replaceWith(decoded.image);
         ui.liveImage = decoded.image;
