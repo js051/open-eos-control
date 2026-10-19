@@ -1,0 +1,225 @@
+# Supplemental Apple-only validation of dev. This never satisfies ci-complete.
+# Original PR CI, main acceptance and release workflows remain unchanged.
+name: Apple dev validation
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'ios/**'
+      - 'simulator/**'
+      - 'contracts/**'
+      - 'scripts/ci/**'
+      - 'scripts/validation/**'
+      - 'scripts/contracts/**'
+      - 'scripts/release/**'
+      - '.github/workflows/apple-dev.yml'
+      - '.gitleaks.toml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apple-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Scan repository history for secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="gitleaks_8.30.1_linux_x64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/$archive"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/$archive" \
+            | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git . \
+            --config .gitleaks.toml \
+            --redact \
+            --no-banner \
+            --no-color \
+            --timeout 300
+
+      - name: Verify product version consistency
+        run: python3 scripts/release/verify-version.py
+
+      - name: Test physical-camera evidence verifier
+        run: python3 -m unittest discover -s scripts/validation/tests -p "test_*.py"
+
+      - name: Test CI and release workflow helpers
+        run: |
+          python3 -m unittest discover -s scripts/ci/tests -p "test_*.py"
+          python3 -m unittest discover -s scripts/release/tests -p "test_*.py"
+
+      - name: Validate and package Camera Import contract
+        run: |
+          python3 -m pip install --disable-pip-version-check --requirement scripts/contracts/requirements.txt
+          python3 -m unittest discover -s scripts/contracts/tests -p "test_*.py"
+          python3 scripts/contracts/camera_import.py validate
+          python3 scripts/contracts/camera_import.py build --output-dir dist
+
+      - name: Validate GitHub Actions workflows
+        run: bash scripts/ci/run-actionlint.sh
+
+      - name: Upload Camera Import schema release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-camera-import-contract
+          path: dist/open-eos-camera-import-contract-*.zip
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          overwrite: true
+
+  ios-core:
+    needs: secret-scan
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: ios/OpenEOSCore
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Show Swift toolchain
+        run: swift --version
+
+      - name: Test iOS CCAPI core
+        run: swift test
+
+  ios-app:
+    needs: secret-scan
+    timeout-minutes: 55
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: ios/OpenEOSControl
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+
+      - name: Validate app metadata
+        run: |
+          plutil -lint App/Info.plist
+          xcodegen generate
+          xcodebuild -project OpenEOSControl.xcodeproj -scheme OpenEOSControl -list
+
+      - name: Build iOS app
+        run: |
+          xcodebuild \
+            -project OpenEOSControl.xcodeproj \
+            -scheme OpenEOSControl \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .derived-data \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Verify bundled app resources
+        run: |
+          APP_PATH=".derived-data/Build/Products/Debug-iphonesimulator/OpenEOSControl.app"
+          test -f "$APP_PATH/Assets.car"
+          test -f "$APP_PATH/en.lproj/Localizable.strings"
+          test -f "$APP_PATH/zh-Hant.lproj/Localizable.strings"
+          plutil -extract UILaunchScreen xml1 -o /dev/null "$APP_PATH/Info.plist"
+          test -n "$(plutil -extract NSLocalNetworkUsageDescription raw -o - "$APP_PATH/Info.plist")"
+          test "$(plutil -extract NSAppTransportSecurity.NSAllowsLocalNetworking raw -o - "$APP_PATH/Info.plist")" = "true"
+          ORIENTATIONS=$(plutil -extract UISupportedInterfaceOrientations xml1 -o - "$APP_PATH/Info.plist")
+          grep -q UIInterfaceOrientationPortrait <<< "$ORIENTATIONS"
+          grep -q UIInterfaceOrientationLandscapeLeft <<< "$ORIENTATIONS"
+          grep -q UIInterfaceOrientationLandscapeRight <<< "$ORIENTATIONS"
+          if grep -q UIInterfaceOrientationPortraitUpsideDown <<< "$ORIENTATIONS"; then
+            echo "Whole-window upside-down orientation must remain disabled"
+            exit 1
+          fi
+
+      - name: Start fake camera for iOS end-to-end tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -e "../../simulator"
+          nohup python -m uvicorn main:app --host 0.0.0.0 --port 18080 \
+            > "$RUNNER_TEMP/ios-camera-simulator.log" 2>&1 &
+          for _ in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/ios-camera-simulator.log"
+          exit 1
+
+      - name: Select iPhone simulator
+        id: simulator
+        run: |
+          DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          devices = [device for runtime, values in data["devices"].items() if ".iOS-" in runtime for device in values if device["name"].startswith("iPhone") and device.get("isAvailable", False)]
+          if not devices:
+              raise SystemExit("No available iPhone simulator")
+          print(devices[0]["udid"])
+          ')
+          echo "device_id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$DEVICE_ID" || true
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+
+      - name: Test iOS app and UI
+        timeout-minutes: 45
+        run: |
+          rm -rf TestResults.xcresult
+          xcodebuild \
+            -project OpenEOSControl.xcodeproj \
+            -scheme OpenEOSControl \
+            -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.device_id }}' \
+            -derivedDataPath .derived-data \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            "SWIFT_ACTIVE_COMPILATION_CONDITIONS=\$(inherited) OEC_REQUIRE_SIMULATOR_E2E" \
+            test
+
+      - name: Upload iOS test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ios-test-results
+          path: |
+            ios/OpenEOSControl/TestResults.xcresult
+            ${{ runner.temp }}/ios-camera-simulator.log
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
+
+  apple-checks-complete:
+    if: always()
+    needs: [secret-scan, ios-core, ios-app]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require supplemental Apple checks
+        env:
+          SECRET_SCAN: ${{ needs.secret-scan.result }}
+          IOS_CORE: ${{ needs.ios-core.result }}
+          IOS_APP: ${{ needs.ios-app.result }}
+        run: |
+          test "$SECRET_SCAN" = success
+          test "$IOS_CORE" = success
+          test "$IOS_APP" = success
