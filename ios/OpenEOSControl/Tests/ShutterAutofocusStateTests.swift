@@ -223,6 +223,9 @@ private actor AppShutterAutofocusTransport: CameraHTTPTransport {
     func send(_ request: URLRequest) async throws -> CameraHTTPResponse {
         requests += 1
         let path = request.url!.path
+        if request.httpMethod == "DELETE", path == "/v1/session/af-ui-session" {
+            return CameraHTTPResponse(statusCode: 204)
+        }
         let body: String
         switch path {
         case "/health": body = #"{"ok":true,"service":"open-eos-control-bridge","version":"0.13.0"}"#

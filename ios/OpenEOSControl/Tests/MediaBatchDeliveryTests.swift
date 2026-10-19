@@ -2430,6 +2430,9 @@ private actor BatchMediaPeer: CameraHTTPTransport {
         }
         recordedRequests.append("\(method) \(url.absoluteString)")
         let simulator = path.hasPrefix("/ccapi")
+        if method == "DELETE", path == "/v1/session/synthetic-batch" {
+            return CameraHTTPResponse(statusCode: 204)
+        }
         var object: [String: Any] = [:]
         if path == "/health" {
             object = ["ok": true, "service": "open-eos-control-bridge", "version": "0.13.0"]

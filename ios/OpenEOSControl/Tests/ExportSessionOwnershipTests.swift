@@ -530,7 +530,7 @@ private actor ExportOwnerPeer: CameraHTTPTransport {
         } else if path == "/v1/session", method == "POST" {
             object = ["id": owner, "engine": "ccapi"]
         } else if path == prefix, method == "DELETE" {
-            object = [:]
+            return CameraHTTPResponse(statusCode: 204)
         } else if path == prefix + "/info", method == "GET" {
             object = ["connected": true, "model": model, "serial": "SYNTHETIC-\(owner)",
                       "api": simulated ? "simulated-export-fixture" : "export-fixture"]

@@ -711,6 +711,7 @@ private actor MutationFixturePeer: CameraHTTPTransport {
         let method = request.httpMethod ?? "GET"
         let canon = path.hasPrefix("/ccapi")
         if path.hasSuffix("/events"), method == "GET" { throw CancellationError() }
+        if method == "DELETE", path == "/v1/session/synthetic-mutation" { return CameraHTTPResponse(statusCode: 204) }
         if path == "/health" { return json(["ok": true, "service": "open-eos-control-bridge", "version": "0.13.0"]) }
         if path == "/v1/session" { return json(["id": "synthetic-mutation", "engine": "ccapi"], status: 201) }
         if path.hasSuffix("/media") { return rawListing.map { CameraHTTPResponse(statusCode: 200, body: $0) } ?? json(["items": items.map { mediaJSON($0, canon: canon, info: false) }]) }

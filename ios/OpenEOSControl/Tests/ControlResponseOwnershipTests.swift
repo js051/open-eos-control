@@ -1175,7 +1175,7 @@ private actor ControlOwnerPeer: CameraHTTPTransport {
             if let gate = readback.gate, !drained { await withCheckedContinuation { gates[gate] = $0 } }
             if let error = readback.error { throw URLError(error) }
         }
-        let empty = wire == .stopEvents || (simulator && (wire == .clean || wire == .sleep))
+        let empty = wire == .close || wire == .stopEvents || (simulator && (wire == .clean || wire == .sleep))
         return CameraHTTPResponse(statusCode: empty ? 204 : 200, body: empty ? Data() : try JSONSerialization.data(withJSONObject: object))
     }
 

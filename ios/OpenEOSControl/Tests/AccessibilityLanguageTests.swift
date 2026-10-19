@@ -27,6 +27,8 @@ final class AccessibilityLanguageTests: XCTestCase {
         host.view.layoutIfNeeded()
         try await waitUntil { self.focusButton(in: host.view) != nil }
         let button = try XCTUnwrap(focusButton(in: host.view))
+        let initialLabel = language.string("held_autofocus")
+        try await waitUntil { button.accessibilityLabel == initialLabel && !button.isEnabled }
         let enabled = button.isEnabled
 
         for choice in [AppLanguage.english, .traditionalChinese, .english] {

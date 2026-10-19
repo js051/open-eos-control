@@ -134,10 +134,103 @@ final class CubeLutNumericContractTests: XCTestCase {
         }
     }
 
-    private func solidImage(_ rgb: [Int]) throws -> CGImage {
+    func testInRangePreviewEncodingPreservesOriginalBytesAndOpaqueTableAlpha() throws {
+        for table in try fixture().luts where table.values.allSatisfy({ (0...1).contains($0) }) {
+            let lut = table.lut
+            let encoding = try XCTUnwrap(lut.previewEncoding)
+            XCTAssertEqual(encoding.rgbaData, lut.rgbaData)
+            XCTAssertEqual(encoding.scale, [1, 1, 1])
+            XCTAssertEqual(encoding.bias, [0, 0, 0])
+            let values = floats(encoding.rgbaData)
+            for index in stride(from: 3, to: values.count, by: 4) { XCTAssertEqual(values[index], 1) }
+        }
+    }
+
+    func testExtendedPreviewEncodingRestoresRawNodesRatherThanClippingThem() throws {
+        let fixture = try self.fixture()
+        let tables = fixture.luts.filter { $0.values.contains { !(0...1).contains($0) } }
+        XCTAssertFalse(tables.isEmpty)
+        for table in tables {
+            let lut = table.lut
+            let encoding = try XCTUnwrap(lut.previewEncoding)
+            let encoded = floats(encoding.rgbaData)
+            XCTAssertEqual(encoded.count, lut.size * lut.size * lut.size * 4)
+            XCTAssertTrue(encoded.allSatisfy { $0.isFinite && (0...1).contains($0) })
+            for node in 0..<(lut.values.count / 3) {
+                for channel in 0..<3 {
+                    let restored = encoded[node * 4 + channel] * encoding.scale[channel] + encoding.bias[channel]
+                    XCTAssertEqual(restored, lut.values[node * 3 + channel], accuracy: 0.000002)
+                }
+                XCTAssertEqual(encoded[node * 4 + 3], 1)
+            }
+            XCTAssertEqual(lut.values, table.values, "Encoding must not rewrite the raw table")
+        }
+    }
+
+    func testConstantExtendedChannelsAndFiniteExtremesUseFinalClampOnRealGpu() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice(), "Native validation requires a real Metal device")
+        let context = nativeRTPPreviewContext(device: device)
+        let cases: [([Float], [Int])] = [
+            ([-Float.greatestFiniteMagnitude, 0.25, Float.greatestFiniteMagnitude], [0, 64, 255]),
+            ([0, 0.5, 1], [0, 128, 255]),
+            ([-4, -2, -1], [0, 0, 0]),
+            ([2, 3, 4], [255, 255, 255]),
+        ]
+        for (constant, expected) in cases {
+            let lut = CubeLut(name: "Synthetic constant", size: 2, domainMin: [0, 0, 0], domainMax: [1, 1, 1],
+                values: Array(repeating: constant, count: 8).flatMap { $0 })
+            let encoding = try XCTUnwrap(lut.previewEncoding)
+            XCTAssertEqual(encoding.scale, [1, 1, 1])
+            XCTAssertEqual(encoding.bias, [0, 0, 0])
+            let source = try solidImage([102, 128, 153])
+            let output = try XCTUnwrap(nativeRTPApplyLut(CIImage(cgImage: source), lut: lut))
+            let image = try XCTUnwrap(context.createCGImage(output, from: output.extent,
+                format: .RGBA8, colorSpace: cubeLutPreviewOutputColorSpace))
+            let actual = try premultipliedRGBA(image)
+            for channel in 0..<3 { XCTAssertLessThanOrEqual(abs(actual[channel] - expected[channel]), 3) }
+            XCTAssertEqual(actual[3], 255)
+        }
+    }
+
+    func testExtendedRestorePreservesPremultipliedInputAlphaOnRealGpu() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice(), "Native validation requires a real Metal device")
+        let context = nativeRTPPreviewContext(device: device)
+        let table = try XCTUnwrap(try fixture().luts.first { $0.id == "extended-nodes" })
+        let lut = table.lut
+        let source = try solidImage([102, 128, 153], alpha: 128)
+        let output = try XCTUnwrap(nativeRTPApplyLut(CIImage(cgImage: source), lut: lut))
+        let image = try XCTUnwrap(context.createCGImage(output, from: output.extent,
+            format: .RGBA8, colorSpace: cubeLutPreviewOutputColorSpace))
+        let actual = try premultipliedRGBA(image)
+        let expected = lut.sample(red: 102.0 / 255, green: 128.0 / 255, blue: 153.0 / 255)
+        for channel in 0..<3 {
+            XCTAssertLessThanOrEqual(abs(Float(actual[channel]) - expected[channel] * 128), 3)
+        }
+        XCTAssertLessThanOrEqual(abs(actual[3] - 128), 1)
+    }
+
+    func testUnrepresentableExtendedRestoreFailsClosedBeforeGpu() throws {
+        let extreme = Float.greatestFiniteMagnitude
+        let values: [Float] = (0..<8).flatMap { index in [index.isMultiple(of: 2) ? -extreme : extreme, 0.25, 0.75] }
+        let lut = CubeLut(name: "Synthetic unrepresentable range", size: 2,
+            domainMin: [0, 0, 0], domainMax: [1, 1, 1], values: values)
+        XCTAssertTrue(lut.values.allSatisfy(\.isFinite))
+        XCTAssertNil(lut.previewEncoding)
+        let input = CIImage(cgImage: try solidImage([128, 128, 128]))
+        XCTAssertNil(applyCubeLutPreview(input, lut: lut))
+        XCTAssertNil(nativeRTPApplyLut(input, lut: lut))
+    }
+
+    private func floats(_ data: Data) -> [Float] {
+        var values = [Float](repeating: 0, count: data.count / MemoryLayout<Float>.size)
+        _ = values.withUnsafeMutableBytes { data.copyBytes(to: $0) }
+        return values
+    }
+
+    private func solidImage(_ rgb: [Int], alpha: UInt8 = 255) throws -> CGImage {
         // Keep the alpha literal in the same byte type as RGB. Otherwise Swift can
         // infer the concatenated/repeated array as [Any], which Data cannot accept.
-        let pixel: [UInt8] = rgb.map { UInt8($0) } + [UInt8(255)]
+        let pixel: [UInt8] = rgb.map { UInt8($0) } + [alpha]
         let rgba: [UInt8] = Array(repeating: pixel, count: 8 * 8).flatMap { $0 }
         let provider = try XCTUnwrap(CGDataProvider(data: Data(rgba) as CFData))
         return try XCTUnwrap(CGImage(width: 8, height: 8, bitsPerComponent: 8, bitsPerPixel: 32,
@@ -147,6 +240,10 @@ final class CubeLutNumericContractTests: XCTestCase {
     }
 
     private func rgb(_ image: CGImage) throws -> [Int] {
+        Array(try premultipliedRGBA(image).prefix(3))
+    }
+
+    private func premultipliedRGBA(_ image: CGImage) throws -> [Int] {
         var rgba = [UInt8](repeating: 0, count: image.width * image.height * 4)
         let rendered = rgba.withUnsafeMutableBytes { bytes -> Bool in
             guard let context = CGContext(data: bytes.baseAddress, width: image.width, height: image.height,
@@ -158,6 +255,6 @@ final class CubeLutNumericContractTests: XCTestCase {
         }
         XCTAssertTrue(rendered)
         guard rendered else { throw invalidFixture() }
-        return rgba.prefix(3).map(Int.init)
+        return rgba.prefix(4).map(Int.init)
     }
 }
