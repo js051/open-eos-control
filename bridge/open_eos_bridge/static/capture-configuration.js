@@ -137,11 +137,14 @@
       try { void response.body?.cancel?.().catch(() => {}); } catch (_) { /* Preserve rejection. */ }
       throw new TypeError("Ambiguous setting response representation");
     }
-    if (response.status === emptyResponseStatus && response.body === null) {
+    const expectsEmpty = response.status === emptyResponseStatus;
+    if (expectsEmpty) {
       if (![null, "0"].includes(response.headers.get("content-length")) || response.headers.has("transfer-encoding")) {
         throw new TypeError("Ambiguous empty control response");
       }
-      return { status: response.status, body: null };
+      if (response.body === null) return { status: response.status, body: null };
+      // Browsers may expose an empty stream for 204. Require its actual EOF;
+      // status alone cannot acknowledge a response with unexpected payload bytes.
     }
     if (!response.body?.getReader) throw new TypeError("Configuration response stream unavailable");
     const reader = response.body.getReader(), decoder = new TextDecoder("utf-8", { fatal: true });
@@ -151,6 +154,7 @@
         const next = await reader.read();
         if (next.done) break;
         bytes += next.value.byteLength;
+        if (expectsEmpty && bytes > 0) throw new TypeError("Empty control response contains payload bytes");
         if (bytes > 65536) throw new TypeError("Configuration response exceeds limit");
         text += decoder.decode(next.value, { stream: true });
       }
@@ -164,6 +168,7 @@
       if (length !== null && (!whole(/^(?:0|[1-9][0-9]*)$/, length) || Number(length) !== bytes ||
           response.headers.has("transfer-encoding"))) throw new TypeError("Ambiguous setting response length");
     }
+    if (expectsEmpty) return { status: response.status, body: null };
     return { status: response.status, body: parseJson(text, strictIntegerTokens) };
   }
   return Object.freeze({ validReceipt, validFieldValue, whole, outcome, ownership, canRecover, validNaming, valueFor, validSelection, transfer });
