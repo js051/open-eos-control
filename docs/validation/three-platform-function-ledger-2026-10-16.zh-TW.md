@@ -483,3 +483,7 @@ EDSDK 回傳錯誤 session 後 close 失敗，現保留精確 rejected owner，�
 ### 2026-10-18 15:38 UTC：#129 純 DeviceInfo dataset
 
 新增有界 Swift DeviceInfo dataset decoder，原 Android 完整 production classes 的 13 組同 byte oracle 逐欄對照；Swift 共 64/64 XCTest，原 50 保持。這只處理已分離 dataset，不接 Apple completion、不新增 raw command；#129 native wire／產品接線仍未完成。詳 [跨語言 dataset 驗證](ios-ptp-device-info-dataset-2026-10-18.zh-TW.md)。
+
+### 2026-10-19 Apple SDK／原生合成旅程補證（第十七輪）
+
+[完整逐輪證據](apple-actions-2026-10-19.zh-TW.md) 的 run `39232965133`／dev `ca4eefd25b10255419293838b629d3af057f80dd` 已完成 Apple Core、App 825/825 與 UI 43 案中的42案。原 LUT27、JPEG original15／LiveView decode3 已有真 Apple 結果；本輪 direct 控制往返、雙語 XXXL 日期／metadata、真 OS picker 取消重開及六種合成上傳結果／重連通過。尚有 canonical English 錄影選段1案失敗，不能宣稱 Apple 全綠；Android exact Media3 UI 材料、codec runtime、Windows/native provider、實體相機及 #129 wire／產品入口各自仍有未完成範圍。這些是更新後的執行證據，不將原89列歷史狀態一概改為已對齊。

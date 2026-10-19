@@ -296,22 +296,27 @@ private struct CaptureModePicker: View {
             .disabled(camera.recordingStopRequired || camera.bulbExposureActive || !camera.canStartShootingSetting
                 || camera.isBusy(.capture) || camera.isBusy(.recording))
             .accessibilityIdentifier("capture-mode-picker")
-            if let selected = draft {
-                Button("apply") {
-                    let submittedRevision = revision
-                    let owner = editorOwner
-                    let sessionOwner = camera.mediaLibrarySessionID
-                    Task {
-                        let consumed = await camera.setCaptureMode(selected, draftRevision: submittedRevision)
-                        if consumed, revision == submittedRevision, owner == editorOwner,
-                           sessionOwner == camera.mediaLibrarySessionID { draft = nil }
-                    }
+            // Reserve this slot before a selection begins. In the bottom-aligned
+            // controls, inserting Apply moved the segmented picker by more than
+            // its own height. Keeping geometry stable avoids that mid-selection reflow.
+            Button("apply") {
+                guard let selected = draft else { return }
+                let submittedRevision = revision
+                let owner = editorOwner
+                let sessionOwner = camera.mediaLibrarySessionID
+                Task {
+                    let consumed = await camera.setCaptureMode(selected, draftRevision: submittedRevision)
+                    if consumed, revision == submittedRevision, owner == editorOwner,
+                       sessionOwner == camera.mediaLibrarySessionID { draft = nil }
                 }
-                .buttonStyle(.bordered)
-                .disabled(!camera.canStartShootingSetting || selected == camera.captureMode
-                    || camera.recordingStopRequired || camera.bulbExposureActive)
-                .accessibilityIdentifier("capture-mode-apply")
             }
+            .buttonStyle(.bordered)
+            .disabled(draft == nil || !camera.canStartShootingSetting || draft == camera.captureMode
+                || camera.recordingStopRequired || camera.bulbExposureActive)
+            .opacity(draft == nil ? 0 : 1)
+            .allowsHitTesting(draft != nil)
+            .accessibilityHidden(draft == nil)
+            .accessibilityIdentifier("capture-mode-apply")
             if let record = camera.shootingSettingRecord {
                 Button { camera.activeSheet = .more } label: {
                     Text(LocalizedStringKey(record.running ? "shooting_setting_working" : record.statusKey))

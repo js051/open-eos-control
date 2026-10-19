@@ -165,3 +165,12 @@
 - UI 43 案有 **2 個失敗案例／3 個斷言**。direct simulator 控制已完成 Video、REC、Stop，最後 Photo 沒有第二次 mode 更新，count 仍 1；單 tap log 不證選段／Apply 已被接受。兩個 mode 轉換加入與既有錄影旅程一致的前置互動與 selected gate，各 5 秒有界、每個 segment／Apply 仍僅一次 tap；原20秒 mode 狀態／精確 count 1、2 不變。原失敗才收固定 direct-capture-mode phase，例外原樣重拋，無新成功判準或重送。新增前置等待會增加整段 journey 最長時間，不把它報成產品性能改善。
 - 日期已知資料夾 Apply 與篩選值正確，XXXL 第一照片的 lazy card 在第三次原生手勢後才出現於 `(140,899.67,48,48)`，viewport 底端 874，仍需約74pt修正。三次手勢／idle 主導約9秒，既有sole-container cache正常；不是缺少照片或冗餘AX查詢。僅這個明確XXXL長距離呼叫將導航預算 **8→15秒**，容納第四次停止修正；正常尺寸與其他呼叫原預算不變，手勢速度、hittable／真tap、尺寸與所有日期／篩選斷言保留。這是根據量測調整harness導航上限，不是產品性能修復，也不改相機deadline。
 - 第十六輪 bounded artifact `12177490765`，5,323,409 bytes，SHA256 `e27903cbb068840bc2b23df6ae9f121deb783e49043cb0ed1ec9ecf06ae34ec4`。新增direct phase只屬原direct測試，沿原固定控件／24MiB／128行／64檔／PNG／symlink規則，無任意文字或URL。第十七輪仍待原Apple驗證。
+
+
+## 第十七輪結果與第十八輪固定模式控制位置
+
+- Source `ca4eefd25b10255419293838b629d3af057f80dd`，run https://github.com/js051/open-eos-control/actions/runs/39232965133 。安全／Core／建置與隔離驗證通過，App **825/825**；UI 43 案剩 **1 案／1 斷言失敗**。direct 控制完整往返、日期雙語 XXXL、大字級 metadata、真 OS picker 取消重開與六種上傳組合全部通過。
+- 唯一失敗為 canonical English 錄影旅程的 Video selected gate，尚未送 mode mutation。bounded 圖／幾何顯示單次 tap 前 picker y=551.33、高31pt，Apply 不存在；tap 後 picker y=513、Photo 仍 selected，Apply 出現且 disabled。可確證條件式插入 Apply 讓底部對齊的 picker 上移38.33pt；此 reflow 是否造成原生選段回復仍是待驗推論。
+- 候選固定保留 Apply 的 layout slot。無 draft 時同時 hidden／不可命中／disabled／不在 AX，action 仍先 guard draft；原 revision、editor owner、session owner 與單次 mutation 路徑保留。原真 UI 選段／Apply／mode count gates 不改，新增無 draft 無可存取 Apply 與選段前後 picker y 不移動斷言。沒有額外重 tap 或等待預算變更。
+- 原 #129 增加只引用 concrete Apple port 型別與 protocol conformance 的 App SDK probe，絕不建立 adapter、discovery、授權提示或相機命令。若 SDK 不提供 ImageCaptureCore 則明確 XCTSkip；編譯／連結證據不能當 USB DeviceInfo 或實體裝置功能完成。
+- 第十七輪 bounded artifact `12179493135`，5,035,429 bytes，SHA256 `bd4947e5794d1da0f565a2754c2494b53da1bab684da99cfb79e98df53126907`。第十八輪候選尚待真 Apple 原生驗證，沒有全案完成或三端對齊宣告。
