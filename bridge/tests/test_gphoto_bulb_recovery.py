@@ -1,4 +1,5 @@
 """Production gphoto Bulb ownership, with a synthetic CLI peer and no hardware."""
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -33,8 +34,9 @@ class BulbRunner(FakeRunner):
         return result
 
     def shutter_commands(self):
-        return [argument for command in self.commands for argument in command
-                if argument.startswith(RELEASE_PATH + "=")]
+        return [
+            argument for command in self.commands for argument in command if argument.startswith(RELEASE_PATH + "=")
+        ]
 
 
 def camera(tmp_path, **failures):
@@ -85,21 +87,37 @@ def test_stop_retains_exact_validated_release_after_discovery_changes(tmp_path, 
     assert (CameraFeature.BULB_EXPOSURE in session._observed) is not lost_start
 
 
-@pytest.mark.parametrize("operation", [
-    "start_bulb_exposure", "capture_still", "half_press_shutter", "autofocus", "start_recording",
-    "sync_camera_clock", "set_setting", "apply_setting_outcome", "drive_focus",
-    "set_live_view_magnification", "start_live_view", "perform_maintenance_outcome",
-])
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "start_bulb_exposure",
+        "capture_still",
+        "half_press_shutter",
+        "autofocus",
+        "start_recording",
+        "sync_camera_clock",
+        "set_setting",
+        "apply_setting_outcome",
+        "drive_focus",
+        "set_live_view_magnification",
+        "start_live_view",
+        "perform_maintenance_outcome",
+    ],
+)
 def test_unknown_release_blocks_new_controls_but_not_safe_stop_or_read(tmp_path, operation):
     session, runner = camera(tmp_path, reject_release=True)
     session.start_bulb_exposure()
     with pytest.raises(BridgeError):
         session.stop_bulb_exposure()
     before = list(runner.commands)
-    arguments = {"set_setting": ("iso", "800"), "apply_setting_outcome": ("iso", "800"),
-                 "drive_focus": ("NEAR", "SMALL"), "set_live_view_magnification": (5,),
-                 "start_live_view": (LiveViewStartRequest(),),
-                 "perform_maintenance_outcome": ("clock-sync", False)}.get(operation, ())
+    arguments = {
+        "set_setting": ("iso", "800"),
+        "apply_setting_outcome": ("iso", "800"),
+        "drive_focus": ("NEAR", "SMALL"),
+        "set_live_view_magnification": (5,),
+        "start_live_view": (LiveViewStartRequest(),),
+        "perform_maintenance_outcome": ("clock-sync", False),
+    }.get(operation, ())
     with pytest.raises(BridgeError) as blocked:
         getattr(session, operation)(*arguments)
     assert blocked.value.code == "SHUTTER_RELEASE_UNCONFIRMED"
@@ -143,9 +161,11 @@ def test_lost_release_reply_stays_stop_only_until_explicit_retry(tmp_path):
 def test_acknowledged_stop_survives_status_read_failure_without_resending(tmp_path):
     session, runner = camera(tmp_path)
     session.start_bulb_exposure()
-    with patch.object(session, "status", side_effect=BridgeError("SYNTHETIC_READ_FAILED", "Status unavailable")):
-        with pytest.raises(BridgeError):
-            session.stop_bulb_exposure()
+    with (
+        patch.object(session, "status", side_effect=BridgeError("SYNTHETIC_READ_FAILED", "Status unavailable")),
+        pytest.raises(BridgeError),
+    ):
+        session.stop_bulb_exposure()
     before = list(runner.shutter_commands())
     assert session.status().shutter_release_unconfirmed is False
     session.stop_bulb_exposure()
@@ -201,6 +221,7 @@ def test_unknown_exposure_keeps_event_camera_io_paused(tmp_path):
 @pytest.mark.parametrize("disconnect", [False, True])
 def test_asgi_status_retry_and_disconnect_preserve_same_session_stop(tmp_path, disconnect):
     from fastapi.testclient import TestClient
+
     from open_eos_bridge.app import create_app
 
     runner = BulbRunner()
@@ -242,6 +263,7 @@ def test_close_cleanup_failure_cannot_hide_unconfirmed_shutter_release(tmp_path,
     session.start_bulb_exposure()
     session._live_view_active = True
     calls = 0
+
     def fail_cleanup(*args):
         nonlocal calls
         calls += 1
@@ -249,9 +271,9 @@ def test_close_cleanup_failure_cannot_hide_unconfirmed_shutter_release(tmp_path,
         # subsequent close-cleanup failure, after the release has been attempted.
         if cleanup != "_stop_movie_stream" or calls == 2:
             raise OSError("Synthetic cleanup failure")
-    with patch.object(session, cleanup, side_effect=fail_cleanup):
-        with pytest.raises(BridgeError) as failure:
-            session.close()
+
+    with patch.object(session, cleanup, side_effect=fail_cleanup), pytest.raises(BridgeError) as failure:
+        session.close()
     assert failure.value.code == "SHUTTER_RELEASE_UNCONFIRMED"
     assert "closed" in failure.value.message
     assert any("cleanup also failed" in note for note in failure.value.__notes__)
@@ -265,6 +287,9 @@ def test_next_deliberate_start_uses_choices_after_saved_release(tmp_path):
     session.start_bulb_exposure()
     session.stop_bulb_exposure()
     session.start_bulb_exposure()
-    assert runner.shutter_commands() == [f"{RELEASE_PATH}=Press Full", f"{RELEASE_PATH}=Release Full",
-                                          f"{RELEASE_PATH}=Press Full"]
+    assert runner.shutter_commands() == [
+        f"{RELEASE_PATH}=Press Full",
+        f"{RELEASE_PATH}=Release Full",
+        f"{RELEASE_PATH}=Press Full",
+    ]
     session.stop_bulb_exposure()

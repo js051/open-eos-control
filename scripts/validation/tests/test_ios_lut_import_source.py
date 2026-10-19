@@ -1,4 +1,5 @@
 """iOS LUT source/wiring guards only. These do not compile or run Swift/UIKit."""
+
 import json
 import unittest
 from pathlib import Path
@@ -57,7 +58,10 @@ class IosLutImportSourceTests(unittest.TestCase):
         run = section(state, "func importCubeLut(_ selection:", "func cancelCubeLutImport()")
         self.assertLess(run.index("guard cubeLutOwner == selection.owner"), run.index("Task.detached"))
         view = (APP / "CameraSheets.swift").read_text()
-        self.assertLess(view.index("camera.completeCubeLutPicker(result, owner: owner)"), view.index("Task { await camera.importCubeLut(selection) }"))
+        self.assertLess(
+            view.index("camera.completeCubeLutPicker(result, owner: owner)"),
+            view.index("Task { await camera.importCubeLut(selection) }"),
+        )
 
     def test_picker_ticket_cancel_and_swiftui_dismissal_are_fenced(self):
         picker = (APP / "CubeLutDocumentPicker.swift").read_text()
@@ -83,7 +87,12 @@ class IosLutImportSourceTests(unittest.TestCase):
         self.assertIn("monitorSettings.cubeLut = nil", remove)
         self.assertIn("bufferedRequestCounts.retiring > 0", state)
         view = (APP / "CameraSheets.swift").read_text()
-        for identifier in ("monitor-lut-import-loading", "monitor-lut-import-cancel", "monitor-lut-import-stopping", "monitor-lut-import-error"):
+        for identifier in (
+            "monitor-lut-import-loading",
+            "monitor-lut-import-cancel",
+            "monitor-lut-import-stopping",
+            "monitor-lut-import-error",
+        ):
             self.assertIn(identifier, view)
         for locale in ("en", "zh-Hant"):
             strings = (APP / "Resources" / f"{locale}.lproj/Localizable.strings").read_text()
@@ -99,7 +108,10 @@ class IosLutImportSourceTests(unittest.TestCase):
         self.assertIn("didSet { lastErrorOwner = UUID() }", state)
         self.assertNotIn("lastError == previousImportError", state)
         self.assertNotIn('lastError == NSLocalizedString("lut_render_failed"', state)
-        self.assertIn("testIdenticalCameraErrorTextHasANewOwnerAndSurvivesLutMutations", (TESTS / "ShutterAutofocusStateTests.swift").read_text())
+        self.assertIn(
+            "testIdenticalCameraErrorTextHasANewOwnerAndSurvivesLutMutations",
+            (TESTS / "ShutterAutofocusStateTests.swift").read_text(),
+        )
         self.assertIn("cubeLutImportError = message", publish)
         test = (TESTS / "ShutterAutofocusStateTests.swift").read_text()
         self.assertIn("testLutSuccessAndFailureCannotOverwriteCameraErrorRaisedDuringImport", test)
@@ -117,7 +129,11 @@ class IosLutImportSourceTests(unittest.TestCase):
         self.assertIn("testDisconnectedDiagnosticsNeverIncludeLutProviderErrorCanaries", ownership)
         self.assertIn("testConnectedDiagnosticReportOmitsDetailedLutFailureCanaries", camera)
         for source in (ownership, camera):
-            for canary in ("SYNTHETIC_LUT_FILENAME_ONLY.cube", "SYNTHETIC_LUT_TITLE_ONLY", "/synthetic/lut-private/location"):
+            for canary in (
+                "SYNTHETIC_LUT_FILENAME_ONLY.cube",
+                "SYNTHETIC_LUT_TITLE_ONLY",
+                "/synthetic/lut-private/location",
+            ):
                 self.assertIn(canary, source)
             self.assertIn("try await state.diagnosticReport()", source)
 
@@ -128,7 +144,11 @@ class IosLutImportSourceTests(unittest.TestCase):
         before_import = state.split("func beginCubeLutPicker()", 1)[0]
         self.assertNotIn("cancelCubeLutImport()", before_import)
         self.assertNotIn("clearCubeLut()", before_import)
-        view = section((APP / "CameraSheets.swift").read_text(), "private struct MonitoringAssistView", "private var lutPickerPresentation")
+        view = section(
+            (APP / "CameraSheets.swift").read_text(),
+            "private struct MonitoringAssistView",
+            "private var lutPickerPresentation",
+        )
         self.assertIn('Button("done") { dismiss() }', view)
         self.assertNotIn(".onDisappear", view)
 

@@ -3,9 +3,10 @@
 Lifecycle behavior lives in ImageCapturePTPStateMachineTests.swift and must be run
 with Swift/XCTest. No Python mirror of the production state machine is used here.
 """
-from pathlib import Path
+
 import re
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 CORE = ROOT / "ios/OpenEOSCore/Sources/OpenEOSCore"

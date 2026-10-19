@@ -5,6 +5,7 @@ import itertools
 import json
 import re
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -64,11 +65,18 @@ class IOSCaptureReviewEvidenceSourceTests(unittest.TestCase):
         self.assertIn("guard size > 0 && size <= 32_768", contract)
         self.assertIn("XCTAssertEqual(data.count, 25_745)", contract)
         self.assertIn("JSONDecoder().decode(Self.self, from: data)", contract)
-        for actual in ("for vector in fixture.cases", "state.captureStill()", "state.toggleRecording()",
-                       "state.retryCaptureMediaReview()", "state.captureReviewOutcome", "XCTAssertEqual(checked, 106)",
-                       "XCTAssertEqual(checked, 4)", "CaptureReviewEvidenceContract.load()",
-                       "XCTAssertEqual(state.latestMediaItem, previous",
-                       "requests.allSatisfy { $0.hasPrefix(\"GET \") }"):
+        for actual in (
+            "for vector in fixture.cases",
+            "state.captureStill()",
+            "state.toggleRecording()",
+            "state.retryCaptureMediaReview()",
+            "state.captureReviewOutcome",
+            "XCTAssertEqual(checked, 106)",
+            "XCTAssertEqual(checked, 4)",
+            "CaptureReviewEvidenceContract.load()",
+            "XCTAssertEqual(state.latestMediaItem, previous",
+            'requests.allSatisfy { $0.hasPrefix("GET ") }',
+        ):
             self.assertIn(actual, journeys)
         self.assertIn(
             'case .malformed: return CameraHTTPResponse(statusCode: 200, body: Data(#"{"items":{}}"#.utf8))',
@@ -80,8 +88,13 @@ class IOSCaptureReviewEvidenceSourceTests(unittest.TestCase):
     def test_independent_read_evidence_is_current_invocation_and_preserves_zero_read_previous(self):
         library = (APP / "MediaLibrary.swift").read_text()
         evidence = library.split("struct CaptureReviewReadEvidence:", 1)[1].split("enum CaptureReviewKind:", 1)[0]
-        for required in ("successfulReads += 1", "failedReads += 1", "lastCompletedRead = read",
-                         "case noCandidateObserved", "case unread"):
+        for required in (
+            "successfulReads += 1",
+            "failedReads += 1",
+            "lastCompletedRead = read",
+            "case noCandidateObserved",
+            "case unread",
+        ):
             self.assertIn(required, library)
         self.assertIn("successfulReads + failedReads", evidence)
         self.assertIn("readEvidence.successfulReads > 0 ? .noCandidateObserved : .unread", evidence)
@@ -99,10 +112,9 @@ class IOSCaptureReviewEvidenceSourceTests(unittest.TestCase):
         )
         self.assertLess(load.index("if let item = selected"), load.index("found: true"))
         self.assertNotIn("lastError", load)
-        prepare = (
-            state.split("private func prepareCaptureMediaReview(", 1)[1]
-            .split("private func startLatestMediaRefresh(", 1)[0]
-        )
+        prepare = state.split("private func prepareCaptureMediaReview(", 1)[1].split(
+            "private func startLatestMediaRefresh(", 1
+        )[0]
         self.assertIn("captureReviewOutcome = CaptureReviewOutcome()", prepare)
 
     def test_retirement_guards_both_completed_outcomes_and_deferred_publication(self):
@@ -116,10 +128,9 @@ class IOSCaptureReviewEvidenceSourceTests(unittest.TestCase):
         self.assertNotIn("CaptureReviewOutcome(readEvidence:", retired)
         busy = load.split("guard !isBusy(.media), !mediaLibraryLoading else {", 1)[1].split("}", 1)[0]
         self.assertIn("retiredRead = true", busy)
-        success = (
-            load.split("let items = try await session.listMedia", 1)[1]
-            .split("readEvidence.record(.success)", 1)[0]
-        )
+        success = load.split("let items = try await session.listMedia", 1)[1].split("readEvidence.record(.success)", 1)[
+            0
+        ]
         self.assertIn("guard generation == latestMediaGeneration, !Task.isCancelled", success)
         failure = load.split("} catch is CancellationError {", 1)[1].split("readEvidence.record(.failure)", 1)[0]
         self.assertIn("retiredRead = true", failure)
@@ -147,8 +158,15 @@ class IOSCaptureReviewEvidenceSourceTests(unittest.TestCase):
         self.assertIn("latestMediaReviewDelay: (@Sendable (UInt64) async throws -> Void)? = nil", state)
         self.assertIn("guard !isBusy(.media), !mediaLibraryLoading", load)
         self.assertIn("afterCaptureFrom: items, previousIDs: review.previousIDs, kind: review.kind", load)
-        for forbidden in ("captureStill(", "toggleRecording(", "startRecording(", "stopRecording(", "autofocus(",
-                          "latestMediaItem =", "mediaCaptureDate("):
+        for forbidden in (
+            "captureStill(",
+            "toggleRecording(",
+            "startRecording(",
+            "stopRecording(",
+            "autofocus(",
+            "latestMediaItem =",
+            "mediaCaptureDate(",
+        ):
             self.assertNotIn(forbidden, load)
 
     def test_simulator_and_bridge_adapters_reject_missing_or_wrong_type_list_envelopes(self):
@@ -190,13 +208,17 @@ class IOSCaptureReviewEvidenceSourceTests(unittest.TestCase):
         self.assertIn("testSimulatorMediaListAcceptsExplicitEmptyItemsArrayAsSuccessfulRead", tests)
         self.assertIn("XCTAssertTrue(snapshots.isEmpty)", tests)
         self.assertIn("XCTAssertEqual(snapshots, [[]])", tests)
-        for method in ("testSimulatorMediaListRejectsMalformedItemsBeforeTruncatingOrPublishing",
-                       "testRealMediaListRejectsMalformedPathEnvelopesBeforePublishing",
-                       "testRealMediaListRejectsMalformedPageCountWithoutInventingZero",
-                       "testRealMediaListKeepsUnsupportedCountAndValidUnpagedResponseFallbacks"):
+        for method in (
+            "testSimulatorMediaListRejectsMalformedItemsBeforeTruncatingOrPublishing",
+            "testRealMediaListRejectsMalformedPathEnvelopesBeforePublishing",
+            "testRealMediaListRejectsMalformedPageCountWithoutInventingZero",
+            "testRealMediaListKeepsUnsupportedCountAndValidUnpagedResponseFallbacks",
+        ):
             self.assertIn(method, tests)
-        self.assertIn("testBridgeMalformedItemsNeverBecomeSuccessfulEmptyReviewReads",
-                      (IOS_TESTS / "CaptureMediaJourneyTests.swift").read_text())
+        self.assertIn(
+            "testBridgeMalformedItemsNeverBecomeSuccessfulEmptyReviewReads",
+            (IOS_TESTS / "CaptureMediaJourneyTests.swift").read_text(),
+        )
 
     def test_localized_ui_keeps_both_observation_and_last_read_warning(self):
         view = (APP / "CameraControlView.swift").read_text()
@@ -218,13 +240,9 @@ class IOSCaptureReviewEvidenceSourceTests(unittest.TestCase):
                         self.assertIn("last" if language == "en" else "最後一次", matches[0])
                         self.assertIn("failed" if language == "en" else "失敗", matches[0])
 
+
 """Source/resource guards only; native ViewModel and Compose execution remain separate gates."""
 
-import hashlib
-import json
-import unittest
-import xml.etree.ElementTree as ET
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 UI = ROOT / "android/app/src/main/java/dev/openeos/control/ui"
@@ -247,12 +265,15 @@ class AndroidCaptureReviewEvidenceSourceTests(unittest.TestCase):
         self.assertIn('getResourceAsStream("/review-evidence-vectors.json")', loader)
         self.assertIn("readNBytes(64 * 1024 + 1)", loader)
         build = (ROOT / "android/app/build.gradle.kts").read_text()
-        for binding in ['"../../contracts/capture-review-evidence/v1/review-evidence-vectors.json"',
-                        'from(unitContractFixtures.map { file(it) })', 'into(unitContractDirectory)',
-                        'duplicatesStrategy = DuplicatesStrategy.FAIL',
-                        'doFirst { checkContractFixtures(unitContractFixtures) }',
-                        'sourceSets.getByName("test").resources.srcDir(unitContractDirectory)',
-                        'dependsOn(prepareUnitContractFixtures, prepareAndroidContractFixtures)']:
+        for binding in [
+            '"../../contracts/capture-review-evidence/v1/review-evidence-vectors.json"',
+            "from(unitContractFixtures.map { file(it) })",
+            "into(unitContractDirectory)",
+            "duplicatesStrategy = DuplicatesStrategy.FAIL",
+            "doFirst { checkContractFixtures(unitContractFixtures) }",
+            'sourceSets.getByName("test").resources.srcDir(unitContractDirectory)',
+            "dependsOn(prepareUnitContractFixtures, prepareAndroidContractFixtures)",
+        ]:
             self.assertIn(binding, build)
 
     def test_invocation_evidence_is_immutable_fresh_and_cancelled_reads_are_not_counted(self):
@@ -272,7 +293,8 @@ class AndroidCaptureReviewEvidenceSourceTests(unittest.TestCase):
         source = (UI / "CameraViewModel.kt").read_text()
         retry = source.split("    fun retryCaptureReview()", 1)[1].split("    private fun refreshCaptureReview()", 1)[0]
         review = source.split("    private fun refreshCaptureReview()", 1)[1].split(
-            "    private fun refreshCaptureReview(items:", 1)[0]
+            "    private fun refreshCaptureReview(items:", 1
+        )[0]
         for command in ["captureStill(", "toggleRecording(", "autofocus(", "halfPressShutter("]:
             self.assertNotIn(command, retry + review)
         self.assertIn("longArrayOf(250L, 750L, 1_500L)", source)
@@ -286,7 +308,8 @@ class AndroidCaptureReviewEvidenceSourceTests(unittest.TestCase):
         self.assertIn("captureReviewObservation = result.observation", review)
         self.assertIn("captureReviewEvidence = result.evidence", review)
         beginning = source.split("    private fun beginCaptureReviewLoad()", 1)[1].split(
-            "    private suspend fun publishCaptureReview", 1)[0]
+            "    private suspend fun publishCaptureReview", 1
+        )[0]
         self.assertNotIn("captureReviewEvidence =", beginning)
         self.assertNotIn("captureReviewObservation =", beginning)
         self.assertNotIn("captureReviewItem =", beginning)
@@ -316,23 +339,28 @@ class AndroidCaptureReviewEvidenceSourceTests(unittest.TestCase):
     def test_malformed_envelopes_and_identities_cannot_become_successful_empty_lists(self):
         source = (DATA / "CcapiClient.kt").read_text()
         simulator = source.split("    private suspend fun listSimulatorMedia()", 1)[1].split(
-            "    private fun parseSimulatorMediaItem", 1)[0]
+            "    private fun parseSimulatorMediaItem", 1
+        )[0]
         self.assertIn('getJSONArray("items")', simulator)
         self.assertIn('item.opt("id") is String && item.opt("name") is String', simulator)
         self.assertIn("checkNotNull(parseSimulatorMediaItem(item))", simulator)
         self.assertNotIn("filterNotNull", simulator)
         self.assertNotIn("return emptyList()", simulator)
         listing = source.split("    private suspend fun listContentPaths(", 1)[1].split(
-            "    private suspend fun getInventoryPageInfo", 1)[0]
+            "    private suspend fun getInventoryPageInfo", 1
+        )[0]
         self.assertIn("pageInfo?.inventoryPageCount() ?: 0", listing)
         self.assertNotIn("contentPaths(strict = strict)", listing)
         self.assertNotIn("contentPaths(reverse = true, strict = strict)", listing)
         native_tests = (ANDROID_TESTS / "CameraCaptureReviewRecoveryTest.kt").read_text()
-        for name in ["zeroCompletedReadCancellationPreservesPriorTerminalOutcomeAndEvidence",
-                     "allFailedRetryStartsFreshAfterMixedReadEvidenceAndNeverResendsCommands",
-                     "malformedSimulatorListingsRemainUnreadAndValidEmptyListingIsSuccessful",
-                     "malformedNativePathListingsRemainUnreadAndValidEmptyListingIsSuccessful"]:
+        for name in [
+            "zeroCompletedReadCancellationPreservesPriorTerminalOutcomeAndEvidence",
+            "allFailedRetryStartsFreshAfterMixedReadEvidenceAndNeverResendsCommands",
+            "malformedSimulatorListingsRemainUnreadAndValidEmptyListingIsSuccessful",
+            "malformedNativePathListingsRemainUnreadAndValidEmptyListingIsSuccessful",
+        ]:
             self.assertIn(name, native_tests)
+
 
 if __name__ == "__main__":
     unittest.main()

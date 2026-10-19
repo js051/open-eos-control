@@ -1,5 +1,8 @@
 """Structural resource/ownership guards; these do not execute iOS or native rendering."""
 
+import base64
+import hashlib
+import re
 import unittest
 from pathlib import Path
 
@@ -79,7 +82,10 @@ class IOSNativeRtpLutSourceTests(unittest.TestCase):
         self.assertIn("case decodedOutputStalled", progress)
         self.assertIn("recordUnverifiablePresentation", progress)
         self.assertIn("recordDecoded(token, at: frame.decodedAt)", session)
-        self.assertIn("decodedOutput.completedAt = ProcessInfo.processInfo.systemUptime", (APP / "IOSRTPVideoProcessing.swift").read_text())
+        self.assertIn(
+            "decodedOutput.completedAt = ProcessInfo.processInfo.systemUptime",
+            (APP / "IOSRTPVideoProcessing.swift").read_text(),
+        )
         self.assertNotIn("hasUsableRendererOutput", session + state)
         self.assertIn("self.rtpController.videoProgressFailure() != nil", state)
         watch = state.split("private func beginLiveViewRenderWatch()", 1)[1].split("func captureStill", 1)[0]
@@ -105,8 +111,12 @@ class IOSNativeRtpLutSourceTests(unittest.TestCase):
         pipeline = (APP / "IOSRTPVideoProcessing.swift").read_text()
         native = (APP.parent / "Tests/RTPNativeLutRenderingTests.swift").read_text()
         probe = session.split("func submitReadinessProbe", 1)[1].split("func cancelReadinessProbe", 1)[0]
-        self.assertLess(probe.index("await videoProcessor.retireAndWait()"), probe.index("return readinessDecoder.submit"))
-        self.assertLess(probe.index("await readinessDecoder.retireAndWait()"), probe.index("return readinessDecoder.submit"))
+        self.assertLess(
+            probe.index("await videoProcessor.retireAndWait()"), probe.index("return readinessDecoder.submit")
+        )
+        self.assertLess(
+            probe.index("await readinessDecoder.retireAndWait()"), probe.index("return readinessDecoder.submit")
+        )
         self.assertLess(probe.index("await self.readinessDecoder.retireAndWait()"), probe.index("completion(result)"))
         self.assertIn("guard !self.closed, self.decodedFirstFrame else", session)
         self.assertEqual(session.count("private let readinessDecoder:"), 1)
@@ -131,7 +141,9 @@ class IOSNativeRtpLutSourceTests(unittest.TestCase):
         self.assertIn("- path: App", project)
         self.assertIn("- path: Tests", project)
         self.assertIn("- path: ../../contracts/rtp-presentation/v1/monitor-vectors.json", project)
-        binding = project.split("- path: ../../contracts/rtp-presentation/v1/monitor-vectors.json", 1)[1].split("- path:", 1)[0]
+        binding = project.split("- path: ../../contracts/rtp-presentation/v1/monitor-vectors.json", 1)[1].split(
+            "- path:", 1
+        )[0]
         self.assertIn("buildPhase: resources", binding)
         self.assertIn('url(forResource: "monitor-vectors", withExtension: "json")', native)
         self.assertIn("XCTAssertEqual(contract.cases.count, 112)", native)
@@ -140,13 +152,9 @@ class IOSNativeRtpLutSourceTests(unittest.TestCase):
         self.assertIn("if invalid { active = false }", gate)
         self.assertIn("9_007_199_254_740_991", gate)
 
+
 """Structural resource/ownership guards; these do not execute Android or the GPU."""
 
-import base64
-import hashlib
-import re
-import unittest
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 DATA = ROOT / "android/app/src/main/java/dev/openeos/control/data"
@@ -163,10 +171,12 @@ class AndroidNativeRtpLutSourceTests(unittest.TestCase):
         units = [nal for nal in re.split(b"\x00\x00(?:\x00)?\x01", payload) if nal]
         self.assertEqual([nal[0] & 31 for nal in units], [7, 8, 5])
         # The original PPS and IDR are unchanged. Only the SPS color description changed.
-        self.assertEqual(hashlib.sha256(units[1]).hexdigest(),
-                         "8c597ccf6b30196213ac90a0a77aa2fdbe81c8f4671b98f1e45ab23cf6120561")
-        self.assertEqual(hashlib.sha256(units[2]).hexdigest(),
-                         "bababe1c97a0947745672fb7e993c535b57609e997faec2f92f5661abf75be6d")
+        self.assertEqual(
+            hashlib.sha256(units[1]).hexdigest(), "8c597ccf6b30196213ac90a0a77aa2fdbe81c8f4671b98f1e45ab23cf6120561"
+        )
+        self.assertEqual(
+            hashlib.sha256(units[2]).hexdigest(), "bababe1c97a0947745672fb7e993c535b57609e997faec2f92f5661abf75be6d"
+        )
         rbsp = units[0].replace(b"\x00\x00\x03", b"\x00\x00")
         bits = "".join(f"{byte:08b}" for byte in rbsp)
         offset = 0
@@ -174,7 +184,7 @@ class AndroidNativeRtpLutSourceTests(unittest.TestCase):
         def take(count):
             nonlocal offset
             self.assertLessEqual(offset + count, len(bits))
-            value = int(bits[offset:offset + count], 2) if count else 0
+            value = int(bits[offset : offset + count], 2) if count else 0
             offset += count
             return value
 
@@ -196,8 +206,11 @@ class AndroidNativeRtpLutSourceTests(unittest.TestCase):
         self.assertEqual((take(1), take(3), take(1), take(1)), (1, 5, 0, 1))  # Limited-range color description.
         self.assertEqual((take(8), take(8), take(8)), (1, 1, 1))  # BT.709 primaries, transfer, matrix.
         self.assertIn("assertFixtureColorFormat(format)", source)
-        for key, value in (("STANDARD", "STANDARD_BT709"), ("RANGE", "RANGE_LIMITED"),
-                           ("TRANSFER", "TRANSFER_SDR_VIDEO")):
+        for key, value in (
+            ("STANDARD", "STANDARD_BT709"),
+            ("RANGE", "RANGE_LIMITED"),
+            ("TRANSFER", "TRANSFER_SDR_VIDEO"),
+        ):
             self.assertIn(f"MediaFormat.KEY_COLOR_{key} to MediaFormat.COLOR_{value}", source)
         self.assertIn('outputFormat != "unobserved"', source)
 
@@ -224,7 +237,10 @@ class AndroidNativeRtpLutSourceTests(unittest.TestCase):
         registry = (DATA / "NativeVideoLut.kt").read_text()
         self.assertIn("java.util.IdentityHashMap<Any, Job>()", registry)
         self.assertIn("priorWriter?.cancel()", registry)
-        self.assertIn("withContext(NonCancellable) { previous?.join(); if (additional !== previous) additional?.join() }", registry)
+        self.assertIn(
+            "withContext(NonCancellable) { previous?.join(); if (additional !== previous) additional?.join() }",
+            registry,
+        )
         self.assertIn("currentCoroutineContext().ensureActive()", registry)
         self.assertIn("launchDrainedNativeVideoJob(scope, previous, priorWriter, block)", registry)
         self.assertIn("if (writers[target] === replacement) writers.remove(target)", registry)
@@ -240,7 +256,9 @@ class AndroidNativeRtpLutSourceTests(unittest.TestCase):
         self.assertIn("NativeVideoLutStatus.UNSUPPORTED_COLOR", session)
         self.assertIn("decodeSurface(targetSurface, generation, null, bypassGpu = true)", session)
         fallback = session.split("catch (fallback: LutFallback)", 1)[1].split("private suspend fun decodeSurface", 1)[0]
-        self.assertIn("!closed.get() && decoderGeneration.get() == generation && surface.get() === targetSurface", fallback)
+        self.assertIn(
+            "!closed.get() && decoderGeneration.get() == generation && surface.get() === targetSurface", fallback
+        )
         self.assertIn("videoLutState.value = fallback.reason", fallback)
 
     def test_native_fixture_retains_numeric_assertions_and_bounded_failure_evidence(self):
@@ -268,6 +286,7 @@ class AndroidNativeRtpLutSourceTests(unittest.TestCase):
         self.assertIn("captured.forEach(Bitmap::recycle)", fixture)
         self.assertIn("if (primaryFailure != null || retired.isFailure) captured?.recycle()", fixture)
         self.assertIn("primaryFailure?.addSuppressed(cleanupFailure) ?: throw cleanupFailure", fixture)
+
 
 if __name__ == "__main__":
     unittest.main()

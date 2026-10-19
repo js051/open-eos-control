@@ -1,4 +1,5 @@
 """USB listing wiring guards only; no Android SDK, USB device or native execution."""
+
 import unittest
 from pathlib import Path
 
@@ -18,7 +19,9 @@ class AndroidUsbListingCompletionSourceTests(unittest.TestCase):
         gate = "if (remainingItems != null && objectInfos.size >= remainingItems) break"
         self.assertIn(gate, listing)
         self.assertLess(listing.index(gate), listing.index("val objectInfo = ptp.objectInfo(handle)"))
-        self.assertIn("objectInfo.objectFormat != PtpObjectFormat.ASSOCIATION && objectInfo.filename.isNotBlank()", listing)
+        self.assertIn(
+            "objectInfo.objectFormat != PtpObjectFormat.ASSOCIATION && objectInfo.filename.isNotBlank()", listing
+        )
         self.assertNotIn("values.take(", listing)
 
     def test_required_read_failure_precedes_optional_metadata_and_terminal_completion(self):
@@ -42,8 +45,10 @@ class AndroidUsbListingCompletionSourceTests(unittest.TestCase):
     def test_viewmodel_marks_only_successful_return_complete_and_retains_error_state(self):
         source = (MAIN / "ui/CameraViewModel.kt").read_text()
         section = source.split("    fun refreshMedia()", 1)[1].split("    fun openCaptureReview()", 1)[0]
-        self.assertLess(section.index("repository.listMedia(maximumItemsFor(scope))"),
-                        section.index("mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE"))
+        self.assertLess(
+            section.index("repository.listMedia(maximumItemsFor(scope))"),
+            section.index("mediaLibraryLoadStatus = MediaLibraryLoadStatus.COMPLETE"),
+        )
         self.assertIn("mediaLibraryLoadStatus = MediaLibraryLoadStatus.FAILED", section)
         self.assertIn("MediaLibraryBatch(take(RECENT_MEDIA_ITEMS), size > RECENT_MEDIA_ITEMS)", source)
 
