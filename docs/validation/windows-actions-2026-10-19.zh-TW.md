@@ -13,3 +13,15 @@
 ## English summary
 
 This supplemental dev-only workflow preserves every original Windows bundle step and pinned action, preceded by the existing full-history secret scan and actionlint validation. It builds and launches the actual executable on a Windows runner, checks its loopback service and bundled resources, and records resolved dependencies. It does not replace PR CI, publish a release, change security settings, or validate physical camera providers. Native execution results are pending.
+
+## 首輪實際結果（2026-10-19 13:24 UTC）
+
+- Source：`ab2cb5b6ff14a358dfaadf34a93bc00f7e5cda02`。
+- [Run 39259649939](https://github.com/js051/open-eos-control/actions/runs/39259649939)：全歷史 secret scan、actionlint 與 Windows job 全部通過。
+- [原生 job log](https://github.com/js051/open-eos-control/actions/runs/39259649939/job/118083759062)：Windows Server 2025 10.0.26100，image `windows-2025-vs2026` / `20261007.264.1`；Python 3.12.10。
+- 原真 exe verifier 於 13:24:07 UTC 通過，產品版本 0.13.0；所有原檢查與服務停止責任保留。
+- 本輪 resolved runtime：av18.1.0、FastAPI0.148.0、Pillow12.3.0、Pydantic2.14.1、Uvicorn0.54.0；PyInstaller6.21.0。完整 `pip freeze` 留在原 log。
+- 同 repo artifact `release-candidate-desktop-windows`，ID `12189692288`，50,959,494 bytes；GitHub archive digest `sha256:bfc34ed60d0852a0b15bfe492638e4a8b32929de16efe76d119e9f7fcb59aded`。此為 API／upload 收據，未另下載在 Linux 執行 Windows exe；有效至 2026-11-02。
+- Windows 原生封裝／啟動門檻已收斂；實體 USB、WSL／gphoto2、Canon EDSDK binding 及真相機功能仍需各自證據。
+
+Windows native packaging and executable verification passed on the real Windows runner. The artifact and resolved dependency inventory are linked above. This closes the native bundle smoke-verification gap, not physical-camera parity or release acceptance.
