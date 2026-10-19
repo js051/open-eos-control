@@ -79,7 +79,15 @@ async function fixture(browser, origin, language = "en", mode = "confirmed") {
   await page.goto(origin, { waitUntil: "networkidle" });
   await page.locator("#connection-view .language-select").selectOption(language);
   await page.waitForSelector("#connect-button:not([disabled])"); await page.click("#connect-button");
-  await page.waitForSelector("#control-view:not([hidden])"); await page.click('.tab[data-view="media"]');
+  try {
+    await page.waitForSelector("#control-view:not([hidden])");
+  } catch (error) {
+    await page.screenshot({ path: path.join(RESULTS, `desktop-media-mutation-connect-${language}.png`) })
+      .catch(() => {});
+    console.log("OEC_MEDIA_MUTATION_CONNECT", JSON.stringify({ pageErrorCount: errors.length }));
+    throw error;
+  }
+  await page.click('.tab[data-view="media"]');
   await page.waitForFunction(() => document.querySelectorAll(".media-select-checkbox").length === 3);
   await page.click("#media-select-filtered");
   return { context, page, errors, writes, reads, gate, setListing: (next) => { listing = next; }, getListing: () => listing };
