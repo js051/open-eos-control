@@ -1892,6 +1892,8 @@ final class OpenEOSControlUITests: XCTestCase {
             let photo = mode.buttons[language == "english" ? "Photo" : "拍照"]
             XCTAssertTrue(photo.isSelected, "The mode switch starts with the Photo segment selected")
             XCTAssertFalse(mode.buttons[videoMode].isSelected)
+            let pickerFrameBeforeSelection = mode.frame
+            XCTAssertFalse(app.buttons["capture-mode-apply"].exists, "No draft means no accessible Apply action")
             recordMediaUIEvidence(in: app, phase: "recording-review", language: language)
             try tapForAsyncTest(mode.buttons[videoMode])
             let selectedVideo = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -1900,6 +1902,8 @@ final class OpenEOSControlUITests: XCTestCase {
             let selectionReady = XCTWaiter.wait(for: [selectedVideo], timeout: 5) == .completed
             if !selectionReady { recordMediaUIEvidence(in: app, phase: "recording-review", language: language) }
             _ = try XCTUnwrap(selectionReady ? true : nil)
+            XCTAssertEqual(mode.frame.minY, pickerFrameBeforeSelection.minY, accuracy: 0.000_001,
+                "Draft creation must not move the control under the original touch")
             let applyMode = app.buttons["capture-mode-apply"]
             let applyModeReady = waitForInteraction(applyMode, timeout: 5)
             if !applyModeReady { recordMediaUIEvidence(in: app, phase: "recording-review", language: language) }
@@ -2349,6 +2353,7 @@ final class OpenEOSControlUITests: XCTestCase {
         if !interactive { recordMediaUIEvidence(in: app, phase: "direct-capture-mode", language: "english") }
         _ = try XCTUnwrap(interactive ? true : nil)
         XCTAssertEqual(segments.count, 1)
+        let pickerFrameBeforeSelection = mode.frame
         try tapForAsyncTest(segment)
         let selected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             segment.isSelected && !mode.buttons[other].isSelected
@@ -2356,6 +2361,7 @@ final class OpenEOSControlUITests: XCTestCase {
         let selectedReady = XCTWaiter.wait(for: [selected], timeout: 5) == .completed
         if !selectedReady { recordMediaUIEvidence(in: app, phase: "direct-capture-mode", language: "english") }
         _ = try XCTUnwrap(selectedReady ? true : nil)
+        XCTAssertEqual(mode.frame.minY, pickerFrameBeforeSelection.minY, accuracy: 0.000_001)
         let applies = app.buttons.matching(identifier: "capture-mode-apply")
         let apply = applies.element
         let applyReady = waitForInteraction(apply, timeout: 5)
