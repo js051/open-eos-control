@@ -2107,17 +2107,33 @@ async function run() {
 
     await page.click('.tab[data-view="live"]');
     await page.waitForSelector('[data-camera-command="sensor-cleaning"]:not([disabled])');
+    const maintenanceResponses = [];
+    const maintenanceResponseListener = response => {
+      let pathname;
+      try { pathname = new URL(response.url()).pathname; } catch (_) { return; }
+      const control = ["control/liveview/stop", "control/events", "sensor-cleaning/outcome"]
+        .find(suffix => pathname.endsWith(`/maintenance/${suffix}`));
+      if (control && maintenanceResponses.length < 16) maintenanceResponses.push({ control, status: response.status() });
+    };
+    page.on("response", maintenanceResponseListener);
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator('[data-camera-command="sensor-cleaning"]').first().click();
-    await waitForSimulatorState(
-      simulatorOrigin,
-      (state) => state.sensor_cleaning.count === 1 &&
-        !state.sensor_cleaning.auto_power_off &&
-        !state.canonical.live_view_active &&
-        state.canonical.live_view_start_count === 1 &&
-        state.canonical.live_view_stop_count === 1,
-      "CCAPI sensor cleaning leaves monitoring paused",
-    );
+    try {
+      await waitForSimulatorState(
+        simulatorOrigin,
+        (state) => state.sensor_cleaning.count === 1 &&
+          !state.sensor_cleaning.auto_power_off &&
+          !state.canonical.live_view_active &&
+          state.canonical.live_view_start_count === 1 &&
+          state.canonical.live_view_stop_count === 1,
+        "CCAPI sensor cleaning leaves monitoring paused",
+      );
+    } catch (error) {
+      console.log("OEC_MAINTENANCE_RESPONSES", JSON.stringify(maintenanceResponses));
+      throw error;
+    } finally {
+      page.off("response", maintenanceResponseListener);
+    }
     const maintenanceRestore = page.locator('[data-maintenance-history] [data-maintenance-action="restore"]').last();
     await maintenanceRestore.waitFor({ state: "visible" });
     page.once("dialog", (dialog) => dialog.accept());

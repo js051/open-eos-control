@@ -50,3 +50,12 @@ The bounded diagnostic identified production attribute copying as the source. Th
 - 原外部事件更新與 clock/AF/後續驗收全保留。此同步候選仍待真正 Chromium；其他 browser／pytest／package gates 尚未到達。
 
 The original live-view browser journey now passes under the unchanged strict CSP. The next CCAPI journey is blocked by an open settings dialog. Its external ISO update previously started before the scoped transaction and editor were known to have completed. The candidate adds exact successful-outcome assertions and normal dialog completion before that external update. The race is plausible from the implementation, but its occurrence in the failed run is not yet established; native validation remains pending.
+
+## 第五輪：ISO 成功前提通過，維護前置待定位
+
+- Source `ff9cb9feb361cd264f08955573da025ec6e97ba8`，[run39266289706](https://github.com/js051/open-eos-control/actions/runs/39266289706) 已通過新增 ISO exact receipt／正常關窗前提，以及後續 clock、AF、錄影、外部事件與媒體詳情旅程。
+- 更後段 sensor-cleaning 等待失敗：peer Live View Stop=1、event DELETE=1，但 sensor cleaning count=0。未取得各 Bridge control HTTP status，因此尚不能斷言是產品 admission、前置回覆驗證或 fixture。
+- 最小失敗診斷只收三個固定 maintenance route 類別及 HTTP status（最多16列），原 peer predicate／等待預算與 error 完整保留；不記 URL、headers、body，不增加相機命令或重試。
+- Windows 同 source 全過；Apple21仍在原 App/UI 執行中，未被取消或重啟。
+
+The exact ISO receipt and normal editor completion now pass in Chromium, followed by the original control and media assertions. The next failure is maintenance admission: preview and event monitoring stopped, but sensor cleaning was not dispatched at the peer. Fixed-category response-status diagnostics will distinguish the preceding control stages without weakening the original assertion or issuing extra commands.
