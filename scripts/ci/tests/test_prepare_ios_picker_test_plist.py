@@ -84,6 +84,8 @@ class PickerPlistTests(unittest.TestCase):
         root = Path(__file__).parents[3]
         project = (root / 'ios/OpenEOSControl/project.yml').read_text()
         self.assertIn('OEC_APP_INFOPLIST_FILE: App/Info.plist', project)
+        app = project.split('  OpenEOSControlTests:', 1)[0]
+        self.assertIn('      - path: App\n        excludes:\n          - Info.plist', app)
         self.assertEqual(project.count('INFOPLIST_FILE: $(OEC_APP_INFOPLIST_FILE)'), 1)
         workflow = (root / '.github/workflows/apple-dev.yml').read_text()
         ordinary, testing = workflow.split('- name: Test iOS app and UI', 1)

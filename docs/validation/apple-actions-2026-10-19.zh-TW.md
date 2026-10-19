@@ -99,3 +99,9 @@
 - 固定診斷新增 capture-mode picker／Apply 幾何，不收未知 label 或 URL，原 test/phase allowlist、24 MiB 與 PNG/text/symlink 限制不變。
 - OS picker 使用 fresh CI runner 的合成 Documents：僅 test xcodebuild 指定 application-target 專用 plist 變數與獨立 `.derived-data-ui`；正常 build／Release 預設仍指原 `App/Info.plist`。原檔未新增分享設定。測試 plist 由 exclusive create 產生並保存 hash；always verifier 檢查原檔未變、正常 app 未曝光 Documents、test app 才啟用兩個可見性 keys 且 bundle ID 相符。保留原 native picker 和取消／選檔負例，無 delegate 注入。
 - Linux 完整 219 個 source guards 與 57 個 CI helper tests 通過，三個修改 Swift 檔語法 parse 通過。日期 source guard 的舊 assignment 字串失敗已保留，更新為 presentation identity／owner／literal carrier／local draft 必要檢查，原 DST／時區與 session 防護檢查不變。這些結果不替代第九輪 Xcode typecheck、UIKit 或 OS picker 執行。
+
+## 第九輪建置結果與第十輪窄修
+
+- Source `a260dedbf2954c0d550e0bcd9cc58d16cde88023`，run https://github.com/js051/open-eos-control/actions/runs/39202203898 。secret-scan 與 Core 通過；普通 App build 在 05:00 UTC 回報 Info.plist 重複產物，App/UI tests 尚未執行。
+- XcodeGen 對間接 `INFOPLIST_FILE` 輸入未自動排除原 App/Info.plist，造成 Copy Bundle Resources 與 ProcessInfoPlistFile 同時產生 app Info.plist。App sources 明確排除該單一 plist 的 resource copy，仍由原 ProcessInfoPlist 處理；未刪除檔案、改 keys 或放寬隔離驗證。新增 source guard，57 CI helper tests 通過；仍待 Xcode 真建置。
+- always 隔離 verifier 因前置 build 失敗、test plist 尚未建立而一併失敗，保留此結果，未以跳過 verifier 掩蓋未驗證狀態。
