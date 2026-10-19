@@ -33,8 +33,9 @@ TESTS = (
     "testDirectCCAPIControlsReachTheRunningCameraSimulator",
     "testRealDocumentPickerCancellationAndReopeningAfterReconnectInBothLanguages",
     "testRealPickerSelectionCancelOrLostAckKeepsUncertaintyAcrossReconnect",
+    "testCanonicalCaptureReviewRetriesReadsAndFailedPreviewOriginalWithoutReshooting",
 )
-MEDIA_PHASES = dict(zip(TESTS[3:], ("metadata-menu", "recording-review", "date-reopen", "grid-initial", "white-balance-tap", "picker-cancel", "picker-selection")))
+MEDIA_PHASES = dict(zip(TESTS[3:], ("metadata-menu", "recording-review", "date-reopen", "grid-initial", "white-balance-tap", "picker-cancel", "picker-selection", "capture-original-recovery")))
 EXTRA_MEDIA_PHASES = {
     "testDirectCCAPIControlsReachTheRunningCameraSimulator": ("direct-capture-mode",),
 }
@@ -50,6 +51,7 @@ MEDIA_CONTROLS = (
     "picker-cancel-en", "picker-cancel-zh", "picker-browse-en", "picker-browse-zh",
     "picker-synthetic-cell", "picker-synthetic-text", "picker-synthetic-folder", "media-upload-document-picker",
     "picker-synthetic-folder-cell", "media-native-menu-target",
+    "capture-original-share", "capture-original-download", "capture-original-cancel", "capture-original-alert",
     "media-upload-complete", "media-upload-uncertain", "media-upload-not-sent",
     "media-upload-recovery", "media-upload-error", "cancel-media-upload-status",
 )

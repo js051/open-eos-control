@@ -76,6 +76,22 @@ class IOSEvidenceTests(unittest.TestCase):
     def collect(self, test=evidence.TESTS[0], **kwargs):
         evidence.collect_attachments(self.staging, self.output, test, self.report, **kwargs)
 
+    def test_capture_original_failure_is_exact_case_and_fixed_counts_only(self):
+        method = "testCanonicalCaptureReviewRetriesReadsAndFailedPreviewOriginalWithoutReshooting"
+        name = "media-ui-capture-original-recovery-english"
+        self.assertEqual(evidence.attachment_name(name, method), name)
+        for other in evidence.TESTS:
+            if other != method:
+                self.assertIsNone(evidence.attachment_name(name, other))
+        data = ("[OEC_MEDIA_UI_GEOMETRY] capture-original-recovery-english\n"
+                "app-state=4\ncapture-original-share count=0\n"
+                "capture-original-download count=1\ncapture-original-cancel count=0\n"
+                "capture-original-alert count=0\n").encode()
+        self.assertEqual(evidence.geometry_text(data), data)
+        for extra in (b"unknown-control count=1\n", b"error=private-text\n", b"url=http://127.0.0.1/\n"):
+            with self.assertRaises(evidence.EvidenceError):
+                evidence.geometry_text(data + extra)
+
     def test_selects_only_exact_requested_test_cases_and_deduplicates_runs(self):
         tree = test_tree()
         children = tree["testNodes"][0]["children"]

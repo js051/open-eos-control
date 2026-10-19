@@ -1471,11 +1471,14 @@ async function run() {
     await page.waitForSelector("#setting-dialog[open]");
     await page.getByRole("button", { name: "1600", exact: true }).click();
     const isoOutcomeResponse = page.waitForResponse(response =>
-      response.request().method() === "POST" && response.url().endsWith("/settings/iso/outcome"));
-    await page.locator("#setting-dialog .button.primary").click();
-    const isoResponse = await isoOutcomeResponse;
-    assert.equal(isoResponse.status(), 200);
-    const isoOutcome = await isoResponse.json();
+      response.request().method() === "POST" && response.url().endsWith("/settings/iso/outcome"))
+      .then(async response => ({ status: response.status(), outcome: await response.json() }));
+    // Capture the body as soon as the response arrives, before click's idle wait.
+    const [, isoResponse] = await Promise.all([
+      page.locator("#setting-dialog .button.primary").click(), isoOutcomeResponse,
+    ]);
+    assert.equal(isoResponse.status, 200);
+    const isoOutcome = isoResponse.outcome;
     assert.equal(isoOutcome.writeEvidence, "response-received");
     assert.equal(isoOutcome.readbackEvidence, "matched");
     assert.equal(isoOutcome.setting?.value, "1600");
