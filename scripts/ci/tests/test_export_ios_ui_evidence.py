@@ -376,6 +376,20 @@ class IOSEvidenceTests(unittest.TestCase):
             with self.assertRaises(evidence.EvidenceError):
                 evidence.geometry_text(data + extra)
 
+    def test_direct_capture_mode_phase_is_scoped_to_original_case(self):
+        name = "media-ui-direct-capture-mode-english"
+        method = "testDirectCCAPIControlsReachTheRunningCameraSimulator"
+        self.assertEqual(evidence.attachment_name(name + ".png", method), name)
+        for other in evidence.TESTS:
+            if other != method:
+                self.assertIsNone(evidence.attachment_name(name + ".png", other))
+        data = ("[OEC_MEDIA_UI_GEOMETRY] direct-capture-mode-english\n"
+                "capture-segment-photo[0] selected=false\n"
+                "capture-mode-apply count=1\n").encode()
+        self.assertEqual(evidence.geometry_text(data), data)
+        with self.assertRaises(evidence.EvidenceError):
+            evidence.geometry_text(data + b"mode-error=private\n")
+
     def test_picker_terminated_state_has_no_unbounded_diagnostics(self):
         data = b"[OEC_MEDIA_UI_GEOMETRY] picker-selection-traditionalChinese\napp-state=1\n"
         self.assertEqual(evidence.geometry_text(data), data)
