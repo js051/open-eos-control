@@ -45,6 +45,7 @@ struct ShootingSettingPanel: View {
         }
         .font(.caption)
         .foregroundStyle(Color.cameraSecondaryText)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("shooting-setting-outcome")
     }
     private func receipt(_ record: ShootingSettingRecord) -> some View {

@@ -1235,9 +1235,20 @@ final class OpenEOSControlUITests: XCTestCase {
                 openUploadFixtureGallery(app)
                 app.buttons["upload-media-button"].tap()
                 XCTAssertTrue(app.otherElements["media-upload-document-picker"].waitForExistence(timeout: 8))
-                // The DEBUG fixture seeds only this synthetic app-owned file and
-                // asks the real picker to open that directory. No delegate injection.
+                // directoryURL is a starting-location hint. The real provider may
+                // show Documents first; navigate its existing synthetic folder.
+                let folder = app.staticTexts["Synthetic Upload Journey"]
                 let source = app.cells.containing(NSPredicate(format: "label CONTAINS %@", "SYNTHETIC-UPLOAD")).firstMatch
+                let locationReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    source.exists || folder.exists
+                }, object: nil)
+                let locationVisible = XCTWaiter.wait(for: [locationReady], timeout: 8) == .completed
+                if !locationVisible { recordPickerUIEvidence(in: app, phase: "picker-selection", language: language) }
+                XCTAssertTrue(locationVisible, "The real provider must expose the synthetic file or its app-owned folder")
+                if !source.exists {
+                    XCTAssertTrue(waitForInteraction(folder, timeout: 8))
+                    folder.tap()
+                }
                 let sourceReady = source.waitForExistence(timeout: 8)
                 if !sourceReady { recordPickerUIEvidence(in: app, phase: "picker-selection", language: language) }
                 XCTAssertTrue(sourceReady, "The OS provider must expose the seeded directory; missing provider access is a failed native gate")
@@ -2220,11 +2231,18 @@ final class OpenEOSControlUITests: XCTestCase {
     // Native menu descendants can exist before UIKit publishes a usable frame.
     // Keep the original budget and require a real enabled/hittable target.
     private func waitForMenuInteraction(_ element: XCUIElement, in app: XCUIApplication, language: String, timeout: TimeInterval) -> Bool {
+        var capturedMenu = false
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             guard element.exists else { return false }
             let frame = element.frame
             guard frame.origin.x.isFinite, frame.origin.y.isFinite,
                   frame.width.isFinite, frame.height.isFinite, !frame.isEmpty else { return false }
+            // A native menu AX activation-point exception can abort the waiter.
+            // Preserve its synthetic popup before the risky hittability query.
+            if !capturedMenu {
+                capturedMenu = true
+                self.addScreenshot(name: "media-ui-metadata-menu-\(language)")
+            }
             return element.isEnabled && element.isHittable
         }, object: nil)
         let ready = XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
@@ -3094,6 +3112,8 @@ final class OpenEOSControlUITests: XCTestCase {
     private func recordPickerUIEvidence(in app: XCUIApplication, phase: String, language: String) {
         guard ["picker-cancel", "picker-selection"].contains(phase),
               ["english", "traditionalChinese"].contains(language) else { return }
+        // Capture before querying a remote provider whose AX collection can change.
+        addScreenshot(name: "media-ui-\(phase)-\(language)")
         var lines = ["[OEC_MEDIA_UI_GEOMETRY] \(phase)-\(language)", "window=\(app.windows.firstMatch.frame)"]
         let queries: [(String, XCUIElementQuery)] = [
             ("picker-cancel-en", app.buttons.matching(identifier: "Cancel")),
@@ -3107,18 +3127,12 @@ final class OpenEOSControlUITests: XCTestCase {
         ]
         for (identifier, matches) in queries {
             lines.append("\(identifier) count=\(matches.count)")
-            for (index, element) in matches.allElementsBoundByIndex.prefix(4).enumerated() {
-                let frame = element.frame
-                let finite = frame.origin.x.isFinite && frame.origin.y.isFinite && frame.width.isFinite && frame.height.isFinite
-                let hittable = finite && !frame.isEmpty && element.isHittable
-                lines.append("\(identifier)[\(index)] enabled=\(element.isEnabled) hittable=\(hittable) frame=\(frame)")
-            }
+
         }
         let attachment = XCTAttachment(string: lines.joined(separator: "\n"))
         attachment.name = "media-ui-\(phase)-\(language)-geometry"
         attachment.lifetime = .keepAlways
         add(attachment)
-        addScreenshot(name: "media-ui-\(phase)-\(language)")
     }
 
     private func waitForConnectionScreen(in app: XCUIApplication, timeout: TimeInterval) -> Bool {
@@ -3157,6 +3171,8 @@ final class OpenEOSControlUITests: XCTestCase {
         let prepareReady = waitForInteraction(prepare, timeout: 8)
         if !prepareReady { recordMediaUIEvidence(in: app, phase: "white-balance-tap", language: "english") }
         _ = try XCTUnwrap(prepareReady ? true : nil)
+        XCTAssertEqual(app.buttons.matching(identifier: "shooting-setting-new").count, 1)
+        XCTAssertEqual(app.buttons.matching(identifier: "shooting-setting-refresh").count, 1)
         try tapForAsyncTest(prepare)
         try tapForAsyncTest(app.buttons["Done"])
     }
