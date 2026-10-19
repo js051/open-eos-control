@@ -361,6 +361,28 @@ class IOSEvidenceTests(unittest.TestCase):
                 with self.assertRaises(evidence.EvidenceError):
                     evidence.geometry_text(data + extra)
 
+    def test_picker_outcome_diagnostics_keep_error_text_private(self):
+        data = ("[OEC_MEDIA_UI_GEOMETRY] picker-selection-traditionalChinese\n"
+                "media-upload-document-picker count=0\n"
+                "media-upload-complete count=0\n"
+                "media-upload-uncertain count=0\n"
+                "media-upload-not-sent count=1\n"
+                "media-upload-recovery count=0\n"
+                "media-upload-error count=1\n"
+                "cancel-media-upload-status count=0\n").encode()
+        self.assertEqual(evidence.geometry_text(data), data)
+        for extra in (b"media-upload-error text=private\n", b"source-url=file:///private\n",
+                      b"media-upload-unknown count=1\n"):
+            with self.assertRaises(evidence.EvidenceError):
+                evidence.geometry_text(data + extra)
+
+    def test_picker_terminated_state_has_no_unbounded_diagnostics(self):
+        data = b"[OEC_MEDIA_UI_GEOMETRY] picker-selection-traditionalChinese\napp-state=1\n"
+        self.assertEqual(evidence.geometry_text(data), data)
+        for extra in (b"app-state=99\n", b"crash-description=private\n"):
+            with self.assertRaises(evidence.EvidenceError):
+                evidence.geometry_text(data + extra)
+
     def test_native_target_frame_diagnostics_are_fixed_and_noninteractive(self):
         for phase, control in (("metadata-menu", "media-native-menu-target"),
                                ("picker-cancel", "picker-cancel-en"),

@@ -1044,3 +1044,6 @@
 "connection_cleanup_unconfirmed" = "尚未確認前次 Bridge 工作階段已清理，已阻擋新連線與相機掃描。請先檢查原本的相機、重新啟動該 Bridge，再重新開啟本 App 後重試。";
 
 "media_metadata_not_writable" = "此媒體項目不允許這項變更。";
+
+"media_mutation_expanded" = "已展開";
+"media_mutation_collapsed" = "已收合";

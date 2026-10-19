@@ -1044,3 +1044,6 @@
 "connection_cleanup_unconfirmed" = "The previous Bridge session cleanup was not confirmed. New connections and camera scanning are blocked. Check the original camera, restart that Bridge, then reopen this app before retrying.";
 
 "media_metadata_not_writable" = "This item does not allow this change.";
+
+"media_mutation_expanded" = "Expanded";
+"media_mutation_collapsed" = "Collapsed";
