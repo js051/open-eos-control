@@ -491,3 +491,7 @@ EDSDK 回傳錯誤 session 後 close 失敗，現保留精確 rejected owner，�
 ### 2026-10-19 11:00 UTC：#129 Apple SDK 條件分支真編譯補證
 
 run `39240488333`／dev `285ca4b246158f4575cb62c62bf722234ec9b9b2` 的 App SDK probe 真 PASS、非 SKIP，確實引用 concrete `ImageCapturePTPApplePort` 並核 protocol conformance／static budget。這收斂原 Apple 分支 NOT_COMPILED 門檻，無 adapter 實例、權限請求或裝置操作；native session/event/runtime、DeviceInfo wire 與產品接線仍未完成。App826全過，UI仍有1案失敗，詳逐輪Apple證據。
+
+### 2026-10-19 13:14 UTC：Apple-only 全批真驗通過
+
+[run39252314539](https://github.com/js051/open-eos-control/actions/runs/39252314539)／dev `0a2035fcc84f4f18c19ab8b1c8863e340077f457`：App828/828、UI43/43、Core與安全gate全部通過；包括同epoch音訊退場倒序新回歸、原背景案例及真picker六組。原DocumentManager crash本批只有診斷、未證實修復，保留穩定性風險。此更新關閉目前Apple gate紅案，不把額外Apple工作流當原ci-complete、Windows/Android/native或全部89列驗收。

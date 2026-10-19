@@ -190,3 +190,11 @@
 - 僅fresh Apple測試build且既有三種upload fixture啟用時，新增固定stage／3個Bool journal，無URL、文件名、owner ID或任意文字。原生callback／完成與dismantle只記錄，不改dismiss、delay、重送、owner、file access或結果。測試後僅取此App容器的exact cache檔，16KiB／128行／固定regex／NOFOLLOW／regular-file／symlink拒絕；與原24MiB／64檔合併計費，普通產品不寫。原真picker與失敗斷言保留。
 - 第十九輪 bounded artifact `12184618785`，5,568,123 bytes，SHA256 `bef0b55183b852c7732230125e93f5d344c33498242c90dc397faacb438a5be6`；原xcresult artifact `12184758664`，220,293,126 bytes，SHA256 `39448c5a47269f0ff5311d5b817808338433d9f9b48e705c74a3b5bea601825c`。兩者下載後bytes/hash均核實；只擷取本App相關crash作定位，未將原完整診斷另行公開。
 - Journal是128行rolling尾端，跨fixture scenario且沒有時間／case起迄，因此只能依已核相鄰stage和原UI activity解讀；不得把末段無條件歸因到某次crash。同步診斷寫檔可能改變排程，若picker轉綠仍不能單憑此宣稱崩潰修復。
+
+## 第二十輪 Apple-only 整批收斂
+
+- Source `0a2035fcc84f4f18c19ab8b1c8863e340077f457`，run https://github.com/js051/open-eos-control/actions/runs/39252314539 ，secret-scan／ios-core／ios-app／apple-checks-complete 全部 success。App **828/828**、UI **43/43**；原背景音訊、新 same-epoch publication gate 與 rollover 案均真通過。新 regression 的原始版本未在Apple獨立跑紅，原 run19 背景失敗與source可達倒序反例保留，不混稱已跑完整before/after新案。
+- canonical雙語雙模式錄影141秒、direct81秒、日期／metadata大字級及真picker六組233秒旅程完整通過。#129 concrete SDK probe再次PASS；不代表device/session/wire或相機驗收。
+- Journal60行、3844 bytes：先四段取消，再六段selected；每段皆 coordinator-created → controller-created → cancelled／selected → completion-begin → completion-end → dismantle。三個UIKit Bool均為0，符合representable容器層可觀察值；沒有本輪崩潰前序列，不能從這些Bool推論遠端DocumentManager proxy已排空。picker本批只加診斷，排程受影響，因此舊run19 framework crash仍是未確證修復的穩定性風險，不改成已修。
+- Bounded artifact `12188556297`，5,492,221 bytes，SHA256 `73cee7db451eda40a4d40d68147a13e73aa54959aee69d26991d20e7fd009091`，下載後核實。60個匯出檔共6,526,599 bytes；summary的incomplete只因三個成功流程沒有failure-only附件，原全部測試結果仍success，journal確存在。
+- 此為額外Apple-only驗證，**不等同原PR ci-complete、不授權main或release、不代表89列三平台全部對齊**。Android／Windows／真相機及原provider未實作範圍依各自收據繼續追蹤。
