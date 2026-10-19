@@ -113,3 +113,11 @@
 - metadata 僅該兩個 native menu 的等待先核 exists／finite 非空 frame，再核 enabled／hittable，維持原 5 秒與業務斷言；不是放寬全域 helper。若仍失敗，沿既有固定 phase 收圖。錄影補單次 tap 前後固定兩 segment 幾何／selected；設定結果 sheet 補原失敗後固定控件幾何，皆不重 tap、不改相機狀態。
 - OS picker 英文 Cancel 與重連再取消已通過，繁中查找「取消」失敗；選檔 case 仍找不到 synthetic cell。隔離 plist 真驗過不代表 provider 選檔完成。增加這兩個原合成案例的 exact test／phase allowlist、八個固定 OS／synthetic 查詢計數及圖；不輸出任意 label、URL、路徑或全 AX。
 - 小型 artifact `12165039456`：4,696,566 bytes，SHA256 `c695b647cb747158898da18cf40ef0fe3c943e06759d3e5ca11e09815bc74e36`，保留第十輪失敗圖。第十一輪 58 個 CI helper tests、Swift syntax parse 與 diff 檢查通過；其餘缺陷仍待原 Apple 流程，沒有把補證當完成。
+
+## 第十一輪結果與第十二輪窄修
+
+- Source `aaf04e5c7c7e5b166b4f27a7949e30a8b898c995`，run https://github.com/js051/open-eos-control/actions/runs/39206551921 。Core、安全、普通 App 與隔離 verifier 通過；App **825/825**，UI 43 案有 **4 個失敗案例／4 個斷言**。完整錄影雙模式雙語旅程這次通過，但新增 tap 前診斷會影響調度時間，尚不能排除觀察者效應或宣稱已確證 picker 根因修復。
+- 白平衡原單次寫入／狀態已過；失敗圖確認 More settings 正確開啟且新設定按鈕可見。AX 中父層 outcome ID 出現在兩個子按鈕而專用 new ID 消失。原 panel 增加 explicit accessibility containment，保留各子按鈕 ID、原 guards／動作；原 UI helper 增加 new／refresh 各唯一 ID 斷言，待 Apple 真紅綠。
+- OS picker 選檔失敗圖顯示 Documents root 的 Synthetic Upload Journey 資料夾。fixture 現在先辨識已在檔案位置或該 exact 合成資料夾，必要時明確導航再沿原選檔／取消／不確定性斷言。另一 case 的診斷因動態 AX index 的 frame 查詢而中止；改為先保存圖、只記八個固定 query 計數，不遍歷動態元素，保留原取消失敗證據與 deadline。
+- metadata finite-frame 等待後仍在 isHittable 取 activation point 時拋錯。只在第一次已存在且 finite 非空 frame 的原固定 phase 先保存 popup，然後仍執行原 enabled／hittable 門檻；未改產品 menu，也未將查詢失敗視為成功。artifact 原 24 MiB／固定 allowlist／檔數上限不變。
+- 第十一輪 bounded artifact `12166942008`，5,575,659 bytes，SHA256 `e3a6a12bb07f57ecedd0d69d453b77274748ec949c4c66ae7c730701b81b3085`。本批 Swift parse、CI helper tests 與 diff 檢查通過；UIKit containment、OS provider 導航與 metadata popup 仍待第十二輪真 Apple 驗證。
