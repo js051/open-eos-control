@@ -368,7 +368,7 @@ def collect_picker_journal(container: Path, output: Path, report: dict) -> None:
 def collect_capture_mode_journal(container: Path, output: Path, report: dict) -> None:
     _collect_fixture_journal(container, output, report,
         source_name="eos-capture-mode-trace.txt", name="capture-mode-trace.txt", label="synthetic-capture-mode",
-        pattern=r"(?:english|traditionalChinese) (?:camera|simulator) stage=(?:pickerSelection|request|rejected|localFallback|alreadyConfigured|dispatch|settled) requested=(?:photo|video) current=(?:photo|video) stopRequired=(?:true|false) bulb=(?:true|false) settingBusy=(?:true|false) captureBusy=(?:true|false) recordingBusy=(?:true|false)")
+        pattern=r"(?:english|traditionalChinese) (?:camera|simulator) stage=(?:touchBegan|pickerSelection|request|rejected|localFallback|alreadyConfigured|dispatch|settled) requested=(?:photo|video) current=(?:photo|video) stopRequired=(?:true|false) bulb=(?:true|false) settingBusy=(?:true|false) captureBusy=(?:true|false) recordingBusy=(?:true|false)")
 
 
 def write_summary(output: Path, report: dict) -> None:
