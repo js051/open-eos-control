@@ -35,6 +35,30 @@ async function assertActionable(page, selector) {
       ))),
     };
   }, selector);
+  if (!geometry.visible || !geometry.enabled || !geometry.unobstructed) {
+    // Preserve the original failing snapshot; diagnostics do not retry the action.
+    await page.screenshot({ path: path.join(root, "test-results", "bulb-actionability-failure.png"), fullPage: true })
+      .catch(() => {});
+    const details = await page.evaluate((target) => {
+      const rect = element => {
+        const box = element?.getBoundingClientRect();
+        return box ? [box.x, box.y, box.width, box.height] : null;
+      };
+      const button = document.querySelector(target);
+      const box = button.getBoundingClientRect();
+      const points = [[0.5, 0.5], [0.25, 0.5], [0.75, 0.5], [0.5, 0.25], [0.5, 0.75]];
+      const blockers = points.map(([x, y]) => {
+        const hit = document.elementFromPoint(box.left + box.width * x, box.top + box.height * y);
+        if (button.contains(hit)) return "target";
+        if (!hit) return "none";
+        return ["toast", "shutter-button", "exposure-strip", "latest-media-button"].find(id =>
+          document.getElementById(id)?.contains(hit)) || "other";
+      });
+      return { target: rect(button), toast: rect(document.getElementById("toast")),
+        viewport: [innerWidth, innerHeight], blockers };
+    }, selector).catch(() => ({ unavailable: true }));
+    console.log("OEC_BULB_ACTIONABILITY", JSON.stringify(details));
+  }
   assert.deepEqual(geometry, { visible: true, enabled: true, unobstructed: true }, `${selector} must remain reachable`);
 }
 
