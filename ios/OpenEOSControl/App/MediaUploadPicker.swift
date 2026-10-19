@@ -39,7 +39,7 @@ struct MediaUploadPicker: UIViewControllerRepresentable {
     let completion: (MediaUploadSelection, [URL]?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(selection: selection, completion: completion) }
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+    func makeUIViewController(context: Context) -> Presenter {
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: false)
         picker.allowsMultipleSelection = false
         picker.delegate = context.coordinator
@@ -50,11 +50,97 @@ struct MediaUploadPicker: UIViewControllerRepresentable {
         #endif
         picker.view.accessibilityIdentifier = "media-upload-document-picker"
         Self.trace(.controllerCreated, picker)
-        return picker
+        return Presenter(picker: picker, coordinator: context.coordinator)
     }
-    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
-    static func dismantleUIViewController(_ controller: UIDocumentPickerViewController, coordinator: Coordinator) {
-        trace(.dismantle, controller)
+    func updateUIViewController(_ controller: Presenter, context: Context) {}
+    static func dismantleUIViewController(_ controller: Presenter, coordinator: Coordinator) {
+        trace(.dismantle, controller.picker)
+        coordinator.invalidate()
+        controller.retire()
+    }
+
+    /// UIKit owns a real modal presentation instead of embedding the document
+    /// service controller as SwiftUI sheet content. Keep its owner alive through
+    /// dismissal, then deliver the immutable ticket and let SwiftUI close us.
+    final class Presenter: UIViewController {
+        let picker: UIDocumentPickerViewController
+        private let coordinator: Coordinator
+        private var presentedPicker = false
+        private var retired = false
+
+        init(picker: UIDocumentPickerViewController, coordinator: Coordinator) {
+            self.picker = picker
+            self.coordinator = coordinator
+            super.init(nibName: nil, bundle: nil)
+            coordinator.retirement = { [weak self] completion in
+                self?.retire(completion: completion)
+            }
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            guard !presentedPicker, !retired else { return }
+            presentedPicker = true
+            // Keep the SwiftUI ticket host visible in the hierarchy; covering
+            // it must not trigger its external-removal cancellation boundary.
+            picker.modalPresentationStyle = .overFullScreen
+            present(picker, animated: true)
+        }
+        func retire(completion: (() -> Void)? = nil) {
+            retired = true
+            let retirement = Retirement(
+                isPresented: { [picker] in picker.presentingViewController != nil },
+                dismiss: { [picker] done in picker.dismiss(animated: true, completion: done) },
+                completion: { completion?() }
+            )
+            // A provider may already be dismissing when it calls the delegate.
+            // A cancelled/unregistered transition is not a dismissal receipt.
+            if picker.isBeingDismissed, let transition = picker.transitionCoordinator {
+                retirement.observe { done in
+                    transition.animate(alongsideTransition: nil) { context in done(context.isCancelled) }
+                }
+            } else {
+                retirement.dismiss()
+            }
+        }
+    }
+
+    /// The same decision boundary is exercised with held transition receipts in
+    /// tests. A callback alone is insufficient: the modal relationship must end.
+    final class Retirement {
+        private let isPresented: () -> Bool
+        private let requestDismiss: (@escaping () -> Void) -> Void
+        private let completion: () -> Void
+        private var dismissRequested = false
+        private var completed = false
+        init(isPresented: @escaping () -> Bool,
+             dismiss: @escaping (@escaping () -> Void) -> Void,
+             completion: @escaping () -> Void) {
+            self.isPresented = isPresented
+            self.requestDismiss = dismiss
+            self.completion = completion
+        }
+        func observe(_ register: (@escaping (Bool) -> Void) -> Bool) {
+            let registered = register { [self] cancelled in
+                if cancelled || isPresented() { dismiss() }
+                else { finish() }
+            }
+            if !registered { dismiss() }
+        }
+        func dismiss() {
+            guard !completed, !dismissRequested else { return }
+            guard isPresented() else { finish(); return }
+            dismissRequested = true
+            requestDismiss { [self] in
+                guard !isPresented() else { return }
+                finish()
+            }
+        }
+        private func finish() {
+            guard !completed else { return }
+            completed = true
+            completion()
+        }
     }
 
     private static func trace(_ stage: PickerFixtureJournal.Stage, _ controller: UIDocumentPickerViewController) {
@@ -67,6 +153,10 @@ struct MediaUploadPicker: UIViewControllerRepresentable {
         let selection: MediaUploadSelection
         private let completion: (MediaUploadSelection, [URL]?) -> Void
         private var delivered = false
+        private var invalidated = false
+        private var completed = false
+        var retirement: (@escaping () -> Void) -> Void = { $0() }
+        func invalidate() { invalidated = true }
         init(selection: MediaUploadSelection, completion: @escaping (MediaUploadSelection, [URL]?) -> Void) {
             self.selection = selection
             self.completion = completion
@@ -81,11 +171,15 @@ struct MediaUploadPicker: UIViewControllerRepresentable {
             finish(nil, controller: controller)
         }
         private func finish(_ urls: [URL]?, controller: UIDocumentPickerViewController) {
-            guard !delivered else { return }
+            guard !delivered, !invalidated else { return }
             delivered = true
-            MediaUploadPicker.trace(.completionBegin, controller)
-            completion(selection, urls)
-            MediaUploadPicker.trace(.completionEnd, controller)
+            retirement { [self, controller] in
+                guard !invalidated, !completed else { return }
+                completed = true
+                MediaUploadPicker.trace(.completionBegin, controller)
+                completion(selection, urls)
+                MediaUploadPicker.trace(.completionEnd, controller)
+            }
         }
     }
 }
