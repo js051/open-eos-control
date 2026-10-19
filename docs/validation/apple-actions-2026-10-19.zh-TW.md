@@ -69,3 +69,12 @@
 - Manual clear 修正以實際 store epoch／clear 成功與同批次 row UUID 判斷工作清單是否失去持久保存；不讓晚回覆蓋掉已完成批次警告，也不讓提交前失敗虛構 worklist 失效。補失敗清除仍保留 plan／ticket 並完成原始檔的負例。
 - 前連線警告 UI fixture 改成舊 Stop 失敗但 DELETE 204 已確認退役，再明確啟動新連線的 owned shutter；另留 DELETE 502 禁止重連負例。strict retirement guard 不變。
 - Bounded UI artifact 共 17 個 allowlisted 檔、2,069,730 bytes；Stop／Disconnect 幾何無重疊，仍有 unknown／重連旅程失敗待修，不能用診斷成功當 UI 全過。
+
+## 第六輪交付與下一批待驗
+
+- 第六輪 source `cd832197c5f10a7ea3a02690ed0de72e056e764a`，run https://github.com/js051/open-eos-control/actions/runs/39193227320 。原 hooks 通過且 dev exact SHA 讀回；Core 於 03:11:27 UTC 實跑 669 / 669 通過，App build 通過；App test 編譯在 MediaResponseOwnershipTests 的 Optional.map 產生巢狀 optional 而失敗，App/UI 尚未執行。下一批改 flatMap 保留 failable folder initializer，不 force unwrap。
+- 下一批針對第五輪實際失敗：三個 Live View peer 的 advertised JPEG endpoint 原本回 404／假 JPEG／JSON，改為既有 `rgb-baseline` 真向量。前景測試依既有產品契約先證沒有自動 frame／focus read，再明確 Start；原取消與 Stop 斷言保留。
+- Control ownership fixture 分開 generic session DELETE 與 maintenance-owned DELETE，精確驗原 session 一次、replacement 零次；影像等待同時等原資料與完整 frame timestamp；Bridge setting 的有效 unavailable readback receipt 仍驗不可消耗 draft、可明確 recover、單次 mutation，不誤當 transport exception。
+- Held AF 的 UIKit control 增加持久能力及 SwiftUI environment 上限，外部 enable 不能越過相機禁用。保留第五輪初始 disabled 真紅與 hosted 正向轉換，補外部 enable／disable、父層 disabled、顯式原 owner release 測試。此候選尚未經 UIKit 執行，不宣稱自動 touch cancellation。
+- Upload journey fake 僅對其已建立 exact session DELETE 回 204 空 body，未知／已退役／子路徑仍拒絕；補真 Bridge client close/reopen 及錯誤 DELETE 負例。OS picker 真選檔仍待原生驗證，未變更產品 Documents 可見性或注入 picker delegate。
+- 原 bounded exporter 增加四個既有合成 media UI 案例，仍固定 test／phase／control allowlist、總 24 MiB、PNG signature、大小與 symlink 限制。先凍結原 wait 結果再保存證據，斷言與 deadline 不變；47 個 Python CI helper 測試通過，原 source guard 保留並增加新 AF 負例存在檢查。

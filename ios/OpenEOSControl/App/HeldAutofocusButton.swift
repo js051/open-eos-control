@@ -27,7 +27,10 @@ struct HeldAutofocusButton: UIViewRepresentable {
         if let owner = context.coordinator.owner, !camera.ownsHeldAutofocus(owner) {
             context.coordinator.owner = nil
         }
-        button.isEnabled = camera.canStartHeldAutofocus || camera.heldAutofocusPressed || context.coordinator.owner != nil
+        button.setControlAdmission(
+            camera.canStartHeldAutofocus || camera.heldAutofocusPressed || context.coordinator.owner != nil,
+            environmentEnabled: context.environment.isEnabled
+        )
         button.isSelected = camera.heldAutofocusPressed
         button.tintColor = camera.heldAutofocusPressed ? .systemYellow : .white
         button.accessibilityLabel = language.string("held_autofocus")
@@ -58,6 +61,17 @@ struct HeldAutofocusButton: UIViewRepresentable {
 
 final class AccessibleFocusButton: UIButton {
     var activation: (() -> Void)?
+    private var resolvedAdmission = false
+
+    override var isEnabled: Bool {
+        get { super.isEnabled }
+        set { super.isEnabled = newValue && resolvedAdmission }
+    }
+
+    func setControlAdmission(_ admitted: Bool, environmentEnabled: Bool) {
+        resolvedAdmission = admitted && environmentEnabled
+        isEnabled = resolvedAdmission
+    }
     override func accessibilityActivate() -> Bool {
         guard isEnabled else { return false }
         activation?()

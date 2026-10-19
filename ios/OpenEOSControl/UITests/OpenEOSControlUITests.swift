@@ -484,7 +484,9 @@ final class OpenEOSControlUITests: XCTestCase {
                 try tapForAsyncTest(checkbox)
             }
             let menu = app.buttons["media-mutation-menu"]
-            _ = try XCTUnwrap(scrollToInteraction(menu, in: app, timeout: 8) ? true : nil)
+            let menuReady = scrollToInteraction(menu, in: app, timeout: 8)
+            recordMediaUIEvidence(in: app, phase: "metadata-menu", language: language)
+            _ = try XCTUnwrap(menuReady ? true : nil)
             try tapForAsyncTest(menu)
             try tapForAsyncTest(app.buttons["media-mutation-rating-menu"])
             try tapForAsyncTest(app.buttons["media-mutation-action-rating-5"])
@@ -809,8 +811,9 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertFalse(app.staticTexts["camera-model-status"].exists)
             XCTAssertFalse(app.buttons["release-shutter-button"].exists)
 
-            XCTAssertTrue(scrollConnectionButtonIntoView(in: app, timeout: 8))
+            let reconnectVisible = scrollConnectionButtonIntoView(in: app, timeout: 8)
             recordShutterRecoveryConnectGeometry(in: app, phase: "\(name)-before-reconnect")
+            XCTAssertTrue(reconnectVisible)
             assertConnectionButtonHitFrame(in: app)
             connect.tap()
             let reconnectDeadline = ProcessInfo.processInfo.systemUptime + 8
@@ -978,7 +981,9 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertTrue(scrollToInteraction(range, in: app, timeout: 8))
             range.tap()
             let apply = app.buttons["media-date-apply"]
-            XCTAssertTrue(waitForInteraction(apply, timeout: 5))
+            let applyReady = waitForInteraction(apply, timeout: 5)
+            recordMediaUIEvidence(in: app, phase: "date-reopen", language: language)
+            XCTAssertTrue(applyReady)
             apply.tap()
             let applied = app.staticTexts["media-date-range-applied"]
             XCTAssertTrue(applied.waitForExistence(timeout: 5))
@@ -1280,7 +1285,9 @@ final class OpenEOSControlUITests: XCTestCase {
 
         let filter = app.segmentedControls["media-filter"]
         XCTAssertTrue(filter.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["R6M3_0001.JPG"].exists)
+        let initialPhotoExists = app.staticTexts["R6M3_0001.JPG"].exists
+        recordMediaUIEvidence(in: app, phase: "grid-initial", language: "english")
+        XCTAssertTrue(initialPhotoExists)
         filter.buttons["Videos"].tap()
         XCTAssertTrue(app.staticTexts["R6M3_0002.MP4"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.staticTexts["R6M3_0001.JPG"].exists)
@@ -1864,7 +1871,9 @@ final class OpenEOSControlUITests: XCTestCase {
                     (state["record_stop_count"] as? NSNumber)?.intValue == 1
             }
             let status = app.staticTexts["capture-review-status"]
-            _ = try XCTUnwrap(waitForLabel(status, containing: notReady, timeout: 15) ? true : nil)
+            let reviewReady = waitForLabel(status, containing: notReady, timeout: 15)
+            recordMediaUIEvidence(in: app, phase: "recording-review", language: language)
+            _ = try XCTUnwrap(reviewReady ? true : nil)
             _ = try XCTUnwrap(latest.label.contains("EARLIER_RECORDING.MP4") && latest.label.contains(previousVideo) ? true : nil)
             let retry = app.buttons["capture-review-retry"]
             _ = try XCTUnwrap(waitForInteraction(retry, timeout: 5) ? true : nil)
@@ -2957,6 +2966,32 @@ final class OpenEOSControlUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
         addScreenshot(name: "shutter-recovery-connect-\(phase)")
+    }
+
+    private func recordMediaUIEvidence(in app: XCUIApplication, phase: String, language: String) {
+        guard ["metadata-menu", "recording-review", "date-reopen", "grid-initial"].contains(phase),
+              ["english", "traditionalChinese"].contains(language) else { return }
+        var lines = ["[OEC_MEDIA_UI_GEOMETRY] \(phase)-\(language)", "window=\(app.windows.firstMatch.frame)"]
+        for identifier in [
+            "media-mutation-menu", "media-date-range", "media-date-apply", "media-date-cancel",
+            "media-filter", "capture-review-status", "capture-review-retry", "latest-media-button",
+            "media-library-summary-complete", "media-library-summary-failed",
+        ] {
+            let matches = app.descendants(matching: .any).matching(identifier: identifier)
+            lines.append("\(identifier) count=\(matches.count)")
+            for (index, element) in matches.allElementsBoundByIndex.prefix(4).enumerated() {
+                lines.append("\(identifier)[\(index)] enabled=\(element.isEnabled) hittable=\(element.isHittable) frame=\(element.frame)")
+            }
+        }
+        lines.append("synthetic-photo-exists=\(app.staticTexts["R6M3_0001.JPG"].exists)")
+        lines.append("synthetic-video-exists=\(app.staticTexts["R6M3_0002.MP4"].exists)")
+        lines.append("date-start-exists=\(app.datePickers["media-date-start"].exists)")
+        lines.append("date-end-exists=\(app.datePickers["media-date-end"].exists)")
+        let attachment = XCTAttachment(string: lines.joined(separator: "\n"))
+        attachment.name = "media-ui-\(phase)-\(language)-geometry"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        addScreenshot(name: "media-ui-\(phase)-\(language)")
     }
 
     private func waitForConnectionScreen(in app: XCUIApplication, timeout: TimeInterval) -> Bool {

@@ -8,6 +8,7 @@ actor BridgeUploadJourneyFixture: CameraHTTPTransport {
     private let mode: String
     private var nextSession = 0
     private var uploads = 0
+    private var sessions = Set<String>()
     init(mode: String) { self.mode = mode }
 
     static func seedPickerFile() throws -> URL {
@@ -25,9 +26,18 @@ actor BridgeUploadJourneyFixture: CameraHTTPTransport {
         if path == "/health" { return json(["ok": true, "service": "open-eos-control-bridge", "version": "synthetic"]) }
         if path == "/v1/session", method == "POST" {
             nextSession += 1
-            return json(["id": "upload-ui-\(nextSession)", "engine": "libgphoto2"], status: 201)
+            let id = "upload-ui-\(nextSession)"
+            sessions.insert(id)
+            return json(["id": id, "engine": "libgphoto2"], status: 201)
         }
-        if method == "DELETE" { return json(["ok": true]) }
+        if method == "DELETE" {
+            let components = path.split(separator: "/").map(String.init)
+            guard components.count == 3, components[0] == "v1", components[1] == "session",
+                  path == "/v1/session/" + components[2],
+                  request.url?.query == nil, request.url?.fragment == nil,
+                  sessions.remove(components[2]) != nil else { throw URLError(.unsupportedURL) }
+            return CameraHTTPResponse(statusCode: 204, body: Data())
+        }
         if path.hasSuffix("/info") {
             return json(["connected": true, "model": "Synthetic upload camera \(nextSession)", "serial": "SYNTHETIC", "api": "fixture"])
         }

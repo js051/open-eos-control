@@ -821,7 +821,7 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
         item = CameraMediaItem(id: "collision", name: "COLLISION.JPG", kind: "image",
             sizeBytes: listedSize, previewAvailable: true,
             protected: false, rating: rating, rotationDegrees: 0, archived: false,
-            contentType: "image/jpeg", folder: folder.map { CameraMediaFolder(id: $0, label: $0) })
+            contentType: "image/jpeg", folder: folder.flatMap { CameraMediaFolder(id: $0, label: $0) })
     }
 
     func enqueue(_ operation: OwnershipOperation, gate: String? = nil, error: URLError.Code? = nil, body: Data? = nil) {

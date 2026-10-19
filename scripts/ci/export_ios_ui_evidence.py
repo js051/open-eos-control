@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export bounded, synthetic-only shutter recovery evidence.
+"""Export bounded, synthetic-only recovery and media evidence.
 
 The Apple-only dev workflow invokes this helper after its existing tests. It reads
 an existing result bundle only; it neither runs tests nor changes their outcome.
@@ -25,7 +25,18 @@ TESTS = (
     "testPreviousConnectionWarningStaysSeparateFromNewConnectionStop",
     "testShutterRecoveryStopRemainsReachableAcrossLanguagesFontsAndRotation",
     "testRecoverySheetStopAndDisconnectHaveIndependentHitTargets",
+    "testCanonicalMetadataBatchReviewCancellationAndExactReadbackInBothLanguages",
+    "testCanonicalRecordingStopReviewsNewlyVisibleVideoAndPreparesOriginalInBothLanguages",
+    "testOfflineMediaDateRangeApplyCancelAndClearInBothLanguages",
+    "testOfflineMediaGridFiltersPhotosAndVideos",
 )
+MEDIA_PHASES = dict(zip(TESTS[3:], ("metadata-menu", "recording-review", "date-reopen", "grid-initial")))
+MEDIA_CONTROLS = (
+    "media-mutation-menu", "media-date-range", "media-date-apply", "media-date-cancel",
+    "media-filter", "capture-review-status", "capture-review-retry", "latest-media-button",
+    "media-library-summary-complete", "media-library-summary-failed",
+)
+
 HIT_TARGET_CASES = (
     "english-UICTContentSizeCategoryXS-1-active",
     "english-UICTContentSizeCategoryXS-3-unknown",
@@ -124,6 +135,8 @@ def attachment_name(suggested: object, test: str) -> str | None:
         base = (rf"(?:shutter-recovery-disconnect-{cases}-before-disconnect(?:-geometry)?|"
                 rf"shutter-recovery-connect-{cases}-{reconnect}(?:-geometry)?|"
                 rf"shutter-recovery-sheet-stop-{cases})")
+    elif test in MEDIA_PHASES:
+        base = rf"media-ui-{MEDIA_PHASES[test]}-(?:english|traditionalChinese)(?:-geometry)?"
     else:
         return None
     # Xcode may append a counter/UUID and a file extension to the supplied name.
@@ -180,6 +193,16 @@ def geometry_text(data: bytes) -> bytes:
             rf"{buttons} count=\d+",
             rf"{buttons}\[[0-3]\] enabled=(?:true|false) hittable=(?:true|false) frame={rect}",
             rf"{peers}\[[0-3]\] connect-overlap={rect} contains-connect-center=(?:true|false)",
+        )
+    if lines and lines[0].startswith("[OEC_MEDIA_UI_GEOMETRY]"):
+        phases = "|".join(map(re.escape, MEDIA_PHASES.values()))
+        controls = "|".join(map(re.escape, MEDIA_CONTROLS))
+        patterns = (
+            rf"\[OEC_MEDIA_UI_GEOMETRY\] (?:{phases})-(?:english|traditionalChinese)",
+            rf"window={rect}",
+            rf"(?:{controls}) count=\d+",
+            rf"(?:{controls})\[[0-3]\] enabled=(?:true|false) hittable=(?:true|false) frame={rect}",
+            r"(?:synthetic-photo|synthetic-video|date-start|date-end)-exists=(?:true|false)",
         )
     if not lines or len(lines) > 128 or any(
         not any(re.fullmatch(pattern, line) for pattern in patterns) for line in lines
@@ -239,7 +262,7 @@ def collect_attachments(staging: Path, output: Path, test: str, report: dict,
 
 
 def export_evidence(bundle: Path, output: Path, run=command) -> dict:
-    report = {"scope": "Synthetic iOS Simulator shutter recovery; no physical-camera validation",
+    report = {"scope": "Synthetic iOS Simulator recovery and media; no physical-camera validation",
               "status": "incomplete", "tests": {}, "files": [], "bytes": 0, "warnings": []}
     if not bundle.is_dir():
         report["warnings"].append("No xcresult bundle; tests may not have started")
@@ -255,7 +278,7 @@ def export_evidence(bundle: Path, output: Path, run=command) -> dict:
         tests = selected_tests(read_json(run(["get", "test-results", "tests", "--path", str(bundle)])))
         # Prioritize direct Stop/Disconnect hit-target proof, then the previous
         # connection flow, then four representative language/font/orientation PNGs.
-        for test in (TESTS[2], TESTS[0], TESTS[1]):
+        for test in (TESTS[2], TESTS[0], TESTS[1], *TESTS[3:]):
             if test not in tests:
                 report["warnings"].append(f"Test not found in xcresult: {test}")
                 continue
@@ -282,11 +305,11 @@ def export_evidence(bundle: Path, output: Path, run=command) -> dict:
 
 def write_summary(output: Path, report: dict) -> None:
     # Never dump test logs, failure messages, device IDs, raw manifests or metadata.
-    lines = ["# iOS shutter recovery UI evidence", "", report["scope"], "",
+    lines = ["# iOS recovery and media UI evidence", "", report["scope"], "",
              f"Evidence status: {report['status']}",
              f"Exported {len(report['files'])} files / {report['bytes']} bytes (24 MiB artifact cap).",
              "Test outcomes below are independent of evidence export success.",
-             "Manual export only: this helper does not run tests or arrange artifact uploads.",
+             "This exporter does not run tests or change their results; the workflow retains the original xcresult.",
              "Selected evidence includes up to four representative matrix PNGs from the supplied bundle.", ""]
     lines.extend(f"- {test}: {', '.join(results)}" for test, results in report["tests"].items())
     lines.extend(f"- Warning: {warning}" for warning in dict.fromkeys(report["warnings"]))

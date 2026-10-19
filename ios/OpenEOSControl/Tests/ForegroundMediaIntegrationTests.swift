@@ -1069,6 +1069,9 @@ private actor ForegroundIntegrationPeer: CameraForegroundHTTPTransport {
             return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: Self.original)
         } else if url.path.hasSuffix("/shooting/control/shutterbutton") {
             object = [:]
+        } else if liveView, request.httpMethod == "GET",
+                  url.path == "/ccapi/ver140/shooting/liveview/flip" {
+            return CameraHTTPResponse(statusCode: 200, headers: ["content-type": "image/jpeg"], body: Self.original)
         } else if liveView, url.path.hasSuffix("/shooting/liveview") {
             object = [:]
         } else {
