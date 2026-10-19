@@ -1,0 +1,124 @@
+# Supplemental Linux desktop-only dev validation; never substitutes for PR ci-complete.
+name: Desktop dev validation
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'bridge/**'
+      - 'simulator/**'
+      - 'contracts/**'
+      - '.github/workflows/desktop-dev.yml'
+      - '.github/workflows/android.yml'
+      - '.gitleaks.toml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Scan repository history for secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="gitleaks_8.30.1_linux_x64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/$archive"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/$archive" \
+            | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git . \
+            --config .gitleaks.toml \
+            --redact \
+            --no-banner \
+            --no-color \
+            --timeout 300
+
+      - name: Validate GitHub Actions workflows
+        run: bash scripts/ci/run-actionlint.sh
+
+  desktop-bridge:
+    needs: secret-scan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bridge
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: bridge/package-lock.json
+
+      - name: Install bridge and test dependencies
+        run: |
+          python -m pip install build==1.5.0 -e ".[dev]"
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Lint desktop bridge
+        run: ruff check --no-cache . ../scripts/validation
+
+      - name: Check desktop control scripts
+        run: |
+          node --check open_eos_bridge/static/icons.js
+          node --check open_eos_bridge/static/diagnostics.js
+          node --check open_eos_bridge/static/monitoring.js
+          node --check open_eos_bridge/static/local-video.js
+          node --check open_eos_bridge/static/rtp-audio.js
+          node --check open_eos_bridge/static/media-transfer.js
+          node --check open_eos_bridge/static/app.js
+          npm run test:modules
+
+      - name: Test desktop browser control
+        run: npm run test:browser
+
+      - name: Test desktop bridge contract
+        run: pytest -q -p no:cacheprovider
+
+      - name: Build Desktop Bridge release candidate
+        run: python -m build --outdir ../dist
+
+      - name: Upload Desktop Bridge release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-desktop-bridge
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+      - name: Upload desktop browser screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-browser-screenshots
+          path: bridge/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
+
