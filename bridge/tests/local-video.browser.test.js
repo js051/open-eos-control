@@ -295,7 +295,15 @@ async function run() {
     const pageErrors = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     page.on("console", (message) => {
-      if (message.type() === "error") pageErrors.push(message.text());
+      if (message.type() === "error") {
+        pageErrors.push(message.text());
+        const location = message.location();
+        const source = location.url === origin + "/app/app.js" ? "app.js" :
+          location.url === origin + "/" ? "document" : "other";
+        console.log("OEC_CONSOLE_ERROR_LOCATION", JSON.stringify({
+          source, line: location.lineNumber, column: location.columnNumber,
+        }));
+      }
     });
     await page.goto(origin, { waitUntil: "networkidle" });
     await page.waitForFunction(() => document.querySelectorAll("#camera-select option").length > 1);
