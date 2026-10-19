@@ -100,11 +100,24 @@ class CaptureModeActionSourceTests(unittest.TestCase):
     def test_native_journeys_preserve_selection_and_single_write_checks(self):
         source = UI_TESTS.read_text()
         self.assertNotIn('app.segmentedControls["capture-mode-picker"]', source)
-        self.assertEqual(source.count('app.otherElements["capture-mode-picker"]'), 4)
+        self.assertEqual(source.count('app.otherElements["capture-mode-picker"]'), 5)
         self.assertIn("segment.isSelected && !mode.buttons[other].isSelected", source)
         self.assertIn("mode.buttons[videoMode].isSelected && !photo.isSelected", source)
-        self.assertIn("XCTAssertGreaterThanOrEqual(segment.frame.height, 44)", source)
+        self.assertIn("XCTAssertGreaterThanOrEqual(segment.frame.height + 0.000_001, 44)", source)
         self.assertIn('(state["movie_mode_update_count"] as? NSNumber)?.intValue == 2', source)
+
+
+    def test_white_balance_uses_exposed_image_point_without_replay(self):
+        source = UI_TESTS.read_text()
+        region = source.split("let whiteBalanceOffset =", 1)[1].split("try openMoreActionsForAsyncTest(in: app)", 1)[0]
+        self.assertIn("CGVector(dx: 0.35, dy: 0.25)", region)
+        self.assertIn("imageFrame.contains(whiteBalancePoint)", region)
+        self.assertIn("whiteBalancePoint.y, modeHUD.frame.minY - 8", region)
+        self.assertIn("XCTAssertFalse(control.frame.contains(whiteBalancePoint))", region)
+        self.assertEqual(region.count("tapForAsyncTest("), 1)
+        self.assertIn('Int == 1', region)
+        self.assertIn('String == "click"', region)
+        self.assertIn("throw error", region)
 
 
 if __name__ == "__main__":

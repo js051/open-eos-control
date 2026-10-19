@@ -214,3 +214,11 @@
 - bounded artifact `12204204724` SHA256 `c0dacc8fa023b5f67b9001dae69bf5a93010e113ce9e7fc595abc1aff817f0d0` 已下載核實。繁中 journal 依序 touchBegan=video、pickerSelection=photo，busy／Stop 均 false；前後幾何相同，Apply 存在但 disabled。這把缺口定位到觸點與 Picker binding 選取之間，未證明 UIKit 內部根因。
 - 第25輪候選將隱式 segmented Picker binding 改為兩個固定 enum 的明確 Button action；只更新 draft/revision，原能力禁止、Apply 的 session／owner／revision 防護保留。維持選取態、雙語標籤，提供至少44pt標籤觸控高度。
 - 原 native UI 單點擊、selected 正反例、Apply位置、單次模式寫入與錄影計數不變；query 改為實際 contain 群組。新增44pt／兩個按鈕、選取不自動寫入、錄影中禁止選取斷言。這些新原生斷言仍待 Apple 執行；本地來源守門與 Swift parse 不代表 AX 或觸控成功。被動 probe/journal 留在同原合成測試範圍，仍可能影響排程。
+
+## 第二十五輪真結果與第二十六輪幾何前提修正
+
+- run `39329416740`／`b3b7d5ed8ad4ac6a162d8e77a8929e85c39514bc`：App 828/828 通過；UI 43 案有 2 案、5 個 assertion 失敗，22:27:31 UTC 結束。原 picker／metadata／日期旅程通過。模式新 action 尚未走到有效選取驗收，不能宣稱已修好。
+- Canonical English 在點選前的44pt斷言讀到 `43.99999999999994`；後續 helper 因既有 issue 停止。僅此新增三個模式高度斷言沿用既有幾何 `1e-6` 表示誤差容差，仍要求44pt，沒有縮小觸控目標。
+- Direct WB 之前 decoded image `(0,338,402,226)`；舊比例點 `.35,.65` 位於 `(140.7,484.9)`，被模式列 y471.67–519.67 覆蓋，故原 count=1／white_balance=click 未成立。原 portrait 就是全圖 ZStack 疊底部 HUD；新 selector 從38pt至48pt增10pt，底部panel從約y463.67開始。此固定畫面仍有約125.67pt、56%整寬影像可見，上方quarter點 `(140.7,394.5)` 距panel約69pt。HUD原有上下拖曳隱藏功能；沒有改動產品viewport或聲稱改善其尺寸。
+- 測試改選該真可見影像點，先驗 image／interaction 包含，且點在模式列頂部padding上方、不落在固定上方／Apply／receipt按鈕內。保留單次原生tap、原count=1／click／20秒結果與原錯誤，無重試。下一 Apple 真結果才可確認此前提與模式兩語旅程。
+- bounded artifact `12226840808`，5,057,634 bytes，SHA256 `73b3b272f56d980701bce7aa4eb4b82bf805eca924e7caf93397c276c593ae4f` 已驗。完整xcresult未下載；幾何與固定合成截圖已足以支持上述兩個狹義結論。

@@ -1460,10 +1460,24 @@ final class OpenEOSControlUITests: XCTestCase {
         _ = try XCTUnwrap(tapAction.waitForNonExistence(timeout: 5) ? true : nil)
         _ = try XCTUnwrap((waitForInteraction(liveViewInteraction, timeout: 8)) ? true : nil)
         _ = try XCTUnwrap(liveView.exists && liveView.frame.width > 0 && liveView.frame.height > 0 ? true : nil)
-        // The interaction container includes letterboxing and the HUD. A camera
-        // coordinate must be selected within the actual decoded image rectangle.
-        XCTAssertTrue(liveViewInteraction.frame.contains(liveView.frame))
-        try tapForAsyncTest(liveView.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)))
+        // Portrait controls intentionally overlay the lower image. Select an
+        // exposed image point, not the old lower point now occupied by the HUD.
+        let imageFrame = liveView.frame
+        let whiteBalanceOffset = CGVector(dx: 0.35, dy: 0.25)
+        let whiteBalancePoint = CGPoint(x: imageFrame.minX + imageFrame.width * whiteBalanceOffset.dx,
+                                       y: imageFrame.minY + imageFrame.height * whiteBalanceOffset.dy)
+        XCTAssertTrue(liveViewInteraction.frame.contains(imageFrame))
+        XCTAssertTrue(imageFrame.contains(whiteBalancePoint))
+        let modeHUD = app.otherElements["capture-mode-picker"]
+        _ = try XCTUnwrap(modeHUD.exists ? true : nil)
+        // PortraitControlPanel has eight points of padding above the selector.
+        XCTAssertLessThan(whiteBalancePoint.y, modeHUD.frame.minY - 8)
+        for identifier in ["more-actions-button", "autofocus-button", "capture-mode-apply",
+                           "shooting-setting-open-result"] {
+            let control = app.buttons[identifier]
+            if control.exists { XCTAssertFalse(control.frame.contains(whiteBalancePoint)) }
+        }
+        try tapForAsyncTest(liveView.coordinate(withNormalizedOffset: whiteBalanceOffset))
         do {
             try await waitForSimulatorState { state in
                 (state["click_white_balance"] as? [String: Any])?["count"] as? Int == 1 &&
@@ -1907,8 +1921,8 @@ final class OpenEOSControlUITests: XCTestCase {
             _ = try XCTUnwrap(waitForInteraction(mode.buttons[videoMode], timeout: 8) ? true : nil)
             let photo = mode.buttons[language == "english" ? "Photo" : "拍照"]
             XCTAssertEqual(mode.buttons.count, 2)
-            XCTAssertGreaterThanOrEqual(photo.frame.height, 44)
-            XCTAssertGreaterThanOrEqual(mode.buttons[videoMode].frame.height, 44)
+            XCTAssertGreaterThanOrEqual(photo.frame.height + 0.000_001, 44)
+            XCTAssertGreaterThanOrEqual(mode.buttons[videoMode].frame.height + 0.000_001, 44)
             XCTAssertTrue(photo.isSelected, "The mode switch starts with the Photo segment selected")
             XCTAssertFalse(mode.buttons[videoMode].isSelected)
             let pickerFrameBeforeSelection = mode.frame
@@ -2378,7 +2392,7 @@ final class OpenEOSControlUITests: XCTestCase {
         _ = try XCTUnwrap(interactive ? true : nil)
         XCTAssertEqual(segments.count, 1)
         XCTAssertEqual(mode.buttons.count, 2)
-        XCTAssertGreaterThanOrEqual(segment.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(segment.frame.height + 0.000_001, 44)
         let pickerFrameBeforeSelection = mode.frame
         try tapForAsyncTest(segment)
         let selected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
