@@ -103,8 +103,25 @@ class MediaDateReviewSourceTests(unittest.TestCase):
         self.assertNotIn("contains(captureDate:", match)
         self.assertIn("private let dateFilterTimeZone = MediaCaptureDate.carrierTimeZone", view)
         self.assertIn("calendar = Calendar(identifier: .iso8601)", view)
-        self.assertIn("dateFilterStart = camera.mediaDateRange?.startDayCarrier", view)
-        self.assertIn("dateFilterEnd = camera.mediaDateRange?.endDayCarrier", view)
+        for required in (
+            "@State private var dateFilterPresentation: MediaDateFilterPresentation?",
+            ".sheet(item: $dateFilterPresentation)",
+            "initialStart = range?.startDayCarrier", "initialEnd = range?.endDayCarrier",
+            "State(initialValue: presentation.initialStart)",
+            "State(initialValue: presentation.initialEnd)",
+            "dateFilterPresentation?.id == opening.id",
+            "dateFilterPresentation?.id == closingID",
+            "opening.admits(range, currentOwner: camera.mediaLibrarySessionID)",
+            "camera.setMediaDateRange(range, owner: opening.owner)",
+            "range != nil && owner == currentOwner",
+        ):
+            self.assertIn(required, view)
+        date_tests = (TESTS / "MediaDateFilterOwnershipTests.swift").read_text()
+        for name in ("testDatePresentationCapturesOneOwnerAndViewerDayAsLiteralCarriers",
+                     "testDatePresentationReopenHasFreshIdentityAndUsesOnlyAppliedRange",
+                     "testDatePresentationRejectsInvalidRangeAndDifferentOwner",
+                     "testDatePresentationNeverAdoptsReplacementSessionOwner"):
+            self.assertIn(name, date_tests)
         self.assertIn(".NSSystemTimeZoneDidChange", root)
         self.assertIn("if active { refreshMediaDateDisplayZone() }", state)
         refresh = state.split("func refreshMediaDateDisplayZone(", 1)[1].split("\n    }", 1)[0]

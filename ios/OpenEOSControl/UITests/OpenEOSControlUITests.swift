@@ -488,8 +488,12 @@ final class OpenEOSControlUITests: XCTestCase {
             recordMediaUIEvidence(in: app, phase: "metadata-menu", language: language)
             _ = try XCTUnwrap(menuReady ? true : nil)
             try tapForAsyncTest(menu)
-            try tapForAsyncTest(app.buttons["media-mutation-rating-menu"])
-            try tapForAsyncTest(app.buttons["media-mutation-action-rating-5"])
+            let ratingMenu = app.buttons["media-mutation-rating-menu"]
+            _ = try XCTUnwrap(waitForInteraction(ratingMenu, timeout: 5) ? true : nil)
+            try tapForAsyncTest(ratingMenu)
+            let ratingAction = app.buttons["media-mutation-action-rating-5"]
+            _ = try XCTUnwrap(waitForInteraction(ratingAction, timeout: 5) ? true : nil)
+            try tapForAsyncTest(ratingAction)
             let cancel = app.buttons["media-mutation-review-cancel"]
             _ = try XCTUnwrap(waitForInteraction(cancel, timeout: 5) ? true : nil)
             addScreenshot(name: "media-metadata-batch-review-\(language)")
@@ -501,9 +505,13 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertFalse(app.buttons["media-mutation-cancel"].exists)
             _ = try XCTUnwrap(scrollToInteraction(menu, in: app, timeout: 8) ? true : nil)
             try tapForAsyncTest(menu)
-            try tapForAsyncTest(app.buttons["media-mutation-rating-menu"])
-            try tapForAsyncTest(app.buttons["media-mutation-action-rating-5"])
-            try tapForAsyncTest(app.buttons["media-mutation-confirm"])
+            _ = try XCTUnwrap(waitForInteraction(ratingMenu, timeout: 5) ? true : nil)
+            try tapForAsyncTest(ratingMenu)
+            _ = try XCTUnwrap(waitForInteraction(ratingAction, timeout: 5) ? true : nil)
+            try tapForAsyncTest(ratingAction)
+            let confirm = app.buttons["media-mutation-confirm"]
+            _ = try XCTUnwrap(waitForInteraction(confirm, timeout: 5) ? true : nil)
+            try tapForAsyncTest(confirm)
             for path in paths {
                 let result = app.descendants(matching: .any)["media-mutation-result-" + path].firstMatch
                 _ = try XCTUnwrap(scrollToInteraction(result, in: app, timeout: 8) ? true : nil)
@@ -1409,8 +1417,13 @@ final class OpenEOSControlUITests: XCTestCase {
         _ = try XCTUnwrap((tapAction.waitForExistence(timeout: 5)) ? true : nil)
         guard try selectLiveViewTapAction(.whiteBalance, in: app, phase: "direct-ccapi") else { return }
         try tapForAsyncTest(app.buttons["Done"])
+        _ = try XCTUnwrap(tapAction.waitForNonExistence(timeout: 5) ? true : nil)
         _ = try XCTUnwrap((waitForInteraction(liveViewInteraction, timeout: 8)) ? true : nil)
-        try tapForAsyncTest(liveViewInteraction.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)))
+        _ = try XCTUnwrap(liveView.exists && liveView.frame.width > 0 && liveView.frame.height > 0 ? true : nil)
+        // The interaction container includes letterboxing and the HUD. A camera
+        // coordinate must be selected within the actual decoded image rectangle.
+        XCTAssertTrue(liveViewInteraction.frame.contains(liveView.frame))
+        try tapForAsyncTest(liveView.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.65)))
         do {
             try await waitForSimulatorState { state in
                 (state["click_white_balance"] as? [String: Any])?["count"] as? Int == 1 &&
@@ -1832,7 +1845,17 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertTrue(photo.isSelected, "The mode switch starts with the Photo segment selected")
             XCTAssertFalse(mode.buttons[videoMode].isSelected)
             try tapForAsyncTest(mode.buttons[videoMode])
-            try tapForAsyncTest(app.buttons["capture-mode-apply"])
+            let selectedVideo = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                mode.buttons[videoMode].isSelected && !photo.isSelected
+            }, object: nil)
+            let selectionReady = XCTWaiter.wait(for: [selectedVideo], timeout: 5) == .completed
+            if !selectionReady { recordMediaUIEvidence(in: app, phase: "recording-review", language: language) }
+            _ = try XCTUnwrap(selectionReady ? true : nil)
+            let applyMode = app.buttons["capture-mode-apply"]
+            let applyModeReady = waitForInteraction(applyMode, timeout: 5)
+            if !applyModeReady { recordMediaUIEvidence(in: app, phase: "recording-review", language: language) }
+            _ = try XCTUnwrap(applyModeReady ? true : nil)
+            try tapForAsyncTest(applyMode)
             do {
                 try await waitForSimulatorState { state in state["movie_mode"] as? String == "on" }
             } catch {
@@ -1871,6 +1894,7 @@ final class OpenEOSControlUITests: XCTestCase {
                 attachment.lifetime = .keepAlways
                 add(attachment)
                 addScreenshot(name: "recording-mode-failure-\(language)")
+                recordMediaUIEvidence(in: app, phase: "recording-review", language: language)
                 throw error
             }
             let record = app.buttons["record-button"]
@@ -3013,6 +3037,7 @@ final class OpenEOSControlUITests: XCTestCase {
             "media-library-summary-complete", "media-library-summary-failed",
             "live-view-interaction-surface", "live-view-decoded-frame", "live-view-start-again-button",
             "more-actions-button", "live-view-tap-action-control",
+            "capture-mode-picker", "capture-mode-apply",
         ] {
             let matches = app.descendants(matching: .any).matching(identifier: identifier)
             lines.append("\(identifier) count=\(matches.count)")

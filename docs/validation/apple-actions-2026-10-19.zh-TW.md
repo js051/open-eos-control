@@ -89,3 +89,13 @@
 - Metadata 的有界命令 header 改 eager，歷史 rows 保持 lazy；離線格／刪除測試實際捲到原 JPG 再驗證，不能因下方 lazy cell 尚未建立就判不存在。
 - Canon direct 沒有已核實 REC GET，原錄影 UI 的 ACK 不可冒稱 fresh false。保留 Canon unavailable／零 review／單 REC/STOP 負例，完整正向 review／原片準備改用原 simulator-status 模式，不能把此結果報成 Canon 真錄影 readback。
 - 同一 bounded artifact 增加既有 direct-controls 白平衡失敗畫面與固定幾何，保留原 count==1／狀態／deadline 失敗；仍總 24 MiB、固定 8 tests／5 media phases、PNG/text limits 與 symlink 檢查。48 個 CI helpers 本地通過。OS Files provider 可見性仍未更改，真 picker 選檔門檻保留。
+
+## 第八輪原生結果與第九輪候選
+
+- 第八輪 source `dc533b858da09eec7e4174867ae53f252cadbfed`，run https://github.com/js051/open-eos-control/actions/runs/39198652632 。Core、secret scan、App build 通過；2026-10-19 04:28 UTC App **821/821** 全過，包括 pending Start 結算後不得自動重送 failed Stop 的確定性雙 caller 回歸。UI 43 個案例仍有 6 個失敗案例／8 個失敗斷言，未達完整 Apple 驗收。
+- UI recovery landscape／重連、離線格與刪除旅程已通過。剩餘為日期 Apply、metadata 子選單、白平衡點選、繁中錄影模式切換，以及兩個原 OS picker 旅程。
+- 日期改用單一 identifiable presentation 保存開啟時 owner／初始日期，sheet 內持有 local draft；舊 presentation 的 Cancel／Apply 不能消耗新 opening，Apply 仍需原 session owner 與 setter 成功。補四個 owner／日期 model 測試；保留唯一且 enabled Apply 的原 UI 門檻。重複 AX 節點本身不能證明 owner 為 nil，修正仍待真 UI 執行。
+- 白平衡失敗圖證明原 surface 比例點在 decoded image 下方；改用真正 image frame 的比例點，保留單次 mutation、精確狀態與原 deadline。metadata 每次子選單先等待實際互動；錄影切換先驗 Video 已選定及 Apply 可互動，原 movie-mode/count 斷言不變。錄影失敗僅能確證 canonical 繁中沒有送出模式寫入，UI 同步候選尚待 Apple。
+- 固定診斷新增 capture-mode picker／Apply 幾何，不收未知 label 或 URL，原 test/phase allowlist、24 MiB 與 PNG/text/symlink 限制不變。
+- OS picker 使用 fresh CI runner 的合成 Documents：僅 test xcodebuild 指定 application-target 專用 plist 變數與獨立 `.derived-data-ui`；正常 build／Release 預設仍指原 `App/Info.plist`。原檔未新增分享設定。測試 plist 由 exclusive create 產生並保存 hash；always verifier 檢查原檔未變、正常 app 未曝光 Documents、test app 才啟用兩個可見性 keys 且 bundle ID 相符。保留原 native picker 和取消／選檔負例，無 delegate 注入。
+- Linux 完整 219 個 source guards 與 57 個 CI helper tests 通過，三個修改 Swift 檔語法 parse 通過。日期 source guard 的舊 assignment 字串失敗已保留，更新為 presentation identity／owner／literal carrier／local draft 必要檢查，原 DST／時區與 session 防護檢查不變。這些結果不替代第九輪 Xcode typecheck、UIKit 或 OS picker 執行。

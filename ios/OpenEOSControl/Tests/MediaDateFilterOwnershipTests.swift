@@ -212,6 +212,92 @@ final class MediaDateFilterOwnershipTests: XCTestCase {
         }
     }
 
+    func testDatePresentationCapturesOneOwnerAndViewerDayAsLiteralCarriers() throws {
+        let owner = UUID()
+        let utcDay = try XCTUnwrap(MediaCaptureDate.dayCarrier("2026-08-13"))
+        let now = utcDay.addingTimeInterval(16 * 3600 + 30 * 60)
+        let zone = try XCTUnwrap(TimeZone(identifier: "Asia/Taipei"))
+        let opening = MediaDateFilterPresentation(owner: owner, range: nil, displayZone: zone, now: now)
+        let expected = try XCTUnwrap(MediaCaptureDate.dayCarrier("2026-08-14"))
+        XCTAssertEqual(opening.owner, owner)
+        XCTAssertEqual(opening.initialStart, expected)
+        XCTAssertEqual(opening.initialEnd, expected)
+        let range = try XCTUnwrap(MediaDateRange(startDate: opening.initialStart,
+            endDate: opening.initialEnd, timeZone: MediaCaptureDate.carrierTimeZone))
+        XCTAssertEqual(range.startDayKey, "2026-08-14")
+        XCTAssertEqual(range.endDayKey, "2026-08-14")
+        XCTAssertTrue(opening.admits(range, currentOwner: owner))
+    }
+
+    func testDatePresentationReopenHasFreshIdentityAndUsesOnlyAppliedRange() throws {
+        try withState { state in
+            state.openOfflinePreview()
+            let owner = state.mediaLibrarySessionID
+            let saved = try makeRange()
+            XCTAssertTrue(state.setMediaDateRange(saved, owner: owner))
+            let opening = MediaDateFilterPresentation(owner: owner, range: state.mediaDateRange,
+                displayZone: state.mediaDateDisplayZone)
+            // These are sheet-local edits. Merely constructing a draft cannot apply them.
+            let editedStart = opening.initialStart.addingTimeInterval(172800)
+            let editedEnd = opening.initialEnd.addingTimeInterval(259200)
+            let edited = try XCTUnwrap(MediaDateRange(startDate: editedStart, endDate: editedEnd,
+                timeZone: MediaCaptureDate.carrierTimeZone))
+            XCTAssertTrue(opening.admits(edited, currentOwner: owner))
+            XCTAssertNotEqual(edited, saved)
+            XCTAssertEqual(state.mediaDateRange, saved)
+            let reopened = MediaDateFilterPresentation(owner: owner, range: state.mediaDateRange,
+                displayZone: try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles")))
+            XCTAssertNotEqual(reopened.id, opening.id)
+            XCTAssertEqual(reopened.owner, opening.owner)
+            XCTAssertEqual(opening.initialStart, saved.startDayCarrier)
+            XCTAssertEqual(opening.initialEnd, saved.endDayCarrier)
+            XCTAssertEqual(reopened.initialStart, saved.startDayCarrier)
+            XCTAssertEqual(reopened.initialEnd, saved.endDayCarrier)
+            XCTAssertEqual(state.mediaDateRange, saved)
+        }
+    }
+
+    func testDatePresentationRejectsInvalidRangeAndDifferentOwner() throws {
+        let owner = UUID()
+        let saved = try makeRange()
+        let opening = MediaDateFilterPresentation(owner: owner, range: saved,
+            displayZone: MediaCaptureDate.carrierTimeZone)
+        let reversed = MediaDateRange(startDate: opening.initialStart.addingTimeInterval(86400),
+            endDate: opening.initialEnd, timeZone: MediaCaptureDate.carrierTimeZone)
+        XCTAssertNil(reversed)
+        XCTAssertFalse(opening.admits(reversed, currentOwner: owner))
+        XCTAssertFalse(opening.admits(nil, currentOwner: owner))
+        XCTAssertFalse(opening.admits(saved, currentOwner: UUID()))
+        XCTAssertTrue(opening.admits(saved, currentOwner: owner))
+    }
+
+    func testDatePresentationNeverAdoptsReplacementSessionOwner() throws {
+        try withState { state in
+            state.openOfflinePreview()
+            let opening = MediaDateFilterPresentation(owner: state.mediaLibrarySessionID, range: nil,
+                displayZone: state.mediaDateDisplayZone)
+            let originalOwner = opening.owner
+            let draft = try XCTUnwrap(MediaDateRange(startDate: opening.initialStart,
+                endDate: opening.initialEnd, timeZone: MediaCaptureDate.carrierTimeZone))
+            XCTAssertTrue(opening.admits(draft, currentOwner: state.mediaLibrarySessionID))
+            state.requestDisconnect()
+            state.openOfflinePreview()
+            let replacementOwner = state.mediaLibrarySessionID
+            let replacement = try makeRange(offset: 345600)
+            XCTAssertNotEqual(opening.owner, replacementOwner)
+            XCTAssertTrue(state.setMediaDateRange(replacement, owner: replacementOwner))
+            XCTAssertFalse(opening.admits(draft, currentOwner: replacementOwner))
+            XCTAssertFalse(state.setMediaDateRange(draft, owner: opening.owner))
+            XCTAssertEqual(state.mediaDateRange, replacement)
+            let reopened = MediaDateFilterPresentation(owner: replacementOwner, range: state.mediaDateRange,
+                displayZone: state.mediaDateDisplayZone)
+            XCTAssertNotEqual(reopened.id, opening.id)
+            XCTAssertTrue(reopened.admits(replacement, currentOwner: replacementOwner))
+            XCTAssertEqual(opening.owner, originalOwner)
+            XCTAssertEqual(state.mediaLibrarySessionID, replacementOwner)
+        }
+    }
+
     private func makeRange(offset: TimeInterval = 0) throws -> MediaDateRange {
         let date = Date(timeIntervalSince1970: 1_786_752_000 + offset)
         return try XCTUnwrap(MediaDateRange(startDate: date, endDate: date, timeZone: TimeZone(secondsFromGMT: 0)!))
