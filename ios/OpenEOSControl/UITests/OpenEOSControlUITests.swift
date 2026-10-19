@@ -1511,7 +1511,7 @@ final class OpenEOSControlUITests: XCTestCase {
         }
 
         try prepareNewShootingSettingForAsyncTest(in: app)
-        let captureMode = app.segmentedControls["capture-mode-picker"]
+        let captureMode = app.otherElements["capture-mode-picker"]
         _ = try XCTUnwrap((captureMode.waitForExistence(timeout: 8)) ? true : nil)
         try selectDirectCaptureMode("Video", other: "Photo", in: app)
         do {
@@ -1903,9 +1903,12 @@ final class OpenEOSControlUITests: XCTestCase {
             try tapForAsyncTest(app.buttons["connect-button"])
             let latest = app.buttons["latest-media-button"]
             _ = try XCTUnwrap(waitForLabel(latest, containing: "EARLIER_RECORDING.MP4", timeout: 30) ? true : nil)
-            let mode = app.segmentedControls["capture-mode-picker"]
+            let mode = app.otherElements["capture-mode-picker"]
             _ = try XCTUnwrap(waitForInteraction(mode.buttons[videoMode], timeout: 8) ? true : nil)
             let photo = mode.buttons[language == "english" ? "Photo" : "拍照"]
+            XCTAssertEqual(mode.buttons.count, 2)
+            XCTAssertGreaterThanOrEqual(photo.frame.height, 44)
+            XCTAssertGreaterThanOrEqual(mode.buttons[videoMode].frame.height, 44)
             XCTAssertTrue(photo.isSelected, "The mode switch starts with the Photo segment selected")
             XCTAssertFalse(mode.buttons[videoMode].isSelected)
             let pickerFrameBeforeSelection = mode.frame
@@ -1924,6 +1927,9 @@ final class OpenEOSControlUITests: XCTestCase {
             let applyModeReady = waitForInteraction(applyMode, timeout: 5)
             if !applyModeReady { recordMediaUIEvidence(in: app, phase: "recording-review", language: language) }
             _ = try XCTUnwrap(applyModeReady ? true : nil)
+            let draftOnly = try await simulatorRequest(path: "/ccapi/test/state")
+            XCTAssertEqual((draftOnly["movie_mode_update_count"] as? NSNumber)?.intValue, 0,
+                "Selecting a mode alone must not write to the camera")
             try tapForAsyncTest(applyMode)
             do {
                 try await waitForSimulatorState { state in state["movie_mode"] as? String == "on" }
@@ -1974,6 +1980,8 @@ final class OpenEOSControlUITests: XCTestCase {
                     (state["record_start_count"] as? NSNumber)?.intValue == 1
             }
             _ = try XCTUnwrap(waitForLabel(record, containing: stopLabel, timeout: 15) ? true : nil)
+            XCTAssertFalse(photo.isEnabled, "An active recording keeps mode selection disabled")
+            XCTAssertFalse(mode.buttons[videoMode].isEnabled)
             try tapForAsyncTest(record)
             try await waitForSimulatorState { state in
                 state["recording"] as? Bool == false &&
@@ -2362,13 +2370,15 @@ final class OpenEOSControlUITests: XCTestCase {
 
     @MainActor
     private func selectDirectCaptureMode(_ title: String, other: String, in app: XCUIApplication) throws {
-        let mode = app.segmentedControls["capture-mode-picker"]
+        let mode = app.otherElements["capture-mode-picker"]
         let segments = mode.buttons.matching(identifier: title)
         let segment = segments.element
         let interactive = waitForInteraction(segment, timeout: 5)
         if !interactive { recordMediaUIEvidence(in: app, phase: "direct-capture-mode", language: "english") }
         _ = try XCTUnwrap(interactive ? true : nil)
         XCTAssertEqual(segments.count, 1)
+        XCTAssertEqual(mode.buttons.count, 2)
+        XCTAssertGreaterThanOrEqual(segment.frame.height, 44)
         let pickerFrameBeforeSelection = mode.frame
         try tapForAsyncTest(segment)
         let selected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -3185,7 +3195,7 @@ final class OpenEOSControlUITests: XCTestCase {
             }
         }
         if phase == "recording-review" || phase == "direct-capture-mode" {
-            let mode = app.segmentedControls["capture-mode-picker"]
+            let mode = app.otherElements["capture-mode-picker"]
             for (identifier, label) in [("capture-segment-photo", language == "english" ? "Photo" : "拍照"),
                                         ("capture-segment-video", language == "english" ? "Video" : "錄影")] {
                 let matches = mode.buttons.matching(identifier: label)

@@ -206,3 +206,11 @@
 - 現有 `CAPTURE_MODE_TRACE` 已覆蓋 setter/request 等封閉階段，但 App stdout 未出現在 job 摘錄。第二十二輪只把同一組 enum/Bool 加固定語言及 camera/simulator 分類寫成 fixture journal；DEBUG、E2E、明確 trace、exact loopback 與兩種已知語言全部成立才寫入，普通產品不寫。
 - 同既有合成 App container 只讀 exact `Library/Caches/eos-capture-mode-trace.txt`；128 行、16 KiB、regular/no-symlink、封閉 regex、24 MiB 總 artifact cap 和 exclusive destination 保留。沒有增加互動、重點擊或放寬原五秒／selected／Apply／模式寫入斷言。
 - 本地 Swift parse、Ruff、diff check、75 項 evidence helper 測試通過。這是診斷能力的驗證；真正 picker 根因及 Apple runtime 尚待新結果。檔案寫入可能改變調度，若單輪轉綠也不宣稱偶發選段根治。
+
+
+## 第二十四輪終態與第二十五輪明確模式動作候選
+
+- run `39285834811`／`0ba08734a02712f4c27b145c6de0255149aed3eb`：App 828/828、UI 41/43，17:08 UTC 終態。原分享／picker 流程本批通過；剩 canonical 繁中 Video 選取及 direct 返回 Photo 選取失敗。
+- bounded artifact `12204204724` SHA256 `c0dacc8fa023b5f67b9001dae69bf5a93010e113ce9e7fc595abc1aff817f0d0` 已下載核實。繁中 journal 依序 touchBegan=video、pickerSelection=photo，busy／Stop 均 false；前後幾何相同，Apply 存在但 disabled。這把缺口定位到觸點與 Picker binding 選取之間，未證明 UIKit 內部根因。
+- 第25輪候選將隱式 segmented Picker binding 改為兩個固定 enum 的明確 Button action；只更新 draft/revision，原能力禁止、Apply 的 session／owner／revision 防護保留。維持選取態、雙語標籤，提供至少44pt標籤觸控高度。
+- 原 native UI 單點擊、selected 正反例、Apply位置、單次模式寫入與錄影計數不變；query 改為實際 contain 群組。新增44pt／兩個按鈕、選取不自動寫入、錄影中禁止選取斷言。這些新原生斷言仍待 Apple 執行；本地來源守門與 Swift parse 不代表 AX 或觸控成功。被動 probe/journal 留在同原合成測試範圍，仍可能影響排程。

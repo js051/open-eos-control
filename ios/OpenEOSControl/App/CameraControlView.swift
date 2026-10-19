@@ -280,21 +280,15 @@ private struct CaptureModePicker: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Picker("capture_mode", selection: Binding(
-                get: { draft ?? camera.captureMode },
-                set: { mode in
-                    camera.traceCaptureMode(.pickerSelection, requested: mode)
-                    draft = mode
-                    revision = UUID()
-                }
-            )) {
-                Text("photo").tag(AppCaptureMode.photo)
-                Text("video").tag(AppCaptureMode.video)
+            HStack(spacing: 2) {
+                modeButton(.photo, title: "photo")
+                modeButton(.video, title: "video")
             }
-            .pickerStyle(.segmented)
-            .frame(height: 38)
-            .disabled(camera.recordingStopRequired || camera.bulbExposureActive || !camera.canStartShootingSetting
-                || camera.isBusy(.capture) || camera.isBusy(.recording))
+            .padding(2)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 9))
+            .disabled(!canSelectMode)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(Text("capture_mode"))
             .accessibilityIdentifier("capture-mode-picker")
             #if DEBUG && OEC_REQUIRE_SIMULATOR_E2E
             .background {
@@ -304,7 +298,7 @@ private struct CaptureModePicker: View {
             }
             #endif
             // Reserve this slot before a selection begins. In the bottom-aligned
-            // controls, inserting Apply moved the segmented picker by more than
+            // controls, inserting Apply moved the mode selector by more than
             // its own height. Keeping geometry stable avoids that mid-selection reflow.
             Text("apply")
                 .padding(.horizontal, 16)
@@ -340,6 +334,32 @@ private struct CaptureModePicker: View {
         .onChange(of: camera.mediaLibrarySessionID) { _, _ in draft = nil; revision = UUID(); editorOwner = UUID() }
         .onDisappear { editorOwner = UUID(); camera.cancelShootingSetting() }
     }
+
+    private var canSelectMode: Bool {
+        !camera.recordingStopRequired && !camera.bulbExposureActive && camera.canStartShootingSetting
+            && !camera.isBusy(.capture) && !camera.isBusy(.recording)
+    }
+
+    private func modeButton(_ mode: AppCaptureMode, title: LocalizedStringKey) -> some View {
+        let selected = (draft ?? camera.captureMode) == mode
+        return Button {
+            guard canSelectMode else { return }
+            // Each action owns its exact mode; no implicit Picker selection binding
+            // can substitute the previously selected segment during a native touch.
+            camera.traceCaptureMode(.pickerSelection, requested: mode)
+            draft = mode
+            revision = UUID()
+        } label: {
+            Text(title)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(selected ? Color.accentColor.opacity(0.18) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 7))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
 }
 
 private struct ExposureStrip: View {
