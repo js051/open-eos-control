@@ -18,6 +18,20 @@ struct IOSCcapiRTPDelivery: Sendable {
     let owner: UUID
     let event: IOSCcapiRTPEvent
     var audioEpoch: UUID? = nil
+    var audioPublication: IOSRTPAudioPublication? = nil
+}
+
+/// Independent of the playback epoch: retirement can publish more than one
+/// snapshot after playback has stopped. A counter rollover invalidates old stamps.
+struct IOSRTPAudioPublication: Equatable, Sendable {
+    let generation: UUID
+    let sequence: UInt64
+
+    func next() -> Self {
+        sequence == .max
+            ? Self(generation: UUID(), sequence: 1)
+            : Self(generation: generation, sequence: sequence + 1)
+    }
 }
 
 struct IOSCcapiRTPAudioStatus: Equatable, Sendable {
@@ -128,6 +142,9 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
     private let audioPipeline: IOSCcapiRTPAudioPipeline
     private let audioClock: () -> TimeInterval
     private var audioEpoch = UUID()
+    private var audioPublication = IOSRTPAudioPublication(generation: UUID(), sequence: 0)
+    private var acceptedAudioPublication: IOSRTPAudioPublication?
+    private let beforeAudioStatusEmission: (@Sendable (IOSCcapiRTPDelivery) -> Void)?
     private var activeAudioToken: IOSRTPAudioPlaybackToken?
     private var audioEnabledAt: TimeInterval?
     private var lastAudioPCMAt: TimeInterval?
@@ -171,6 +188,7 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
 
     init(audioPipeline: IOSCcapiRTPAudioPipeline = IOSCcapiRTPAudioPipeline(),
          audioClock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         beforeAudioStatusEmission: (@Sendable (IOSCcapiRTPDelivery) -> Void)? = nil,
          videoConsumer: (@MainActor @Sendable (CCAPIH264AccessUnit) -> Void)? = nil,
          videoProcessor: IOSRTPVideoProcessor = IOSRTPVideoProcessor(),
          readinessDecoder: IOSRTPVideoProcessor = IOSRTPVideoProcessor(),
@@ -183,6 +201,7 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
          }) {
         self.audioPipeline = audioPipeline
         self.audioClock = audioClock
+        self.beforeAudioStatusEmission = beforeAudioStatusEmission
         self.videoConsumer = videoConsumer
         self.videoProcessor = videoProcessor
         self.readinessDecoder = readinessDecoder
@@ -201,8 +220,20 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
         audioStateLock.synchronized {
             guard deliveryOwner == delivery.owner else { return false }
             if case .failed = delivery.event { return true }
-            if case .audioStatus = delivery.event, delivery.audioEpoch != audioEpoch { return false }
-            return terminalVideoFailure == nil
+            guard terminalVideoFailure == nil else { return false }
+            if case .audioStatus = delivery.event {
+                guard delivery.audioEpoch == audioEpoch,
+                      let publication = delivery.audioPublication,
+                      publication.generation == audioPublication.generation,
+                      publication.sequence <= audioPublication.sequence else { return false }
+                // The consumer (including its MainActor hop) must never apply an
+                // older snapshot after a newer one from this same playback epoch.
+                if let acceptedAudioPublication,
+                   acceptedAudioPublication.generation == publication.generation,
+                   publication.sequence < acceptedAudioPublication.sequence { return false }
+                acceptedAudioPublication = publication
+            }
+            return true
         }
     }
 
@@ -737,11 +768,16 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
 
     func currentVideoFailure() -> String? { audioStateLock.synchronized { terminalVideoFailure } }
 
-    func emit(_ event: IOSCcapiRTPEvent, owner: UUID, audioEpoch: UUID? = nil) {
-        let delivery = IOSCcapiRTPDelivery(owner: owner, event: event, audioEpoch: audioEpoch)
+    func emit(_ event: IOSCcapiRTPEvent, owner: UUID, audioEpoch: UUID? = nil,
+              audioPublication: IOSRTPAudioPublication? = nil) {
+        let delivery = IOSCcapiRTPDelivery(owner: owner, event: event, audioEpoch: audioEpoch,
+                                           audioPublication: audioPublication)
         let accepted = audioStateLock.synchronized { () -> Bool in
             guard deliveryOwner == owner, terminalVideoFailure == nil else { return false }
-            if case .audioStatus = event, audioEpoch != self.audioEpoch { return false }
+            if case .audioStatus = event {
+                guard audioEpoch == self.audioEpoch,
+                      audioPublication == self.audioPublication else { return false }
+            }
             if case let .failed(message) = event {
                 terminalVideoFailure = message
                 retireAudioLocked()
@@ -934,9 +970,17 @@ final class IOSCcapiRTPController: CCAPIRTPSessionFactory, @unchecked Sendable {
                 return nil
             }
             lastAudioStatusPublishedAt = now
-            return IOSCcapiRTPDelivery(owner: deliveryOwner, event: .audioStatus(audioStatus), audioEpoch: audioEpoch)
+            audioPublication = audioPublication.next()
+            return IOSCcapiRTPDelivery(owner: deliveryOwner, event: .audioStatus(audioStatus),
+                                        audioEpoch: audioEpoch, audioPublication: audioPublication)
         }
-        if let delivery { emit(delivery.event, owner: delivery.owner, audioEpoch: delivery.audioEpoch) }
+        if let delivery {
+            // Nil in production. Tests can hold a copied snapshot without holding
+            // the state lock or preventing real native/decoder retirement.
+            beforeAudioStatusEmission?(delivery)
+            emit(delivery.event, owner: delivery.owner, audioEpoch: delivery.audioEpoch,
+                 audioPublication: delivery.audioPublication)
+        }
     }
 
     private func publishAudioStatusIfNeeded(sessionID: UUID) {

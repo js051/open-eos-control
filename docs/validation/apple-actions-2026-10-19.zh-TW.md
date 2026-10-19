@@ -181,3 +181,12 @@
 - UI 43 案有 **1 案／2 斷言失敗**。新加的「無 draft 不得存在 AX Apply」先失敗，後續 async guard 正確停止該旅程，尚未點 Video，因此本輪不能驗收原模式選段假說。其餘42案包含 direct 控制及位置穩定斷言通過。
 - 原 opacity／accessibilityHidden Button 仍能被 native AX 找到，不能以畫面不可見取代原負例。最小候選改為 hidden Text 保留隨字級擴展、至少44pt的 slot，只在 draft 存在時以 overlay 建立真 Button；overlay 不改底層 layout 尺寸。原 revision／owner／session guard、capability／same-mode／Stop duty 禁用條件、原負例及全旅程斷言不變，沒有改超時或重tap。
 - 第十八輪 bounded artifact `12183141203`，4,894,030 bytes，API digest `f22dbe027b8fc08eb00302d86481c971c316e8e1166daa564d145cc16c63e647`；本段以原job log定位失敗，未另下載該artifact。第十九輪候選仍待真Apple結果。
+
+## 第十九輪結果與第二十輪音訊發布／picker 生命期診斷
+
+- Source `629e4af67a3af252865a771ac8c3d5199be35980`，run https://github.com/js051/open-eos-control/actions/runs/39245261553 。固定 Apply slot 的無 draft AX 負例、兩類模式位置斷言、canonical 雙語／雙模式完整錄影旅程148秒及 direct75秒真通過；日期／大字級metadata保持通過。這支持固定位置修正有效，但不推論所有原生觸控競態皆已消失。
+- App826有1案失敗：`RTPAudioLifecycleTests.testBackgroundAndMonitoringPauseRequireExplicitEnableAfterResume` 第115行，背景後等待 output 未prepared且retiringResources=false，原3秒到期。source確有同epoch snapshot鎖外發布倒序窗口，epoch admission無法攔較舊retiring=true覆蓋已完成false。候選補獨立publication generation／sequence，emit及consumer admission拒絕較舊snapshot；原deadline不變，新確定性gate回歸尚待Apple執行，不能將source推導報成已執行紅綠。
+- UI43有1案失敗：picker English success組正確點JPG Cell後8秒缺complete。固定診斷確為app-state=1（notRunning）；本run xcresult含12:05:22的OpenEOSControl EXC_CRASH/SIGABRT，lastExceptionBacktrace為DocumentManager `DOCWeakProxy forwardingTargetForSelector`／NSXPCConnection。沒有App呼叫frame，尚不能定位本App的delegate／拆除順序。WebKit官方[同類公開問題268568](https://bugs.webkit.org/show_bug.cgi?id=268568)有相同framework stack與host proxy失效記錄，但不當成本案因果或已修證據。
+- 僅fresh Apple測試build且既有三種upload fixture啟用時，新增固定stage／3個Bool journal，無URL、文件名、owner ID或任意文字。原生callback／完成與dismantle只記錄，不改dismiss、delay、重送、owner、file access或結果。測試後僅取此App容器的exact cache檔，16KiB／128行／固定regex／NOFOLLOW／regular-file／symlink拒絕；與原24MiB／64檔合併計費，普通產品不寫。原真picker與失敗斷言保留。
+- 第十九輪 bounded artifact `12184618785`，5,568,123 bytes，SHA256 `bef0b55183b852c7732230125e93f5d344c33498242c90dc397faacb438a5be6`；原xcresult artifact `12184758664`，220,293,126 bytes，SHA256 `39448c5a47269f0ff5311d5b817808338433d9f9b48e705c74a3b5bea601825c`。兩者下載後bytes/hash均核實；只擷取本App相關crash作定位，未將原完整診斷另行公開。
+- Journal是128行rolling尾端，跨fixture scenario且沒有時間／case起迄，因此只能依已核相鄰stage和原UI activity解讀；不得把末段無條件歸因到某次crash。同步診斷寫檔可能改變排程，若picker轉綠仍不能單憑此宣稱崩潰修復。

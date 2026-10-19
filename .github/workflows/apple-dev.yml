@@ -214,9 +214,14 @@ jobs:
         if: always()
         continue-on-error: true
         run: |
+          PICKER_CONTAINER=$(xcrun simctl get_app_container '${{ steps.simulator.outputs.device_id }}' dev.openeos.control data 2>/dev/null || true)
+          JOURNAL_ARGS=()
+          if [ -n "$PICKER_CONTAINER" ]; then
+            JOURNAL_ARGS=(--picker-container "$PICKER_CONTAINER")
+          fi
           python ../../scripts/ci/export_ios_ui_evidence.py \
             --result-bundle TestResults.xcresult \
-            --output-dir ShutterRecoveryEvidence
+            --output-dir ShutterRecoveryEvidence "${JOURNAL_ARGS[@]}"
 
       - name: Upload bounded shutter recovery diagnostics
         if: always()

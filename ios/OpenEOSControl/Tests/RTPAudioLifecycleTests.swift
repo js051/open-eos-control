@@ -125,6 +125,65 @@ final class RTPAudioLifecycleTests: XCTestCase {
         XCTAssertFalse(f.status.requested)
     }
 
+    func testSameEpochRetirementSnapshotCannotOverwriteCompletedRetirement() async throws {
+        let copied = expectation(description: "retiring snapshot copied before emission")
+        let gate = AudioTestPublicationGate(entered: { copied.fulfill() })
+        let f = try await AudioLifecycleFixture.make(beforeAudioStatusEmission: { gate.hold($0) })
+        let stopEntered = expectation(description: "native stop retained")
+        let stopRelease = DispatchSemaphore(value: 0)
+        defer {
+            stopRelease.signal()
+            gate.release()
+            f.controller.retireDelivery()
+        }
+        f.controller.setAudioEnabled(true)
+        f.submit()
+        await eventually { f.output.count == 1 }
+        f.output.completeDuringStop = true
+        f.output.blockNextStop(entered: { stopEntered.fulfill() }, release: stopRelease)
+        let controller = f.controller
+        let muteReturned = expectation(description: "held mute publication returned")
+        DispatchQueue.global().async {
+            controller.setAudioEnabled(false)
+            muteReturned.fulfill()
+        }
+        await fulfillment(of: [copied, stopEntered], timeout: 2)
+        let retiring = try XCTUnwrap(gate.captured)
+        XCTAssertTrue(controller.accepts(retiring), "Current retirement evidence is initially admissible")
+        stopRelease.signal()
+        await eventually { !f.output.prepared && f.acceptedStatus?.retiringResources == false }
+        let completed = try XCTUnwrap(f.deliveries.last)
+        XCTAssertEqual(retiring.owner, completed.owner)
+        XCTAssertEqual(retiring.audioEpoch, completed.audioEpoch, "Epoch filtering alone cannot fence this race")
+        let oldPublication = try XCTUnwrap(retiring.audioPublication)
+        let newPublication = try XCTUnwrap(completed.audioPublication)
+        XCTAssertEqual(oldPublication.generation, newPublication.generation)
+        XCTAssertLessThan(oldPublication.sequence, newPublication.sequence)
+        XCTAssertFalse(controller.accepts(retiring), "A delayed consumer must reject the older same-epoch snapshot")
+        let rawBeforeRelease = f.deliveries.rawSnapshot
+        XCTAssertFalse(rawBeforeRelease.contains { $0.audioPublication == oldPublication })
+        gate.release()
+        await fulfillment(of: [muteReturned], timeout: 2)
+        XCTAssertFalse(gate.timedOut)
+        let rawAfterRelease = f.deliveries.rawSnapshot
+        XCTAssertEqual(rawAfterRelease.count, rawBeforeRelease.count, "Emit must fence the superseded snapshot before the consumer")
+        XCTAssertFalse(rawAfterRelease.contains { $0.audioPublication == oldPublication })
+        XCTAssertFalse(f.status.retiringResources)
+        XCTAssertFalse(f.status.enabled)
+        XCTAssertFalse(f.status.requested)
+        XCTAssertEqual(f.status.renderedSampleFrames, 0, "A stop-time callback cannot revive retired playback")
+        XCTAssertEqual(f.output.count, 1)
+    }
+
+    func testAudioPublicationRolloverDoesNotReuseAnOldGeneration() {
+        let last = IOSRTPAudioPublication(generation: UUID(), sequence: .max)
+        let next = last.next()
+        XCTAssertNotEqual(next.generation, last.generation)
+        XCTAssertEqual(next.sequence, 1)
+        XCTAssertEqual(next.next().generation, next.generation)
+        XCTAssertEqual(next.next().sequence, 2)
+    }
+
     func testEmptyDecoderOutputAndPacketsCannotRenewFirstPCMDeadline() async throws {
         let f = try await AudioLifecycleFixture.make()
         defer { f.controller.retireDelivery() }
@@ -443,7 +502,8 @@ private final class AudioLifecycleFixture {
     let description: CCAPIRTPSessionDescription
     private let video: AudioTestVideo
 
-    private init(supportsRenderProgress: Bool) async throws {
+    private init(supportsRenderProgress: Bool,
+                 beforeAudioStatusEmission: (@Sendable (IOSCcapiRTPDelivery) -> Void)?) async throws {
         let clock = AudioTestClock()
         let decoder = AudioTestDecoder()
         let output = AudioTestOutput(supportsRenderProgress: supportsRenderProgress)
@@ -451,8 +511,12 @@ private final class AudioLifecycleFixture {
         let video = AudioTestVideo()
         let pipeline = IOSCcapiRTPAudioPipeline(decoder: decoder, output: output, now: { clock.now })
         let controller = IOSCcapiRTPController(audioPipeline: pipeline, audioClock: { clock.now },
+                                               beforeAudioStatusEmission: beforeAudioStatusEmission,
                                                videoConsumer: { video.timestamps.append($0.rtpTimestamp) })
-        controller.setEventHandler { deliveries.append($0) }
+        controller.setEventHandler { [weak controller] delivery in
+            guard let controller else { return }
+            deliveries.append(delivery, acceptingWith: controller)
+        }
         let description = try CCAPIRTPSessionDescriptionParser.parse("""
             v=0
             m=video 12000 RTP/AVP 103
@@ -475,8 +539,10 @@ private final class AudioLifecycleFixture {
         self.owner = owner
     }
 
-    static func make(supportsRenderProgress: Bool = true) async throws -> AudioLifecycleFixture {
-        try await AudioLifecycleFixture(supportsRenderProgress: supportsRenderProgress)
+    static func make(supportsRenderProgress: Bool = true,
+                     beforeAudioStatusEmission: (@Sendable (IOSCcapiRTPDelivery) -> Void)? = nil) async throws -> AudioLifecycleFixture {
+        try await AudioLifecycleFixture(supportsRenderProgress: supportsRenderProgress,
+                                         beforeAudioStatusEmission: beforeAudioStatusEmission)
     }
 
     var acceptedStatus: IOSCcapiRTPAudioStatus? {
@@ -525,9 +591,47 @@ private final class AudioTestClock: @unchecked Sendable {
 private final class AudioTestDeliveries: @unchecked Sendable {
     private let lock = NSLock()
     private var values: [IOSCcapiRTPDelivery] = []
+    private var rawValues: [IOSCcapiRTPDelivery] = []
     var last: IOSCcapiRTPDelivery? { lock.audioLocked { values.last } }
     var snapshot: [IOSCcapiRTPDelivery] { lock.audioLocked { values } }
-    func append(_ value: IOSCcapiRTPDelivery) { lock.audioLocked { values.append(value) } }
+    var rawSnapshot: [IOSCcapiRTPDelivery] { lock.audioLocked { rawValues } }
+    func append(_ value: IOSCcapiRTPDelivery, acceptingWith controller: IOSCcapiRTPController) {
+        lock.audioLocked {
+            rawValues.append(value)
+            // Match the production MainActor consumer: admission and application
+            // are serial, including delayed deliveries from a retired epoch.
+            if controller.accepts(value) { values.append(value) }
+        }
+    }
+}
+
+private final class AudioTestPublicationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let resumed = DispatchSemaphore(value: 0)
+    private let entered: () -> Void
+    private var snapshot: IOSCcapiRTPDelivery?
+    private var waitExpired = false
+    var captured: IOSCcapiRTPDelivery? { lock.audioLocked { snapshot } }
+    var timedOut: Bool { lock.audioLocked { waitExpired } }
+
+    init(entered: @escaping () -> Void) { self.entered = entered }
+
+    func hold(_ delivery: IOSCcapiRTPDelivery) {
+        guard case let .audioStatus(status) = delivery.event,
+              !status.enabled, status.retiringResources else { return }
+        let shouldHold = lock.audioLocked { () -> Bool in
+            guard snapshot == nil else { return false }
+            snapshot = delivery
+            return true
+        }
+        guard shouldHold else { return }
+        entered()
+        if resumed.wait(timeout: .now() + 5) != .success {
+            lock.audioLocked { waitExpired = true }
+        }
+    }
+
+    func release() { resumed.signal() }
 }
 
 private final class AudioTestDecoder: IOSAACDecoding {
