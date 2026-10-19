@@ -93,3 +93,10 @@ The real browser failure retained valid Bridge framing but an unknown Stop-prepa
 - 將七類錯誤各放入新合成 context；兩個 unknown 案保留禁重試、編輯 token 仍禁用、精確單 POST 與零其他 mutation。其他確定 rejection 才等可重試；原掃描晚回覆、取消、成功實際 Bridge connect/disconnect 與雙語 guidance 均保留。這不是宣稱重新載入頁面能清理真相機。
 - 本地 JavaScript syntax、diff check 與原 connection-guidance 104 項通過；新增 browser 結構尚待下一輪真 Chromium。
 - 同 SHA 的 Windows `39270426818` 完成原生 exe 建置、啟動驗證及產物上傳。
+
+### 第十輪：維護旅程的顯式 session 退場
+
+- `fde902d0c98752201d130ec1c8d8d881c3e970ed` / Actions `39271697417` 已再次通過 maintenance 原流程，但掃描旅程之後的成功 Connect 在第 1121 行超時；七個獨立錯誤情境尚未執行。
+- source 明確顯示 `suspendMaintenanceForLifecycle`／`beforeunload` 在 maintenance hold 時只退本地 receiver，刻意不送 session DELETE。原主旅程 sleep 後直接關 context，留下同相機 session；`SessionManager._register` 依法拒絕重複 owner。瀏覽器關閉不能當作已完成這項清理。
+- 在原 sleep／Stop／event／零 page-error assertions 之後，用真 UI Disconnect 完成退場；先註冊 exact maintenance session DELETE，驗 HTTP204 空 body、connection view 回復與無 error，再關 context。產品 guard、後續 Connect 和原時間上限不變。
+- 本地 syntax／diff check 與獨立窄審通過，新增真退場仍待下一輪 Chromium。Windows 同 SHA 的 `39271697588` 全過。

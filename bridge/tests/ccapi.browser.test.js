@@ -2234,6 +2234,18 @@ async function run() {
     await page.waitForTimeout(1100);
     assert.deepEqual(await page.evaluate(() => window.__objectUrlRevocationViolations), []);
     assert.deepEqual(pageErrors, []);
+    // Sleep retains a maintenance owner even across page teardown. Finish its
+    // explicit local-session retirement before the next independent journey
+    // attempts to acquire the same synthetic camera through this Bridge.
+    const maintenanceClosed = page.waitForResponse(response =>
+      response.request().method() === "DELETE" &&
+      /^\/v1\/session\/[^/]+\/maintenance\/control\/session$/.test(new URL(response.url()).pathname));
+    await page.click("#disconnect-button");
+    const retiredSession = await maintenanceClosed;
+    assert.equal(retiredSession.status(), 204);
+    assert.equal((await retiredSession.body()).length, 0);
+    await page.waitForSelector("#connection-view:not([hidden])");
+    assert.equal(await page.locator("#connection-error").isHidden(), true);
     await page.unrouteAll({ behavior: "wait" });
     await context.close();
     mainPage = null;
