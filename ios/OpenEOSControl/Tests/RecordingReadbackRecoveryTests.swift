@@ -523,13 +523,18 @@ final class RecordingReadbackRecoveryTests: XCTestCase {
                     await state.toggleRecording()
                     let recovery = try XCTUnwrap(state.recordingReadbackRecovery)
                     let originalStatus = state.status
+                    // The shared lifecycle contract clears duty for an acknowledged Stop,
+                    // even while its readback is unavailable. An acknowledged Start keeps it.
+                    let expectedStopDuty = !initiallyRecording
+                    XCTAssertEqual(state.recordingOutcomes.last?.responseEvidence, .responseReceived)
+                    XCTAssertEqual(state.recordingStopRequired, expectedStopDuty)
                     let payload = #"{"battery":{},"media":{},"exposure":{},"recording":FIELD}"#.replacingOccurrences(of: "FIELD", with: field)
                     await peer.plan("status", .rawRecording(payload))
                     await state.refresh()
                     XCTAssertEqual(state.recordingReadbackRecovery, recovery)
                     XCTAssertNil(state.recordingCommandRecovery)
                     XCTAssertEqual(state.status, originalStatus)
-                    XCTAssertTrue(state.recordingStopRequired)
+                    XCTAssertEqual(state.recordingStopRequired, expectedStopDuty)
                     let actions = await peer.actions()
                     XCTAssertEqual(actions, [initiallyRecording ? "stop" : "start"])
                 }

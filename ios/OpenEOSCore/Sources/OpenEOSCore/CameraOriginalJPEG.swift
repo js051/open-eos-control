@@ -129,13 +129,30 @@ enum CameraOriginalJPEG {
     static func validateStructure(_ data: Data) throws -> Dimensions {
         guard data.count > 0, data.count <= maximumBytes else { throw Failure.resourceLimit }
         return try data.withUnsafeBytes { raw in
-            var parser = Parser(bytes: raw.bindMemory(to: UInt8.self))
+            var parser = Parser(bytes: raw.bindMemory(to: UInt8.self), verifySequentialEntropy: false)
             return try parser.parse()
         }
     }
 
+    /// Decode admission, separate from the frozen marker/scan structure contract.
+    /// ImageIO may conceal missing sequential MCUs with gray pixels. Require every
+    /// sequential block's Huffman symbols and amplitude bits before native decode.
+    /// Progressive scans retain their existing structure + native-decode path;
+    /// this check does not claim to validate their coefficient refinement entropy.
+    static func validateSequentialEntropy(_ data: Data, dimensions: Dimensions) throws {
+        try Task.checkCancellation()
+        guard data.count > 0, data.count <= maximumBytes else { throw Failure.resourceLimit }
+        let actual = try data.withUnsafeBytes { raw in
+            var parser = Parser(bytes: raw.bindMemory(to: UInt8.self), verifySequentialEntropy: true)
+            return try parser.parse()
+        }
+        guard actual == dimensions else { throw Failure.decode }
+        try Task.checkCancellation()
+    }
+
     static func decode(_ data: Data, dimensions: Dimensions) throws {
         try Task.checkCancellation()
+        try validateSequentialEntropy(data, dimensions: dimensions)
         #if canImport(ImageIO)
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions),
@@ -170,8 +187,75 @@ enum CameraOriginalJPEG {
     }
 
     private struct Component { let quantization: Int; let horizontal: Int; let vertical: Int; let order: Int }
+    private struct ScanComponent { let component: Component; let dc: Int; let ac: Int }
+    private struct HuffmanTable {
+        let counts: [Int]
+        let firstCodes: [Int]
+        let offsets: [Int]
+        let symbols: [UInt8]
+    }
+
+    /// ITU-T T.81 F.2.2.3–5: MSB-first Huffman bits, with FF00 byte stuffing.
+    /// Markers are never treated as replacement entropy. No coefficient/image
+    /// buffer is allocated, and no sign extension or IDCT is needed for coverage.
+    private struct EntropyBits {
+        let bytes: UnsafeBufferPointer<UInt8>
+        var position: Int
+        var byte = 0
+        var remaining = 0
+
+        mutating func bit() throws -> Int {
+            if remaining == 0 {
+                guard position < bytes.count else { throw Failure.decode }
+                byte = Int(bytes[position])
+                position += 1
+                if byte == 0xFF {
+                    guard position < bytes.count, bytes[position] == 0 else { throw Failure.decode }
+                    position += 1
+                }
+                remaining = 8
+            }
+            remaining -= 1
+            return (byte >> remaining) & 1
+        }
+
+        mutating func receive(_ count: Int) throws {
+            for _ in 0..<count { _ = try bit() }
+        }
+
+        mutating func symbol(_ table: HuffmanTable) throws -> Int {
+            var code = 0
+            for length in 0..<16 {
+                code = (code << 1) | (try bit())
+                let index = code - table.firstCodes[length]
+                if index >= 0, index < table.counts[length] {
+                    return Int(table.symbols[table.offsets[length] + index])
+                }
+            }
+            throw Failure.decode
+        }
+
+        mutating func finishSegment() throws {
+            // T.81 B.1.1.5 / F.1.2.3: only 1-bit padding to the next byte.
+            let mask = (1 << remaining) - 1
+            guard byte & mask == mask, position < bytes.count, bytes[position] == 0xFF else { throw Failure.decode }
+            remaining = 0
+        }
+
+        mutating func restart(_ expected: UInt8) throws {
+            try finishSegment()
+            while position < bytes.count, bytes[position] == 0xFF {
+                if position & 0xFFFF == 0 { try Task.checkCancellation() }
+                position += 1
+            }
+            guard position < bytes.count, bytes[position] == expected else { throw Failure.decode }
+            position += 1
+        }
+    }
+
     private struct Parser {
         let bytes: UnsafeBufferPointer<UInt8>
+        let verifySequentialEntropy: Bool
         var position = 2
         var markers = 1
         var scans = 0
@@ -184,6 +268,8 @@ enum CameraOriginalJPEG {
         var sequentialSeen: Set<UInt8> = []
         var progressive: [UInt8: [Int]] = [:]
         var restartInterval = 0
+        var decodingTables: [Int: HuffmanTable] = [:]
+        var scanComponents: [ScanComponent] = []
 
         mutating func parse() throws -> Dimensions {
             guard bytes.count >= 4, bytes[0] == 0xFF, bytes[1] == 0xD8 else { throw Failure.structure }
@@ -215,7 +301,8 @@ enum CameraOriginalJPEG {
                 case 0xC0, 0xC1, 0xC2: try frameHeader(marker, start, end)
                 case 0xDA:
                     try scanHeader(start, end)
-                    try entropy()
+                    if verifySequentialEntropy, frame != 0xC2 { try sequentialEntropy() }
+                    else { try entropy() }
                 default: throw Failure.unsupported // Arithmetic, lossless, DNL and extensions are not admitted.
                 }
             }
@@ -269,6 +356,7 @@ enum CameraOriginalJPEG {
                 index += 1
                 var count = 0
                 var available = 1
+                let countsStart = index
                 for offset in 0..<16 {
                     let amount = Int(bytes[index + offset])
                     count += amount
@@ -285,6 +373,18 @@ enum CameraOriginalJPEG {
                     guard symbols.insert(symbol).inserted,
                           (kind == 0 ? symbol <= 11 : symbol & 15 <= 10) else { throw Failure.structure }
                     if kind == 1, symbol & 15 == 0, symbol != 0 && symbol != 0xF0 { validSequential = false }
+                }
+                if verifySequentialEntropy {
+                    let counts = (0..<16).map { Int(bytes[countsStart + $0]) }
+                    var code = 0, offset = 0
+                    var firstCodes: [Int] = [], offsets: [Int] = []
+                    for amount in counts {
+                        firstCodes.append(code); offsets.append(offset)
+                        code = (code + amount) << 1
+                        offset += amount
+                    }
+                    decodingTables[key] = HuffmanTable(counts: counts, firstCodes: firstCodes,
+                        offsets: offsets, symbols: Array(bytes[index..<(index + count)]))
                 }
                 index += count
                 huffman.insert(key)
@@ -339,6 +439,7 @@ enum CameraOriginalJPEG {
             var selected: Set<UInt8> = []
             var sampling = 0
             var lastOrder = -1
+            scanComponents.removeAll(keepingCapacity: true)
             for offset in 0..<count {
                 let index = start + 1 + 2 * offset
                 let id = bytes[index], selectors = Int(bytes[index + 1])
@@ -364,8 +465,64 @@ enum CameraOriginalJPEG {
                 } else {
                     guard sequentialSeen.insert(id).inserted, huffman.contains(dc), huffman.contains(0x10 | ac),
                           sequentialAC.contains(0x10 | ac) else { throw Failure.structure }
+                    if verifySequentialEntropy {
+                        scanComponents.append(ScanComponent(component: component, dc: dc, ac: 0x10 | ac))
+                    }
                 }
             }
+        }
+
+        /// T.81 B.2.1, E.2.3–5 and F.2.2/F.2.3. Dimensions and sampling are
+        /// already capped by frameHeader; tables occupy at most eight small
+        /// canonical-code arrays. Work consumes bounded input and at most 64
+        /// symbols/block; cancellation is checked at each MCU (at most 10 blocks).
+        mutating func sequentialEntropy() throws {
+            guard let dimensions, !scanComponents.isEmpty,
+                  let maxH = components.values.map(\.horizontal).max(),
+                  let maxV = components.values.map(\.vertical).max() else { throw Failure.decode }
+            let interleaved = scanComponents.count > 1
+            let first = scanComponents[0].component
+            let columns = interleaved ? (dimensions.width + 8 * maxH - 1) / (8 * maxH)
+                : (dimensions.width * first.horizontal + 8 * maxH - 1) / (8 * maxH)
+            let rows = interleaved ? (dimensions.height + 8 * maxV - 1) / (8 * maxV)
+                : (dimensions.height * first.vertical + 8 * maxV - 1) / (8 * maxV)
+            let mcus = columns * rows
+            var bits = EntropyBits(bytes: bytes, position: position)
+            var nextRestart: UInt8 = 0xD0
+            for mcu in 0..<mcus {
+                try Task.checkCancellation()
+                for selected in scanComponents {
+                    guard let dc = decodingTables[selected.dc], let ac = decodingTables[selected.ac] else { throw Failure.decode }
+                    let blocks = interleaved ? selected.component.horizontal * selected.component.vertical : 1
+                    for _ in 0..<blocks {
+                        let category = try bits.symbol(dc)
+                        try bits.receive(category)
+                        var coefficient = 1
+                        while coefficient < 64 {
+                            let symbol = try bits.symbol(ac)
+                            let run = symbol >> 4, size = symbol & 15
+                            if size == 0 {
+                                if run == 0 { break }
+                                guard run == 15 else { throw Failure.decode }
+                                coefficient += 16
+                                guard coefficient <= 64 else { throw Failure.decode }
+                            } else {
+                                coefficient += run
+                                guard coefficient < 64 else { throw Failure.decode }
+                                try bits.receive(size)
+                                coefficient += 1
+                            }
+                        }
+                    }
+                }
+                if restartInterval > 0, (mcu + 1) % restartInterval == 0, mcu + 1 < mcus {
+                    try bits.restart(nextRestart)
+                    try countMarker()
+                    nextRestart = nextRestart == 0xD7 ? 0xD0 : nextRestart + 1
+                }
+            }
+            try bits.finishSegment()
+            position = bits.position
         }
 
         mutating func entropy() throws {

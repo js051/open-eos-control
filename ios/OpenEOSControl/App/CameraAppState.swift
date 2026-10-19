@@ -4095,6 +4095,8 @@ final class CameraAppState: ObservableObject {
     /// Called only after the UI confirms removal of records and retained App copies.
     func clearMediaDeliveryHistory() async {
         guard !mediaDeliveryHistoryLoading, let mediaDeliveryStore else { return }
+        let activeManualBatch = mediaBatchState == .running && !mediaBatchContinuationActive
+        let batchRowsAtClear = mediaBatchResults.map(\.id)
         foregroundMedia.stop()
         cancelMediaWorklistContinuation()
         if mediaBatchContinuationActive { cancelMediaBatchDownload() }
@@ -4103,11 +4105,13 @@ final class CameraAppState: ObservableObject {
         mediaDeliveryHistoryOwner = owner
         mediaDeliveryHistoryLoading = true
         defer { if mediaDeliveryHistoryOwner == owner { mediaDeliveryHistoryLoading = false } }
+        let epochBeforeClear = await mediaDeliveryStore.snapshot().epoch
+        var clearSucceeded = false
         do {
             try await mediaDeliveryStore.clear()
+            clearSucceeded = true
             guard mediaDeliveryHistoryOwner == owner else { return }
             mediaDeliveryRecordingWarning = false
-            mediaBatchWorklistWarning = false
         } catch {
             guard mediaDeliveryHistoryOwner == owner else { return }
             mediaDeliveryRecordingWarning = true
@@ -4115,6 +4119,16 @@ final class CameraAppState: ObservableObject {
         let snapshot = await mediaDeliveryStore.snapshot()
         await mediaDeliveryReplyDelay?(.snapshot)
         guard mediaDeliveryHistoryOwner == owner else { return }
+        let epochChanged = epochBeforeClear != nil && snapshot.epoch != nil && snapshot.epoch != epochBeforeClear
+        if mediaBatchResults.map(\.id) == batchRowsAtClear {
+            if activeManualBatch, clearSucceeded || epochChanged {
+                // The same manual selection may finish as temporary shares even
+                // when its plan was cleared. A failed pre-commit clear preserves it.
+                mediaBatchWorklistWarning = true
+            } else if !activeManualBatch, clearSucceeded {
+                mediaBatchWorklistWarning = false
+            }
+        }
         mediaDeliverySnapshot = snapshot
         mediaDeliveryHistoryWarning = mediaDeliveryRecordingWarning || snapshot.warning != nil
     }

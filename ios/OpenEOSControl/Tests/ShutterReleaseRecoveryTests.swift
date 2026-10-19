@@ -522,15 +522,21 @@ final class ShutterReleaseRecoveryTests: XCTestCase {
     }
 
     func testPreviousBridgeWarningAcknowledgementSendsNothingAndStopTargetsOnlyNewSession() async throws {
-        let transport = BridgeShutterRecoveryFixture(unknown: false, failFirstClose: true)
+        let transport = BridgeShutterRecoveryFixture(unknown: false, pendingStart: true, failFirstStop: true)
         let state = CameraAppState(sessionFactory: {
             .desktopBridge(try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: transport))
         })
         state.autoRefresh = false
         await state.connect()
+        let oldStart = Task { await state.toggleBulbExposure() }
+        try await waitForBridgeMutation("POST /v1/session/shutter-fixture-1/bulb/start/owned", on: transport)
         await state.disconnect()
+        await oldStart.value
+        XCTAssertTrue(state.previousConnectionCleanupWarnings.isEmpty)
         XCTAssertTrue(state.previousShutterReleaseUnconfirmed)
         await state.connect()
+        let newStart = Task { await state.toggleBulbExposure() }
+        try await waitForBridgeMutation("POST /v1/session/shutter-fixture-2/bulb/start/owned", on: transport)
         XCTAssertTrue(state.canRetryShutterRelease)
         XCTAssertTrue(state.previousShutterReleaseUnconfirmed)
         let before = await transport.mutations()
@@ -539,10 +545,34 @@ final class ShutterReleaseRecoveryTests: XCTestCase {
         XCTAssertEqual(before, after)
         XCTAssertTrue(state.canRetryShutterRelease)
         await state.retryShutterRelease()
+        await newStart.value
         let commands = await transport.mutations()
-        XCTAssertEqual(commands.filter { $0.hasSuffix("/bulb/stop") }, ["POST /v1/session/shutter-fixture-2/bulb/stop"])
+        XCTAssertEqual(Array(commands.dropFirst(before.count)), ["POST /v1/session/shutter-fixture-2/bulb/stop/owned"])
+        XCTAssertEqual(commands.filter { $0.hasSuffix("/bulb/stop/owned") }, [
+            "POST /v1/session/shutter-fixture-1/bulb/stop/owned",
+            "POST /v1/session/shutter-fixture-2/bulb/stop/owned",
+        ])
         XCTAssertFalse(state.shutterReleaseRequired)
         await state.disconnect()
+    }
+
+    func testUnconfirmedBridgeRetirementBlocksReplacementAfterWarningAcknowledgement() async throws {
+        let transport = BridgeShutterRecoveryFixture(unknown: false, failFirstClose: true)
+        let state = CameraAppState(sessionFactory: {
+            .desktopBridge(try DesktopBridgeClient(baseURL: "http://127.0.0.1:18181", transport: transport))
+        })
+        state.autoRefresh = false
+        await state.connect()
+        await state.disconnect()
+        XCTAssertTrue(state.previousShutterReleaseUnconfirmed)
+        XCTAssertFalse(state.previousConnectionCleanupWarnings.isEmpty)
+        let before = await transport.mutations()
+        state.confirmPreviousShutterReleased()
+        await state.connect()
+        XCTAssertFalse(state.connected)
+        XCTAssertFalse(state.previousConnectionCleanupWarnings.isEmpty)
+        let after = await transport.mutations()
+        XCTAssertEqual(after, before, "Acknowledging release cannot acknowledge unknown session retirement")
     }
 
     func testUnknownReleaseCannotResumeLiveViewAndBackgroundStopDoesNotResumeIt() async throws {

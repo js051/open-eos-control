@@ -250,7 +250,9 @@ final class MediaResponseOwnershipTests: XCTestCase {
 
     func testCurrentOwnerInfoAndAllMetadataActionsStillPublishReadback() async throws {
         for bridge in [false, true] {
-            let peer = MediaOwnershipPeer()
+            // The simulator listing contract has no folder identity. The Bridge
+            // path does, and metadata changes must preserve that listed identity.
+            let peer = MediaOwnershipPeer(folder: bridge ? "original-folder" : nil)
             let state = makeState([peer], bridge: bridge)
             defer { state.requestDisconnect(); Task { await peer.releaseAll() } }
             try await connectAndLoad(state)
@@ -813,13 +815,13 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
     private var eventPollCount = 0
 
     init(rating: Int = 0, events: Bool = false, acceptUpload: Bool = true,
-         listedSize: Int64? = Int64(MediaOwnershipPeer.imageBytes.count), folder: String = "original-folder") {
+         listedSize: Int64? = Int64(MediaOwnershipPeer.imageBytes.count), folder: String? = "original-folder") {
         self.events = events
         self.acceptUpload = acceptUpload
         item = CameraMediaItem(id: "collision", name: "COLLISION.JPG", kind: "image",
             sizeBytes: listedSize, previewAvailable: true,
             protected: false, rating: rating, rotationDegrees: 0, archived: false,
-            contentType: "image/jpeg", folder: CameraMediaFolder(id: folder, label: folder))
+            contentType: "image/jpeg", folder: folder.map { CameraMediaFolder(id: $0, label: $0) })
     }
 
     func enqueue(_ operation: OwnershipOperation, gate: String? = nil, error: URLError.Code? = nil, body: Data? = nil) {
@@ -907,7 +909,7 @@ private actor MediaOwnershipPeer: CameraHTTPTransport {
                     protected: operation == .protection ? true : item.protected,
                     rating: operation == .rating ? 5 : item.rating,
                     rotationDegrees: operation == .rotation ? 270 : item.rotationDegrees,
-                    archived: operation == .archive ? true : item.archived, contentType: item.contentType)
+                    archived: operation == .archive ? true : item.archived, contentType: item.contentType, folder: item.folder)
                 object = simulator ? [:] : mediaJSON(item, simulator: false)
             } else if kind == "thumbnail" || path.hasSuffix("/thumbnail") { operation = .thumbnail }
             else if kind == "display" || path.hasSuffix("/preview") { operation = .preview }

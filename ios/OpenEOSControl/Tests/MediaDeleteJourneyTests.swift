@@ -354,7 +354,10 @@ private actor DeleteFixturePeer: CameraHTTPTransport {
         }
         if method == "DELETE" { return CameraHTTPResponse(statusCode: 204) }
         if path.hasSuffix("/media") {
-            return json(["items": items.map { item -> [String: Any] in
+            let limit = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                .first { $0.name == "limit" }?.value.flatMap(Int.init)
+            let listed = limit.map { Array(items.prefix($0)) } ?? items
+            return json(["items": listed.map { item -> [String: Any] in
                 var row: [String: Any] = ["id": item.id, "name": item.name, "kind": item.kind]
                 row[path.hasPrefix("/ccapi") ? "protect" : "protected"] = item.protected
                 row["writable"] = item.writable
