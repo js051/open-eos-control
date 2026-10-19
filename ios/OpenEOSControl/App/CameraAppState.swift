@@ -428,6 +428,7 @@ final class CameraAppState: ObservableObject {
     private var liveViewLifetime = UUID()
     private var liveViewReaderID = UUID()
     private var liveViewRetirementTask: Task<Void, Never>?
+    private let liveViewStopAdmissionDelay: (@Sendable () async -> Void)?
     private var liveViewRenderWatchTask: Task<Void, Never>?
     // Read-only lifecycle evidence for App tests; this is not GPU/display proof.
     var hasLiveViewRenderWatchTask: Bool { liveViewRenderWatchTask != nil }
@@ -593,6 +594,7 @@ final class CameraAppState: ObservableObject {
         cubeLutFileReader: CubeLutFileReader = CubeLutFileReader(),
         focusMarkerDelay: (@Sendable () async throws -> Void)? = nil,
         heldAutofocusDelay: (@Sendable () async throws -> Void)? = nil,
+        liveViewStopAdmissionDelay: (@Sendable () async -> Void)? = nil,
         rtpEventDispatcher: (@Sendable (@escaping @MainActor @Sendable () -> Void) -> Void)? = nil,
         mediaDeliveryStore: MediaDeliveryStore? = nil,
         mediaDeliveryReplyDelay: (@Sendable (MediaDeliveryReplyStage) async -> Void)? = nil,
@@ -621,6 +623,7 @@ final class CameraAppState: ObservableObject {
         self.cubeLutFileReader = cubeLutFileReader
         self.focusMarkerDelay = focusMarkerDelay
         self.heldAutofocusDelay = heldAutofocusDelay
+        self.liveViewStopAdmissionDelay = liveViewStopAdmissionDelay
         if CommandLine.arguments.contains("-resetState") {
             [
                 DefaultsKey.baseURL,
@@ -1514,11 +1517,22 @@ final class CameraAppState: ObservableObject {
         liveViewLifetime = UUID()
         clearLiveViewPresentation()
         if let session {
+            if let delay = liveViewStopAdmissionDelay { await delay() }
+            await pendingStart?.value
+            if pendingStart != nil {
+                let settledStop = await session.liveViewStopState()
+                guard generation == sessionGeneration else { return }
+                if settledStop.stopUnconfirmed {
+                    // This restart already cancelled the owned Start. Its failed
+                    // compensation needs a new explicit Stop-only recovery action.
+                    liveViewStopState = settledStop
+                    liveViewNeedsRestart = true
+                    return
+                }
+            }
             do {
                 try await session.retryLiveViewStop()
-                await pendingStart?.value
             } catch {
-                await pendingStart?.value
                 let stopState = await session.liveViewStopState()
                 guard generation == sessionGeneration else { return }
                 liveViewStopState = stopState
@@ -1598,12 +1612,18 @@ final class CameraAppState: ObservableObject {
         liveViewNeedsRestart = true
         clearLiveViewPresentation()
         if let reason { lastError = reason }
+        let stopAdmissionDelay = liveViewStopAdmissionDelay
         liveViewRetirementTask = Task { [weak self] in
             await session.retireLiveViewReader()
-            if !deferStop {
+            if let delay = stopAdmissionDelay { await delay() }
+            // Cancellation may finish Core compensation before this task reaches
+            // Stop admission. Settle that exact Start first so retirement cannot
+            // silently retry (and erase) its failed Stop acknowledgement.
+            await pendingStart?.value
+            let settledStop = await session.liveViewStopState()
+            if !deferStop && !settledStop.stopUnconfirmed {
                 do { try await session.retryLiveViewStop() } catch { /* Core retains exact Stop responsibility. */ }
             }
-            await pendingStart?.value
             let stop = await session.liveViewStopState()
             guard let self, self.sessionGeneration == generation, self.liveViewLifetime == retirement else { return }
             self.liveViewStopState = stop

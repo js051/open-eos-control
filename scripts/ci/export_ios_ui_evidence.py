@@ -29,12 +29,15 @@ TESTS = (
     "testCanonicalRecordingStopReviewsNewlyVisibleVideoAndPreparesOriginalInBothLanguages",
     "testOfflineMediaDateRangeApplyCancelAndClearInBothLanguages",
     "testOfflineMediaGridFiltersPhotosAndVideos",
+    "testDirectCCAPIControlsReachTheRunningCameraSimulator",
 )
-MEDIA_PHASES = dict(zip(TESTS[3:], ("metadata-menu", "recording-review", "date-reopen", "grid-initial")))
+MEDIA_PHASES = dict(zip(TESTS[3:], ("metadata-menu", "recording-review", "date-reopen", "grid-initial", "white-balance-tap")))
 MEDIA_CONTROLS = (
     "media-mutation-menu", "media-date-range", "media-date-apply", "media-date-cancel",
     "media-filter", "capture-review-status", "capture-review-retry", "latest-media-button",
     "media-library-summary-complete", "media-library-summary-failed",
+    "live-view-interaction-surface", "live-view-decoded-frame", "live-view-start-again-button",
+    "more-actions-button", "live-view-tap-action-control",
 )
 
 HIT_TARGET_CASES = (

@@ -316,6 +316,18 @@ class IOSEvidenceTests(unittest.TestCase):
                 with self.assertRaises(evidence.EvidenceError):
                     evidence.geometry_text(data + extra)
 
+    def test_white_balance_diagnostics_allow_only_fixed_geometry(self):
+        method = "testDirectCCAPIControlsReachTheRunningCameraSimulator"
+        name = "media-ui-white-balance-tap-english"
+        self.assertEqual(evidence.attachment_name(name + ".png", method), name)
+        self.assertIsNone(evidence.attachment_name(name, evidence.TESTS[3]))
+        data = ("[OEC_MEDIA_UI_GEOMETRY] white-balance-tap-english\n"
+                "live-view-interaction-surface count=1\n"
+                "live-view-interaction-surface[0] enabled=true hittable=true frame=(0, 20, 402, 300)\n").encode()
+        self.assertEqual(evidence.geometry_text(data), data)
+        with self.assertRaises(evidence.EvidenceError):
+            evidence.geometry_text(data + b"live-view-label=private\n")
+
     def test_attempts_remaining_tests_after_an_export_failure(self):
         exports = []
 

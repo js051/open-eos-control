@@ -12,7 +12,8 @@ struct MediaMetadataBatchPanel: View {
     @State private var showingHistoryClearConfirmation = false
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 8) {
+        // Keep the bounded command header addressable while history rows remain lazy.
+        VStack(alignment: .leading, spacing: 8) {
             if showsControls {
                 Menu(language.string("media_mutation_menu")) {
                     Menu(language.string("media_mutation_rating_menu")) {

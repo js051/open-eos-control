@@ -78,3 +78,14 @@
 - Held AF 的 UIKit control 增加持久能力及 SwiftUI environment 上限，外部 enable 不能越過相機禁用。保留第五輪初始 disabled 真紅與 hosted 正向轉換，補外部 enable／disable、父層 disabled、顯式原 owner release 測試。此候選尚未經 UIKit 執行，不宣稱自動 touch cancellation。
 - Upload journey fake 僅對其已建立 exact session DELETE 回 204 空 body，未知／已退役／子路徑仍拒絕；補真 Bridge client close/reopen 及錯誤 DELETE 負例。OS picker 真選檔仍待原生驗證，未變更產品 Documents 可見性或注入 picker delegate。
 - 原 bounded exporter 增加四個既有合成 media UI 案例，仍固定 test／phase／control allowlist、總 24 MiB、PNG signature、大小與 symlink 限制。先凍結原 wait 結果再保存證據，斷言與 deadline 不變；47 個 Python CI helper 測試通過，原 source guard 保留並增加新 AF 負例存在檢查。
+
+## 第七輪原生結果與第八輪修正
+
+- 第七輪 source `55ac5a18b9c7e14e0332af1c29d5adb9b40eb2cb`，run https://github.com/js051/open-eos-control/actions/runs/39194979760 。Core 669/669 通過；App 819 個案例中 3 個失敗案例／5 個斷言，UI 43 個案例中 10 個失敗案例／11 個斷言。原生 App build 與所有 test 編譯通過。
+- JPEGOriginalContractTests 15/15、LiveViewJPEGDecode 3/3、ControlResponseOwnership 26/26、MediaBatchDelivery 68/68、RecordingReadbackRecovery 37/37、ShortShutterRecoveryState 17/17 通過；Held AF hosted disabled/能力/父層 disabled/顯式 release 已有真 UIKit 證據。JPEG 仍不宣稱完整 progressive entropy 或真相機驗收。
+- App 新真失敗揭露 pending Start 的 compensation 已失敗且 task 已清空時，稍晚的 background retirement 又重送 Stop。修正先等原 Start 結算，再保留其 failed Stop debt；同型 restart 只在 captured Start 的失敗結算時停止自動續作，原明確 retry 保留。新增確定性 gate 排程及成功清理正例；預設 nil gate 不增加產品等待，Apple 執行仍待下輪。
+- Foreground fixture 的三處成功序列補上原 Start 必須取得的一張 exact flip 首幀；完整 method/path/foreground 序列更嚴格，held ownership 期間零請求斷言不變。
+- 新 bounded 圖證明短 landscape Connection 的 scroll AX frame 延伸到固定 warning 下方，改用實際 sibling 空間。日期最大字級 compact picker 把文字擠成直條，改為獨立完整標籤行；Apply 的 owner/range 拒絕不變，Cancel 後測試先等舊 controls 消失再要求唯一可操作 Apply。
+- Metadata 的有界命令 header 改 eager，歷史 rows 保持 lazy；離線格／刪除測試實際捲到原 JPG 再驗證，不能因下方 lazy cell 尚未建立就判不存在。
+- Canon direct 沒有已核實 REC GET，原錄影 UI 的 ACK 不可冒稱 fresh false。保留 Canon unavailable／零 review／單 REC/STOP 負例，完整正向 review／原片準備改用原 simulator-status 模式，不能把此結果報成 Canon 真錄影 readback。
+- 同一 bounded artifact 增加既有 direct-controls 白平衡失敗畫面與固定幾何，保留原 count==1／狀態／deadline 失敗；仍總 24 MiB、固定 8 tests／5 media phases、PNG/text limits 與 symlink 檢查。48 個 CI helpers 本地通過。OS Files provider 可見性仍未更改，真 picker 選檔門檻保留。
