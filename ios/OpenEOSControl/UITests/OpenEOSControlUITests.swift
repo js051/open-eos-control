@@ -488,8 +488,12 @@ final class OpenEOSControlUITests: XCTestCase {
             recordMediaUIEvidence(in: app, phase: "metadata-menu", language: language)
             _ = try XCTUnwrap(menuReady ? true : nil)
             try tapForAsyncTest(menu)
-            let ratingMenu = app.buttons["media-mutation-rating-menu"]
+            // Native Menu can expose an off-layout identifier proxy. Address
+            // the unique, localized menu row that UIKit actually renders.
+            let ratingRows = app.buttons.matching(NSPredicate(format: "label == %@", language == "english" ? "Rating" : "評分"))
+            let ratingMenu = ratingRows.element
             _ = try XCTUnwrap(waitForMenuInteraction(ratingMenu, in: app, language: language, timeout: 5) ? true : nil)
+            XCTAssertEqual(ratingRows.count, 1)
             try tapForAsyncTest(ratingMenu)
             let ratingAction = app.buttons["media-mutation-action-rating-5"]
             _ = try XCTUnwrap(waitForMenuInteraction(ratingAction, in: app, language: language, timeout: 5) ? true : nil)
@@ -506,6 +510,7 @@ final class OpenEOSControlUITests: XCTestCase {
             _ = try XCTUnwrap(scrollToInteraction(menu, in: app, timeout: 8) ? true : nil)
             try tapForAsyncTest(menu)
             _ = try XCTUnwrap(waitForMenuInteraction(ratingMenu, in: app, language: language, timeout: 5) ? true : nil)
+            XCTAssertEqual(ratingRows.count, 1)
             try tapForAsyncTest(ratingMenu)
             _ = try XCTUnwrap(waitForMenuInteraction(ratingAction, in: app, language: language, timeout: 5) ? true : nil)
             try tapForAsyncTest(ratingAction)
@@ -1054,7 +1059,8 @@ final class OpenEOSControlUITests: XCTestCase {
             XCTAssertEqual(app.staticTexts["media-folder-applied"].label, "card1/DCIM/100CANON")
             XCTAssertTrue(scrollToInteraction(app.buttons["media-actions-preview-001"], in: app, timeout: 8))
             XCTAssertFalse(app.buttons["media-actions-preview-002"].exists)
-            XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: 8))
+            // This control belongs to the media content, not fixed sheet chrome.
+            XCTAssertTrue(scrollToInteraction(folder, in: app, timeout: 8, knownScrollableContent: true))
             folder.tap()
             let unknownFolder = app.buttons["media-folder-choice-unknown"]
             XCTAssertTrue(scrollToInteraction(unknownFolder, in: app, timeout: 8))
@@ -1201,6 +1207,7 @@ final class OpenEOSControlUITests: XCTestCase {
             app.buttons["upload-media-button"].tap()
             let picker = app.otherElements["media-upload-document-picker"]
             XCTAssertTrue(picker.waitForExistence(timeout: 8), "This must be the actual OS document picker")
+            XCTAssertTrue(waitForNativePickerProvider(in: app, phase: "picker-cancel", language: language))
             let cancelButton = app.buttons[cancel].firstMatch
             let cancelReady = waitForInteraction(cancelButton, timeout: 8)
             if !cancelReady { recordPickerUIEvidence(in: app, phase: "picker-cancel", language: language) }
@@ -1213,6 +1220,7 @@ final class OpenEOSControlUITests: XCTestCase {
             openUploadFixtureGallery(app)
             app.buttons["upload-media-button"].tap()
             XCTAssertTrue(picker.waitForExistence(timeout: 8))
+            XCTAssertTrue(waitForNativePickerProvider(in: app, phase: "picker-cancel", language: language))
             let reopenedCancelReady = waitForInteraction(cancelButton, timeout: 8)
             if !reopenedCancelReady { recordPickerUIEvidence(in: app, phase: "picker-cancel", language: language) }
             XCTAssertTrue(reopenedCancelReady)
@@ -1235,6 +1243,7 @@ final class OpenEOSControlUITests: XCTestCase {
                 openUploadFixtureGallery(app)
                 app.buttons["upload-media-button"].tap()
                 XCTAssertTrue(app.otherElements["media-upload-document-picker"].waitForExistence(timeout: 8))
+                XCTAssertTrue(waitForNativePickerProvider(in: app, phase: "picker-selection", language: language))
                 // directoryURL is a starting-location hint. The real provider may
                 // show Documents first; navigate its existing synthetic folder. No delegate injection.
                 let folder = app.staticTexts["Synthetic Upload Journey"]
@@ -2365,7 +2374,8 @@ final class OpenEOSControlUITests: XCTestCase {
         _ element: XCUIElement,
         in app: XCUIApplication,
         timeout: TimeInterval,
-        cameraActions: Bool = false
+        cameraActions: Bool = false,
+        knownScrollableContent: Bool = false
     ) -> Bool {
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
         var lastSurface = "not selected"
@@ -2385,7 +2395,10 @@ final class OpenEOSControlUITests: XCTestCase {
         var cacheDecisions: [String] = []
         while ProcessInfo.processInfo.systemUptime < deadline {
             let exists = element.exists
-            if exists, element.isEnabled, element.isHittable { return true }
+            // Only the explicitly known media-content target can defer costly
+            // offscreen AX hit testing; general/fixed controls keep the old path.
+            if (!knownScrollableContent || cameraActions || dragCount == 0),
+               exists, element.isEnabled, element.isHittable { return true }
             let surface: XCUIElement
             let surfaceFrame: CGRect
             let viewport: CGRect
@@ -2423,6 +2436,7 @@ final class OpenEOSControlUITests: XCTestCase {
                     genericSelection = genericScrollSurface(for: element, targetExists: exists, in: app)
                 }
                 guard let selection = genericSelection else {
+                    if knownScrollableContent, exists, element.isEnabled, element.isHittable { return true }
                     lastSurface = "no visible scroll, collection, or table container"
                     Thread.sleep(forTimeInterval: min(0.05, max(0, deadline - ProcessInfo.processInfo.systemUptime)))
                     continue
@@ -2433,6 +2447,8 @@ final class OpenEOSControlUITests: XCTestCase {
                 lastSurface = "\(selection.kind) frame=\(surfaceFrame) viewport=\(viewport)"
             }
             let targetFrame = exists ? element.frame : .null
+            if knownScrollableContent, exists, Self.validScrollFrame(targetFrame),
+               targetFrame.intersects(viewport), element.isEnabled, element.isHittable { return true }
             lastTargetFrame = targetFrame
             if awaitingPostDragFrame {
                 dragFrames.append("drag=\(dragCount) post-target-frame=\(targetFrame)")
@@ -3107,6 +3123,20 @@ final class OpenEOSControlUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
         addScreenshot(name: "media-ui-\(phase)-\(language)")
+    }
+
+    // The host picker view exists before its OS file-provider UI has loaded.
+    // This bounds only cold provider startup, before any file selection or upload.
+    // Original interaction (8s), dismissal (5s), and mutation deadlines remain below.
+    private func waitForNativePickerProvider(in app: XCUIApplication, phase: String, language: String) -> Bool {
+        let cancel = app.buttons.matching(NSPredicate(format: "label IN %@", ["Cancel", "取消"]))
+        let browse = app.buttons.matching(NSPredicate(format: "label IN %@", ["Browse", "瀏覽"]))
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            cancel.count == 1 && browse.count == 1
+        }, object: nil)
+        let ready = XCTWaiter.wait(for: [expectation], timeout: 30) == .completed
+        if !ready { recordPickerUIEvidence(in: app, phase: phase, language: language) }
+        return ready
     }
 
     private func recordPickerUIEvidence(in app: XCUIApplication, phase: String, language: String) {

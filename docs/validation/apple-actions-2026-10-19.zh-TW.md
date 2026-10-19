@@ -126,3 +126,11 @@
 
 - 第十二輪 source `341fece7e7b951a9ea8aab71374ab5a4f7775f9f`，run https://github.com/js051/open-eos-control/actions/runs/39210846870 在 source guard 結束：219 項中 1 項要求的 `No delegate injection` 註解隨導航說明改寫而消失。Apple Core／App 未啟動，沒有新的原生結果。
 - 恢復仍符合實作的原註解，完整 219 個 source guards 真執行通過；未修改 guard 或原生測試行為，保留第十二輪失敗證據。
+
+## 第十三輪結果與第十四輪 native UI harness 修正
+
+- Source `40558c71138a81ced73e96e6ebe74181d8b86b1d`，run https://github.com/js051/open-eos-control/actions/runs/39211349203 。安全、Core、普通 build 與隔離驗證通過，App **825/825**；UI 43 案仍有 **4 案／4 斷言失敗**。白平衡設定結果的 new／refresh 專用按鈕 ID、唯一性與後續旅程真紅轉綠。雙語雙模式錄影再次通過，但仍帶原診斷，不把它當無觀察者效應的證據。
+- metadata popup 圖確認 Rating 可見，原 identifier proxy 卻無有效 frame。fixture 以精確本地化 Rating／評分標題解析唯一 native button，不挑 firstMatch 或忽略重複；原 5 秒、有效 frame、enabled／hittable、實際 tap、取消零寫入與確認評分斷言保留。
+- 日期 Apply／重開／rating／known-folder Apply 已過，最後由照片區回到 folder 控制的 8 秒導航僅完成兩次長距離 seek，目標距可見邊界仍差約 156pt。只對此已確認屬 MediaView 內容的回返呼叫，延後離屏 enabled／hittable 查詢到 fresh surface／target frame 已相交；首輪快捷、無容器 fallback、原最後完整互動檢查、8 秒及手勢計畫不變。其他所有呼叫維持原路徑；此為減少已證昂貴 AX round trips 的候選，仍待真執行。
+- 原生 picker host view 先存在，而 OS provider 仍可為空白；第十三輪 screenshot-first 保存了此狀態，幾秒後固定 query 才見真控制。增加獨立 30 秒 provider 啟動上限，整段旅程因此可多等待 30 秒，要求 exact Cancel／Browse 各一；之後仍執行原語言 Cancel、8 秒互動／選檔及 5 秒 dismiss，所有 mutation／不確定性／重連斷言不變。不把 provider 啟動當上傳成功，也無 delegate 注入。Apple 官方 directoryURL 僅是嘗試採用的起點：https://developer.apple.com/documentation/uikit/uidocumentpickerviewcontroller/directoryurl 。
+- 第十三輪 artifact `12169515826`，6,388,855 bytes，SHA256 `3f9772493da9d9185f24b7d5bb9760143f2e0bf65056fa0773b03df1a5b644b9`。本批完整 219 source guards、58 CI helpers、Swift parse／diffcheck 通過，尚待下一輪 Apple，沒有放寬影像 oracle 或相機 deadline。
