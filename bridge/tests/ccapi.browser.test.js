@@ -1409,7 +1409,18 @@ async function run() {
     await page.click('.exposure-control[data-setting-key="iso"]');
     await page.waitForSelector("#setting-dialog[open]");
     await page.getByRole("button", { name: "1600", exact: true }).click();
+    const isoOutcomeResponse = page.waitForResponse(response =>
+      response.request().method() === "POST" && response.url().endsWith("/settings/iso/outcome"));
     await page.locator("#setting-dialog .button.primary").click();
+    const isoResponse = await isoOutcomeResponse;
+    assert.equal(isoResponse.status(), 200);
+    const isoOutcome = await isoResponse.json();
+    assert.equal(isoOutcome.writeEvidence, "response-received");
+    assert.equal(isoOutcome.readbackEvidence, "matched");
+    assert.equal(isoOutcome.setting?.value, "1600");
+    // A peer-side write/event is not completion of the scoped readback and editor.
+    // Do not race the following external ISO change against that first transaction.
+    await page.waitForFunction(() => !document.querySelector("#setting-dialog").open);
     await waitForSimulatorState(
       simulatorOrigin,
       (state) => state.exposure.iso === "1600",
