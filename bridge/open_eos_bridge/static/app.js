@@ -5792,6 +5792,19 @@
     const reviewStatus = state.latestMediaReviewStatus;
     const reviewPrefix = state.latestMediaReviewKind === "video" ? "latestVideo" : "latestMedia";
     const pending = reviewStatus === "SEARCHING" || reviewStatus === "NOT_READY";
+    // A second click in a recovery gesture must not land on a camera mutation
+    // when shorter status text or discovery removes content above those controls.
+    // Preserve measured (including enlarged text/localization) space for this review lifetime.
+    for (const element of [ui.latestMediaReviewStatus, ui.latestMediaRetry.parentElement]) {
+      if (!supported || reviewStatus === "IDLE") {
+        element.style.minHeight = "";
+      } else if (!ui.latestMediaReview.hidden) {
+        const height = element.getBoundingClientRect().height;
+        if (Number.isFinite(height) && height > 0) {
+          element.style.minHeight = `${Math.max(height, Number.parseFloat(element.style.minHeight) || 0)}px`;
+        }
+      }
+    }
     button.hidden = !supported;
     button.disabled = !state.latestMediaItem;
     button.setAttribute("aria-label", state.latestMediaItem

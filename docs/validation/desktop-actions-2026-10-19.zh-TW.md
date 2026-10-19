@@ -116,3 +116,10 @@ The real browser failure retained valid Bridge framing but an unknown Stop-prepa
 - 原失敗圖顯示完整現行 `No new media was observed...` 狀態，改用 exact 文案；仍保留原四次查找／重查四次、單 capture 與無新 write。兩個 JPEG 失敗 artifact 均證 gallery COMPLETE、三張32×24縮圖、latest=SIM_0003、picker=1、單original且停止。恢復 helper 現顯式傳這個精確基線；預設二張／oldA／picker0不變，第二個明確快門才期待capture2。
 - 原 JPEG 零輸出／failed history、恢復不重試舊ID、無自動快門與新照片才成功等斷言保留。原12秒與20秒等待未延長。
 - 本地 syntax/diff與抽取原helper的隔離 fake-DOM red→green 檢查通過：舊helper拒三張基線，新明確三張基線通過，原二張預設仍過且拒未指定三張。這不等同真瀏覽器；新整批仍待 Actions。
+
+### 第十三／十四輪：查找雙擊錯落半按的真產品缺陷
+
+- `2ee2195520cea868a31d8557bef2642602c0ef47` / `39276025076` 已真通過兩個 JPEG 拒絕後恢復旅程；唯讀重查卻多出一次 `/shutter/half-press` POST，原零寫入斷言失敗。Windows `39276025176` 同 SHA 全過。
+- `0bd2fd7a3f66b2296c4ee560baea7837e22a07cc` / `39277837013` 保留原雙擊與失敗，加入三個固定 controls 的 bounded 事件證據。首次 click 在 retry `(1275,738)`、top714；SEARCHING 文案縮短後，第二次相同座標的 pointerdown/up/click(detail2) 命中已上移至top720的半按按鈕，並實際發出 POST。新增即時零寫入斷言也真紅，排除最後一次 retry 才出錯的假說。
+- 產品候選在這個 review lifetime 保留狀態文字與 retry 槽的實測最低高度，包含現行字級／語言；IDLE 或無 session 時重置。READY 仍隱藏且禁用 retry，但保留槽，避免相機 mutation 控制移入原觸點。沒有 sleep、改成單擊、吞掉半按事件或削弱能力／owner guards。
+- 新原 renderer 回歸先紅（未保留63px），修後與 media-refresh/preview 共455項通過；新增真 browser 幾何斷言仍待下一輪 Chromium。原查找次數、單次 capture、零額外 write 與雙擊完整保留。

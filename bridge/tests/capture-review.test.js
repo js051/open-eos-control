@@ -145,13 +145,15 @@ function writes(subject) {
 
 function installLatestMediaRenderer(subject) {
   const element = () => ({
-    hidden: false, disabled: false, textContent: "", dataset: {},
+    hidden: false, disabled: false, textContent: "", dataset: {}, style: {},
+    getBoundingClientRect() { return { height: 0 }; },
     setAttribute() {}, replaceChildren() {}, append() {},
   });
   subject.ui = Object.fromEntries([
     "latestMediaButton", "latestMediaHeading", "latestMediaReview", "latestMediaReviewStatus",
     "latestMediaRetry", "latestMediaLabel", "latestMediaThumbnail",
   ].map((name) => [name, element()]));
+  subject.ui.latestMediaRetry.parentElement = element();
   subject.document = { createElement: element };
   vm.runInContext(productionFunction("renderLatestMedia"), subject);
   subject.renderSession = () => subject.renderLatestMedia();
@@ -2058,3 +2060,30 @@ for (const phase of ['fetch', 'body']) for (const retired of [false, true]) {
     assert.equal(s.state.shutterReleaseUnconfirmed, !retired, 'Late read completion cannot erase or transfer the warning');
   });
 }
+
+
+test("capture review reserves status and retry geometry across read-only updates", () => {
+  const subject = context();
+  installLatestMediaRenderer(subject);
+  const status = subject.ui.latestMediaReviewStatus;
+  const slot = subject.ui.latestMediaRetry.parentElement;
+  status.getBoundingClientRect = () => ({ height: 63 });
+  slot.getBoundingClientRect = () => ({ height: 72 });
+  subject.state.latestMediaReviewStatus = "SEARCHING";
+  subject.renderLatestMedia();
+  assert.equal(status.style.minHeight, "63px", "Short searching copy cannot pull camera controls under the touch");
+  assert.equal(slot.style.minHeight, "72px", "Keep the actual scaled retry target's space");
+  status.getBoundingClientRect = () => ({ height: 21 });
+  slot.getBoundingClientRect = () => ({ height: 0 });
+  subject.state.latestMediaReviewStatus = "READY";
+  subject.renderLatestMedia();
+  assert.equal(subject.ui.latestMediaRetry.hidden, true);
+  assert.equal(subject.ui.latestMediaReview.hidden, false, "READY retains the whole review container");
+  assert.equal(status.style.minHeight, "63px");
+  assert.equal(slot.style.minHeight, "72px", "Discovery cannot replace the retry slot with a mutation control");
+  subject.state.latestMediaReviewStatus = "IDLE";
+  subject.renderLatestMedia();
+  assert.equal(status.style.minHeight, "");
+  assert.equal(slot.style.minHeight, "");
+  assert.equal(subject.ui.latestMediaReview.hidden, true);
+});

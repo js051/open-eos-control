@@ -1091,6 +1091,11 @@ input:disabled {
   gap: 8px;
 }
 
+.latest-media-retry-slot {
+  display: grid;
+  min-height: 48px;
+}
+
 .latest-media-review .supporting {
   white-space: normal;
   overflow-wrap: anywhere;
