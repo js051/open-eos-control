@@ -326,38 +326,49 @@ def export_evidence(bundle: Path, output: Path, run=command) -> dict:
     return report
 
 
-def collect_picker_journal(container: Path, output: Path, report: dict) -> None:
+def _collect_fixture_journal(container: Path, output: Path, report: dict, *,
+                             source_name: str, name: str, pattern: str, label: str) -> None:
     """Read one fixture-only cache file, never enumerate the simulator container."""
-    source = container / "Library" / "Caches" / "eos-picker-lifecycle.txt"
+    source = container / "Library" / "Caches" / source_name
     try:
         if any(p.is_symlink() for p in (container, container / "Library", source.parent, source)):
-            raise EvidenceError("Unsafe picker journal path")
+            raise EvidenceError("Unsafe fixture journal path")
         fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, "rb") as stream:
             info = os.fstat(stream.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_TEXT_BYTES:
-                raise EvidenceError("Unsupported picker journal size/type")
+                raise EvidenceError("Unsupported fixture journal size/type")
             data = stream.read(MAX_TEXT_BYTES + 1)
         if not data or len(data) > MAX_TEXT_BYTES:
-            raise EvidenceError("Empty or oversized picker journal")
+            raise EvidenceError("Empty or oversized fixture journal")
         text = data.decode("ascii")
         lines = text.splitlines()
-        pattern = r"(?:success|cancel|lost-ack) (?:coordinator-created|controller-created|selected|cancelled|dismantle|completion-begin|completion-end) presented=[01] transitioning=[01] dismissing=[01]"
         if len(lines) > 128 or any(re.fullmatch(pattern, line) is None for line in lines):
-            raise EvidenceError("Picker journal contains unsupported fields")
+            raise EvidenceError("Fixture journal contains unsupported fields")
         if len(report["files"]) >= MAX_FILES or report["bytes"] + len(data) > MAX_ARTIFACT_BYTES - SUMMARY_RESERVE:
-            raise EvidenceError("Picker journal omitted at artifact size/count limit")
-        name = "picker-lifecycle.txt"
+            raise EvidenceError("Fixture journal omitted at artifact size/count limit")
         with (output / name).open("xb") as stream:
             stream.write(data)
         report["bytes"] += len(data)
-        report["files"].append({"file": name, "test": "synthetic-picker-lifecycle", "bytes": len(data)})
+        report["files"].append({"file": name, "test": label, "bytes": len(data)})
     except FileNotFoundError:
-        report["warnings"].append("No synthetic picker lifecycle journal")
+        report["warnings"].append(f"No {label} journal")
     except (OSError, UnicodeError):
-        report["warnings"].append("Picker journal could not be safely read")
+        report["warnings"].append("Fixture journal could not be safely read")
     except EvidenceError as error:
         report["warnings"].append(str(error))
+
+
+def collect_picker_journal(container: Path, output: Path, report: dict) -> None:
+    _collect_fixture_journal(container, output, report,
+        source_name="eos-picker-lifecycle.txt", name="picker-lifecycle.txt", label="synthetic-picker-lifecycle",
+        pattern=r"(?:success|cancel|lost-ack) (?:coordinator-created|controller-created|selected|cancelled|dismantle|completion-begin|completion-end) presented=[01] transitioning=[01] dismissing=[01]")
+
+
+def collect_capture_mode_journal(container: Path, output: Path, report: dict) -> None:
+    _collect_fixture_journal(container, output, report,
+        source_name="eos-capture-mode-trace.txt", name="capture-mode-trace.txt", label="synthetic-capture-mode",
+        pattern=r"(?:english|traditionalChinese) (?:camera|simulator) stage=(?:pickerSelection|request|rejected|localFallback|alreadyConfigured|dispatch|settled) requested=(?:photo|video) current=(?:photo|video) stopRequired=(?:true|false) bulb=(?:true|false) settingBusy=(?:true|false) captureBusy=(?:true|false) recordingBusy=(?:true|false)")
 
 
 def write_summary(output: Path, report: dict) -> None:
@@ -395,6 +406,7 @@ def main() -> int:
     report = export_evidence(args.result_bundle, args.output_dir)
     if args.picker_container is not None:
         collect_picker_journal(args.picker_container, args.output_dir, report)
+        collect_capture_mode_journal(args.picker_container, args.output_dir, report)
         if report["warnings"]:
             report["status"] = "incomplete"
     write_summary(args.output_dir, report)
