@@ -123,3 +123,10 @@ The real browser failure retained valid Bridge framing but an unknown Stop-prepa
 - `0bd2fd7a3f66b2296c4ee560baea7837e22a07cc` / `39277837013` 保留原雙擊與失敗，加入三個固定 controls 的 bounded 事件證據。首次 click 在 retry `(1275,738)`、top714；SEARCHING 文案縮短後，第二次相同座標的 pointerdown/up/click(detail2) 命中已上移至top720的半按按鈕，並實際發出 POST。新增即時零寫入斷言也真紅，排除最後一次 retry 才出錯的假說。
 - 產品候選在這個 review lifetime 保留狀態文字與 retry 槽的實測最低高度，包含現行字級／語言；IDLE 或無 session 時重置。READY 仍隱藏且禁用 retry，但保留槽，避免相機 mutation 控制移入原觸點。沒有 sleep、改成單擊、吞掉半按事件或削弱能力／owner guards。
 - 新原 renderer 回歸先紅（未保留63px），修後與 media-refresh/preview 共455項通過；新增真 browser 幾何斷言仍待下一輪 Chromium。原查找次數、單次 capture、零額外 write 與雙擊完整保留。
+
+## Desktop26 實際進展與合成 maintenance peer 邊界
+
+- `71628206da814aaa7c176ba28e110036d8ec8dd8`／run `39336454166`：22:46:07 UTC 前已通過原 metadata、12 upload、13 delete、10 capture configuration 旅程，隨後9個 ordinary setting 案含取消／重連／繁中也通過。configuration 的 retire 現沿原先 Cancel 解開 busy，再明確 Disconnect，原 late gate 與單次寫入保留。
+- 最後 maintenance 的 clean／sleep 原旅程斷言通過，但 sleep 的測試退場得到409：普通 browser peer 是 `GPhoto2Engine(FakeRunner)`，其維護能力與outcome由瀏覽器fixture合成；底層真 gphoto provider沒有 local-only `maintenance_retire`，原 manager 正確拒絕。不能把這當產品 gphoto 已支援維護或允許 generic DELETE 代替安全退場。
+- 新增僅 maintenance browser 使用的專用合成 server factory，固定 `FakeRunner`，idle才允許原session local close，並核零fakecamera命令。存在 short shutter、Bulb、live view或stream責任即拒絕，沒有Stop／重送。普通browser server與production不變。
+- 新3個真TestClient方法涵蓋4種責任subcase、exact204空body／reservation釋放、重複404、拒退後owner仍在，以及普通gphoto仍409；本地通過。這是合成peer契約驗證，完整browser、後續Python與release candidate建置仍待新CI。沒有真相機驗收。
