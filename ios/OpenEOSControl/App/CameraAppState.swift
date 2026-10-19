@@ -2806,9 +2806,38 @@ final class CameraAppState: ObservableObject {
         guard ProcessInfo.processInfo.environment["OEC_CAPTURE_MODE_TRACE"] == "1" else { return }
         // Opt-in synthetic UI evidence: closed enums and booleans only. No view
         // publication, retries, delays, camera identities, routes or error prose.
-        print("CAPTURE_MODE_TRACE stage=\(stage.rawValue) requested=\(mode.rawValue) current=\(captureMode.rawValue) " +
-              "stopRequired=\(recordingStopRequired) bulb=\(bulbExposureActive) " +
-              "settingBusy=\(isBusy(.setting)) captureBusy=\(isBusy(.capture)) recordingBusy=\(isBusy(.recording))")
+        let trace = "stage=\(stage.rawValue) requested=\(mode.rawValue) current=\(captureMode.rawValue) " +
+            "stopRequired=\(recordingStopRequired) bulb=\(bulbExposureActive) " +
+            "settingBusy=\(isBusy(.setting)) captureBusy=\(isBusy(.capture)) recordingBusy=\(isBusy(.recording))"
+        print("CAPTURE_MODE_TRACE " + trace)
+        #if OEC_REQUIRE_SIMULATOR_E2E
+        // Exact loopback fixture only; ordinary Debug and release builds never
+        // write this journal. Closed enums/booleans make ordering observable
+        // without exporting endpoints, camera identities, credentials or errors.
+        let process = ProcessInfo.processInfo
+        guard process.environment["OEC_HTTP_PRESET_URL"] == "http://127.0.0.1:18080",
+              let languageIndex = process.arguments.firstIndex(of: "-app-language"),
+              process.arguments.indices.contains(languageIndex + 1),
+              ["english", "traditionalChinese"].contains(process.arguments[languageIndex + 1]),
+              let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        let language = process.arguments[languageIndex + 1]
+        let backend = ccapiConnectionMode == .simulator ? "simulator" : "camera"
+        let url = cache.appendingPathComponent("eos-capture-mode-trace.txt")
+        do {
+            let old: Data
+            if FileManager.default.fileExists(atPath: url.path) {
+                let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .fileSizeKey])
+                guard values.isSymbolicLink != true, (values.fileSize ?? Int.max) <= 16_384 else { return }
+                old = try Data(contentsOf: url)
+            } else { old = Data() }
+            guard let previous = String(data: old, encoding: .utf8) else { return }
+            var lines = previous.split(separator: "\n").map(String.init)
+            lines.append("\(language) \(backend) " + trace)
+            let bytes = Data((lines.suffix(128).joined(separator: "\n") + "\n").utf8)
+            guard bytes.count <= 16_384 else { return }
+            try bytes.write(to: url, options: .atomic)
+        } catch { /* Diagnostic failure cannot change capture-mode admission. */ }
+        #endif
         #endif
     }
 

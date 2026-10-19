@@ -198,3 +198,11 @@
 - Journal60行、3844 bytes：先四段取消，再六段selected；每段皆 coordinator-created → controller-created → cancelled／selected → completion-begin → completion-end → dismantle。三個UIKit Bool均為0，符合representable容器層可觀察值；沒有本輪崩潰前序列，不能從這些Bool推論遠端DocumentManager proxy已排空。picker本批只加診斷，排程受影響，因此舊run19 framework crash仍是未確證修復的穩定性風險，不改成已修。
 - Bounded artifact `12188556297`，5,492,221 bytes，SHA256 `73cee7db451eda40a4d40d68147a13e73aa54959aee69d26991d20e7fd009091`，下載後核實。60個匯出檔共6,526,599 bytes；summary的incomplete只因三個成功流程沒有failure-only附件，原全部測試結果仍success，journal確存在。
 - 此為額外Apple-only驗證，**不等同原PR ci-complete、不授權main或release、不代表89列三平台全部對齊**。Android／Windows／真相機及原provider未實作範圍依各自收據繼續追蹤。
+
+## 第二十一輪結果與第二十二輪固定模式事件診斷
+
+- Apple run `39262378109`（`282648ac9997b9576baf1d8ecd4d13f2baaf8a8f`）App 828/828 通過、UI 42/43 通過。唯一失敗為 canonical HTTP / English 的錄影旅程，在單次 Video 選段後五秒仍未 selected，尚未按 Apply；原音訊背景／舊 snapshot／rollover 與原生選檔旅程通過。
+- bounded 幾何與前後截圖均顯示 picker Y=503，Photo 保持 selected，Apply 從不存在變為 disabled。本輪沒有前次插入 Apply 導致位移的證據；不能把既往全綠當成已證穩定，也不能因此重複同一版碰綠。
+- 現有 `CAPTURE_MODE_TRACE` 已覆蓋 setter/request 等封閉階段，但 App stdout 未出現在 job 摘錄。第二十二輪只把同一組 enum/Bool 加固定語言及 camera/simulator 分類寫成 fixture journal；DEBUG、E2E、明確 trace、exact loopback 與兩種已知語言全部成立才寫入，普通產品不寫。
+- 同既有合成 App container 只讀 exact `Library/Caches/eos-capture-mode-trace.txt`；128 行、16 KiB、regular/no-symlink、封閉 regex、24 MiB 總 artifact cap 和 exclusive destination 保留。沒有增加互動、重點擊或放寬原五秒／selected／Apply／模式寫入斷言。
+- 本地 Swift parse、Ruff、diff check、75 項 evidence helper 測試通過。這是診斷能力的驗證；真正 picker 根因及 Apple runtime 尚待新結果。檔案寫入可能改變調度，若單輪轉綠也不宣稱偶發選段根治。
