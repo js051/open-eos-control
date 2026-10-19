@@ -1004,7 +1004,7 @@ async function verifyConnectionRecoveryJourneys(browser, origin, simulatorOrigin
     const page = await context.newPage();
     page.setDefaultTimeout(12_000);
     const pageErrors = [], writes = [], scanGates = new Map();
-    let enginesAvailable = false, scans = 0, connections = 0;
+    let enginesAvailable = false, scans = 0;
     const text = language === "en" ? {
       unavailable: /No USB camera engine/, empty: /Scan finished with no cameras/, scanFailed: /Scan failed/,
       token: /Bridge rejected its token/, cancelled: /Scan cancelled/, invalid: /Enter a camera origin/,
@@ -1062,18 +1062,6 @@ async function verifyConnectionRecoveryJourneys(browser, origin, simulatorOrigin
         await route.fulfill({ json: { cameras: attempt === 1 ? [] : [camera(attempt === 4 ? "OLD" : "NEW")] } });
       }
     });
-    await page.route("**/v1/session", async route => {
-      if (route.request().method() !== "POST") return route.continue();
-      const attempt = ++connections;
-      if (attempt === 8) return route.continue();
-      if (attempt === 6) return route.abort("failed");
-      const reason = ["AUTHENTICATION_REJECTED", "ENDPOINT_NOT_FOUND", { malformed: true },
-        "TLS_ERROR", "AUTHENTICATION_REJECTED", null, "TLS_ERROR"][attempt - 1];
-      await route.fulfill({ status: attempt === 4 ? 401 : attempt === 5 ? 503 : 502, json: { error: {
-        code: attempt === 5 ? "UNAUTHORIZED" : "CCAPI_DISCOVERY_FAILED", engine: "ccapi",
-        connectionReason: reason, message: "401 Unauthorized: synthetic body cannot establish authentication",
-      } } });
-    });
     try {
       await page.goto(origin, { waitUntil: "networkidle" });
       await page.locator("#connection-view .language-select").selectOption(language);
@@ -1129,25 +1117,9 @@ async function verifyConnectionRecoveryJourneys(browser, origin, simulatorOrigin
       assert.equal(await page.locator("#connect-button").isDisabled(), true);
       await page.fill("#ccapi-url-input", simulatorOrigin);
       assert.equal(await page.locator("#ccapi-url-validation").isHidden(), true);
-      for (const [index, expected] of [text.cameraAuth, text.missing, text.unknown, text.token,
-        text.generic, text.bridgeNetwork, text.tls].entries()) {
-        await page.click("#connect-button");
-        await page.waitForSelector("#connection-error:not([hidden])");
-        await page.waitForSelector("#connect-button:not([disabled])");
-        assert.equal(connections, index + 1);
-        assert.match(await page.locator("#connection-error").innerText(), expected);
-        assert.doesNotMatch(await page.locator("#connection-error").innerText(), /synthetic body/);
-        if (index === 0) {
-          await page.click("#connection-fix-button");
-          assert.equal(await page.locator("#camera-credentials").getAttribute("open"), "");
-          assert.equal(await page.locator("#ccapi-username-input").evaluate(input => input === document.activeElement), true);
-        }
-      }
-      assert.equal(writes.length, 7, "Only explicit Connect attempts send POST requests");
-      assert.equal(writes.every(write => write.method === "POST" && write.path === "/v1/session"), true);
       await page.click("#connect-button");
       await page.waitForSelector("#control-view:not([hidden])");
-      assert.equal(connections, 8);
+      assert.equal(writes.filter(write => write.method === "POST").length, 1);
       await page.click("#disconnect-button");
       await page.waitForSelector("#connection-view:not([hidden])");
       assert.equal(writes.every(write => (write.method === "POST" && write.path === "/v1/session") ||
@@ -1159,6 +1131,75 @@ async function verifyConnectionRecoveryJourneys(browser, origin, simulatorOrigin
       for (const release of scanGates.values()) release();
       await context.close();
     }
+
+    // Each error owns a fresh synthetic Bridge fixture. An unknown creation
+    // must never be followed by a retry in that same owner. Disposing this test
+    // context does not claim that reloading a real Bridge closes its camera.
+    const failures = [
+      { status: 502, reason: "AUTHENTICATION_REJECTED", expected: text.cameraAuth },
+      { status: 502, reason: "ENDPOINT_NOT_FOUND", expected: text.missing },
+      { status: 502, reason: { malformed: true }, expected: text.unknown },
+      { status: 401, reason: "TLS_ERROR", expected: text.token },
+      { status: 503, code: "UNAUTHORIZED", reason: "AUTHENTICATION_REJECTED", expected: text.generic, unknown: true },
+      { abort: true, expected: text.bridgeNetwork, unknown: true },
+      { status: 502, reason: "TLS_ERROR", expected: text.tls },
+    ];
+    for (const [index, failure] of failures.entries()) {
+      const failureContext = await browser.newContext({ locale: language === "en" ? "en-US" : "zh-TW",
+        viewport: { width: 1100, height: 850 } });
+      const failurePage = await failureContext.newPage();
+      failurePage.setDefaultTimeout(12_000);
+      const failureWrites = [], failureErrors = [];
+      failurePage.on("pageerror", error => failureErrors.push(error.message));
+      failurePage.on("request", request => {
+        if (request.method() !== "GET") failureWrites.push({ method: request.method(), path: new URL(request.url()).pathname });
+      });
+      await failurePage.route("**/health", route => route.fulfill({ json: {
+        authRequired: true, engines: { ccapi: { available: true } },
+      } }));
+      await failurePage.route("**/v1/session", route => {
+        assert.equal(route.request().method(), "POST");
+        if (failure.abort) return route.abort("failed");
+        return route.fulfill({ status: failure.status, json: { error: {
+          code: failure.code || "CCAPI_DISCOVERY_FAILED", engine: "ccapi",
+          connectionReason: failure.reason, message: "401 Unauthorized: synthetic body cannot establish authentication",
+        } } });
+      });
+      try {
+        await failurePage.goto(origin, { waitUntil: "networkidle" });
+        await failurePage.locator("#connection-view .language-select").selectOption(language);
+        await failurePage.click("#ccapi-mode-button");
+        await failurePage.fill("#ccapi-url-input", simulatorOrigin);
+        await failurePage.click("#connect-button");
+        await failurePage.waitForSelector("#connection-error:not([hidden])");
+        assert.match(await failurePage.locator("#connection-error").innerText(), failure.expected);
+        assert.doesNotMatch(await failurePage.locator("#connection-error").innerText(), /synthetic body/);
+        if (failure.unknown) {
+          const cleanup = language === "en" ? /Previous connection cleanup is unconfirmed/ : /前次連線清理尚未確認/;
+          await failurePage.waitForFunction(expected => document.querySelector("#connection-cleanup-notice").textContent.includes(expected),
+            language === "en" ? "Previous connection cleanup is unconfirmed" : "前次連線清理尚未確認");
+          assert.match(await failurePage.locator("#connection-cleanup-notice").innerText(), cleanup);
+          assert.equal(await failurePage.locator("#connect-button").isDisabled(), true);
+          await failurePage.fill("#token-input", "SYNTHETIC-REPLACEMENT-TOKEN");
+          assert.equal(await failurePage.locator("#connect-button").isDisabled(), true,
+            "Editing credentials cannot acknowledge an unknown previous session");
+        } else {
+          await failurePage.waitForSelector("#connect-button:not([disabled])");
+        }
+        if (index === 0) {
+          await failurePage.click("#connection-fix-button");
+          assert.equal(await failurePage.locator("#camera-credentials").getAttribute("open"), "");
+          assert.equal(await failurePage.locator("#ccapi-username-input").evaluate(input => input === document.activeElement), true);
+        }
+        assert.deepEqual(failureWrites, [{ method: "POST", path: "/v1/session" }],
+          "Each explicit Connect sends one request; uncertainty never silently retries or sends a camera command");
+        assert.deepEqual(failureErrors, []);
+      } finally {
+        await failurePage.unrouteAll({ behavior: "wait" });
+        await failureContext.close();
+      }
+    }
+    console.log(`PC connection rejection and unknown-session admission passed: ${language}`);
   }
 }
 

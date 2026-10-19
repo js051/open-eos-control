@@ -85,3 +85,11 @@ An in-flight capability route handler failed during browser teardown and conceal
 - 471項相關transport tests通過，含空格／JSON／換行／非零或非canonical長度／TE／range／gzip拒絕、pending EOF與read error。這是原碼與host證據，真Chromium maintenance仍待後續驗證。
 
 The real browser failure retained valid Bridge framing but an unknown Stop-preparation outcome. A documented browser compatibility edge is now reproduced locally: an EOF-only stream on an expected empty 204 was incorrectly parsed as JSON. The correction requires actual zero-byte EOF and preserves all framing and nonempty-payload rejection. Native Chromium confirmation remains pending.
+
+### 第九輪：204 真瀏覽器修復證據與連線 fixture 邊界
+
+- `0abc8f63fc0c3ac84d03bd1b6a3f009f243d8fbe` / Actions `39270426756` 的真 Chromium 已通過原 sensor-cleaning、顯式 restore、sleep 暫停及事件退場 assertions；先前 EOF-only 204 的修正獲得實際瀏覽器證據。
+- 後續 connection recovery 旅程在第 1136 行等待重新 Connect 超時。原七類錯誤共用同一頁，卻要求 generic HTTP 503 與網路失聯都解除 unknown-session gate，與現有 `sessionCreationRejected` 明確契約衝突。
+- 將七類錯誤各放入新合成 context；兩個 unknown 案保留禁重試、編輯 token 仍禁用、精確單 POST 與零其他 mutation。其他確定 rejection 才等可重試；原掃描晚回覆、取消、成功實際 Bridge connect/disconnect 與雙語 guidance 均保留。這不是宣稱重新載入頁面能清理真相機。
+- 本地 JavaScript syntax、diff check 與原 connection-guidance 104 項通過；新增 browser 結構尚待下一輪真 Chromium。
+- 同 SHA 的 Windows `39270426818` 完成原生 exe 建置、啟動驗證及產物上傳。
