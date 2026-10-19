@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import tempfile
 
@@ -325,6 +326,40 @@ def export_evidence(bundle: Path, output: Path, run=command) -> dict:
     return report
 
 
+def collect_picker_journal(container: Path, output: Path, report: dict) -> None:
+    """Read one fixture-only cache file, never enumerate the simulator container."""
+    source = container / "Library" / "Caches" / "eos-picker-lifecycle.txt"
+    try:
+        if any(p.is_symlink() for p in (container, container / "Library", source.parent, source)):
+            raise EvidenceError("Unsafe picker journal path")
+        fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_TEXT_BYTES:
+                raise EvidenceError("Unsupported picker journal size/type")
+            data = stream.read(MAX_TEXT_BYTES + 1)
+        if not data or len(data) > MAX_TEXT_BYTES:
+            raise EvidenceError("Empty or oversized picker journal")
+        text = data.decode("ascii")
+        lines = text.splitlines()
+        pattern = r"(?:success|cancel|lost-ack) (?:coordinator-created|controller-created|selected|cancelled|dismantle|completion-begin|completion-end) presented=[01] transitioning=[01] dismissing=[01]"
+        if len(lines) > 128 or any(re.fullmatch(pattern, line) is None for line in lines):
+            raise EvidenceError("Picker journal contains unsupported fields")
+        if len(report["files"]) >= MAX_FILES or report["bytes"] + len(data) > MAX_ARTIFACT_BYTES - SUMMARY_RESERVE:
+            raise EvidenceError("Picker journal omitted at artifact size/count limit")
+        name = "picker-lifecycle.txt"
+        with (output / name).open("xb") as stream:
+            stream.write(data)
+        report["bytes"] += len(data)
+        report["files"].append({"file": name, "test": "synthetic-picker-lifecycle", "bytes": len(data)})
+    except FileNotFoundError:
+        report["warnings"].append("No synthetic picker lifecycle journal")
+    except (OSError, UnicodeError):
+        report["warnings"].append("Picker journal could not be safely read")
+    except EvidenceError as error:
+        report["warnings"].append(str(error))
+
+
 def write_summary(output: Path, report: dict) -> None:
     # Never dump test logs, failure messages, device IDs, raw manifests or metadata.
     lines = ["# iOS recovery and media UI evidence", "", report["scope"], "",
@@ -353,10 +388,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--result-bundle", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--picker-container", type=Path)
     args = parser.parse_args()
     # Refuse reused output so stale files cannot evade the artifact byte cap.
     args.output_dir.mkdir(parents=True, exist_ok=False)
     report = export_evidence(args.result_bundle, args.output_dir)
+    if args.picker_container is not None:
+        collect_picker_journal(args.picker_container, args.output_dir, report)
+        if report["warnings"]:
+            report["status"] = "incomplete"
     write_summary(args.output_dir, report)
     return 0 if report["status"] == "exported" else 1
 
